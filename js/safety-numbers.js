@@ -120,7 +120,7 @@
       #kynSafetyBox .sn-title {
         font-size: 17px;
         font-weight: 700;
-        color: var(--text-primary, #fff);
+        color: var(--text-primary);
         margin: 0 0 4px;
       }
       #kynSafetyBox .sn-subtitle {
@@ -161,7 +161,7 @@
         font-family: 'Courier New', monospace;
         font-size: 13px;
         font-weight: 700;
-        color: var(--text-primary, #fff);
+        color: var(--text-primary);
         letter-spacing: 1px;
         border: 1px solid var(--border-color, rgba(255,255,255,0.06));
       }

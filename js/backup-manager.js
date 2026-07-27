@@ -258,15 +258,15 @@
     style.textContent = `
       #kyn-backup-dialog { position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center; }
       .kyn-backup-inner { background:var(--bg-primary,#14141f);border-radius:16px;padding:24px;max-width:380px;width:90%;display:flex;flex-direction:column;gap:12px; }
-      .kyn-backup-inner h3 { color:var(--text-primary,#fff);margin:0; }
+      .kyn-backup-inner h3 { color:var(--text-primary);margin:0; }
       .kyn-backup-inner p { color:var(--text-muted,#888);font-size:13px;margin:0; }
-      #kyn-backup-pw { width:100%;box-sizing:border-box;padding:10px 12px;border-radius:8px;border:1px solid var(--border-color,rgba(255,255,255,0.1));background:var(--bg-secondary,#1e1e2e);color:var(--text-primary,#fff); }
+      #kyn-backup-pw { width:100%;box-sizing:border-box;padding:10px 12px;border-radius:8px;border:1px solid var(--border-color,rgba(255,255,255,0.1));background:var(--bg-secondary,#1e1e2e);color:var(--text-primary); }
       .kyn-backup-progress { position:relative;height:6px;background:var(--bg-tertiary,#2a2a3e);border-radius:3px;overflow:hidden; }
-      .kyn-backup-bar { height:100%;background:var(--accent-color,#7c3aed);transition:width 0.3s;border-radius:3px; }
+      .kyn-backup-bar { height:100%;background:var(--accent-color);transition:width 0.3s;border-radius:3px; }
       .kyn-backup-actions { display:grid;grid-template-columns:1fr 1fr;gap:8px; }
-      .kyn-backup-actions button,.kyn-restore-file-btn { padding:9px 12px;border-radius:8px;border:1px solid var(--border-color,rgba(255,255,255,0.1));background:var(--bg-secondary,#1e1e2e);color:var(--text-primary,#fff);cursor:pointer;font-size:12px;text-align:center; }
+      .kyn-backup-actions button,.kyn-restore-file-btn { padding:9px 12px;border-radius:8px;border:1px solid var(--border-color,rgba(255,255,255,0.1));background:var(--bg-secondary,#1e1e2e);color:var(--text-primary);cursor:pointer;font-size:12px;text-align:center; }
       .kyn-backup-actions button:hover,.kyn-restore-file-btn:hover { background:var(--bg-tertiary,#2a2a3e); }
-      #kyn-backup-close { background:var(--accent-color,#7c3aed);color:#fff;border:none;border-radius:8px;padding:10px;cursor:pointer; }
+      #kyn-backup-close { background:var(--accent-color);color:#fff;border:none;border-radius:8px;padding:10px;cursor:pointer; }
     `;
     document.head.appendChild(style);
     document.body.appendChild(dialog);

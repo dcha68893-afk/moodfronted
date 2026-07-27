@@ -2124,7 +2124,7 @@
     top: 40px; right: 0;
     min-width: 200px;
     background: var(--surface, #1e2a32);
-    border: 1px solid var(--border-color, #2a3942);
+    border: 1px solid var(--border-color);
     border-radius: 8px;
     box-shadow: 0 6px 20px rgba(0,0,0,0.4);
     z-index: 9999;
@@ -2139,14 +2139,14 @@
     cursor: pointer; transition: background 0.12s;
 }
 .sw-dropdown-item:hover { background: var(--surface-alt, #2a3942); }
-.sw-dropdown-item i { width: 16px; color: var(--text-secondary, #8696a0); font-size: 14px; }
+.sw-dropdown-item i { width: 16px; color: var(--text-secondary); font-size: 14px; }
 
 /* Section label ("Status", "Recent updates") */
 .sw-section-label {
     padding: 6px 16px 2px;
     font-size: 12px;
     font-weight: 600;
-    color: var(--text-secondary, #8696a0);
+    color: var(--text-secondary);
     letter-spacing: 0.4px;
     text-transform: none;
 }
@@ -2174,7 +2174,7 @@
     background: var(--surface-alt, #2a3942);
     display: flex; align-items: center; justify-content: center;
     font-size: 22px;
-    color: var(--text-secondary, #8696a0);
+    color: var(--text-secondary);
     overflow: hidden;
     background-size: cover;
     background-position: center;
@@ -2189,7 +2189,7 @@
     color: #fff;
     font-size: 10px;
     display: flex; align-items: center; justify-content: center;
-    border: 2px solid var(--background-color, #0b141a);
+    border: 2px solid var(--background-color);
     z-index: 2;
 }
 
@@ -2202,7 +2202,7 @@
 }
 .sw-row-sub {
     font-size: 13px;
-    color: var(--text-secondary, #8696a0);
+    color: var(--text-secondary);
     margin-top: 2px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
@@ -2267,7 +2267,7 @@
     align-items: center;
     gap: 10px;
     padding: 8px 6px;
-    border-bottom: 1px solid var(--border-color, #2a3942);
+    border-bottom: 1px solid var(--border-color);
 }
 .viewer-list-person:last-child { border-bottom: none; }
 .vp-avatar {
@@ -2279,7 +2279,7 @@
     background-size: cover; background-position: center;
 }
 .vp-name { font-size: 14px; font-weight: 500; color: var(--text-primary); }
-.vp-time { font-size: 11px; color: var(--text-secondary, #8696a0); margin-top: 1px; }
+.vp-time { font-size: 11px; color: var(--text-secondary); margin-top: 1px; }
 .vp-reaction { font-size: 16px; margin-left: auto; }
 </style>
 
@@ -4004,7 +4004,7 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
             if (typeof renderStatusListInstantlyUI === 'function') {
                 renderStatusListInstantlyUI();
             } else {
-                list.innerHTML = '<div class="empty-state" style="padding:24px 16px;text-align:center;color:var(--text-secondary,#8696a0);"><i class="fas fa-comment-dots" style="font-size:32px;margin-bottom:10px;opacity:0.4;display:block;"></i><p style="margin:0 0 4px;font-size:14px;">No recent updates</p><p style="margin:0;font-size:12px;opacity:0.7;">Status updates from your contacts appear here</p></div>';
+                list.innerHTML = '<div class="empty-state" style="padding:24px 16px;text-align:center;color:var(--text-secondary);"><i class="fas fa-comment-dots" style="font-size:32px;margin-bottom:10px;opacity:0.4;display:block;"></i><p style="margin:0 0 4px;font-size:14px;">No recent updates</p><p style="margin:0;font-size:12px;opacity:0.7;">Status updates from your contacts appear here</p></div>';
             }
         }
     }, 8000);
@@ -4138,12 +4138,12 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
                 return;
             }
             showPanel();
-            if (list) list.innerHTML = '<div style="padding:12px;text-align:center;color:var(--text-secondary,#8696a0);font-size:13px;"><i class="fas fa-spinner fa-spin"></i> Loading...</div>';
+            if (list) list.innerHTML = '<div style="padding:12px;text-align:center;color:var(--text-secondary);font-size:13px;"><i class="fas fa-spinner fa-spin"></i> Loading...</div>';
 
             // Get current status id from active viewer
             var currentStatusId = window.__currentViewingStatusId || window.__activeStatusId;
             if (!currentStatusId) {
-                list.innerHTML = '<div style="padding:12px;text-align:center;color:var(--text-secondary,#8696a0);font-size:13px;">No data</div>';
+                list.innerHTML = '<div style="padding:12px;text-align:center;color:var(--text-secondary);font-size:13px;">No data</div>';
                 return;
             }
             // Fetch viewers
@@ -4152,7 +4152,7 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
                 api.getViewers(currentStatusId).then(function(result) {
                     var viewers = (result && (result.viewers || (result.data && result.data.viewers))) || [];
                     if (!viewers.length) {
-                        list.innerHTML = '<div style="padding:12px;text-align:center;color:var(--text-secondary,#8696a0);font-size:13px;">No views yet</div>';
+                        list.innerHTML = '<div style="padding:12px;text-align:center;color:var(--text-secondary);font-size:13px;">No views yet</div>';
                         return;
                     }
                     list.innerHTML = viewers.slice(0, 50).map(function(v) {
@@ -4163,7 +4163,7 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
                         var reaction = v.reaction ? '<span class="vp-reaction">' + v.reaction + '</span>' : '';
                         var avatarStyle = avatarUrl
                             ? 'background-image:url(' + avatarUrl + ');background-size:cover;background-position:center;'
-                            : 'background:var(--primary-color,#00a884);';
+                            : 'background:var(--primary-color);';
                         return '<div class="viewer-list-person">' +
                             '<div class="vp-avatar" style="' + avatarStyle + '">' + (avatarUrl ? '' : initial) + '</div>' +
                             '<div style="flex:1;min-width:0;">' +
@@ -4174,10 +4174,10 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
                         '</div>';
                     }).join('');
                 }).catch(function() {
-                    list.innerHTML = '<div style="padding:12px;text-align:center;color:var(--text-secondary,#8696a0);font-size:13px;">Could not load viewers</div>';
+                    list.innerHTML = '<div style="padding:12px;text-align:center;color:var(--text-secondary);font-size:13px;">Could not load viewers</div>';
                 });
             } else {
-                list.innerHTML = '<div style="padding:12px;text-align:center;color:var(--text-secondary,#8696a0);font-size:13px;">Not available</div>';
+                list.innerHTML = '<div style="padding:12px;text-align:center;color:var(--text-secondary);font-size:13px;">Not available</div>';
             }
         });
 

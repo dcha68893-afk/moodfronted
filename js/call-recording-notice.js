@@ -107,7 +107,7 @@
       }
       #kynRecordingConsentBox h3 {
         font-size: 16px; font-weight: 700;
-        color: var(--text-primary, #fff);
+        color: var(--text-primary);
         margin: 0 0 8px;
       }
       #kynRecordingConsentBox p {

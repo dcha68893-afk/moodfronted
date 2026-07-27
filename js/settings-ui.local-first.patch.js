@@ -40,12 +40,12 @@
 
     // ─── Sync Status Badge ────────────────────────────────────────────────────────
     const SYNC_LABELS = {
-        idle:    { icon: '✓',  text: 'Saved',          color: 'var(--success-color, #34c759)' },
-        synced:  { icon: '☁',  text: 'Synced',         color: 'var(--success-color, #34c759)' },
-        pending: { icon: '⏳', text: 'Pending sync',   color: 'var(--warning-color, #ff9500)' },
-        syncing: { icon: '↻',  text: 'Syncing…',       color: 'var(--primary-color, #0084ff)' },
-        failed:  { icon: '⚠',  text: 'Sync failed',    color: 'var(--danger-color, #ff3b30)'  },
-        offline: { icon: '📴', text: 'Offline',        color: 'var(--text-secondary, #666)'   },
+        idle:    { icon: '✓',  text: 'Saved',          color: 'var(--success-color)' },
+        synced:  { icon: '☁',  text: 'Synced',         color: 'var(--success-color)' },
+        pending: { icon: '⏳', text: 'Pending sync',   color: 'var(--warning-color)' },
+        syncing: { icon: '↻',  text: 'Syncing…',       color: 'var(--primary-color)' },
+        failed:  { icon: '⚠',  text: 'Sync failed',    color: 'var(--danger-color)'  },
+        offline: { icon: '📴', text: 'Offline',        color: 'var(--text-secondary)'   },
     };
 
     let _badgeHideTimer = null;
@@ -137,7 +137,7 @@
             'font-size:11px',
             'padding:3px 10px',
             'background:rgba(255,149,0,.15)',
-            'color:var(--warning-color,#ff9500)',
+            'color:var(--warning-color)',
             'border-radius:12px',
             'margin-left:8px',
         ].join(';');

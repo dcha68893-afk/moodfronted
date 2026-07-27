@@ -102,7 +102,7 @@
         background: var(--bg-secondary, #1e1e2e);
         border: 1px solid var(--border-color, rgba(255,255,255,0.08));
         border-radius: 10px;
-        color: var(--text-primary, #fff);
+        color: var(--text-primary);
         font-size: 12px;
         padding: 8px 4px;
         cursor: pointer;
@@ -137,7 +137,7 @@
       }
       #kynForwardPickerBox h3 {
         font-size: 15px; font-weight: 700;
-        color: var(--text-primary, #fff);
+        color: var(--text-primary);
         text-align: center;
         margin: 0 0 12px;
         padding: 0 16px;
@@ -148,7 +148,7 @@
         border-radius: 20px;
         background: var(--bg-secondary, #1e1e2e);
         border: 1px solid var(--border-color, rgba(255,255,255,0.1));
-        color: var(--text-primary, #fff);
+        color: var(--text-primary);
         font-size: 13px; outline: none;
       }
       #kynForwardList {
@@ -169,7 +169,7 @@
         flex-shrink: 0;
       }
       .fwd-chat-name {
-        font-size: 14px; color: var(--text-primary, #fff);
+        font-size: 14px; color: var(--text-primary);
       }
     `;
     document.head.appendChild(s);

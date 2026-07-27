@@ -2137,7 +2137,7 @@ export function createSecureGroupItemElement(groupData, type = 'group') {
         } else {
             html += `
                 <button class="group-action-btn chat" data-action="open-chat" title="Open Group Chat" aria-label="Open Chat"
-                    style="background:var(--primary-color,#0084ff);color:#fff;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;border:none;cursor:pointer;display:flex;align-items:center;gap:5px;">
+                    style="background:var(--primary-color);color:#fff;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;border:none;cursor:pointer;display:flex;align-items:center;gap:5px;">
                     <i class="fas fa-door-open"></i> Open
                 </button>
             `;
@@ -2640,7 +2640,7 @@ function _updateSyncStateUI(state) {
         badge.style.background = cfg.bg;
         badge.style.color = state === 'synced' ? '#48bb78'
                           : state === 'error'  ? '#f56565'
-                          : state === 'syncing' ? 'var(--primary-color, #6c63ff)'
+                          : state === 'syncing' ? 'var(--primary-color)'
                           : state === 'pending' ? '#ed8936'
                           : 'var(--text-secondary)';
 
@@ -2750,7 +2750,7 @@ async function _fetchInvites() {
                   '<div style="font-size:12px;color:var(--text-secondary);margin-top:2px;">Invited by ' + inviter + '</div>' +
                 '</div>' +
                 '<div style="display:flex;gap:8px;flex-shrink:0;">' +
-                  '<button class="inv-accept" data-id="' + inv.id + '" style="padding:7px 14px;border-radius:20px;background:var(--primary-color,#0084ff);color:#fff;border:none;cursor:pointer;font-size:13px;font-weight:600;">Accept</button>' +
+                  '<button class="inv-accept" data-id="' + inv.id + '" style="padding:7px 14px;border-radius:20px;background:var(--primary-color);color:#fff;border:none;cursor:pointer;font-size:13px;font-weight:600;">Accept</button>' +
                   '<button class="inv-reject" data-id="' + inv.id + '" style="padding:7px 14px;border-radius:20px;background:rgba(128,128,128,.15);color:var(--text-secondary);border:none;cursor:pointer;font-size:13px;">Decline</button>' +
                 '</div>';
             card.querySelector('.inv-accept').addEventListener('click', async function() {
@@ -2930,7 +2930,7 @@ export function setupToolbarButtons() {
                 b.style.color = 'var(--text-primary)';
                 b.classList.remove('active');
             });
-            this.style.background = 'var(--primary-color,#6c63ff)';
+            this.style.background = 'var(--primary-color)';
             this.style.color = '#fff';
             this.classList.add('active');
             const q = document.getElementById('discoverSearchInput')?.value || '';
@@ -2947,7 +2947,7 @@ export function setupToolbarButtons() {
                 b.style.color = 'var(--text-primary)';
                 b.classList.remove('active');
             });
-            this.style.background = 'var(--primary-color,#6c63ff)';
+            this.style.background = 'var(--primary-color)';
             this.style.color = '#fff';
             this.classList.add('active');
             const q = document.getElementById('discoverSearchInput')?.value || '';
@@ -2973,7 +2973,7 @@ export function setupToolbarButtons() {
                 b.style.background = 'var(--bg-tertiary,#252537)';
                 b.style.color = 'var(--text-secondary)';
             });
-            this.style.background = 'var(--primary-color,#6c63ff)';
+            this.style.background = 'var(--primary-color)';
             this.style.color = '#fff';
             if (this.dataset.etab === 'create') {
                 renderCreateEventForm();
@@ -2990,7 +2990,7 @@ export function setupToolbarButtons() {
                 b.style.background = 'var(--bg-tertiary,#252537)';
                 b.style.color = 'var(--text-secondary)';
             });
-            this.style.background = 'var(--primary-color,#6c63ff)';
+            this.style.background = 'var(--primary-color)';
             this.style.color = '#fff';
             if (this.dataset.invtab === 'received')    loadReceivedInvites();
             else if (this.dataset.invtab === 'invite') loadInviteFriendsTab();
@@ -3121,15 +3121,15 @@ export function renderFriendsPickerList(friends) {
         const item = document.createElement('div');
         const sel = window._cgSelectedMembers.has(f.id);
         const inviteMode = f.invitePolicy === 'invite_required';
-        item.style.cssText = 'display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;transition:background .15s;' + (sel ? 'background:var(--bg-secondary);border:1px solid var(--primary-color,#6c63ff);border-radius:8px;' : 'border:1px solid transparent;');
+        item.style.cssText = 'display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;transition:background .15s;' + (sel ? 'background:var(--bg-secondary);border:1px solid var(--primary-color);border-radius:8px;' : 'border:1px solid transparent;');
         const initials = f.displayName.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2)||'U';
         item.innerHTML = `
-            <div style="width:36px;height:36px;border-radius:50%;background:var(--primary-color,#6c63ff);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;flex-shrink:0;${f.avatar?'background-image:url('+f.avatar+');background-size:cover;':''}">${f.avatar?'':initials}</div>
+            <div style="width:36px;height:36px;border-radius:50%;background:var(--primary-color);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;flex-shrink:0;${f.avatar?'background-image:url('+f.avatar+');background-size:cover;':''}">${f.avatar?'':initials}</div>
             <div style="flex:1;min-width:0">
                 <div style="font-weight:600;font-size:13px;color:var(--text-primary)">${f.displayName}</div>
                 <div style="font-size:11px;color:var(--text-secondary)">${f.username?'@'+f.username:''} · <span style="color:${f.online?'#48bb78':'var(--text-secondary)'}">●</span> ${f.online?'Online':'Offline'}${inviteMode ? ' · Invite required' : ' · Add directly'}</div>
             </div>
-            <div style="width:20px;height:20px;border-radius:50%;border:2px solid ${sel?'var(--primary-color,#6c63ff)':'var(--border-color)'};background:${sel?'var(--primary-color,#6c63ff)':'none'};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;color:#fff;">${sel?'✓':''}</div>
+            <div style="width:20px;height:20px;border-radius:50%;border:2px solid ${sel?'var(--primary-color)':'var(--border-color)'};background:${sel?'var(--primary-color)':'none'};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;color:#fff;">${sel?'✓':''}</div>
         `;
         item.addEventListener('click', () => {
             if (window._cgSelectedMembers.has(f.id)) {
@@ -3152,7 +3152,7 @@ export function renderSelectedMembersChips() {
         const f = window._cgFriendsAll.find(x => x.id === id);
         if (!f) return;
         const chip = document.createElement('div');
-        chip.style.cssText = 'display:inline-flex;align-items:center;gap:5px;padding:3px 10px;background:var(--primary-color,#6c63ff)22;border:1px solid var(--primary-color,#6c63ff);border-radius:20px;font-size:12px;color:var(--text-primary);';
+        chip.style.cssText = 'display:inline-flex;align-items:center;gap:5px;padding:3px 10px;background:var(--primary-color)22;border:1px solid var(--primary-color);border-radius:20px;font-size:12px;color:var(--text-primary);';
         chip.innerHTML = `${f.displayName} <span style="cursor:pointer;opacity:.7">✕</span>`;
         chip.querySelector('span').addEventListener('click', () => {
             window._cgSelectedMembers.delete(id);
@@ -3695,7 +3695,7 @@ function bindCreateGroupModalEvents() {
                 o.style.outline = 'none'; o.classList.remove('selected');
                 const ic = o.querySelector('i'); if (ic) ic.style.display = 'none';
             });
-            this.style.outline = '3px solid var(--primary-color,#6c63ff)';
+            this.style.outline = '3px solid var(--primary-color)';
             this.classList.add('selected');
             const ic = this.querySelector('i'); if (ic) ic.style.display = 'inline';
         });
@@ -3708,7 +3708,7 @@ function bindCreateGroupModalEvents() {
                 o.style.outline = 'none'; o.classList.remove('selected');
                 const ic = o.querySelector('i'); if (ic) ic.style.display = 'none';
             });
-            this.style.outline = '3px solid var(--primary-color,#6c63ff)';
+            this.style.outline = '3px solid var(--primary-color)';
             this.classList.add('selected');
             const ic = this.querySelector('i'); if (ic) ic.style.display = 'inline';
         });
@@ -4560,7 +4560,7 @@ async function panelFetch(path, opts = {}) {
 
 function panelCard(innerHTML) {
     const d = document.createElement('div');
-    d.style.cssText = 'background:var(--bg-tertiary,#252537);border-radius:12px;padding:14px 16px;margin-bottom:10px;border:1px solid var(--border-color,#2a2a3e);';
+    d.style.cssText = 'background:var(--bg-tertiary,#252537);border-radius:12px;padding:14px 16px;margin-bottom:10px;border:1px solid var(--border-color);';
     d.innerHTML = innerHTML;
     return d;
 }
@@ -4590,12 +4590,12 @@ export async function loadDiscoverGroups(query, purpose, scope) {
     container.innerHTML=panelLoader();
     container.innerHTML=[
         '<div style="display:flex;border-bottom:2px solid var(--border-color);margin-bottom:14px">',
-        '<button id="dscMyTab" style="flex:1;padding:10px;background:none;border:none;border-bottom:3px solid var(--primary-color,#6c63ff);font-weight:700;font-size:14px;color:var(--primary-color,#6c63ff);cursor:pointer">My Groups</button>',
+        '<button id="dscMyTab" style="flex:1;padding:10px;background:none;border:none;border-bottom:3px solid var(--primary-color);font-weight:700;font-size:14px;color:var(--primary-color);cursor:pointer">My Groups</button>',
         '<button id="dscOtherTab" style="flex:1;padding:10px;background:none;border:none;border-bottom:3px solid transparent;font-weight:600;font-size:14px;color:var(--text-secondary);cursor:pointer">Explore Public</button>',
         '</div><div id="dscMyList"></div><div id="dscOtherList" style="display:none"></div>'
     ].join('');
-    function setTab(w){var mt=document.getElementById('dscMyTab'),ot=document.getElementById('dscOtherTab'),ml=document.getElementById('dscMyList'),ol=document.getElementById('dscOtherList');if(!mt)return;var pc='var(--primary-color,#6c63ff)',ts='var(--text-secondary)';if(w==='my'){mt.style.cssText='flex:1;padding:10px;background:none;border:none;border-bottom:3px solid '+pc+';font-weight:700;font-size:14px;color:'+pc+';cursor:pointer';ot.style.cssText='flex:1;padding:10px;background:none;border:none;border-bottom:3px solid transparent;font-weight:600;font-size:14px;color:'+ts+';cursor:pointer';ml.style.display='';ol.style.display='none';}else{ot.style.cssText='flex:1;padding:10px;background:none;border:none;border-bottom:3px solid '+pc+';font-weight:700;font-size:14px;color:'+pc+';cursor:pointer';mt.style.cssText='flex:1;padding:10px;background:none;border:none;border-bottom:3px solid transparent;font-weight:600;font-size:14px;color:'+ts+';cursor:pointer';ml.style.display='none';ol.style.display='';}}
-    function makeCard(g,isOwn){var ii=(g.name||'G').split(' ').map(function(w){return w[0];}).join('').toUpperCase().slice(0,2);var mc=(g.stats&&g.stats.totalMembers)||g.memberCount||0;var ob='<button data-gid="'+g.id+'" data-gname="'+g.name+'" data-action="open" style="padding:7px 10px;border-radius:8px;background:none;border:1px solid var(--primary-color,#6c63ff);color:var(--primary-color,#6c63ff);cursor:pointer;font-size:13px;display:flex;align-items:center;gap:5px"><i class="fas fa-door-open"></i> Open</button>';var jb=isOwn?'':'<button data-gid="'+g.id+'" data-gname="'+g.name+'" data-action="join" style="padding:7px 10px;border-radius:8px;background:var(--primary-color,#6c63ff);color:#fff;border:none;cursor:pointer;font-size:13px;font-weight:600">Join</button>';var h='<div style="display:flex;align-items:center;gap:12px"><div style="width:44px;height:44px;border-radius:50%;background:var(--primary-color,#6c63ff);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:15px;flex-shrink:0">'+ii+'</div><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:14px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+g.name+'</div><div style="font-size:12px;color:var(--text-secondary);margin-top:2px">'+((g.description||'').slice(0,55)||'No description')+'</div><div style="margin-top:5px;display:flex;gap:6px;flex-wrap:wrap"><span style="padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:rgba(108,99,255,.13);color:var(--primary-color,#6c63ff)">\uD83D\uDC65 '+mc+'</span>'+(g.purpose?'<span style="padding:2px 8px;border-radius:20px;font-size:11px;background:#48bb7822;color:#48bb78">'+g.purpose+'</span>':'')+'<span style="padding:2px 8px;border-radius:20px;font-size:11px;background:#eee;color:#666">'+(g.isPublic?'\uD83C\uDF10 Public':'\uD83D\uDD12 Private')+'</span></div></div><div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0">'+ob+jb+'</div></div>';var card=panelCard(h);card.querySelectorAll('[data-gid]').forEach(function(btn){btn.addEventListener('click',async function(){var action=this.dataset.action,gid2=this.dataset.gid,gname=this.dataset.gname;
+    function setTab(w){var mt=document.getElementById('dscMyTab'),ot=document.getElementById('dscOtherTab'),ml=document.getElementById('dscMyList'),ol=document.getElementById('dscOtherList');if(!mt)return;var pc='var(--primary-color)',ts='var(--text-secondary)';if(w==='my'){mt.style.cssText='flex:1;padding:10px;background:none;border:none;border-bottom:3px solid '+pc+';font-weight:700;font-size:14px;color:'+pc+';cursor:pointer';ot.style.cssText='flex:1;padding:10px;background:none;border:none;border-bottom:3px solid transparent;font-weight:600;font-size:14px;color:'+ts+';cursor:pointer';ml.style.display='';ol.style.display='none';}else{ot.style.cssText='flex:1;padding:10px;background:none;border:none;border-bottom:3px solid '+pc+';font-weight:700;font-size:14px;color:'+pc+';cursor:pointer';mt.style.cssText='flex:1;padding:10px;background:none;border:none;border-bottom:3px solid transparent;font-weight:600;font-size:14px;color:'+ts+';cursor:pointer';ml.style.display='none';ol.style.display='';}}
+    function makeCard(g,isOwn){var ii=(g.name||'G').split(' ').map(function(w){return w[0];}).join('').toUpperCase().slice(0,2);var mc=(g.stats&&g.stats.totalMembers)||g.memberCount||0;var ob='<button data-gid="'+g.id+'" data-gname="'+g.name+'" data-action="open" style="padding:7px 10px;border-radius:8px;background:none;border:1px solid var(--primary-color);color:var(--primary-color);cursor:pointer;font-size:13px;display:flex;align-items:center;gap:5px"><i class="fas fa-door-open"></i> Open</button>';var jb=isOwn?'':'<button data-gid="'+g.id+'" data-gname="'+g.name+'" data-action="join" style="padding:7px 10px;border-radius:8px;background:var(--primary-color);color:#fff;border:none;cursor:pointer;font-size:13px;font-weight:600">Join</button>';var h='<div style="display:flex;align-items:center;gap:12px"><div style="width:44px;height:44px;border-radius:50%;background:var(--primary-color);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:15px;flex-shrink:0">'+ii+'</div><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:14px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+g.name+'</div><div style="font-size:12px;color:var(--text-secondary);margin-top:2px">'+((g.description||'').slice(0,55)||'No description')+'</div><div style="margin-top:5px;display:flex;gap:6px;flex-wrap:wrap"><span style="padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:rgba(108,99,255,.13);color:var(--primary-color)">\uD83D\uDC65 '+mc+'</span>'+(g.purpose?'<span style="padding:2px 8px;border-radius:20px;font-size:11px;background:#48bb7822;color:#48bb78">'+g.purpose+'</span>':'')+'<span style="padding:2px 8px;border-radius:20px;font-size:11px;background:#eee;color:#666">'+(g.isPublic?'\uD83C\uDF10 Public':'\uD83D\uDD12 Private')+'</span></div></div><div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0">'+ob+jb+'</div></div>';var card=panelCard(h);card.querySelectorAll('[data-gid]').forEach(function(btn){btn.addEventListener('click',async function(){var action=this.dataset.action,gid2=this.dataset.gid,gname=this.dataset.gname;
         if(action==='open'){
             // FIX-PHASE16: Fetch group with full membership/role data before calling openGroupChat.
             // Without isAdmin/isCreator/role, loadUniqueFeaturesPanels hides all tools panels.
@@ -4679,7 +4679,7 @@ async function _loadGroupEventsPanelImpl(filter = 'upcoming') {
                 <div style="font-weight:700;font-size:15px;color:var(--text-primary);margin-bottom:5px">📅 ${ev.title||ev.name||'Untitled Event'}</div>
                 <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">${(ev.description||'').slice(0,100)}</div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap">
-                    <span style="padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:var(--primary-color,#6c63ff)22;color:var(--primary-color,#6c63ff)">🕐 ${dateStr}</span>
+                    <span style="padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:var(--primary-color)22;color:var(--primary-color)">🕐 ${dateStr}</span>
                     ${ev.location?'<span style="padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:#48bb7822;color:#48bb78">📍 '+ev.location+'</span>':''}
                     ${ev.attendees?.length?'<span style="padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:#f6ad5522;color:#f6ad55">👥 '+ev.attendees.length+' attending</span>':''}
                 </div>
@@ -4704,7 +4704,7 @@ export function renderCreateEventForm() {
         </div>
         <div><label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Location</label>
         <input id="evtLoc" placeholder="e.g. Zoom, Room 101" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--bg-tertiary,#252537);border:1px solid var(--border-color);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;"></div>
-        <button id="evtSaveBtn" style="width:100%;padding:12px;border-radius:8px;background:var(--primary-color,#6c63ff);color:#fff;border:none;cursor:pointer;font-size:14px;font-weight:600;">Create Event</button>
+        <button id="evtSaveBtn" style="width:100%;padding:12px;border-radius:8px;background:var(--primary-color);color:#fff;border:none;cursor:pointer;font-size:14px;font-weight:600;">Create Event</button>
     `;
     body.innerHTML = '';
     body.appendChild(div);
@@ -4749,14 +4749,14 @@ export async function loadReceivedInvites() {
             const initials = gname.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
             const card = panelCard(`
                 <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
-                    <div style="width:44px;height:44px;border-radius:50%;background:var(--primary-color,#6c63ff);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;flex-shrink:0;${groupObj?.avatar?'background-image:url('+groupObj.avatar+');background-size:cover;':''}">${groupObj?.avatar?'':initials}</div>
+                    <div style="width:44px;height:44px;border-radius:50%;background:var(--primary-color);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;flex-shrink:0;${groupObj?.avatar?'background-image:url('+groupObj.avatar+');background-size:cover;':''}">${groupObj?.avatar?'':initials}</div>
                     <div style="flex:1"><div style="font-weight:700;font-size:14px;color:var(--text-primary)">${gname}</div>
                     <div style="font-size:12px;color:var(--text-secondary)">Invited by @${inviter} · ${timeAgo(inv.createdAt)}</div>
                     ${groupObj?.description?'<div style="font-size:12px;color:var(--text-secondary);margin-top:2px">'+groupObj.description.slice(0,70)+'</div>':''}</div>
                 </div>
                 <div style="display:flex;gap:8px">
                     <button data-inv="${inv.id}" data-action="decline" data-name="${gname}" style="flex:1;padding:8px;border-radius:8px;background:none;border:1px solid var(--border-color);cursor:pointer;color:var(--text-primary);font-weight:600;font-size:13px">Decline</button>
-                    <button data-inv="${inv.id}" data-action="accept" data-name="${gname}" style="flex:1;padding:8px;border-radius:8px;background:var(--primary-color,#6c63ff);border:none;cursor:pointer;color:#fff;font-weight:600;font-size:13px">Accept & Join</button>
+                    <button data-inv="${inv.id}" data-action="accept" data-name="${gname}" style="flex:1;padding:8px;border-radius:8px;background:var(--primary-color);border:none;cursor:pointer;color:#fff;font-weight:600;font-size:13px">Accept & Join</button>
                 </div>
             `);
             card.querySelectorAll('[data-inv]').forEach(btn => {
@@ -4791,7 +4791,7 @@ export async function loadInviteFriendsTab() {
         <input id="invFriendSearch" placeholder="Search friends…" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--bg-tertiary,#252537);border:1px solid var(--border-color);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;margin-bottom:10px;">
         <div id="invFriendsList" style="max-height:260px;overflow-y:auto;">${panelLoader()}</div>
         <div id="invSelBar" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;min-height:30px;"></div>
-        <button id="invSendBtn" style="display:none;width:100%;padding:12px;border-radius:8px;background:var(--primary-color,#6c63ff);color:#fff;border:none;cursor:pointer;font-size:14px;font-weight:600;margin-top:10px">Send Invitations</button>
+        <button id="invSendBtn" style="display:none;width:100%;padding:12px;border-radius:8px;background:var(--primary-color);color:#fff;border:none;cursor:pointer;font-size:14px;font-weight:600;margin-top:10px">Send Invitations</button>
     `;
     if (!gid) {
         panelFetch('/api/groups/user').then(data => {
@@ -4832,12 +4832,12 @@ function renderInvFriendsList(friends) {
     friends.forEach(f => {
         const sel = window._invSelFriends.has(f.id);
         const item = document.createElement('div');
-        item.style.cssText = 'display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;transition:background .15s;border:2px solid '+(sel?'var(--primary-color,#6c63ff)':'transparent')+';';
+        item.style.cssText = 'display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;transition:background .15s;border:2px solid '+(sel?'var(--primary-color)':'transparent')+';';
         const initials = f.displayName.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2)||'U';
         item.innerHTML = `
-            <div style="width:38px;height:38px;border-radius:50%;background:var(--primary-color,#6c63ff);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;flex-shrink:0;${f.avatar?'background-image:url('+f.avatar+');background-size:cover;':''}">${f.avatar?'':initials}</div>
+            <div style="width:38px;height:38px;border-radius:50%;background:var(--primary-color);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;flex-shrink:0;${f.avatar?'background-image:url('+f.avatar+');background-size:cover;':''}">${f.avatar?'':initials}</div>
             <div style="flex:1"><div style="font-weight:600;font-size:13px;color:var(--text-primary)">${f.displayName}</div><div style="font-size:11px;color:var(--text-secondary)">${f.username?'@'+f.username:''} · <span style="color:${f.online?'#48bb78':'var(--text-secondary)'}">●</span> ${f.online?'Online':'Offline'}</div></div>
-            <div style="width:20px;height:20px;border-radius:50%;border:2px solid ${sel?'var(--primary-color,#6c63ff)':'var(--border-color)'};background:${sel?'var(--primary-color,#6c63ff)':'none'};display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;flex-shrink:0;">${sel?'✓':''}</div>
+            <div style="width:20px;height:20px;border-radius:50%;border:2px solid ${sel?'var(--primary-color)':'var(--border-color)'};background:${sel?'var(--primary-color)':'none'};display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;flex-shrink:0;">${sel?'✓':''}</div>
         `;
         item.addEventListener('click', () => {
             if (window._invSelFriends.has(f.id)) window._invSelFriends.delete(f.id); else window._invSelFriends.add(f.id);
@@ -4858,7 +4858,7 @@ function renderInvSelBar() {
         const f = window._invFriendsAll.find(x => x.id === id);
         if (!f) return;
         const chip = document.createElement('div');
-        chip.style.cssText = 'display:inline-flex;align-items:center;gap:5px;padding:3px 10px;background:var(--primary-color,#6c63ff)22;border:1px solid var(--primary-color,#6c63ff);border-radius:20px;font-size:12px;color:var(--text-primary);';
+        chip.style.cssText = 'display:inline-flex;align-items:center;gap:5px;padding:3px 10px;background:var(--primary-color)22;border:1px solid var(--primary-color);border-radius:20px;font-size:12px;color:var(--text-primary);';
         chip.innerHTML = f.displayName + ' <span style="cursor:pointer;opacity:.7">✕</span>';
         chip.querySelector('span').addEventListener('click', () => { window._invSelFriends.delete(id); renderInvFriendsList(window._invFriendsAll); renderInvSelBar(); const btn = document.getElementById('invSendBtn'); if (btn) { btn.style.display = window._invSelFriends.size > 0 ? 'block' : 'none'; } });
         bar.appendChild(chip);

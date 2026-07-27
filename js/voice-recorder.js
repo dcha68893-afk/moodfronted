@@ -113,7 +113,7 @@
         }
         .kyn-voice-waveform { width: 240px; height: 48px; }
         #kyn-voice-canvas { display: block; }
-        .kyn-voice-timer { font-size: 18px; font-weight: 600; color: var(--text-primary, #fff); letter-spacing: 1px; }
+        .kyn-voice-timer { font-size: 18px; font-weight: 600; color: var(--text-primary); letter-spacing: 1px; }
         .kyn-voice-hint { font-size: 11px; color: var(--text-muted, #888); text-align: center; }
         .kyn-voice-controls { display: flex; align-items: center; gap: 20px; width: 100%; justify-content: center; }
         .kyn-voice-btn {
@@ -123,7 +123,7 @@
         }
         .kyn-voice-btn:active { transform: scale(0.9); }
         .kyn-voice-cancel { background: var(--bg-tertiary, #2a2a3e); color: var(--text-muted, #888); }
-        .kyn-voice-send   { background: var(--accent-color, #7c3aed); color: #fff; }
+        .kyn-voice-send   { background: var(--accent-color); color: #fff; }
         .kyn-voice-send:hover { background: var(--accent-hover, #6d28d9); }
         .kyn-voice-mic-wrap {
           position: relative; width: 56px; height: 56px;
@@ -135,14 +135,14 @@
           animation: kynVoicePulse 1.2s ease-in-out infinite;
         }
         @keyframes kynVoicePulse { 0%,100% { transform:scale(1); opacity:0.6 } 50% { transform:scale(1.3); opacity:0.2 } }
-        .kyn-voice-mic-icon { color: var(--accent-color, #7c3aed); position: relative; z-index: 1; }
+        .kyn-voice-mic-icon { color: var(--accent-color); position: relative; z-index: 1; }
         .kyn-voice-lock {
           align-self: flex-end; width: 32px; height: 32px; border-radius: 50%;
           background: var(--bg-tertiary, #2a2a3e); border: none; cursor: pointer;
           display: flex; align-items: center; justify-content: center;
           color: var(--text-muted, #888); transition: color 0.2s, background 0.2s;
         }
-        .kyn-voice-lock.locked { color: var(--accent-color, #7c3aed); background: rgba(124,58,237,0.15); }
+        .kyn-voice-lock.locked { color: var(--accent-color); background: rgba(124,58,237,0.15); }
       `;
       document.head.appendChild(style);
     }
@@ -461,12 +461,12 @@
           var a=p.querySelector('audio');
           if(a.paused){a.play();btn.textContent='⏸'}else{a.pause();btn.textContent='▶'}
           a.onended=function(){btn.textContent='▶'};
-        })(this)" style="width:36px;height:36px;border-radius:50%;background:var(--accent-color,#7c3aed);border:none;color:#fff;cursor:pointer;font-size:14px">▶</button>
+        })(this)" style="width:36px;height:36px;border-radius:50%;background:var(--accent-color);border:none;color:#fff;cursor:pointer;font-size:14px">▶</button>
         <div style="flex:1;min-width:0">
           ${waveform ? `<div class="kyn-waveform-static">${waveform}</div>` : `<div style="height:32px;background:rgba(124,58,237,0.15);border-radius:4px"></div>`}
           <div style="display:flex;justify-content:space-between;margin-top:2px">
             <span style="font-size:10px;color:var(--text-muted,#888)">${mm}:${ss}</span>
-            <button class="kyn-voice-speed-btn" style="font-size:10px;color:var(--accent-color,#7c3aed);background:none;border:none;cursor:pointer;padding:0">1×</button>
+            <button class="kyn-voice-speed-btn" style="font-size:10px;color:var(--accent-color);background:none;border:none;cursor:pointer;padding:0">1×</button>
           </div>
         </div>
       </div>

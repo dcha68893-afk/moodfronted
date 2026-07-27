@@ -362,7 +362,7 @@ function _renderFriendsList(list, friends) {
         div.dataset.searchName = (f.name + ' ' + f.username).toLowerCase();
         const sel = _selectedMembers.has(f.id);
         const initials = (f.name.match(/\b\w/g) || ['?']).slice(0,2).join('').toUpperCase();
-        div.style.cssText = `display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;margin-bottom:4px;transition:all .15s;background:${sel?'var(--primary-color,#667eea)1a':'transparent'};border:1.5px solid ${sel?'var(--primary-color,#667eea)':'transparent'};`;
+        div.style.cssText = `display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;margin-bottom:4px;transition:all .15s;background:${sel?'var(--primary-color)1a':'transparent'};border:1.5px solid ${sel?'var(--primary-color)':'transparent'};`;
         div.innerHTML = `
             <div style="width:38px;height:38px;border-radius:50%;flex-shrink:0;overflow:hidden;background:linear-gradient(135deg,#667eea,#764ba2);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:14px;">
                 ${f.avatar ? `<img src="${f.avatar}" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display='none'">` : ''}
@@ -376,7 +376,7 @@ function _renderFriendsList(list, friends) {
                     ${f.online?'Online':'Offline'}
                 </div>
             </div>
-            <div class="_chk" style="width:22px;height:22px;border-radius:50%;border:2px solid ${sel?'var(--primary-color,#667eea)':'var(--border-color,#ccc)'};background:${sel?'var(--primary-color,#667eea)':'transparent'};display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s">
+            <div class="_chk" style="width:22px;height:22px;border-radius:50%;border:2px solid ${sel?'var(--primary-color)':'var(--border-color)'};background:${sel?'var(--primary-color)':'transparent'};display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s">
                 ${sel?'<i class="fas fa-check" style="color:#fff;font-size:11px"></i>':''}
             </div>`;
         div.addEventListener('click', () => _toggleMember(f, div));
@@ -387,12 +387,12 @@ function _renderFriendsList(list, friends) {
 function _toggleMember(f, el) {
     const nowSel = !_selectedMembers.has(f.id);
     if (nowSel) _selectedMembers.add(f.id); else _selectedMembers.delete(f.id);
-    el.style.background = nowSel ? 'var(--primary-color,#667eea)1a' : 'transparent';
-    el.style.borderColor = nowSel ? 'var(--primary-color,#667eea)' : 'transparent';
+    el.style.background = nowSel ? 'var(--primary-color)1a' : 'transparent';
+    el.style.borderColor = nowSel ? 'var(--primary-color)' : 'transparent';
     const chk = el.querySelector('._chk');
     if (chk) {
-        chk.style.background = nowSel ? 'var(--primary-color,#667eea)' : 'transparent';
-        chk.style.borderColor = nowSel ? 'var(--primary-color,#667eea)' : 'var(--border-color,#ccc)';
+        chk.style.background = nowSel ? 'var(--primary-color)' : 'transparent';
+        chk.style.borderColor = nowSel ? 'var(--primary-color)' : 'var(--border-color)';
         chk.innerHTML = nowSel ? '<i class="fas fa-check" style="color:#fff;font-size:11px"></i>' : '';
     }
     _renderChips();
@@ -416,7 +416,7 @@ function _renderChips() {
         const f = friends.find(fr => fr.id === id);
         if (!f) return;
         const chip = document.createElement('span');
-        chip.style.cssText = `display:inline-flex;align-items:center;gap:5px;padding:4px 10px;background:var(--primary-color,#667eea)1a;border:1px solid var(--primary-color,#667eea)55;border-radius:20px;font-size:12px;color:var(--text-primary);`;
+        chip.style.cssText = `display:inline-flex;align-items:center;gap:5px;padding:4px 10px;background:var(--primary-color)1a;border:1px solid var(--primary-color)55;border-radius:20px;font-size:12px;color:var(--text-primary);`;
         chip.innerHTML = `${f.name} <i class="fas fa-times" style="cursor:pointer;opacity:0.6;font-size:10px"></i>`;
         chip.querySelector('i').addEventListener('click', () => {
             _selectedMembers.delete(id);
@@ -424,7 +424,7 @@ function _renderChips() {
             if (row) {
                 row.style.background = 'transparent'; row.style.borderColor = 'transparent';
                 const chk = row.querySelector('._chk');
-                if (chk) { chk.style.background = 'transparent'; chk.style.borderColor = 'var(--border-color,#ccc)'; chk.innerHTML = ''; }
+                if (chk) { chk.style.background = 'transparent'; chk.style.borderColor = 'var(--border-color)'; chk.innerHTML = ''; }
             }
             _renderChips();
             _updateTabBadge();
@@ -442,7 +442,7 @@ function _updateTabBadge() {
     if (!badge) {
         badge = document.createElement('span');
         badge.className = '_mbadge';
-        badge.style.cssText = 'margin-left:5px;background:var(--primary-color,#667eea);color:#fff;border-radius:10px;padding:1px 6px;font-size:11px;font-weight:700;';
+        badge.style.cssText = 'margin-left:5px;background:var(--primary-color);color:#fff;border-radius:10px;padding:1px 6px;font-size:11px;font-weight:700;';
         tab.appendChild(badge);
     }
     badge.style.display = count ? '' : 'none';

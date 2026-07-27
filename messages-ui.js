@@ -5097,7 +5097,7 @@
                                 ontouchend="event.stopPropagation();document.body.classList.remove('chat-item-pressing');"
                                 ontouchcancel="document.body.classList.remove('chat-item-pressing');"
                                 onclick="event.stopPropagation();event.preventDefault();document.body.classList.remove('chat-item-pressing');if(window.messagesUI&&typeof window.messagesUI._showChatContextMenu==='function'){window.messagesUI._showChatContextMenu('${chat.id}', event);}"
-                                style="border:none;background:none;cursor:pointer;color:var(--text-secondary,#9ca3af);padding:10px 12px;margin:-4px;border-radius:8px;font-size:16px;flex-shrink:0;line-height:1;position:relative;z-index:2;min-width:40px;min-height:40px;display:flex;align-items:center;justify-content:center;">
+                                style="border:none;background:none;cursor:pointer;color:var(--text-secondary);padding:10px 12px;margin:-4px;border-radius:8px;font-size:16px;flex-shrink:0;line-height:1;position:relative;z-index:2;min-width:40px;min-height:40px;display:flex;align-items:center;justify-content:center;">
                                 <i class="fas fa-ellipsis-v" style="pointer-events:none;"></i>
                             </button>
 
@@ -7460,10 +7460,10 @@
         modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
         modal.innerHTML = `
           <div style="background:var(--bg-primary,#1a1a2e);border-radius:16px;width:100%;max-width:360px;padding:20px;max-height:70vh;overflow-y:auto;">
-            <h3 style="margin:0 0 16px;font-size:16px;color:var(--text-primary,#fff)">Forward to</h3>
+            <h3 style="margin:0 0 16px;font-size:16px;color:var(--text-primary)">Forward to</h3>
             <div id="_fwdList" style="display:flex;flex-direction:column;gap:8px;">
               ${conversations.slice(0,20).map(c => `
-                <button data-chat-id="${c.id}" style="display:flex;align-items:center;gap:10px;padding:10px;border-radius:10px;border:none;background:var(--bg-secondary,#16213e);cursor:pointer;color:var(--text-primary,#fff);font-size:14px;text-align:left;">
+                <button data-chat-id="${c.id}" style="display:flex;align-items:center;gap:10px;padding:10px;border-radius:10px;border:none;background:var(--bg-secondary,#16213e);cursor:pointer;color:var(--text-primary);font-size:14px;text-align:left;">
                   <img src="${c.avatar || c.participantAvatar || ''}" onerror="this.style.display='none'" style="width:36px;height:36px;border-radius:50%;object-fit:cover;">
                   <span>${UIFailsafe.escapeHtml(c.name || c.participantName || 'Chat')}</span>
                 </button>`).join('')}

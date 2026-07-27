@@ -105,7 +105,7 @@
             <i class="fas ${_getPlatformIcon(d.platform)}"></i>
           </div>
           <div class="session-info" style="flex:1;min-width:0">
-            <div style="font-size:14px;font-weight:600;color:var(--text-primary,#fff);
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary);
                         white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
               ${_esc(d.deviceName || 'Unknown Device')}
             </div>
@@ -115,7 +115,7 @@
           </div>
           <button onclick="window.__kynRenameDevice('${d.deviceId}', '${_esc(d.deviceName || '').replace(/'/g, "\\'")}')" style="
             background:none; border:1px solid var(--border-color,rgba(255,255,255,0.15));
-            border-radius:8px; color:var(--text-secondary,#aaa);
+            border-radius:8px; color:var(--text-secondary);
             font-size:11px; padding:5px 10px; cursor:pointer;
             flex-shrink:0; margin-right:6px; transition:background 0.15s;
           " onmouseover="this.style.background='rgba(255,255,255,0.06)'"
@@ -209,7 +209,7 @@
     div.id = '__kynDevices';
     div.style.cssText = 'margin:16px 0;padding:16px;background:var(--bg-secondary,#1e1e2e);border-radius:14px;border:1px solid var(--border-color,rgba(255,255,255,0.06))';
     div.innerHTML = `
-      <div style="font-weight:600;font-size:15px;color:var(--text-primary,#fff);margin-bottom:4px">
+      <div style="font-weight:600;font-size:15px;color:var(--text-primary);margin-bottom:4px">
         <i class="fas fa-mobile-alt" style="color:var(--accent,#4F46E5);margin-right:8px"></i>
         Linked Devices
       </div>
@@ -257,7 +257,7 @@
     div.id = '__kynTwoStepPin';
     div.style.cssText = 'margin:16px 0;padding:16px;background:var(--bg-secondary,#1e1e2e);border-radius:14px;border:1px solid var(--border-color,rgba(255,255,255,0.06))';
     div.innerHTML = `
-      <div style="font-weight:600;font-size:15px;color:var(--text-primary,#fff);margin-bottom:4px">
+      <div style="font-weight:600;font-size:15px;color:var(--text-primary);margin-bottom:4px">
         <i class="fas fa-lock" style="color:var(--accent,#4F46E5);margin-right:8px"></i>
         Two-Step Verification
       </div>
@@ -321,7 +321,7 @@
     overlay.innerHTML = `
       <div style="background:var(--bg-primary,#141420);border-radius:20px 20px 0 0;
                   width:100%;max-width:480px;padding:24px 20px 36px">
-        <h3 style="font-size:16px;font-weight:700;color:var(--text-primary,#fff);text-align:center;margin:0 0 20px">
+        <h3 style="font-size:16px;font-weight:700;color:var(--text-primary);text-align:center;margin:0 0 20px">
           Two-Step Verification PIN
         </h3>
 
@@ -334,7 +334,7 @@
                style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;
                       background:var(--bg-secondary,#1e1e2e);
                       border:1px solid var(--border-color,rgba(255,255,255,0.1));
-                      color:var(--text-primary,#fff);font-size:20px;
+                      color:var(--text-primary);font-size:20px;
                       letter-spacing:8px;text-align:center;outline:none;margin-bottom:12px" />
 
         <label style="font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;
@@ -346,7 +346,7 @@
                style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;
                       background:var(--bg-secondary,#1e1e2e);
                       border:1px solid var(--border-color,rgba(255,255,255,0.1));
-                      color:var(--text-primary,#fff);font-size:20px;
+                      color:var(--text-primary);font-size:20px;
                       letter-spacing:8px;text-align:center;outline:none;margin-bottom:6px" />
 
         <div id="__kynPinErr" style="font-size:12px;color:#ef4444;min-height:16px;margin-bottom:14px"></div>

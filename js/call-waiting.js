@@ -124,7 +124,7 @@
         color: var(--text-muted, #888); font-weight: 700;
       }
       #kynWaitingBanner .wb-name {
-        font-size: 15px; font-weight: 700; color: var(--text-primary, #fff);
+        font-size: 15px; font-weight: 700; color: var(--text-primary);
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       }
       #kynWaitingBanner .wb-actions { display: flex; gap: 8px; }

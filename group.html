@@ -473,7 +473,7 @@
             width: 50px;
             height: 50px;
             border: 4px solid #f3f3f3;
-            border-top: 4px solid var(--primary-color, #667eea);
+            border-top: 4px solid var(--primary-color);
             border-radius: 50%;
             animation: spin 1s linear infinite;
             margin-bottom: 20px;
@@ -495,7 +495,7 @@
         
         .loading-progress-bar {
             height: 100%;
-            background: linear-gradient(90deg, var(--primary-color, #667eea), #764ba2);
+            background: linear-gradient(90deg, var(--primary-color), #764ba2);
             width: 0%;
             transition: width 0.3s;
         }
@@ -676,7 +676,7 @@
         }
         
         .error-retry-btn:hover {
-            background: var(--primary-dark, #5a67d8) !important;
+            background: var(--primary-dark) !important;
         }
         
         /* ========== MODIFIED: Skeleton Loading Enhancements ========== */
@@ -2123,7 +2123,7 @@
             <div style="padding:14px 20px;flex-shrink:0;">
                 <input type="text" id="discoverSearchInput" placeholder="Search public groups..." style="width:100%;padding:10px 14px;border-radius:8px;background:var(--bg-tertiary,#252537);border:1px solid var(--border-color);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;">
                 <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;" id="discoverFilterBtns">
-                    <button class="discover-filter active" data-purpose="all" style="padding:5px 12px;border-radius:20px;border:none;cursor:pointer;font-size:12px;font-weight:600;background:var(--primary-color,#6c63ff);color:#fff;">All</button>
+                    <button class="discover-filter active" data-purpose="all" style="padding:5px 12px;border-radius:20px;border:none;cursor:pointer;font-size:12px;font-weight:600;background:var(--primary-color);color:#fff;">All</button>
                     <button class="discover-filter" data-purpose="study" style="padding:5px 12px;border-radius:20px;border:1px solid var(--border-color);cursor:pointer;font-size:12px;background:none;color:var(--text-primary);">📚 Study</button>
                     <button class="discover-filter" data-purpose="work" style="padding:5px 12px;border-radius:20px;border:1px solid var(--border-color);cursor:pointer;font-size:12px;background:none;color:var(--text-primary);">💼 Work</button>
                     <button class="discover-filter" data-purpose="hobby" style="padding:5px 12px;border-radius:20px;border:1px solid var(--border-color);cursor:pointer;font-size:12px;background:none;color:var(--text-primary);">🎨 Hobby</button>
@@ -2131,7 +2131,7 @@
                     <button class="discover-filter" data-purpose="family" style="padding:5px 12px;border-radius:20px;border:1px solid var(--border-color);cursor:pointer;font-size:12px;background:none;color:var(--text-primary);">👨‍👩‍👧 Family</button>
                 </div>
                 <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;" id="discoverScopeBtns">
-                    <button class="discover-scope active" data-scope="world" style="padding:5px 12px;border-radius:20px;border:none;cursor:pointer;font-size:12px;font-weight:600;background:var(--primary-color,#6c63ff);color:#fff;">🌍 World</button>
+                    <button class="discover-scope active" data-scope="world" style="padding:5px 12px;border-radius:20px;border:none;cursor:pointer;font-size:12px;font-weight:600;background:var(--primary-color);color:#fff;">🌍 World</button>
                     <button class="discover-scope" data-scope="friends" style="padding:5px 12px;border-radius:20px;border:1px solid var(--border-color);cursor:pointer;font-size:12px;background:none;color:var(--text-primary);">🤝 Friends</button>
                     <button class="discover-scope" data-scope="community" style="padding:5px 12px;border-radius:20px;border:1px solid var(--border-color);cursor:pointer;font-size:12px;background:none;color:var(--text-primary);">🏘️ Community</button>
                     <button class="discover-scope" data-scope="region" style="padding:5px 12px;border-radius:20px;border:1px solid var(--border-color);cursor:pointer;font-size:12px;background:none;color:var(--text-primary);">📍 Region</button>
@@ -2150,7 +2150,7 @@
                 <button onclick="document.getElementById('eventsPanel').style.display='none'" style="background:none;border:none;cursor:pointer;font-size:20px;color:var(--text-secondary)">✕</button>
             </div>
             <div style="padding:12px 20px;flex-shrink:0;display:flex;gap:6px;">
-                <button class="evt-tab active" data-etab="upcoming" style="flex:1;padding:8px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:13px;background:var(--primary-color,#6c63ff);color:#fff;">Upcoming</button>
+                <button class="evt-tab active" data-etab="upcoming" style="flex:1;padding:8px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:13px;background:var(--primary-color);color:#fff;">Upcoming</button>
                 <button class="evt-tab" data-etab="past" style="flex:1;padding:8px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:13px;background:var(--bg-tertiary,#252537);color:var(--text-secondary);">Past</button>
                 <button class="evt-tab" data-etab="create" style="flex:1;padding:8px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:13px;background:var(--bg-tertiary,#252537);color:var(--text-secondary);">+ Create</button>
             </div>
@@ -2166,7 +2166,7 @@
                 <button onclick="document.getElementById('invitePanel').style.display='none'" style="background:none;border:none;cursor:pointer;font-size:20px;color:var(--text-secondary)">✕</button>
             </div>
             <div style="padding:12px 20px;flex-shrink:0;display:flex;gap:6px;">
-                <button class="inv-tab active" data-invtab="received" style="flex:1;padding:8px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:13px;background:var(--primary-color,#6c63ff);color:#fff;">Received</button>
+                <button class="inv-tab active" data-invtab="received" style="flex:1;padding:8px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:13px;background:var(--primary-color);color:#fff;">Received</button>
                 <button class="inv-tab" data-invtab="invite" style="flex:1;padding:8px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:13px;background:var(--bg-tertiary,#252537);color:var(--text-secondary);">Invite Friends</button>
                 <button class="inv-tab" data-invtab="sent" style="flex:1;padding:8px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:13px;background:var(--bg-tertiary,#252537);color:var(--text-secondary);">Sent</button>
             </div>
@@ -2428,16 +2428,16 @@ function injectCSS(){
     '#gcComposerPill .chat-input-btn{width:34px;height:34px;font-size:18px;flex-shrink:0;}',
     '#gcComposerPill .chat-input{flex:1;border:none;background:transparent;padding:9px 4px;max-height:140px;min-height:34px;border-radius:0;}',
     '#gcComposerPill .chat-input:focus{border:none;background:transparent;}',
-    '#chatMessagesContainer{flex:1;overflow-y:auto;min-height:0;background:var(--secondary-color,#e5ddd5);padding:12px 14px 6px;}',
+    '#chatMessagesContainer{flex:1;overflow-y:auto;min-height:0;background:var(--secondary-color);padding:12px 14px 6px;}',
     '#chatMessages{display:flex;flex-direction:column;gap:4px;}',
     /* Bubbles */
     '.message{display:flex;flex-direction:column;max-width:75%;margin-bottom:2px;}',
     '.message.sent{align-self:flex-end;align-items:flex-end;}',
     '.message.received{align-self:flex-start;align-items:flex-start;}',
     '.message.system{align-self:center;max-width:85%;text-align:center;}',
-    '.message-sender{font-size:11.5px;font-weight:600;color:var(--primary-color,#0084ff);margin-bottom:2px;padding:0 3px;}',
+    '.message-sender{font-size:11.5px;font-weight:600;color:var(--primary-color);margin-bottom:2px;padding:0 3px;}',
     '.message-bubble{padding:8px 12px;border-radius:8px;font-size:14px;line-height:1.45;overflow-wrap:break-word;word-break:normal;min-width:44px;white-space:normal;writing-mode:horizontal-tb;}',
-    '.message.sent .message-bubble{background:var(--primary-color,#0084ff);color:#fff;border-radius:18px 18px 4px 18px;}',
+    '.message.sent .message-bubble{background:var(--primary-color);color:#fff;border-radius:18px 18px 4px 18px;}',
     '.message.received .message-bubble{background:var(--bg-color);color:var(--text-primary);border-radius:18px 18px 18px 4px;box-shadow:0 1px 2px rgba(0,0,0,.12);}',
     '.message.system .message-bubble{background:rgba(0,0,0,.07);color:var(--text-secondary);font-size:12px;border-radius:10px;}',
     '.message-time{font-size:10px;opacity:.6;margin-top:2px;padding:0 3px;}',
@@ -2448,7 +2448,7 @@ function injectCSS(){
     '.chat-input-btn{background:none;border:none;color:var(--text-secondary);cursor:pointer;padding:8px;border-radius:50%;font-size:18px;display:flex;align-items:center;justify-content:center;transition:background .15s;flex-shrink:0;}',
     '.chat-input-btn:hover{background:var(--secondary-color);color:var(--text-primary);}',
     '#chatInput{flex:1;border:none;border-radius:22px;padding:10px 14px;font-size:14px;background:var(--secondary-color);color:var(--text-primary);resize:none;line-height:1.4;max-height:120px;overflow-y:auto;outline:none;font-family:inherit;}',
-    '#chatSendBtn{background:var(--primary-color,#0084ff);color:#fff;width:40px;height:40px;border-radius:50%;flex-shrink:0;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;}',
+    '#chatSendBtn{background:var(--primary-color);color:#fff;width:40px;height:40px;border-radius:50%;flex-shrink:0;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;}',
     '#chatSendBtn:hover{opacity:.88;}',
     /* Emoji picker */
     '#gcp-emoji{position:absolute;bottom:62px;left:6px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.3);padding:10px;z-index:9000;width:288px;display:none;}',
@@ -2759,7 +2759,7 @@ function _showRecBar(){
         bar=document.createElement('div');bar.id='gcRecBar';
         bar.innerHTML='<div class="gcr-dot"></div><span id="gcRecTimer">0:00</span>'+
             '<button class="gcr-btn" id="gcRecCancel" style="background:rgba(128,128,128,.15);color:var(--text-secondary)"><i class="fas fa-times"></i> Cancel</button>'+
-            '<button class="gcr-btn" id="gcRecSend" style="background:var(--primary-color,#0084ff);color:#fff"><i class="fas fa-paper-plane"></i> Send</button>';
+            '<button class="gcr-btn" id="gcRecSend" style="background:var(--primary-color);color:#fff"><i class="fas fa-paper-plane"></i> Send</button>';
         var panel=document.getElementById('groupChatPanel'),inputRow=panel&&panel.querySelector('.chat-input-container');
         if(inputRow)panel.insertBefore(bar,inputRow);else if(panel)panel.appendChild(bar);
         document.getElementById('gcRecCancel').addEventListener('click',cancelRec);
@@ -3057,7 +3057,7 @@ function buildSub(type,g,el){
             var canManage=mine&&['owner','admin'].includes(mine.role);
             var existingIds=list.map(function(m){var u=m.user||m;return String(u.id||m.userId);});
             el.innerHTML='<div style="padding:0 4px 12px">'+
-                '<button id="gcAddMembersBtn" style="width:100%;padding:10px;background:var(--primary-color,#0084ff);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;display:flex;align-items:center;justify-content:center;gap:6px"><i class="fas fa-user-plus"></i> Add Members</button>'+
+                '<button id="gcAddMembersBtn" style="width:100%;padding:10px;background:var(--primary-color);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;display:flex;align-items:center;justify-content:center;gap:6px"><i class="fas fa-user-plus"></i> Add Members</button>'+
                 '<div id="gcAddMembersPicker" style="display:none;margin-top:10px"></div>'+
                 '</div>'+
                 '<p style="font-size:13px;color:var(--text-secondary);padding:0 4px;margin:0 0 10px">'+list.length+' member'+(list.length===1?'':'s')+'</p><div style="padding:0 4px">'+list.map(function(m){var u=m.user||m,uid=u.id||m.userId,n=u.displayName||u.firstName||u.username||'Member',rl=m.role||'member',rc=colors[rl]||'#6b7280';
@@ -3092,7 +3092,7 @@ function buildSub(type,g,el){
                     picker.innerHTML='<div style="max-height:240px;overflow-y:auto;border:1px solid var(--border-color);border-radius:8px;padding:6px">'+candidates.map(function(f){
                         var u=f.user||f,fid=u.id||f.friendId,fn=u.displayName||u.firstName||u.username||'User';
                         return '<label style="display:flex;align-items:center;gap:10px;padding:8px 6px;cursor:pointer;border-bottom:1px solid var(--border-color)"><input type="checkbox" data-invite-uid="'+fid+'" style="width:16px;height:16px"><div style="width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#0084ff,#0055cc);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:11px;flex-shrink:0;">'+esc(fn.slice(0,2).toUpperCase())+'</div><span style="font-size:14px">'+esc(fn)+'</span></label>';
-                    }).join('')+'</div><button id="gcSendInvitesBtn" style="width:100%;margin-top:10px;padding:9px;background:var(--primary-color,#0084ff);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:500">Send Invite</button>';
+                    }).join('')+'</div><button id="gcSendInvitesBtn" style="width:100%;margin-top:10px;padding:9px;background:var(--primary-color);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:500">Send Invite</button>';
                     document.getElementById('gcSendInvitesBtn').addEventListener('click',function(){
                         var checked=Array.prototype.slice.call(picker.querySelectorAll('[data-invite-uid]:checked'));
                         if(!checked.length){ntf('Select at least one friend','error');return;}
@@ -3112,24 +3112,24 @@ function buildSub(type,g,el){
     }
     if(type==='settings'){
         var s=g.settings||{};
-        el.innerHTML='<div style="display:flex;flex-direction:column;gap:16px;padding:4px"><label style="display:flex;justify-content:space-between;align-items:center;font-size:14px">Allow media <input type="checkbox" id="gs_m" '+(s.allowMedia!==false?'checked':'')+'></label><label style="display:flex;justify-content:space-between;align-items:center;font-size:14px">Allow reactions <input type="checkbox" id="gs_r" '+(s.allowReactions!==false?'checked':'')+'></label><label style="display:flex;justify-content:space-between;align-items:center;font-size:14px">Allow calls <input type="checkbox" id="gs_c" '+(s.allowCalls!==false?'checked':'')+'></label><label style="display:flex;justify-content:space-between;align-items:center;font-size:14px">Admins only post <input type="checkbox" id="gs_a" '+(s.onlyAdminsCanPost?'checked':'')+'></label><button id="gcSvSet" style="padding:10px;background:var(--primary-color,#0084ff);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500">Save Settings</button></div>';
+        el.innerHTML='<div style="display:flex;flex-direction:column;gap:16px;padding:4px"><label style="display:flex;justify-content:space-between;align-items:center;font-size:14px">Allow media <input type="checkbox" id="gs_m" '+(s.allowMedia!==false?'checked':'')+'></label><label style="display:flex;justify-content:space-between;align-items:center;font-size:14px">Allow reactions <input type="checkbox" id="gs_r" '+(s.allowReactions!==false?'checked':'')+'></label><label style="display:flex;justify-content:space-between;align-items:center;font-size:14px">Allow calls <input type="checkbox" id="gs_c" '+(s.allowCalls!==false?'checked':'')+'></label><label style="display:flex;justify-content:space-between;align-items:center;font-size:14px">Admins only post <input type="checkbox" id="gs_a" '+(s.onlyAdminsCanPost?'checked':'')+'></label><button id="gcSvSet" style="padding:10px;background:var(--primary-color);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500">Save Settings</button></div>';
         document.getElementById('gcSvSet').addEventListener('click',function(){api('/groups/'+g.id+'/settings',{method:'PUT',body:{settings:{allowMedia:document.getElementById('gs_m').checked,allowReactions:document.getElementById('gs_r').checked,allowCalls:document.getElementById('gs_c').checked,onlyAdminsCanPost:document.getElementById('gs_a').checked}}}).then(function(){ntf('Settings saved!');}).catch(function(){ntf('Failed','error');});});return;
     }
     if(type==='theme'){
         var themes=[{id:'blue',name:'Ocean Blue',bg:'linear-gradient(135deg,#0084ff,#0055cc)'},{id:'green',name:'Forest',bg:'linear-gradient(135deg,#22c55e,#16a34a)'},{id:'purple',name:'Violet',bg:'linear-gradient(135deg,#a855f7,#7c3aed)'},{id:'red',name:'Crimson',bg:'linear-gradient(135deg,#ef4444,#b91c1c)'},{id:'orange',name:'Sunset',bg:'linear-gradient(135deg,#f97316,#c2410c)'},{id:'teal',name:'Teal',bg:'linear-gradient(135deg,#14b8a6,#0f766e)'},{id:'dark',name:'Dark',bg:'linear-gradient(135deg,#374151,#111827)'}];
-        el.innerHTML='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:4px">'+themes.map(function(th){return'<button data-tid="'+esc(th.id)+'" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 8px;border:'+(g.theme===th.id?'2px solid var(--primary-color,#0084ff)':'2px solid var(--border-color,#ddd)')+';border-radius:10px;cursor:pointer;background:var(--bg-color)"><div style="width:40px;height:40px;border-radius:50%;background:'+th.bg+'"></div><span style="font-size:12px;font-weight:500">'+esc(th.name)+'</span></button>';}).join('')+'</div>';
+        el.innerHTML='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:4px">'+themes.map(function(th){return'<button data-tid="'+esc(th.id)+'" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 8px;border:'+(g.theme===th.id?'2px solid var(--primary-color)':'2px solid var(--border-color)')+';border-radius:10px;cursor:pointer;background:var(--bg-color)"><div style="width:40px;height:40px;border-radius:50%;background:'+th.bg+'"></div><span style="font-size:12px;font-weight:500">'+esc(th.name)+'</span></button>';}).join('')+'</div>';
         el.querySelectorAll('[data-tid]').forEach(function(b){b.addEventListener('click',function(){api('/groups/'+g.id+'/settings',{method:'PUT',body:{settings:{theme:b.getAttribute('data-tid')}}}).then(function(){g.theme=b.getAttribute('data-tid');buildSub('theme',g,el);ntf('Theme updated!');}).catch(function(){ntf('Failed','error');});});});return;
     }
     if(type==='purpose'){
         var pp=[{id:'social',icon:'\ud83d\udc65'},{id:'work',icon:'\ud83d\udcbc'},{id:'education',icon:'\ud83c\udf93'},{id:'gaming',icon:'\ud83c\udfae'},{id:'health',icon:'\ud83c\udfe5'},{id:'hobby',icon:'\ud83c\udfa8'},{id:'tech',icon:'\ud83d\udcbb'},{id:'music',icon:'\ud83c\udfb5'},{id:'sports',icon:'\u26bd'},{id:'travel',icon:'\u2708\ufe0f'},{id:'support',icon:'\ud83e\udd1d'},{id:'general',icon:'\ud83d\udcac'}];
-        el.innerHTML='<p style="font-size:13px;color:var(--text-secondary);margin:0 0 12px;padding:0 4px">Current: <b>'+esc(g.purpose||'general')+'</b></p><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 4px">'+pp.map(function(p){return'<button data-pid="'+esc(p.id)+'" style="display:flex;align-items:center;gap:8px;padding:10px;border:'+(g.purpose===p.id?'2px solid var(--primary-color,#0084ff)':'2px solid var(--border-color,#ddd)')+';border-radius:8px;cursor:pointer;background:var(--bg-color);font-size:13px"><span>'+p.icon+'</span><span>'+esc(p.id)+'</span></button>';}).join('')+'</div>';
+        el.innerHTML='<p style="font-size:13px;color:var(--text-secondary);margin:0 0 12px;padding:0 4px">Current: <b>'+esc(g.purpose||'general')+'</b></p><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 4px">'+pp.map(function(p){return'<button data-pid="'+esc(p.id)+'" style="display:flex;align-items:center;gap:8px;padding:10px;border:'+(g.purpose===p.id?'2px solid var(--primary-color)':'2px solid var(--border-color)')+';border-radius:8px;cursor:pointer;background:var(--bg-color);font-size:13px"><span>'+p.icon+'</span><span>'+esc(p.id)+'</span></button>';}).join('')+'</div>';
         el.querySelectorAll('[data-pid]').forEach(function(b){b.addEventListener('click',function(){api('/groups/'+g.id,{method:'PUT',body:{purpose:b.getAttribute('data-pid')}}).then(function(){g.purpose=b.getAttribute('data-pid');buildSub('purpose',g,el);ntf('Purpose updated!');}).catch(function(){ntf('Failed','error');});});});return;
     }
     if(type==='disappearing'){
         var curOn=!!(g.settings&&g.settings.disappearingMessages);
         var curSecs=(g.settings&&g.settings.disappearingTimer)||0;
         var opts=[{v:0,l:'Off'},{v:86400,l:'24 hours'},{v:604800,l:'7 days'},{v:7776000,l:'90 days'}];
-        el.innerHTML='<p style="font-size:13px;color:var(--text-secondary);margin:0 0 12px;padding:0 4px">Messages will disappear after the selected time for everyone in this chat.</p><div style="display:flex;flex-direction:column;gap:8px;padding:0 4px">'+opts.map(function(o){var active=(curOn&&curSecs===o.v)||(!curOn&&o.v===0);return'<button data-dsec="'+o.v+'" style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border:'+(active?'2px solid var(--primary-color,#0084ff)':'2px solid var(--border-color,#ddd)')+';border-radius:8px;cursor:pointer;background:var(--bg-color);font-size:14px"><span>'+o.l+'</span>'+(active?'<i class="fas fa-check" style="color:var(--primary-color,#0084ff)"></i>':'')+'</button>';}).join('')+'</div>';
+        el.innerHTML='<p style="font-size:13px;color:var(--text-secondary);margin:0 0 12px;padding:0 4px">Messages will disappear after the selected time for everyone in this chat.</p><div style="display:flex;flex-direction:column;gap:8px;padding:0 4px">'+opts.map(function(o){var active=(curOn&&curSecs===o.v)||(!curOn&&o.v===0);return'<button data-dsec="'+o.v+'" style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border:'+(active?'2px solid var(--primary-color)':'2px solid var(--border-color)')+';border-radius:8px;cursor:pointer;background:var(--bg-color);font-size:14px"><span>'+o.l+'</span>'+(active?'<i class="fas fa-check" style="color:var(--primary-color)"></i>':'')+'</button>';}).join('')+'</div>';
         el.querySelectorAll('[data-dsec]').forEach(function(b){b.addEventListener('click',function(){
             var secs=parseInt(b.getAttribute('data-dsec'),10);
             api('/groups/'+g.id+'/settings',{method:'PUT',body:{disappearingMessages:secs>0,disappearingTimer:secs}}).then(function(){

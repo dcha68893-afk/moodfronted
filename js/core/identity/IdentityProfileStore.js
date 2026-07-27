@@ -150,7 +150,7 @@
     if (url) {
       return `<div class="${cls}"${uidAttr} style="width:${size}px;height:${size}px;border-radius:50%;background-image:url('${esc(url)}');background-size:cover;background-position:center;"></div>`;
     }
-    return `<div class="${cls}"${uidAttr} style="width:${size}px;height:${size}px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--primary-color,#00a884);color:#fff;font-weight:600;">${esc(initials(name))}</div>`;
+    return `<div class="${cls}"${uidAttr} style="width:${size}px;height:${size}px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--primary-color);color:#fff;font-weight:600;">${esc(initials(name))}</div>`;
   }
 
   function get(userId) {

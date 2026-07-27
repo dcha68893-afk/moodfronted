@@ -52,7 +52,7 @@
         background: var(--bg-tertiary, #2a2a3e);
         border: 1px solid var(--border-color, rgba(255,255,255,0.1));
         border-radius: 20px;
-        color: var(--text-primary, #fff);
+        color: var(--text-primary);
         font-size: 13px;
         padding: 7px 14px;
         outline: none;
@@ -85,7 +85,7 @@
         color: var(--text-muted, #888);
         cursor: pointer; font-size: 16px; padding: 4px;
       }
-      #kynSearchClose:hover { color: var(--text-primary, #fff); }
+      #kynSearchClose:hover { color: var(--text-primary); }
 
       /* Search results dropdown (global search) */
       #kynSearchDropdown {
@@ -124,7 +124,7 @@
       }
       .kyn-search-result .sr-content {
         font-size: 13px;
-        color: var(--text-primary, #fff);
+        color: var(--text-primary);
         line-height: 1.4;
         overflow: hidden;
         display: -webkit-box;

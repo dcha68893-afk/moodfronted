@@ -1069,7 +1069,7 @@
        ═══════════════════════════════════════════════════════════ */
     :root {
         --background-color: var(--bg-color);
-        --surface-color: var(--card-bg, #ffffff);
+        --surface-color: var(--card-bg);
     }
 
     /* Full app background now follows the live theme */
@@ -1084,21 +1084,21 @@
        live --card-bg/--text-primary/--border-color variables AppSettings.js
        writes on every theme change (see applyToDOM in js/AppSettings.js). */
     .jm-header {
-        background: var(--card-bg, #ffffff) !important;
-        border-bottom: 1px solid var(--border-color, #e5e7eb) !important;
+        background: var(--card-bg) !important;
+        border-bottom: 1px solid var(--border-color) !important;
     }
 
     /* Search bar */
     .jm-search-wrap {
         background: var(--input-bg, #f3f4f6) !important;
-        border: 1px solid var(--border-color, #e5e7eb) !important;
+        border: 1px solid var(--border-color) !important;
     }
     .jm-search-input {
         background: transparent !important;
         color: var(--text-primary) !important;
     }
-    .jm-search-input::placeholder { color: var(--text-secondary, #9ca3af) !important; }
-    .jm-search-icon, .jm-icon-btn i { color: var(--text-secondary, #667781) !important; }
+    .jm-search-input::placeholder { color: var(--text-secondary) !important; }
+    .jm-search-icon, .jm-icon-btn i { color: var(--text-secondary) !important; }
 
     /* Page title bars */
     .jm-page-title {
@@ -1109,8 +1109,8 @@
         display: flex !important;
         align-items: center !important;
         gap: 8px !important;
-        border-bottom: 1px solid var(--border-color, #e5e7eb) !important;
-        background: var(--card-bg, #ffffff) !important;
+        border-bottom: 1px solid var(--border-color) !important;
+        background: var(--card-bg) !important;
         cursor: pointer;
     }
 
@@ -1343,8 +1343,8 @@
     }
 
     /* Detail panel — same header-hardcoding bug as .jm-header above */
-    .marketplace-detail-panel { background: var(--card-bg, #ffffff) !important; color: var(--text-primary) !important; }
-    .marketplace-detail-header { background: var(--card-bg, #ffffff) !important; border-bottom: 1px solid var(--border-color, #e5e7eb) !important; }
+    .marketplace-detail-panel { background: var(--card-bg) !important; color: var(--text-primary) !important; }
+    .marketplace-detail-header { background: var(--card-bg) !important; border-bottom: 1px solid var(--border-color) !important; }
     .marketplace-detail-name, .marketplace-detail-time { color: var(--text-primary) !important; }
     .listing-price { color: #f57224 !important; }
 

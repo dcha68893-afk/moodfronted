@@ -3877,11 +3877,11 @@ function _loadViewersForOwner(status) {
             const reaction = v.reaction ? ' · ' + v.reaction : '';
             const replies = v.replyCount ? ' · ' + v.replyCount + ' repl' + (v.replyCount === 1 ? 'y' : 'ies') : '';
             const avatarUrl = (window.Identity && window.Identity.resolveAvatar(v.viewer)) || v.viewer?.avatar || v.viewer?.photoURL || ''; // IDENTITY-CENTRALIZATION
-            return '<div class="viewer-list-item" style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border-color,#2a3942);">' +
-                '<div style="width:32px;height:32px;border-radius:50%;background:var(--primary-color,#00a884);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;flex-shrink:0;' + (avatarUrl ? 'background-image:url(' + avatarUrl + ');background-size:cover;background-position:center;' : '') + '">' +
+            return '<div class="viewer-list-item" style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border-color);">' +
+                '<div style="width:32px;height:32px;border-radius:50%;background:var(--primary-color);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;flex-shrink:0;' + (avatarUrl ? 'background-image:url(' + avatarUrl + ');background-size:cover;background-position:center;' : '') + '">' +
                 (avatarUrl ? '' : initial) + '</div>' +
-                '<div style="flex:1;min-width:0;"><div style="font-size:13px;font-weight:500;color:var(--text-primary,#e9edef);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + name + '</div>' +
-                '<div style="font-size:11px;color:var(--text-secondary,#8696a0);">' + time + reaction + replies + '</div></div></div>';
+                '<div style="flex:1;min-width:0;"><div style="font-size:13px;font-weight:500;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + name + '</div>' +
+                '<div style="font-size:11px;color:var(--text-secondary);">' + time + reaction + replies + '</div></div></div>';
         }).join('');
     }).catch(() => { viewersList.innerHTML = ''; });
 }
@@ -8019,7 +8019,7 @@ function renderStatusListInstantlyUI() {
     if (!recentGroups.length && !viewedGroups.length) {
         if (recentLabel) recentLabel.style.display = 'none';
         recentContainer.innerHTML = `
-            <div class="empty-state" style="padding:24px 16px;text-align:center;color:var(--text-secondary,#8696a0);">
+            <div class="empty-state" style="padding:24px 16px;text-align:center;color:var(--text-secondary);">
                 <i class="fas fa-comment-dots" style="font-size:32px;margin-bottom:10px;opacity:0.4;display:block;"></i>
                 <p style="margin:0 0 4px;font-size:14px;">No recent updates</p>
                 <p style="margin:0;font-size:12px;opacity:0.7;">Status updates from your contacts appear here</p>

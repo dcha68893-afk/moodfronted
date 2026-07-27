@@ -3518,7 +3518,7 @@ function renderMyNotes() {
         const realIdx = privateNotes.length - 1 - idx;
         const noteEl = document.createElement('div');
         noteEl.className = 'note-item';
-        noteEl.style.cssText = 'border:1px solid var(--border-color,#e0e0e0);border-radius:10px;padding:14px;margin-bottom:10px;';
+        noteEl.style.cssText = 'border:1px solid var(--border-color);border-radius:10px;padding:14px;margin-bottom:10px;';
         noteEl.innerHTML = `
             <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
                 <div style="font-weight:600;font-size:14px;">${escapeHtml(note.title || 'Note')}</div>
@@ -3601,21 +3601,21 @@ function renderTrustStats() {
                 </div>
             </div>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                <div style="padding: 16px; background: var(--secondary-color, #f5f5f5); border-radius: 10px; text-align: center;">
-                    <div style="font-size: 28px; font-weight: 700; color: var(--primary-color, #0084ff);">${listingCreated}</div>
-                    <div style="font-size: 12px; color: var(--text-secondary, #888); margin-top: 4px;"><i class="fas fa-list"></i> Listings Created</div>
+                <div style="padding: 16px; background: var(--secondary-color); border-radius: 10px; text-align: center;">
+                    <div style="font-size: 28px; font-weight: 700; color: var(--primary-color);">${listingCreated}</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;"><i class="fas fa-list"></i> Listings Created</div>
                 </div>
-                <div style="padding: 16px; background: var(--secondary-color, #f5f5f5); border-radius: 10px; text-align: center;">
+                <div style="padding: 16px; background: var(--secondary-color); border-radius: 10px; text-align: center;">
                     <div style="font-size: 28px; font-weight: 700; color: #4caf50;">${totalSaved}</div>
-                    <div style="font-size: 12px; color: var(--text-secondary, #888); margin-top: 4px;"><i class="fas fa-bookmark"></i> Items Saved</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;"><i class="fas fa-bookmark"></i> Items Saved</div>
                 </div>
-                <div style="padding: 16px; background: var(--secondary-color, #f5f5f5); border-radius: 10px; text-align: center;">
+                <div style="padding: 16px; background: var(--secondary-color); border-radius: 10px; text-align: center;">
                     <div style="font-size: 28px; font-weight: 700; color: #ff9800;">${fileDownloaded}</div>
-                    <div style="font-size: 12px; color: var(--text-secondary, #888); margin-top: 4px;"><i class="fas fa-download"></i> Downloads</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;"><i class="fas fa-download"></i> Downloads</div>
                 </div>
-                <div style="padding: 16px; background: var(--secondary-color, #f5f5f5); border-radius: 10px; text-align: center;">
+                <div style="padding: 16px; background: var(--secondary-color); border-radius: 10px; text-align: center;">
                     <div style="font-size: 28px; font-weight: 700; color: #e91e63;">${tipReceived}</div>
-                    <div style="font-size: 12px; color: var(--text-secondary, #888); margin-top: 4px;"><i class="fas fa-gift"></i> Tips Received</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;"><i class="fas fa-gift"></i> Tips Received</div>
                 </div>
             </div>
             <div style="margin-top: 16px; padding: 12px; background: rgba(76,175,80,0.1); border-radius: 8px; border: 1px solid rgba(76,175,80,0.3);">
@@ -4689,14 +4689,14 @@ window.addEventListener('tools:active', function() {
 .mp-sheet{background:var(--bg-primary,#fff);width:100%;max-width:640px;margin:0 auto;border-radius:20px 20px 0 0;max-height:90vh;overflow-y:auto;padding:20px;box-sizing:border-box;}
 .mp-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
 .mp-hdr h3{margin:0;font-size:18px;font-weight:700;}
-.mp-x{background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-secondary,#888);line-height:1;}
+.mp-x{background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-secondary);line-height:1;}
 .mp-btn{display:inline-flex;align-items:center;gap:6px;padding:10px 16px;border-radius:10px;border:none;cursor:pointer;font-size:14px;font-weight:600;transition:.15s;}
 .mp-btn:disabled{opacity:.5;cursor:not-allowed;}
-.mp-primary{background:var(--primary-color,#6C63FF);color:#fff;}
+.mp-primary{background:var(--primary-color);color:#fff;}
 .mp-primary:hover:not(:disabled){opacity:.88;}
 .mp-danger{background:#ef4444;color:#fff;}
-.mp-outline{background:transparent;border:1.5px solid var(--border-color,#e0e0e0);color:var(--text-primary,#222);}
-.mp-card{border:1px solid var(--border-color,#e0e0e0);border-radius:12px;padding:14px;margin-bottom:12px;}
+.mp-outline{background:transparent;border:1.5px solid var(--border-color);color:var(--text-primary);}
+.mp-card{border:1px solid var(--border-color);border-radius:12px;padding:14px;margin-bottom:12px;}
 .mp-badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;text-transform:uppercase;}
 .mp-badge.pending{background:#fef9c3;color:#854d0e;}
 .mp-badge.paid{background:#dcfce7;color:#166534;}
@@ -4708,26 +4708,26 @@ window.addEventListener('tools:active', function() {
 .mp-stars-input span{font-size:30px;cursor:pointer;color:#d1d5db;transition:.1s;}
 .mp-stars-input span.on{color:#f59e0b;}
 .mp-field{margin-bottom:14px;}
-.mp-field label{display:block;font-size:13px;font-weight:600;margin-bottom:5px;color:var(--text-secondary,#666);}
-.mp-field input,.mp-field textarea,.mp-field select{width:100%;padding:10px 12px;border:1.5px solid var(--border-color,#e0e0e0);border-radius:10px;font-size:14px;background:var(--bg-primary,#fff);color:var(--text-primary,#222);box-sizing:border-box;}
+.mp-field label{display:block;font-size:13px;font-weight:600;margin-bottom:5px;color:var(--text-secondary);}
+.mp-field input,.mp-field textarea,.mp-field select{width:100%;padding:10px 12px;border:1.5px solid var(--border-color);border-radius:10px;font-size:14px;background:var(--bg-primary,#fff);color:var(--text-primary);box-sizing:border-box;}
 .mp-field textarea{resize:vertical;min-height:72px;}
-.mp-tabs{display:flex;border-bottom:2px solid var(--border-color,#e0e0e0);margin-bottom:16px;overflow-x:auto;}
-.mp-tab{padding:9px 14px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;border-bottom:2px solid transparent;margin-bottom:-2px;color:var(--text-secondary,#888);}
-.mp-tab.active{border-bottom-color:var(--primary-color,#6C63FF);color:var(--primary-color,#6C63FF);}
-.mp-spinner{text-align:center;padding:32px;color:var(--text-secondary,#888);}
-.mp-empty{text-align:center;padding:40px 20px;color:var(--text-secondary,#888);}
+.mp-tabs{display:flex;border-bottom:2px solid var(--border-color);margin-bottom:16px;overflow-x:auto;}
+.mp-tab{padding:9px 14px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;border-bottom:2px solid transparent;margin-bottom:-2px;color:var(--text-secondary);}
+.mp-tab.active{border-bottom-color:var(--primary-color);color:var(--primary-color);}
+.mp-spinner{text-align:center;padding:32px;color:var(--text-secondary);}
+.mp-empty{text-align:center;padding:40px 20px;color:var(--text-secondary);}
 .mp-stat-row{display:flex;gap:10px;margin-bottom:16px;}
 .mp-stat{flex:1;background:var(--bg-secondary,#f5f5f5);border-radius:10px;padding:12px;text-align:center;}
 .mp-stat strong{display:block;font-size:22px;font-weight:800;}
-.mp-stat span{font-size:12px;color:var(--text-secondary,#888);}
-.mp-seller-avatar{width:68px;height:68px;border-radius:50%;background:var(--primary-color,#6C63FF);display:flex;align-items:center;justify-content:center;color:#fff;font-size:28px;font-weight:700;margin:0 auto 10px;overflow:hidden;}
+.mp-stat span{font-size:12px;color:var(--text-secondary);}
+.mp-seller-avatar{width:68px;height:68px;border-radius:50%;background:var(--primary-color);display:flex;align-items:center;justify-content:center;color:#fff;font-size:28px;font-weight:700;margin:0 auto 10px;overflow:hidden;}
 .mp-seller-avatar img{width:100%;height:100%;object-fit:cover;}
 .mp-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
-.mp-product-tile{border:1px solid var(--border-color,#e0e0e0);border-radius:10px;overflow:hidden;}
+.mp-product-tile{border:1px solid var(--border-color);border-radius:10px;overflow:hidden;}
 .mp-product-tile-img{width:100%;height:88px;object-fit:cover;background:var(--bg-secondary,#f5f5f5);display:flex;align-items:center;justify-content:center;font-size:26px;}
 .mp-product-tile-body{padding:8px;}
 .mp-product-tile-title{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.mp-product-tile-price{font-size:12px;color:var(--primary-color,#6C63FF);font-weight:700;}
+.mp-product-tile-price{font-size:12px;color:var(--primary-color);font-weight:700;}
 /* ── Responsive overrides ───────────────────────────────────────────────── */
 @media(max-width:480px){
   .mp-sheet{border-radius:16px 16px 0 0;padding:16px 14px;max-height:95vh;}
@@ -4866,10 +4866,10 @@ window.addEventListener('tools:active', function() {
                         <strong style="font-size:15px;">${esc(o.product?.title || 'Product')}</strong>
                         <span class="mp-badge ${o.status}">${o.status}</span>
                     </div>
-                    <div style="font-size:13px;color:var(--text-secondary,#666);">
+                    <div style="font-size:13px;color:var(--text-secondary);">
                         Qty: ${o.quantity} &nbsp;|&nbsp; Total: ${esc(o.currency)} ${Number(o.totalPrice).toLocaleString()}
                     </div>
-                    <div style="font-size:12px;color:var(--text-secondary,#888);margin-top:3px;">Ordered ${fmtDate(o.createdAt)}</div>
+                    <div style="font-size:12px;color:var(--text-secondary);margin-top:3px;">Ordered ${fmtDate(o.createdAt)}</div>
                     ${o.trackingNumber ? `<div style="font-size:12px;margin-top:3px;">Tracking: <strong>${esc(o.trackingNumber)}</strong></div>` : ''}
                     <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
                         ${['pending','paid'].includes(o.status) ? `<button class="mp-btn mp-danger" onclick="cancelOrder('${o.id}')">Cancel</button>` : ''}
@@ -4903,10 +4903,10 @@ window.addEventListener('tools:active', function() {
             <div style="display:flex;gap:12px;align-items:center;margin-bottom:18px;">
                 ${listing.images?.[0]
                     ? `<img src="${esc(listing.images[0])}" style="width:64px;height:64px;border-radius:10px;object-fit:cover;">`
-                    : `<div style="width:64px;height:64px;border-radius:10px;background:var(--primary-color,#6C63FF);display:flex;align-items:center;justify-content:center;font-size:24px;">🛍</div>`}
+                    : `<div style="width:64px;height:64px;border-radius:10px;background:var(--primary-color);display:flex;align-items:center;justify-content:center;font-size:24px;">🛍</div>`}
                 <div>
                     <div style="font-weight:700;font-size:15px;">${esc(listing.title)}</div>
-                    <div style="color:var(--primary-color,#6C63FF);font-weight:600;margin-top:3px;">${cur} ${price.toLocaleString()} per item</div>
+                    <div style="color:var(--primary-color);font-weight:600;margin-top:3px;">${cur} ${price.toLocaleString()} per item</div>
                 </div>
             </div>
             <div class="mp-field"><label>Quantity</label>
@@ -4928,7 +4928,7 @@ window.addEventListener('tools:active', function() {
             </div>
             <div style="background:var(--bg-secondary,#f5f5f5);border-radius:10px;padding:12px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;">
                 <span style="font-weight:600;">Total</span>
-                <span id="mp-total" style="font-weight:800;font-size:16px;color:var(--primary-color,#6C63FF);">${cur} ${price.toLocaleString()}</span>
+                <span id="mp-total" style="font-weight:800;font-size:16px;color:var(--primary-color);">${cur} ${price.toLocaleString()}</span>
             </div>
             <button id="mp-submit-order-btn" class="mp-btn mp-primary" style="width:100%;" onclick="submitOrder('${listing.id}','${cur}',${price})">
                 <i class="fas fa-shopping-cart"></i> Place Order
@@ -4996,10 +4996,10 @@ window.addEventListener('tools:active', function() {
                 body.innerHTML = '<div class="mp-empty"><i class="fas fa-star" style="font-size:32px;margin-bottom:10px;display:block;color:#d1d5db;"></i>No reviews yet</div>';
             } else {
                 body.innerHTML = `
-                    <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border-color,#e0e0e0);">
+                    <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border-color);">
                         <span style="font-size:42px;font-weight:800;line-height:1;">${parseFloat(avgRating).toFixed(1)}</span>
                         <div><div class="mp-stars" style="font-size:20px;">${stars(avgRating)}</div>
-                        <div style="font-size:13px;color:var(--text-secondary,#888);">${total} review${total!==1?'s':''}</div></div>
+                        <div style="font-size:13px;color:var(--text-secondary);">${total} review${total!==1?'s':''}</div></div>
                     </div>
                 ` + reviews.map(r => `
                     <div class="mp-card">
@@ -5007,7 +5007,7 @@ window.addEventListener('tools:active', function() {
                         <div style="display:flex;align-items:center;gap:8px;margin:6px 0;">
                             <strong style="font-size:14px;">${esc(r.reviewer?.displayName || r.reviewer?.username || 'User')}</strong>
                             ${r.isVerifiedPurchase ? '<span class="mp-badge paid" style="font-size:10px;">✓ Verified</span>' : ''}
-                            <span style="font-size:12px;color:var(--text-secondary,#888);margin-left:auto;">${fmtDate(r.createdAt)}</span>
+                            <span style="font-size:12px;color:var(--text-secondary);margin-left:auto;">${fmtDate(r.createdAt)}</span>
                         </div>
                         ${r.comment ? `<p style="margin:0 0 8px;font-size:14px;">${esc(r.comment)}</p>` : ''}
                         ${r.sellerReply ? `
@@ -5025,7 +5025,7 @@ window.addEventListener('tools:active', function() {
             if (_reviewOrderId && !alreadyReviewed) {
                 _reviewRating = 0;
                 write.innerHTML = `
-                    <hr style="border:none;border-top:1px solid var(--border-color,#e0e0e0);margin:16px 0;">
+                    <hr style="border:none;border-top:1px solid var(--border-color);margin:16px 0;">
                     <h4 style="margin:0 0 14px;font-size:16px;">Write a Review</h4>
                     <div class="mp-field"><label>Your Rating</label>
                         <div class="mp-stars-input" id="mp-star-row">
@@ -5097,7 +5097,7 @@ window.addEventListener('tools:active', function() {
                         ${seller.avatar ? `<img src="${esc(seller.avatar)}" alt="Seller">` : (seller.name||'S').charAt(0).toUpperCase()}
                     </div>
                     <div style="font-weight:800;font-size:18px;">${esc(seller.name||'Seller')}</div>
-                    <div style="font-size:13px;color:var(--text-secondary,#888);margin-top:4px;">Member since ${fmtDate(seller.joinedAt)}</div>
+                    <div style="font-size:13px;color:var(--text-secondary);margin-top:4px;">Member since ${fmtDate(seller.joinedAt)}</div>
                 </div>
                 <div class="mp-stat-row">
                     <div class="mp-stat"><strong>${stats.listingCount||0}</strong><span>Listings</span></div>

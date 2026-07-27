@@ -2297,13 +2297,13 @@
      headers never matched whatever idle/panel screens correctly followed.
      Now every module's header just uses the live page background, same as
      the rest of that module. */
-  --header-chat:    var(--bg-color, #ffffff);
-  --header-calls:   var(--bg-color, #ffffff);
-  --header-groups:  var(--bg-color, #ffffff);
-  --header-friends: var(--bg-color, #ffffff);
-  --header-status:  var(--bg-color, #ffffff);
-  --header-marketplace: var(--bg-color, #ffffff);
-  --header-settings: var(--bg-color, #ffffff);
+  --header-chat:    var(--bg-color);
+  --header-calls:   var(--bg-color);
+  --header-groups:  var(--bg-color);
+  --header-friends: var(--bg-color);
+  --header-status:  var(--bg-color);
+  --header-marketplace: var(--bg-color);
+  --header-settings: var(--bg-color);
 
   /* ── CALL BUTTONS (green, per spec) ── */
   --call-accept-bg: #22c55e;
@@ -3104,7 +3104,7 @@ input:focus + .toggle-slider,
     width: 100px;
     height: 100px;
     border-radius: 50%;
-    background: linear-gradient(135deg, var(--accent-color, #0084ff), #7b2ff7);
+    background: linear-gradient(135deg, var(--accent-color), #7b2ff7);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -4099,8 +4099,8 @@ body.call-active #idleScreen {
 
 /* Override the dark video background on idle screen */
 #idleScreen {
-    background: var(--bg-color, #ffffff) !important;
-    color: var(--text-primary, #050505) !important;
+    background: var(--bg-color) !important;
+    color: var(--text-primary) !important;
     align-items: flex-start !important;
     justify-content: flex-start !important;
     padding: 0 !important;
@@ -4123,13 +4123,13 @@ body.call-active #idleScreen {
 .welcome-title {
     font-size: 22px;
     font-weight: 700;
-    color: var(--text-primary, #050505);
+    color: var(--text-primary);
     margin-bottom: 6px;
 }
 
 .welcome-subtitle {
     font-size: 14px;
-    color: var(--text-secondary, #65676b);
+    color: var(--text-secondary);
 }
 
 /* Quick call action cards — like WhatsApp's Voice/Video/Group row */
@@ -4144,14 +4144,14 @@ body.call-active #idleScreen {
     align-items: center;
     gap: 16px;
     padding: 16px 20px;
-    background: var(--secondary-color, #f0f2f5);
+    background: var(--secondary-color);
     border: none;
     border-radius: 12px;
     cursor: pointer;
     transition: background 0.2s, transform 0.15s;
     width: 100%;
     text-align: left;
-    color: var(--text-primary, #050505);
+    color: var(--text-primary);
 }
 
 .quick-call-card:hover {
@@ -4191,12 +4191,12 @@ body.call-active #idleScreen {
     font-size: 15px;
     font-weight: 600;
     margin-bottom: 2px;
-    color: var(--text-primary, #050505);
+    color: var(--text-primary);
 }
 
 .quick-call-info p {
     font-size: 13px;
-    color: var(--text-secondary, #65676b);
+    color: var(--text-secondary);
 }
 
 /* Recent calls section on idle */
@@ -4209,7 +4209,7 @@ body.call-active #idleScreen {
 .recent-calls-preview h3 {
     font-size: 13px;
     font-weight: 600;
-    color: var(--text-secondary, #65676b);
+    color: var(--text-secondary);
     text-transform: uppercase;
     letter-spacing: 0.6px;
     padding: 0 4px;
@@ -4221,7 +4221,7 @@ body.call-active #idleScreen {
     align-items: center;
     gap: 8px;
     padding: 24px;
-    color: var(--text-secondary, #65676b);
+    color: var(--text-secondary);
     opacity: 0.6;
     font-size: 14px;
 }

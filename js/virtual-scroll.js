@@ -63,7 +63,7 @@
       this._jumpBtn.innerHTML = '↓ <span id="kyn-unread-badge"></span>';
       this._jumpBtn.style.cssText = `
         position:fixed;bottom:90px;right:20px;z-index:100;
-        background:var(--accent-color,#7c3aed);color:#fff;
+        background:var(--accent-color);color:#fff;
         border:none;border-radius:20px;padding:6px 14px;
         font-size:13px;cursor:pointer;display:none;
         box-shadow:0 2px 8px rgba(0,0,0,0.3);

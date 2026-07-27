@@ -4238,7 +4238,7 @@
         .info-modal-handle {
             width: 40px;
             height: 4px;
-            background: var(--border-color, #ddd);
+            background: var(--border-color);
             border-radius: 2px;
             margin: 10px auto 0;
             flex-shrink: 0;
@@ -4254,18 +4254,18 @@
         .info-modal-body h4 {
             font-size: 15px;
             font-weight: 700;
-            color: var(--text-primary, #2c3e50);
+            color: var(--text-primary);
             margin: 18px 0 6px;
         }
         .info-modal-body h4:first-child { margin-top: 0; }
         .info-modal-body p, .info-modal-body li {
             font-size: 14px;
             line-height: 1.65;
-            color: var(--text-secondary, #7f8c8d);
+            color: var(--text-secondary);
             margin: 0 0 8px;
         }
         .info-modal-body ul { padding-left: 18px; margin: 0 0 8px; }
-        .info-modal-body a { color: var(--primary-color, #667eea); }
+        .info-modal-body a { color: var(--primary-color); }
 
         /* Opt-in / opt-out toggle rows */
         .pref-row {
@@ -4273,12 +4273,12 @@
             align-items: center;
             justify-content: space-between;
             padding: 12px 0;
-            border-bottom: 1px solid var(--border-color, #ecf0f1);
+            border-bottom: 1px solid var(--border-color);
             gap: 10px;
         }
         .pref-row:last-child { border-bottom: none; }
-        .pref-label { font-size: 14px; color: var(--text-primary, #2c3e50); flex: 1; }
-        .pref-label small { display: block; font-size: 12px; color: var(--text-secondary, #7f8c8d); margin-top: 2px; }
+        .pref-label { font-size: 14px; color: var(--text-primary); flex: 1; }
+        .pref-label small { display: block; font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
 
         /* Toggle switch */
         .pref-toggle { position: relative; width: 44px; height: 24px; flex-shrink: 0; }
@@ -4286,12 +4286,12 @@
         .pref-toggle-track {
             position: absolute;
             inset: 0;
-            background: var(--border-color, #ccc);
+            background: var(--border-color);
             border-radius: 12px;
             cursor: pointer;
             transition: background .2s;
         }
-        .pref-toggle input:checked + .pref-toggle-track { background: var(--primary-color, #667eea); }
+        .pref-toggle input:checked + .pref-toggle-track { background: var(--primary-color); }
         .pref-toggle-track::after {
             content: '';
             position: absolute;
@@ -4310,24 +4310,24 @@
             display: block;
             font-size: 13px;
             font-weight: 600;
-            color: var(--text-primary, #2c3e50);
+            color: var(--text-primary);
             margin-bottom: 5px;
         }
         .contact-field input, .contact-field textarea, .contact-field select {
             width: 100%;
             box-sizing: border-box;
             padding: 10px 12px;
-            border: 1.5px solid var(--border-color, #ddd);
+            border: 1.5px solid var(--border-color);
             border-radius: 8px;
             font-size: 14px;
-            background: var(--bg-color, #fff);
-            color: var(--text-primary, #2c3e50);
+            background: var(--bg-color);
+            color: var(--text-primary);
             transition: border-color .2s;
             font-family: inherit;
         }
         .contact-field input:focus, .contact-field textarea:focus, .contact-field select:focus {
             outline: none;
-            border-color: var(--primary-color, #667eea);
+            border-color: var(--primary-color);
         }
         .contact-field textarea { resize: vertical; min-height: 90px; }
         .contact-submit {
@@ -4346,7 +4346,7 @@
         .contact-submit:hover { opacity: .9; }
 
         /* Help accordion */
-        .help-item { border-bottom: 1px solid var(--border-color, #ecf0f1); }
+        .help-item { border-bottom: 1px solid var(--border-color); }
         .help-item:last-child { border-bottom: none; }
         .help-question {
             width: 100%;
@@ -4356,21 +4356,21 @@
             padding: 13px 0;
             font-size: 14px;
             font-weight: 600;
-            color: var(--text-primary, #2c3e50);
+            color: var(--text-primary);
             cursor: pointer;
             display: flex;
             justify-content: space-between;
             align-items: center;
             gap: 8px;
         }
-        .help-question i { font-size: 12px; transition: transform .2s; flex-shrink: 0; color: var(--text-secondary,#7f8c8d); }
+        .help-question i { font-size: 12px; transition: transform .2s; flex-shrink: 0; color: var(--text-secondary); }
         .help-item.open .help-question i { transform: rotate(180deg); }
         .help-answer {
             display: none;
             padding: 0 0 12px;
             font-size: 13.5px;
             line-height: 1.65;
-            color: var(--text-secondary, #7f8c8d);
+            color: var(--text-secondary);
         }
         .help-item.open .help-answer { display: block; }
     </style>
@@ -4394,7 +4394,7 @@
         .mfa-modal-overlay.open { display: flex; }
         .mfa-modal-card {
             background: var(--bg-secondary, #1e1e2e);
-            color: var(--text-primary, #fff);
+            color: var(--text-primary);
             border-radius: 14px;
             width: 100%;
             max-width: 360px;
@@ -4411,7 +4411,7 @@
         .mfa-modal-card p {
             margin: 0 0 18px;
             font-size: 13px;
-            color: var(--text-secondary, #aaa);
+            color: var(--text-secondary);
             line-height: 1.5;
         }
         .mfa-modal-card input {
@@ -4419,9 +4419,9 @@
             box-sizing: border-box;
             padding: 12px 14px;
             border-radius: 10px;
-            border: 1px solid var(--border-color, #3a3a4e);
+            border: 1px solid var(--border-color);
             background: var(--input-bg, #2a2a3e);
-            color: var(--text-primary, #fff);
+            color: var(--text-primary);
             font-size: 18px;
             letter-spacing: 3px;
             text-align: center;
@@ -4442,7 +4442,7 @@
             cursor: pointer;
         }
         #mfaSubmitBtn { background: var(--accent, #4F46E5); color: #fff; }
-        #mfaCancelBtn { background: transparent; color: var(--text-secondary, #aaa); border: 1px solid var(--border-color, #3a3a4e) !important; }
+        #mfaCancelBtn { background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color) !important; }
         .mfa-modal-error {
             display: none;
             color: #ef4444;
@@ -4451,7 +4451,7 @@
         }
         .mfa-modal-hint {
             font-size: 11.5px;
-            color: var(--text-secondary, #888);
+            color: var(--text-secondary);
             margin-top: 14px;
             text-align: center;
         }
@@ -4826,7 +4826,7 @@ setTimeout(function(){
     var el=document.querySelector(sel);
     if(!el)return;
     if(!el.children.length||(el.innerHTML||'').trim()===''){
-      el.innerHTML='<div style="display:flex;flex-direction:column;align-items:center;padding:60px 20px;text-align:center;color:var(--text-secondary,#7f8c8d)"><i class="fas fa-store" style="font-size:3rem;color:var(--primary-color,#667eea);margin-bottom:16px"></i><h3 style="margin:0 0 8px;color:var(--text-primary,#2c3e50)">Marketplace</h3><p>Loading products…</p></div>';
+      el.innerHTML='<div style="display:flex;flex-direction:column;align-items:center;padding:60px 20px;text-align:center;color:var(--text-secondary)"><i class="fas fa-store" style="font-size:3rem;color:var(--primary-color);margin-bottom:16px"></i><h3 style="margin:0 0 8px;color:var(--text-primary)">Marketplace</h3><p>Loading products…</p></div>';
     }
   });
 },3000);
@@ -4850,18 +4850,18 @@ var _cart=(function(){
       panel.style.cssText='position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;justify-content:center';
       panel.innerHTML='<div style="background:var(--panel-bg,#fff);width:100%;max-width:520px;border-radius:20px 20px 0 0;padding:24px;max-height:85vh;overflow-y:auto">'
         +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">'
-        +'<h3 style="margin:0;font-size:18px;font-weight:700"><i class="fas fa-shopping-cart" style="color:var(--primary-color,#667eea);margin-right:8px"></i>Checkout</h3>'
-        +'<button onclick="document.getElementById(\'__mc_checkout\').remove()" style="background:var(--sidebar-bg,#f5f5f5);border:none;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:16px">✕</button></div>'
-        +'<div>'+list.map(function(i){return'<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border-color,#eee)">'
+        +'<h3 style="margin:0;font-size:18px;font-weight:700"><i class="fas fa-shopping-cart" style="color:var(--primary-color);margin-right:8px"></i>Checkout</h3>'
+        +'<button onclick="document.getElementById(\'__mc_checkout\').remove()" style="background:var(--sidebar-bg);border:none;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:16px">✕</button></div>'
+        +'<div>'+list.map(function(i){return'<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border-color)">'
           +'<div style="display:flex;align-items:center;gap:10px"><img src="'+(i.image||PLACEHOLDER)+'" style="width:46px;height:46px;border-radius:8px;object-fit:cover" onerror="this.src=\''+PLACEHOLDER+'\'">'
           +'<div><div style="font-weight:600;font-size:14px">'+(i.name||'Product')+'</div><div style="font-size:12px;color:#888">Qty: '+(i.qty||1)+'</div></div></div>'
-          +'<b style="color:var(--primary-color,#667eea)">$'+((i.price||0)*(i.qty||1)).toFixed(2)+'</b></div>'}).join('')+'</div>'
-        +'<div style="margin:14px 0;padding:12px;background:var(--sidebar-bg,#f9f9f9);border-radius:10px">'
-        +'<div style="display:flex;justify-content:space-between;font-weight:700;font-size:16px"><span>Total</span><span style="color:var(--primary-color,#667eea)">$'+total.toFixed(2)+'</span></div></div>'
+          +'<b style="color:var(--primary-color)">$'+((i.price||0)*(i.qty||1)).toFixed(2)+'</b></div>'}).join('')+'</div>'
+        +'<div style="margin:14px 0;padding:12px;background:var(--sidebar-bg);border-radius:10px">'
+        +'<div style="display:flex;justify-content:space-between;font-weight:700;font-size:16px"><span>Total</span><span style="color:var(--primary-color)">$'+total.toFixed(2)+'</span></div></div>'
         +'<div style="margin-bottom:12px"><label style="font-size:13px;font-weight:600;display:block;margin-bottom:4px">Delivery Address</label>'
-        +'<input type="text" placeholder="Enter address" style="width:100%;box-sizing:border-box;padding:10px;border:1.5px solid var(--border-color,#ddd);border-radius:8px;font-size:14px;background:var(--bg-color,#fff);color:var(--text-primary,#333)"></div>'
+        +'<input type="text" placeholder="Enter address" style="width:100%;box-sizing:border-box;padding:10px;border:1.5px solid var(--border-color);border-radius:8px;font-size:14px;background:var(--bg-color);color:var(--text-primary)"></div>'
         +'<div style="margin-bottom:14px"><label style="font-size:13px;font-weight:600;display:block;margin-bottom:4px">Payment</label>'
-        +'<select style="width:100%;box-sizing:border-box;padding:10px;border:1.5px solid var(--border-color,#ddd);border-radius:8px;font-size:14px;background:var(--bg-color,#fff)">'
+        +'<select style="width:100%;box-sizing:border-box;padding:10px;border:1.5px solid var(--border-color);border-radius:8px;font-size:14px;background:var(--bg-color)">'
         +'<option>M-Pesa</option><option>Credit Card</option><option>PayPal</option><option>Bank Transfer</option></select></div>'
         +'<button onclick="window.__mcCart.placeOrder()" style="width:100%;padding:14px;background:var(--gradient-primary,linear-gradient(135deg,#667eea,#764ba2));color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer">'
         +'<i class="fas fa-lock"></i> Place Order — $'+total.toFixed(2)+'</button></div>';
@@ -4906,14 +4906,14 @@ var _ms=(function(){
     getSessions:function(){return _s.slice();},
     renderHistory:function(el){
       if(!el)return;var list=_s;
-      if(!list.length){el.innerHTML='<div style="text-align:center;padding:40px;color:var(--text-secondary,#888)"><i class="fas fa-paper-plane" style="font-size:2rem;display:block;margin-bottom:12px"></i>No bulk sends yet</div>';return;}
+      if(!list.length){el.innerHTML='<div style="text-align:center;padding:40px;color:var(--text-secondary)"><i class="fas fa-paper-plane" style="font-size:2rem;display:block;margin-bottom:12px"></i>No bulk sends yet</div>';return;}
       el.innerHTML=list.map(function(s){
         var t=s.recipients.length,d=s.recipients.filter(function(r){return r.status==='delivered'||r.status==='read';}).length,f=s.recipients.filter(function(r){return r.status==='failed';}).length;
-        return'<div style="background:var(--card-bg,#fff);border-radius:12px;padding:16px;margin-bottom:10px;box-shadow:0 2px 8px rgba(0,0,0,.08)">'
+        return'<div style="background:var(--card-bg);border-radius:12px;padding:16px;margin-bottom:10px;box-shadow:0 2px 8px rgba(0,0,0,.08)">'
           +'<div style="display:flex;justify-content:space-between;margin-bottom:6px"><b style="font-size:14px">'+t+' recipients</b><small style="color:#999">'+new Date(s.createdAt).toLocaleString()+'</small></div>'
           +'<div style="font-size:13px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:8px">"'+(s.content||'').slice(0,80)+'"</div>'
-          +'<div style="display:flex;gap:12px;font-size:13px"><span style="color:var(--success-color,#2ecc71)"><i class="fas fa-check-circle"></i> '+d+' delivered</span>'
-          +(f?'<span style="color:var(--danger-color,#e74c3c)"><i class="fas fa-times-circle"></i> '+f+' failed</span>':'')
+          +'<div style="display:flex;gap:12px;font-size:13px"><span style="color:var(--success-color)"><i class="fas fa-check-circle"></i> '+d+' delivered</span>'
+          +(f?'<span style="color:var(--danger-color)"><i class="fas fa-times-circle"></i> '+f+' failed</span>':'')
           +'<span style="color:#999"><i class="fas fa-clock"></i> '+(t-d-f)+' pending</span></div></div>';
       }).join('');
     }

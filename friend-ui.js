@@ -2066,16 +2066,16 @@ export const renderAllFriendsList = function() {
         if (domElements.allFriendsList && !domElements.allFriendsList.querySelector('.skeleton-item')) {
             domElements.allFriendsList.innerHTML = `
                 <div class="skeleton-item" style="display:flex;align-items:center;padding:12px 16px;gap:12px;opacity:0.5;">
-                    <div style="width:44px;height:44px;border-radius:50%;background:var(--border-color,#e0e0e0);flex-shrink:0;"></div>
-                    <div style="flex:1;"><div style="height:12px;background:var(--border-color,#e0e0e0);border-radius:4px;margin-bottom:6px;width:60%;"></div><div style="height:10px;background:var(--border-color,#e0e0e0);border-radius:4px;width:40%;"></div></div>
+                    <div style="width:44px;height:44px;border-radius:50%;background:var(--border-color);flex-shrink:0;"></div>
+                    <div style="flex:1;"><div style="height:12px;background:var(--border-color);border-radius:4px;margin-bottom:6px;width:60%;"></div><div style="height:10px;background:var(--border-color);border-radius:4px;width:40%;"></div></div>
                 </div>
                 <div class="skeleton-item" style="display:flex;align-items:center;padding:12px 16px;gap:12px;opacity:0.35;">
-                    <div style="width:44px;height:44px;border-radius:50%;background:var(--border-color,#e0e0e0);flex-shrink:0;"></div>
-                    <div style="flex:1;"><div style="height:12px;background:var(--border-color,#e0e0e0);border-radius:4px;margin-bottom:6px;width:70%;"></div><div style="height:10px;background:var(--border-color,#e0e0e0);border-radius:4px;width:45%;"></div></div>
+                    <div style="width:44px;height:44px;border-radius:50%;background:var(--border-color);flex-shrink:0;"></div>
+                    <div style="flex:1;"><div style="height:12px;background:var(--border-color);border-radius:4px;margin-bottom:6px;width:70%;"></div><div style="height:10px;background:var(--border-color);border-radius:4px;width:45%;"></div></div>
                 </div>
                 <div class="skeleton-item" style="display:flex;align-items:center;padding:12px 16px;gap:12px;opacity:0.2;">
-                    <div style="width:44px;height:44px;border-radius:50%;background:var(--border-color,#e0e0e0);flex-shrink:0;"></div>
-                    <div style="flex:1;"><div style="height:12px;background:var(--border-color,#e0e0e0);border-radius:4px;margin-bottom:6px;width:50%;"></div><div style="height:10px;background:var(--border-color,#e0e0e0);border-radius:4px;width:35%;"></div></div>
+                    <div style="width:44px;height:44px;border-radius:50%;background:var(--border-color);flex-shrink:0;"></div>
+                    <div style="flex:1;"><div style="height:12px;background:var(--border-color);border-radius:4px;margin-bottom:6px;width:50%;"></div><div style="height:10px;background:var(--border-color);border-radius:4px;width:35%;"></div></div>
                 </div>
             `;
         }
@@ -2330,7 +2330,7 @@ export const renderFriends = function() {
                 'padding:14px 16px',
                 'margin-bottom:12px',
                 'font-size:13px',
-                'color:var(--text-secondary,#888)',
+                'color:var(--text-secondary)',
                 'text-align:center',
                 'display:flex',
                 'align-items:center',
@@ -2340,7 +2340,7 @@ export const renderFriends = function() {
             banner.innerHTML = [
                 '<i class="fas fa-magic" style="color:#6C63FF;font-size:16px;flex-shrink:0"></i>',
                 '<span>',
-                '<strong style="color:var(--text-primary,#333)">Welcome!</strong> ',
+                '<strong style="color:var(--text-primary)">Welcome!</strong> ',
                 'These are demo contacts showing how the friends feature works. ',
                 '<button id="demoBannerAddBtn" style="background:none;border:none;padding:0;cursor:pointer;color:#6C63FF;font-weight:600;text-decoration:underline;font-size:13px">Add a real friend</button> to get started.',
                 '</span>'
@@ -3541,7 +3541,7 @@ function createFriendItemElement(friendData, type, instantMode = false) {
                     <button class="friend-action-btn" data-action="more" title="More options">
                         <i class="fas fa-ellipsis-v"></i>
                     </button>
-                    <div class="friend-more-dropdown" style="display:none;position:absolute;right:0;top:100%;background:var(--surface-elevated,#fff);border:1px solid var(--border-color,#e0e0e0);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12);z-index:100;min-width:160px;padding:4px 0;">
+                    <div class="friend-more-dropdown" style="display:none;position:absolute;right:0;top:100%;background:var(--surface-elevated,#fff);border:1px solid var(--border-color);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12);z-index:100;min-width:160px;padding:4px 0;">
                         <button class="friend-dropdown-item" data-action="snooze" data-friend-id="${friendId}" style="display:flex;align-items:center;gap:8px;width:100%;padding:9px 14px;border:none;background:none;cursor:pointer;font-size:14px;text-align:left;">
                             <i class="fas fa-bell-slash" style="width:16px;opacity:.7;"></i>
                             ${isSnoozed ? 'Unsnooze' : 'Snooze (7 days)'}
@@ -3550,7 +3550,7 @@ function createFriendItemElement(friendData, type, instantMode = false) {
                             <i class="fas fa-user-lock" style="width:16px;opacity:.7;"></i>
                             ${isRestricted ? 'Unrestrict' : 'Restrict'}
                         </button>
-                        <div style="height:1px;background:var(--border-color,#e0e0e0);margin:4px 0;"></div>
+                        <div style="height:1px;background:var(--border-color);margin:4px 0;"></div>
                         <button class="friend-dropdown-item" data-action="block" data-friend-id="${friendId}" style="display:flex;align-items:center;gap:8px;width:100%;padding:9px 14px;border:none;background:none;cursor:pointer;font-size:14px;color:#e53e3e;text-align:left;">
                             <i class="fas fa-ban" style="width:16px;opacity:.7;"></i>
                             Block
@@ -4787,9 +4787,9 @@ export function showReportModal(friendId, displayName) {
                 ).join('')}
             </div>
             <textarea id="reportDescription" placeholder="Additional details (optional)" maxlength="500"
-                style="width:100%;border:1px solid var(--border-color,#e0e0e0);border-radius:8px;padding:10px;font-size:13px;resize:vertical;min-height:70px;box-sizing:border-box;margin-bottom:16px;"></textarea>
+                style="width:100%;border:1px solid var(--border-color);border-radius:8px;padding:10px;font-size:13px;resize:vertical;min-height:70px;box-sizing:border-box;margin-bottom:16px;"></textarea>
             <div style="display:flex;gap:10px;justify-content:flex-end;">
-                <button id="cancelReportBtn" style="padding:10px 18px;border:1px solid var(--border-color,#e0e0e0);background:none;border-radius:8px;cursor:pointer;font-size:14px;">Cancel</button>
+                <button id="cancelReportBtn" style="padding:10px 18px;border:1px solid var(--border-color);background:none;border-radius:8px;cursor:pointer;font-size:14px;">Cancel</button>
                 <button id="submitReportBtn" style="padding:10px 18px;background:#e53e3e;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Submit Report</button>
             </div>
         </div>`;

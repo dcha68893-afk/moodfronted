@@ -2283,13 +2283,13 @@
      headers never matched whatever idle/panel screens correctly followed.
      Now every module's header just uses the live page background, same as
      the rest of that module. */
-  --header-chat:    var(--bg-color, #ffffff);
-  --header-calls:   var(--bg-color, #ffffff);
-  --header-groups:  var(--bg-color, #ffffff);
-  --header-friends: var(--bg-color, #ffffff);
-  --header-status:  var(--bg-color, #ffffff);
-  --header-marketplace: var(--bg-color, #ffffff);
-  --header-settings: var(--bg-color, #ffffff);
+  --header-chat:    var(--bg-color);
+  --header-calls:   var(--bg-color);
+  --header-groups:  var(--bg-color);
+  --header-friends: var(--bg-color);
+  --header-status:  var(--bg-color);
+  --header-marketplace: var(--bg-color);
+  --header-settings: var(--bg-color);
 
   /* ── CALL BUTTONS (green, per spec) ── */
   --call-accept-bg: #22c55e;

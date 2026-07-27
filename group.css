@@ -2791,13 +2791,13 @@
      headers never matched whatever idle/panel screens correctly followed.
      Now every module's header just uses the live page background, same as
      the rest of that module. */
-  --header-chat:    var(--bg-color, #ffffff);
-  --header-calls:   var(--bg-color, #ffffff);
-  --header-groups:  var(--bg-color, #ffffff);
-  --header-friends: var(--bg-color, #ffffff);
-  --header-status:  var(--bg-color, #ffffff);
-  --header-marketplace: var(--bg-color, #ffffff);
-  --header-settings: var(--bg-color, #ffffff);
+  --header-chat:    var(--bg-color);
+  --header-calls:   var(--bg-color);
+  --header-groups:  var(--bg-color);
+  --header-friends: var(--bg-color);
+  --header-status:  var(--bg-color);
+  --header-marketplace: var(--bg-color);
+  --header-settings: var(--bg-color);
 
   /* ── CALL BUTTONS (green, per spec) ── */
   --call-accept-bg: #22c55e;
@@ -2840,8 +2840,8 @@
 
 /* Group chat-header is now in the parent shell — keep local one transparent */
 .chat-header {
-  background: var(--bg-color, #0f172a) !important;
-  border-bottom: 1px solid var(--border-color, #374151) !important;
+  background: var(--bg-color) !important;
+  border-bottom: 1px solid var(--border-color) !important;
 }
 
 /* Calls sidebar header → GREEN (communication) */
@@ -3499,7 +3499,7 @@ body.dark #chatMessagesContainer {
 body.dark .msg-time { color: rgba(255,255,255,.4); }
 
 /* Three-dots dropdown */
-.gcm-item:hover { background: var(--secondary-color, #f5f5f5) !important; }
+.gcm-item:hover { background: var(--secondary-color) !important; }
 
 /* Sub-panel animation */
 #gcSubPanel {
@@ -3573,7 +3573,7 @@ body.dark .msg-time { color: rgba(255,255,255,.4); }
 
 /* Chat header button hover */
 .chat-header-btn:hover {
-    background: var(--secondary-color, #f0f0f0) !important;
+    background: var(--secondary-color) !important;
 }
 
 /* ── Group chat header is now rendered in the parent shell (chat.html) ──
@@ -3625,14 +3625,14 @@ body.dark .msg-time { color: rgba(255,255,255,.4); }
     padding: max(14px, env(safe-area-inset-top)) 16px 10px;
     flex-shrink: 0;
 }
-#createGroupModal .groupc-topbar-title { font-size: 17px; font-weight: 600; color: var(--text-primary, #fff); }
+#createGroupModal .groupc-topbar-title { font-size: 17px; font-weight: 600; color: var(--text-primary); }
 #createGroupModal .groupc-topbar-spacer { width: 40px; }
 #createGroupModal .groupc-icon-btn {
     width: 40px; height: 40px; min-width: 44px; min-height: 44px;
     border-radius: 50%;
     border: none;
     background: rgba(127,127,127,0.14);
-    color: var(--text-primary, #fff);
+    color: var(--text-primary);
     font-size: 16px;
     display: flex; align-items: center; justify-content: center;
     cursor: pointer;
@@ -3678,7 +3678,7 @@ body.dark .msg-time { color: rgba(255,255,255,.4); }
     font-size: 15px;
 }
 #createGroupModal .groupc-card-text { flex: 1; min-width: 0; }
-#createGroupModal .groupc-card-title { font-size: 15px; font-weight: 600; color: var(--text-primary, #fff); }
+#createGroupModal .groupc-card-title { font-size: 15px; font-weight: 600; color: var(--text-primary); }
 #createGroupModal .groupc-card-subtitle {
     font-size: 12px;
     color: var(--text-secondary, rgba(255,255,255,0.55));
@@ -3696,7 +3696,7 @@ body.dark .msg-time { color: rgba(255,255,255,.4); }
 /* Full-screen sub-panels */
 #createGroupModal .groupc-fullscreen-panel {
     position: absolute; inset: 0;
-    background: var(--bg-color, #0b0b0f);
+    background: var(--bg-color);
     transform: translateX(100%);
     transition: transform 260ms cubic-bezier(0.32, 0.72, 0, 1);
     z-index: 35;
@@ -3707,7 +3707,7 @@ body.dark .msg-time { color: rgba(255,255,255,.4); }
 #createGroupModal .groupc-panel-header {
     display: flex; align-items: center; gap: 12px;
     padding: max(14px, env(safe-area-inset-top)) 16px 12px;
-    color: var(--text-primary, #fff);
+    color: var(--text-primary);
     font-size: 15px; font-weight: 600;
     flex-shrink: 0;
 }

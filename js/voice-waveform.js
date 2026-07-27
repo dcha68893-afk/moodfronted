@@ -77,7 +77,7 @@
       }
       #kynRecordingWaveform .rec-timer {
         font-size: 13px; font-weight: 600;
-        color: var(--text-primary, #fff);
+        color: var(--text-primary);
         min-width: 36px;
       }
       @keyframes recPulse {

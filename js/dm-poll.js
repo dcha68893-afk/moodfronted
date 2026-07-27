@@ -40,7 +40,7 @@
       }
       #kynPollModalBox h3 {
         font-size: 15px; font-weight: 600;
-        color: var(--text-primary, #fff);
+        color: var(--text-primary);
         margin: 0 0 16px; text-align: center;
       }
       .poll-modal-label {
@@ -54,7 +54,7 @@
         background: var(--bg-secondary, #1e1e2e);
         border: 1px solid var(--border-color, rgba(255,255,255,0.08));
         border-radius: 10px;
-        color: var(--text-primary, #fff);
+        color: var(--text-primary);
         font-size: 14px;
         padding: 10px 12px;
         outline: none;
@@ -115,7 +115,7 @@
       .poll-bubble-question {
         padding: 2px 12px 10px;
         font-size: 14px; font-weight: 600;
-        color: var(--text-primary, #fff);
+        color: var(--text-primary);
         line-height: 1.3;
       }
       .poll-option-btn {
@@ -133,7 +133,7 @@
         position: relative; z-index: 1;
       }
       .poll-option-text {
-        flex: 1; font-size: 13px; color: var(--text-primary, #fff);
+        flex: 1; font-size: 13px; color: var(--text-primary);
       }
       .poll-option-check {
         color: var(--accent, #7c3aed); font-size: 13px;

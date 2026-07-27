@@ -394,7 +394,7 @@ const OfflineQueue = {
                         position: fixed;
                         bottom: 20px;
                         right: 20px;
-                        background: var(--warning-color, #ff9800);
+                        background: var(--warning-color);
                         color: white;
                         border-radius: 20px;
                         padding: 8px 16px;

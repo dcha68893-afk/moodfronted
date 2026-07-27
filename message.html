@@ -164,6 +164,16 @@
     
     <!-- Load CSS -->
     <link rel="stylesheet" href="messages.css">
+    <!-- FIX (nav-icon visibility / hardcoded-fallback audit): this page never
+         loaded theme.colors.css (chat/friend/calls/group/status/Tools already
+         had this fixed) -- so the extended --kyn-* palette (bubble colors,
+         panel/card backgrounds, gradients, shadows) was undefined here, and
+         every CSS rule using those vars either fell through to whatever
+         hardcoded fallback hex it happened to be written with, or rendered
+         unstyled. theme.engine.js's inline PALETTES only ever covers the
+         small pre-paint subset by design -- theme.colors.css is required for
+         the rest. -->
+    <link rel="stylesheet" href="theme.colors.css">
 
     <style>
         /* =============================================
@@ -949,7 +959,7 @@
             gap: 10px;
             margin-top: 20px;
             padding-top: 20px;
-            border-top: 1px solid var(--border-color, #eee);
+            border-top: 1px solid var(--border-color);
         }
         
         .chat-info-btn {
@@ -1249,7 +1259,7 @@
                 <!-- Attachment preview for multi-send -->
             </div>
             <input type="hidden" id="forwardMessageId" value="">
-            <div class="input-area" style="border-top: 1px solid var(--border-color, #eee);">
+            <div class="input-area" style="border-top: 1px solid var(--border-color);">
                 <textarea class="message-input" id="multiSendInput" placeholder="Type message to send..."></textarea>
                 <button class="send-button" id="multiSendBtn">
                     <i class="fas fa-paper-plane"></i>

@@ -68,7 +68,7 @@
         border-radius: 20px;
         border: 1px solid var(--border-color, rgba(255,255,255,0.1));
         background: var(--bg-tertiary, #2a2a3e);
-        color: var(--text-primary, #fff);
+        color: var(--text-primary);
         font-size: 13px;
         outline: none;
       }

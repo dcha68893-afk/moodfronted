@@ -208,15 +208,15 @@
     <style>
         /* ========== BASE STYLES ========== */
         :root {
-            --primary-color:   var(--kyn-accent-primary,   #22c55e);
+            --primary-color:   var(--kyn-accent-primary);
             --primary-dark:    #16a34a;
-            --success-color:   var(--kyn-accent-primary,   #22c55e);
-            --warning-color:   var(--kyn-accent-warning,   #f59e0b);
-            --danger-color:    var(--kyn-accent-danger,    #ef4444);
+            --success-color:   var(--kyn-accent-primary);
+            --warning-color:   var(--kyn-accent-warning);
+            --danger-color:    var(--kyn-accent-danger);
             --text-color:      var(--kyn-text-primary);
             --text-secondary:  var(--kyn-text-secondary);
             --border-color:    var(--kyn-border);
-            --surface-color:   var(--kyn-bg-panel,         #1e293b);
+            --surface-color:   var(--kyn-bg-panel);
             --hover-color:     var(--kyn-bg-hover,         rgba(255,255,255,0.06));
             --category-acquaintance: #6c757d;
             --category-friend: #22c55e;
@@ -2492,7 +2492,7 @@
                         </button>
                         <div id="friendMoreDropdown" style="
                             display:none;position:absolute;top:calc(100% + 6px);right:0;
-                            min-width:220px;background:var(--card-bg,#1e2a3a);
+                            min-width:220px;background:var(--card-bg);
                             border:1px solid rgba(255,255,255,.08);border-radius:12px;
                             box-shadow:0 8px 32px rgba(0,0,0,.4);z-index:9999;overflow:hidden;">
                             <!-- New Group -->
@@ -2620,7 +2620,7 @@
                         <!-- People you may know — populated by renderFriendSuggestions(), hidden
                              entirely when the friends.friendSuggestions setting is off -->
                         <div id="friendSuggestionsContainer" style="display:none; margin-top: 16px;">
-                            <div style="display:flex; align-items:center; gap:8px; margin: 8px 4px; font-size: 13px; font-weight: 600; color: var(--text-secondary,#888); text-transform: uppercase; letter-spacing: 0.5px;">
+                            <div style="display:flex; align-items:center; gap:8px; margin: 8px 4px; font-size: 13px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">
                                 <i class="fas fa-user-plus"></i> People you may know
                             </div>
                             <div class="friends-list" id="friendSuggestionsList"></div>

@@ -1354,7 +1354,7 @@ body {
 }
 .font-option:hover { background: rgba(255,255,255,0.12); }
 .font-option.selected {
-    border-color: var(--primary-color, #00a884);
+    border-color: var(--primary-color);
     background: rgba(0,168,132,0.18);
 }
 
@@ -2566,13 +2566,13 @@ input:checked + .toggle-slider:before {
      headers never matched whatever idle/panel screens correctly followed.
      Now every module's header just uses the live page background, same as
      the rest of that module. */
-  --header-chat:    var(--bg-color, #ffffff);
-  --header-calls:   var(--bg-color, #ffffff);
-  --header-groups:  var(--bg-color, #ffffff);
-  --header-friends: var(--bg-color, #ffffff);
-  --header-status:  var(--bg-color, #ffffff);
-  --header-marketplace: var(--bg-color, #ffffff);
-  --header-settings: var(--bg-color, #ffffff);
+  --header-chat:    var(--bg-color);
+  --header-calls:   var(--bg-color);
+  --header-groups:  var(--bg-color);
+  --header-friends: var(--bg-color);
+  --header-status:  var(--bg-color);
+  --header-marketplace: var(--bg-color);
+  --header-settings: var(--bg-color);
 
   /* ── CALL BUTTONS (green, per spec) ── */
   --call-accept-bg: #22c55e;
@@ -3170,7 +3170,7 @@ input:focus + .toggle-slider,
 /* ── header-status now follows the live theme (see fix note near the
    first --header-status definition above) rather than a fixed gradient ── */
 :root {
-  --header-status: var(--bg-color, #ffffff);
+  --header-status: var(--bg-color);
 }
 
 /* ── Status module sidebar header: same gradient on all screen sizes ── */
@@ -3202,7 +3202,7 @@ body[data-module="status"] .sidebar-header,
   body[data-module="status"] .sidebar,
   .status-list-panel,
   .status-content {
-    background-color: var(--bg-color, #ffffff) !important;
+    background-color: var(--bg-color) !important;
   }
 
   /* Remove any dark background that may bleed from chat module on mobile */
@@ -3555,7 +3555,7 @@ html.dark-mode .viewer-container {
     padding: 10px 16px;
     cursor: pointer;
     transition: background 0.15s;
-    border-bottom: 1px solid var(--border-color, #2a3942);
+    border-bottom: 1px solid var(--border-color);
     position: relative;
 }
 .status-group-item:hover { background-color: var(--surface-alt, #2a3942); }
@@ -3575,7 +3575,7 @@ html.dark-mode .viewer-container {
     border: 2.5px solid #00a884;
     box-sizing: border-box;
 }
-.status-group-ring.viewed { border-color: var(--text-secondary, #8696a0); }
+.status-group-ring.viewed { border-color: var(--text-secondary); }
 /* Multiple statuses: segmented ring */
 .status-group-ring.multi {
     border: none;
@@ -3597,7 +3597,7 @@ html.dark-mode .viewer-container {
     justify-content: center;
     font-weight: 600;
     font-size: 18px;
-    color: var(--text-primary, #e9edef);
+    color: var(--text-primary);
     overflow: hidden;
     position: relative;
     z-index: 1;
@@ -3619,14 +3619,14 @@ html.dark-mode .viewer-container {
 .status-group-name {
     font-size: 15px;
     font-weight: 600;
-    color: var(--text-primary, #e9edef);
+    color: var(--text-primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 .status-group-meta {
     font-size: 12px;
-    color: var(--text-secondary, #8696a0);
+    color: var(--text-secondary);
     margin-top: 2px;
     white-space: nowrap;
     overflow: hidden;
@@ -3723,11 +3723,11 @@ html.dark-mode .viewer-container {
 #reportModal .category-option {
     padding: 6px 12px;
     border-radius: 20px;
-    border: 1.5px solid var(--border-color, #2a3942);
+    border: 1.5px solid var(--border-color);
     font-size: 12px;
     cursor: pointer;
     transition: all 0.15s;
-    color: var(--text-secondary, #8696a0);
+    color: var(--text-secondary);
     background: transparent;
 }
 #reportModal .category-option.selected {
@@ -3795,7 +3795,7 @@ html.dark-mode .viewer-container {
 #viewedUpdatesLabel {
     margin-top: 4px;
     padding-top: 6px;
-    border-top: 1px solid var(--border-color, #2a3942);
+    border-top: 1px solid var(--border-color);
 }
 
 /* Viewers panel inside footer — dark overlay */
@@ -3825,7 +3825,7 @@ html.dark-mode .viewer-container {
 
 /* My Status row — distinct from friend rows */
 .sw-my-status-row {
-    border-bottom: 1px solid var(--border-color, #2a3942);
+    border-bottom: 1px solid var(--border-color);
     margin-bottom: 2px;
 }
 /* ── P2 FIX: Poll overlay in story viewer ─────────────────────────────── */

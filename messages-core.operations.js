@@ -588,7 +588,18 @@ const ChatManager = {
             } else {
                 debugLog(`[ChatManager] 📤 Sending message to real conversation - using chatId: ${conversationId}`);
                 const _conv = this._conversationsMap.get(conversationId);
-                _recipientUserIdForEncryption = _conv?.friendId || _conv?.otherParticipant?.id || null;
+                // FIX-DECRYPT-OTHERPARTY-RESOLUTION: friendId/otherParticipant.id
+                // alone aren't always populated on a conversation object the
+                // moment a message is sent (e.g. right after opening a chat
+                // from the message module or friend module, before the fuller
+                // fetchConversations-driven resolution has run). Fall back to
+                // the same robust resolver (friendId → otherUserId →
+                // otherParticipant → pendingReceiverId → participantIds →
+                // participants) messages-ui.js exposes, rather than silently
+                // encrypting for the wrong recipient (or not encrypting at
+                // all) when only the first two fields come up empty.
+                _recipientUserIdForEncryption = _conv?.friendId || _conv?.otherParticipant?.id ||
+                    (window.__kynGetConversationPeerId ? (window.__kynGetConversationPeerId(_conv, SessionManager.getUserId()) || null) : null);
                 requestBody = {
                     chatId: conversationId,
                     localId: options.localId || options.id || null,

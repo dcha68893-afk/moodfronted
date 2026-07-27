@@ -54,7 +54,7 @@
         border-radius: 12px;
         cursor: pointer;
         border: 1px dashed var(--accent, #7c3aed);
-        color: var(--text-primary, #fff);
+        color: var(--text-primary);
         font-size: 13px;
         transition: background 0.15s;
       }

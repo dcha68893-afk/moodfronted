@@ -53,7 +53,7 @@
       #kyn-link-preview-card .kyn-preview-text { flex: 1; min-width: 0; }
       #kyn-link-preview-card .kyn-preview-title {
         font-size: 12px; font-weight: 600;
-        color: var(--text-primary, #fff);
+        color: var(--text-primary);
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       }
       #kyn-link-preview-card .kyn-preview-desc {
@@ -63,7 +63,7 @@
         margin-top: 2px;
       }
       #kyn-link-preview-card .kyn-preview-site {
-        font-size: 10px; color: var(--accent-color, #7c3aed); margin-top: 2px;
+        font-size: 10px; color: var(--accent-color); margin-top: 2px;
       }
       #kyn-link-preview-card .kyn-preview-dismiss {
         position: absolute; top: 6px; right: 8px;
@@ -72,7 +72,7 @@
       }
       /* In-message link preview card */
       .kyn-msg-link-preview {
-        border-left: 3px solid var(--accent-color, #7c3aed);
+        border-left: 3px solid var(--accent-color);
         padding: 8px 10px; margin-top: 6px; border-radius: 0 8px 8px 0;
         background: var(--bg-secondary, rgba(255,255,255,0.04));
         max-width: 280px;
@@ -81,14 +81,14 @@
         width: 100%; border-radius: 6px; object-fit: cover; max-height: 140px; margin-bottom: 6px;
       }
       .kyn-msg-link-preview .kyn-mlp-title {
-        font-size: 12px; font-weight: 600; color: var(--text-primary, #fff); margin-bottom: 2px;
+        font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 2px;
       }
       .kyn-msg-link-preview .kyn-mlp-desc {
         font-size: 11px; color: var(--text-muted, #888);
         display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
       }
       .kyn-msg-link-preview .kyn-mlp-site {
-        font-size: 10px; color: var(--accent-color, #7c3aed); margin-top: 4px;
+        font-size: 10px; color: var(--accent-color); margin-top: 4px;
       }
     `;
     document.head.appendChild(style);
