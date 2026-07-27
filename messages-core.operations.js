@@ -119,7 +119,63 @@ const ChatManager = {
             const pendingId = `pending_${receiverId}`;
             return this._conversations.find(c => c.id === pendingId || c.pendingReceiverId === receiverId);
         },
-        
+
+        // FIX-ROOT-CAUSE-NO-FIND-EXISTING: messages-ui.js's openChatWithUserInUI
+        // has always called `core.findExistingConversation(numericUserId)` when
+        // opening a chat with findExisting:true (this is the flag set by every
+        // entry point EXCEPT chat history — friends "message" button, call-end
+        // return-to-chat, status replies, marketplace "message seller", the
+        // "start chat" modal). That function never existed anywhere in the
+        // codebase, so the `typeof core.findExistingConversation === 'function'`
+        // guard around the call always evaluated false, and every one of those
+        // entry points fell straight through to getOrCreatePendingConversation()
+        // — creating a brand-new local-only pending_<userId> conversation even
+        // when a REAL conversation with that user (with its own real chatId)
+        // already existed and was already sitting in _conversations.
+        //
+        // Net effect: two conversation entries for the same person (the
+        // duplicate-looking user in the chat list), and the message got sent
+        // via `{ receiverId }` against the pending shadow. The backend itself
+        // correctly resolves receiverId -> the pre-existing real chat and
+        // delivers over the socket, but this client never learns that the
+        // pending_<userId> it's actively viewing IS that real chat (no
+        // replacePendingConversation() call ever ran for a chat it didn't know
+        // existed), so its own subsequent history fetches/reads stay pointed at
+        // the wrong (empty) chatId — which is exactly what made the receiver
+        // look like they never got anything, from the sender's perspective, once
+        // they left and came back to that "duplicate" thread.
+        //
+        // Only match a REAL conversation (never another pending shadow) so we
+        // actually resolve back to the server-known chat instead of matching
+        // ourselves.
+        findExistingConversation: function(userId) {
+            if (userId === null || userId === undefined || userId === '') return null;
+            const targetId = String(userId);
+            let myId = null;
+            try { myId = (typeof SessionManager !== 'undefined' && SessionManager.getUserId) ? SessionManager.getUserId() : null; } catch (_) {}
+
+            for (const conv of this._conversations) {
+                if (!conv || conv.isPending || (typeof conv.id === 'string' && conv.id.startsWith('pending_'))) continue;
+                let peerId = null;
+                try {
+                    peerId = (typeof window !== 'undefined' && window.__kynGetConversationPeerId)
+                        ? window.__kynGetConversationPeerId(conv, myId)
+                        : null;
+                } catch (_) {}
+                if (!peerId) {
+                    peerId = conv.friendId ?? conv.otherUserId ?? conv.otherParticipant?.id ??
+                        conv.otherParticipant?.userId ?? conv.pendingReceiverId ?? null;
+                }
+                if (!peerId && Array.isArray(conv.participantIds)) {
+                    peerId = conv.participantIds.find(pid => String(pid) !== String(myId)) || null;
+                }
+                if (peerId !== null && peerId !== undefined && String(peerId) === targetId) {
+                    return conv;
+                }
+            }
+            return null;
+        },
+
         getOrCreatePendingConversation: function(receiverId, userName, userAvatar) {
             if (!receiverId) return null;
             
