@@ -90,7 +90,7 @@ body {
 /* Sidebar */
 .sidebar {
     width: 380px;
-    background-color: #111b21;
+    background-color: var(--kyn-text-primary);
     border-right: 1px solid var(--border-color);
     display: flex;
     flex-direction: column;
@@ -558,7 +558,7 @@ body {
 
 .message-bubble.sent {
     background-color: #005c4b;
-    color: #e9edef;
+    color: var(--kyn-border);
     border-radius: 7.5px 0 7.5px 7.5px;
 }
 
@@ -574,7 +574,7 @@ body {
 
 .message-bubble.received {
     background-color: #202c33;
-    color: #e9edef;
+    color: var(--kyn-border);
     border-radius: 0 7.5px 7.5px 7.5px;
 }
 
@@ -623,7 +623,7 @@ body {
 /* SENT: right side, dark green bubble */
 .message.sent .message-bubble {
     background: #005c4b;
-    color: #e9edef;
+    color: var(--kyn-border);
     border-radius: 7.5px 0 7.5px 7.5px;
     max-width: 75%;
     width: fit-content;
@@ -648,7 +648,7 @@ body {
 /* RECEIVED: left side, dark grey bubble */
 .message.received .message-bubble {
     background: #202c33;
-    color: #e9edef;
+    color: var(--kyn-border);
     border-radius: 0 7.5px 7.5px 7.5px;
     max-width: 75%;
     width: fit-content;
@@ -697,7 +697,7 @@ body {
 /* Pending/sending — lighter green */
 .message.sent.message-sending .message-bubble {
     background: #128c7e;
-    color: #e9edef;
+    color: var(--kyn-border);
     opacity: 0.85;
 }
 
@@ -744,7 +744,7 @@ body {
     padding: 11px 16px;
     cursor: pointer;
     font-size: 14px;
-    color: #e9edef;
+    color: var(--kyn-border);
     transition: background .15s;
     border: none;
     background: none;
@@ -3259,7 +3259,7 @@ body {
 .message.sent  .message-bubble,
 .message-bubble.sent {
     background: #005c4b !important;
-    color: #e9edef !important;
+    color: var(--kyn-border) !important;
     border-radius: 7.5px 0 7.5px 7.5px !important;
     box-shadow: 0 1px 1px rgba(0,0,0,0.3);
 }
@@ -3267,7 +3267,7 @@ body {
 .message.received .message-bubble,
 .message-bubble.received {
     background: #202c33 !important;
-    color: #e9edef !important;
+    color: var(--kyn-border) !important;
     border-radius: 0 7.5px 7.5px 7.5px !important;
 }
 
@@ -3448,16 +3448,16 @@ body[data-module="settings"] .sidebar-header {
 /* Friends header → white/gray (friend role) */
 body[data-module="friends"] .sidebar-header {
   background: var(--header-friends) !important;
-  color: #374151 !important;
+  color: var(--kyn-border) !important;
 }
 
 body[data-module="friends"] .sidebar-header h2 {
-  color: #374151 !important;
+  color: var(--kyn-border) !important;
 }
 
 body[data-module="friends"] .add-friend-btn {
   background-color: rgba(0, 0, 0, 0.08) !important;
-  color: #374151 !important;
+  color: var(--kyn-border) !important;
   border-color: rgba(0,0,0,0.15) !important;
 }
 
@@ -3841,12 +3841,12 @@ body[data-module="friends"] .friend-item:hover {
 .mutual-friends,
 .mutual-friends-count {
   background-color: #f3f4f6 !important;
-  color: #374151 !important;
+  color: var(--kyn-border) !important;
 }
 
 .mutual-friends:hover,
 .mutual-friends-count:hover {
-  background-color: #e5e7eb !important;
+  background-color: var(--kyn-text-primary) !important;
 }
 
 /* Friend category badges keep their original colors */
@@ -3913,7 +3913,7 @@ body[data-module="friends"] .friend-item:hover {
   .message-bubble.sent,
   .message.sent .message-bubble {
     background-color: #005c4b !important;
-    color: #e9edef !important;
+    color: var(--kyn-border) !important;
   }
 
   /* Story rings stay gradient on mobile */
@@ -3948,7 +3948,7 @@ body[data-module="friends"] .friend-item:hover {
    ================================================================ */
 
 /* Legacy variable bridge */
-.message-bubble.sent { background-color: #005c4b !important; color: #e9edef !important; }
+.message-bubble.sent { background-color: #005c4b !important; color: var(--kyn-border) !important; }
 .chat-input-btn.send  { background-color: #00a884 !important; }
 .quick-action-icon    { color: #00a884 !important; }
 .friend-status.online { background-color: #00a884 !important; }

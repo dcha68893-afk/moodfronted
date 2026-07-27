@@ -2365,16 +2365,16 @@ body[data-module="settings"] .sidebar-header {
 /* Friends header → white/gray (friend role) */
 body[data-module="friends"] .sidebar-header {
   background: var(--header-friends) !important;
-  color: #374151 !important;
+  color: var(--kyn-border) !important;
 }
 
 body[data-module="friends"] .sidebar-header h2 {
-  color: #374151 !important;
+  color: var(--kyn-border) !important;
 }
 
 body[data-module="friends"] .add-friend-btn {
   background-color: rgba(0, 0, 0, 0.08) !important;
-  color: #374151 !important;
+  color: var(--kyn-border) !important;
   border-color: rgba(0,0,0,0.15) !important;
 }
 
@@ -2733,12 +2733,12 @@ body[data-module="friends"] .friend-item:hover {
 .mutual-friends,
 .mutual-friends-count {
   background-color: #f3f4f6 !important;
-  color: #374151 !important;
+  color: var(--kyn-border) !important;
 }
 
 .mutual-friends:hover,
 .mutual-friends-count:hover {
-  background-color: #e5e7eb !important;
+  background-color: var(--kyn-text-primary) !important;
 }
 
 /* Friend category badges keep their original colors */
@@ -2965,7 +2965,7 @@ input:focus + .toggle-slider,
     min-width: 0;
 }
 
-.jm-search-input::placeholder { color: #9ca3af; }
+.jm-search-input::placeholder { color: var(--kyn-text-secondary); }
 
 .jm-search-clear {
     background: none;
@@ -3220,7 +3220,7 @@ input:focus + .toggle-slider,
 .jm-hcard-oldprice {
     font-size: 11px;
     text-decoration: line-through;
-    color: #9ca3af;
+    color: var(--kyn-text-secondary);
     margin-left: 4px;
 }
 
@@ -3243,7 +3243,7 @@ input:focus + .toggle-slider,
     grid-template-columns: repeat(2, 1fr) !important;
     gap: 8px !important;
     padding: 8px !important;
-    background: #f5f5f5 !important;
+    background: var(--kyn-bg-hover) !important;
 }
 
 @media (min-width: 600px) {
@@ -3422,7 +3422,7 @@ input:focus + .toggle-slider,
 .jm-card-oldprice {
     font-size: 11px;
     text-decoration: line-through;
-    color: #9ca3af;
+    color: var(--kyn-text-secondary);
 }
 
 .jm-card-delivery {
@@ -3454,7 +3454,7 @@ input:focus + .toggle-slider,
 }
 
 .jm-add-cart-btn:active { transform: scale(0.97); background: var(--jm-orange-dark); }
-.jm-add-cart-btn:disabled { background: #e5e7eb; color: #9ca3af; cursor: not-allowed; }
+.jm-add-cart-btn:disabled { background: var(--kyn-text-primary); color: var(--kyn-text-secondary); cursor: not-allowed; }
 
 .jm-add-cart-btn.in-cart {
     background: var(--jm-green);
@@ -3661,7 +3661,7 @@ input:focus + .toggle-slider,
 .jm-cart-item-oldprice {
     font-size: 11px;
     text-decoration: line-through;
-    color: #9ca3af;
+    color: var(--kyn-text-secondary);
     margin-left: 6px;
 }
 
@@ -3695,7 +3695,7 @@ input:focus + .toggle-slider,
     transition: background 0.15s;
 }
 
-.jm-qty-btn:hover { background: #e5e7eb; }
+.jm-qty-btn:hover { background: var(--kyn-text-primary); }
 
 .jm-qty-val {
     font-size: 14px;
@@ -3715,7 +3715,7 @@ input:focus + .toggle-slider,
 }
 
 .jm-cart-out-btn {
-    background: #9ca3af;
+    background: var(--kyn-text-secondary);
     color: #fff;
     border: none;
     border-radius: 6px;
@@ -3763,7 +3763,7 @@ input:focus + .toggle-slider,
 }
 
 .jm-checkout-btn:hover { background: var(--jm-orange-dark); }
-.jm-checkout-btn:disabled { background: #9ca3af; cursor: not-allowed; }
+.jm-checkout-btn:disabled { background: var(--kyn-text-secondary); cursor: not-allowed; }
 
 .jm-cart-recently {
     margin-top: 8px;
@@ -4264,7 +4264,7 @@ input:focus + .toggle-slider,
     width: 72px;
     height: 72px;
     border-radius: 6px;
-    background: #9ca3af;
+    background: var(--kyn-text-secondary);
     color: #fff;
     display: flex;
     align-items: center;

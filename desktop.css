@@ -746,7 +746,7 @@
     
     .call-time {
         font-size: 0.75rem;
-        color: #9CA3AF;
+        color: var(--kyn-text-secondary);
     }
     
     /* Friends Tab */

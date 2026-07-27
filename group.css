@@ -23,7 +23,7 @@
         .mood-calm { background: #e3f2fd; color: #1976d2; }
         .mood-busy { background: #fff3e0; color: #f57c00; }
         .mood-celebratory { background: #fce4ec; color: #c2185b; }
-        .mood-silent { background: #f5f5f5; color: #616161; }
+        .mood-silent { background: var(--kyn-bg-hover); color: #616161; }
         .mood-urgent { background: #ffebee; color: #d32f2f; }
         
         .posting-rules-banner {
@@ -46,7 +46,7 @@
             border-radius: 10px;
             font-size: 11px;
             margin-right: 6px;
-            background: #f5f5f5;
+            background: var(--kyn-bg-hover);
             color: #666;
         }
         
@@ -78,7 +78,7 @@
             margin: 5px 0;
         }
         
-        .mode-read-only { background: #f5f5f5; color: #666; }
+        .mode-read-only { background: var(--kyn-bg-hover); color: #666; }
         .mode-react-only { background: #e3f2fd; color: #1976d2; }
         .mode-anonymous { background: #f3e5f5; color: #7b1fa2; }
         
@@ -2878,16 +2878,16 @@ body[data-module="settings"] .sidebar-header {
 /* Friends header → white/gray (friend role) */
 body[data-module="friends"] .sidebar-header {
   background: var(--header-friends) !important;
-  color: #374151 !important;
+  color: var(--kyn-border) !important;
 }
 
 body[data-module="friends"] .sidebar-header h2 {
-  color: #374151 !important;
+  color: var(--kyn-border) !important;
 }
 
 body[data-module="friends"] .add-friend-btn {
   background-color: rgba(0, 0, 0, 0.08) !important;
-  color: #374151 !important;
+  color: var(--kyn-border) !important;
   border-color: rgba(0,0,0,0.15) !important;
 }
 
@@ -3246,12 +3246,12 @@ body[data-module="friends"] .friend-item:hover {
 .mutual-friends,
 .mutual-friends-count {
   background-color: #f3f4f6 !important;
-  color: #374151 !important;
+  color: var(--kyn-border) !important;
 }
 
 .mutual-friends:hover,
 .mutual-friends-count:hover {
-  background-color: #e5e7eb !important;
+  background-color: var(--kyn-text-primary) !important;
 }
 
 /* Friend category badges keep their original colors */

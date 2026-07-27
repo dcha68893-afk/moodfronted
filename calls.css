@@ -2379,16 +2379,16 @@ body[data-module="settings"] .sidebar-header {
 /* Friends header → white/gray (friend role) */
 body[data-module="friends"] .sidebar-header {
   background: var(--header-friends) !important;
-  color: #374151 !important;
+  color: var(--kyn-border) !important;
 }
 
 body[data-module="friends"] .sidebar-header h2 {
-  color: #374151 !important;
+  color: var(--kyn-border) !important;
 }
 
 body[data-module="friends"] .add-friend-btn {
   background-color: rgba(0, 0, 0, 0.08) !important;
-  color: #374151 !important;
+  color: var(--kyn-border) !important;
   border-color: rgba(0,0,0,0.15) !important;
 }
 
@@ -2747,12 +2747,12 @@ body[data-module="friends"] .friend-item:hover {
 .mutual-friends,
 .mutual-friends-count {
   background-color: #f3f4f6 !important;
-  color: #374151 !important;
+  color: var(--kyn-border) !important;
 }
 
 .mutual-friends:hover,
 .mutual-friends-count:hover {
-  background-color: #e5e7eb !important;
+  background-color: var(--kyn-text-primary) !important;
 }
 
 /* Friend category badges keep their original colors */
