@@ -1159,6 +1159,18 @@ const UIStateManager = {
                 }
             }
 
+            // FORENSIC: log every render decision, not just successes, so a
+            // silently-dropped incoming message (network tab shows delivered,
+            // nothing appears on screen) is visible in the console instead of
+            // invisible. Pinpoints exactly what activeChatId vs. incoming
+            // chatId looked like at the moment the match was made/missed —
+            // this is the one thing the existing UI_RENDERED log (which only
+            // fires on success) could never tell us.
+            // NOTE: uses console.log directly (not debugLog) so it's visible
+            // without having to flip on __MESSAGES_DEBUG__ / DEBUG first —
+            // this is meant to be readable on the very next live test.
+            console.log(`[FORENSIC] UI_RENDER_CHECK | incomingChatId=${_rcId} | activeChatId=${_acId} | activeConvSet=${!!activeChat} | isThisChat=${isThisChat} | msgId=${normalizedMessage ? (normalizedMessage.id || normalizedMessage.localId || '?') : '?'} | ts=${Date.now()}`);
+
             // Always update sidebar (unread badge, online status, last message)
             try {
                 window.dispatchEvent(new CustomEvent('renderChatsList', {

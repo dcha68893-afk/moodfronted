@@ -32,7 +32,7 @@
 // one-time clean slate for every static asset already cached from
 // previous versions.
 const SW_VERSION = '19.2.0';
-const CACHE_NAME = 'nexopa-static-v22'; // Bumped — theme.colors.css/pwa-manager.js now network-first, forces stale-CSS eviction
+const CACHE_NAME = 'nexopa-static-v23'; // Bumped — messages-core.ui-bridge.js/messages-ui.js changed (forensic render-check logging), forces stale-JS eviction
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
 
 // ---------------------------------------------------------------------------

@@ -14786,8 +14786,14 @@ Type: ${message.type || 'text'}`;
         // render pipeline, so this fallback doesn't reject a message the
         // primary pipeline would have accepted).
         const _stripPend3 = function(s) { return s.startsWith('pending_') ? s.slice(8) : s; };
-        if (activeChatId && msgChatId && activeChatId !== msgChatId &&
-            _stripPend3(activeChatId) !== _stripPend3(msgChatId)) return;
+        const _fallbackMatches = !(activeChatId && msgChatId && activeChatId !== msgChatId &&
+            _stripPend3(activeChatId) !== _stripPend3(msgChatId));
+        // FORENSIC: same visibility gap as the primary pipeline — this fallback
+        // silently returns here when it's a "no match", giving zero trace that
+        // it was even considered. Log unconditionally so a live test shows
+        // whether the primary AND fallback both missed for the same reason.
+        console.log(`[FORENSIC] UI_RENDER_CHECK_FALLBACK | incomingChatId=${msgChatId} | activeChatId=${activeChatId} | matches=${_fallbackMatches} | ts=${Date.now()}`);
+        if (!_fallbackMatches) return;
 
         // Use a small delay to let the normal render pipeline try first
         setTimeout(function() {
