@@ -578,18 +578,51 @@
         console.log('[ToolPatch] Settings applied');
     }
 
-    // ── Wire into AppSettings if it exists ────────────────────────────────────
+    // ── Wire into the real settings pipeline ───────────────────────────────────
+    // FIX (tool-settings-not-reactive): this used to poll forever for
+    // `window.AppSettings` / `window.KynectaSettings`, but neither of those
+    // globals is ever created anywhere in the app (settings-core.js never
+    // assigns `window.AppSettings = ...`). So `_subscribeToSettings` retried
+    // every second forever and `_applyToolSettings` (theme, feature toggles,
+    // permissions) was NEVER invoked on a real settings change — the tools
+    // module just kept whatever theme/state it had at first paint, which is
+    // exactly the "hardcoded theme ignoring settings changes" symptom.
+    // settings-core.js actually broadcasts changes via
+    // `window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: { settings }}))`
+    // (and a `marketplace:settingsUpdated` variant used by a couple of other
+    // modules), and caches the last-known settings object in
+    // `localStorage['kyn_app_settings']`. Listen to the events that are
+    // actually fired, and hydrate immediately from the cache on load so the
+    // correct theme/toggles are applied before the first settings event ever
+    // arrives (e.g. tools page opened directly, not via navigation).
+    function _extractSettings(e) {
+        if (!e) return null;
+        const d = e.detail;
+        if (!d) return null;
+        return d.settings || d;
+    }
+
     function _subscribeToSettings() {
+        try {
+            const cached = localStorage.getItem('kyn_app_settings');
+            if (cached) _applyToolSettings(JSON.parse(cached));
+        } catch (_) {}
+
+        window.addEventListener('settingsUpdated', function (e) {
+            const settings = _extractSettings(e);
+            if (settings) _applyToolSettings(settings);
+        });
+        window.addEventListener('marketplace:settingsUpdated', function (e) {
+            const settings = _extractSettings(e);
+            if (settings) _applyToolSettings(settings);
+        });
+
         const AS = window.AppSettings || window.KynectaSettings;
         if (AS && typeof AS.subscribe === 'function') {
             AS.subscribe(_applyToolSettings);
             const current = typeof AS.getAll === 'function' ? AS.getAll() : (typeof AS.get === 'function' ? AS.get() : null);
             if (current) _applyToolSettings(current);
-            return;
         }
-
-        // Retry
-        setTimeout(_subscribeToSettings, 1000);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

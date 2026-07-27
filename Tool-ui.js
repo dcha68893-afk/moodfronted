@@ -5442,8 +5442,93 @@ function _nav(page, subpage) {
 window._jmNav  = _nav;
 window._jmBack = _navBack;
 
+// ── Shared bottom-sheet chooser used by both the Messages and WhatsApp icons
+// FEATURE 5: previously the WhatsApp icon just opened a hardcoded number
+// (wa.me/254700000000) with no choice at all, and the Messages icon always
+// jumped straight into the in-app chat panel. Now both icons ask the user
+// what they want first.
+function _jmShowChooser(opts) {
+    const existing = document.getElementById('jmChooserSheet');
+    if (existing) existing.remove();
+
+    if (!document.getElementById('jmChooserSheetStyle')) {
+        const style = document.createElement('style');
+        style.id = 'jmChooserSheetStyle';
+        style.textContent = '@keyframes jmSheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }';
+        document.head.appendChild(style);
+    }
+
+    const wrap = document.createElement('div');
+    wrap.id = 'jmChooserSheet';
+    wrap.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center';
+    wrap.innerHTML = `
+        <div style="background:#fff;width:100%;max-width:480px;border-radius:18px 18px 0 0;padding:18px 16px 22px;animation:jmSheetUp .18s ease-out">
+            <div style="width:36px;height:4px;background:#e5e7eb;border-radius:4px;margin:0 auto 14px"></div>
+            <div style="font-weight:800;font-size:15px;color:#111827;margin-bottom:14px;text-align:center">${_esc(opts.title || 'Choose an option')}</div>
+            <button data-jm-choice="mine" style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 12px;border:1.5px solid #e5e7eb;border-radius:12px;background:#fff;margin-bottom:10px;cursor:pointer;text-align:left">
+                <i class="fas ${_esc(opts.mineIcon || 'fa-user')}" style="font-size:18px;color:#2563eb;width:22px;text-align:center"></i>
+                <div><div style="font-weight:700;font-size:13px;color:#111827">${_esc(opts.mineLabel || 'Open My Account')}</div><div style="font-size:11px;color:#6b7280;margin-top:1px">${_esc(opts.mineSub || '')}</div></div>
+            </button>
+            <button data-jm-choice="admin" style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 12px;border:1.5px solid #e5e7eb;border-radius:12px;background:#fff;cursor:pointer;text-align:left">
+                <i class="fas fa-headset" style="font-size:18px;color:#25d366;width:22px;text-align:center"></i>
+                <div><div style="font-weight:700;font-size:13px;color:#111827">Chat with Admin</div><div style="font-size:11px;color:#6b7280;margin-top:1px">Get help from support</div></div>
+            </button>
+            <button data-jm-choice="cancel" style="width:100%;text-align:center;padding:12px;margin-top:10px;border:none;background:none;color:#9ca3af;font-weight:600;font-size:13px;cursor:pointer">Cancel</button>
+        </div>`;
+    document.body.appendChild(wrap);
+
+    return new Promise((resolve) => {
+        wrap.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-jm-choice]');
+            if (e.target === wrap || (btn && btn.dataset.jmChoice === 'cancel')) {
+                wrap.remove();
+                resolve(null);
+                return;
+            }
+            if (btn) {
+                wrap.remove();
+                resolve(btn.dataset.jmChoice);
+            }
+        });
+    });
+}
+
+async function _jmOpenAdminWhatsApp() {
+    try {
+        const res = await (window.apiCall ? window.apiCall('GET', '/api/tools/admin-contact') : fetch('/api/tools/admin-contact', { headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` } }).then(r => r.json()));
+        const data = res?.data || res;
+        if (!data?.whatsapp) { _toast('Admin contact is not set up yet', 'error', '⚠️'); return; }
+        const msg = encodeURIComponent(data.defaultMessage || 'Hi, I need help with my account.');
+        window.open(`https://wa.me/${data.whatsapp}?text=${msg}`, '_blank');
+    } catch (e) {
+        _toast('Could not reach admin contact right now', 'error', '⚠️');
+    }
+}
+
+async function _jmOpenOwnWhatsApp() {
+    let num = (prompt('Enter your WhatsApp number (with country code, e.g. 2547XXXXXXXX):') || '').replace(/[^\d]/g, '');
+    if (!num) return;
+    window.open(`https://wa.me/${num}`, '_blank');
+}
+
 // ── Chat navigation — opens the messages module (like WhatsApp icon) ────────
-window._jmOpenChat = function() {
+window._jmOpenChat = async function() {
+    const choice = await _jmShowChooser({
+        title: 'Messages',
+        mineIcon: 'fa-comment-dots',
+        mineLabel: 'Open My Messages',
+        mineSub: 'Go to your chats',
+    });
+    if (choice === 'admin') {
+        if (typeof window._jmOpenSupport === 'function') { window._jmOpenSupport(); return; }
+        await _jmOpenAdminWhatsApp();
+        return;
+    }
+    if (choice !== 'mine') return; // cancelled
+    _jmOpenChatDirect();
+};
+
+function _jmOpenChatDirect() {
     try {
         // Tell parent chat.html to navigate to messages page
         window.parent.postMessage({ type: 'NAVIGATE_TO_PAGE', payload: { page: 'messages' } }, '*');
@@ -5459,7 +5544,7 @@ window._jmOpenChat = function() {
         // If cross-origin blocked, try within same page
         if (typeof navigateToPage === 'function') navigateToPage('messages');
     }
-};
+}
 
 // Update chat badge from parent unread count
 window.addEventListener('message', (e) => {
@@ -7368,8 +7453,15 @@ window._jmOpenSupport = function() {
     if (typeof openChat === 'function') { openChat('support','Support'); return; }
     _toast('Opening support chat…', 'info', '💬');
 };
-window._jmOpenWhatsApp = function() {
-    window.open('https://wa.me/254700000000?text=Hi%2C%20I%20need%20help%20with%20my%20order', '_blank');
+window._jmOpenWhatsApp = async function() {
+    const choice = await _jmShowChooser({
+        title: 'WhatsApp',
+        mineIcon: 'fa-user',
+        mineLabel: 'Open My WhatsApp',
+        mineSub: 'Enter your number to open it',
+    });
+    if (choice === 'mine') await _jmOpenOwnWhatsApp();
+    else if (choice === 'admin') await _jmOpenAdminWhatsApp();
 };
 window._jmLogout = function() {
     if (confirm('Are you sure you want to log out?')) {

@@ -301,18 +301,36 @@ const FriendRequestManager = {
                     isBusiness:  options.isBusiness  || false,
                     message:     options.message     || '',
                 };
-                const _res = await fetch(`${_apiBase}/friends/requests/send`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${_token}` },
-                    body: JSON.stringify(_requestBody)
-                });
+                // BUG FIX: this fetch previously had no timeout at all. If the network
+                // stalled (bad connectivity, a CORS preflight that never resolves, a
+                // slow/unresponsive server) the promise never settled, and the caller
+                // (e.g. the QR "Send Friend Request & Save" button) was left stuck on
+                // its spinner forever with no error and no way to retry. Cap it with
+                // an AbortController so it always settles within 12s.
+                const _abortController = new AbortController();
+                const _timeoutId = setTimeout(() => _abortController.abort(), 12000);
+                let _res;
+                try {
+                    _res = await fetch(`${_apiBase}/friends/requests/send`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${_token}` },
+                        body: JSON.stringify(_requestBody),
+                        signal: _abortController.signal
+                    });
+                } finally {
+                    clearTimeout(_timeoutId);
+                }
                 const _json = await _res.json().catch(() => ({}));
                 const _inner = (_json && 'data' in _json) ? _json.data : _json;
                 response = { success: _res.ok, statusCode: _res.status, data: _inner,
                              error: _json.error || _json.message || null };
                 console.log('[FriendRequestManager] Send result:', _res.status, response.success);
             } catch (_fetchErr) {
-                Logger.warn('FriendRequestManager', 'Direct fetch failed, using bridge', _fetchErr.message);
+                const _wasTimeout = _fetchErr && _fetchErr.name === 'AbortError';
+                Logger.warn('FriendRequestManager', _wasTimeout ? 'Direct fetch timed out, using bridge' : 'Direct fetch failed, using bridge', _fetchErr.message);
+                // Fall back to the postMessage bridge, which has its own 30s timeout
+                // and always resolves — so the caller is guaranteed a final answer
+                // instead of an indefinitely spinning button.
                 response = await authorizedRequest('/api/friends/requests/send', {
                     method: 'POST',
                     body: JSON.stringify({ receiverId: userId, category: options.category || 'friend', note: options.note || '' })

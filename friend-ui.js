@@ -3343,20 +3343,46 @@ async function renderFriendSuggestions() {
     const result = await loadFriendSuggestions(10);
     const suggestions = (result && result.suggestions) || [];
 
-    if (suggestions.length === 0) {
+    // BUG FIX: merge in people found via real device-contact matching (see
+    // importPhoneContacts()/contactMatchesFound) so someone from the user's
+    // phonebook who's on the app shows up here even when the mutual-friend /
+    // shared-group scoring in /api/friends/suggestions has no signal for them yet.
+    const phoneMatches = Array.isArray(window.__phoneContactMatches) ? window.__phoneContactMatches : [];
+    const seenIds = new Set(suggestions.map(u => String(u.id)));
+    const merged = [...suggestions];
+    phoneMatches.forEach(u => {
+        if (u && u.id && !seenIds.has(String(u.id))) {
+            seenIds.add(String(u.id));
+            merged.unshift(u); // phone contacts are a stronger signal — show first
+        }
+    });
+
+    if (merged.length === 0) {
         container.style.display = 'none';
         return;
     }
 
     list.innerHTML = '';
     const fragment = document.createDocumentFragment();
-    suggestions.forEach(user => {
+    merged.forEach(user => {
         const item = createUserSearchItemElement(user);
         if (item && item.nodeType === Node.ELEMENT_NODE) fragment.appendChild(item);
     });
     list.appendChild(fragment);
     container.style.display = '';
 }
+
+// BUG FIX: importPhoneContacts() (friend-core.ui-bridge.js) dispatches this event
+// with real matched users once device contacts are hashed and checked against
+// /api/friends/contacts/match, but until now nothing listened for it — the results
+// were computed and then thrown away. Cache them and refresh the suggestions UI.
+window.addEventListener('contactMatchesFound', (event) => {
+    const matches = (event.detail && event.detail.matches) || [];
+    window.__phoneContactMatches = matches.map(m => ({ ...m, source: m.source || 'phone_contact' }));
+    if (typeof renderFriendSuggestions === 'function') {
+        renderFriendSuggestions().catch(() => {});
+    }
+});
 
 // [9] UI ELEMENT CREATORS - STRICT LIFECYCLE COMPLIANCE
 // =============================================
@@ -5806,9 +5832,26 @@ function bindAllEvents() {
             btn.disabled = true;
 
             try {
-                await simulateContactSync();
+                // BUG FIX: this used to call simulateContactSync(), a pure mock that
+                // always returns { syncedContacts: 0, newContacts: 0 } and never touches
+                // the device's real contacts. It never called the working backend
+                // /api/friends/contacts/match endpoint, so people from the user's phone
+                // who are already on the app could never surface as "People You May Know".
+                // Use the real importPhoneContacts() implementation instead — it reads
+                // the device contact list via the Contact Picker API, hashes phone
+                // numbers client-side, and matches them against registered users.
+                if (typeof importPhoneContacts === 'function') {
+                    await importPhoneContacts();
+                } else {
+                    Logger.warn?.('Contacts', 'importPhoneContacts not available, falling back to mock sync');
+                    await simulateContactSync();
+                }
                 await loadContactsFromBackend();
                 renderContacts();
+                // Refresh "People You May Know" so phone-contact matches merge into it.
+                if (typeof renderFriendSuggestions === 'function') {
+                    renderFriendSuggestions().catch(() => {});
+                }
                 // Sync runs silently in background - no toast shown to user
             } catch (error) {
                 console.warn('Contact sync failed:', error);
