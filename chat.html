@@ -751,7 +751,12 @@
             height: 40px;
             background: transparent;
             border-radius: 0 0 40px 40px;
-            box-shadow: 0 20px 0 0 rgba(13,17,26,0.97);
+            /* FIX (footer sparkle): was hardcoded rgba(13,17,26,0.97) — a
+               fixed dark blob above the nav bar that stayed dark in light
+               theme and created a visible seam against the light page
+               background behind it. Now follows the same theme variable
+               as the bar itself, so the "cutout" always blends in. */
+            box-shadow: 0 20px 0 0 var(--kyn-navbar-notch-shadow, rgba(13,17,26,0.97));
             pointer-events: none;
         }
 
@@ -762,10 +767,16 @@
             left: 0;
             right: 0;
             height: 60px; /* PHASE15 FIX: reduced from 76px */
-            background: linear-gradient(180deg, rgba(10,13,22,0.98) 0%, rgba(13,17,28,0.99) 100%);
+            /* FIX (footer sparkle): was hardcoded permanently dark
+               (rgba(10,13,22,...)) with no light-mode value, so the footer
+               nav bar stayed black even when the header/body switched to
+               light theme — the visible top/bottom "sparkle" seam reported
+               against the theme system. Now reads the same --kyn-bg-navbar
+               variable the theme engine paints before first render. */
+            background: var(--kyn-bg-navbar, linear-gradient(180deg, rgba(10,13,22,0.98) 0%, rgba(13,17,28,0.99) 100%));
             backdrop-filter: blur(24px) saturate(200%);
             -webkit-backdrop-filter: blur(24px) saturate(200%);
-            border-top: 1px solid rgba(255,255,255,0.06);
+            border-top: 1px solid var(--kyn-navbar-border, rgba(255,255,255,0.06));
             z-index: 1000;
             justify-content: space-around;
             align-items: center;
@@ -815,7 +826,10 @@
             justify-content: center;
             gap: 4px;
             padding: 10px 4px 8px;
-            color: rgba(148, 163, 184, 0.55);
+            /* FIX (footer sparkle): was a fixed slate-gray tuned only for
+               a dark bar; on a light-theme bar it read as low-contrast and
+               inconsistent with the header's themed text colors. */
+            color: var(--kyn-navbar-icon-inactive, rgba(148, 163, 184, 0.55));
             cursor: pointer;
             font-size: 21px;
             position: relative;
@@ -941,7 +955,7 @@
             background: linear-gradient(145deg, #f97316 0%, #ea580c 50%, #c2410c 100%);
             border-radius: 50%;
             box-shadow:
-                0 0 0 4px rgba(10,13,22,0.98),
+                0 0 0 4px var(--kyn-navbar-ring, rgba(10,13,22,0.98)),
                 0 0 0 5px rgba(249,115,22,0.25),
                 0 6px 24px rgba(249,115,22,0.65),
                 0 12px 40px rgba(0,0,0,0.5);
@@ -957,14 +971,14 @@
         @keyframes centerBtnIdle {
             0%, 100% {
                 box-shadow:
-                    0 0 0 4px rgba(10,13,22,0.98),
+                    0 0 0 4px var(--kyn-navbar-ring, rgba(10,13,22,0.98)),
                     0 0 0 5px rgba(249,115,22,0.20),
                     0 6px 24px rgba(249,115,22,0.55),
                     0 12px 40px rgba(0,0,0,0.5);
             }
             50% {
                 box-shadow:
-                    0 0 0 4px rgba(10,13,22,0.98),
+                    0 0 0 4px var(--kyn-navbar-ring, rgba(10,13,22,0.98)),
                     0 0 0 8px rgba(249,115,22,0.12),
                     0 6px 32px rgba(249,115,22,0.75),
                     0 12px 40px rgba(0,0,0,0.5);
@@ -990,7 +1004,7 @@
             transform: scale(0.91) translateY(-2px);
             animation: none;
             box-shadow:
-                0 0 0 4px rgba(10,13,22,0.98),
+                0 0 0 4px var(--kyn-navbar-ring, rgba(10,13,22,0.98)),
                 0 0 0 8px rgba(249,115,22,0.15),
                 0 8px 36px rgba(249,115,22,0.8),
                 0 16px 48px rgba(0,0,0,0.55);
@@ -1004,14 +1018,14 @@
         @keyframes centerBtnPulse {
             0%, 100% {
                 box-shadow:
-                    0 0 0 4px rgba(10,13,22,0.98),
+                    0 0 0 4px var(--kyn-navbar-ring, rgba(10,13,22,0.98)),
                     0 0 0 6px rgba(249,115,22,0.22),
                     0 6px 28px rgba(249,115,22,0.75),
                     0 12px 40px rgba(0,0,0,0.5);
             }
             50% {
                 box-shadow:
-                    0 0 0 4px rgba(10,13,22,0.98),
+                    0 0 0 4px var(--kyn-navbar-ring, rgba(10,13,22,0.98)),
                     0 0 0 10px rgba(249,115,22,0.12),
                     0 6px 40px rgba(249,115,22,1.0),
                     0 12px 40px rgba(0,0,0,0.5);
@@ -1034,7 +1048,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            border: 2px solid rgba(10,13,22,0.98);
+            border: 2px solid var(--kyn-navbar-ring, rgba(10,13,22,0.98));
             line-height: 1;
             pointer-events: none;
             box-shadow: 0 2px 8px rgba(239,68,68,0.5);
@@ -1769,14 +1783,14 @@
             background: linear-gradient(135deg, #f97316, #ea580c);
             color: #fff; font-size: 9px; font-weight: 800;
             border-radius: 10px; display: none; align-items: center;
-            justify-content: center; border: 2px solid rgba(10,13,22,0.98);
+            justify-content: center; border: 2px solid var(--kyn-navbar-ring, rgba(10,13,22,0.98));
             line-height: 1; pointer-events: none;
             animation: badgePop 0.3s cubic-bezier(0.34,1.56,0.64,1) forwards;
         }
         .mobile-nav-icon[data-page="tools"] .ecom-notif-dot {
             position: absolute; top: 8px; right: calc(50% - 16px);
             width: 8px; height: 8px; background: #ef4444;
-            border-radius: 50%; border: 2px solid rgba(10,13,22,0.98); display: none;
+            border-radius: 50%; border: 2px solid var(--kyn-navbar-ring, rgba(10,13,22,0.98)); display: none;
         }
         /* ── Add-Friend FAB ─────────────────────────────────────────────── */
         #fabAddFriend {

@@ -106,6 +106,19 @@
             '--kyn-gradient-sidebar': 'linear-gradient(180deg, #0f172a 0%, #1e293b 100%)',
             '--kyn-gradient-header': 'linear-gradient(135deg, rgba(15,23,42,0.97), rgba(30,41,59,0.97))',
 
+            /* FIX (footer nav "sparkle"): the bottom mobile-nav-bar in
+               chat.html used to hardcode a permanently-dark gradient/ring
+               (rgba(10,13,22,...)) with no light-mode counterpart, so in
+               light theme the header/body went light but the footer stayed
+               black — a jarring seam at the bottom edge that read as
+               "sparkling". These variables give the footer bar the same
+               theme-follows-data-theme treatment the header already has. */
+            '--kyn-bg-navbar': 'linear-gradient(180deg, rgba(10,13,22,0.98) 0%, rgba(13,17,28,0.99) 100%)',
+            '--kyn-navbar-border': 'rgba(255,255,255,0.06)',
+            '--kyn-navbar-ring': 'rgba(10,13,22,0.98)',
+            '--kyn-navbar-notch-shadow': 'rgba(13,17,26,0.97)',
+            '--kyn-navbar-icon-inactive': 'rgba(148,163,184,0.55)',
+
             '--bg-color': '#0f172a', '--text-primary': '#e5e7eb', '--text-color': '#e5e7eb',
             '--text-secondary': '#9ca3af', '--sidebar-bg': '#0f172a', '--card-bg': '#1e293b',
             '--border-color': '#374151', '--hover-color': '#1f2c33',
@@ -136,6 +149,14 @@
             '--kyn-gradient-primary': 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 62%, #06b6d4 100%)',
             '--kyn-gradient-sidebar': 'linear-gradient(180deg, #ffffff 0%, #f0f2f5 100%)',
             '--kyn-gradient-header': 'linear-gradient(135deg, rgba(255,255,255,0.97), rgba(240,242,245,0.97))',
+
+            /* FIX (footer nav "sparkle") — light-theme counterpart. See the
+               matching comment in the dark palette above for the root cause. */
+            '--kyn-bg-navbar': 'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(240,242,245,0.99) 100%)',
+            '--kyn-navbar-border': 'rgba(15,23,42,0.08)',
+            '--kyn-navbar-ring': 'rgba(255,255,255,0.98)',
+            '--kyn-navbar-notch-shadow': 'rgba(248,250,252,0.97)',
+            '--kyn-navbar-icon-inactive': 'rgba(100,116,139,0.65)',
 
             '--bg-color': '#ffffff', '--text-primary': '#111b21', '--text-color': '#111b21',
             '--text-secondary': '#667781', '--sidebar-bg': '#ffffff', '--card-bg': '#ffffff',
