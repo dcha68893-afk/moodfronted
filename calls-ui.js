@@ -996,6 +996,35 @@ function transitionToInCall(callInfo) {
         setTimeout(() => { this._ending = false; }, 1500);
         if (window._currentCallTimer) { clearInterval(window._currentCallTimer); window._currentCallTimer = null; }
 
+        // FIX-DOUBLE-ENDCALL-DISPATCH: this button used to ALSO be wired via
+        // EventSystem.setupUIEventListeners() -> UIEventHandlers.endCall
+        // (addEventListener, bound once at page init) in addition to this
+        // .onclick handler (rebound on every transitionToInCall). Both fired
+        // on a single click, each independently calling core.endCall() and
+        // each posting its own CALL_ENDED message to chat.html — one keyed
+        // off UIState.activeCallId, the other off the core module's own
+        // (separately-tracked) callsState.activeCallId. When those two IDs
+        // drifted, the backend/remote side received two end-call signals
+        // for what looked like two different calls. That EventSystem
+        // binding has been removed so this is now the single source of
+        // truth — but it also owned the group-call host/participant check
+        // (a regular participant must only leave, not end the meeting for
+        // everyone), so that check is folded in here first.
+        try {
+            const gce = window.__GroupCallEngine || window.GroupCall;
+            if (gce && typeof gce.isHost === 'function' && gce._callId) {
+                if (gce.isHost()) {
+                    gce.endGroupCallForAll('host_ended');
+                } else {
+                    gce.leaveGroupCall('left');
+                }
+                UIEventHandlers.handleCallEnded && UIEventHandlers.handleCallEnded({ reason: 'ended', status: 'ended' });
+                return;
+            }
+        } catch (e) {
+            console.error('[Calls UI] endHandler: group-call teardown failed', e);
+        }
+
         const cid = UIState.activeCallId;
 
         // 1. Tell core to close WebRTC + signal backend
@@ -1166,9 +1195,21 @@ window.showInCallScreen   = showInCallScreen;
         const callType = data.callType || data.type || data.call_type || 'voice';
         const source = data.source || data.origin || data.from || 'calls';
         let returnTo = data.returnTo || source;
+        // FIX (CALLER-RETURN-TO-WRONG-SCREEN): this used to only recognize
+        // 'friends'/'messages' aliases and force EVERY other value — including
+        // legitimate origins like 'group' (sent by group.html's call buttons;
+        // see chat.html's __dispatchCallToIframe/INITIATE_CALL which already
+        // normalizes and preserves returnTo:'group') — down to the hardcoded
+        // 'calls'. That meant a caller who started a call from a group chat
+        // (or any module other than messages/friends) always got bounced to
+        // the Calls tab instead of back to the group they called from. Only
+        // normalize known aliases; otherwise trust whatever origin was
+        // actually passed in (chat.html already resolves it before this
+        // event is dispatched), and fall back to 'calls' only when nothing
+        // usable was provided at all.
         if (returnTo === 'friends-page' || returnTo === 'friends' || returnTo === 'friend') returnTo = 'friends';
         else if (returnTo === 'messages' || returnTo === 'chat' || returnTo === 'message') returnTo = 'messages';
-        else returnTo = 'calls';
+        else if (!returnTo) returnTo = 'calls';
 
         const chatUserId = data.chatUserId || data.conversationUserId || null;
 

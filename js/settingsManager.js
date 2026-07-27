@@ -169,6 +169,23 @@
 
             try {
                 await this.loadSettings();
+                // FIX-THEME-BOOT-CONFLICT: js/theme.engine.js already painted the
+                // correct theme synchronously before this script ran (it's the
+                // single source of truth — see its own header comment and the
+                // matching fix in AppSettings.js's boot()). loadSettings() above
+                // can fall through all its local-cache priorities to
+                // this.defaultSettings (theme: 'light') right after a fresh
+                // login/relogin, when none of LocalStoreSettings/
+                // knecta_settings_cache have data for this session yet. The
+                // applySettings() call below would then call applyTheme() with
+                // that stale/default value, flipping the screen away from the
+                // theme that was already showing correctly — this is the
+                // "saved theme flashes wrong, then corrects" conflict. Seed
+                // from ThemeManager's already-resolved value instead of
+                // overriding it, so this call is a no-op for theme.
+                if (window.ThemeManager && this.currentSettings && this.currentSettings.appearance) {
+                    this.currentSettings.appearance.theme = window.ThemeManager.getTheme();
+                }
                 this.setupBroadcastChannel();
                 this.applySettings(this.currentSettings);
                 this.setupStorageListener();

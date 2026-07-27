@@ -476,6 +476,18 @@
 
     }
 
+    // FIX-DECRYPT-OTHERPARTY-RESOLUTION-2: messages-core.operations.js's send
+    // path (and both decrypt call sites further down this file) reference
+    // window.__kynGetConversationPeerId as the robust cross-module fallback
+    // resolver, but nothing in the codebase ever actually assigned it — the
+    // reference always evaluated to undefined, silently falling straight
+    // through to null. Expose the real resolver here so all three call sites
+    // get the intended fallback chain (friendId -> otherUserId ->
+    // otherParticipant -> pendingReceiverId -> participantIds -> participants)
+    // instead of failing whenever a conversation opened from the friend/call/
+    // message module hasn't had its friendId/otherParticipant.id populated yet.
+    window.__kynGetConversationPeerId = getConversationPeerId;
+
 
 
     function sanitizeHTML(html) {
@@ -3725,19 +3737,35 @@
             }
 
             const currentUserId = currentUser?.id || currentUser?.userId;
-            const otherPartyId = currentChat?.friendId || currentChat?.otherUserId || currentChat?.id;
+            // FIX-DECRYPT-OTHERPARTY-RESOLUTION-2: resolve otherPartyId once per
+            // attempt so a retry (below) can pick up a conversation object that
+            // has since finished populating.
+            const resolveOtherPartyId = () => currentChat?.friendId || currentChat?.otherUserId ||
+                (window.__kynGetConversationPeerId ? window.__kynGetConversationPeerId(currentChat, currentUserId) : null) ||
+                currentChat?.id;
             const chatId = currentChat?.id;
-            pending.forEach(message => {
+            const attemptDecrypt = (message, attemptsLeft) => {
                 const raw = message.content;
                 const isSent = String(message.senderId) === String(currentUserId);
+                const otherPartyId = resolveOtherPartyId();
                 const senderForDecrypt = isSent ? otherPartyId : message.senderId;
                 if (!senderForDecrypt || !chatId) {
+                    // FIX-DECRYPT-OTHERPARTY-RESOLUTION-2: a shallow friendId/otherUserId/
+                    // id chain (and even the robust resolver above) isn't always
+                    // populated yet on a conversation opened straight from the friend/
+                    // call/message module. Retry a few times before giving up, instead
+                    // of the old behavior of failing on the very first pass. Retries
+                    // call decryptFromChat directly (not back through the outer
+                    // pending/__kynClaimDecrypt filter above), since this message was
+                    // already claimed on entry and must keep its exclusive claim.
+                    if (attemptsLeft > 0) {
+                        message._decryptInFlight = true;
+                        setTimeout(() => attemptDecrypt(message, attemptsLeft - 1), 300);
+                        return;
+                    }
                     this._revealDecryptedBubble(message, '[Unable to decrypt message]', true);
                     return;
                 }
-                // Claim this message synchronously, before the async call starts,
-                // so a second _decryptRenderedMessages() pass (which can run
-                // before this promise resolves) skips it via the `pending` filter.
                 message._decryptInFlight = true;
                 window.KynectaE2E.decryptFromChat(raw, chatId, senderForDecrypt).then(plaintext => {
                     if (!plaintext || plaintext === raw) {
@@ -3748,7 +3776,8 @@
                 }).catch(() => {
                     this._revealDecryptedBubble(message, '[Unable to decrypt message]', true);
                 });
-            });
+            };
+            pending.forEach(message => attemptDecrypt(message, 6));
         },
 
         // Fills in the real (or, on failure, a neutral fallback — never raw
@@ -14665,33 +14694,54 @@ Type: ${message.type || 'text'}`;
             if (window.__kynClaimDecrypt && !window.__kynClaimDecrypt(claimKey)) {
                 return;
             }
-            const chatId = String(
-                msg.chatId || msg.conversationId ||
-                window.ChatManager?._activeConversation?.id ||
-                window.__activeChatId || ''
-            );
-            const otherPartyId =
+            // FIX-DECRYPT-OTHERPARTY-RESOLUTION-2: resolve otherPartyId with the
+            // same robust fallback chain the send path uses, and retry a few
+            // times instead of immediately falling through to appending the raw
+            // (still-encrypted) msg below when a conversation opened straight
+            // from the friend/call/message module hasn't had friendId/
+            // otherParticipant.id populated on _activeConversation yet.
+            const resolveOtherPartyId = () =>
                 window.ChatManager?._activeConversation?.friendId ||
                 window.ChatManager?._activeConversation?.otherUserId ||
+                (window.__kynGetConversationPeerId ?
+                    window.__kynGetConversationPeerId(window.ChatManager?._activeConversation, myId) : null) ||
                 null;
-            const senderForDecrypt = isOwn ? otherPartyId : senderId;
-            if (chatId && senderForDecrypt) {
-                window.KynectaE2E.decryptFromChat(content, chatId, senderForDecrypt).then(function (plaintext) {
-                    const finalText = (plaintext && plaintext !== content) ? plaintext : '[Unable to decrypt message]';
-                    const finalMsg = Object.assign({}, msg, {
-                        content: finalText,
-                        _decrypted: true
+            const attemptBypassDecrypt = function (attemptsLeft) {
+                const chatId = String(
+                    msg.chatId || msg.conversationId ||
+                    window.ChatManager?._activeConversation?.id ||
+                    window.__activeChatId || ''
+                );
+                const otherPartyId = resolveOtherPartyId();
+                const senderForDecrypt = isOwn ? otherPartyId : senderId;
+                if (chatId && senderForDecrypt) {
+                    window.KynectaE2E.decryptFromChat(content, chatId, senderForDecrypt).then(function (plaintext) {
+                        const finalText = (plaintext && plaintext !== content) ? plaintext : '[Unable to decrypt message]';
+                        const finalMsg = Object.assign({}, msg, {
+                            content: finalText,
+                            _decrypted: true
+                        });
+                        if (plaintext && plaintext !== content && window.__kynCommitDecrypt) {
+                            window.__kynCommitDecrypt(msg.id, msg.localId, finalText);
+                        }
+                        _buildAndAppendBubble(finalMsg, msgId, isOwn, timeStr, senderName);
+                    }).catch(function () {
+                        const finalMsg = Object.assign({}, msg, { content: '[Unable to decrypt message]', _decrypted: true });
+                        _buildAndAppendBubble(finalMsg, msgId, isOwn, timeStr, senderName);
                     });
-                    if (plaintext && plaintext !== content && window.__kynCommitDecrypt) {
-                        window.__kynCommitDecrypt(msg.id, msg.localId, finalText);
-                    }
-                    _buildAndAppendBubble(finalMsg, msgId, isOwn, timeStr, senderName);
-                }).catch(function () {
-                    const finalMsg = Object.assign({}, msg, { content: '[Unable to decrypt message]', _decrypted: true });
-                    _buildAndAppendBubble(finalMsg, msgId, isOwn, timeStr, senderName);
-                });
-                return;
-            }
+                    return;
+                }
+                if (attemptsLeft > 0) {
+                    setTimeout(function () { attemptBypassDecrypt(attemptsLeft - 1); }, 300);
+                    return;
+                }
+                // Resolution never completed — never append the raw ciphertext,
+                // fall back to the neutral placeholder instead.
+                const finalMsg = Object.assign({}, msg, { content: '[Unable to decrypt message]', _decrypted: true });
+                _buildAndAppendBubble(finalMsg, msgId, isOwn, timeStr, senderName);
+            };
+            attemptBypassDecrypt(6);
+            return;
         }
         _buildAndAppendBubble(msg, msgId, isOwn, timeStr, senderName);
     }

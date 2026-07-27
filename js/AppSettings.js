@@ -1137,6 +1137,28 @@
         const auth = readAuthSnapshot();
         _activeUserId = auth.userId || 'guest';
         _data = loadFromStorage(_activeUserId);
+        // FIX-THEME-BOOT-CONFLICT: js/theme.engine.js already ran synchronously
+        // before this script (it's the single source of truth for the
+        // resolved theme — see its own header comment) and has already
+        // painted the correct theme from its own 'app_theme' key. This
+        // module's per-user settings cache (loadFromStorage above) is keyed
+        // separately and can be stale or entirely absent right after a
+        // fresh login/relogin — a newly-active user id has no per-user
+        // cache yet, so loadFromStorage() silently falls back to
+        // DEFAULTS.appearance.theme ('light'). applyToDOM() below calls
+        // ThemeManager.setTheme(_data.appearance.theme) unconditionally,
+        // which would then flip the screen away from the theme that was
+        // already correctly showing, until the later refreshFromServer()
+        // call corrects it back — this is the "saved theme shows briefly
+        // wrong, then flips again" conflict on every fresh reload/relogin.
+        // Seed from ThemeManager's already-resolved value instead of
+        // overriding it, so this first applyToDOM() call is a no-op for
+        // theme and the spurious flip never happens. persist() below then
+        // writes this corrected value into the per-user cache too, so it
+        // self-heals for next time.
+        if (window.ThemeManager && _data && _data.appearance) {
+            _data.appearance.theme = window.ThemeManager.getTheme();
+        }
         installNotificationProxy();
         installCallAudioProxy();
         installSettingsServiceBridge();
