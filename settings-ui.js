@@ -2000,9 +2000,40 @@ export function removeCoverPhoto() {
     }
 }
 
+let _coverPhotoSaveInFlight = false;
+
 export function saveCoverPhoto() {
     if (pendingCoverPhotoData) {
+        // FIX (repeated-502-hammering / socket-storm): there was no lock or
+        // "Saving..." feedback here, so when the backend was slow or failing
+        // (e.g. 502 from a misconfigured Cloudinary cloud_name), a user
+        // re-clicking Save because nothing visibly happened fired a brand
+        // new request every click — the console showed 6 duplicate PUT
+        // /api/settings/profile 502s in under 2 seconds. That volume of
+        // near-simultaneous requests hitting a single free-tier Render dyno
+        // is a very plausible reason the WebSocket connection was also
+        // dropping/reconnecting repeatedly around the same time. Guard
+        // against re-entrant saves and give immediate visual feedback so
+        // there's no reason to re-click.
+        if (_coverPhotoSaveInFlight) return;
+        _coverPhotoSaveInFlight = true;
+
+        const saveCoverPhotoBtn = document.getElementById('saveCoverPhotoBtn');
+        const _origBtnText = saveCoverPhotoBtn ? saveCoverPhotoBtn.innerHTML : null;
+        if (saveCoverPhotoBtn) {
+            saveCoverPhotoBtn.disabled = true;
+            saveCoverPhotoBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+        }
+        const _restoreBtn = () => {
+            _coverPhotoSaveInFlight = false;
+            if (saveCoverPhotoBtn) {
+                saveCoverPhotoBtn.disabled = false;
+                if (_origBtnText !== null) saveCoverPhotoBtn.innerHTML = _origBtnText;
+            }
+        };
+
         SettingsState.updatePhoto('profile', 'coverPhotoUrl', pendingCoverPhotoData).then((result) => {
+            _restoreBtn();
             // FIX: SettingsState.update() used to always resolve here even
             // when the backend genuinely rejected the save (e.g. Cloudinary
             // not configured) — this applied the optimistic local preview
@@ -2026,6 +2057,7 @@ export function saveCoverPhoto() {
             closeModal('changeCoverPhotoModal');
             showNotification('Cover photo updated', 'success');
         }).catch(error => {
+            _restoreBtn();
             debugLog('Error saving cover photo:', error);
             showNotification('Error saving cover photo', 'error');
         });
@@ -2042,10 +2074,32 @@ function updateProfileCoverBanner(url) {
     }
 }
 
+let _photoSaveInFlight = false;
+
 export function savePhoto() {
     if (pendingPhotoData) {
+        // FIX (repeated-502-hammering / socket-storm) — same guard as
+        // saveCoverPhoto() above, see comment there.
+        if (_photoSaveInFlight) return;
+        _photoSaveInFlight = true;
+
+        const savePhotoBtnEl = document.getElementById('savePhotoBtn');
+        const _origBtnText = savePhotoBtnEl ? savePhotoBtnEl.innerHTML : null;
+        if (savePhotoBtnEl) {
+            savePhotoBtnEl.disabled = true;
+            savePhotoBtnEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+        }
+        const _restoreBtn = () => {
+            _photoSaveInFlight = false;
+            if (savePhotoBtnEl) {
+                savePhotoBtnEl.disabled = false;
+                if (_origBtnText !== null) savePhotoBtnEl.innerHTML = _origBtnText;
+            }
+        };
+
         // Update through SettingsState for REAL backend persistence
         SettingsState.updatePhoto('profile', 'photoUrl', pendingPhotoData).then((result) => {
+            _restoreBtn();
             // FIX: same silent-success bug as saveCoverPhoto() above — check
             // the real result instead of assuming every resolved promise
             // means the photo actually reached the database.
@@ -2072,6 +2126,7 @@ export function savePhoto() {
             closeModal('changePhotoModal');
             showNotification('Photo saved', 'success');
         }).catch(error => {
+            _restoreBtn();
             debugLog('Error saving photo:', error);
             showNotification('Error saving photo', 'error');
         });
