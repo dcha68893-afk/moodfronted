@@ -60,55 +60,99 @@
     var MAX_FONT = 28;
     var DEFAULT_FONT = 16;
 
-    // Palette mirrors theme.colors.css exactly. Kept here (and only here)
-    // so first paint never has to wait on the theme.colors.css network
-    // request. If theme.colors.css's palette ever changes, update it here
-    // too — this is intentionally the single other place these values live.
+    // ------------------------------------------------------------------
+    // SINGLE COMPLETE PALETTE — mirrors theme.colors.css's FULL variable
+    // set exactly (every --kyn-* variable it defines, not a subset), plus
+    // every generic alias (--bg-color, --primary-color, --card-background,
+    // etc.) any module page or its CSS references directly.
+    //
+    // FIX (remaining spark source): the previous version of this file only
+    // inlined 6 --kyn-* variables even though theme.colors.css actually
+    // defines 35+ of them (accents, panel/card/input/modal/sidebar
+    // backgrounds, chat-bubble colors, scrollbar colors, shadows,
+    // gradients...). Every element styled ONLY through one of those other
+    // ~29 variables had nothing to read until theme.colors.css finished
+    // its network request and parsed — a real, visible "unstyled -> themed"
+    // pop for buttons, cards, panels, chat bubbles, scrollbars and
+    // gradients on every fresh load, exactly the reported sparking. A
+    // second, different value set (the old IFRAME_SHELL_VARS) was only
+    // applied when the parent shell injected a theme into a child iframe,
+    // so a module opened directly showed one palette, then a slightly
+    // different one if/when opened inside the parent shell. Both are
+    // fixed by using exactly ONE object for a page's own self-paint AND
+    // for parent-to-iframe injection.
+    // ------------------------------------------------------------------
     var PALETTES = {
         dark: {
-            '--kyn-bg-root': '#0f172a', '--kyn-bg-chat': '#020617', '--kyn-bg-header': '#0f172a',
+            '--kyn-bg-root': '#0f172a', '--kyn-bg-chat': '#020617', '--kyn-bg-panel': '#1e293b',
+            '--kyn-bg-card': '#1e293b', '--kyn-bg-input': '#1e293b', '--kyn-bg-sidebar': '#0f172a',
+            '--kyn-bg-header': '#0f172a', '--kyn-bg-modal': '#1e293b',
+            '--kyn-bg-overlay': 'rgba(0, 0, 0, 0.65)', '--kyn-bg-hover': 'rgba(255, 255, 255, 0.06)',
+            '--kyn-bg-active': 'rgba(255, 255, 255, 0.10)',
             '--kyn-text-primary': '#e5e7eb', '--kyn-text-secondary': '#9ca3af',
-            '--kyn-border': '#374151',
-            '--bg-color': '#0f172a', '--text-primary': '#e5e7eb',
-            // FIX: settings.html/settingsManager.js (and settings-core.js's
-            // fallback path) key off this second, differently-named set of
-            // variables — not the --kyn-* set above. The original committed
-            // palette only covered --bg-color/--text-primary, which left
-            // settings.html's cards/borders/hover states permanently
-            // unstyled (not just flashing — settings.html doesn't load
-            // theme.colors.css at all, so nothing was ever going to fill
-            // these in later).
-            '--text-color': '#e5e7eb', '--text-secondary': '#9ca3af',
-            '--sidebar-bg': '#0f172a', '--card-bg': '#1e293b',
-            '--border-color': '#374151', '--hover-color': '#1f2c33'
-        },
-        light: {
-            '--kyn-bg-root': '#ffffff', '--kyn-bg-chat': '#efeae2', '--kyn-bg-header': '#f0f2f5',
-            '--kyn-text-primary': '#111b21', '--kyn-text-secondary': '#667781',
-            '--kyn-border': '#e9edef',
-            '--bg-color': '#ffffff', '--text-primary': '#111b21',
-            '--text-color': '#111b21', '--text-secondary': '#667781',
-            '--sidebar-bg': '#ffffff', '--card-bg': '#ffffff',
-            '--border-color': '#d1d7db', '--hover-color': '#f5f5f5'
-        }
-    };
+            '--kyn-text-muted': '#6b7280', '--kyn-text-inverse': '#0f172a',
+            '--kyn-text-placeholder': '#9ca3af',
+            '--kyn-border': '#374151', '--kyn-border-light': 'rgba(255,255,255,0.08)',
+            '--kyn-border-strong': '#4b5563',
+            '--kyn-accent-primary': '#22c55e', '--kyn-accent-secondary': '#2563eb',
+            '--kyn-accent-danger': '#ef4444', '--kyn-accent-warning': '#f59e0b',
+            '--kyn-accent-info': '#38bdf8', '--kyn-accent-purple': '#8b5cf6',
+            '--kyn-bubble-sent': '#005c4b', '--kyn-bubble-sent-text': '#e5e7eb',
+            '--kyn-bubble-recv': '#1e293b', '--kyn-bubble-recv-text': '#e5e7eb',
+            '--kyn-scrollbar-track': '#1e293b', '--kyn-scrollbar-thumb': '#374151',
+            '--kyn-shadow-sm': '0 2px 8px rgba(0,0,0,0.4)', '--kyn-shadow-md': '0 8px 24px rgba(0,0,0,0.5)',
+            '--kyn-shadow-lg': '0 16px 48px rgba(0,0,0,0.6)',
+            '--kyn-gradient-primary': 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 62%, #06b6d4 100%)',
+            '--kyn-gradient-sidebar': 'linear-gradient(180deg, #0f172a 0%, #1e293b 100%)',
+            '--kyn-gradient-header': 'linear-gradient(135deg, rgba(15,23,42,0.97), rgba(30,41,59,0.97))',
 
-    var IFRAME_SHELL_VARS = {
-        dark: {
+            '--bg-color': '#0f172a', '--text-primary': '#e5e7eb', '--text-color': '#e5e7eb',
+            '--text-secondary': '#9ca3af', '--sidebar-bg': '#0f172a', '--card-bg': '#1e293b',
+            '--border-color': '#374151', '--hover-color': '#1f2c33',
             '--primary-color': '#22c55e', '--primary-dark': '#16a34a', '--primary-light': '#166534',
             '--secondary-color': '#1e293b', '--background-color': '#0f172a', '--surface-color': '#1e293b',
-            '--card-background': '#1e293b', '--border-color': '#374151', '--text-primary': '#e5e7eb',
-            '--text-secondary': '#9ca3af', '--accent-color': '#8b5cf6', '--accent-soft': '#1e293b',
+            '--card-background': '#1e293b', '--accent-color': '#8b5cf6', '--accent-soft': '#1e293b',
             '--header-gradient': 'linear-gradient(135deg, #0f172a 0%, #1e293b 62%, #0f172a 100%)'
         },
         light: {
+            '--kyn-bg-root': '#ffffff', '--kyn-bg-chat': '#efeae2', '--kyn-bg-panel': '#ffffff',
+            '--kyn-bg-card': '#ffffff', '--kyn-bg-input': '#f0f2f5', '--kyn-bg-sidebar': '#ffffff',
+            '--kyn-bg-header': '#f0f2f5', '--kyn-bg-modal': '#ffffff',
+            '--kyn-bg-overlay': 'rgba(0, 0, 0, 0.45)', '--kyn-bg-hover': 'rgba(0, 0, 0, 0.04)',
+            '--kyn-bg-active': 'rgba(0, 0, 0, 0.08)',
+            '--kyn-text-primary': '#111b21', '--kyn-text-secondary': '#667781',
+            '--kyn-text-muted': '#8696a0', '--kyn-text-inverse': '#ffffff',
+            '--kyn-text-placeholder': '#8696a0',
+            '--kyn-border': '#e9edef', '--kyn-border-light': 'rgba(0,0,0,0.06)',
+            '--kyn-border-strong': '#d1d7db',
+            '--kyn-accent-primary': '#22c55e', '--kyn-accent-secondary': '#2563eb',
+            '--kyn-accent-danger': '#ef4444', '--kyn-accent-warning': '#f59e0b',
+            '--kyn-accent-info': '#38bdf8', '--kyn-accent-purple': '#8b5cf6',
+            '--kyn-bubble-sent': '#d9fdd3', '--kyn-bubble-sent-text': '#111b21',
+            '--kyn-bubble-recv': '#ffffff', '--kyn-bubble-recv-text': '#111b21',
+            '--kyn-scrollbar-track': '#f0f2f5', '--kyn-scrollbar-thumb': '#d1d7db',
+            '--kyn-shadow-sm': '0 2px 8px rgba(0,0,0,0.08)', '--kyn-shadow-md': '0 8px 24px rgba(0,0,0,0.12)',
+            '--kyn-shadow-lg': '0 16px 48px rgba(0,0,0,0.16)',
+            '--kyn-gradient-primary': 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 62%, #06b6d4 100%)',
+            '--kyn-gradient-sidebar': 'linear-gradient(180deg, #ffffff 0%, #f0f2f5 100%)',
+            '--kyn-gradient-header': 'linear-gradient(135deg, rgba(255,255,255,0.97), rgba(240,242,245,0.97))',
+
+            '--bg-color': '#ffffff', '--text-primary': '#111b21', '--text-color': '#111b21',
+            '--text-secondary': '#667781', '--sidebar-bg': '#ffffff', '--card-bg': '#ffffff',
+            '--border-color': '#d1d7db', '--hover-color': '#f5f5f5',
             '--primary-color': '#22c55e', '--primary-dark': '#16a34a', '--primary-light': '#dcfce7',
             '--secondary-color': '#f0f2f5', '--background-color': '#ffffff', '--surface-color': '#ffffff',
-            '--card-background': '#ffffff', '--border-color': '#d1d7db', '--text-primary': '#111b21',
-            '--text-secondary': '#667781', '--accent-color': '#8b5cf6', '--accent-soft': '#f5f3ff',
+            '--card-background': '#ffffff', '--accent-color': '#8b5cf6', '--accent-soft': '#f5f3ff',
             '--header-gradient': 'linear-gradient(135deg, #ffffff 0%, #f0f2f5 62%, #ffffff 100%)'
         }
     };
+
+    // Iframe shell injection now reads from the exact same PALETTES object
+    // used for a page's own self-paint above — kept as an alias (rather
+    // than deleting every call site below) so there is no longer any way
+    // for a standalone page load and a parent-injected iframe to disagree
+    // on a single color.
+    var IFRAME_SHELL_VARS = PALETTES;
 
     var IFRAME_OVERRIDE_CSS_DARK =
         'html, body { background: #0f172a !important; color: #e5e7eb !important; }' +
@@ -276,6 +320,23 @@
         }
     }
 
+    // A handful of generic (non --kyn-*) variable names are used by more
+    // than one page for genuinely DIFFERENT purposes — most notably
+    // index.html's dashboard, which intentionally keeps its own distinct
+    // purple/blue brand look (see THEME_FIX_CHANGELOG.md) rather than the
+    // green/purple accent the chat interior and its module iframes share.
+    // A page can opt out of having the engine set just these generic
+    // brand aliases (it still gets the full --kyn-* palette and the
+    // always-shared bg/text/border aliases) by setting this flag in an
+    // inline <script> BEFORE theme.engine.js is loaded:
+    //   <script>window.__kynSkipGenericAccentVars = true;</script>
+    var GENERIC_BRAND_KEYS = {
+        '--primary-color': 1, '--primary-dark': 1, '--primary-light': 1,
+        '--secondary-color': 1, '--background-color': 1, '--surface-color': 1,
+        '--card-background': 1, '--accent-color': 1, '--accent-soft': 1,
+        '--header-gradient': 1
+    };
+
     function paintNow(theme, fontSize, accentColor) {
         var root = document.documentElement;
         root.setAttribute('data-theme', theme);
@@ -283,9 +344,11 @@
         root.classList.toggle('dark-theme', theme === 'dark');
         root.style.colorScheme = theme;
 
+        var skipBrand = global.__kynSkipGenericAccentVars === true;
         var palette = PALETTES[theme];
         for (var k in palette) {
             if (Object.prototype.hasOwnProperty.call(palette, k)) {
+                if (skipBrand && GENERIC_BRAND_KEYS[k]) continue;
                 root.style.setProperty(k, palette[k]);
             }
         }

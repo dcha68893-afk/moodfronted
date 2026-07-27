@@ -1,7 +1,15 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <script>window.API_BASE_URL = "https://nexora-3bla.onrender.com"; window.__kynAPI = window.__kynAPI || {}; window.__kynAPI.baseUrl = "https://nexora-3bla.onrender.com/api";</script>
+    <script>window.API_BASE_URL = "https://nexora-3bla.onrender.com"; window.__kynAPI = window.__kynAPI || {}; window.__kynAPI.baseUrl = "https://nexora-3bla.onrender.com/api";
+    // FIX (theme-engine generic-accent opt-out): index.html's dashboard keeps its
+    // own intentional purple/blue brand look (see THEME_FIX_CHANGELOG.md) instead
+    // of the shared green/purple accent used by the chat interior + module
+    // iframes. Setting this BEFORE theme.engine.js loads tells it to skip only the
+    // generic --primary-color/--accent-color/etc. aliases; this page still gets
+    // the full --kyn-* palette and the shared --bg-color/--text-primary/etc.
+    // aliases instantly, same as every other page.
+    window.__kynSkipGenericAccentVars = true;</script>
     <script src="/js/theme.engine.js"></script>
     <script>
         // PRELOAD FLASH GUARD: theme.engine.js paints synchronously above,

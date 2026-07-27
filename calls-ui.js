@@ -4441,7 +4441,7 @@ handleContactItemClick: function(e) {
                     if (window._incomingRingtone) { try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {} window._incomingRingtone = null; }
                     if (elements.incomingCallModal) { const _ct = parseInt(elements.incomingCallModal.dataset.timer); if (_ct) clearInterval(_ct); elements.incomingCallModal.dataset.timer = ''; elements.incomingCallModal.classList.remove('active'); elements.incomingCallModal.style.setProperty('display','none','important'); UIState.activeModals.delete('incomingCallModal'); }
                     window._currentIncomingCallId = null; UIState.callState = 'idle'; UIState.callActive = false; window.__callActive = false;
-                    if (window.parent && window.parent !== window) { window.__callEndedNavigating = true; setTimeout(function(){window.__callEndedNavigating=false;},3000); window.parent.postMessage({type:'CALL_ENDED_RETURN',timestamp:Date.now()},'*'); const _cr=window.__callOriginReturnTo||window.__pendingCallReturnTo||'messages'; setTimeout(function(){if(window.parent&&window.parent!==window)window.parent.postMessage({type:'SWITCH_MODULE',module:_cr,payload:{returnFromCall:true},timestamp:Date.now()},'*');},350); }
+                    if (window.parent && window.parent !== window) { window.__callEndedNavigating = true; setTimeout(function(){window.__callEndedNavigating=false;},3000); const _cr=window.__callOriginReturnTo||window.__pendingCallReturnTo||'messages'; const _crChatId=window.__callOriginChatUserId||window.__pendingCallChatUserId||null; const _crChatName=window.__callOriginChatUserName||null; window.parent.postMessage({type:'CALL_ENDED_RETURN',timestamp:Date.now(),returnTo:_cr,chatUserId:_crChatId,chatUserName:_crChatName},'*'); setTimeout(function(){if(window.parent&&window.parent!==window)window.parent.postMessage({type:'SWITCH_MODULE',module:_cr,payload:{returnFromCall:true,openChatWith:_crChatId,openChatWithName:_crChatName},timestamp:Date.now()},'*');},350); }
                     this.handleCallEnded(data);
                     this.refreshCallHistory();
                     showNotification('Call was cancelled by the caller', 'info');
@@ -5757,6 +5757,20 @@ handleContactItemClick: function(e) {
             if (window._currentCallTimer)    { clearInterval(window._currentCallTimer);    window._currentCallTimer    = null; }
             if (window._modalGuardObserver) { try { window._modalGuardObserver.disconnect(); } catch(e) {} window._modalGuardObserver = null; }
             _postToParentDebounced('CALL_SCREEN_ACTIVE', { active: false });
+            // FIX (return-to-wrong-module / nav-icons-stuck): compute the
+            // tracked return target NOW, before anything below clears it, so
+            // it can ride along on every parent-facing signal from here on —
+            // not just the SWITCH_MODULE follow-up 350ms below. Previously
+            // CALLS_IDLE_SCREEN_SHOWN and CALL_ENDED_RETURN carried no context
+            // at all, forcing the parent (chat.html) to guess the origin from
+            // its own separate, independent tracking — which could disagree
+            // with this iframe's tracking (e.g. calls started from within the
+            // Calls tab's own contact list never touch the parent's tracking
+            // at all) and is why both callers and receivers could land back
+            // on the calls idle screen instead of their real origin.
+            const _earlyReturnTo = window.__callOriginReturnTo || window.__pendingCallReturnTo || null;
+            const _earlyChatUserId = window.__callOriginChatUserId || window.__pendingCallChatUserId || null;
+            const _earlyChatUserName = window.__callOriginChatUserName || null;
             // FIX-CALL4: Always hide all call screens and restore idle screen,
             // so the iframe is not dark on the second call initiation.
             (function _resetScreens() {
@@ -5786,7 +5800,7 @@ handleContactItemClick: function(e) {
                 // as an independent, always-fires signal it can't miss.
                 try {
                     if (window.parent && window.parent !== window) {
-                        window.parent.postMessage({ type: 'CALLS_IDLE_SCREEN_SHOWN', timestamp: Date.now() }, '*');
+                        window.parent.postMessage({ type: 'CALLS_IDLE_SCREEN_SHOWN', timestamp: Date.now(), returnTo: _earlyReturnTo, chatUserId: _earlyChatUserId, chatUserName: _earlyChatUserName }, '*');
                     }
                 } catch (_) {}
             })();
@@ -5935,7 +5949,7 @@ handleContactItemClick: function(e) {
                 window.__callEndedNavigating = true;
                 setTimeout(function() { window.__callEndedNavigating = false; }, 3000);
                 window.parent.postMessage({ type: 'SHOW_SIDEBAR_ICONS', module: 'calls' }, '*');
-                window.parent.postMessage({ type: 'CALL_ENDED_RETURN', timestamp: Date.now() }, '*');
+                window.parent.postMessage({ type: 'CALL_ENDED_RETURN', timestamp: Date.now(), returnTo: _earlyReturnTo, chatUserId: _earlyChatUserId, chatUserName: _earlyChatUserName }, '*');
             }
 
             // ── Navigate back to origin module (with short delay for animation) ──
@@ -8934,7 +8948,7 @@ declineIncomingCall: async function() {
     }
     if (typeof window._stopRingtones === 'function') window._stopRingtones();
     if (typeof window._stopAllRingtones === 'function') window._stopAllRingtones();
-    if (window.parent && window.parent !== window) { window.__callEndedNavigating = true; setTimeout(function(){window.__callEndedNavigating=false;},3000); window.parent.postMessage({type:'CALL_ENDED_RETURN',timestamp:Date.now()},'*'); const _dr=window.__callOriginReturnTo||window.__pendingCallReturnTo||'messages'; setTimeout(function(){if(window.parent&&window.parent!==window)window.parent.postMessage({type:'SWITCH_MODULE',module:_dr,payload:{returnFromCall:true},timestamp:Date.now()},'*');},350); }
+    if (window.parent && window.parent !== window) { window.__callEndedNavigating = true; setTimeout(function(){window.__callEndedNavigating=false;},3000); const _dr=window.__callOriginReturnTo||window.__pendingCallReturnTo||'messages'; const _drChatId=window.__callOriginChatUserId||window.__pendingCallChatUserId||null; const _drChatName=window.__callOriginChatUserName||null; window.parent.postMessage({type:'CALL_ENDED_RETURN',timestamp:Date.now(),returnTo:_dr,chatUserId:_drChatId,chatUserName:_drChatName},'*'); setTimeout(function(){if(window.parent&&window.parent!==window)window.parent.postMessage({type:'SWITCH_MODULE',module:_dr,payload:{returnFromCall:true,openChatWith:_drChatId,openChatWithName:_drChatName},timestamp:Date.now()},'*');},350); }
     showIdleScreen(true);
     showNotification('Call declined', 'info');
 

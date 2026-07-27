@@ -4480,17 +4480,52 @@
             // icons hidden (call-screen-active removed, but the origin screen/iframe was
             // never re-shown) and the user stuck on the calls screen. Extracted here so
             // ALL termination paths restore the exact same way.
-            function _kynReturnFromCallToOrigin() {
+            // FIX (nav-icons/sidebar-stuck-hidden): __dispatchCallToIframe and the
+            // CALL_SCREEN_ACTIVE(true) handler both force #callsContent into a
+            // fullscreen fixed overlay (position:fixed, inset:0, z-index:99999)
+            // via inline !important styles so the call UI can cover the whole
+            // viewport. Those inline styles were never removed when the call
+            // ended — so even after the code below correctly navigated back to
+            // the right module, callsContent (by then just showing the calls
+            // module's own idle screen underneath) stayed pinned on top of
+            // everything at z-index 99999, permanently covering #globalHeader/
+            // #permanentSidebar and .mobile-nav-bar no matter which page was
+            // actually restored. Clearing the inline overrides here lets the
+            // normal .iframe-container / .hidden CSS rules (position:fixed;
+            // top:56px;left:60px;z-index:90, or visibility:hidden when not on
+            // the calls page) take back over.
+            function _kynResetCallsContentOverlay() {
+                const _cc = document.getElementById('callsContent');
+                if (_cc) {
+                    ['position','top','left','right','bottom','z-index','display','visibility','pointer-events'].forEach(p => _cc.style.removeProperty(p));
+                    if (window.__currentPage !== 'calls') _cc.classList.add('hidden');
+                }
+            }
+
+            // FIX (return-to-wrong-module): accepts an optional override —
+            // {returnTo, chatUserId, userName} — sourced from the calls
+            // iframe's OWN tracked origin (window.__callOriginReturnTo /
+            // __pendingCallReturnTo, populated correctly for BOTH the caller
+            // and the receiver — see calls-ui.js). That value is fresher and
+            // more reliable than this parent's independent ctx/lastActivePage
+            // guess, which is a second, separate tracking system that can
+            // disagree with the iframe's and was the root cause of both sides
+            // landing back on the calls idle screen instead of their real
+            // origin. Prefer the override when supplied; fall back to the
+            // parent's own tracking otherwise.
+            function _kynReturnFromCallToOrigin(override) {
                 const _ceNow = Date.now();
                 if (window.__callEndedNavAt && (_ceNow - window.__callEndedNavAt) < 3000) return; // debounce
                 window.__callEndedNavAt = _ceNow;
                 setTimeout(() => { window.__callEndedNavAt = 0; }, 4000);
                 let _ctx = window.__callReturnContext;
                 if (!_ctx) { try { const _s = sessionStorage.getItem('call_return_ctx'); if (_s) _ctx = JSON.parse(_s); } catch(e) {} }
-                const _returnTo = (_ctx && _ctx.returnTo) || window.__lastActivePage || 'messages';
+                const _returnTo = (override && override.returnTo) || (_ctx && _ctx.returnTo) || window.__lastActivePage || 'messages';
+                if (override) { if (!_ctx) _ctx = {}; if (override.chatUserId) _ctx.chatUserId = _ctx.chatUserId || override.chatUserId; if (override.userName) _ctx.userName = _ctx.userName || override.userName; }
                 window.__callReturnContext = null;
                 window.__moduleSessionDispatchCache = {};
                 try { sessionStorage.removeItem('call_return_ctx'); } catch(e) {}
+                _kynResetCallsContentOverlay();
                 if (_returnTo === 'group') {
                     navigateToPage('group');
                     const _gf = document.getElementById('groupIframe');
@@ -4539,6 +4574,7 @@
                 if (document.body.classList.contains('call-screen-active') && !window.__activeCallInProgress) {
                     _chatLog('[Parent] Watchdog: call-screen-active stuck with no active call — force-restoring nav');
                     document.body.classList.remove('call-screen-active');
+                    _kynResetCallsContentOverlay();
                     _kynReturnFromCallToOrigin();
                 }
             }, 1500);
@@ -5185,7 +5221,7 @@
                     if (document.body.classList.contains('call-screen-active')) {
                         window.__activeCallInProgress = false;
                         document.body.classList.remove('call-screen-active');
-                        _kynReturnFromCallToOrigin();
+                        _kynReturnFromCallToOrigin(data.returnTo ? { returnTo: data.returnTo, chatUserId: data.chatUserId, userName: data.chatUserName } : undefined);
                     }
                 }
 
@@ -5225,6 +5261,7 @@
                     // Clear in-progress flag — call is truly done
                     window.__activeCallInProgress = false;
                     document.body.classList.remove('call-screen-active');
+                    _kynResetCallsContentOverlay();
 
                     // FIX: Always restore nav icons when call ends
                     clearTimeout(window.__navHideWatchdog);
@@ -5234,10 +5271,19 @@
                     // 'calls'    → calls sidebar (call started from calls module)
                     // 'messages' → messages, re-open specific chat
                     // 'friends'  → friends sidebar
-                    // Receiver side has no ctx — use __lastActivePage
-                    const returnTo = ctx?.returnTo
+                    // FIX (return-to-wrong-module): prefer the value the calls
+                    // iframe itself just computed and attached to this message
+                    // (data.returnTo/data.chatUserId/data.chatUserName) — it's
+                    // tracked correctly for BOTH the caller and the receiver.
+                    // ctx (this parent's own separate tracking) and
+                    // __lastActivePage remain as fallbacks for messages that
+                    // predate this fix or didn't carry the context.
+                    const returnTo = data.returnTo
+                        || ctx?.returnTo
                         || window.__lastActivePage
                         || 'messages';
+                    const _cerChatUserId = data.chatUserId || ctx?.chatUserId;
+                    const _cerChatUserName = data.chatUserName || ctx?.userName;
                     _chatLog('[Parent] Call ended → returnTo=' + returnTo);
 
                     // CRITICAL: Clear session dispatch cache so the next navigateToPage
@@ -5248,13 +5294,13 @@
                         navigateToPage('calls');
                     } else if (returnTo === 'messages') {
                         navigateToPage('messages');
-                        if (ctx?.chatUserId) {
+                        if (_cerChatUserId) {
                             const msgIframe = document.getElementById('messagesIframe');
                             if (msgIframe && msgIframe.contentWindow) {
                                 setTimeout(() => {
                                     msgIframe.contentWindow.postMessage({
                                         type: 'OPEN_CHAT_WITH_USER',
-                                        payload: { userId: ctx.chatUserId, userName: ctx.userName || 'User', returnFromCall: true, timestamp: Date.now() },
+                                        payload: { userId: _cerChatUserId, userName: _cerChatUserName || 'User', returnFromCall: true, timestamp: Date.now() },
                                         source: 'parent-frame'
                                     }, '*');
                                     document.body.classList.add('chat-panel-active'); /* FIX: was gated to mobile-only (window.innerWidth<=768), so desktop never got this flag and the header/avatar/call/video/more icons never fully activated on wide screens for these code paths. Now applied on all widths, matching group-panel-active. */
@@ -6211,6 +6257,11 @@
                 if (data.type === 'SHOW_SIDEBAR_ICONS') {
                     clearTimeout(window.__navHideWatchdog);
                     document.querySelectorAll('.nav-icon, .mobile-nav-icon, .sidebar-nav .nav-item').forEach(el => { el.style.opacity = ''; el.style.pointerEvents = ''; });
+                    // FIX (nav-icons/sidebar-stuck-hidden): this fires earliest and
+                    // most reliably of any post-hangup signal (see calls-ui.js
+                    // handleCallEnded) — reset the callsContent fullscreen overlay
+                    // here too so the sidebar/bottom-nav are never left covered.
+                    _kynResetCallsContentOverlay();
                 }
 
                 if (data.type === 'API_RESPONSE' && data.status === 401) await refreshAuthToken();
@@ -7872,6 +7923,7 @@ window.addEventListener('message', function (e) {
 
         // Remove call-screen body classes so sidebar/nav reappear
         document.body.classList.remove('call-screen-active', 'in-call-active');
+        if (typeof _kynResetCallsContentOverlay === 'function') _kynResetCallsContentOverlay();
         // FIX (nav-icons-stuck-hidden): this is the definitive final cleanup
         // step for a hangup (per the dedup comment above, it fires from both
         // the local endCall() path and a remote call:ended echo), but it
