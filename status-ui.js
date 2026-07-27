@@ -3638,6 +3638,30 @@ function _loadSlot(index, isOwner, group) {
     const status = group[index];
     currentViewerStatus = status;
 
+    // FIX (viewed status reverts to "recently updated" after refresh/relogin):
+    // this write used to happen AFTER loadViewerContent()/_applyViewerMode()
+    // ran. Those can fail for a given status (missing media, race with a
+    // still-loading iframe, a slow network) without throwing anything the
+    // user notices — the slide still visually appears to open — but any
+    // exception there aborted the rest of this function, so the
+    // localStorage write below never executed and the status stayed
+    // "unviewed" for the next render/reload even though the user clearly
+    // saw it. Recording the view is now the very first thing this function
+    // does, wrapped in its own try/catch, so content-loading problems can
+    // never prevent it from persisting.
+    try {
+        const _sid = String(status.id);
+        const _alreadyViewed = viewedStatuses?.has(_sid) || viewedStatuses?.has(status.id);
+        if (!isOwner && !_alreadyViewed && viewedStatuses) {
+            viewedStatuses.add(_sid);
+            viewedStatuses.add(status.id);
+            if (!isNaN(_sid)) viewedStatuses.add(Number(_sid));
+            const arr = JSON.stringify(Array.from(viewedStatuses).map(String));
+            localStorage.setItem('kyn_viewed_statuses',    arr);
+            localStorage.setItem('knecta_viewed_statuses', arr);
+        }
+    } catch (_) {}
+
     // Expose current status ID to window (for viewers panel + hold-reveal)
     window.__currentViewingStatusId = status.id;
     window.__activeStatusId         = status.id;
@@ -3653,22 +3677,11 @@ function _loadSlot(index, isOwner, group) {
     // Apply owner/friend mode
     _applyViewerMode(isOwner, status);
 
-    // Record view (friends only, deduplicated)
-    // Check both string and number forms (IDs may be either type)
-    const _sid = String(status.id);
-    const _alreadyViewed = viewedStatuses?.has(_sid) || viewedStatuses?.has(status.id);
-    if (!isOwner && !_alreadyViewed) {
-        if (viewedStatuses) {
-            viewedStatuses.add(_sid);
-            viewedStatuses.add(status.id);
-            // Also add numeric and string forms to be safe
-            if (!isNaN(_sid)) viewedStatuses.add(Number(_sid));
-        }
-        try {
-            const arr = JSON.stringify(Array.from(viewedStatuses).map(String));
-            localStorage.setItem('kyn_viewed_statuses',    arr);
-            localStorage.setItem('knecta_viewed_statuses', arr);
-        } catch(_) {}
+    // Re-render lists/rings/badges to reflect the view recorded above.
+    // (The actual localStorage write already happened at the top of this
+    // function — this block is now just the UI-refresh side effect.)
+    const _sidForUI = String(status.id);
+    if (!isOwner) {
         // FIX: Re-render immediately after marking viewed so viewed section shows instantly
         setTimeout(() => {
             if (typeof renderStatusListInstantlyUI === 'function') {
@@ -4984,16 +4997,16 @@ async function sendReply() {
             // Close the status viewer and open the relevant chat
             const viewer = UIElements.statusViewerPanel;
             if (viewer) viewer.classList.remove('active');
-            // If parent window can open chat, use it
-            try {
-                const ownerId = currentViewerStatus.userId || currentViewerStatus.user?.id;
-                if (ownerId && window.parent && window.parent !== window) {
-                    window.parent.postMessage({
-                        type: 'OPEN_CHAT',
-                        payload: { userId: ownerId, chatId: result.chatId }
-                    }, '*');
-                }
-            } catch (_) {}
+            // FIX (status-reply auto-opens chat panel): this used to
+            // postMessage('OPEN_CHAT') to the parent unconditionally, which
+            // force-navigated the sender to Messages and opened the chat
+            // panel every time they replied/commented on a status. The
+            // reply is already delivered and persisted via the normal
+            // new_message socket path (see chat.html's _fwdNewMessage),
+            // which updates chat history silently without navigating —
+            // so no parent postMessage is needed here at all. Sending a
+            // reply should only show the "Reply sent" confirmation above
+            // and keep the user in the status viewer/feed.
         } else {
             showNotification(result.error || 'Failed to send reply', 'error');
         }

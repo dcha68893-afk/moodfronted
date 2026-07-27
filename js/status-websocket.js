@@ -381,16 +381,14 @@ class StatusWebSocket {
             });
         }
 
-        // Forward to parent chat module
-        if (window.parent && window.parent !== window) {
-            try {
-                window.parent.postMessage({
-                    type:    'STATUS_REPLY_RECEIVED',
-                    payload: data,
-                    source:  'status',
-                }, '*');
-            } catch (_) {}
-        }
+        // FIX (friend's chat panel force-opens on comment/reply): this used
+        // to postMessage('STATUS_REPLY_RECEIVED') to the parent, which
+        // chat.html turned into an unconditional navigateToPage('messages')
+        // + forced chat-panel-active — so the recipient's app yanked them
+        // into Messages the instant a friend commented on their status.
+        // The reply/comment already arrives in chat history on its own via
+        // the normal new_message socket event (silent, no navigation) —
+        // the reply badge update above is all that should happen here.
 
         const currentUser = window.currentUser || (window.auth && window.auth.currentUser);
         const currentId   = currentUser && (currentUser.id || currentUser.userId);

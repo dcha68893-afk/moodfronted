@@ -26,8 +26,13 @@
     <link rel="icon" href="../icons/nexopa-192.png">
     <link rel="icon" href="../icons/nexopa-512.png">
     <meta charset="UTF-8">
-    <!-- Force light color-scheme so Android/iOS never applies dark backgrounds -->
-    <meta name="color-scheme" content="dark">
+    <!-- FIX (hardcoded theme audit): removed <meta name="color-scheme"
+         content="dark">, a stray leftover from the same original bug that
+         `html { color-scheme: light dark }` further down this file already
+         fixes properly. The meta tag's own comment claimed it forced LIGHT
+         while its value was actually "dark" — it was fighting the real fix
+         and forcing native dark form controls/scrollbars regardless of what
+         theme the user saved in Settings. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Status | Knecta Chat</title>
 

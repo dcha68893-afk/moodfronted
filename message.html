@@ -2123,7 +2123,24 @@
 
                 const { userId, userName, recipientId, recipientName } = data.payload || {};
                 const targetUserId = userId || recipientId;
-                const targetUserName = userName || recipientName || 'User';
+                // FIX (duplicate "User" chat entry): callers that don't have
+                // a display name handy (e.g. the status-reply flow, which
+                // only ever sent userId/chatId) used to fall straight
+                // through to the literal string 'User'. If findExisting
+                // lookup by userId/chatId then missed for any reason, this
+                // registered a NEW pending conversation named "User"
+                // alongside the real, already-named conversation with that
+                // friend — the duplicate-chat bug. Try resolving the real
+                // name from the already-loaded friends cache first.
+                let targetUserName = userName || recipientName;
+                if (!targetUserName) {
+                    try {
+                        const _fm = window.MessagesCore && window.MessagesCore.FriendManager;
+                        const _friend = _fm && (_fm.getFriend(targetUserId) || _fm.getFriend(parseInt(targetUserId, 10)));
+                        if (_friend) targetUserName = _friend.name || _friend.displayName || _friend.username;
+                    } catch (_) {}
+                }
+                targetUserName = targetUserName || 'User';
 
                 if (!targetUserId) { console.error('[Message HTML] No userId provided'); return; }
 
