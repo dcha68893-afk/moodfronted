@@ -1384,6 +1384,19 @@
                     <button class="chat-action-btn" id="videoCallBtn" title="Video Call">
                         <i class="fas fa-video"></i>
                     </button>
+                    <!-- FIX (DEAD-BACKUP-FEATURE): js/backup-manager.js was loaded on
+                         this page (see the <script> tag near the end of <body>) but
+                         nothing anywhere ever called window.KynectaBackupManager's
+                         showBackupDialog()/createLocalBackup()/createCloudBackup()/
+                         restoreFromFile()/restoreFromCloud() — the whole encrypted
+                         backup+restore feature was fully implemented (frontend crypto
+                         and matching /api/devices/backup* backend routes both exist)
+                         but had no UI entry point, so it could never be triggered.
+                         This button is that entry point; its click handler is wired
+                         up in messages-ui.js next to the chatOptionsBtn handler. -->
+                    <button class="chat-action-btn" id="messageBackupBtn" title="Backup & Restore Messages">
+                        <i class="fas fa-shield-alt"></i>
+                    </button>
                     <button class="chat-action-btn" id="chatOptionsBtn" title="Options">
                         <i class="fas fa-ellipsis-v"></i>
                     </button>

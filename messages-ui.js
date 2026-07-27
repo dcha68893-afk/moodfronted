@@ -9078,6 +9078,30 @@ Type: ${message.type || 'text'}`;
 
 
 
+            // Message backup / restore button
+            // FIX (DEAD-BACKUP-FEATURE): see message.html for the matching comment —
+            // this is the missing entry point that finally invokes the already-built
+            // KynectaBackupManager dialog (js/backup-manager.js).
+            const messageBackupBtn = UIFailsafe.safeGetElement('messageBackupBtn');
+
+            if (messageBackupBtn) {
+
+                messageBackupBtn.addEventListener('click', () => {
+
+                    UIFailsafe.queueAction(() => {
+
+                        if (window.KynectaBackupManager && typeof window.KynectaBackupManager.showBackupDialog === 'function') {
+                            window.KynectaBackupManager.showBackupDialog();
+                        } else {
+                            console.error('[Messages] KynectaBackupManager not loaded — backup-manager.js failed to initialize');
+                        }
+
+                    });
+
+                });
+
+            }
+
             // Chat options button
 
             const chatOptionsBtn = UIFailsafe.safeGetElement('chatOptionsBtn');

@@ -4337,10 +4337,56 @@ export function loadDangerSection(container) {
                 if (confirm('Type "DELETE" to confirm')) {
                     const confirmation = prompt('Type "DELETE" to confirm:');
                     if (confirmation === 'DELETE') {
-                        localStorage.clear();
-                        indexedDB.deleteDatabase('settingsDB');
-                        showNotification('All data cleared. Reloading...', 'warning');
-                        setTimeout(() => window.location.reload(), 2000);
+                        // FIX (PLACEHOLDER-CLEAR-ALL-DATA): this previously only ran
+                        // localStorage.clear() and indexedDB.deleteDatabase('settingsDB') —
+                        // 'settingsDB' is not a real database anywhere in this app (the
+                        // actual local stores are KnectaToolsDB, kynectaMesh, AppDB,
+                        // calls-db, KnectaStatusDB, kyn_offline_queue, nexopa_repair_v1,
+                        // kyn_stories_v1, nexopa_dq_v1 — see authStorage.js's own
+                        // KNOWN_INDEXEDDB_NAMES list), so this button deleted a database
+                        // that never existed and left every real cache untouched. It also
+                        // never touched the Cache Storage API used by the service worker.
+                        // Now enumerates and deletes every real IndexedDB database (with
+                        // the same known-names fallback authStorage.js uses when
+                        // indexedDB.databases() isn't supported), clears Cache Storage,
+                        // and clears both localStorage and sessionStorage.
+                        (async () => {
+                            try {
+                                if (window.sessionStorage) sessionStorage.clear();
+                            } catch (_) {}
+                            try {
+                                if (typeof indexedDB !== 'undefined') {
+                                    const knownNames = [
+                                        'KnectaToolsDB', 'kynectaMesh', 'AppDB', 'calls-db', 'KnectaStatusDB',
+                                        'kyn_offline_queue', 'nexopa_repair_v1', 'kyn_stories_v1', 'nexopa_dq_v1',
+                                        'settingsDB'
+                                    ];
+                                    if (typeof indexedDB.databases === 'function') {
+                                        try {
+                                            const dbs = await indexedDB.databases();
+                                            (dbs || []).forEach((db) => {
+                                                if (db && db.name) { try { indexedDB.deleteDatabase(db.name); } catch (_) {} }
+                                            });
+                                        } catch (_) {
+                                            knownNames.forEach((name) => { try { indexedDB.deleteDatabase(name); } catch (_) {} });
+                                        }
+                                    } else {
+                                        knownNames.forEach((name) => { try { indexedDB.deleteDatabase(name); } catch (_) {} });
+                                    }
+                                }
+                            } catch (_) {}
+                            try {
+                                if (window.caches && typeof caches.keys === 'function') {
+                                    const cacheNames = await caches.keys();
+                                    await Promise.all(cacheNames.map((name) => caches.delete(name)));
+                                }
+                            } catch (_) {}
+                            try {
+                                localStorage.clear();
+                            } catch (_) {}
+                            showNotification('All data cleared. Reloading...', 'warning');
+                            setTimeout(() => window.location.reload(), 2000);
+                        })();
                     }
                 }
             }
