@@ -31,8 +31,23 @@
 // network-first. Bumping the cache name here also forces an immediate,
 // one-time clean slate for every static asset already cached from
 // previous versions.
-const SW_VERSION = '19.2.0';
-const CACHE_NAME = 'nexopa-static-v23'; // Bumped — messages-core.ui-bridge.js/messages-ui.js changed (forensic render-check logging), forces stale-JS eviction
+// FIX v19.3.0 (theme-sparking bug, round 7): the round-6 fix touched 6 files
+// (status-core-runtime.js, messages-core.ui-bridge.js, group-core-bridge.js,
+// friend-core.ui-bridge.js, Tool-core.part3.js, Tool-ui.js) to stop them
+// replaying a stale settings cache's theme on cold boot. None of those 6
+// files were in NETWORK_FIRST_PATTERNS below, and 3 of them
+// (messages-core.ui-bridge.js, group-core-bridge.js, friend-core.ui-bridge.js)
+// weren't even covered by the messages-core.js/messages-ui.js entries already
+// there (different filenames) — so for any already-installed user, the
+// service worker kept serving the pre-fix, still-buggy versions of these
+// exact files from cache, cache-first, for up to 7 days after every deploy.
+// This is the identical failure mode already diagnosed for theme.colors.css
+// in v19.2.0 below — it just hadn't been extended to these 6 files, which is
+// almost certainly why the fix "didn't work": it was shipped, but the
+// browser never fetched it. All 6 are now network-first, and the cache name
+// is bumped again for an immediate one-time clean slate.
+const SW_VERSION = '19.3.0';
+const CACHE_NAME = 'nexopa-static-v24'; // Bumped — theme-critical module bridge files now network-first (round 7)
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
 
 // ---------------------------------------------------------------------------
@@ -152,6 +167,16 @@ const NETWORK_FIRST_PATTERNS = [
   // ✅ NEW: Messages module
   /\/messages-core\.js/i,
   /\/messages-ui\.js/i,
+
+  // ✅ NEW (theme-sparking bug, round 7): the actual files patched for the
+  // theme cold-boot stale-cache-replay bug. See v19.3.0 note above for why
+  // these specifically must never sit cache-first.
+  /\/status-core-runtime\.js/i,
+  /\/messages-core\.ui-bridge\.js/i,
+  /\/group-core-bridge\.js/i,
+  /\/friend-core\.ui-bridge\.js/i,
+  /\/Tool-core\.part3\.js/i,
+  /\/Tool-ui\.js/i,
 
   // ✅ NEW: Safety layer (handles localStorage, used by token reading)
   /\/kynecta\.safety\.layer\.js/i,
