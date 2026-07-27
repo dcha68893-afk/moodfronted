@@ -68,7 +68,7 @@
         transition: background 0.15s;
       }
       #kynVerifiedBadge:hover { background: rgba(34,197,94,0.2); }
-      #kynVerifiedBadge.unverified { color: var(--text-muted,#888); background: none; border-color: transparent; }
+      #kynVerifiedBadge.unverified { color: var(--kyn-text-muted); background: none; border-color: transparent; }
       #kynVerifiedBadge.key-changed { color: #ef4444; background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.3); }
 
       /* Key-changed warning banner in chat */
@@ -99,7 +99,7 @@
         padding: 20px;
       }
       #kynSafetyBox {
-        background: var(--bg-primary, #141420);
+        background: var(--kyn-bg-modal);
         border-radius: 20px;
         width: 100%;
         max-width: 360px;
@@ -125,7 +125,7 @@
       }
       #kynSafetyBox .sn-subtitle {
         font-size: 12px;
-        color: var(--text-muted, #888);
+        color: var(--kyn-text-muted);
         line-height: 1.5;
       }
 
@@ -139,12 +139,12 @@
       .sn-avatar {
         width: 52px; height: 52px;
         border-radius: 50%;
-        background: var(--accent, #7c3aed);
+        background: var(--kyn-accent-primary);
         display: flex; align-items: center; justify-content: center;
         color: #fff; font-weight: 700; font-size: 18px;
         flex-shrink: 0;
       }
-      .sn-avatar-link { font-size: 20px; color: var(--text-muted, #666); }
+      .sn-avatar-link { font-size: 20px; color: var(--kyn-text-muted); }
 
       /* Fingerprint groups */
       .sn-fingerprint {
@@ -154,7 +154,7 @@
         margin: 16px 0;
       }
       .sn-group {
-        background: var(--bg-secondary, #1e1e2e);
+        background: var(--kyn-bg-panel);
         border-radius: 8px;
         padding: 8px 4px;
         text-align: center;
@@ -180,13 +180,13 @@
         background: none;
         border: 1px solid var(--border-color, rgba(255,255,255,0.1));
         border-radius: 20px;
-        color: var(--text-muted, #888);
+        color: var(--kyn-text-muted);
         font-size: 12px;
         padding: 4px 12px;
         cursor: pointer;
         transition: border-color 0.15s, color 0.15s;
       }
-      .sn-mode-btn:hover { color: var(--accent, #7c3aed); border-color: var(--accent, #7c3aed); }
+      .sn-mode-btn:hover { color: var(--kyn-accent-primary); border-color: var(--kyn-accent-primary); }
 
       /* Instructions */
       .sn-instructions {
@@ -194,7 +194,7 @@
         border-radius: 10px;
         padding: 12px;
         font-size: 12px;
-        color: var(--text-muted, #aaa);
+        color: var(--kyn-text-muted);
         line-height: 1.5;
         margin: 12px 0;
         border: 1px solid rgba(124,58,237,0.2);
@@ -211,7 +211,7 @@
         padding: 12px;
         border-radius: 12px;
         border: none;
-        background: var(--accent, #7c3aed);
+        background: var(--kyn-accent-primary);
         color: #fff;
         font-size: 14px;
         font-weight: 700;
@@ -228,8 +228,8 @@
         padding: 10px;
         border-radius: 12px;
         border: none;
-        background: var(--bg-secondary, #1e1e2e);
-        color: var(--text-muted, #888);
+        background: var(--kyn-bg-panel);
+        color: var(--kyn-text-muted);
         font-size: 14px;
         cursor: pointer;
       }
@@ -238,7 +238,7 @@
       .sn-status-line {
         text-align: center;
         font-size: 12px;
-        color: var(--text-muted, #888);
+        color: var(--kyn-text-muted);
         margin-top: 8px;
       }
       .sn-status-line.ok { color: #22c55e; }
@@ -365,7 +365,7 @@
         <div class="sn-header">
           <div class="sn-title">Safety Numbers</div>
         </div>
-        <div style="text-align:center;padding:32px;color:var(--text-muted,#888)">
+        <div style="text-align:center;padding:32px;color:var(--kyn-text-muted)">
           <i class="fas fa-circle-notch fa-spin" style="font-size:24px"></i>
           <div style="margin-top:12px;font-size:13px">Computing fingerprint…</div>
         </div>
@@ -386,7 +386,7 @@
         </div>
         <button onclick="document.getElementById('kynSafetyModal').remove()"
           style="width:100%;padding:12px;border-radius:12px;border:none;
-                 background:var(--bg-secondary,#1e1e2e);color:var(--text-muted,#888);
+                 background:var(--kyn-bg-panel);color:var(--kyn-text-muted);
                  font-size:14px;cursor:pointer">Close</button>
       `;
       return;
@@ -394,14 +394,14 @@
 
     if (!safetyData) {
       overlay.querySelector('#kynSafetyBox').innerHTML = `
-        <div style="text-align:center;padding:24px;font-size:13px;color:var(--text-muted,#888)">
+        <div style="text-align:center;padding:24px;font-size:13px;color:var(--kyn-text-muted)">
           <i class="fas fa-lock-open" style="font-size:32px;display:block;margin-bottom:12px"></i>
           ${_esc(userName)} hasn't enabled encryption yet.<br>
           Safety numbers require both users to have encryption active.
         </div>
         <button onclick="document.getElementById('kynSafetyModal').remove()"
           style="width:100%;padding:12px;border-radius:12px;border:none;
-                 background:var(--bg-secondary,#1e1e2e);color:var(--text-muted,#888);
+                 background:var(--kyn-bg-panel);color:var(--kyn-text-muted);
                  cursor:pointer">Close</button>
       `;
       return;

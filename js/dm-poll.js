@@ -28,7 +28,7 @@
         display: flex; align-items: flex-end; justify-content: center;
       }
       #kynPollModalBox {
-        background: var(--bg-primary, #141420);
+        background: var(--kyn-bg-modal);
         border-radius: 20px 20px 0 0;
         width: 100%; max-width: 480px;
         padding: 20px 16px 32px;
@@ -46,12 +46,12 @@
       .poll-modal-label {
         font-size: 11px; font-weight: 600; letter-spacing: 0.5px;
         text-transform: uppercase;
-        color: var(--text-muted, #888);
+        color: var(--kyn-text-muted);
         margin: 12px 0 4px;
       }
       .poll-modal-input {
         width: 100%; box-sizing: border-box;
-        background: var(--bg-secondary, #1e1e2e);
+        background: var(--kyn-bg-panel);
         border: 1px solid var(--border-color, rgba(255,255,255,0.08));
         border-radius: 10px;
         color: var(--text-primary);
@@ -60,20 +60,20 @@
         outline: none;
         transition: border-color 0.15s;
       }
-      .poll-modal-input:focus { border-color: var(--accent, #7c3aed); }
+      .poll-modal-input:focus { border-color: var(--kyn-accent-primary); }
       .poll-option-row {
         display: flex; gap: 6px; align-items: center; margin-bottom: 6px;
       }
       .poll-option-row input { flex: 1; }
       .poll-option-remove {
-        background: none; border: none; color: var(--text-muted, #888);
+        background: none; border: none; color: var(--kyn-text-muted);
         cursor: pointer; font-size: 16px; padding: 0 4px;
         transition: color 0.15s;
       }
       .poll-option-remove:hover { color: #ef4444; }
       #kynAddPollOption {
         background: none; border: 1px dashed var(--border-color, rgba(255,255,255,0.1));
-        border-radius: 10px; color: var(--accent, #7c3aed);
+        border-radius: 10px; color: var(--kyn-accent-primary);
         width: 100%; padding: 8px; cursor: pointer;
         font-size: 13px; margin-top: 4px;
         transition: background 0.15s;
@@ -89,11 +89,11 @@
         transition: opacity 0.15s;
       }
       #kynPollCancel {
-        background: var(--bg-secondary, #1e1e2e);
-        color: var(--text-muted, #888);
+        background: var(--kyn-bg-panel);
+        color: var(--kyn-text-muted);
       }
       #kynPollSend {
-        background: var(--accent, #7c3aed);
+        background: var(--kyn-accent-primary);
         color: #fff;
       }
       #kynPollSend:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -101,7 +101,7 @@
       /* Poll bubble in chat */
       .poll-bubble {
         min-width: 200px; max-width: 280px;
-        background: var(--bg-tertiary, #2a2a3e);
+        background: var(--kyn-bg-input);
         border-radius: 14px;
         overflow: hidden;
         border: 1px solid var(--border-color, rgba(255,255,255,0.06));
@@ -109,7 +109,7 @@
       .poll-bubble-header {
         padding: 10px 12px 4px;
         font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
-        text-transform: uppercase; color: var(--accent, #7c3aed);
+        text-transform: uppercase; color: var(--kyn-accent-primary);
         display: flex; align-items: center; gap: 5px;
       }
       .poll-bubble-question {
@@ -136,12 +136,12 @@
         flex: 1; font-size: 13px; color: var(--text-primary);
       }
       .poll-option-check {
-        color: var(--accent, #7c3aed); font-size: 13px;
+        color: var(--kyn-accent-primary); font-size: 13px;
         opacity: 0; transition: opacity 0.15s;
       }
       .poll-option-btn.my-vote .poll-option-check { opacity: 1; }
       .poll-option-pct {
-        font-size: 11px; color: var(--text-muted, #888);
+        font-size: 11px; color: var(--kyn-text-muted);
         min-width: 28px; text-align: right;
       }
       .poll-option-bar {
@@ -154,7 +154,7 @@
       .poll-option-btn.my-vote .poll-option-bar { background: rgba(124,58,237,0.25); }
       .poll-bubble-footer {
         padding: 6px 12px 10px;
-        font-size: 11px; color: var(--text-muted, #777);
+        font-size: 11px; color: var(--kyn-text-muted);
         border-top: 1px solid var(--border-color, rgba(255,255,255,0.04));
         display: flex; gap: 8px; align-items: center;
       }

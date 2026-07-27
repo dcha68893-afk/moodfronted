@@ -461,7 +461,7 @@
     document.addEventListener('click', function _evtTabDelegate(e) {
         const tab = e.target.closest('.evt-tab');
         if (!tab) return;
-        qsa('.evt-tab').forEach(t => { t.style.background='var(--bg-tertiary,#252537)'; t.style.color='var(--text-secondary)'; });
+        qsa('.evt-tab').forEach(t => { t.style.background='var(--kyn-bg-input)'; t.style.color='var(--text-secondary)'; });
         tab.style.background = 'var(--primary-color)'; tab.style.color = '#fff';
         const key = tab.dataset.etab;
         if (key === 'upcoming' || key === 'past') loadGroupEventsPanel(key);
@@ -472,7 +472,7 @@
     document.addEventListener('click', function _invTabDelegate(e) {
         const tab = e.target.closest('.inv-tab');
         if (!tab) return;
-        qsa('.inv-tab').forEach(t => { t.style.background='var(--bg-tertiary,#252537)'; t.style.color='var(--text-secondary)'; });
+        qsa('.inv-tab').forEach(t => { t.style.background='var(--kyn-bg-input)'; t.style.color='var(--text-secondary)'; });
         tab.style.background = 'var(--primary-color)'; tab.style.color = '#fff';
         loadInvitePanel(tab.dataset.invtab);
     });
@@ -1042,7 +1042,7 @@
                 '<button id="_discMine" style="flex:1;padding:8px 14px;border-radius:10px;border:none;cursor:pointer;' +
                 'font-weight:700;font-size:13px;background:var(--primary-color);color:#fff;">👤 My Groups</button>' +
                 '<button id="_discOthers" style="flex:1;padding:8px 14px;border-radius:10px;border:none;cursor:pointer;' +
-                'font-weight:700;font-size:13px;background:var(--bg-tertiary,#2a2a3e);color:var(--text-secondary);">🌐 Discover Others</button>';
+                'font-weight:700;font-size:13px;background:var(--kyn-bg-input);color:var(--text-secondary);">🌐 Discover Others</button>';
             resultsEl.parentNode.insertBefore(wrap, resultsEl);
 
             qs('#_discMine').addEventListener('click', () => _discoverSetTab('mine', resultsEl));
@@ -1070,10 +1070,10 @@
         if (mine && others) {
             if (tab === 'mine') {
                 mine.style.background   = 'var(--primary-color)'; mine.style.color = '#fff';
-                others.style.background = 'var(--bg-tertiary,#2a2a3e)';  others.style.color = 'var(--text-secondary)';
+                others.style.background = 'var(--kyn-bg-input)';  others.style.color = 'var(--text-secondary)';
             } else {
                 others.style.background = 'var(--primary-color)'; others.style.color = '#fff';
-                mine.style.background   = 'var(--bg-tertiary,#2a2a3e)';   mine.style.color = 'var(--text-secondary)';
+                mine.style.background   = 'var(--kyn-bg-input)';   mine.style.color = 'var(--text-secondary)';
             }
         }
         if (tab === 'mine') _renderMyGroups(resultsEl);
@@ -1135,7 +1135,7 @@
 
     function _discoverScopeButton(scope, icon, label, full) {
         return '<button data-scope="' + scope + '" style="' + (full ? 'width:100%;' : '') +
-            'padding:16px 10px;border-radius:12px;border:none;cursor:pointer;background:var(--bg-tertiary,#2a2a3e);' +
+            'padding:16px 10px;border-radius:12px;border:none;cursor:pointer;background:var(--kyn-bg-input);' +
             'color:var(--text-primary);font-weight:600;font-size:13px;display:flex;flex-direction:column;' +
             'align-items:center;gap:6px;">' +
             '<span style="font-size:22px">' + icon + '</span>' + label + '</button>';
@@ -1282,13 +1282,13 @@
         bodyEl.innerHTML = `
             <div style="padding:16px 0">
                 <div style="margin-bottom:14px"><label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">Event Title *</label>
-                <input id="_evt_title" type="text" placeholder="Enter event name" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-tertiary,#252537);color:var(--text-primary);font-size:14px;box-sizing:border-box"></div>
+                <input id="_evt_title" type="text" placeholder="Enter event name" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:var(--kyn-bg-input);color:var(--text-primary);font-size:14px;box-sizing:border-box"></div>
                 <div style="margin-bottom:14px"><label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">Group</label>
-                <select id="_evt_group" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-tertiary,#252537);color:var(--text-primary);font-size:14px"><option value="">Select group...</option></select></div>
+                <select id="_evt_group" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:var(--kyn-bg-input);color:var(--text-primary);font-size:14px"><option value="">Select group...</option></select></div>
                 <div style="margin-bottom:14px"><label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">Date &amp; Time *</label>
-                <input id="_evt_date" type="datetime-local" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-tertiary,#252537);color:var(--text-primary);font-size:14px;box-sizing:border-box"></div>
+                <input id="_evt_date" type="datetime-local" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:var(--kyn-bg-input);color:var(--text-primary);font-size:14px;box-sizing:border-box"></div>
                 <div style="margin-bottom:20px"><label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">Description</label>
-                <textarea id="_evt_desc" rows="3" placeholder="Event description..." style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-tertiary,#252537);color:var(--text-primary);font-size:14px;resize:vertical;box-sizing:border-box"></textarea></div>
+                <textarea id="_evt_desc" rows="3" placeholder="Event description..." style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:var(--kyn-bg-input);color:var(--text-primary);font-size:14px;resize:vertical;box-sizing:border-box"></textarea></div>
                 <button id="_evt_submit" style="width:100%;padding:12px;border-radius:8px;border:none;background:var(--primary-color);color:#fff;font-weight:700;font-size:15px;cursor:pointer">Create Event</button>
             </div>`;
         // Populate group select
@@ -1306,7 +1306,7 @@
             try {
                 await apiFetch('/groups/'+gid+'/events', { method:'POST', body:{ title, description:desc, date:new Date(dt).toISOString() } });
                 toast('Event created!'); loadGroupEventsPanel('upcoming');
-                qsa('.evt-tab').forEach((t,i)=>{ t.style.background=i===0?'var(--primary-color)':'var(--bg-tertiary,#252537)'; t.style.color=i===0?'#fff':'var(--text-secondary)'; });
+                qsa('.evt-tab').forEach((t,i)=>{ t.style.background=i===0?'var(--primary-color)':'var(--kyn-bg-input)'; t.style.color=i===0?'#fff':'var(--text-secondary)'; });
             } catch(err) { toast(err.message||'Failed','error'); }
         });
     }
@@ -1369,7 +1369,7 @@
             } catch(err){bodyEl.innerHTML='<div style="padding:24px;text-align:center;color:var(--text-secondary)">'+(err.message||'Failed')+'</div>';}
         } else if (tab === 'invite') {
             // Show friend list to invite to a group
-            bodyEl.innerHTML = '<div style="padding:14px 0"><select id="_inv_group" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-tertiary,#252537);color:var(--text-primary);font-size:14px;margin-bottom:12px"><option value="">Select group to invite to...</option></select><div id="_inv_friends" style="max-height:300px;overflow-y:auto"></div><button id="_inv_send" style="width:100%;padding:11px;margin-top:14px;border-radius:8px;border:none;background:var(--primary-color);color:#fff;font-weight:700;font-size:14px;cursor:pointer">Send Invitations</button></div>';
+            bodyEl.innerHTML = '<div style="padding:14px 0"><select id="_inv_group" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:var(--kyn-bg-input);color:var(--text-primary);font-size:14px;margin-bottom:12px"><option value="">Select group to invite to...</option></select><div id="_inv_friends" style="max-height:300px;overflow-y:auto"></div><button id="_inv_send" style="width:100%;padding:11px;margin-top:14px;border-radius:8px;border:none;background:var(--primary-color);color:#fff;font-weight:700;font-size:14px;cursor:pointer">Send Invitations</button></div>';
             const gsel = qs('#_inv_group');
             // FIX: populate group select from cache OR API fallback
             (async () => {
@@ -1872,7 +1872,7 @@
                 '<div style="display:flex;gap:8px;margin-bottom:8px">' +
                 '<input id="_patchUserSearchInput" placeholder="Name or @username\u2026" autocomplete="off"' +
                 ' style="flex:1;padding:9px 12px;border-radius:8px;border:1px solid var(--border-color);' +
-                'background:var(--bg-tertiary,#252537);color:var(--text-primary);font-size:13px;outline:none">' +
+                'background:var(--kyn-bg-input);color:var(--text-primary);font-size:13px;outline:none">' +
                 '<button id="_patchUserSearchBtn" style="padding:9px 14px;border-radius:8px;border:none;' +
                 'background:var(--primary-color);color:#fff;font-size:13px;font-weight:600;cursor:pointer">Search</button>' +
                 '</div>' +

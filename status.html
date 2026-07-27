@@ -2116,14 +2116,14 @@
     transition: background 0.15s;
     flex-shrink: 0;
 }
-.sw-icon-btn:hover { background: var(--surface-alt, #2a3942); }
+.sw-icon-btn:hover { background: var(--kyn-bg-hover); }
 
 /* Three-dots dropdown */
 .sw-dropdown {
     position: absolute;
     top: 40px; right: 0;
     min-width: 200px;
-    background: var(--surface, #1e2a32);
+    background: var(--kyn-bg-modal);
     border: 1px solid var(--border-color);
     border-radius: 8px;
     box-shadow: 0 6px 20px rgba(0,0,0,0.4);
@@ -2138,7 +2138,7 @@
     font-size: 14px; text-align: left;
     cursor: pointer; transition: background 0.12s;
 }
-.sw-dropdown-item:hover { background: var(--surface-alt, #2a3942); }
+.sw-dropdown-item:hover { background: var(--kyn-bg-hover); }
 .sw-dropdown-item i { width: 16px; color: var(--text-secondary); font-size: 14px; }
 
 /* Section label ("Status", "Recent updates") */
@@ -2160,7 +2160,7 @@
     cursor: pointer;
     transition: background 0.12s;
 }
-.sw-my-status-row:hover { background: var(--surface-alt, #2a3942); }
+.sw-my-status-row:hover { background: var(--kyn-bg-hover); }
 
 /* Avatar wrapper — holds the ring SVG + avatar */
 .sw-avatar-wrap {
@@ -2171,7 +2171,7 @@
 .sw-avatar {
     width: 52px; height: 52px;
     border-radius: 50%;
-    background: var(--surface-alt, #2a3942);
+    background: var(--kyn-bg-hover);
     display: flex; align-items: center; justify-content: center;
     font-size: 22px;
     color: var(--text-secondary);
@@ -2218,7 +2218,7 @@
     transition: background 0.12s;
     position: relative;
 }
-.status-group-item:hover { background: var(--surface-alt, #2a3942); }
+.status-group-item:hover { background: var(--kyn-bg-hover); }
 
 /* Hide old category tabs and clutter */
 .status-categories:not(#hiddenTabs),
@@ -2272,7 +2272,7 @@
 .viewer-list-person:last-child { border-bottom: none; }
 .vp-avatar {
     width: 36px; height: 36px; border-radius: 50%;
-    background: var(--surface-alt, #2a3942);
+    background: var(--kyn-bg-hover);
     display: flex; align-items: center; justify-content: center;
     font-size: 14px; font-weight: 600; color: #fff;
     flex-shrink: 0; overflow: hidden;
@@ -3566,7 +3566,7 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
     <!-- Report Modal -->
     <div class="create-status-modal" id="reportModal" style="z-index:10001;">
         <div class="create-status-container" style="max-width:480px;width:94%;margin:auto;max-height:90vh;overflow-y:auto;">
-            <div class="create-status-header" style="position:sticky;top:0;z-index:2;background:var(--surface,#1e2a32);">
+            <div class="create-status-header" style="position:sticky;top:0;z-index:2;background:var(--kyn-bg-modal);">
                 <h3 style="display:flex;align-items:center;gap:8px;"><i class="fas fa-flag" style="color:#ef4444;"></i> Report Status</h3>
                 <button class="create-status-btn" id="closeReportModal" onclick="document.getElementById('reportModal').classList.remove('active')" style="font-size:20px;opacity:0.7;">
                     <i class="fas fa-times"></i>
@@ -3597,7 +3597,7 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
                     </div>
                 </div>
 
-                <div style="background:var(--surface-alt,#2a3942);border-radius:8px;padding:12px;display:flex;align-items:center;justify-content:space-between;">
+                <div style="background:var(--kyn-bg-hover);border-radius:8px;padding:12px;display:flex;align-items:center;justify-content:space-between;">
                     <div>
                         <div style="font-size:13px;font-weight:500;">Submit Anonymously</div>
                         <div style="font-size:11px;color:var(--text-secondary);margin-top:2px;">Your identity will not be shared</div>
@@ -3609,7 +3609,7 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
                 </div>
             </div>
 
-            <div style="padding:12px 16px;border-top:1px solid var(--border-color);display:flex;gap:10px;justify-content:flex-end;position:sticky;bottom:0;background:var(--surface,#1e2a32);">
+            <div style="padding:12px 16px;border-top:1px solid var(--border-color);display:flex;gap:10px;justify-content:flex-end;position:sticky;bottom:0;background:var(--kyn-bg-modal);">
                 <button class="action-btn secondary" id="cancelReportBtn" onclick="document.getElementById('reportModal').classList.remove('active')" style="min-width:90px;">
                     <i class="fas fa-times"></i> Cancel
                 </button>

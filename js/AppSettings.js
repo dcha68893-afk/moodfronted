@@ -914,7 +914,7 @@
                 }
             }
             // chat.html, admin-calls.html, game.html, index.html) style panels
-            // and cards using var(--surface, ...), var(--accent, ...) and
+            // and cards using var(--kyn-bg-modal), var(--kyn-accent-primary) and
             // var(--border, ...) — variable names this function never actually
             // set. Every one of those elements was silently using its
             // hardcoded fallback color forever, regardless of theme, which is

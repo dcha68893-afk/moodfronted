@@ -44,11 +44,11 @@
 
       /* Played-through portion: accent color */
       .wf-bar { fill: rgba(255,255,255,0.3); transition: fill 0.1s; }
-      .wf-bar.played { fill: var(--accent, #7c3aed); }
+      .wf-bar.played { fill: var(--kyn-accent-primary); }
 
       /* Animated recording bars */
       .wf-bar-live {
-        fill: var(--accent, #7c3aed);
+        fill: var(--kyn-accent-primary);
         transform-origin: bottom;
         animation: wfLivePulse 0.4s ease-in-out infinite alternate;
       }

@@ -2970,7 +2970,7 @@ export function setupToolbarButtons() {
     document.querySelectorAll('.evt-tab').forEach(btn => {
         btn.addEventListener('click', function () {
             document.querySelectorAll('.evt-tab').forEach(b => {
-                b.style.background = 'var(--bg-tertiary,#252537)';
+                b.style.background = 'var(--kyn-bg-input)';
                 b.style.color = 'var(--text-secondary)';
             });
             this.style.background = 'var(--primary-color)';
@@ -2987,7 +2987,7 @@ export function setupToolbarButtons() {
     document.querySelectorAll('.inv-tab').forEach(btn => {
         btn.addEventListener('click', function () {
             document.querySelectorAll('.inv-tab').forEach(b => {
-                b.style.background = 'var(--bg-tertiary,#252537)';
+                b.style.background = 'var(--kyn-bg-input)';
                 b.style.color = 'var(--text-secondary)';
             });
             this.style.background = 'var(--primary-color)';
@@ -3121,7 +3121,7 @@ export function renderFriendsPickerList(friends) {
         const item = document.createElement('div');
         const sel = window._cgSelectedMembers.has(f.id);
         const inviteMode = f.invitePolicy === 'invite_required';
-        item.style.cssText = 'display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;transition:background .15s;' + (sel ? 'background:var(--bg-secondary);border:1px solid var(--primary-color);border-radius:8px;' : 'border:1px solid transparent;');
+        item.style.cssText = 'display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;transition:background .15s;' + (sel ? 'background:var(--kyn-bg-panel);border:1px solid var(--primary-color);border-radius:8px;' : 'border:1px solid transparent;');
         const initials = f.displayName.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2)||'U';
         item.innerHTML = `
             <div style="width:36px;height:36px;border-radius:50%;background:var(--primary-color);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;flex-shrink:0;${f.avatar?'background-image:url('+f.avatar+');background-size:cover;':''}">${f.avatar?'':initials}</div>
@@ -4560,7 +4560,7 @@ async function panelFetch(path, opts = {}) {
 
 function panelCard(innerHTML) {
     const d = document.createElement('div');
-    d.style.cssText = 'background:var(--bg-tertiary,#252537);border-radius:12px;padding:14px 16px;margin-bottom:10px;border:1px solid var(--border-color);';
+    d.style.cssText = 'background:var(--kyn-bg-input);border-radius:12px;padding:14px 16px;margin-bottom:10px;border:1px solid var(--border-color);';
     d.innerHTML = innerHTML;
     return d;
 }
@@ -4695,15 +4695,15 @@ export function renderCreateEventForm() {
     div.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
     div.innerHTML = `
         <div><label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Event Title *</label>
-        <input id="evtTitle" placeholder="e.g. Weekly Study Session" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--bg-tertiary,#252537);border:1px solid var(--border-color);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;"></div>
+        <input id="evtTitle" placeholder="e.g. Weekly Study Session" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--kyn-bg-input);border:1px solid var(--border-color);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;"></div>
         <div><label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Description</label>
-        <textarea id="evtDesc" rows="2" placeholder="What's this event about?" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--bg-tertiary,#252537);border:1px solid var(--border-color);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;resize:vertical;"></textarea></div>
+        <textarea id="evtDesc" rows="2" placeholder="What's this event about?" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--kyn-bg-input);border:1px solid var(--border-color);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;resize:vertical;"></textarea></div>
         <div style="display:flex;gap:10px">
-            <div style="flex:1"><label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Start *</label><input id="evtStart" type="datetime-local" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--bg-tertiary,#252537);border:1px solid var(--border-color);color:var(--text-primary);font-size:13px;outline:none;box-sizing:border-box;"></div>
-            <div style="flex:1"><label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">End</label><input id="evtEnd" type="datetime-local" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--bg-tertiary,#252537);border:1px solid var(--border-color);color:var(--text-primary);font-size:13px;outline:none;box-sizing:border-box;"></div>
+            <div style="flex:1"><label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Start *</label><input id="evtStart" type="datetime-local" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--kyn-bg-input);border:1px solid var(--border-color);color:var(--text-primary);font-size:13px;outline:none;box-sizing:border-box;"></div>
+            <div style="flex:1"><label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">End</label><input id="evtEnd" type="datetime-local" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--kyn-bg-input);border:1px solid var(--border-color);color:var(--text-primary);font-size:13px;outline:none;box-sizing:border-box;"></div>
         </div>
         <div><label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Location</label>
-        <input id="evtLoc" placeholder="e.g. Zoom, Room 101" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--bg-tertiary,#252537);border:1px solid var(--border-color);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;"></div>
+        <input id="evtLoc" placeholder="e.g. Zoom, Room 101" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--kyn-bg-input);border:1px solid var(--border-color);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;"></div>
         <button id="evtSaveBtn" style="width:100%;padding:12px;border-radius:8px;background:var(--primary-color);color:#fff;border:none;cursor:pointer;font-size:14px;font-weight:600;">Create Event</button>
     `;
     body.innerHTML = '';
@@ -4787,8 +4787,8 @@ export async function loadInviteFriendsTab() {
     window._invSelFriends.clear();
     const gid = window.selectedGroup?.id;
     body.innerHTML = `
-        ${!gid ? '<div style="margin-bottom:10px"><label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Select Group</label><select id="invGroupSel" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--bg-tertiary,#252537);border:1px solid var(--border-color);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;"><option value="">Loading groups…</option></select></div>' : ''}
-        <input id="invFriendSearch" placeholder="Search friends…" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--bg-tertiary,#252537);border:1px solid var(--border-color);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;margin-bottom:10px;">
+        ${!gid ? '<div style="margin-bottom:10px"><label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Select Group</label><select id="invGroupSel" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--kyn-bg-input);border:1px solid var(--border-color);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;"><option value="">Loading groups…</option></select></div>' : ''}
+        <input id="invFriendSearch" placeholder="Search friends…" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--kyn-bg-input);border:1px solid var(--border-color);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;margin-bottom:10px;">
         <div id="invFriendsList" style="max-height:260px;overflow-y:auto;">${panelLoader()}</div>
         <div id="invSelBar" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;min-height:30px;"></div>
         <button id="invSendBtn" style="display:none;width:100%;padding:12px;border-radius:8px;background:var(--primary-color);color:#fff;border:none;cursor:pointer;font-size:14px;font-weight:600;margin-top:10px">Send Invitations</button>

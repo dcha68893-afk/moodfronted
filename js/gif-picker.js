@@ -39,17 +39,17 @@
     s.textContent = `
       #kynGifBtn {
         background: none; border: none; cursor: pointer;
-        color: var(--text-muted, #888); font-size: 18px;
+        color: var(--kyn-text-muted); font-size: 18px;
         padding: 0 6px; line-height: 1; transition: color 0.15s;
       }
-      #kynGifBtn:hover { color: var(--accent, #7c3aed); }
-      #kynGifBtn.active { color: var(--accent, #7c3aed); }
+      #kynGifBtn:hover { color: var(--kyn-accent-primary); }
+      #kynGifBtn.active { color: var(--kyn-accent-primary); }
 
       #kynGifPanel {
         position: absolute;
         bottom: 60px; left: 0; right: 0;
         height: 320px;
-        background: var(--bg-secondary, #1e1e2e);
+        background: var(--kyn-bg-panel);
         border: 1px solid var(--border-color, rgba(255,255,255,0.08));
         border-radius: 16px 16px 0 0;
         display: flex; flex-direction: column;
@@ -67,12 +67,12 @@
         padding: 8px 12px;
         border-radius: 20px;
         border: 1px solid var(--border-color, rgba(255,255,255,0.1));
-        background: var(--bg-tertiary, #2a2a3e);
+        background: var(--kyn-bg-input);
         color: var(--text-primary);
         font-size: 13px;
         outline: none;
       }
-      #kynGifSearch::placeholder { color: var(--text-muted, #666); }
+      #kynGifSearch::placeholder { color: var(--kyn-text-muted); }
 
       #kynGifGrid {
         flex: 1;
@@ -88,7 +88,7 @@
         overflow: hidden;
         border-radius: 8px;
         cursor: pointer;
-        background: var(--bg-tertiary, #2a2a3e);
+        background: var(--kyn-bg-input);
         transition: transform 0.1s, opacity 0.1s;
       }
       #kynGifGrid .gif-cell:hover { transform: scale(0.96); opacity: 0.85; }
@@ -98,7 +98,7 @@
       #kynGifGrid .gif-empty {
         grid-column: 1/-1;
         text-align: center;
-        color: var(--text-muted, #666);
+        color: var(--kyn-text-muted);
         font-size: 13px;
         padding: 40px 0;
       }
@@ -106,7 +106,7 @@
         grid-column: 1/-1;
         text-align: center;
         padding: 24px 0;
-        color: var(--text-muted, #888);
+        color: var(--kyn-text-muted);
         font-size: 20px;
       }
 
@@ -129,7 +129,7 @@
         padding: 1px 5px; border-radius: 4px;
       }
       .msg-gif-powered {
-        font-size: 9px; color: var(--text-muted, #666);
+        font-size: 9px; color: var(--kyn-text-muted);
         text-align: right; padding: 1px 4px;
       }
     `;

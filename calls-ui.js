@@ -8959,12 +8959,12 @@ declineIncomingCall: async function() {
             modal.id = 'callShareModal';
             modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:99999;display:flex;align-items:center;justify-content:center;';
             modal.innerHTML = `
-                <div style="background:var(--bg-secondary,#1e1e2e);border-radius:16px;padding:24px;width:320px;max-width:90vw;">
+                <div style="background:var(--kyn-bg-panel);border-radius:16px;padding:24px;width:320px;max-width:90vw;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
                         <h3 style="margin:0;color:var(--text-primary);font-size:16px;">Share Call Link</h3>
                         <button id="closeShareModal" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:20px;">&times;</button>
                     </div>
-                    <div style="background:var(--bg-tertiary,#2a2a3a);border-radius:8px;padding:10px;margin-bottom:16px;word-break:break-all;font-size:12px;color:var(--text-secondary);">${link}</div>
+                    <div style="background:var(--kyn-bg-input);border-radius:8px;padding:10px;margin-bottom:16px;word-break:break-all;font-size:12px;color:var(--text-secondary);">${link}</div>
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
                         <button id="shareWhatsApp" style="display:flex;align-items:center;gap:8px;padding:12px;background:#25D366;border:none;border-radius:10px;color:#fff;cursor:pointer;font-size:13px;font-weight:600;">
                             <i class="fab fa-whatsapp" style="font-size:18px;"></i> WhatsApp

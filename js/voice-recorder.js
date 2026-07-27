@@ -106,7 +106,7 @@
         }
         @keyframes kynVoiceIn { from { opacity:0; transform:translateY(20px) } to { opacity:1; transform:translateY(0) } }
         .kyn-voice-inner {
-          background: var(--bg-secondary, #1e1e2e); border-radius: 24px;
+          background: var(--kyn-bg-panel); border-radius: 24px;
           padding: 12px 16px; display: flex; flex-direction: column; align-items: center;
           box-shadow: 0 8px 32px rgba(0,0,0,0.4); width: min(340px, 92vw); gap: 8px;
           border: 1px solid var(--border-color, rgba(255,255,255,0.08));
@@ -114,7 +114,7 @@
         .kyn-voice-waveform { width: 240px; height: 48px; }
         #kyn-voice-canvas { display: block; }
         .kyn-voice-timer { font-size: 18px; font-weight: 600; color: var(--text-primary); letter-spacing: 1px; }
-        .kyn-voice-hint { font-size: 11px; color: var(--text-muted, #888); text-align: center; }
+        .kyn-voice-hint { font-size: 11px; color: var(--kyn-text-muted); text-align: center; }
         .kyn-voice-controls { display: flex; align-items: center; gap: 20px; width: 100%; justify-content: center; }
         .kyn-voice-btn {
           width: 44px; height: 44px; border-radius: 50%; border: none; cursor: pointer;
@@ -122,9 +122,9 @@
           transition: transform 0.15s, background 0.15s;
         }
         .kyn-voice-btn:active { transform: scale(0.9); }
-        .kyn-voice-cancel { background: var(--bg-tertiary, #2a2a3e); color: var(--text-muted, #888); }
+        .kyn-voice-cancel { background: var(--kyn-bg-input); color: var(--kyn-text-muted); }
         .kyn-voice-send   { background: var(--accent-color); color: #fff; }
-        .kyn-voice-send:hover { background: var(--accent-hover, #6d28d9); }
+        .kyn-voice-send:hover { background: var(--primary-dark); }
         .kyn-voice-mic-wrap {
           position: relative; width: 56px; height: 56px;
           display: flex; align-items: center; justify-content: center;
@@ -138,9 +138,9 @@
         .kyn-voice-mic-icon { color: var(--accent-color); position: relative; z-index: 1; }
         .kyn-voice-lock {
           align-self: flex-end; width: 32px; height: 32px; border-radius: 50%;
-          background: var(--bg-tertiary, #2a2a3e); border: none; cursor: pointer;
+          background: var(--kyn-bg-input); border: none; cursor: pointer;
           display: flex; align-items: center; justify-content: center;
-          color: var(--text-muted, #888); transition: color 0.2s, background 0.2s;
+          color: var(--kyn-text-muted); transition: color 0.2s, background 0.2s;
         }
         .kyn-voice-lock.locked { color: var(--accent-color); background: rgba(124,58,237,0.15); }
       `;
@@ -465,7 +465,7 @@
         <div style="flex:1;min-width:0">
           ${waveform ? `<div class="kyn-waveform-static">${waveform}</div>` : `<div style="height:32px;background:rgba(124,58,237,0.15);border-radius:4px"></div>`}
           <div style="display:flex;justify-content:space-between;margin-top:2px">
-            <span style="font-size:10px;color:var(--text-muted,#888)">${mm}:${ss}</span>
+            <span style="font-size:10px;color:var(--kyn-text-muted)">${mm}:${ss}</span>
             <button class="kyn-voice-speed-btn" style="font-size:10px;color:var(--accent-color);background:none;border:none;cursor:pointer;padding:0">1×</button>
           </div>
         </div>

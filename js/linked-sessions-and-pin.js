@@ -74,7 +74,7 @@
     if (!list) return;
 
     list.innerHTML = `
-      <div style="text-align:center;padding:24px;color:var(--text-muted,#888)">
+      <div style="text-align:center;padding:24px;color:var(--kyn-text-muted)">
         <i class="fas fa-circle-notch fa-spin" style="font-size:22px"></i>
       </div>`;
 
@@ -84,7 +84,7 @@
 
       if (!devices.length) {
         list.innerHTML = `
-          <div style="text-align:center;padding:24px;color:var(--text-muted,#888);font-size:13px">
+          <div style="text-align:center;padding:24px;color:var(--kyn-text-muted);font-size:13px">
             <i class="fas fa-mobile-alt" style="font-size:28px;display:block;margin-bottom:8px"></i>
             No other linked devices
           </div>`;
@@ -98,9 +98,9 @@
         ">
           <div class="session-icon" style="
             width:42px; height:42px; border-radius:50%;
-            background:var(--bg-tertiary,#2a2a3e);
+            background:var(--kyn-bg-input);
             display:flex; align-items:center; justify-content:center;
-            color:var(--text-muted,#888); font-size:18px; flex-shrink:0;
+            color:var(--kyn-text-muted); font-size:18px; flex-shrink:0;
           ">
             <i class="fas ${_getPlatformIcon(d.platform)}"></i>
           </div>
@@ -109,7 +109,7 @@
                         white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
               ${_esc(d.deviceName || 'Unknown Device')}
             </div>
-            <div style="font-size:11px;color:var(--text-muted,#888);margin-top:2px">
+            <div style="font-size:11px;color:var(--kyn-text-muted);margin-top:2px">
               ${_esc(d.platform || 'Web')} · Last active ${_timeAgo(d.lastSeenAt)}
             </div>
           </div>
@@ -207,18 +207,18 @@
 
     const div = document.createElement('div');
     div.id = '__kynDevices';
-    div.style.cssText = 'margin:16px 0;padding:16px;background:var(--bg-secondary,#1e1e2e);border-radius:14px;border:1px solid var(--border-color,rgba(255,255,255,0.06))';
+    div.style.cssText = 'margin:16px 0;padding:16px;background:var(--kyn-bg-panel);border-radius:14px;border:1px solid var(--border-color,rgba(255,255,255,0.06))';
     div.innerHTML = `
       <div style="font-weight:600;font-size:15px;color:var(--text-primary);margin-bottom:4px">
-        <i class="fas fa-mobile-alt" style="color:var(--accent,#4F46E5);margin-right:8px"></i>
+        <i class="fas fa-mobile-alt" style="color:var(--kyn-accent-primary);margin-right:8px"></i>
         Linked Devices
       </div>
-      <div style="font-size:12px;color:var(--text-muted,#888);margin-bottom:12px">
+      <div style="font-size:12px;color:var(--kyn-text-muted);margin-bottom:12px">
         See all devices where you're signed in. Revoke access to any device remotely.
       </div>
       <button id="kynLinkedDevicesBtn" style="
         padding:10px 20px;border-radius:10px;border:none;
-        background:var(--accent,#4F46E5);color:#fff;cursor:pointer;
+        background:var(--kyn-accent-primary);color:#fff;cursor:pointer;
         font-size:14px;font-weight:600;width:100%;
       ">Manage Linked Devices</button>
     `;
@@ -255,28 +255,28 @@
 
     const div = document.createElement('div');
     div.id = '__kynTwoStepPin';
-    div.style.cssText = 'margin:16px 0;padding:16px;background:var(--bg-secondary,#1e1e2e);border-radius:14px;border:1px solid var(--border-color,rgba(255,255,255,0.06))';
+    div.style.cssText = 'margin:16px 0;padding:16px;background:var(--kyn-bg-panel);border-radius:14px;border:1px solid var(--border-color,rgba(255,255,255,0.06))';
     div.innerHTML = `
       <div style="font-weight:600;font-size:15px;color:var(--text-primary);margin-bottom:4px">
-        <i class="fas fa-lock" style="color:var(--accent,#4F46E5);margin-right:8px"></i>
+        <i class="fas fa-lock" style="color:var(--kyn-accent-primary);margin-right:8px"></i>
         Two-Step Verification
       </div>
-      <div style="font-size:12px;color:var(--text-muted,#888);margin-bottom:12px">
+      <div style="font-size:12px;color:var(--kyn-text-muted);margin-bottom:12px">
         Set a PIN that's required whenever you register your phone number again,
         and optionally add an authenticator-app code (2FA) on top of it for
         extra protection even if someone gets your verification code.
       </div>
-      <div id="__kynPinStatus" style="font-size:12px;color:var(--text-muted,#888);margin-bottom:10px">
+      <div id="__kynPinStatus" style="font-size:12px;color:var(--kyn-text-muted);margin-bottom:10px">
         Checking status…
       </div>
       <button id="__kynPinBtn" style="
         padding:10px 20px;border-radius:10px;border:none;
-        background:var(--accent,#4F46E5);color:#fff;cursor:pointer;
+        background:var(--kyn-accent-primary);color:#fff;cursor:pointer;
         font-size:14px;font-weight:600;width:100%;
       ">Set Up PIN</button>
       <button id="__kynOpen2FABtn" style="
         margin-top:8px;padding:10px 20px;border-radius:10px;
-        border:1px solid var(--accent,#4F46E5);background:none;color:var(--accent,#4F46E5);
+        border:1px solid var(--kyn-accent-primary);background:none;color:var(--kyn-accent-primary);
         cursor:pointer;font-size:14px;font-weight:600;width:100%;
       ">Set Up 2FA</button>
       <div id="__kynTwoStepPinTwoFAHost"></div>
@@ -319,32 +319,32 @@
     overlay.id = '__kynPinModal';
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:10000;display:flex;align-items:flex-end;justify-content:center';
     overlay.innerHTML = `
-      <div style="background:var(--bg-primary,#141420);border-radius:20px 20px 0 0;
+      <div style="background:var(--kyn-bg-modal);border-radius:20px 20px 0 0;
                   width:100%;max-width:480px;padding:24px 20px 36px">
         <h3 style="font-size:16px;font-weight:700;color:var(--text-primary);text-align:center;margin:0 0 20px">
           Two-Step Verification PIN
         </h3>
 
         <label style="font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;
-                      color:var(--text-muted,#888);display:block;margin-bottom:4px">
+                      color:var(--kyn-text-muted);display:block;margin-bottom:4px">
           6-digit PIN
         </label>
         <input id="__kynPinInput" type="password" inputmode="numeric" maxlength="6"
                pattern="[0-9]{6}" placeholder="••••••"
                style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;
-                      background:var(--bg-secondary,#1e1e2e);
+                      background:var(--kyn-bg-panel);
                       border:1px solid var(--border-color,rgba(255,255,255,0.1));
                       color:var(--text-primary);font-size:20px;
                       letter-spacing:8px;text-align:center;outline:none;margin-bottom:12px" />
 
         <label style="font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;
-                      color:var(--text-muted,#888);display:block;margin-bottom:4px">
+                      color:var(--kyn-text-muted);display:block;margin-bottom:4px">
           Confirm PIN
         </label>
         <input id="__kynPinConfirm" type="password" inputmode="numeric" maxlength="6"
                pattern="[0-9]{6}" placeholder="••••••"
                style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;
-                      background:var(--bg-secondary,#1e1e2e);
+                      background:var(--kyn-bg-panel);
                       border:1px solid var(--border-color,rgba(255,255,255,0.1));
                       color:var(--text-primary);font-size:20px;
                       letter-spacing:8px;text-align:center;outline:none;margin-bottom:6px" />
@@ -353,10 +353,10 @@
 
         <div style="display:flex;gap:10px">
           <button id="__kynPinCancel" style="flex:1;padding:12px;border-radius:10px;
-            border:none;background:var(--bg-secondary,#1e1e2e);
-            color:var(--text-muted,#888);font-size:14px;cursor:pointer">Cancel</button>
+            border:none;background:var(--kyn-bg-panel);
+            color:var(--kyn-text-muted);font-size:14px;cursor:pointer">Cancel</button>
           <button id="__kynPinSave" style="flex:1;padding:12px;border-radius:10px;
-            border:none;background:var(--accent,#4F46E5);color:#fff;
+            border:none;background:var(--kyn-accent-primary);color:#fff;
             font-size:14px;font-weight:600;cursor:pointer">Save PIN</button>
         </div>
         <button id="__kynPinDisable" style="

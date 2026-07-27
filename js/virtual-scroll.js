@@ -212,7 +212,7 @@
           el = document.createElement('div');
           el.className = 'kyn-date-separator';
           el.textContent = item.data;
-          el.style.cssText = `position:absolute;left:0;right:0;text-align:center;font-size:11px;color:var(--text-muted,#888);padding:6px 0;top:${item.top}px;height:${item.height}px;line-height:${item.height - 12}px;`;
+          el.style.cssText = `position:absolute;left:0;right:0;text-align:center;font-size:11px;color:var(--kyn-text-muted);padding:6px 0;top:${item.top}px;height:${item.height}px;line-height:${item.height - 12}px;`;
         } else {
           el = this._opts.renderMessage(item.data);
           if (el) {

@@ -95,7 +95,7 @@
         display: flex; align-items: center; justify-content: center;
       }
       #kynRecordingConsentBox {
-        background: var(--bg-primary, #141420);
+        background: var(--kyn-bg-modal);
         border-radius: 16px;
         padding: 24px 20px;
         max-width: 320px; width: 90%;
@@ -111,7 +111,7 @@
         margin: 0 0 8px;
       }
       #kynRecordingConsentBox p {
-        font-size: 13px; color: var(--text-muted, #999);
+        font-size: 13px; color: var(--kyn-text-muted);
         line-height: 1.5; margin: 0 0 20px;
       }
       #kynRecordingConsentBox .consent-btns {
@@ -123,8 +123,8 @@
         font-size: 14px; font-weight: 600; cursor: pointer;
       }
       #kynConsentDecline {
-        background: var(--bg-secondary, #1e1e2e);
-        color: var(--text-muted, #888);
+        background: var(--kyn-bg-panel);
+        color: var(--kyn-text-muted);
       }
       #kynConsentAccept {
         background: #dc2626; color: #fff;

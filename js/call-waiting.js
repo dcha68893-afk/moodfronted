@@ -90,7 +90,7 @@
         position: fixed;
         top: 16px; left: 50%;
         transform: translateX(-50%);
-        background: var(--bg-primary, #141420);
+        background: var(--kyn-bg-modal);
         border: 1px solid var(--border-color, rgba(255,255,255,0.1));
         border-radius: 16px;
         padding: 12px 16px;
@@ -108,7 +108,7 @@
       }
       #kynWaitingBanner .wb-avatar {
         width: 42px; height: 42px; border-radius: 50%;
-        background: var(--accent, #7c3aed);
+        background: var(--kyn-accent-primary);
         display: flex; align-items: center; justify-content: center;
         color: #fff; font-weight: 700; font-size: 16px;
         flex-shrink: 0;
@@ -121,7 +121,7 @@
       #kynWaitingBanner .wb-info { flex: 1; min-width: 0; }
       #kynWaitingBanner .wb-label {
         font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
-        color: var(--text-muted, #888); font-weight: 700;
+        color: var(--kyn-text-muted); font-weight: 700;
       }
       #kynWaitingBanner .wb-name {
         font-size: 15px; font-weight: 700; color: var(--text-primary);

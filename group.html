@@ -2115,13 +2115,13 @@
 
     <!-- ========== DISCOVER PANEL ========== -->
     <div id="discoverPanel" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.5);align-items:flex-end;justify-content:center;">
-        <div style="background:var(--bg-secondary,#1e1e2e);width:100%;max-width:520px;border-radius:18px 18px 0 0;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 -4px 32px rgba(0,0,0,.4);">
+        <div style="background:var(--kyn-bg-panel);width:100%;max-width:520px;border-radius:18px 18px 0 0;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 -4px 32px rgba(0,0,0,.4);">
             <div style="padding:16px 20px 12px;border-bottom:1px solid var(--border-color);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
                 <h3 style="margin:0;font-size:17px;">🔍 Discover Groups</h3>
                 <button onclick="document.getElementById('discoverPanel').style.display='none'" style="background:none;border:none;cursor:pointer;font-size:20px;color:var(--text-secondary)">✕</button>
             </div>
             <div style="padding:14px 20px;flex-shrink:0;">
-                <input type="text" id="discoverSearchInput" placeholder="Search public groups..." style="width:100%;padding:10px 14px;border-radius:8px;background:var(--bg-tertiary,#252537);border:1px solid var(--border-color);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;">
+                <input type="text" id="discoverSearchInput" placeholder="Search public groups..." style="width:100%;padding:10px 14px;border-radius:8px;background:var(--kyn-bg-input);border:1px solid var(--border-color);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;">
                 <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;" id="discoverFilterBtns">
                     <button class="discover-filter active" data-purpose="all" style="padding:5px 12px;border-radius:20px;border:none;cursor:pointer;font-size:12px;font-weight:600;background:var(--primary-color);color:#fff;">All</button>
                     <button class="discover-filter" data-purpose="study" style="padding:5px 12px;border-radius:20px;border:1px solid var(--border-color);cursor:pointer;font-size:12px;background:none;color:var(--text-primary);">📚 Study</button>
@@ -2144,15 +2144,15 @@
 
     <!-- ========== EVENTS PANEL ========== -->
     <div id="eventsPanel" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.5);align-items:flex-end;justify-content:center;">
-        <div style="background:var(--bg-secondary,#1e1e2e);width:100%;max-width:520px;border-radius:18px 18px 0 0;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 -4px 32px rgba(0,0,0,.4);">
+        <div style="background:var(--kyn-bg-panel);width:100%;max-width:520px;border-radius:18px 18px 0 0;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 -4px 32px rgba(0,0,0,.4);">
             <div style="padding:16px 20px 12px;border-bottom:1px solid var(--border-color);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
                 <h3 style="margin:0;font-size:17px;">📅 Group Events</h3>
                 <button onclick="document.getElementById('eventsPanel').style.display='none'" style="background:none;border:none;cursor:pointer;font-size:20px;color:var(--text-secondary)">✕</button>
             </div>
             <div style="padding:12px 20px;flex-shrink:0;display:flex;gap:6px;">
                 <button class="evt-tab active" data-etab="upcoming" style="flex:1;padding:8px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:13px;background:var(--primary-color);color:#fff;">Upcoming</button>
-                <button class="evt-tab" data-etab="past" style="flex:1;padding:8px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:13px;background:var(--bg-tertiary,#252537);color:var(--text-secondary);">Past</button>
-                <button class="evt-tab" data-etab="create" style="flex:1;padding:8px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:13px;background:var(--bg-tertiary,#252537);color:var(--text-secondary);">+ Create</button>
+                <button class="evt-tab" data-etab="past" style="flex:1;padding:8px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:13px;background:var(--kyn-bg-input);color:var(--text-secondary);">Past</button>
+                <button class="evt-tab" data-etab="create" style="flex:1;padding:8px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:13px;background:var(--kyn-bg-input);color:var(--text-secondary);">+ Create</button>
             </div>
             <div id="eventsBody" style="overflow-y:auto;flex:1;padding:0 20px 20px;"></div>
         </div>
@@ -2160,15 +2160,15 @@
 
     <!-- ========== INVITE PANEL ========== -->
     <div id="invitePanel" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.5);align-items:flex-end;justify-content:center;">
-        <div style="background:var(--bg-secondary,#1e1e2e);width:100%;max-width:520px;border-radius:18px 18px 0 0;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 -4px 32px rgba(0,0,0,.4);">
+        <div style="background:var(--kyn-bg-panel);width:100%;max-width:520px;border-radius:18px 18px 0 0;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 -4px 32px rgba(0,0,0,.4);">
             <div style="padding:16px 20px 12px;border-bottom:1px solid var(--border-color);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
                 <h3 style="margin:0;font-size:17px;">✉️ Invitations</h3>
                 <button onclick="document.getElementById('invitePanel').style.display='none'" style="background:none;border:none;cursor:pointer;font-size:20px;color:var(--text-secondary)">✕</button>
             </div>
             <div style="padding:12px 20px;flex-shrink:0;display:flex;gap:6px;">
                 <button class="inv-tab active" data-invtab="received" style="flex:1;padding:8px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:13px;background:var(--primary-color);color:#fff;">Received</button>
-                <button class="inv-tab" data-invtab="invite" style="flex:1;padding:8px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:13px;background:var(--bg-tertiary,#252537);color:var(--text-secondary);">Invite Friends</button>
-                <button class="inv-tab" data-invtab="sent" style="flex:1;padding:8px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:13px;background:var(--bg-tertiary,#252537);color:var(--text-secondary);">Sent</button>
+                <button class="inv-tab" data-invtab="invite" style="flex:1;padding:8px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:13px;background:var(--kyn-bg-input);color:var(--text-secondary);">Invite Friends</button>
+                <button class="inv-tab" data-invtab="sent" style="flex:1;padding:8px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:13px;background:var(--kyn-bg-input);color:var(--text-secondary);">Sent</button>
             </div>
             <div id="inviteBody" style="overflow-y:auto;flex:1;padding:0 20px 20px;"></div>
         </div>

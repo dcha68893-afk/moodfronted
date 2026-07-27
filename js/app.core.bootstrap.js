@@ -5089,7 +5089,7 @@
           newNav.style.cssText = `
             position: relative;
             z-index: 1000;
-            background: var(--bg-secondary);
+            background: var(--kyn-bg-panel);
             padding: 10px;
             display: flex;
             gap: 10px;

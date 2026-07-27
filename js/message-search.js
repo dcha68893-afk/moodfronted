@@ -41,7 +41,7 @@
         align-items: center;
         gap: 8px;
         padding: 8px 12px;
-        background: var(--bg-secondary, #1e1e2e);
+        background: var(--kyn-bg-panel);
         border-bottom: 1px solid var(--border-color, rgba(255,255,255,0.06));
         z-index: 100;
       }
@@ -49,7 +49,7 @@
 
       #kynSearchInput {
         flex: 1;
-        background: var(--bg-tertiary, #2a2a3e);
+        background: var(--kyn-bg-input);
         border: 1px solid var(--border-color, rgba(255,255,255,0.1));
         border-radius: 20px;
         color: var(--text-primary);
@@ -58,12 +58,12 @@
         outline: none;
         transition: border-color 0.15s;
       }
-      #kynSearchInput:focus { border-color: var(--accent, #7c3aed); }
-      #kynSearchInput::placeholder { color: var(--text-muted, #666); }
+      #kynSearchInput:focus { border-color: var(--kyn-accent-primary); }
+      #kynSearchInput::placeholder { color: var(--kyn-text-muted); }
 
       #kynSearchCount {
         font-size: 11px;
-        color: var(--text-muted, #888);
+        color: var(--kyn-text-muted);
         white-space: nowrap;
         min-width: 50px;
         text-align: right;
@@ -71,18 +71,18 @@
       .kyn-search-nav {
         background: none;
         border: none;
-        color: var(--text-muted, #888);
+        color: var(--kyn-text-muted);
         cursor: pointer;
         font-size: 14px;
         padding: 4px;
         transition: color 0.15s;
         line-height: 1;
       }
-      .kyn-search-nav:hover { color: var(--accent, #7c3aed); }
+      .kyn-search-nav:hover { color: var(--kyn-accent-primary); }
       .kyn-search-nav:disabled { opacity: 0.3; cursor: default; }
       #kynSearchClose {
         background: none; border: none;
-        color: var(--text-muted, #888);
+        color: var(--kyn-text-muted);
         cursor: pointer; font-size: 16px; padding: 4px;
       }
       #kynSearchClose:hover { color: var(--text-primary); }
@@ -91,7 +91,7 @@
       #kynSearchDropdown {
         position: absolute;
         top: 100%; left: 0; right: 0;
-        background: var(--bg-primary, #141420);
+        background: var(--kyn-bg-modal);
         border: 1px solid var(--border-color, rgba(255,255,255,0.08));
         border-top: none;
         border-radius: 0 0 12px 12px;
@@ -113,14 +113,14 @@
       .kyn-search-result .sr-sender {
         font-size: 11px;
         font-weight: 700;
-        color: var(--accent, #7c3aed);
+        color: var(--kyn-accent-primary);
         margin-bottom: 2px;
         display: flex;
         justify-content: space-between;
       }
       .kyn-search-result .sr-sender span:last-child {
         font-weight: 400;
-        color: var(--text-muted, #888);
+        color: var(--kyn-text-muted);
       }
       .kyn-search-result .sr-content {
         font-size: 13px;
@@ -133,31 +133,31 @@
       }
       .kyn-search-result .sr-content mark {
         background: rgba(124,58,237,0.3);
-        color: var(--accent, #a78bfa);
+        color: var(--kyn-accent-primary);
         border-radius: 2px;
         padding: 0 2px;
       }
       .kyn-search-empty {
         padding: 20px;
         text-align: center;
-        color: var(--text-muted, #888);
+        color: var(--kyn-text-muted);
         font-size: 13px;
       }
       .kyn-search-loading {
         padding: 16px;
         text-align: center;
-        color: var(--text-muted, #888);
+        color: var(--kyn-text-muted);
         font-size: 13px;
       }
 
       /* Highlighted message in chat */
       .message-wrapper.kyn-search-highlight .message-bubble {
-        outline: 2px solid var(--accent, #7c3aed);
+        outline: 2px solid var(--kyn-accent-primary);
         outline-offset: 2px;
         animation: kynSearchPulse 1.5s ease-in-out 2;
       }
       @keyframes kynSearchPulse {
-        0%,100% { outline-color: var(--accent, #7c3aed); }
+        0%,100% { outline-color: var(--kyn-accent-primary); }
         50% { outline-color: rgba(124,58,237,0.2); }
       }
 
@@ -165,14 +165,14 @@
       #kynGlobalSearchBtn {
         background: none;
         border: none;
-        color: var(--text-muted, #888);
+        color: var(--kyn-text-muted);
         cursor: pointer;
         font-size: 16px;
         padding: 6px;
         transition: color 0.15s;
         line-height: 1;
       }
-      #kynGlobalSearchBtn:hover { color: var(--accent, #7c3aed); }
+      #kynGlobalSearchBtn:hover { color: var(--kyn-accent-primary); }
     `;
     document.head.appendChild(s);
   }

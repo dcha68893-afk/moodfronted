@@ -7459,16 +7459,16 @@
         modal.id = '_forwardModal';
         modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
         modal.innerHTML = `
-          <div style="background:var(--bg-primary,#1a1a2e);border-radius:16px;width:100%;max-width:360px;padding:20px;max-height:70vh;overflow-y:auto;">
+          <div style="background:var(--kyn-bg-modal);border-radius:16px;width:100%;max-width:360px;padding:20px;max-height:70vh;overflow-y:auto;">
             <h3 style="margin:0 0 16px;font-size:16px;color:var(--text-primary)">Forward to</h3>
             <div id="_fwdList" style="display:flex;flex-direction:column;gap:8px;">
               ${conversations.slice(0,20).map(c => `
-                <button data-chat-id="${c.id}" style="display:flex;align-items:center;gap:10px;padding:10px;border-radius:10px;border:none;background:var(--bg-secondary,#16213e);cursor:pointer;color:var(--text-primary);font-size:14px;text-align:left;">
+                <button data-chat-id="${c.id}" style="display:flex;align-items:center;gap:10px;padding:10px;border-radius:10px;border:none;background:var(--kyn-bg-panel);cursor:pointer;color:var(--text-primary);font-size:14px;text-align:left;">
                   <img src="${c.avatar || c.participantAvatar || ''}" onerror="this.style.display='none'" style="width:36px;height:36px;border-radius:50%;object-fit:cover;">
                   <span>${UIFailsafe.escapeHtml(c.name || c.participantName || 'Chat')}</span>
                 </button>`).join('')}
             </div>
-            <button id="_fwdCancel" style="margin-top:16px;width:100%;padding:10px;border-radius:10px;border:none;background:var(--bg-secondary,#16213e);color:var(--text-muted,#888);cursor:pointer;">Cancel</button>
+            <button id="_fwdCancel" style="margin-top:16px;width:100%;padding:10px;border-radius:10px;border:none;background:var(--kyn-bg-panel);color:var(--kyn-text-muted);cursor:pointer;">Cancel</button>
           </div>`;
 
         document.body.appendChild(modal);

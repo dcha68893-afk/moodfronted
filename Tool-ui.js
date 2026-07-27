@@ -4686,7 +4686,7 @@ window.addEventListener('tools:active', function() {
 <style>
 .mp-panel{position:fixed;inset:0;z-index:9000;display:none;align-items:flex-end;background:rgba(0,0,0,.5);}
 .mp-panel.active{display:flex;}
-.mp-sheet{background:var(--bg-primary,#fff);width:100%;max-width:640px;margin:0 auto;border-radius:20px 20px 0 0;max-height:90vh;overflow-y:auto;padding:20px;box-sizing:border-box;}
+.mp-sheet{background:var(--kyn-bg-modal);width:100%;max-width:640px;margin:0 auto;border-radius:20px 20px 0 0;max-height:90vh;overflow-y:auto;padding:20px;box-sizing:border-box;}
 .mp-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
 .mp-hdr h3{margin:0;font-size:18px;font-weight:700;}
 .mp-x{background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-secondary);line-height:1;}
@@ -4709,7 +4709,7 @@ window.addEventListener('tools:active', function() {
 .mp-stars-input span.on{color:#f59e0b;}
 .mp-field{margin-bottom:14px;}
 .mp-field label{display:block;font-size:13px;font-weight:600;margin-bottom:5px;color:var(--text-secondary);}
-.mp-field input,.mp-field textarea,.mp-field select{width:100%;padding:10px 12px;border:1.5px solid var(--border-color);border-radius:10px;font-size:14px;background:var(--bg-primary,#fff);color:var(--text-primary);box-sizing:border-box;}
+.mp-field input,.mp-field textarea,.mp-field select{width:100%;padding:10px 12px;border:1.5px solid var(--border-color);border-radius:10px;font-size:14px;background:var(--kyn-bg-modal);color:var(--text-primary);box-sizing:border-box;}
 .mp-field textarea{resize:vertical;min-height:72px;}
 .mp-tabs{display:flex;border-bottom:2px solid var(--border-color);margin-bottom:16px;overflow-x:auto;}
 .mp-tab{padding:9px 14px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;border-bottom:2px solid transparent;margin-bottom:-2px;color:var(--text-secondary);}
@@ -4717,14 +4717,14 @@ window.addEventListener('tools:active', function() {
 .mp-spinner{text-align:center;padding:32px;color:var(--text-secondary);}
 .mp-empty{text-align:center;padding:40px 20px;color:var(--text-secondary);}
 .mp-stat-row{display:flex;gap:10px;margin-bottom:16px;}
-.mp-stat{flex:1;background:var(--bg-secondary,#f5f5f5);border-radius:10px;padding:12px;text-align:center;}
+.mp-stat{flex:1;background:var(--kyn-bg-panel);border-radius:10px;padding:12px;text-align:center;}
 .mp-stat strong{display:block;font-size:22px;font-weight:800;}
 .mp-stat span{font-size:12px;color:var(--text-secondary);}
 .mp-seller-avatar{width:68px;height:68px;border-radius:50%;background:var(--primary-color);display:flex;align-items:center;justify-content:center;color:#fff;font-size:28px;font-weight:700;margin:0 auto 10px;overflow:hidden;}
 .mp-seller-avatar img{width:100%;height:100%;object-fit:cover;}
 .mp-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
 .mp-product-tile{border:1px solid var(--border-color);border-radius:10px;overflow:hidden;}
-.mp-product-tile-img{width:100%;height:88px;object-fit:cover;background:var(--bg-secondary,#f5f5f5);display:flex;align-items:center;justify-content:center;font-size:26px;}
+.mp-product-tile-img{width:100%;height:88px;object-fit:cover;background:var(--kyn-bg-panel);display:flex;align-items:center;justify-content:center;font-size:26px;}
 .mp-product-tile-body{padding:8px;}
 .mp-product-tile-title{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .mp-product-tile-price{font-size:12px;color:var(--primary-color);font-weight:700;}
@@ -4926,7 +4926,7 @@ window.addEventListener('tools:active', function() {
             <div class="mp-field"><label>Notes to Seller (optional)</label>
                 <textarea id="mp-notes" placeholder="Any special requests…" style="min-height:56px;"></textarea>
             </div>
-            <div style="background:var(--bg-secondary,#f5f5f5);border-radius:10px;padding:12px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;">
+            <div style="background:var(--kyn-bg-panel);border-radius:10px;padding:12px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;">
                 <span style="font-weight:600;">Total</span>
                 <span id="mp-total" style="font-weight:800;font-size:16px;color:var(--primary-color);">${cur} ${price.toLocaleString()}</span>
             </div>
@@ -5011,7 +5011,7 @@ window.addEventListener('tools:active', function() {
                         </div>
                         ${r.comment ? `<p style="margin:0 0 8px;font-size:14px;">${esc(r.comment)}</p>` : ''}
                         ${r.sellerReply ? `
-                            <div style="background:var(--bg-secondary,#f5f5f5);border-radius:8px;padding:10px;margin-top:8px;">
+                            <div style="background:var(--kyn-bg-panel);border-radius:8px;padding:10px;margin-top:8px;">
                                 <div style="font-size:12px;font-weight:700;margin-bottom:4px;">Seller replied:</div>
                                 <p style="margin:0;font-size:13px;">${esc(r.sellerReply)}</p>
                             </div>` : ''}

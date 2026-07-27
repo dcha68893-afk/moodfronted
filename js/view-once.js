@@ -28,19 +28,19 @@
         align-items: center;
         gap: 5px;
         font-size: 12px;
-        color: var(--text-muted, #888);
+        color: var(--kyn-text-muted);
         cursor: pointer;
         padding: 4px 8px;
         border-radius: 20px;
         border: 1px solid var(--border-color, rgba(255,255,255,0.1));
-        background: var(--bg-tertiary, #2a2a3e);
+        background: var(--kyn-bg-input);
         margin: 4px 0;
         user-select: none;
         transition: color 0.15s, border-color 0.15s;
       }
       #kynViewOnceToggle.active {
-        color: var(--accent, #7c3aed);
-        border-color: var(--accent, #7c3aed);
+        color: var(--kyn-accent-primary);
+        border-color: var(--kyn-accent-primary);
       }
       #kynViewOnceToggle i { font-size: 11px; }
 
@@ -50,19 +50,19 @@
         align-items: center;
         gap: 8px;
         padding: 10px 14px;
-        background: var(--bg-tertiary, #2a2a3e);
+        background: var(--kyn-bg-input);
         border-radius: 12px;
         cursor: pointer;
-        border: 1px dashed var(--accent, #7c3aed);
+        border: 1px dashed var(--kyn-accent-primary);
         color: var(--text-primary);
         font-size: 13px;
         transition: background 0.15s;
       }
-      .view-once-sealed:hover { background: var(--bg-hover, #33334a); }
+      .view-once-sealed:hover { background: var(--kyn-bg-hover); }
       .view-once-sealed .vo-icon { font-size: 22px; }
       .view-once-sealed .vo-label { display: flex; flex-direction: column; }
       .view-once-sealed .vo-label strong { font-size: 13px; }
-      .view-once-sealed .vo-label small { font-size: 10px; color: var(--text-muted, #888); }
+      .view-once-sealed .vo-label small { font-size: 10px; color: var(--kyn-text-muted); }
 
       /* Opened state */
       .view-once-opened {
@@ -70,9 +70,9 @@
         align-items: center;
         gap: 6px;
         padding: 8px 12px;
-        background: var(--bg-tertiary, #2a2a3e);
+        background: var(--kyn-bg-input);
         border-radius: 12px;
-        color: var(--text-muted, #666);
+        color: var(--kyn-text-muted);
         font-size: 12px;
         border: 1px solid var(--border-color, rgba(255,255,255,0.06));
       }
@@ -83,13 +83,13 @@
         align-items: center;
         gap: 6px;
         font-size: 11px;
-        color: var(--text-muted, #888);
+        color: var(--kyn-text-muted);
         padding: 6px 10px;
         border-radius: 10px;
-        background: var(--bg-tertiary, #2a2a3e);
+        background: var(--kyn-bg-input);
         border: 1px dashed var(--border-color, rgba(255,255,255,0.08));
       }
-      .view-once-sent-state.viewed { color: var(--accent, #7c3aed); }
+      .view-once-sent-state.viewed { color: var(--kyn-accent-primary); }
 
       /* Fullscreen view overlay */
       #kynViewOnceOverlay {
@@ -145,7 +145,7 @@
       _viewOnceActive = !_viewOnceActive;
       toggle.classList.toggle('active', _viewOnceActive);
       toggle.innerHTML = _viewOnceActive
-        ? '<i class="fas fa-eye-slash"></i> View once <i class="fas fa-check" style="color:var(--accent,#7c3aed)"></i>'
+        ? '<i class="fas fa-eye-slash"></i> View once <i class="fas fa-check" style="color:var(--kyn-accent-primary)"></i>'
         : '<i class="fas fa-eye-slash"></i> View once';
     });
 
@@ -237,7 +237,7 @@
           <strong>${mediaType === 'video' ? 'Video' : 'Photo'}</strong>
           <small>Tap to view once</small>
         </div>
-        <i class="fas fa-chevron-right" style="margin-left:auto;color:var(--text-muted)"></i>
+        <i class="fas fa-chevron-right" style="margin-left:auto;color:var(--kyn-text-muted)"></i>
       </div>
     `;
   }

@@ -37,7 +37,7 @@
         user-select: none;
       }
       body.kyn-select-mode .message-wrapper:hover .message-bubble {
-        outline: 2px solid var(--accent, #7c3aed);
+        outline: 2px solid var(--kyn-accent-primary);
         outline-offset: 2px;
       }
 
@@ -51,7 +51,7 @@
         width: 20px; height: 20px;
         border-radius: 50%;
         border: 2px solid var(--border-color, rgba(255,255,255,0.2));
-        background: var(--bg-secondary, #1e1e2e);
+        background: var(--kyn-bg-panel);
         align-items: center; justify-content: center;
         z-index: 10;
         transition: background 0.15s, border-color 0.15s;
@@ -59,8 +59,8 @@
       }
       body.kyn-select-mode .msg-select-checkbox { display: flex; }
       .message-wrapper.selected .msg-select-checkbox {
-        background: var(--accent, #7c3aed);
-        border-color: var(--accent, #7c3aed);
+        background: var(--kyn-accent-primary);
+        border-color: var(--kyn-accent-primary);
       }
       .message-wrapper.selected .msg-select-checkbox::after {
         content: '✓';
@@ -69,7 +69,7 @@
         font-weight: 700;
       }
       .message-wrapper.selected .message-bubble {
-        outline: 2px solid var(--accent, #7c3aed);
+        outline: 2px solid var(--kyn-accent-primary);
         outline-offset: 2px;
         background: rgba(124,58,237,0.08) !important;
       }
@@ -78,7 +78,7 @@
       #kynSelectBar {
         position: fixed;
         bottom: 0; left: 0; right: 0;
-        background: var(--bg-primary, #141420);
+        background: var(--kyn-bg-modal);
         border-top: 1px solid var(--border-color, rgba(255,255,255,0.08));
         padding: 12px 16px env(safe-area-inset-bottom, 0);
         display: flex;
@@ -94,12 +94,12 @@
       }
       #kynSelectCount {
         font-size: 14px; font-weight: 700;
-        color: var(--accent, #7c3aed);
+        color: var(--kyn-accent-primary);
         min-width: 40px;
       }
       #kynSelectBar .sel-btn {
         flex: 1;
-        background: var(--bg-secondary, #1e1e2e);
+        background: var(--kyn-bg-panel);
         border: 1px solid var(--border-color, rgba(255,255,255,0.08));
         border-radius: 10px;
         color: var(--text-primary);
@@ -113,7 +113,7 @@
       #kynSelectBar .sel-btn i { font-size: 16px; }
       #kynSelectBar .sel-btn:hover { background: rgba(255,255,255,0.08); }
       #kynSelectBar .sel-btn.danger { color: #ef4444; }
-      #kynSelectBar .sel-btn.cancel { color: var(--text-muted, #888); }
+      #kynSelectBar .sel-btn.cancel { color: var(--kyn-text-muted); }
 
       /* Forward picker modal */
       #kynForwardPicker {
@@ -123,7 +123,7 @@
         display: flex; align-items: flex-end; justify-content: center;
       }
       #kynForwardPickerBox {
-        background: var(--bg-primary, #141420);
+        background: var(--kyn-bg-modal);
         border-radius: 20px 20px 0 0;
         width: 100%; max-width: 480px;
         padding: 16px 0 32px;
@@ -146,7 +146,7 @@
         margin: 0 16px 10px;
         padding: 9px 12px;
         border-radius: 20px;
-        background: var(--bg-secondary, #1e1e2e);
+        background: var(--kyn-bg-panel);
         border: 1px solid var(--border-color, rgba(255,255,255,0.1));
         color: var(--text-primary);
         font-size: 13px; outline: none;
@@ -163,7 +163,7 @@
       .fwd-chat-item:hover { background: rgba(255,255,255,0.04); }
       .fwd-chat-avatar {
         width: 40px; height: 40px; border-radius: 50%;
-        background: var(--accent, #7c3aed);
+        background: var(--kyn-accent-primary);
         display: flex; align-items: center; justify-content: center;
         color: #fff; font-weight: 700; font-size: 15px;
         flex-shrink: 0;
@@ -312,7 +312,7 @@
             <div class="fwd-chat-name">${_esc(name)}</div>
           </div>`;
         }).join('')
-      : '<div style="padding:20px;text-align:center;color:var(--text-muted,#888)">No conversations found</div>';
+      : '<div style="padding:20px;text-align:center;color:var(--kyn-text-muted)">No conversations found</div>';
 
     overlay.innerHTML = `
       <div id="kynForwardPickerBox">

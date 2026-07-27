@@ -144,16 +144,16 @@
     s.textContent = `
       #kynStickerBtn {
         background: none; border: none; cursor: pointer;
-        color: var(--text-muted, #888); font-size: 18px;
+        color: var(--kyn-text-muted); font-size: 18px;
         padding: 0 6px; line-height: 1; transition: color 0.15s;
       }
-      #kynStickerBtn:hover, #kynStickerBtn.active { color: var(--accent, #7c3aed); }
+      #kynStickerBtn:hover, #kynStickerBtn.active { color: var(--kyn-accent-primary); }
 
       #kynStickerPanel {
         position: absolute;
         bottom: 60px; left: 0; right: 0;
         height: 340px;
-        background: var(--bg-secondary, #1e1e2e);
+        background: var(--kyn-bg-panel);
         border: 1px solid var(--border-color, rgba(255,255,255,0.08));
         border-radius: 16px 16px 0 0;
         display: flex; flex-direction: column;
@@ -181,10 +181,10 @@
         background: none; border: none;
         font-size: 20px; padding: 8px 10px;
         cursor: pointer; border-bottom: 2px solid transparent;
-        color: var(--text-muted, #888);
+        color: var(--kyn-text-muted);
         transition: border-color 0.15s;
       }
-      .sticker-tab.active { border-bottom-color: var(--accent, #7c3aed); }
+      .sticker-tab.active { border-bottom-color: var(--kyn-accent-primary); }
 
       /* Sticker grid */
       #kynStickerGrid {
@@ -218,7 +218,7 @@
         grid-column: 1/-1;
         font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
         text-transform: uppercase;
-        color: var(--text-muted, #777);
+        color: var(--kyn-text-muted);
         padding: 4px 2px 0;
       }
 
@@ -295,7 +295,7 @@
     if (packId === 'recent') {
       stickers = _getRecent();
       if (!stickers.length) {
-        grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px 0;color:var(--text-muted,#666);font-size:13px;">No recent stickers yet</div>';
+        grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px 0;color:var(--kyn-text-muted);font-size:13px;">No recent stickers yet</div>';
         return;
       }
     } else {

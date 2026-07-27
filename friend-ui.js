@@ -3206,9 +3206,9 @@ export const renderAllUsersList = function() {
                 if (!navigator.onLine) {
                     allUsersListElement.innerHTML = `
                         <div class="empty-state">
-                            <i class="fas fa-wifi-slash" style="font-size: 32px; margin-bottom: 15px; color: var(--text-muted);"></i>
+                            <i class="fas fa-wifi-slash" style="font-size: 32px; margin-bottom: 15px; color: var(--kyn-text-muted);"></i>
                             <p>You're offline</p>
-                            <p style="font-size:12px;color:var(--text-muted);">No cached users found. Connect to load the directory.</p>
+                            <p style="font-size:12px;color:var(--kyn-text-muted);">No cached users found. Connect to load the directory.</p>
                         </div>
                     `;
                 } else {
@@ -3541,7 +3541,7 @@ function createFriendItemElement(friendData, type, instantMode = false) {
                     <button class="friend-action-btn" data-action="more" title="More options">
                         <i class="fas fa-ellipsis-v"></i>
                     </button>
-                    <div class="friend-more-dropdown" style="display:none;position:absolute;right:0;top:100%;background:var(--surface-elevated,#fff);border:1px solid var(--border-color);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12);z-index:100;min-width:160px;padding:4px 0;">
+                    <div class="friend-more-dropdown" style="display:none;position:absolute;right:0;top:100%;background:var(--kyn-bg-modal);border:1px solid var(--border-color);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12);z-index:100;min-width:160px;padding:4px 0;">
                         <button class="friend-dropdown-item" data-action="snooze" data-friend-id="${friendId}" style="display:flex;align-items:center;gap:8px;width:100%;padding:9px 14px;border:none;background:none;cursor:pointer;font-size:14px;text-align:left;">
                             <i class="fas fa-bell-slash" style="width:16px;opacity:.7;"></i>
                             ${isSnoozed ? 'Unsnooze' : 'Snooze (7 days)'}
@@ -4775,7 +4775,7 @@ export function showReportModal(friendId, displayName) {
     modal.id = 'friendReportModal';
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
     modal.innerHTML = `
-        <div style="background:var(--surface,#fff);border-radius:16px;padding:24px;max-width:360px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.2);">
+        <div style="background:var(--kyn-bg-modal);border-radius:16px;padding:24px;max-width:360px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.2);">
             <h3 style="margin:0 0 8px;font-size:17px;">Report ${escapeHtml(displayName || 'user')}</h3>
             <p style="margin:0 0 16px;font-size:13px;opacity:.7;">Select a reason. Your report is anonymous.</p>
             <div id="reportReasonGroup" style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">

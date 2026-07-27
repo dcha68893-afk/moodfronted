@@ -33,7 +33,7 @@
     style.textContent = `
       #kyn-link-preview-card {
         position: relative;
-        background: var(--bg-secondary, #1e1e2e);
+        background: var(--kyn-bg-panel);
         border: 1px solid var(--border-color, rgba(255,255,255,0.08));
         border-radius: 12px;
         padding: 10px 12px;
@@ -48,7 +48,7 @@
       @keyframes kynPreviewIn { from { opacity:0; transform:translateY(6px) } to { opacity:1; transform:translateY(0) } }
       #kyn-link-preview-card .kyn-preview-img {
         width: 56px; height: 56px; border-radius: 8px; object-fit: cover;
-        flex-shrink: 0; background: var(--bg-tertiary, #2a2a3e);
+        flex-shrink: 0; background: var(--kyn-bg-input);
       }
       #kyn-link-preview-card .kyn-preview-text { flex: 1; min-width: 0; }
       #kyn-link-preview-card .kyn-preview-title {
@@ -57,7 +57,7 @@
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       }
       #kyn-link-preview-card .kyn-preview-desc {
-        font-size: 11px; color: var(--text-muted, #888);
+        font-size: 11px; color: var(--kyn-text-muted);
         display: -webkit-box; -webkit-line-clamp: 2;
         -webkit-box-orient: vertical; overflow: hidden;
         margin-top: 2px;
@@ -67,14 +67,14 @@
       }
       #kyn-link-preview-card .kyn-preview-dismiss {
         position: absolute; top: 6px; right: 8px;
-        background: none; border: none; color: var(--text-muted, #888);
+        background: none; border: none; color: var(--kyn-text-muted);
         font-size: 14px; cursor: pointer; line-height: 1; padding: 2px;
       }
       /* In-message link preview card */
       .kyn-msg-link-preview {
         border-left: 3px solid var(--accent-color);
         padding: 8px 10px; margin-top: 6px; border-radius: 0 8px 8px 0;
-        background: var(--bg-secondary, rgba(255,255,255,0.04));
+        background: var(--kyn-bg-panel);
         max-width: 280px;
       }
       .kyn-msg-link-preview img {
@@ -84,7 +84,7 @@
         font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 2px;
       }
       .kyn-msg-link-preview .kyn-mlp-desc {
-        font-size: 11px; color: var(--text-muted, #888);
+        font-size: 11px; color: var(--kyn-text-muted);
         display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
       }
       .kyn-msg-link-preview .kyn-mlp-site {

@@ -3558,8 +3558,8 @@ html.dark-mode .viewer-container {
     border-bottom: 1px solid var(--border-color);
     position: relative;
 }
-.status-group-item:hover { background-color: var(--surface-alt, #2a3942); }
-.status-group-item:active { background-color: var(--surface-alt, #2a3942); }
+.status-group-item:hover { background-color: var(--kyn-bg-hover); }
+.status-group-item:active { background-color: var(--kyn-bg-hover); }
 
 .status-group-avatar {
     position: relative;
@@ -3589,7 +3589,7 @@ html.dark-mode .viewer-container {
     width: 52px;
     height: 52px;
     border-radius: 50%;
-    background-color: var(--surface-alt, #2a3942);
+    background-color: var(--kyn-bg-hover);
     background-size: cover;
     background-position: center;
     display: flex;
@@ -3981,7 +3981,7 @@ html.dark-mode .viewer-container {
     display: flex;
     gap: 6px;
     padding: 8px 12px;
-    background: var(--bg-secondary, #111b21);
+    background: var(--kyn-bg-panel);
     border-bottom: 1px solid rgba(255,255,255,0.06);
     overflow-x: auto;
     scrollbar-width: none;
