@@ -248,6 +248,18 @@
             return cached;
         }
 
+        // FIX (auth-token race): the iframe's session/token arrives
+        // asynchronously from the parent shell via postMessage, and
+        // SessionClient.handleSessionData (Tool-core.part1.js) fires a
+        // window-level 'session:updated' CustomEvent once a valid session
+        // lands. Previously this network-refresh step ran immediately on
+        // DOMContentLoaded, before that event had a chance to fire —
+        // guaranteeing "Authorized fetch blocked: no token" on every single
+        // page load. Waiting here (with a safety timeout) only delays this
+        // network call, never the cache render in Step 1 above, which
+        // already happened synchronously.
+        await _waitForSessionToken(4000);
+
         try {
             const fn   = fetchFn || _safeFetch;
             const resp = await fn('/api/tools?enabledOnly=false');
@@ -675,6 +687,38 @@
             || localStorage.getItem('token')
             || localStorage.getItem('accessToken')
             || '';
+    }
+
+    // FIX (auth-token race on startup, used by loadToolManifest above):
+    // resolves as soon as a token is already present, on the 'session:updated'
+    // window event dispatched once SessionClient accepts a valid session
+    // from the parent, or after a safety timeout so this never hangs forever
+    // (e.g. standalone/test contexts where that handshake never happens).
+    function _waitForSessionToken(timeoutMs) {
+        return new Promise(resolve => {
+            const hasTokenAlready = () => {
+                try {
+                    if (typeof window.getAuthSession === 'function') {
+                        const s = window.getAuthSession();
+                        return !!(s && s.token);
+                    }
+                } catch (_) {}
+                return false;
+            };
+            if (hasTokenAlready()) { resolve(); return; }
+
+            let done = false;
+            const finish = () => {
+                if (done) return;
+                done = true;
+                window.removeEventListener('session:updated', onSessionUpdated);
+                clearTimeout(timer);
+                resolve();
+            };
+            const onSessionUpdated = () => finish();
+            window.addEventListener('session:updated', onSessionUpdated);
+            const timer = setTimeout(finish, timeoutMs);
+        });
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

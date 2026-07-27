@@ -149,14 +149,21 @@ import {
     
 } from './Tool-core.part3.js';
 
-// Make sure showCreateListingModal is defined and works - SIMPLIFIED: removed isActive check
-if (typeof showCreateListingModal !== 'function') {
-    window.showCreateListingModal = function() {
-        console.log('[MANUAL] showCreateListingModal called');
-        const modal = document.getElementById('createListingModal');
-        if (modal) modal.classList.add('active');
-    };
-}
+// FIX (ReferenceError: showCreateListingModal is not defined): this file is
+// loaded as an ES module (type="module" in Tools.html), so top-level
+// function declarations are module-scoped and never leak to window on their
+// own. The guard below was meant to provide a window-level fallback, but
+// because function declarations hoist within a module, `showCreateListingModal`
+// (declared further down this same file) was ALREADY a function at this
+// point in evaluation -- so `typeof showCreateListingModal !== 'function'`
+// was always false and window.showCreateListingModal was never actually
+// set. Inline onclick="showCreateListingModal()" handlers built via
+// innerHTML (e.g. the "No products yet" empty-state button) execute in
+// global/window scope, not module scope, so every one of them threw
+// ReferenceError. Function declarations hoist with their full
+// implementation (not just the name) within a module, so the real function
+// is already callable here -- this direct assignment is all that's needed.
+window.showCreateListingModal = showCreateListingModal;
 
 // ----------------------------------------------------------------------
 // GLOBAL VARIABLES FROM CORE (with safe fallbacks)
