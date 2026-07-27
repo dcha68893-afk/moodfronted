@@ -4666,7 +4666,31 @@ window.addEventListener('tools:active', function() {
     });
     try {
         var cached = localStorage.getItem("knecta_settings_cache");
-        if (cached) { var parsed = JSON.parse(cached); var settings = (parsed && parsed.data) ? parsed.data : parsed; if (parsed.timestamp && (Date.now() - parsed.timestamp) < 86400000) applyAll(settings); }
+        if (cached) {
+            var parsed = JSON.parse(cached);
+            var settings = (parsed && parsed.data) ? parsed.data : parsed;
+            if (settings && parsed.timestamp && (Date.now() - parsed.timestamp) < 86400000) {
+                // FIX (theme-sparking-on-refresh bug): this cache blob can be up
+                // to 24h stale. window.ThemeManager has already painted the
+                // correct, always-current theme/font-size/accent from the
+                // authoritative 'app_theme'/'app_font_size' keys before this
+                // cold-boot replay runs (and before Tool-core.part3.js's own,
+                // separate bootstrap from the same cache) — re-applying the
+                // stale cache's appearance values here a second time would flip
+                // the already-correct theme back, visibly. Skip only those
+                // three keys on this cold-boot pass; applyAll() above still
+                // handles them normally for live SETTINGS_UPDATED/SETTING_CHANGED.
+                Object.entries(settings).forEach(function(se) {
+                    var sec = se[0], secVal = se[1];
+                    if (!secVal || typeof secVal !== "object") return;
+                    Object.entries(secVal).forEach(function(ke) {
+                        var key = ke[0];
+                        if (sec === "appearance" && (key === "theme" || key === "fontSize" || key === "accentColor")) return;
+                        try { applyUISettingChange(sec, key, ke[1]); } catch(e) {}
+                    });
+                });
+            }
+        }
     } catch(e) {}
 })();
 // [exports moved to end of file]

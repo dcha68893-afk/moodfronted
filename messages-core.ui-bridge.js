@@ -2653,7 +2653,20 @@ function applySettingToMessagesModule(section, key, value) {
             var section = sectionEntry[0], sectionVal = sectionEntry[1];
             if (!sectionVal || typeof sectionVal !== 'object') return;
             Object.entries(sectionVal).forEach(function(keyEntry) {
-                try { applySettingToMessagesModule(section, keyEntry[0], keyEntry[1]); } catch(e) {}
+                var key = keyEntry[0];
+                // FIX (theme-sparking-on-refresh bug): this 'knecta_settings_cache'
+                // blob can be up to 24h stale — a snapshot from the last time the
+                // FULL settings object was fetched/saved, not necessarily the
+                // theme/font-size the user most recently picked. window.ThemeManager
+                // (js/theme.engine.js, loaded synchronously before this script) has
+                // already painted the correct, always-current values from the
+                // authoritative 'app_theme'/'app_font_size' keys before this cold-boot
+                // replay ever runs. Re-applying this cache's appearance values here
+                // could silently flip the already-correct theme back to a stale one —
+                // exactly the visible spark/blink on every reload. Skip them; every
+                // other cached setting still applies normally.
+                if (section === 'appearance' && (key === 'theme' || key === 'fontSize' || key === 'accentColor')) return;
+                try { applySettingToMessagesModule(section, key, keyEntry[1]); } catch(e) {}
             });
         });
         debugLog('[messages-core] ✅ Settings bootstrapped from cache');

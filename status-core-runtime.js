@@ -2273,17 +2273,43 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (ageMs < 86400000) { // < 24h
                     SettingsState.data = data;
                     SettingsState.loaded = true;
-                    // Apply appearance/theme immediately before any async work
-                    if (data.appearance?.theme) {
-                        const t = data.appearance.theme;
-                        const resolved = (t === 'dark' ? 'dark' : 'light');
-                        document.documentElement.setAttribute('data-theme', resolved);
+                    // FIX (theme-sparking-on-refresh bug): this cached settings
+                    // blob can be up to 24h stale — it's a snapshot from the last
+                    // time the FULL settings object was fetched/saved, not
+                    // necessarily the theme the user most recently picked.
+                    // js/theme.engine.js (the single canonical theme owner —
+                    // loaded synchronously before any other script in status.html's
+                    // <head>) has already painted the correct, always-current
+                    // theme/font-size from the 'app_theme'/'app_font_size' keys
+                    // before this DOMContentLoaded handler ever runs. Re-applying
+                    // the cache's theme here directly on document.documentElement,
+                    // unconditionally and without going through ThemeManager, was a
+                    // second independently-timed paint that could silently revert
+                    // the already-correct theme back to a stale cached one and
+                    // skip the transition-suppression ThemeManager wraps every
+                    // repaint in — exactly the visible "spark/blink" on every
+                    // reload, relogin and refresh of the status module. Now this
+                    // only ever delegates through ThemeManager (a no-op if the
+                    // value already matches, so nothing repaints at all in the
+                    // normal case), and only ever falls back to the cache's value
+                    // when the authoritative key is missing entirely (true first
+                    // run with no theme ever chosen yet).
+                    if (data.appearance?.theme && !localStorage.getItem('app_theme')) {
+                        if (window.ThemeManager) window.ThemeManager.setTheme(data.appearance.theme);
+                        else {
+                            const resolved = (data.appearance.theme === 'dark' ? 'dark' : 'light');
+                            document.documentElement.setAttribute('data-theme', resolved);
+                        }
                     }
-                    if (data.appearance?.fontSize) {
-                        document.documentElement.style.fontSize = data.appearance.fontSize + 'px';
+                    if (data.appearance?.fontSize && !localStorage.getItem('app_font_size')) {
+                        if (window.ThemeManager) window.ThemeManager.setFontSize(data.appearance.fontSize);
+                        else {
+                            document.documentElement.style.fontSize = data.appearance.fontSize + 'px';
+                        }
                     }
                     if (data.appearance?.accentColor) {
-                        document.documentElement.style.setProperty('--accent-color', data.appearance.accentColor);
+                        if (window.ThemeManager) window.ThemeManager.setAccentColor(data.appearance.accentColor);
+                        else document.documentElement.style.setProperty('--accent-color', data.appearance.accentColor);
                     }
                     if (data.appearance?.compactMode) {
                         document.body.classList.toggle('compact-mode', !!data.appearance.compactMode);

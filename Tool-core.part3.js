@@ -5014,7 +5014,15 @@ export default marketplace;
             var section = se[0], sectionVal = se[1];
             if (!sectionVal || typeof sectionVal !== 'object') return;
             Object.entries(sectionVal).forEach(function(ke) {
-                try { applySettingToToolsModule(section, ke[0], ke[1]); } catch(e) {}
+                var key = ke[0];
+                // FIX (theme-sparking-on-refresh bug): this cache blob can be up
+                // to 24h stale. window.ThemeManager has already painted the
+                // correct, always-current theme/font-size/accent from the
+                // authoritative 'app_theme'/'app_font_size' keys before this
+                // cold-boot replay runs — re-applying the stale cache's values
+                // here would flip the already-correct theme back, visibly.
+                if (section === 'appearance' && (key === 'theme' || key === 'fontSize' || key === 'accentColor')) return;
+                try { applySettingToToolsModule(section, key, ke[1]); } catch(e) {}
             });
         });
         if (window.__TOOLS_DEBUG__) console.log('[Tool-core] ✅ Settings bootstrapped from cache');

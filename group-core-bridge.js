@@ -1271,7 +1271,15 @@ queueMicrotask(() => {
             var section = sectionEntry[0], sectionVal = sectionEntry[1];
             if (!sectionVal || typeof sectionVal !== 'object') return;
             Object.entries(sectionVal).forEach(function(keyEntry) {
-                try { applySettingToGroupModule(section, keyEntry[0], keyEntry[1]); } catch(e) {}
+                var key = keyEntry[0];
+                // FIX (theme-sparking-on-refresh bug): this cache blob can be up
+                // to 24h stale. window.ThemeManager has already painted the
+                // correct, always-current theme/font-size/accent from the
+                // authoritative 'app_theme'/'app_font_size' keys before this
+                // cold-boot replay runs — re-applying the stale cache's values
+                // here would flip the already-correct theme back, visibly.
+                if (section === 'appearance' && (key === 'theme' || key === 'fontSize' || key === 'accentColor')) return;
+                try { applySettingToGroupModule(section, key, keyEntry[1]); } catch(e) {}
             });
         });
         // settings bootstrapped;
