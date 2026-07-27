@@ -176,16 +176,24 @@ a:hover {
 }
 
 /* ── 5. Headers & Toolbars ────────────────────────────────── */
+/* FIX (header patchwork/sparking): [class*="header"], [class*="topbar"]
+   and [class*="top-bar"] matched ANY element whose class merely contains
+   that substring, including inner pieces like .header-context,
+   .header-module-badge, .header-module-copy and .header-actions that sit
+   inside the real header bar. Forcing a flat, opaque var(--kyn-bg-header)
+   background onto those (which were designed to stay transparent or keep
+   their own gradient/translucent look) created visible disconnected
+   color blocks inside the header instead of one continuous themed
+   surface. Scoped to real header/toolbar containers only; no icon,
+   button, or feature is removed — they just stop getting an unwanted
+   background override. */
 header,
 .header,
 .top-bar,
 .toolbar,
 .app-header,
 .chat-header,
-.module-header,
-[class*="header"],
-[class*="topbar"],
-[class*="top-bar"] {
+.module-header {
   background: var(--kyn-bg-header) !important;
   border-color: var(--kyn-border) !important;
   color: var(--kyn-text-primary) !important;

@@ -4,8 +4,25 @@
     <script>window.API_BASE_URL = "https://nexora-3bla.onrender.com";</script>
     <script src="/js/theme.engine.js"></script>
     <style id="kynCriticalHeaderFix">
+        /* FIX (header patchwork/sparking): the old selector included
+           [class*="header"], [class*="topbar"], [class*="top-bar"], which
+           matches ANY element whose class merely contains that substring —
+           not just real header bars. That caught inner pieces like
+           .header-context, .header-module-badge, .header-module-copy and
+           .header-actions and force-painted them with a flat, opaque
+           var(--kyn-bg-header) background + border + text color. Those
+           pieces were designed to be transparent (or to keep their own
+           gradient/translucent styling) so they'd blend into the single
+           #globalHeader surface; forcing a solid color onto them instead
+           created visible rectangular patches/seams inside the header
+           instead of one continuous themed bar. Scoping this rule to only
+           real header/toolbar containers (and dropping the wildcard
+           substring matches) fixes that without touching any icon,
+           button, or feature — those elements simply stop getting an
+           unwanted background override and go back to blending with
+           their parent header. */
         header, .header, .top-bar, .toolbar, .app-header, .chat-header,
-        .module-header, [class*="header"], [class*="topbar"], [class*="top-bar"] {
+        .module-header {
             background: var(--kyn-bg-header) !important;
             border-color: var(--kyn-border) !important;
             color: var(--kyn-text-primary) !important;
