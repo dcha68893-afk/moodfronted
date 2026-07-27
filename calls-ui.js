@@ -814,17 +814,32 @@ function showIdleScreen(force) {
         incoming.style.setProperty('display', 'none', 'important');
     }
 
-    // ── Show idle screen ──
-    // ✅ FIX v3: ALWAYS show callContainer so repeat calls work.
-    // The parent controls iframe visibility; we just reset internal screens.
+    // ── Show idle screen — ONLY if this call actually belongs to the calls
+    // module (caller started the call from the calls module, or the receiver
+    // was in the calls module when the incoming call arrived). Otherwise the
+    // parent frame is about to navigate away to messages/friends/group, and
+    // the idle screen must never become visible in between — no flash.
+    const _idleReturnCtx = window.__callOriginReturnTo || window.__pendingCallReturnTo || null;
+    const _belongsToCallsModule = _idleReturnCtx === 'calls';
     if (callContainer) {
-        callContainer.classList.add('active');
-        callContainer.classList.add('idle-active');
-        callContainer.style.removeProperty('display');
+        if (_belongsToCallsModule) {
+            callContainer.classList.add('active');
+            callContainer.classList.add('idle-active');
+            callContainer.style.removeProperty('display');
+        } else {
+            callContainer.classList.remove('active');
+            callContainer.classList.remove('idle-active');
+            callContainer.style.setProperty('display', 'none', 'important');
+        }
     }
     if (idleScreen) {
-        idleScreen.classList.add('active');
-        idleScreen.style.setProperty('display', 'block', 'important');
+        if (_belongsToCallsModule) {
+            idleScreen.classList.add('active');
+            idleScreen.style.setProperty('display', 'block', 'important');
+        } else {
+            idleScreen.classList.remove('active');
+            idleScreen.style.setProperty('display', 'none', 'important');
+        }
     }
 
 
@@ -4143,13 +4158,23 @@ handleContactItemClick: function(e) {
             if (DEBUG) {
                 logOnce('info', 'Executing full rendering pipeline');
             }
-            
-            this.skeleton();
-            
-            await new Promise(resolve => setTimeout(resolve, 50));
-            
-            await this.initialRender();
-            
+
+            // FIX (in-call icons unresponsive): button wiring (EventSystem.initialize(),
+            // called from progressiveEnhancement()) must run even if an earlier,
+            // purely-cosmetic stage throws — otherwise moreBtn/menuDotsBtn/etc. are
+            // never wired and every click on them silently does nothing.
+            try {
+                this.skeleton();
+
+                await new Promise(resolve => setTimeout(resolve, 50));
+
+                await this.initialRender();
+            } catch (err) {
+                if (DEBUG) {
+                    logOnce('error', 'Rendering pipeline early stage failed — continuing to progressiveEnhancement so button wiring still runs', err);
+                }
+            }
+
             await this.progressiveEnhancement();
             
             await this.liveUpdate();
@@ -8275,7 +8300,15 @@ handleContactItemClick: function(e) {
             
             if (window.parent && window.parent !== window) {
                 window.parent.postMessage({ type: 'SHOW_SIDEBAR_ICONS', module: 'calls' }, '*');
-                window.parent.postMessage({ type: 'CALL_ENDED_RETURN', timestamp: Date.now() }, '*');
+                const _immRawReturn = window.__callOriginReturnTo || window.__pendingCallReturnTo;
+                const _immReturnTo = (_immRawReturn && _immRawReturn !== 'calls')
+                    ? _immRawReturn
+                    : (window.__lastActivePage && window.__lastActivePage !== 'calls')
+                        ? window.__lastActivePage
+                        : 'messages';
+                const _immChatUserId = window.__callOriginChatUserId || window.__pendingCallChatUserId || null;
+                const _immChatUserName = window.__callOriginChatUserName || null;
+                window.parent.postMessage({ type: 'CALL_ENDED_RETURN', timestamp: Date.now(), returnTo: _immReturnTo, chatUserId: _immChatUserId, chatUserName: _immChatUserName }, '*');
             }
             
             setTimeout(() => {
