@@ -12403,6 +12403,21 @@ Type: ${message.type || 'text'}`;
 
             );
 
+            // ROOT-CAUSE FIX (Phase 19 — canonical send pipeline): see comment
+            // above. Make ChatManager.getActiveChat() (what core.sendMessage()
+            // actually reads) agree with what this function just displayed —
+            // exactly what core.openConversation() does for the Chat History
+            // path, applied here too so every entry point ends in the same
+            // state before Send can be pressed.
+            if (core.ChatManager && typeof core.ChatManager.setActiveConversation === 'function') {
+                if (existingConversation) {
+                    core.ChatManager.setActiveConversation(existingConversation);
+                } else if (typeof core.ChatManager.getOrCreatePendingConversation === 'function') {
+                    const _pendingConv = core.ChatManager.getOrCreatePendingConversation(id, displayName, null);
+                    if (_pendingConv) core.ChatManager.setActiveConversation(_pendingConv);
+                }
+            }
+
 
 
             const contactsSidebar = document.getElementById('contactsSidebar');
