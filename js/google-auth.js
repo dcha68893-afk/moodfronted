@@ -11,7 +11,7 @@
 (function () {
     'use strict';
 
-    const GOOGLE_CLIENT_ID = '605397126514-6r3nebks3h6acb0dtre97e784rpg2750.apps.googleusercontent.com';
+    const GOOGLE_CLIENT_ID = '523213927690-volo0p7mbbqjucrksv8vasfvcqqicall.apps.googleusercontent.com';
 
     function getApiOrigin() {
         if (typeof window.__getApiOrigin === 'function') return window.__getApiOrigin();
