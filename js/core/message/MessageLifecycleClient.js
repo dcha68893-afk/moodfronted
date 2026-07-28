@@ -232,11 +232,19 @@
     await idbPut(STORE_OUTGOING, item);
   }
 
+  // FIX-RECEIVERID-GAP: sendMessage() previously only accepted a chatId,
+  // which meant this pipeline had no way to start a brand-new conversation —
+  // every "message this person" entry point from Friends/Calls/Status
+  // starts with only a receiverId, before any chatId exists. Pass
+  // `extra.receiverId` in that case; chatId can be left null/undefined.
+  // Once the server resolves/creates the real chat, the ack's chatId is
+  // adopted below so every retry and the local record use the real id.
   async function sendMessage(chatId, content, type = 'text', extra = {}) {
     const clientMessageId = genClientMessageId();
     const item = {
       clientMessageId,
-      chatId,
+      chatId: chatId || null,
+      receiverId: extra.receiverId || null,
       senderId: currentUserId,
       content,
       type,
@@ -246,6 +254,10 @@
       createdAt: new Date().toISOString(),
       serverId: null,
     };
+
+    if (!item.chatId && !item.receiverId) {
+      throw new Error('MessageLifecycleClient.sendMessage requires a chatId or a receiverId');
+    }
 
     await saveOutgoingLocal(item);
     // Optimistic render — the whole point of "user doesn't have to press
@@ -259,7 +271,8 @@
   async function attemptSend(item) {
     const socket = getSocket();
     const payload = {
-      chatId: item.chatId,
+      chatId: item.chatId || undefined,
+      receiverId: item.chatId ? undefined : item.receiverId,
       content: item.content,
       type: item.type,
       clientMessageId: item.clientMessageId,
@@ -270,6 +283,10 @@
       if (result && result.ok) {
         item.status = result.status || 'sent';
         item.serverId = result.serverId;
+        // FIX-RECEIVERID-GAP: this was a receiverId-only pending send —
+        // adopt the real chatId the server just resolved/created so the
+        // stored record and the status-update event carry it, not null.
+        if (!item.chatId && result.chatId) item.chatId = result.chatId;
         await idbDelete(STORE_OUTGOING, item.clientMessageId);
         await idbPut(STORE_MESSAGES, item);
         dispatchStatusUpdate(item.clientMessageId, item.serverId, item.chatId, item.status);
@@ -309,7 +326,7 @@
       });
       if (!resp.ok) { onResult({ ok: false }); return; }
       const data = await resp.json();
-      onResult({ ok: true, serverId: data.serverId, status: data.status });
+      onResult({ ok: true, serverId: data.serverId, status: data.status, chatId: data.chatId });
     } catch (_) {
       onResult({ ok: false });
     }
