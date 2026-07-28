@@ -333,10 +333,23 @@
         if (rt.on) rt.on(evt, payload => this._handleStatusEvent(evt, payload));
       }
 
-      // Also listen to kyn: CustomEvents (dispatched by socket layer for status: events)
-      for (const evt of statusEvents) {
-        window.addEventListener('kyn:' + evt, e => this._handleStatusEvent(evt, e.detail || {}), { passive: true });
-      }
+      // FIX-ROOT-CAUSE (infinite recursion / RangeError: Maximum call stack size
+      // exceeded, "postMessage storm detected" x100+/2s): this loop used to ALSO
+      // subscribe to window CustomEvents named 'kyn:' + evt for every one of these
+      // same status events. But _dispatchToAll() below (the only place that ever
+      // emits those exact 'kyn:'+eventType CustomEvents for status events) is
+      // itself called from _handleStatusEvent — which this same listener called
+      // right back into. Net effect: every real status:* event received via
+      // rt.on() above triggered _handleStatusEvent -> _dispatchToAll ->
+      // window.dispatchEvent('kyn:status:X') -> this instance's OWN listener for
+      // 'kyn:status:X' -> _handleStatusEvent again -> _dispatchToAll again ->
+      // forever, until the stack overflowed. Removed entirely: this engine
+      // already gets every status event directly from rt.on() immediately above;
+      // it has no need to also listen for the very echo it produces. Other
+      // subsystems (status-core-runtime.js, SocialNotificationEngine.js,
+      // GroupPresenceCacheEngine.js, CacheRepairEngine.js) still listen for these
+      // 'kyn:status:*' events from _dispatchToAll and are unaffected — none of
+      // them re-dispatch, so none of them can loop.
     }
 
     async _handleStatusEvent(eventType, payload) {
@@ -425,13 +438,27 @@
     }
 
     _dispatchToAll(eventType, payload) {
-      try { window.dispatchEvent(new CustomEvent('kyn:' + eventType, { detail: payload })); } catch (_) {}
-      const iframes = document.querySelectorAll('iframe');
-      iframes.forEach(f => {
-        try { f.contentWindow.postMessage({ type: 'REALTIME_EVENT:' + eventType, payload }, '*'); } catch (_) {}
-      });
-      const bus = window.KynectaEventBus;
-      if (bus) bus.emit('REALTIME_' + eventType, payload, { async: true });
+      // FIX-GUARD: reentrancy protection. This is what actually prevents a
+      // stack overflow if this same eventType is ever fed back into
+      // _handleStatusEvent while a dispatch for it is already in flight (the
+      // exact shape of the self-listener bug removed from attachSocketListeners
+      // above). Not just a duplicate-call guard — it only blocks nested
+      // re-entry of the SAME eventType, so back-to-back distinct calls (e.g.
+      // two different stories arriving) are never affected.
+      this.__dispatching = this.__dispatching || new Set();
+      if (this.__dispatching.has(eventType)) return;
+      this.__dispatching.add(eventType);
+      try {
+        try { window.dispatchEvent(new CustomEvent('kyn:' + eventType, { detail: payload })); } catch (_) {}
+        const iframes = document.querySelectorAll('iframe');
+        iframes.forEach(f => {
+          try { f.contentWindow.postMessage({ type: 'REALTIME_EVENT:' + eventType, payload }, '*'); } catch (_) {}
+        });
+        const bus = window.KynectaEventBus;
+        if (bus) bus.emit('REALTIME_' + eventType, payload, { async: true });
+      } finally {
+        this.__dispatching.delete(eventType);
+      }
     }
   }
 

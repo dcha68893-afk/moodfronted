@@ -286,9 +286,15 @@
         'group:pin', 'group:announcement', 'group:membership_change', 'group:slow_mode',
         'group:read_receipt', 'group:member_joined', 'group:member_left', 'group:rejoin_ack',
         'group:delete', 'group:deleted',
-        'status:new', 'status:created', 'status:viewed', 'status:view',
-        'status:reaction', 'status:reply', 'status:deleted', 'status:expired',
-        'status:privacy_updated',
+        // FIX-ROOT-CAUSE (duplicate status events / duplicate replies in UI):
+        // status:* events removed from this generic safety-net list.
+        // StatusStoryEngine.js already owns these — it has its own rt.on()
+        // subscription that does the real local work (persist to store,
+        // schedule expiry, update sequence) and then re-broadcasts the same
+        // 'kyn:'+evt CustomEvent + iframe postMessage itself via
+        // _dispatchToAll(). Forwarding them again here meant every status
+        // event (replies, reactions, new stories, deletions) was delivered
+        // to every consumer twice.
         'device:registered', 'session:restored', 'session:revoked', 'turn:config',
         'reconnect:required',
       ];
