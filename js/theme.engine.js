@@ -52,6 +52,7 @@
 
     var THEME_KEY = 'app_theme';
     var FONT_KEY = 'app_font_size';
+    var ICON_KEY = 'app_icon_scale';
     var ACCENT_LEGACY_KEY = 'app_settings_global';
     var SETTINGS_CACHE_KEY = 'knecta_settings_cache';
     var SETTINGS_CACHE_KEY_LEGACY = 'nexopa_settings_default';
@@ -59,6 +60,14 @@
     var MIN_FONT = 10;
     var MAX_FONT = 28;
     var DEFAULT_FONT = 16;
+    // Icon size settings (item 4): stored as a named scale, mapped to a
+    // single --icon-scale multiplier every icon-bearing element (header,
+    // sidebar, bottom nav, message/status icons, marketplace, calls,
+    // settings, menus, floating buttons) reads via theme.colors.css /
+    // per-module CSS. Same single-source-of-truth rule as font size above:
+    // this engine is the ONLY code allowed to read/write 'app_icon_scale'.
+    var ICON_SCALE_MAP = { small: 0.85, medium: 1, large: 1.2, xl: 1.4 };
+    var DEFAULT_ICON_SCALE = 'medium';
 
     // ------------------------------------------------------------------
     // SINGLE COMPLETE PALETTE — mirrors theme.colors.css's FULL variable
@@ -249,6 +258,10 @@
         return n;
     }
 
+    function validateIconScale(raw) {
+        return ICON_SCALE_MAP.hasOwnProperty(raw) ? raw : DEFAULT_ICON_SCALE;
+    }
+
     function resolveInitialTheme() {
         var raw = safeGet(THEME_KEY);
         if (!raw) {
@@ -265,6 +278,15 @@
             raw = cache && cache.appearance && cache.appearance.fontSize;
         }
         return validateFontSize(raw);
+    }
+
+    function resolveInitialIconScale() {
+        var raw = safeGet(ICON_KEY);
+        if (!raw) {
+            var cache = readSettingsCache();
+            raw = cache && cache.appearance && cache.appearance.iconSize;
+        }
+        return validateIconScale(raw);
     }
 
     // ---- Apply (paint-critical, synchronous, idempotent) -------------------
@@ -358,7 +380,7 @@
         '--header-gradient': 1
     };
 
-    function paintNow(theme, fontSize, accentColor) {
+    function paintNow(theme, fontSize, accentColor, iconScale) {
         var root = document.documentElement;
         root.setAttribute('data-theme', theme);
         root.classList.toggle('theme-dark', theme === 'dark');
@@ -377,6 +399,10 @@
         root.style.fontSize = fontSize + 'px';
         root.style.setProperty('--base-font-size', fontSize + 'px');
 
+        var scaleName = validateIconScale(iconScale);
+        root.setAttribute('data-icon-size', scaleName);
+        root.style.setProperty('--icon-scale', String(ICON_SCALE_MAP[scaleName]));
+
         if (accentColor) {
             root.style.setProperty('--primary-color', accentColor);
             root.style.setProperty('--kyn-accent-primary', accentColor);
@@ -387,7 +413,7 @@
         }
     }
 
-    function paint(theme, fontSize, accentColor) {
+    function paint(theme, fontSize, accentColor, iconScale) {
         // The very first paint (script-evaluation time, before state.locked
         // is set below) has nothing on screen yet to visibly fade from, so
         // it runs at full speed with no suppression overhead. Every paint
@@ -397,11 +423,11 @@
         // however many independently-timed CSS transitions the touched
         // elements happen to carry.
         if (!state.locked) {
-            paintNow(theme, fontSize, accentColor);
+            paintNow(theme, fontSize, accentColor, iconScale);
             return;
         }
         withTransitionsSuppressed(document, function () {
-            paintNow(theme, fontSize, accentColor);
+            paintNow(theme, fontSize, accentColor, iconScale);
         });
     }
 
@@ -411,6 +437,7 @@
         theme: resolveInitialTheme(),
         fontSize: resolveInitialFontSize(),
         accentColor: resolveInitialAccent(),
+        iconScale: resolveInitialIconScale(),
         locked: false
     };
 
@@ -418,13 +445,13 @@
     // synchronously as the first thing in <head>, before any CSS, so this
     // is the very first paint-affecting work the page does. Nothing renders
     // before this line has run.
-    paint(state.theme, state.fontSize, state.accentColor);
+    paint(state.theme, state.fontSize, state.accentColor, state.iconScale);
     state.locked = true;
 
     var listeners = [];
 
     function notify(reason) {
-        var detail = { theme: state.theme, fontSize: state.fontSize, reason: reason || 'update' };
+        var detail = { theme: state.theme, fontSize: state.fontSize, iconScale: state.iconScale, reason: reason || 'update' };
         // Single, one-time broadcast per change — not a loop, not a poll.
         listeners.forEach(function (fn) {
             try { fn(detail); } catch (_) {}
@@ -442,6 +469,7 @@
         getTheme: function () { return state.theme; },
         getFontSize: function () { return state.fontSize; },
         getAccentColor: function () { return state.accentColor; },
+        getIconScale: function () { return state.iconScale; },
 
         // The ONLY function in the app allowed to persist a theme change.
         setTheme: function (theme, opts) {
@@ -449,7 +477,7 @@
             if (resolved === state.theme && !(opts && opts.force)) return state.theme;
             state.theme = resolved;
             safeSet(THEME_KEY, resolved);
-            paint(state.theme, state.fontSize, state.accentColor);
+            paint(state.theme, state.fontSize, state.accentColor, state.iconScale);
             notify('theme');
             return state.theme;
         },
@@ -460,9 +488,21 @@
             if (resolved === state.fontSize) return state.fontSize;
             state.fontSize = resolved;
             safeSet(FONT_KEY, String(resolved));
-            paint(state.theme, state.fontSize, state.accentColor);
+            paint(state.theme, state.fontSize, state.accentColor, state.iconScale);
             notify('fontSize');
             return state.fontSize;
+        },
+
+        // The ONLY function in the app allowed to persist an icon-scale
+        // change. `size` is a named scale: 'small' | 'medium' | 'large' | 'xl'.
+        setIconScale: function (size) {
+            var resolved = validateIconScale(size);
+            if (resolved === state.iconScale) return state.iconScale;
+            state.iconScale = resolved;
+            safeSet(ICON_KEY, resolved);
+            paint(state.theme, state.fontSize, state.accentColor, state.iconScale);
+            notify('iconScale');
+            return state.iconScale;
         },
 
         // The ONLY function in the app allowed to persist an accent-color
@@ -472,7 +512,7 @@
         setAccentColor: function (color) {
             if (!color || color === state.accentColor) return state.accentColor;
             state.accentColor = color;
-            paint(state.theme, state.fontSize, state.accentColor);
+            paint(state.theme, state.fontSize, state.accentColor, state.iconScale);
             notify('accentColor');
             return state.accentColor;
         },
@@ -533,6 +573,8 @@
                     doc.documentElement.classList.toggle('dark-theme', isDark);
                     if (doc.body) doc.body.classList.toggle('dark-theme', isDark);
                     doc.documentElement.style.setProperty('--base-font-size', state.fontSize + 'px');
+                    doc.documentElement.setAttribute('data-icon-size', state.iconScale);
+                    doc.documentElement.style.setProperty('--icon-scale', String(ICON_SCALE_MAP[state.iconScale]));
 
                     if (doc.head) {
                         var style = doc.getElementById('kyn-theme-inline');
@@ -565,15 +607,22 @@
             var resolved = validateTheme(e.newValue);
             if (resolved !== state.theme) {
                 state.theme = resolved;
-                paint(state.theme, state.fontSize, state.accentColor);
+                paint(state.theme, state.fontSize, state.accentColor, state.iconScale);
                 notify('theme-cross-tab');
             }
         } else if (e.key === FONT_KEY) {
             var fs = validateFontSize(e.newValue);
             if (fs !== state.fontSize) {
                 state.fontSize = fs;
-                paint(state.theme, state.fontSize, state.accentColor);
+                paint(state.theme, state.fontSize, state.accentColor, state.iconScale);
                 notify('fontSize-cross-tab');
+            }
+        } else if (e.key === ICON_KEY) {
+            var isz = validateIconScale(e.newValue);
+            if (isz !== state.iconScale) {
+                state.iconScale = isz;
+                paint(state.theme, state.fontSize, state.accentColor, state.iconScale);
+                notify('iconScale-cross-tab');
             }
         }
     });
@@ -589,6 +638,9 @@
             ThemeManager.broadcastToAllIframes();
         } else if (data.type === 'FONT_SIZE_CHANGED' && data.fontSize) {
             ThemeManager.setFontSize(data.fontSize);
+            ThemeManager.broadcastToAllIframes();
+        } else if (data.type === 'ICON_SCALE_CHANGED' && data.iconScale) {
+            ThemeManager.setIconScale(data.iconScale);
             ThemeManager.broadcastToAllIframes();
         }
     });

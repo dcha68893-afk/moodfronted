@@ -3,6 +3,7 @@
 <head>
     <script>window.API_BASE_URL = "https://nexora-3bla.onrender.com";</script>
     <script src="/js/theme.engine.js"></script>
+    <script src="/js/panel-state-bridge.js"></script>
     <style id="kynCriticalHeaderFix">
         /* FIX (header patchwork/sparking): the old selector included
            [class*="header"], [class*="topbar"], [class*="top-bar"], which
@@ -4784,6 +4785,21 @@
                         document.documentElement.style.fontSize = _fs + 'px';
                         document.documentElement.style.setProperty('--base-font-size', _fs + 'px');
                         try { localStorage.setItem('app_font_size', String(_fs)); } catch (_) {}
+                    }
+                    document.querySelectorAll('iframe').forEach(function (f) {
+                        if (f.contentWindow === event.source) return;
+                        try { f.contentWindow.postMessage(data, '*'); } catch (_) {}
+                    });
+                    return;
+                }
+                if (data.type === 'ICON_SCALE_CHANGED' && data.iconScale) {
+                    if (window.ThemeManager) {
+                        window.ThemeManager.setIconScale(data.iconScale);
+                    } else {
+                        var _iconMap = { small: 0.85, medium: 1, large: 1.2, xl: 1.4 };
+                        document.documentElement.setAttribute('data-icon-size', data.iconScale);
+                        document.documentElement.style.setProperty('--icon-scale', String(_iconMap[data.iconScale] || 1));
+                        try { localStorage.setItem('app_icon_scale', data.iconScale); } catch (_) {}
                     }
                     document.querySelectorAll('iframe').forEach(function (f) {
                         if (f.contentWindow === event.source) return;

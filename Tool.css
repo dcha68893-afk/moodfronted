@@ -263,7 +263,7 @@
             border: 2px solid rgba(255, 215, 0, 0.5);
             border-radius: 12px;
             overflow: hidden;
-            background: white;
+            background: var(--kyn-bg-card);
             cursor: pointer;
             transition: transform 0.2s;
             box-shadow: 0 4px 12px rgba(255, 215, 0, 0.2);
@@ -714,7 +714,7 @@
             position: absolute;
             bottom: 60px;
             left: 0;
-            background: white;
+            background: var(--kyn-bg-card);
             border-radius: 12px;
             box-shadow: var(--shadow-lg);
             padding: 15px;
@@ -3167,7 +3167,7 @@ input:focus + .toggle-slider,
 .jm-hcard {
     flex-shrink: 0;
     width: 130px;
-    background: #fff;
+    background: var(--kyn-bg-card);
     border-radius: 10px;
     border: 1px solid var(--jm-border);
     overflow: hidden;
@@ -3255,7 +3255,7 @@ input:focus + .toggle-slider,
 
 /* ── PRODUCT CARD ─────────────────────────────────────────────────────────── */
 .jm-card {
-    background: #ffffff;
+    background: var(--kyn-bg-card);
     border-radius: 8px;
     overflow: hidden;
     cursor: pointer;
@@ -3282,7 +3282,7 @@ input:focus + .toggle-slider,
     width: 100%;
     padding-top: 100%;
     overflow: hidden;
-    background: #ffffff;
+    background: var(--kyn-bg-panel);
     border-bottom: 1px solid #f0f0f0;
 }
 
@@ -3294,7 +3294,7 @@ input:focus + .toggle-slider,
     object-fit: contain;
     padding: 6px;
     transition: transform 0.3s;
-    background: #ffffff;
+    background: var(--kyn-bg-panel);
 }
 
 .jm-card:hover .jm-card-img { transform: scale(1.04); }
@@ -3493,7 +3493,7 @@ input:focus + .toggle-slider,
 }
 
 .jm-cat-item.active {
-    background: #ffffff;
+    background: var(--kyn-bg-active);
     color: #f57224;
     font-weight: 700;
     border-left-color: #f57224;
@@ -3507,7 +3507,7 @@ input:focus + .toggle-slider,
 }
 
 .jm-cat-group {
-    background: #ffffff;
+    background: var(--kyn-bg-card);
     border-radius: 8px;
     margin-bottom: 8px;
     overflow: hidden;
@@ -3666,7 +3666,7 @@ input:focus + .toggle-slider,
 }
 
 .jm-cart-item-discount {
-    background: #fff3ec;
+    background: var(--kyn-bg-hover);
     color: var(--jm-orange);
     font-size: 10px;
     font-weight: 700;
@@ -3887,7 +3887,7 @@ input:focus + .toggle-slider,
 
 .jm-wa-btn {
     flex: 1;
-    background: #fff;
+    background: var(--kyn-bg-card);
     color: #25d366;
     border: 2px solid #25d366;
     border-radius: 8px;
@@ -4146,7 +4146,7 @@ input:focus + .toggle-slider,
     height: 20px;
     left: 3px;
     top: 3px;
-    background: #fff;
+    background: var(--kyn-text-inverse);
     border-radius: 50%;
     transition: transform 0.2s;
     box-shadow: 0 1px 4px rgba(0,0,0,0.2);
@@ -4239,7 +4239,7 @@ input:focus + .toggle-slider,
 }
 
 .jm-follow-btn.following {
-    background: #fff;
+    background: var(--kyn-bg-card);
     color: var(--jm-orange);
     border: 1.5px solid var(--jm-orange);
 }

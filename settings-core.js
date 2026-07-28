@@ -7537,6 +7537,7 @@ const DEFAULT_SETTINGS = {
         theme: 'light',
         accentColor: '#0084ff',
         fontSize: 16,
+        iconSize: 'medium',
         language: 'en',
         compactMode: false,
         animations: true

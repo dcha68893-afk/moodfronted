@@ -1693,6 +1693,36 @@ export function applyFontSize(size) {
     });
 }
 
+// Apply icon size — applies instantly to this page and persists it under
+// the same 'app_icon_scale' key theme.engine.js's pre-paint script reads,
+// so icon size stays in sync across modules without waiting for a reload.
+export function applyIconSize(size) {
+    const iconScale = window.ThemeManager ? window.ThemeManager.setIconScale(size) : (size || 'medium');
+    if (!window.ThemeManager) {
+        // Fallback only if theme.engine.js somehow failed to load.
+        const ICON_SCALE_MAP = { small: 0.85, medium: 1, large: 1.2, xl: 1.4 };
+        document.documentElement.setAttribute('data-icon-size', iconScale);
+        document.documentElement.style.setProperty('--icon-scale', String(ICON_SCALE_MAP[iconScale] || 1));
+        try { localStorage.setItem('app_icon_scale', iconScale); } catch (_) {}
+    }
+
+    // FIX (live sync, same reasoning as applyFontSize above): broadcast so
+    // other open modules pick up the new icon size immediately.
+    sendMessageToParent({
+        type: 'ICON_SCALE_CHANGED',
+        iconScale: iconScale,
+        timestamp: Date.now()
+    });
+
+    // Update through SettingsState for REAL backend persistence
+    SettingsState.update('appearance', 'iconSize', iconScale).then(() => {
+        unsavedChanges = true;
+        updateSaveButton();
+    }).catch(error => {
+        debugLog('Error saving icon size:', error);
+    });
+}
+
 // Shade color
 export function shadeColor(color, percent) {
     let R = parseInt(color.substring(1,3),16);
@@ -3945,6 +3975,21 @@ export function loadAppearanceSection(container) {
                         </select>
                     </div>
                 </div>
+
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Icon Size</div>
+                        <div class="setting-description">Adjust icon size across the app</div>
+                    </div>
+                    <div class="setting-control">
+                        <select class="setting-dropdown" id="iconSizeSelect">
+                            <option value="small" ${settings.iconSize === 'small' ? 'selected' : ''}>Small</option>
+                            <option value="medium" ${(settings.iconSize === 'medium' || !settings.iconSize) ? 'selected' : ''}>Medium</option>
+                            <option value="large" ${settings.iconSize === 'large' ? 'selected' : ''}>Large</option>
+                            <option value="xl" ${settings.iconSize === 'xl' ? 'selected' : ''}>Extra Large</option>
+                        </select>
+                    </div>
+                </div>
             </div>
         </div>
         
@@ -3992,6 +4037,12 @@ export function loadAppearanceSection(container) {
     if (fontSizeSelect) fontSizeSelect.addEventListener('change', () => {
         window.__updateSetting('appearance', 'fontSize', parseInt(fontSizeSelect.value));
         applyFontSize(parseInt(fontSizeSelect.value));
+    });
+
+    const iconSizeSelect = document.getElementById('iconSizeSelect');
+    if (iconSizeSelect) iconSizeSelect.addEventListener('change', () => {
+        window.__updateSetting('appearance', 'iconSize', iconSizeSelect.value);
+        applyIconSize(iconSizeSelect.value);
     });
     
     const compactMode = document.getElementById('compactMode');

@@ -19,6 +19,11 @@
 html[data-theme="light"],
 body[data-theme="light"] {
 
+  /* Icon size scaling (item 4) — theme.engine.js overwrites this inline
+     the moment it resolves the user's saved icon-size setting; this is
+     just the pre-engine fallback so nothing is unscaled for a frame. */
+  --icon-scale: 1;
+
   /* Global backgrounds */
   --kyn-bg-root:          #ffffff;
   --kyn-bg-chat:          #efeae2;
@@ -927,4 +932,34 @@ input[type="checkbox"]:checked + .toggle {
   background: var(--kyn-bg-panel) !important;
   color: var(--kyn-text-primary) !important;
   border: 1px solid var(--kyn-border) !important;
+}
+/* ============================================================
+   GLOBAL ICON SIZE SCALING (item 4)
+   ------------------------------------------------------------
+   Single rule, applied app-wide, driven entirely by the
+   --icon-scale variable theme.engine.js sets synchronously
+   (small=0.85, medium=1, large=1.2, xl=1.4). Uses transform
+   instead of font-size so it works uniformly across FontAwesome
+   glyph icons, inline SVG icons, and background-image icon
+   buttons without needing to know each one's base size, and so
+   it never fights a module's own font-size rules. Covers header,
+   sidebar, bottom navigation, message/status icons, marketplace,
+   calls, settings, menus and floating buttons — i.e. every
+   FontAwesome/icon-class selector already in use across the app.
+   ============================================================ */
+i.fa, i.fas, i.far, i.fab, i.fal, i.fad,
+[class*=" fa-"], [class^="fa-"],
+.icon, .nav-icon, .header-icon, .sidebar-icon, .tab-icon,
+.action-icon, .menu-icon, .fab-icon, .floating-btn i,
+.bottom-nav i, .nav-item i, .module-header i, .toolbar i,
+svg.icon, .icon-btn svg {
+  transform: scale(var(--icon-scale, 1));
+  transform-origin: center;
+}
+
+/* Buttons/containers that only wrap an icon need room to grow without
+   clipping at 'large'/'xl' — a small extra tap-target padding, not a
+   redesign of the control itself. */
+.icon-btn, .floating-btn, .nav-icon-wrap {
+  overflow: visible;
 }
