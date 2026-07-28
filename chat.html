@@ -1893,6 +1893,45 @@
             'game':      'gamesIframe',
         };
 
+        // FIX-ROOT-CAUSE-DUPLICATE-MODULE-ALIASES: moduleToIframeId intentionally
+        // keeps multiple alias keys (e.g. 'messages' AND 'message', 'friends' AND
+        // 'friend' AND 'friend-core') pointing at the SAME physical iframe, for
+        // lookups elsewhere that use either form (moduleToIframeId[page] etc).
+        // But dispatchEventToModules() and sendToAllModulesIfNeeded() both did
+        // `Object.entries(moduleToIframeId).forEach(...)` — which walks every
+        // ALIAS, not every iframe — so a single broadcast cycle posted
+        // SESSION_DATA/AUTH_READY/PARENT_READY (or any dispatchEventToModules
+        // broadcast) into the SAME iframe 2-3 times per tick, once per alias.
+        // Each child module's incoming-message validator only accepts messages
+        // whose `target` exactly equals its own canonical MODULE_NAME (plural:
+        // 'messages', 'friends', 'calls', 'groups', 'settings', 'tools' — see
+        // "EXACT match required" / "EXACT module name per contract" comments in
+        // each *-core module) so every alias send beyond the first was silently
+        // rejected as wrong_target — visible as repeated
+        // "[messages] Rejected message: wrong_target | target=message" console
+        // spam. Worse, the redundant *accepted* sends (the matching-alias one
+        // firing 2-3x back to back because RealtimeStabilizationLayer's own
+        // duplicate suppression is keyed differently) is exactly what
+        // RealtimeStabilizationLayer's "postMessage storm detected" warnings
+        // were catching, and each one re-triggers downstream work (extra
+        // fetchConversations()/fetchFriends() calls racing each other, extra
+        // re-renders) — a very plausible contributor to the UI feeling like it
+        // hangs on rapid interaction (e.g. the chat-list three-dot menu).
+        //
+        // Fix: walk each physical iframe exactly once, using only its first
+        // (canonical, plural) alias — object key insertion order guarantees the
+        // plural form is listed first for every entry above.
+        const _uniqueModuleEntries = (function () {
+            const seenIframeIds = new Set();
+            const entries = [];
+            Object.entries(moduleToIframeId).forEach(function ([moduleName, iframeId]) {
+                if (seenIframeIds.has(iframeId)) return;
+                seenIframeIds.add(iframeId);
+                entries.push([moduleName, iframeId]);
+            });
+            return entries;
+        })();
+
         // FIX-006: Iframe-ready queue — prevents postMessage events dropped during iframe load
         // Without this, any socket event arriving while an iframe's JS is still loading is silently lost.
         const _iframeReady = new Set();         // modules that have sent CHILD_READY
@@ -2549,8 +2588,18 @@
                 broadcastId: `${event.type}_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`
             };
             // FIX-006: Use _postToModule which queues messages for not-yet-ready iframes
-            Object.entries(moduleToIframeId).forEach(([moduleName, iframeId]) => {
-                if (enrichedEvent.targetModule && enrichedEvent.targetModule !== moduleName) return;
+            // FIX-ROOT-CAUSE-DUPLICATE-MODULE-ALIASES: walk each physical iframe once
+            // (see _uniqueModuleEntries above) instead of once per alias key, so a
+            // targetModule-less broadcast doesn't post into the same iframe 2-3 times.
+            // NOTE: when enrichedEvent.targetModule is one of the non-canonical alias
+            // names (e.g. 'message', 'friend', 'call'), it still needs to reach that
+            // iframe — resolve the alias to its iframeId directly for that case.
+            if (enrichedEvent.targetModule) {
+                const _targetIframeId = moduleToIframeId[enrichedEvent.targetModule];
+                if (_targetIframeId) _postToModule(enrichedEvent.targetModule, _targetIframeId, enrichedEvent);
+                return;
+            }
+            _uniqueModuleEntries.forEach(([moduleName, iframeId]) => {
                 _postToModule(moduleName, iframeId, enrichedEvent);
             });
         }
@@ -4329,7 +4378,13 @@
                 if (!cachedToken || !cachedUserId) updateSessionCache();
                 if (!cachedToken || !cachedUserId) return;
                 lastSessionSend = now;
-                Object.entries(moduleToIframeId).forEach(([moduleName, iframeId]) => {
+                // FIX-ROOT-CAUSE-DUPLICATE-MODULE-ALIASES: see _uniqueModuleEntries
+                // above — was Object.entries(moduleToIframeId), which sent SESSION_DATA/
+                // AUTH_READY/PARENT_READY into the same iframe 2-3x per cycle (once per
+                // alias key), with every send but the first rejected as wrong_target by
+                // the receiving module's own validator, and contributing directly to the
+                // postMessage storms seen in the console.
+                _uniqueModuleEntries.forEach(([moduleName, iframeId]) => {
                     const iframe = document.getElementById(iframeId);
                     if (iframe && iframe.contentWindow) {
                         sendSessionToModule(iframe, moduleName);
