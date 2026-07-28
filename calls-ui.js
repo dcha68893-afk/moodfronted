@@ -5007,7 +5007,7 @@ handleContactItemClick: function(e) {
                 // that here too. Without this, this restore path could win
                 // the race against POST_CALL_RESTORE and bounce the receiver
                 // to the caller's module instead of back to their own.
-                const _src = (callData && (callData._receiverReturnTo || callData.source || callData.returnTo)) || null;
+                const _src = (callData && callData._receiverReturnTo) || null;
                 window.__callOriginReturnTo  = (_src && _src !== 'calls') ? _src : 'messages';
                 window.__pendingCallReturnTo = window.__callOriginReturnTo;
                 window.__callOriginChatUserId = (callData && (callData._receiverReturnChatUserId || callData.callerId || callData.userId)) || null;
@@ -8752,6 +8752,20 @@ acceptIncomingCallAsVideo: function() {
 
 acceptIncomingCallGeneric: async function(asVideo) {
     if (!canPerformAction('answerCall')) return;
+
+    // FIX (idle-screen flash on accept): hide the idle screen immediately,
+    // before the incoming-call modal is removed and before we await
+    // answerCall(). Otherwise the idle screen is visible underneath during
+    // the accept-in-progress gap, right up until transitionToInCall() fires.
+    const _acceptIdleScreen = document.getElementById('idleScreen');
+    const _acceptCallContainer = document.getElementById('callContainer');
+    if (_acceptIdleScreen) {
+        _acceptIdleScreen.classList.remove('active');
+        _acceptIdleScreen.style.setProperty('display', 'none', 'important');
+    }
+    if (_acceptCallContainer) {
+        _acceptCallContainer.classList.remove('idle-active');
+    }
     
     if (coreInstance && coreInstance.isInCall && coreInstance.isInCall()) {
         showNotification('You are already in a call', 'warning');

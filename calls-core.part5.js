@@ -3843,6 +3843,23 @@
 
     }
 
+    // FIX (stale state after role-switch -- receiver becomes caller on the
+    // next call): none of the calls-UI layer's own gating flags were cleared
+    // here, so finishing a call as the RECEIVER could leave them in a state
+    // that made the very next call placed by this same side (now as CALLER)
+    // render an empty calling screen while the real signal silently failed
+    // to go out.
+    window.__callActive = false;
+    window.__callInitiatedAt = 0;
+    window.__callEndedHandledAt = 0;
+    window.__uiCallDispatchLock = null;
+    if (window.UIState) {
+        window.UIState.callActive = false;
+        window.UIState.callState = 'idle';
+        window.UIState.activeCallId = null;
+        window.UIState.callData = null;
+    }
+
 
 
 

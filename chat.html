@@ -7257,47 +7257,6 @@
                 window.wsService.on('user:offline',    function(d) { _fwdPresenceToFriends(Object.assign({}, d, { online: false })); });
                 window.wsService.on('presence:update', _fwdPresenceToFriends);
 
-                // FIX (REAL-PRESENCE — status module): status-ui.js now
-                // listens for FRIEND_ONLINE/FRIEND_OFFLINE (and the
-                // FRIENDS_LIST_UPDATE this page already sends via
-                // sendFriendsToStatusIframe) to show a live "active now" dot
-                // next to each friend's status ring. Forward the same event
-                // there too.
-                function _fwdPresenceToStatus(presPayload) {
-                    const uid = presPayload && (presPayload.userId || presPayload.id || presPayload.friendId);
-                    if (!uid) return;
-                    const online = presPayload && (presPayload.online !== false && presPayload.status !== 'offline');
-                    const statusIf = document.getElementById('statusIframe');
-                    if (!statusIf || !statusIf.contentWindow) return;
-                    statusIf.contentWindow.postMessage({
-                        type: online ? 'FRIEND_ONLINE' : 'FRIEND_OFFLINE',
-                        payload: { userId: uid, online: online, lastSeen: presPayload.lastSeen || null }
-                    }, '*');
-                }
-                window.wsService.on('user:online',     _fwdPresenceToStatus);
-                window.wsService.on('user:offline',    function(d) { _fwdPresenceToStatus(Object.assign({}, d, { online: false })); });
-                window.wsService.on('presence:update', _fwdPresenceToStatus);
-
-                // FIX (REAL-PRESENCE — group module): group-core-operations.js
-                // now listens for FRIEND_ONLINE/FRIEND_OFFLINE to show an
-                // "Active now" / "Active N minutes ago" label on each member
-                // in the member management list. Forward the same event
-                // there too.
-                function _fwdPresenceToGroup(presPayload) {
-                    const uid = presPayload && (presPayload.userId || presPayload.id || presPayload.friendId);
-                    if (!uid) return;
-                    const online = presPayload && (presPayload.online !== false && presPayload.status !== 'offline');
-                    const groupIf = document.getElementById('groupIframe');
-                    if (!groupIf || !groupIf.contentWindow) return;
-                    groupIf.contentWindow.postMessage({
-                        type: online ? 'FRIEND_ONLINE' : 'FRIEND_OFFLINE',
-                        payload: { userId: uid, online: online, lastSeen: presPayload.lastSeen || null }
-                    }, '*');
-                }
-                window.wsService.on('user:online',     _fwdPresenceToGroup);
-                window.wsService.on('user:offline',    function(d) { _fwdPresenceToGroup(Object.assign({}, d, { online: false })); });
-                window.wsService.on('presence:update', _fwdPresenceToGroup);
-
                 // ── GROUP REAL-TIME BRIDGE ────────────────────────────────────
                 // Forward all group WebSocket events from wsService into groupIframe
                 // via postMessage. The group module runs inside an iframe — parent-window
