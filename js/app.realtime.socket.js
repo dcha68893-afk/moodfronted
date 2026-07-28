@@ -449,7 +449,38 @@
             this._clearReconnectTimer();
             this._reconnectAttempts = 0;
 
-            if (this._state === CONNECTION_STATE.AUTHENTICATED) return Promise.resolve(this);
+            // FIX-ROOT-CAUSE-ZOMBIE-CONNECTION: the ping-timeout-after-background path
+            // (_setupNetworkMonitoring's visibilitychange handler) calls
+            // handleReconnect({ reason: 'ping-timeout-visibility' }) specifically
+            // because it sent a 'ping' and got no 'pong' within 10s — i.e. it already
+            // knows the existing socket is dead. But `this._state` is only ever
+            // flipped away from AUTHENTICATED by an actual 'disconnect' socket event,
+            // and a silently-stale connection (backgrounded tab, mobile network
+            // hand-off, a proxy/idle-timeout killing the transport without a clean
+            // FIN) never fires one. So _state stayed AUTHENTICATED, this function hit
+            // the early return right here, and NO reconnection ever happened — the
+            // "forcing reconnect" warning was logged but nothing was actually forced.
+            // The app then sat on a zombie socket indefinitely: the backend still
+            // considered it a live room member (so BROADCASTED/delivered=1/1 kept
+            // reporting success) while the client never received another event again
+            // until the page was hard-refreshed. This is what made messages sent to a
+            // backgrounded/idle receiver vanish with no error on either side.
+            //
+            // Fix: callers that already know the socket is dead pass `meta.force`
+            // (see the ping-timeout-visibility call site) so we tear down the old
+            // socket and actually reset state, instead of trusting stale `_state`.
+            if (this._state === CONNECTION_STATE.AUTHENTICATED) {
+                if (!meta.force) return Promise.resolve(this);
+                if (this._socket) {
+                    try { this._socket.removeAllListeners?.(); } catch (_) {}
+                    try { this._socket.disconnect?.(); } catch (_) {}
+                    try { this._socket.close?.(); } catch (_) {}
+                    this._socket = null;
+                }
+                this._state = CONNECTION_STATE.DISCONNECTED;
+                this._authenticated = false;
+                this._emitStateChange();
+            }
             // FIX: route through _scheduleReconnect so the _isConnecting mutex and
             // timer guard are always respected — calling this.connect() directly bypassed both.
             this._scheduleReconnect();
@@ -1360,7 +1391,10 @@
                         if (!pongReceived) {
                             console.warn('[Realtime] Ping timeout after background — forcing reconnect');
                             this._reconnectAttempts = 0;
-                            this.handleReconnect({ reason: 'ping-timeout-visibility' });
+                            // force:true — we just proved this socket is dead (sent a
+                            // ping, got no pong in 10s), so handleReconnect must not
+                            // bail out just because _state still says AUTHENTICATED.
+                            this.handleReconnect({ reason: 'ping-timeout-visibility', force: true });
                         }
                     }, 10000); // FIX: increased from 5s to 10s — 5s fired too quickly after throttled tabs
                     try {
