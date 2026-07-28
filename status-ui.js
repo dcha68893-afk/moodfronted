@@ -796,6 +796,20 @@ const statusIntents = {
     'celebration': { name: 'Celebration', icon: 'fas fa-glass-cheers', color: 'var(--intent-celebration)' }
 };
 
+// STATUS TOPICS — hashtag-style intents (#Prayer, #Business, #Sports, ...).
+// Distinct from `statusIntents` above (a single-select mood/purpose tag).
+// Multiple topics may be attached to one status. They are stored with the
+// status (`hashtags` on create -> `metadata.hashtags` on the backend) but
+// NEVER drive an automatic feed — statuses for a topic are only shown once
+// the user explicitly taps that topic's filter chip.
+const STATUS_TOPICS = [
+    'Prayer', 'Business', 'Sports', 'Education', 'Music',
+    'News', 'Technology', 'Travel', 'Family', 'Comedy'
+];
+
+// Currently active topic filter (null = no filter, show everything as normal)
+let activeTopicFilter = null;
+
 const statusMoods = {
     'happy': { name: 'Happy', emoji: '😊', color: 'var(--mood-happy)' },
     'stressed': { name: 'Stressed', emoji: '😫', color: 'var(--mood-stressed)' },
@@ -6072,6 +6086,7 @@ function initializeUIComponents() {
     if (UIElements.getElement('emojiGrid')) initializeEmojiPicker();
     if (UIElements.getElement('backgroundGrid')) initializeBackgroundOptions();
     if (UIElements.getElement('intentOptions')) initializeIntentOptions();
+    if (UIElements.getElement('topicOptions')) initializeTopicOptions();
     if (UIElements.getElement('moodOptions')) initializeMoodOptions();
     if (UIElements.getElement('categoryOptions')) initializeCategoryOptions();
     if (UIElements.getElement('actionButtonsSelector')) initializeActionButtonsSelector();
@@ -6215,6 +6230,49 @@ function initializeIntentOptions() {
         });
         container.appendChild(option);
     });
+}
+
+function initializeTopicOptions() {
+    const container = UIElements.getElement('topicOptions');
+    const hiddenInput = UIElements.getElement('selectedTopics');
+    if (!container) return;
+    container.innerHTML = '';
+    STATUS_TOPICS.forEach((topic) => {
+        const chip = document.createElement('div');
+        chip.className = 'topic-option';
+        chip.dataset.topic = topic.toLowerCase();
+        chip.setAttribute('role', 'button');
+        chip.setAttribute('tabindex', '0');
+        chip.setAttribute('aria-pressed', 'false');
+        chip.textContent = `#${topic}`;
+        const toggle = () => {
+            const nowSelected = chip.classList.toggle('selected');
+            chip.setAttribute('aria-pressed', nowSelected ? 'true' : 'false');
+            if (hiddenInput) {
+                const selected = Array.from(container.querySelectorAll('.topic-option.selected'))
+                    .map(el => el.dataset.topic);
+                hiddenInput.value = selected.join(',');
+            }
+        };
+        chip.addEventListener('click', toggle);
+        chip.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+        });
+        container.appendChild(chip);
+    });
+}
+
+// Reset the topic composer chips (called after posting / opening a fresh composer)
+function resetTopicOptions() {
+    const container = UIElements.getElement('topicOptions');
+    const hiddenInput = UIElements.getElement('selectedTopics');
+    if (container) {
+        container.querySelectorAll('.topic-option.selected').forEach(el => {
+            el.classList.remove('selected');
+            el.setAttribute('aria-pressed', 'false');
+        });
+    }
+    if (hiddenInput) hiddenInput.value = '';
 }
 
 function initializeMoodOptions() {
@@ -6575,9 +6633,11 @@ async function handlePostStatus() {
     const selectedFriendIds = Array.from(document.querySelectorAll('#friendsListContainer .friend-select-item.selected'))
         .map(el => parseInt(el.dataset.friendId, 10))
         .filter(id => Number.isInteger(id) && id > 0);
+    const selectedTopics = Array.from(UIElements.querySelectorAll('.topic-option.selected')).map(opt => opt.dataset.topic);
     if (intent) statusData.intent = intent;
     if (mood) statusData.mood = mood;
     if (category) statusData.category = category;
+    if (selectedTopics.length > 0) statusData.hashtags = selectedTopics;
     // Fall back to the user's saved "who can view my status" preference
     // (js/settings-broadcast-listener.js keeps window.__whoCanViewMyStatus
     // live) rather than a hardcoded 'friends' — the picker above is already
@@ -6782,7 +6842,8 @@ async function handlePostStatus() {
                 userId: currentUser?.id || statusData.userId || null,
                 user: currentUser || statusData.user || null,
                 queued: !!response.queued,
-                visibility: 'friends'
+                visibility: 'friends',
+                metadata: statusData.hashtags ? { hashtags: statusData.hashtags } : undefined
             };
 
             console.log(`[status-ui] 📤 STATUS POSTED id=${optimisticStatus.id} — updating sender UI`);
@@ -6790,6 +6851,7 @@ async function handlePostStatus() {
             showNotification('Status posted successfully! ✓', 'success');
             const modal = UIElements.createStatusModal;
             if (modal) modal.classList.remove('active');
+            resetTopicOptions();
 
             // ── Replace any previous optimistic placeholder with confirmed status ─
             // This prevents duplicates when the socket event also fires on the
@@ -6915,9 +6977,11 @@ function handleSaveDraft(silent = true) {
     const intent = UIElements.querySelector('.intent-option.selected')?.dataset.intent;
     const mood = UIElements.querySelector('.mood-option.selected')?.dataset.mood;
     const category = UIElements.querySelector('.category-option.selected')?.dataset.category;
+    const draftTopics = Array.from(UIElements.querySelectorAll('.topic-option.selected')).map(opt => opt.dataset.topic);
     if (intent) draftData.intent = intent;
     if (mood) draftData.mood = mood;
     if (category) draftData.category = category;
+    if (draftTopics.length > 0) draftData.hashtags = draftTopics;
     draftData.id = 'draft_' + Date.now();
     // P2 FIX: save to dedicated backend draft table via API
     const api = window.StatusAPI;
@@ -8063,11 +8127,23 @@ function renderStatusListInstantlyUI() {
         })
         .map(s => ({ ...s, id: String(s.id) }));
 
+    // ── Status Topics: render the filter chip bar, then apply any active filter ──
+    // The chip bar itself is populated from whatever topics currently exist in
+    // the visible friend statuses; it never shows/hides content on its own —
+    // only tapping a chip (activeTopicFilter) changes what's displayed below.
+    renderStatusTopicFilterBar(allFriendStatuses);
+    const topicFilteredStatuses = activeTopicFilter
+        ? allFriendStatuses.filter(s => {
+            const tags = (s.metadata && Array.isArray(s.metadata.hashtags)) ? s.metadata.hashtags : [];
+            return tags.map(t => String(t).toLowerCase()).includes(activeTopicFilter);
+        })
+        : allFriendStatuses;
+
     // ── Split into unviewed (recent) vs viewed ────────────────────────────
     // Group by userId — if user has ANY unviewed status, ALL their statuses go to recent
     // If user has ONLY viewed statuses, they go to viewed section
     const byUser = {};
-    allFriendStatuses.forEach(s => {
+    topicFilteredStatuses.forEach(s => {
         const uid = String(s.userId || s.user_id || (s.user && s.user.id) || 'unknown');
         if (!byUser[uid]) byUser[uid] = [];
         byUser[uid].push(s);
@@ -8115,13 +8191,62 @@ function renderStatusListInstantlyUI() {
     // Show empty state if nothing at all
     if (!recentGroups.length && !viewedGroups.length) {
         if (recentLabel) recentLabel.style.display = 'none';
-        recentContainer.innerHTML = `
+        const filterActive = !!activeTopicFilter;
+        recentContainer.innerHTML = filterActive
+            ? `
+            <div class="empty-state" style="padding:24px 16px;text-align:center;color:var(--text-secondary);">
+                <i class="fas fa-hashtag" style="font-size:32px;margin-bottom:10px;opacity:0.4;display:block;"></i>
+                <p style="margin:0 0 4px;font-size:14px;">No statuses tagged #${UISanitizer.sanitizeHTML(activeTopicFilter)}</p>
+                <p style="margin:0;font-size:12px;opacity:0.7;">Tap the topic again to clear the filter</p>
+            </div>`
+            : `
             <div class="empty-state" style="padding:24px 16px;text-align:center;color:var(--text-secondary);">
                 <i class="fas fa-comment-dots" style="font-size:32px;margin-bottom:10px;opacity:0.4;display:block;"></i>
                 <p style="margin:0 0 4px;font-size:14px;">No recent updates</p>
                 <p style="margin:0;font-size:12px;opacity:0.7;">Status updates from your contacts appear here</p>
             </div>`;
     }
+}
+
+// Renders the topic filter chip bar in the sidebar from whatever topics are
+// actually present on the given statuses. Hidden entirely if no status has
+// a topic. Tapping a chip toggles activeTopicFilter and re-renders; tapping
+// the active chip again clears the filter. This never auto-applies a filter.
+function renderStatusTopicFilterBar(allStatusesForTopics) {
+    const bar = document.getElementById('statusTopicFilterBar');
+    if (!bar) return;
+
+    const present = new Set();
+    (allStatusesForTopics || []).forEach(s => {
+        const tags = (s.metadata && Array.isArray(s.metadata.hashtags)) ? s.metadata.hashtags : [];
+        tags.forEach(t => present.add(String(t).toLowerCase()));
+    });
+
+    if (present.size === 0) {
+        bar.style.display = 'none';
+        bar.innerHTML = '';
+        // A filter that no longer has any matching topic shouldn't stay stuck active
+        if (activeTopicFilter) activeTopicFilter = null;
+        return;
+    }
+
+    bar.style.display = '';
+    bar.innerHTML = '';
+    STATUS_TOPICS
+        .map(t => t.toLowerCase())
+        .filter(t => present.has(t))
+        .forEach(topic => {
+            const chip = document.createElement('div');
+            chip.className = 'status-topic-chip' + (activeTopicFilter === topic ? ' active' : '');
+            chip.textContent = `#${topic}`;
+            chip.setAttribute('role', 'button');
+            chip.setAttribute('tabindex', '0');
+            chip.addEventListener('click', () => {
+                activeTopicFilter = (activeTopicFilter === topic) ? null : topic;
+                renderStatusListInstantlyUI();
+            });
+            bar.appendChild(chip);
+        });
 }
 
 // BUG FIX (OWN-AVATAR-NEVER-SHOWN-IN-STATUS): reads the same avatar source

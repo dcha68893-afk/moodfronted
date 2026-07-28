@@ -2729,6 +2729,24 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
                                 </div>
                             </div>
                         </div>
+
+                        <!-- Status Topics (hashtag-style intents: #Prayer, #Business, #Sports, etc.) -->
+                        <!-- Separate from "Status Intent" above (a single-select mood/purpose tag).   -->
+                        <!-- Topics are multi-select and are stored with the status; they never drive  -->
+                        <!-- automatic feeds — a topic's statuses only show once the user explicitly   -->
+                        <!-- taps that topic's filter chip in the sidebar.                             -->
+                        <input type="hidden" id="selectedTopics" value="">
+                        <div class="metadata-section collapsible expanded" data-accordion="topics">
+                            <div class="metadata-title" role="button" tabindex="0" aria-expanded="true">
+                                <span class="metadata-title-left"><i class="fas fa-hashtag"></i><span>Status Topics</span></span>
+                                <i class="fas fa-chevron-down metadata-chevron"></i>
+                            </div>
+                            <div class="metadata-body">
+                                <div class="topic-options" id="topicOptions">
+                                    <!-- Topic chips will be loaded here -->
+                                </div>
+                            </div>
+                        </div>
                         
                         <!-- Mood -->
                         <div class="metadata-section collapsible" data-accordion="mood">
@@ -3732,6 +3750,12 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
                         <div class="enhanced-loading"><i class="fas fa-spinner fa-spin"></i><p>Loading memories…</p></div>
                     </div>
                 </div>
+
+                <!-- ── TOPIC FILTER (hashtag-style intents) ──────────────────────── -->
+                <!-- Hidden until a status with a topic exists; tapping a chip filters -->
+                <!-- the lists below by that topic. Nothing is shown by default — this -->
+                <!-- never auto-applies a filter on load.                              -->
+                <div class="status-topic-filter-bar" id="statusTopicFilterBar" style="display:none;"></div>
 
                 <!-- ── RECENT UPDATES (unviewed friend statuses) ── -->
                 <div class="sw-section-label" id="recentUpdatesLabel" style="display:none;">Recent updates</div>

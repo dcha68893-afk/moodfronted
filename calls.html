@@ -5473,7 +5473,13 @@ window.__CALLS_IFRAME__ = {
                               || (document.getElementById('inCallScreen') &&
                                   document.getElementById('inCallScreen').classList.contains('active'))
                               || document.body.classList.contains('call-active')
-                              || document.body.classList.contains('call-connected');
+                              || document.body.classList.contains('call-connected')
+                              // FIX: an accept-in-progress (receiver tapped Accept,
+                              // still awaiting answerCall()) sets this before any of
+                              // the other flags/DOM classes above are guaranteed to be
+                              // in place yet — treat it as call-in-progress too so a
+                              // visibility check firing mid-accept can't reset to idle.
+                              || !!window._currentIncomingCallId;
 
             if (callInProgress) {
                 _log('Iframe visible — call in progress, leaving screens alone');

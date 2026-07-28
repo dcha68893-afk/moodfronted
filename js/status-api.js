@@ -153,7 +153,10 @@ class StatusAPI {
                 actionButtons: statusData.actionButtons || undefined,
                 caption: statusData.caption || undefined,
                 fontFamily: statusData.fontFamily || undefined,
-                textColor: statusData.textColor || undefined
+                textColor: statusData.textColor || undefined,
+                hashtags: (Array.isArray(statusData.hashtags) && statusData.hashtags.length > 0)
+                    ? statusData.hashtags
+                    : undefined
             };
 
             // Strip undefined fields so express-validator's .optional() works

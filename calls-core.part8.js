@@ -3763,7 +3763,7 @@ clearActiveCall: function() {
 
 
 
-        answerCall: function(callId) {
+        answerCall: function(callId, uiCallType) {
 
 
 
@@ -3837,7 +3837,7 @@ clearActiveCall: function() {
 
 
 
-            return window.__CallsCoreShared.CallsStateGovernor.acceptCall(callId);
+            return window.__CallsCoreShared.CallsStateGovernor.acceptCall(callId, uiCallType);
 
 
 

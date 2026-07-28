@@ -1120,29 +1120,27 @@ const UIStateManager = {
                 upsertRealtimeConversation(chatId, normalizedMessage);
             }
 
-            if (ChatManager && ChatManager._conversationsMap && chatId) {
-                const conversation = ChatManager._conversationsMap.get(chatId) || ChatManager._conversationsMap.get(String(chatId));
-                if (conversation && normalizedMessage) {
-                    conversation.lastMessage = normalizedMessage.content;
-                    conversation.lastMessageAt = _tsMs3(normalizedMessage.createdAt || normalizedMessage.timestamp) || Date.now();
-                    const _av = ChatManager.getActiveChat && ChatManager.getActiveChat();
-                    const _viewing = _av && String(_av.id) === String(chatId);
-                    if (!_viewing) {
-                        const myId = SessionManager && SessionManager.getUserId && SessionManager.getUserId();
-                        if (!normalizedMessage.senderId || String(normalizedMessage.senderId) !== String(myId)) {
-                            conversation.unreadCount = (conversation.unreadCount || 0) + 1;
-                        }
-                    }
-                }
-                if (ChatManager._conversations) {
-                    ChatManager._conversations.sort(function(a, b) { return _tsMs3(b.lastMessageAt) - _tsMs3(a.lastMessageAt); });
-                }
-            }
-
+            // FIX-SINGLE-SOURCE-OF-TRUTH: "is the user currently viewing this
+            // conversation?" used to be computed TWICE — once just below (a bare
+            // activeChat.id === chatId string compare, used only to decide
+            // whether to bump unreadCount) and again further down (isThisChat,
+            // with three fallback strategies, used to decide whether to render
+            // live). The two could disagree: e.g. right after a reply confirms a
+            // conversation's real chatId, ChatManager.getActiveChat().id can
+            // still briefly read a 'pending_<id>' placeholder while the
+            // conversationsMap is already keyed by the real numeric id — the
+            // simple compare saw a mismatch and incremented unreadCount (badge
+            // shows unread) while the richer check correctly resolved
+            // isThisChat=true and rendered the message live (no badge should
+            // show while the panel displaying that exact message is open).
+            // Compute isThisChat ONCE, up front, with 'pending_' stripped from
+            // both sides, and reuse it for the unread counter, the
+            // notification, and the live render so they can never disagree.
+            const _stripPendPrefix = function(s) { s = String(s || ''); return s.startsWith('pending_') ? s.slice(8) : s; };
             const activeChat = ChatManager && ChatManager.getActiveChat && ChatManager.getActiveChat();
             const _rcId = String(chatId || '');
             const _acId = activeChat ? String(activeChat.id || '') : '';
-            let isThisChat = !!(_rcId && _acId && _rcId === _acId);
+            let isThisChat = !!(_rcId && _acId && (_rcId === _acId || _stripPendPrefix(_rcId) === _stripPendPrefix(_acId)));
             // SECONDARY: friendId match — when User A receives User B's reply, senderId=B
             // and activeChat.friendId=B, so we match even if chatId check somehow fails
             if (!isThisChat && activeChat && normalizedMessage && normalizedMessage.senderId) {
@@ -1156,6 +1154,28 @@ const UIStateManager = {
                 if (_panel && !_panel.classList.contains('hidden') && ChatManager._conversationsMap) {
                     const _conv = ChatManager._conversationsMap.get(_rcId) || ChatManager._conversationsMap.get(Number(_rcId));
                     if (_conv) { ChatManager._activeConversation = _conv; isThisChat = true; }
+                }
+            }
+
+            if (ChatManager && ChatManager._conversationsMap && chatId) {
+                const conversation = ChatManager._conversationsMap.get(chatId) || ChatManager._conversationsMap.get(String(chatId));
+                if (conversation && normalizedMessage) {
+                    conversation.lastMessage = normalizedMessage.content;
+                    conversation.lastMessageAt = _tsMs3(normalizedMessage.createdAt || normalizedMessage.timestamp) || Date.now();
+                    if (!isThisChat) {
+                        const myId = SessionManager && SessionManager.getUserId && SessionManager.getUserId();
+                        if (!normalizedMessage.senderId || String(normalizedMessage.senderId) !== String(myId)) {
+                            conversation.unreadCount = (conversation.unreadCount || 0) + 1;
+                        }
+                    } else {
+                        // Actively viewing this conversation right now — it can never
+                        // be "unread" while the message is appearing live in front of
+                        // the user, regardless of what a stale counter said before.
+                        conversation.unreadCount = 0;
+                    }
+                }
+                if (ChatManager._conversations) {
+                    ChatManager._conversations.sort(function(a, b) { return _tsMs3(b.lastMessageAt) - _tsMs3(a.lastMessageAt); });
                 }
             }
 
@@ -1227,6 +1247,22 @@ const UIStateManager = {
                         try {
                             const _c = document.getElementById('messagesContainer');
                             if (_c) requestAnimationFrame(function() { _c.scrollTop = _c.scrollHeight; });
+                        } catch (_) {}
+                        // FIX (live read receipts): a message that arrives while its
+                        // conversation is already open on screen was rendered
+                        // instantly (above) but never told the server it had been
+                        // seen — read status only updated the next time the user
+                        // manually reopened/refocused the chat. Mark it read now,
+                        // same call the manual chat-open path already uses, so the
+                        // sender's delivery/read ticks update without any extra
+                        // action from the receiver.
+                        try {
+                            const _mc = window.MessagesCore || window.messagesCore;
+                            if (_mc && typeof _mc.markAsRead === 'function') {
+                                _mc.markAsRead(chatId);
+                            } else if (typeof ConversationManager !== 'undefined' && ConversationManager && ConversationManager.markAsRead) {
+                                ConversationManager.markAsRead(chatId);
+                            }
                         } catch (_) {}
                     }
                 } catch (_e) {}

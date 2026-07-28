@@ -2006,6 +2006,36 @@
                         callerName: (window.__CallsCoreShared.callsState.callData && (window.__CallsCoreShared.callsState.callData.callerName || window.__CallsCoreShared.callsState.callData.fromUserName)) || ''
                     });
 
+                    // FIX (black remote video with no recovery): ICE reaching
+                    // 'connected' only proves audio/data connectivity — it says
+                    // nothing about whether a *video* track was ever received.
+                    // Previously a video call whose remote peer never sent a
+                    // video track (denied camera permission, joined audio-only,
+                    // or a dropped video m-line) rendered a silent, permanent
+                    // black screen with no diagnostic and no recovery attempt.
+                    // Watch for this specific case and (a) log it clearly so it
+                    // is no longer indistinguishable from every other kind of
+                    // black-screen bug, and (b) fire one 'remote_video_stalled'
+                    // event the UI can use to show a real status (e.g. "Waiting
+                    // for {name}'s video...") instead of a bare black rectangle.
+                    (() => {
+                        const expectingVideo = (window.__CallsCoreShared.callsState.callType || '') === 'video';
+                        if (!expectingVideo) return;
+                        const checkCallId = window.__CallsCoreShared.callsState.activeCallId;
+                        setTimeout(() => {
+                            // Bail if the call already ended or a different call started
+                            if (window.__CallsCoreShared.callsState.activeCallId !== checkCallId) return;
+                            const hasVideoTrack = !!(this._remoteVideoStream && this._remoteVideoStream.getVideoTracks().length);
+                            if (hasVideoTrack) return;
+                            window.__CallsCoreShared.logWarn(
+                                window.__CallsCoreShared.MODULE,
+                                'Video call connected but no remote video track received after 6s — remote peer likely never sent one (camera denied/unavailable on their end, or joined audio-only)',
+                                { callId: checkCallId }
+                            );
+                            this._notifyListeners('remote_video_stalled', { callId: checkCallId });
+                        }, 6000);
+                    })();
+
                 } else if (state === 'failed') {
 
 

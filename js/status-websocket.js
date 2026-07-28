@@ -53,8 +53,19 @@ class StatusWebSocket {
         }
 
         if (!manager) {
-            console.warn('[StatusWebSocket] No socket available — will retry');
+            // FIX (console spam / OFFLINE requirement): this init() runs on a
+            // ~60s poll loop (up to 120 attempts). Logging on every tick used
+            // to flood the console with the same warning while offline/still
+            // connecting. Log the state transition exactly once.
+            if (!this._loggedOffline) {
+                this._loggedOffline = true;
+                console.warn('[StatusWebSocket] OFFLINE — waiting for realtime connection');
+            }
             return false;
+        }
+        if (this._loggedOffline) {
+            this._loggedOffline = false;
+            console.log('[StatusWebSocket] RECONNECTING — realtime manager found, wiring up');
         }
 
         if (this.socket === manager) return true; // already wired
@@ -153,16 +164,24 @@ class StatusWebSocket {
         s.on('status:reaction',     (data) => this._handleStatusReaction(data));
         s.on('status:reply',        (data) => this._handleStatusReply(data));
 
-        // Connection state — KynectaRealtime exposes these via .on() too
+        // Connection state — KynectaRealtime exposes these via .on() too.
+        // FIX (offline console spam): only log a transition once, not every
+        // time the underlying manager re-emits the same state.
         s.on('connect', () => {
             this.isConnected      = true;
             this.reconnectAttempts = 0;
-            console.log('[StatusWebSocket] ✅ Socket connected');
+            if (this._lastLoggedState !== 'connected') {
+                this._lastLoggedState = 'connected';
+                console.log('[StatusWebSocket] CONNECTED');
+            }
         });
 
         s.on('disconnect', () => {
             this.isConnected = false;
-            console.warn('[StatusWebSocket] ⚠️ Socket disconnected');
+            if (this._lastLoggedState !== 'offline') {
+                this._lastLoggedState = 'offline';
+                console.warn('[StatusWebSocket] OFFLINE');
+            }
             this._scheduleReconnect();
         });
 
@@ -565,7 +584,7 @@ class StatusWebSocket {
 
         const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts);
         this.reconnectAttempts++;
-        console.log(`[StatusWebSocket] Reconnect attempt ${this.reconnectAttempts} in ${delay}ms`);
+        console.log(`[StatusWebSocket] RECONNECTING (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}, in ${delay}ms)`);
 
         setTimeout(() => this.init(), delay);
     }

@@ -4807,6 +4807,17 @@ handleContactItemClick: function(e) {
                         elements.callStatusText.textContent = 'In call';
                     }
                     break;
+                case 'remote_video_stalled':
+                    // FIX (black remote video): connected but the other side never
+                    // sent a video track — tell the user instead of leaving a bare
+                    // black rectangle that looks broken. Their avatar (already shown
+                    // by default until a video track arrives) stays visible; this
+                    // just adds an explanatory status line.
+                    if (elements.callStatusText) {
+                        elements.callStatusText.textContent = "Waiting for their video…";
+                    }
+                    showNotification("Still connected — the other side's video hasn't started", 'info');
+                    break;
                 case 'data_message':
                     if (data && data.type === 'chat' && data.message) {
                         this.addChatMessage(data.sender, data.message, data.timestamp);
@@ -8868,7 +8879,26 @@ acceptIncomingCallGeneric: async function(asVideo) {
         elements.incomingCallModal.classList.remove('active');
         UIState.activeModals && UIState.activeModals.delete('incomingCallModal');
     }
-    
+
+    // FIX (idle-screen flash on accept, part 2): the incoming-call DOM
+    // signals (incomingCallModal.active) were just removed above, and
+    // `await _core.answerCall()` below can legitimately take a couple of
+    // seconds (media acquisition + WebRTC setup + a signalling round trip).
+    // UIState.callActive/callState used to only get set to true/'connecting'
+    // AFTER that await resolved, so for the whole duration of the await,
+    // nothing marked the call as in-progress except the already-removed DOM
+    // state. If the calls iframe's own visibility watcher (_doIframeVisibleCheck
+    // in calls.html) re-checks during that exact window, it saw no
+    // in-progress signal and reset the screen to idle — which is exactly the
+    // "idle screen flashes for a few seconds before in-call" symptom. Setting
+    // these flags here, before the await, keeps the call marked in-progress
+    // for the entire accept sequence with no gap.
+    UIState.callActive    = true;
+    UIState.callState     = 'connecting';
+    UIState.activeCallId  = callId;
+    UIState.callType      = callType;
+    window.__callActive   = true;
+
     showNotification(`Accepting ${callType} call from ${callerName}...`, 'info');
 
     // ── CRITICAL FIX: Use answerCall (not sendAction CALL_ACCEPT) so the WebRTC
@@ -8879,7 +8909,13 @@ acceptIncomingCallGeneric: async function(asVideo) {
     const _core = coreInstance || window.callCore || window.CallsCore || window.callsCore || null;
     if (_core && _core.answerCall) {
         try {
-            const result = await _core.answerCall(callId);
+            // FIX: pass the UI's own callType (from which accept button was
+            // tapped) through to the core — it used to be dropped here and
+            // re-derived from callData.callType inside acceptCall(), which
+            // can be missing/stale and made getUserMedia() request audio-only
+            // for what the receiver intended as a video call, leaving the
+            // caller with a permanently black remote video area.
+            const result = await _core.answerCall(callId, callType);
             if (result && result.success) {
                 accepted = true;
                 showNotification(`Call accepted with ${callerName}`, 'success');

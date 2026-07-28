@@ -3017,7 +3017,7 @@ initiateCall: async function(callType, participants = [], options = {}) {
 
 
 
-        acceptCall: async function(callId) {
+        acceptCall: async function(callId, uiCallType) {
 
 
 
@@ -3109,11 +3109,16 @@ initiateCall: async function(callType, participants = [], options = {}) {
 
 
 
-                // Determine call type from callData if available
-
-
-
-                const callType = window.__CallsCoreShared.callsState.callData?.callType || 'voice';
+                // Determine call type -- prefer the UI's own determination (which
+                // accept button the receiver actually tapped) since callData.callType
+                // from the backend payload can be missing/stale. Silently discarding
+                // this and falling back to 'voice' meant getUserMedia() never
+                // requested a camera for what the receiver intended as a video call,
+                // so the caller received an audio-only track and saw a permanently
+                // black remote video area despite the call otherwise connecting fine.
+                const callType = (uiCallType === 'video' || uiCallType === 'voice')
+                    ? uiCallType
+                    : (window.__CallsCoreShared.callsState.callData?.callType || 'voice');
 
 
 
