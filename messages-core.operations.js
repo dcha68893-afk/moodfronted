@@ -760,10 +760,31 @@ const ChatManager = {
                 // fires if the internet POST actually fails — never in parallel
                 // with it.
 
+                // FIX (durability gap): write this message to the durable
+                // offline queue BEFORE attempting the send, not only after a
+                // failure. Previously, a request killed mid-flight (tab
+                // closed/navigated away before the POST resolved either way)
+                // left the message existing only as an in-memory optimistic
+                // bubble — nothing durable was ever written for it, so it was
+                // silently lost. markInFlight() only persists to IndexedDB; it
+                // deliberately does not touch the queue's send machinery, so
+                // it can never race or duplicate the request below. Uses the
+                // same requestBody.localId the catch block's enqueue() call
+                // already uses, so on failure that call upserts this exact
+                // row (no duplicate entry) instead of creating a second one.
+                if (offlineQueue && requestBody.localId && typeof offlineQueue.markInFlight === 'function') {
+                    offlineQueue.markInFlight({ ...requestBody, type: 'message' }).catch(() => {});
+                }
+
                 // Internet (primary, and now the ONLY path attempted up front)
                 try {
                     result = await makeApiRequest('/messages', 'POST', requestBody);
                     hybridEngine?.recordSuccess?.('INTERNET', 0);
+                    // Send succeeded — clear the write-ahead record so it's
+                    // never mistaken for a lost/interrupted send and resent.
+                    if (offlineQueue && requestBody.localId) {
+                        offlineQueue.markDelivered(requestBody.localId).catch(() => {});
+                    }
                 } catch (sendErr) {
                     console.warn('[ChatManager] PHASE10 Internet send failed, checking fallbacks:', sendErr.message);
                     hybridEngine?.recordFailure?.('INTERNET');
@@ -778,6 +799,9 @@ const ChatManager = {
                             meshSent = true;
                             hybridEngine?.recordSuccess?.('MESH', 0);
                             debugLog('[ChatManager] ✅ PHASE10 MESH relay delivery');
+                            if (offlineQueue && requestBody.localId) {
+                                offlineQueue.markDelivered(requestBody.localId).catch(() => {});
+                            }
                         } catch (_meshErr) { hybridEngine?.recordFailure?.('MESH'); }
                     }
 

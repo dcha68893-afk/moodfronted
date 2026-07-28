@@ -11071,7 +11071,7 @@ Type: ${message.type || 'text'}`;
 
         window.addEventListener('messages:openChat', function(event) {
 
-            const { userId, userName, userAvatar, recipientId, recipientName, recipientAvatar } = event.detail || {};
+            const { userId, userName, userAvatar, recipientId, recipientName, recipientAvatar, findExisting } = event.detail || {};
 
             const targetUserId = userId || recipientId;
 
@@ -11095,7 +11095,21 @@ Type: ${message.type || 'text'}`;
 
             
 
-            openChatWithUserInUI(targetUserId, targetUserName, targetAvatar);
+            // ROOT-CAUSE FIX (single shared conversation engine): this listener is
+            // the ONE place every cross-module "Open Chat" (Friend, Status, Calls)
+            // converges — message.html re-dispatches every OPEN_CHAT_WITH_USER
+            // postMessage as this event. It used to call openChatWithUserInUI()
+            // with no options at all, which defaulted findExisting to false and
+            // meant findExistingConversation() (which correctly resolves the real
+            // chatId/conversationId/socket room/history) was NEVER reached from
+            // here — every one of those modules silently got a brand-new local
+            // "pending_" conversation instead of the real, already-existing one.
+            // That's why only Chat History (which already passes a real
+            // conversationId and never goes through this path) worked. Default to
+            // true unless the sender explicitly says otherwise.
+            openChatWithUserInUI(targetUserId, targetUserName, targetAvatar, {
+                findExisting: findExisting !== false
+            });
 
         });
 
@@ -11176,7 +11190,11 @@ Type: ${message.type || 'text'}`;
 
     function openChatWithUserInUI(userId, userName, userAvatar, options = {}) {
 
-        const { findExisting = false, returnFromCall = false } = options;
+        // FIX: default true — this function is the single shared entry point
+        // every module's "Open Chat" converges on (see setupAutoOpenChat above).
+        // It must always try to resolve the real, existing conversation first;
+        // only an explicit findExisting:false should skip that lookup.
+        const { findExisting = true, returnFromCall = false } = options;
 
         // Set a global flag so _showChatPanel (in messages-core) also knows we came from a call
         window.__returningFromCall = returnFromCall === true;

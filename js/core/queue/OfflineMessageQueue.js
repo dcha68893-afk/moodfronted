@@ -165,6 +165,16 @@
     async init() {
       await this._hydrate();
       this._attachNetworkListener();
+      // Crash-recovery safety net: entries hydrated from a previous session
+      // (including markInFlight() rows left by a tab that closed mid-send)
+      // are otherwise only resent when an 'online' or socket-reconnect event
+      // fires later. On a fresh load that's already connected throughout,
+      // neither may fire. Give the app's phaseN bootstraps a few seconds to
+      // register the real send handler, then attempt a flush regardless —
+      // safe even if the handler isn't wired yet (_trySend no-ops without one).
+      if (this._queue.size > 0) {
+        setTimeout(() => this.flushAll().catch(() => {}), 4000);
+      }
       console.log(`[OfflineQueue] ✅ Initialized — ${this._queue.size} queued`);
     }
 
@@ -207,16 +217,71 @@
     }
 
     /**
+     * Durably persist a message as "in flight" BEFORE it's attempted, without
+     * triggering a send. This closes the one gap in the existing queue: today
+     * a message is only written to IndexedDB reactively, after the caller's
+     * own send attempt already failed (see enqueue()) or while known-offline.
+     * If the tab/app is killed mid-request (network request aborted by
+     * navigation/close, neither success nor failure ever resolves), that
+     * in-flight message was never written anywhere and is lost for good.
+     *
+     * Call this right before attempting a send the caller is handling itself
+     * (e.g. the existing encrypted/hybrid-transport POST in
+     * ChatManager.sendMessageToBackend). Deliberately does NOT call
+     * _trySend() or touch this._queue — it must never race the caller's own
+     * in-flight attempt or produce a second, parallel send for the same
+     * message (the codebase has hit that exact bug before with LAN+internet
+     * parallel sends corrupting encryption ordering).
+     *
+     * On success, the caller should call markDelivered(id) to clear this
+     * record. On failure, the caller's existing enqueue(msg) call (same id)
+     * naturally upserts the same IndexedDB row — no duplicate entry.
+     *
+     * On an actual crash before either happens, _hydrate() on next init()
+     * finds this row, resets it to QUEUED, and flushAll() resends it once
+     * connectivity is confirmed — exactly the same crash-recovery path
+     * already used for entries written via enqueue().
+     */
+    async markInFlight(msg) {
+      const id = msg.localId || msg.id;
+      if (!id) return null; // no stable id to dedupe against later — skip rather than risk a duplicate entry
+      const entry = {
+        id,
+        chatId:    msg.chatId  || msg.conversationId || null,
+        type:      msg.type    || 'message',
+        priority:  MSG_TYPE_PRIORITY[msg.type] || PRIORITY.MEDIUM,
+        payload:   msg,
+        state:     'SENDING',
+        attempts:  0,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        expiresAt: Date.now() + this._expireMs,
+      };
+      try {
+        await this._persistence.save(entry);
+      } catch (err) {
+        console.warn('[OfflineQueue] markInFlight persistence error:', err?.message);
+      }
+      return entry;
+    }
+
+    /**
      * Mark a queued message as delivered (remove from queue).
      */
     async markDelivered(id) {
       const entry = this._queue.get(id);
-      if (!entry) return;
-      entry.state = 'DELIVERED';
-      this._queue.delete(id);
-      this._scheduler.cancel(id);
-      await this._persistence.remove(id);
-      this._notify(entry);
+      if (entry) {
+        entry.state = 'DELIVERED';
+        this._queue.delete(id);
+        this._scheduler.cancel(id);
+        this._notify(entry);
+      }
+      // Always clear IndexedDB — covers both a normal queued entry AND a
+      // markInFlight() write-ahead row, which is never added to this._queue
+      // by design (see markInFlight). Without this, a successfully-delivered
+      // in-flight message would leave an orphaned persisted row that gets
+      // wrongly resent (duplicate) on a future crash-recovery hydrate.
+      try { await this._persistence.remove(id); } catch (_) {}
     }
 
     /**

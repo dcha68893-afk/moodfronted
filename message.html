@@ -2175,11 +2175,23 @@
                 sessionStorage.removeItem('open_chat_on_load');
                 sessionStorage.removeItem('pending_chat');
 
+                // ROOT-CAUSE FIX (Friend/Status/Calls chat-open pipeline): every
+                // cross-module "Open Chat" (friend list, status viewer reply,
+                // call-history message icon) arrives here via this same
+                // OPEN_CHAT_WITH_USER postMessage. Only Chat History bypasses
+                // this handler entirely (it already has a real conversationId).
+                // findExisting must default to true so this shared path always
+                // resolves to the SAME real conversation/chatId/socket room that
+                // Chat History uses, instead of silently falling back to a
+                // throwaway local "pending_" conversation with no history.
+                const _findExisting = (data.payload && data.payload.findExisting === false) ? false : true;
+
                 const eventDetail = {
                     userId: targetUserId,
                     userName: targetUserName,
                     recipientId: targetUserId,
-                    recipientName: targetUserName
+                    recipientName: targetUserName,
+                    findExisting: _findExisting
                 };
 
                 let _fired = false;
