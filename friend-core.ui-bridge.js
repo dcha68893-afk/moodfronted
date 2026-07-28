@@ -3980,6 +3980,47 @@ function applySettingToFriendModule(section, key, value) {
     });
 })();
 
+// =============================================
+// FIX (NOTIFICATIONS-ONLY-LIVE-IN-CALLS-AND-GROUPS): this module, like
+// messages-core.ui-bridge.js, only ever applied settings once from a
+// (possibly stale) localStorage cache at boot, and had no postMessage
+// SETTING_CHANGED/SETTINGS_UPDATED listener either — so it never received
+// live setting changes at all while the page was open. calls-ui.js and
+// group-ui.js both call window.AppSettings.subscribe(...) for this; mirroring
+// it here brings Friends to parity so toggles like notification sound take
+// effect immediately instead of requiring a full reload.
+// =============================================
+function _wireFriendLiveSettingsSubscription() {
+    if (!window.AppSettings || typeof window.AppSettings.subscribe !== 'function') return;
+    if (window.__friendLiveSettingsSubscribed) return;
+    window.__friendLiveSettingsSubscribed = true;
+    window.AppSettings.subscribe(function(settings, path, value) {
+        try {
+            if (path && path !== '*') {
+                const parts = path.split('.');
+                const section = parts[0];
+                const key = parts.slice(1).join('.');
+                applySettingToFriendModule(section, key, value);
+            } else if (settings && typeof settings === 'object') {
+                Object.entries(settings).forEach(function([sec, secVal]) {
+                    if (secVal && typeof secVal === 'object') {
+                        Object.entries(secVal).forEach(function([k, v]) {
+                            applySettingToFriendModule(sec, k, v);
+                        });
+                    }
+                });
+            }
+        } catch (err) {
+            console.warn('[friend-core] Live settings subscription error:', err);
+        }
+    });
+}
+if (window.AppSettings) {
+    _wireFriendLiveSettingsSubscription();
+} else {
+    window.addEventListener('appSettingsReady', _wireFriendLiveSettingsSubscription, { once: true });
+}
+
 // Additional exports required for cross-module wiring between the 3 split files
 export {
     applySettingToFriendModule

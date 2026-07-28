@@ -9,7 +9,15 @@
 
 'use strict';
 
-const CACHE_NAME    = 'kynecta-v5';
+// FIX (STALE-DEPLOY / FIXES-NOT-APPEARING-LIVE): CACHE_NAME was a hardcoded
+// string that never got bumped across many deploys. Every JS/CSS/HTML file
+// was served pure cache-first below with no revalidation, so once a browser
+// installed this worker it kept serving whatever it first cached — forever —
+// even after Render shipped fixes for the exact same files. Bumping the
+// version here forces every existing install to drop the old cache on its
+// next activate (see the 'activate' handler below, which already deletes any
+// cache whose name != CACHE_NAME) and rebuild from the live deploy.
+const CACHE_NAME    = 'kynecta-v6';
 const API_CACHE     = 'kynecta-api-v1';
 const STATIC_ASSETS = [
   '/',
@@ -63,17 +71,25 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Static assets: Cache-first
+  // Static assets: stale-while-revalidate.
+  // FIX (STALE-DEPLOY / FIXES-NOT-APPEARING-LIVE): the old cache-first
+  // strategy served the cached copy and NEVER checked the network again for
+  // that URL, so a fix pushed to Render could sit live for weeks without any
+  // already-installed browser ever seeing it. This still returns the cached
+  // copy immediately (same instant load), but always fires a background
+  // fetch to refresh the cache — so the NEXT load already has the update,
+  // instead of requiring the developer to remember to bump CACHE_NAME again
+  // and every user to happen to get a fresh SW install.
   event.respondWith(
     caches.match(event.request).then(cached => {
-      if (cached) return cached;
-      return fetch(event.request).then(resp => {
+      const networkFetch = fetch(event.request).then(resp => {
         if (resp.ok) {
           const copy = resp.clone();
           caches.open(CACHE_NAME).then(c => c.put(event.request, copy)).catch(() => {});
         }
         return resp;
-      });
+      }).catch(() => cached);
+      return cached || networkFetch;
     })
   );
 });

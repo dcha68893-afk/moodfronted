@@ -2690,3 +2690,45 @@ function applySettingToMessagesModule(section, key, value) {
         } catch(e) {}
     });
 })();
+
+// =============================================
+// FIX (NOTIFICATIONS-ONLY-LIVE-IN-CALLS-AND-GROUPS): the bootstrap IIFE above
+// only applies settings ONCE, from a (possibly 24h-stale) localStorage cache,
+// at page load. calls-ui.js and group-ui.js both also call
+// window.AppSettings.subscribe(...) so they keep receiving every LIVE change
+// for as long as the page stays open — this module never did, so toggling
+// e.g. "Notification Sound" in Settings while the app was already running
+// had no effect here (window.__notificationSoundEnabled just stayed at
+// whatever the cache said at boot) even though it worked immediately for
+// Calls/Groups. Mirroring that same subscription here fixes messages parity.
+// =============================================
+function _wireMessagesLiveSettingsSubscription() {
+    if (!window.AppSettings || typeof window.AppSettings.subscribe !== 'function') return;
+    if (window.__messagesLiveSettingsSubscribed) return;
+    window.__messagesLiveSettingsSubscribed = true;
+    window.AppSettings.subscribe(function(settings, path, value) {
+        try {
+            if (path && path !== '*') {
+                const parts = path.split('.');
+                const section = parts[0];
+                const key = parts.slice(1).join('.');
+                applySettingToMessagesModule(section, key, value);
+            } else if (settings && typeof settings === 'object') {
+                Object.entries(settings).forEach(function([sec, secVal]) {
+                    if (secVal && typeof secVal === 'object') {
+                        Object.entries(secVal).forEach(function([k, v]) {
+                            applySettingToMessagesModule(sec, k, v);
+                        });
+                    }
+                });
+            }
+        } catch (err) {
+            console.warn('[messages-core] Live settings subscription error:', err);
+        }
+    });
+}
+if (window.AppSettings) {
+    _wireMessagesLiveSettingsSubscription();
+} else {
+    window.addEventListener('appSettingsReady', _wireMessagesLiveSettingsSubscription, { once: true });
+}
