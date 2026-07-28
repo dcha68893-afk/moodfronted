@@ -2603,6 +2603,19 @@
                         <div class="friends-list" id="allFriendsList">
                             <!-- Populated by renderAllFriendsList() -->
                         </div>
+                        <!-- BUG FIX: this block used to live inside #friendsSection, a tab
+                             that was hidden/removed when the category tabs were dropped in
+                             favor of a single unified list. Since nothing ever marks
+                             #friendsSection ".active" anymore, its contents (including this)
+                             were permanently invisible no matter what renderFriendSuggestions()
+                             or Sync Contacts did. Moved here, into the section that's actually
+                             shown, so sync results/People You May Know are visible again. -->
+                        <div id="friendSuggestionsContainer" style="display:none; margin-top: 16px;">
+                            <div style="display:flex; align-items:center; gap:8px; margin: 8px 4px; font-size: 13px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">
+                                <i class="fas fa-user-plus"></i> People you may know
+                            </div>
+                            <div class="friends-list" id="friendSuggestionsList"></div>
+                        </div>
                     </div>
                     
                     <!-- Contacts Section -->
@@ -2616,14 +2629,6 @@
                     <div class="friends-section" id="friendsSection">
                         <div class="friends-list" id="friendsList">
                             <!-- Approved friends will be loaded in background -->
-                        </div>
-                        <!-- People you may know — populated by renderFriendSuggestions(), hidden
-                             entirely when the friends.friendSuggestions setting is off -->
-                        <div id="friendSuggestionsContainer" style="display:none; margin-top: 16px;">
-                            <div style="display:flex; align-items:center; gap:8px; margin: 8px 4px; font-size: 13px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">
-                                <i class="fas fa-user-plus"></i> People you may know
-                            </div>
-                            <div class="friends-list" id="friendSuggestionsList"></div>
                         </div>
                     </div>
                     

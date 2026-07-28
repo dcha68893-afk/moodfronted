@@ -2180,9 +2180,19 @@ export const renderContacts = function() {
                     syncBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Syncing...';
                     syncBtn.disabled = true;
                     try {
-                        await simulateContactSync();
+                        // BUG FIX: was calling simulateContactSync(), a mock that never
+                        // reads real device contacts and always returns 0 matches — see
+                        // the matching fix on the dropdown "Sync contacts" button below.
+                        if (typeof importPhoneContacts === 'function') {
+                            await importPhoneContacts();
+                        } else {
+                            await simulateContactSync();
+                        }
                         await loadContactsFromBackend();
                         renderContacts();
+                        if (typeof renderFriendSuggestions === 'function') {
+                            renderFriendSuggestions({ showEmptyState: true }).catch(() => {});
+                        }
                     } catch (error) {
                         console.warn('Contact sync failed:', error);
                         showNotification('Contact sync failed', 'error');
@@ -3330,7 +3340,8 @@ function renderFilteredUsersList(users, searchTerm) {
 // may know" using the existing (previously unused) GET /api/friends/suggestions endpoint.
 // Reuses createUserSearchItemElement so suggestion cards get the same Add Friend / pending /
 // already-friends button states as search results, for free.
-async function renderFriendSuggestions() {
+async function renderFriendSuggestions(options = {}) {
+    const { showEmptyState = false } = options;
     const container = document.getElementById('friendSuggestionsContainer');
     const list = document.getElementById('friendSuggestionsList');
     if (!container || !list) return;
@@ -3358,7 +3369,20 @@ async function renderFriendSuggestions() {
     });
 
     if (merged.length === 0) {
-        container.style.display = 'none';
+        // BUG FIX: this used to just hide the container with no feedback either way,
+        // so after clicking "Sync contacts" the user had no idea whether it ran and
+        // found nobody, or did nothing at all. When triggered by an explicit sync
+        // action, show a clear "no one found" state instead of going silent.
+        if (showEmptyState) {
+            list.innerHTML = '';
+            const empty = document.createElement('div');
+            empty.style.cssText = 'padding:16px 8px; color: var(--text-secondary); font-size: 14px; text-align:center;';
+            empty.textContent = 'No contacts on your phone are using the app yet.';
+            list.appendChild(empty);
+            container.style.display = '';
+        } else {
+            container.style.display = 'none';
+        }
         return;
     }
 
@@ -5849,10 +5873,15 @@ function bindAllEvents() {
                 await loadContactsFromBackend();
                 renderContacts();
                 // Refresh "People You May Know" so phone-contact matches merge into it.
+                // showEmptyState: true because this was a manual, explicit sync click —
+                // the user needs to see *something* changed, even if it's "nobody found".
                 if (typeof renderFriendSuggestions === 'function') {
-                    renderFriendSuggestions().catch(() => {});
+                    await renderFriendSuggestions({ showEmptyState: true }).catch(() => {});
+                    const suggestionsEl = document.getElementById('friendSuggestionsContainer');
+                    if (suggestionsEl && suggestionsEl.style.display !== 'none') {
+                        suggestionsEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    }
                 }
-                // Sync runs silently in background - no toast shown to user
             } catch (error) {
                 console.warn('Contact sync failed:', error);
                 showNotification('Failed to sync contacts', 'error');
