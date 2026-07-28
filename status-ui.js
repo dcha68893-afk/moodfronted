@@ -5249,6 +5249,84 @@ function renderSectionContent(sectionId) {
     }
 }
 
+// =============================================
+// FIX (REAL-PRESENCE — status module): friend online/last-seen info was
+// never available here at all — this module never listened for
+// FRIENDS_LIST_UPDATE (which chat.html already sends on every module switch
+// and friend-list refresh — see sendFriendsToStatusIframe/
+// broadcastFriendsToAllModules in chat.html) or the live FRIEND_ONLINE/
+// FRIEND_OFFLINE events. __statusPresenceCache is the single source of truth
+// this file now reads when drawing each friend's avatar in the status list.
+// =============================================
+window.__statusPresenceCache = window.__statusPresenceCache || new Map();
+
+function _ingestFriendsListForPresence(friends) {
+    if (!Array.isArray(friends)) return;
+    friends.forEach((f) => {
+        if (!f || f.id == null) return;
+        const online = f.isOnline === true || f.online === true || f.status === 'online';
+        window.__statusPresenceCache.set(String(f.id), {
+            online,
+            lastSeen: f.lastSeen || f.last_seen || f.lastActive || null
+        });
+    });
+    _patchStatusPresenceDots();
+}
+
+function _formatStatusPresenceTitle(entry) {
+    if (!entry) return '';
+    if (entry.online) return 'Active now';
+    if (entry.lastSeen) {
+        const minutesAgo = Math.max(0, Math.round((Date.now() - new Date(entry.lastSeen).getTime()) / 60000));
+        if (minutesAgo < 1) return 'Last seen just now';
+        return `Last seen ${minutesAgo} minute${minutesAgo === 1 ? '' : 's'} ago`;
+    }
+    return 'Offline';
+}
+
+// Patch any already-rendered avatar dots in place (cheap — avoids a full
+// re-render of the status list just to reflect a presence change).
+function _patchStatusPresenceDots() {
+    document.querySelectorAll('.status-group-item[data-user-id]').forEach((item) => {
+        const uid = item.dataset.userId;
+        if (!uid) return;
+        const entry = window.__statusPresenceCache.get(uid);
+        const avatarWrap = item.querySelector('.status-group-avatar');
+        if (!avatarWrap) return;
+        let dot = avatarWrap.querySelector('.status-presence-dot');
+        if (!entry) {
+            if (dot) dot.remove();
+            return;
+        }
+        if (!dot) {
+            dot = document.createElement('span');
+            dot.className = 'status-presence-dot';
+            dot.style.cssText = 'position:absolute;bottom:0;right:0;width:12px;height:12px;border-radius:50%;border:2px solid var(--bg-primary, #111);z-index:3;';
+            avatarWrap.appendChild(dot);
+        }
+        dot.style.background = entry.online ? '#00a884' : 'transparent';
+        dot.style.display = entry.online ? 'block' : 'none';
+        dot.title = _formatStatusPresenceTitle(entry);
+        avatarWrap.title = _formatStatusPresenceTitle(entry);
+    });
+}
+
+window.addEventListener('message', (event) => {
+    const d = event.data;
+    if (!d || typeof d !== 'object') return;
+    if (d.type === 'FRIENDS_LIST_UPDATE' && d.payload) {
+        _ingestFriendsListForPresence(d.payload.friends);
+    } else if (d.type === 'FRIEND_ONLINE' || d.type === 'FRIEND_OFFLINE') {
+        const p = d.payload || {};
+        if (p.userId == null) return;
+        window.__statusPresenceCache.set(String(p.userId), {
+            online: d.type === 'FRIEND_ONLINE',
+            lastSeen: p.lastSeen || (d.type === 'FRIEND_OFFLINE' ? Date.now() : null)
+        });
+        _patchStatusPresenceDots();
+    }
+});
+
 function renderStatusesListUI(container, statusesList, allViewed) {
     if (!container) return;
     let filtered = Array.isArray(statusesList) ? [...statusesList] : [];
@@ -5359,13 +5437,19 @@ function createGroupedStatusElement(statuses, allViewedOverride) {
         ? `background-image:url('${avatarUrl}');background-size:cover;background-position:center;`
         : '';
 
+    const _presenceEntry = window.__statusPresenceCache ? window.__statusPresenceCache.get(String(item.dataset.userId)) : null;
+    const _presenceDotHtml = _presenceEntry && _presenceEntry.online
+        ? `<span class="status-presence-dot" title="${_formatStatusPresenceTitle(_presenceEntry)}" style="position:absolute;bottom:0;right:0;width:12px;height:12px;border-radius:50%;border:2px solid var(--bg-primary, #111);z-index:3;background:#00a884;"></span>`
+        : '';
+
     item.innerHTML = `
-        <div class="status-group-avatar" style="position:relative;">
+        <div class="status-group-avatar" style="position:relative;" title="${_presenceEntry ? _formatStatusPresenceTitle(_presenceEntry) : ''}">
             ${ringSvg}
             <div class="status-group-avatar-inner" style="${avatarBg}${fullyViewed ? 'opacity:0.7;' : ''}">
                 ${avatarUrl ? '' : `<span>${initials}</span>`}
             </div>
             ${total > 1 ? `<div class="status-group-count">${total}</div>` : ''}
+            ${_presenceDotHtml}
         </div>
         <div class="status-group-info" style="${fullyViewed ? 'opacity:0.65;' : ''}">
             <div class="status-group-name">${displayName}</div>

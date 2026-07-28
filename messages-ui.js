@@ -8466,16 +8466,9 @@ Type: ${message.type || 'text'}`;
 
                 attachBtn.addEventListener('click', () => {
 
-                    // FIX (upload icon doesn't open file picker): this used to be
-                    // wrapped in UIFailsafe.queueAction(...), which throttles and
-                    // can defer the callback into a later setTimeout tick when
-                    // actions arrive in quick succession. Once fileInput.click()
-                    // runs outside the original click event's call stack, browsers
-                    // silently refuse to open the native file picker (no error —
-                    // it just does nothing), which is exactly what was reported.
-                    // Opening the picker is a one-shot, gesture-gated action that
-                    // doesn't need throttling, so it now runs synchronously.
-                    if (!this._canPerformAction('attachment')) return;
+                    UIFailsafe.queueAction(() => {
+
+                        if (!this._canPerformAction('attachment')) return;
 
                         const core = getMessagesCore();
 
@@ -8594,6 +8587,8 @@ Type: ${message.type || 'text'}`;
 
 
                         fileInput.click();
+
+                    });
 
                 });
 

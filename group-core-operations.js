@@ -2754,6 +2754,66 @@ async function loadGroupMembersForManagement(groupData) {
     } catch (error) {}
 }
 
+// =============================================
+// FIX (REAL-PRESENCE — group module): group member management had no
+// online/last-active indicator at all. group-core-patch.js already caches
+// the friends list from chat.html's FRIENDS_LIST_UPDATE broadcast into
+// window.__friendsList (which carries isOnline/lastSeen) — this builds a
+// lookup table from that plus live FRIEND_ONLINE/FRIEND_OFFLINE events, and
+// renderMembersList() below reads it per member. Note: members who are not
+// also a friend of the viewer won't have live presence data (the app only
+// pushes presence for the friend graph), so those members simply show no
+// dot rather than a wrong one — real data or nothing, not a guess.
+// =============================================
+window.__groupPresenceCache = window.__groupPresenceCache || new Map();
+
+function _ingestFriendsListForGroupPresence(friends) {
+    if (!Array.isArray(friends)) return;
+    friends.forEach((f) => {
+        if (!f || f.id == null) return;
+        const online = f.isOnline === true || f.online === true || f.status === 'online';
+        window.__groupPresenceCache.set(String(f.id), {
+            online,
+            lastSeen: f.lastSeen || f.last_seen || f.lastActive || null
+        });
+    });
+}
+
+function _formatGroupPresenceLabel(entry) {
+    if (!entry) return '';
+    if (entry.online) return 'Active now';
+    if (entry.lastSeen) {
+        const minutesAgo = Math.max(0, Math.round((Date.now() - new Date(entry.lastSeen).getTime()) / 60000));
+        if (minutesAgo < 1) return 'Active just now';
+        return `Active ${minutesAgo} minute${minutesAgo === 1 ? '' : 's'} ago`;
+    }
+    return '';
+}
+
+window.addEventListener('message', (e) => {
+    const d = e.data;
+    if (!d || typeof d !== 'object') return;
+    if (d.type === 'FRIENDS_LIST_UPDATE' && d.payload) {
+        _ingestFriendsListForGroupPresence(d.payload.friends);
+    } else if (d.type === 'FRIEND_ONLINE' || d.type === 'FRIEND_OFFLINE') {
+        const p = d.payload || {};
+        if (p.userId == null) return;
+        window.__groupPresenceCache.set(String(p.userId), {
+            online: d.type === 'FRIEND_ONLINE',
+            lastSeen: p.lastSeen || (d.type === 'FRIEND_OFFLINE' ? Date.now() : null)
+        });
+        // Live-patch already-rendered rows without a full re-render
+        const row = document.querySelector(`.member-management-item[data-member-userid="${p.userId}"]`);
+        if (row) {
+            const label = row.querySelector('.member-presence-label');
+            const dot = row.querySelector('.member-presence-dot');
+            const entry = window.__groupPresenceCache.get(String(p.userId));
+            if (label) label.textContent = _formatGroupPresenceLabel(entry);
+            if (dot) dot.style.display = entry && entry.online ? 'inline-block' : 'none';
+        }
+    }
+});
+
 function renderMembersList(memberDetails) {
     try {
         const memberList = safeGetElement('#memberManagementList');
@@ -2764,19 +2824,25 @@ function renderMembersList(memberDetails) {
         memberDetails.forEach(member => {
             const memberItem = document.createElement('div');
             memberItem.className = 'member-management-item';
-            
+            memberItem.dataset.memberUserid = String(member.id);
+
             const initials = member.displayName 
                 ? member.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2)
                 : 'U';
+
+            const _presenceEntry = window.__groupPresenceCache ? window.__groupPresenceCache.get(String(member.id)) : null;
+            const _presenceLabel = _formatGroupPresenceLabel(_presenceEntry);
             
             memberItem.innerHTML = `
                 <div class="member-management-info">
-                    <div class="friend-avatar" ${member.photoURL ? `style="background-image: url('${member.photoURL}')"` : ''}>
+                    <div class="friend-avatar" style="position:relative;${member.photoURL ? `background-image: url('${member.photoURL}')` : ''}">
                         ${member.photoURL ? '' : `<span>${initials}</span>`}
+                        <span class="member-presence-dot" style="display:${_presenceEntry && _presenceEntry.online ? 'inline-block' : 'none'};position:absolute;bottom:0;right:0;width:10px;height:10px;border-radius:50%;background:#00a884;border:2px solid var(--bg-primary, #111);"></span>
                     </div>
                     <div>
                         <div style="font-weight: 500;">${member.displayName}</div>
                         <div style="font-size: 12px; color: var(--text-secondary);">${member.username || ''}</div>
+                        <div class="member-presence-label" style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">${_presenceLabel}</div>
                         <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">
                             ${member.isCreator ? '<span class="role-badge admin"><i class="fas fa-star"></i> Creator</span>' : ''}
                             ${member.isAdmin && !member.isCreator ? '<span class="role-badge admin"><i class="fas fa-crown"></i> Admin</span>' : ''}
