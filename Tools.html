@@ -1114,20 +1114,31 @@
         cursor: pointer;
     }
 
-    /* Product grid background */
+    /* Product grid background
+       FIX (still-hardcoded-light-theme): this whole block below used to be
+       pinned to literal #ffffff/#f5f5f5/#111111/etc regardless of theme —
+       the same bug already fixed above for .jm-header/.jm-search-wrap/
+       .marketplace-detail-panel, just never finished for the rest of the
+       page. js/AppSettings.js keeps --bg-color/--card-bg/--text-primary/
+       --text-secondary/--border-color live on :root on every theme change
+       (see applyToDOM); everything neutral below now reads those instead
+       of a fixed light value. Brand orange (#f57224), semantic colors
+       (red warnings, blue balance chip) and white text sitting on a
+       colored/gradient background are left as literals on purpose — those
+       aren't light/dark-dependent. */
     .marketplace-list, .jm-product-grid,
     .marketplace-list-content.jm-product-grid {
-        background: #f5f5f5 !important;
+        background: var(--bg-color) !important;
     }
 
     /* Section header text */
-    .jm-section-header span { color: #111111 !important; font-weight: 700 !important; }
+    .jm-section-header span { color: var(--text-primary) !important; font-weight: 700 !important; }
 
     /* Filter chips */
     .jm-chip {
-        background: #f3f4f6 !important;
-        color: #444444 !important;
-        border: 1px solid #e5e7eb !important;
+        background: var(--kyn-bg-input, var(--bg-color)) !important;
+        color: var(--text-secondary) !important;
+        border: 1px solid var(--border-color) !important;
     }
     .jm-chip.active {
         background: #f57224 !important;
@@ -1137,33 +1148,33 @@
 
     /* Product & listing cards */
     .listing-item, .jm-product-card, .jm-card {
-        background: #ffffff !important;
-        border-color: #e8e8e8 !important;
-        color: #111111 !important;
+        background: var(--card-bg) !important;
+        border-color: var(--border-color) !important;
+        color: var(--text-primary) !important;
     }
 
     /* Card text */
-    .jm-card-title { color: #111111 !important; font-weight: 500 !important; }
+    .jm-card-title { color: var(--text-primary) !important; font-weight: 500 !important; }
     .jm-card-price { color: #f57224 !important; font-weight: 800 !important; }
-    .jm-card-oldprice { color: #9ca3af !important; }
+    .jm-card-oldprice { color: var(--text-secondary) !important; }
 
     /* CRITICAL: Product images — contain so they never bleed/overlap */
     .jm-card-img {
         object-fit: contain !important;
         padding: 6px !important;
-        background: #ffffff !important;
+        background: var(--card-bg) !important;
     }
 
     .jm-card-img-wrap {
-        background: #ffffff !important;
-        border-bottom: 1px solid #f0f0f0 !important;
+        background: var(--card-bg) !important;
+        border-bottom: 1px solid var(--border-color) !important;
     }
 
     /* More sheet */
-    .jm-more-sheet { background: #ffffff !important; color: #111111 !important; }
-    .jm-more-title { color: #111111 !important; font-weight: 700 !important; }
-    .jm-more-item { color: #111111 !important; background: #f9fafb !important; }
-    .jm-more-item:hover { background: #f0fdf4 !important; }
+    .jm-more-sheet { background: var(--card-bg) !important; color: var(--text-primary) !important; }
+    .jm-more-title { color: var(--text-primary) !important; font-weight: 700 !important; }
+    .jm-more-item { color: var(--text-primary) !important; background: var(--bg-color) !important; }
+    .jm-more-item:hover { background: rgba(245, 114, 36, 0.12) !important; }
     .jm-more-item i { color: #f57224 !important; }
     .jm-more-overlay { background: rgba(0,0,0,0.4) !important; }
 
@@ -1175,14 +1186,14 @@
         display: flex !important;
         gap: 8px !important;
         padding: 10px 12px !important;
-        background: #ffffff !important;
-        border-bottom: 1px solid #e5e7eb !important;
+        background: var(--card-bg) !important;
+        border-bottom: 1px solid var(--border-color) !important;
     }
     .jm-cat-type-btn {
         flex: 1 !important;
-        border: 1px solid #e5e7eb !important;
-        background: #f5f5f5 !important;
-        color: #444444 !important;
+        border: 1px solid var(--border-color) !important;
+        background: var(--bg-color) !important;
+        color: var(--text-secondary) !important;
         border-radius: 8px !important;
         padding: 8px 4px !important;
         font-size: 12.5px !important;
@@ -1197,28 +1208,28 @@
 
     /* Category sidebar */
     .jm-cat-sidebar {
-        background: #f5f5f5 !important;
-        border-right: 1px solid #e5e7eb !important;
+        background: var(--bg-color) !important;
+        border-right: 1px solid var(--border-color) !important;
     }
 
     /* Category items in sidebar */
     .jm-cat-item {
-        color: #444444 !important;
-        border-bottom: 1px solid #e5e7eb !important;
+        color: var(--text-secondary) !important;
+        border-bottom: 1px solid var(--border-color) !important;
         background: transparent !important;
         font-weight: 500 !important;
     }
     .jm-cat-item.active {
-        background: #ffffff !important;
+        background: var(--card-bg) !important;
         color: #f57224 !important;
         font-weight: 700 !important;
         border-left-color: #f57224 !important;
     }
 
     /* Category content */
-    .jm-cat-content { background: #f5f5f5 !important; }
-    .jm-cat-group { background: #ffffff !important; border: 1px solid #f0f0f0 !important; }
-    .jm-cat-group-header { color: #111111 !important; font-weight: 700 !important; }
+    .jm-cat-content { background: var(--bg-color) !important; }
+    .jm-cat-group { background: var(--card-bg) !important; border: 1px solid var(--border-color) !important; }
+    .jm-cat-group-header { color: var(--text-primary) !important; font-weight: 700 !important; }
 
     /* CRITICAL: subcategory images — contain, isolated, no bleed */
     .jm-subcat-item { background: transparent !important; }
@@ -1226,9 +1237,9 @@
     .jm-subcat-img,
     .jm-subcat-img-placeholder {
         object-fit: contain !important;
-        background: #f8f8f8 !important;
+        background: var(--bg-color) !important;
         padding: 4px !important;
-        border: 1px solid #eeeeee !important;
+        border: 1px solid var(--border-color) !important;
         border-radius: 8px !important;
         display: block !important;
         width: 88px !important;
@@ -1239,7 +1250,7 @@
     }
 
     .jm-subcat-name {
-        color: #111111 !important;
+        color: var(--text-primary) !important;
         font-weight: 500 !important;
         font-size: 11px !important;
     }
@@ -1248,7 +1259,7 @@
     [class*="jm-cat-card"],
     [class*="jm-cat-tile"],
     [class*="jm-cat-block"] {
-        background-color: #f8f8f8 !important;
+        background-color: var(--bg-color) !important;
         position: relative !important;
         overflow: hidden !important;
     }
@@ -1262,48 +1273,48 @@
         height: 100% !important;
         object-fit: contain !important;
         padding: 4px !important;
-        background: #f8f8f8 !important;
+        background: var(--bg-color) !important;
         border-radius: 8px !important;
         position: static !important;
     }
 
     /* Cart & wishlist */
-    .jm-cart-wrap, .jm-wishlist-wrap { background: #f5f5f5 !important; }
+    .jm-cart-wrap, .jm-wishlist-wrap { background: var(--bg-color) !important; }
     .jm-cart-item {
-        background: #ffffff !important;
-        border-color: #e5e7eb !important;
+        background: var(--card-bg) !important;
+        border-color: var(--border-color) !important;
     }
-    .jm-cart-item-title { color: #111111 !important; }
+    .jm-cart-item-title { color: var(--text-primary) !important; }
     .jm-cart-item-price { color: #f57224 !important; font-weight: 700 !important; }
 
     /* Account */
-    .jm-account-wrap { background: #f5f5f5 !important; color: #111111 !important; }
+    .jm-account-wrap { background: var(--bg-color) !important; color: var(--text-primary) !important; }
     .jm-account-hero, .jm-account-menu-group {
-        background: #ffffff !important;
-        border-color: #e5e7eb !important;
+        background: var(--card-bg) !important;
+        border-color: var(--border-color) !important;
     }
-    .jm-account-welcome { color: #111111 !important; font-weight: 700 !important; font-size: 20px !important; }
+    .jm-account-welcome { color: var(--text-primary) !important; font-weight: 700 !important; font-size: 20px !important; }
     .jm-account-email { color: #f57224 !important; }
     .jm-account-balance { background: #eff6ff !important; color: #1d4ed8 !important; }
-    .jm-account-section-label { color: #444444 !important; font-weight: 700 !important; font-size: 11px !important; text-transform: uppercase !important; }
-    .jm-account-menu-item { color: #111111 !important; background: #ffffff !important; border-bottom: 1px solid #f3f4f6 !important; }
-    .jm-account-menu-item i:first-child { color: #6b7280 !important; }
-    .jm-account-menu-item .jm-menu-chevron { color: #d1d5db !important; }
+    .jm-account-section-label { color: var(--text-secondary) !important; font-weight: 700 !important; font-size: 11px !important; text-transform: uppercase !important; }
+    .jm-account-menu-item { color: var(--text-primary) !important; background: var(--card-bg) !important; border-bottom: 1px solid var(--border-color) !important; }
+    .jm-account-menu-item i:first-child { color: var(--text-secondary) !important; }
+    .jm-account-menu-item .jm-menu-chevron { color: var(--text-secondary) !important; }
 
     /* Account rows (acct-row / account-row) */
     .jm-account-wrap .jm-acct-section,
     .jm-account-wrap .acct-section,
     .jm-account-wrap .account-section {
-        background: #ffffff !important;
+        background: var(--card-bg) !important;
         border-radius: 12px !important;
         margin: 8px 12px !important;
-        border: 1px solid #e5e7eb !important;
+        border: 1px solid var(--border-color) !important;
     }
     .jm-account-wrap .jm-acct-row,
     .jm-account-wrap .acct-row,
     .jm-account-wrap .account-row {
-        border-bottom: 1px solid #f3f4f6 !important;
-        color: #111111 !important;
+        border-bottom: 1px solid var(--border-color) !important;
+        color: var(--text-primary) !important;
     }
     .jm-account-wrap .jm-acct-header,
     .jm-account-wrap .acct-header,
@@ -1349,20 +1360,20 @@
     .listing-price { color: #f57224 !important; }
 
     /* Misc text */
-    #jmProductCount { color: #6b7280 !important; }
-    .empty-state { color: #6b7280 !important; background: transparent !important; }
+    #jmProductCount { color: var(--text-secondary) !important; }
+    .empty-state { color: var(--text-secondary) !important; background: transparent !important; }
 
     /* Bottom nav — our new nav uses ID #jmBottomNav, override old class hide */
     .jm-bottom-nav { display: none !important; }
     #jmBottomNav { display: flex !important; }
 
     /* Horizontal card */
-    .jm-hcard { background: #ffffff !important; border-color: #e8e8e8 !important; }
-    .jm-hcard-title { color: #111111 !important; font-weight: 600 !important; }
+    .jm-hcard { background: var(--card-bg) !important; border-color: var(--border-color) !important; }
+    .jm-hcard-title { color: var(--text-primary) !important; font-weight: 600 !important; }
     .jm-hcard-price { color: #f57224 !important; }
     .jm-hcard-img {
         object-fit: contain !important;
-        background: #ffffff !important;
+        background: var(--card-bg) !important;
         padding: 4px !important;
     }
 
@@ -1370,9 +1381,9 @@
     .jm-notif-system-row, .jm-notif-group,
     .jm-address-item, .jm-review-item,
     .jm-seller-item, .jm-order-item {
-        background: #ffffff !important;
-        color: #111111 !important;
-        border-color: #e5e7eb !important;
+        background: var(--card-bg) !important;
+        color: var(--text-primary) !important;
+        border-color: var(--border-color) !important;
     }
     /* ── Notification bell badge ────────────────────────────────────── */
     #jmNotifBadge { display:none; }
