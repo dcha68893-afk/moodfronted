@@ -155,12 +155,140 @@
       this._attachSocketListeners();
       this._attachVisibility();
       this._patchBrowserNotification();
+      this._attachBannerBridge();
       console.log('[NotifStab] ✅ Initialized');
     }
 
     // ── Public API ─────────────────────────────────────────────────────────────
 
     get unread() { return this._unread; }
+
+    /**
+     * notifyApp(title, body, opts)
+     * FIX (NOTIFICATIONS-DM-FRIEND-CALL-MISSING): single cross-module entry
+     * point for an in-app top banner. Any module — DMs, friend requests,
+     * calls, marketplace, etc. — can call this from *any* frame (shell or
+     * iframe). chat.html is the shell that visually hosts every module
+     * iframe, so this file (loaded on every page via phase6.bootstrap.js)
+     * renders the banner only when it's running in the top window; when
+     * called from inside an iframe it relays the request up via
+     * postMessage so the shell renders one banner instead of each iframe
+     * fighting to draw its own.
+     *
+     * opts: { module, contextId, icon, onClick }
+     *   module    - short tag e.g. 'dm' | 'friend' | 'call' | 'marketplace'
+     *   contextId - dedup/storm-check scope (chatId, userId, callId, ...)
+     *   icon      - optional emoji shown in the banner
+     *   onClick   - optional callback (only usable when called from the
+     *               same frame that renders the banner, i.e. the shell)
+     */
+    notifyApp(title, body, opts = {}) {
+      const { module = 'app', contextId = null, icon = null, onClick = null } = opts;
+
+      // Respect the same global Settings > Notifications toggle every
+      // other notification path in the app honors.
+      if (window.__messageNotificationsEnabled === false) return;
+
+      const key = `${module}:${title}:${body}`;
+      if (!this.shouldShow(key, contextId || module)) return;
+
+      if (window.top !== window.self) {
+        // Running inside an iframe — ask the shell to render it.
+        try {
+          window.top.postMessage({
+            type: 'KYN_APP_BANNER',
+            title, body, module, contextId, icon,
+          }, '*');
+        } catch (_) {}
+        return;
+      }
+
+      this._renderBanner(title, body, { module, contextId, icon, onClick });
+    }
+
+    // ── Shared top banner (rendered only in the top/shell window) ───────────────
+
+    _attachBannerBridge() {
+      window.addEventListener('message', (e) => {
+        if (!e.data || e.data.type !== 'KYN_APP_BANNER') return;
+        if (window.top !== window.self) return; // only the shell renders
+        const { title, body, module, contextId, icon } = e.data;
+        // Re-run dedup here too: multiple sibling iframes (or a known
+        // double-dispatch upstream) can relay the same event within
+        // milliseconds of each other — collapse those into one banner.
+        const key = `${module || 'app'}:${title}:${body}`;
+        if (!this.shouldShow(key, contextId || module || 'app')) return;
+        this._renderBanner(title, body, { module, contextId, icon });
+      });
+    }
+
+    _ensureBannerEl() {
+      if (this._bannerEl) return this._bannerEl;
+
+      const style = document.createElement('style');
+      style.textContent = `
+        #kyn-app-banner {
+          position: fixed; top: -80px; left: 50%; transform: translateX(-50%);
+          z-index: 2147483000; min-width: 280px; max-width: 420px;
+          background: rgba(28, 28, 34, 0.96); color: #fff;
+          border-radius: 14px; padding: 12px 16px;
+          box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+          display: flex; align-items: flex-start; gap: 10px;
+          font-family: inherit; cursor: pointer; user-select: none;
+          transition: top 0.28s ease;
+        }
+        #kyn-app-banner.kyn-app-banner-visible { top: 14px; }
+        #kyn-app-banner .kyn-app-banner-icon { font-size: 20px; line-height: 1.3; }
+        #kyn-app-banner .kyn-app-banner-title { font-weight: 600; font-size: 14px; margin: 0 0 2px; }
+        #kyn-app-banner .kyn-app-banner-body { font-size: 13px; opacity: 0.85; margin: 0; }
+      `;
+      document.head.appendChild(style);
+
+      const el = document.createElement('div');
+      el.id = 'kyn-app-banner';
+      el.innerHTML = `
+        <span class="kyn-app-banner-icon"></span>
+        <div>
+          <p class="kyn-app-banner-title"></p>
+          <p class="kyn-app-banner-body"></p>
+        </div>
+      `;
+      document.body.appendChild(el);
+
+      el.addEventListener('click', () => {
+        this._hideBanner();
+        if (this._bannerOnClick) { try { this._bannerOnClick(); } catch (_) {} }
+        try {
+          window.dispatchEvent(new CustomEvent('kyn:banner:click', {
+            detail: { module: this._bannerModule, contextId: this._bannerContextId },
+          }));
+        } catch (_) {}
+      });
+
+      this._bannerEl = el;
+      return el;
+    }
+
+    _renderBanner(title, body, { module, contextId, icon, onClick } = {}) {
+      const el = this._ensureBannerEl();
+      const icons = { dm: '💬', friend: '👥', call: '📞', marketplace: '🛍️' };
+      el.querySelector('.kyn-app-banner-icon').textContent = icon || icons[module] || '🔔';
+      el.querySelector('.kyn-app-banner-title').textContent = title || '';
+      el.querySelector('.kyn-app-banner-body').textContent = body || '';
+
+      this._bannerModule = module;
+      this._bannerContextId = contextId;
+      this._bannerOnClick = typeof onClick === 'function' ? onClick : null;
+
+      // Restart the visible/auto-hide cycle even if a banner is already showing.
+      requestAnimationFrame(() => el.classList.add('kyn-app-banner-visible'));
+      clearTimeout(this._bannerHideTimer);
+      this._bannerHideTimer = setTimeout(() => this._hideBanner(), 4500);
+    }
+
+    _hideBanner() {
+      if (this._bannerEl) this._bannerEl.classList.remove('kyn-app-banner-visible');
+    }
 
     /**
      * Call before showing any notification.

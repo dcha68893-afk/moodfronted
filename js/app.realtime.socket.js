@@ -1178,6 +1178,19 @@
                         });
                         window.dispatchEvent(new CustomEvent('kyn:call:incoming', { detail: payload }));
                         window.dispatchEvent(new CustomEvent('kyn:incoming_call',  { detail: payload }));
+
+                        // FIX (NOTIFICATIONS-DM-FRIEND-CALL-MISSING): calls never reached
+                        // the shared notification system — only kyn:group:*/kyn:status:*
+                        // did. Route through notifyApp() so an incoming call shows the
+                        // top banner even if the user isn't already on the calls screen.
+                        try {
+                            var _callerName = (payload && (payload.callerName || payload.fromName || payload.name)) || 'Someone';
+                            window.__NotificationStabilizationLayer && window.__NotificationStabilizationLayer.notifyApp(
+                                '📞 Incoming Call',
+                                _callerName + ' is calling you',
+                                { module: 'call', contextId: payload && (payload.callId || payload.callerId) }
+                            );
+                        } catch(_) {}
                     } catch(_) {}
                 }
 
@@ -1204,6 +1217,28 @@
                         // even when messages-core runs in the same frame (no iframe).
                         try { window.dispatchEvent(new CustomEvent('kyn:message:new', { detail: payload })); } catch(_) {}
                         try { window.dispatchEvent(new CustomEvent('kyn:new_message',  { detail: payload })); } catch(_) {}
+
+                        // FIX (NOTIFICATIONS-DM-FRIEND-CALL-MISSING): DMs never reached
+                        // the shared notification system (only kyn:group:*/kyn:status:*
+                        // did) — so no banner appeared for a new 1:1 message unless the
+                        // user was already looking at that chat. Group messages already
+                        // get their own path via kyn:group:message, so this only covers
+                        // 1:1 DMs. Skip echoes of the current user's own messages.
+                        try {
+                            var _myAuthRaw = localStorage.getItem('kynecta_auth') || localStorage.getItem('nexopa_auth');
+                            var _myId = _myAuthRaw ? (JSON.parse(_myAuthRaw).user || {}).id : null;
+                            var _senderId = payload && (payload.senderId || payload.userId || payload.fromId);
+                            if (_senderId && String(_senderId) !== String(_myId)) {
+                                var _senderName = (payload && (payload.senderName || payload.fromName)) || 'New message';
+                                var _preview = (payload && (payload.content || payload.text)) || '';
+                                if (_preview.length > 60) _preview = _preview.slice(0, 60) + '…';
+                                window.__NotificationStabilizationLayer && window.__NotificationStabilizationLayer.notifyApp(
+                                    _senderName,
+                                    _preview || 'Sent you a message',
+                                    { module: 'dm', contextId: payload.chatId || _senderId }
+                                );
+                            }
+                        } catch(_) {}
                         // PHASE15 FIX: Persist incoming message to localStorage so it survives
                         // if the user is on a different screen when the message arrives.
                         // messages-core flushes kyn_pending_messages on load / tab focus.
@@ -2150,6 +2185,17 @@
                             frame.contentWindow.postMessage({ type: 'FRIEND_REQUEST_ACCEPTED', payload: payload || {}, id: _accId + '_named' }, '*');
                         } catch (_) {}
                     });
+                    // FIX (NOTIFICATIONS-DM-FRIEND-CALL-MISSING): route through the
+                    // shared banner too — previously only iframes that happened to
+                    // be open and listening got any indication this happened.
+                    try {
+                        var _accName = (payload && (payload.userName || payload.name)) || 'Someone';
+                        window.__NotificationStabilizationLayer && window.__NotificationStabilizationLayer.notifyApp(
+                            '👥 Friend Request Accepted',
+                            _accName + ' accepted your friend request',
+                            { module: 'friend', contextId: payload && (payload.userId || payload.friendId) }
+                        );
+                    } catch (_) {}
                     return;
                 }
 
@@ -2169,6 +2215,17 @@
                             frame.contentWindow.postMessage({ type: 'FRIEND_REQUEST_RECEIVED', payload: payload || {}, id: _reqId + '_named' }, '*');
                         } catch (_) {}
                     });
+                    // FIX (NOTIFICATIONS-DM-FRIEND-CALL-MISSING): route through the
+                    // shared banner too — previously a new friend request only
+                    // showed up if you happened to already be on friend.html.
+                    try {
+                        var _reqName = (payload && (payload.userName || payload.name)) || 'Someone';
+                        window.__NotificationStabilizationLayer && window.__NotificationStabilizationLayer.notifyApp(
+                            '👥 New Friend Request',
+                            _reqName + ' sent you a friend request',
+                            { module: 'friend', contextId: payload && (payload.userId || payload.senderId) }
+                        );
+                    } catch (_) {}
                     return;
                 }
 

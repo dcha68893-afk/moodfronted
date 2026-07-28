@@ -425,7 +425,16 @@
 
       window.addEventListener('message', (e) => {
         if (!e.data || typeof e.data !== 'object') return;
-        const key = e.data.type + '|' + (e.data.chatId || '') + '|' + (e.data.id || '');
+        // FIX (POSTMESSAGE-STORM-FALSE-POSITIVE): API_REQUEST messages (and a
+        // few other request-style types) carry no chatId/id — only an
+        // endpoint + requestId — so every distinct API call collapsed onto
+        // the same "type||" key. A single Promise.allSettled batch (e.g.
+        // friendSync's 5 parallel calls) was enough to trip the "storm"
+        // warning even though each call was for a different endpoint and
+        // nothing was actually wrong. Fold endpoint/requestId into the key
+        // so only genuinely repeated identical requests count as a storm.
+        const key = e.data.type + '|' + (e.data.chatId || '') + '|' +
+          (e.data.id || e.data.requestId || e.data.endpoint || '');
         const now = Date.now();
 
         // Purge old
