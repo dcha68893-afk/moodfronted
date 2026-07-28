@@ -11071,7 +11071,7 @@ Type: ${message.type || 'text'}`;
 
         window.addEventListener('messages:openChat', function(event) {
 
-            const { userId, userName, userAvatar, recipientId, recipientName, recipientAvatar, findExisting } = event.detail || {};
+            const { userId, userName, userAvatar, recipientId, recipientName, recipientAvatar, findExisting, message: draftMessage } = event.detail || {};
 
             const targetUserId = userId || recipientId;
 
@@ -11108,7 +11108,8 @@ Type: ${message.type || 'text'}`;
             // conversationId and never goes through this path) worked. Default to
             // true unless the sender explicitly says otherwise.
             openChatWithUserInUI(targetUserId, targetUserName, targetAvatar, {
-                findExisting: findExisting !== false
+                findExisting: findExisting !== false,
+                draftMessage: draftMessage || ''
             });
 
         });
@@ -11194,7 +11195,7 @@ Type: ${message.type || 'text'}`;
         // every module's "Open Chat" converges on (see setupAutoOpenChat above).
         // It must always try to resolve the real, existing conversation first;
         // only an explicit findExisting:false should skip that lookup.
-        const { findExisting = true, returnFromCall = false } = options;
+        const { findExisting = true, returnFromCall = false, draftMessage = '' } = options;
 
         // Set a global flag so _showChatPanel (in messages-core) also knows we came from a call
         window.__returningFromCall = returnFromCall === true;
@@ -11402,6 +11403,22 @@ Type: ${message.type || 'text'}`;
             _uiLog('[MessageUI] Using messagesUI.loadChatByFriendId');
 
             window.messagesUI.loadChatByFriendId(numericUserId, resolvedName);
+
+            // FIX (marketplace product-inquiry text silently lost): every layer of the
+            // shared open-chat pipeline (message.html's OPEN_CHAT_WITH_USER handler,
+            // then this function) used to discard payload.message entirely — a seller
+            // DM opened from a product page never carried the buyer's pre-typed
+            // inquiry. Fill it in now that the chat panel/input exist.
+            if (draftMessage) {
+                setTimeout(() => {
+                    const _mi = document.getElementById('messageInput');
+                    if (_mi && !_mi.value) {
+                        _mi.value = draftMessage;
+                        _mi.dispatchEvent(new Event('input', { bubbles: true }));
+                        _mi.focus();
+                    }
+                }, 300);
+            }
 
             return;
 

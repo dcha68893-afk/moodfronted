@@ -6224,6 +6224,60 @@
                     setTimeout(_postChatOpen, 300);
                 }
 
+                // ROOT-CAUSE FIX (Phase 18 canonical-pipeline audit — Status module):
+                // status.html's viewer-bubble "Chat" button (window.openChatWith) posts a raw
+                // { type: 'OPEN_CHAT_WITH_USER', payload: { userId } } directly to window.parent
+                // (this shell). Unlike Friend module (which also sends a SWITCH_MODULE message
+                // that this shell already handles) or Calls module (which sends
+                // DIRECT_CHAT_REQUEST), Status module has never sent anything else — and this
+                // shell had NO listener for a bare OPEN_CHAT_WITH_USER arriving directly from a
+                // child iframe (the shell only ever *sends* that type down to messagesIframe).
+                // The message was silently dropped: chat.html never navigated to the messages
+                // page and never relayed anything into messagesIframe, so "Chat" from Status
+                // did nothing. Only Chat History (same-iframe, real conversationId) worked.
+                // Route this the same way DIRECT_CHAT_REQUEST is handled: navigate to the
+                // messages page, flag chat-panel-active, and relay into messagesIframe with a
+                // short retry loop (message.html's own 2s dedup already protects against this
+                // ever double-opening alongside some other relay path for the same user).
+                if (data.type === 'OPEN_CHAT_WITH_USER' && event.source !== window &&
+                    (!document.getElementById('messagesIframe') || event.source !== document.getElementById('messagesIframe').contentWindow)) {
+                    const _ocwuPayload = data.payload || {};
+                    const _ocwuUserId = _ocwuPayload.userId || _ocwuPayload.recipientId;
+                    if (_ocwuUserId) {
+                        const chatPayload = {
+                            userId: _ocwuUserId,
+                            userName: _ocwuPayload.userName || _ocwuPayload.recipientName || 'User',
+                            findExisting: _ocwuPayload.findExisting !== false,
+                            timestamp: Date.now()
+                        };
+                        navigateToPage('messages');
+                        document.body.classList.add('chat-panel-active');
+
+                        window.__ocwuChatOpened = false;
+                        window.__ocwuAttempts = 0;
+
+                        const _postOcwuOpen = () => {
+                            if (window.__ocwuChatOpened) { window.__ocwuAttempts = 0; return; }
+                            const messagesIframe = document.getElementById('messagesIframe');
+                            if (messagesIframe && messagesIframe.contentWindow) {
+                                messagesIframe.contentWindow.postMessage({
+                                    type: 'OPEN_CHAT_WITH_USER',
+                                    payload: chatPayload,
+                                    source: 'parent-frame',
+                                    timestamp: Date.now()
+                                }, '*');
+                                _chatLog('[chat.html] OPEN_CHAT_WITH_USER (direct relay) → messagesIframe, attempt', window.__ocwuAttempts + 1);
+                            }
+                            if (window.__ocwuAttempts++ < 3) {
+                                setTimeout(_postOcwuOpen, 600);
+                            } else {
+                                window.__ocwuAttempts = 0;
+                            }
+                        };
+                        setTimeout(_postOcwuOpen, 300);
+                    }
+                }
+
                 if (data.type === 'DIRECT_CALL_REQUEST') {
                     const p = data.payload || {};
                     // Always return to friends after a direct call from friends module
@@ -6294,7 +6348,17 @@
                 // ── STATUS_REPLY_RECEIVED / OPEN_CHAT ─────────────────────────────────────
                 // Fired by status-ui.js when a user replies to a status.
                 // Navigate to messages and open the correct conversation.
-                if (data.type === 'OPEN_CHAT' || data.type === 'STATUS_REPLY_RECEIVED') {
+                // ROOT-CAUSE FIX (Phase 18 canonical-pipeline audit — marketplace double-fire):
+                // this block used to match any OPEN_CHAT regardless of payload, including the
+                // marketplace product-inquiry variant (data.payload.product_id present). Because
+                // it ran first and fired its own relay into messagesIframe WITHOUT productId or
+                // the pre-filled inquiry message, message.html's 2s open-chat dedup (keyed by
+                // userId) then silently swallowed the marketplace-specific handler's relay
+                // (further below, ~400ms later) that actually carried productId/message — so
+                // "Message Seller" from a product page always opened a bare chat with no product
+                // context. Excluding product_id payloads here leaves the dedicated marketplace
+                // bridge handler below as the only one that runs for that case.
+                if ((data.type === 'OPEN_CHAT' && !data.payload?.product_id) || data.type === 'STATUS_REPLY_RECEIVED') {
                     const p = data.payload || {};
                     const targetUserId = p.userId || p.recipientId || p.ownerId;
                     const targetChatId = p.chatId;

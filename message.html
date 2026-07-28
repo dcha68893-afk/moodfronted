@@ -2125,7 +2125,7 @@
             if (data.type === 'OPEN_CHAT_WITH_USER') {
                 console.log('[Message HTML] Opening chat with user:', data.payload);
 
-                const { userId, userName, recipientId, recipientName } = data.payload || {};
+                const { userId, userName, recipientId, recipientName, message: draftMessage, productId } = data.payload || {};
                 const targetUserId = userId || recipientId;
                 // FIX (duplicate "User" chat entry): callers that don't have
                 // a display name handy (e.g. the status-reply flow, which
@@ -2191,7 +2191,12 @@
                     userName: targetUserName,
                     recipientId: targetUserId,
                     recipientName: targetUserName,
-                    findExisting: _findExisting
+                    findExisting: _findExisting,
+                    // FIX (marketplace product-inquiry text silently lost): forward the
+                    // buyer's pre-typed message and product reference through instead of
+                    // dropping them here — see matching fix in messages-ui.js.
+                    message: draftMessage || '',
+                    productId: productId || null
                 };
 
                 let _fired = false;
