@@ -2573,6 +2573,43 @@
                 <!-- Hidden trigger buttons - keep for JS wiring, invisible -->
                 <button id="syncContactsBtn" style="display:none"></button>
                 <button id="scanQRBtn" style="display:none"></button>
+
+                <!-- Contacts Sync Results Screen - opened after tapping "Sync Contacts".
+                     Shows two distinct sections: contacts from the phone that already
+                     have the app, and separate "people you may know" suggestions. -->
+                <div class="contacts-sync-screen" id="contactsSyncScreen">
+                    <div class="contacts-sync-header">
+                        <button class="contacts-sync-back" id="contactsSyncBackBtn" aria-label="Back">
+                            <i class="fas fa-arrow-left"></i>
+                        </button>
+                        <h3>Contacts</h3>
+                    </div>
+                    <div class="contacts-sync-body">
+                        <div class="contacts-sync-loading" id="contactsSyncLoading">
+                            <i class="fas fa-spinner fa-spin"></i> Syncing your contacts...
+                        </div>
+                        <div id="contactsSyncContent" style="display:none;">
+                            <div class="contacts-sync-section">
+                                <div class="contacts-sync-section-title">
+                                    <i class="fas fa-address-book"></i> From your contacts
+                                </div>
+                                <div class="friends-list" id="contactsSyncOnAppList"></div>
+                                <div class="contacts-sync-empty" id="contactsSyncOnAppEmpty" style="display:none;">
+                                    None of your phone contacts are on the app yet.
+                                </div>
+                            </div>
+                            <div class="contacts-sync-section">
+                                <div class="contacts-sync-section-title">
+                                    <i class="fas fa-user-plus"></i> People you may know
+                                </div>
+                                <div class="friends-list" id="contactsSyncSuggestList"></div>
+                                <div class="contacts-sync-empty" id="contactsSyncSuggestEmpty" style="display:none;">
+                                    No suggestions right now.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
                 <button id="discoverBtn" style="display:none"></button>
                 <!-- ADD FRIEND button kept hidden, triggered from More menu -->
                 <button id="addFriendBtn" style="display:none"></button>

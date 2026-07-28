@@ -2190,9 +2190,7 @@ export const renderContacts = function() {
                         }
                         await loadContactsFromBackend();
                         renderContacts();
-                        if (typeof renderFriendSuggestions === 'function') {
-                            renderFriendSuggestions({ showEmptyState: true }).catch(() => {});
-                        }
+                        await openContactsSyncScreen();
                     } catch (error) {
                         console.warn('Contact sync failed:', error);
                         showNotification('Contact sync failed', 'error');
@@ -3395,6 +3393,83 @@ async function renderFriendSuggestions(options = {}) {
     list.appendChild(fragment);
     container.style.display = '';
 }
+
+// Contacts Sync Results Screen — opened from the "Sync Contacts" action.
+// Shows two distinct sections: phone contacts already on the app (a stronger,
+// explicit signal) and separate "people you may know" suggestions (mutual
+// friends / shared groups), instead of silently merging both into one list.
+async function openContactsSyncScreen() {
+    const screen = document.getElementById('contactsSyncScreen');
+    if (!screen) return;
+    const loading = document.getElementById('contactsSyncLoading');
+    const content = document.getElementById('contactsSyncContent');
+    screen.classList.add('active');
+    if (loading) loading.style.display = '';
+    if (content) content.style.display = 'none';
+
+    try {
+        await renderContactsSyncScreenContent();
+    } finally {
+        if (loading) loading.style.display = 'none';
+        if (content) content.style.display = '';
+    }
+}
+
+async function renderContactsSyncScreenContent() {
+    const onAppList = document.getElementById('contactsSyncOnAppList');
+    const onAppEmpty = document.getElementById('contactsSyncOnAppEmpty');
+    const suggestList = document.getElementById('contactsSyncSuggestList');
+    const suggestEmpty = document.getElementById('contactsSyncSuggestEmpty');
+    if (!onAppList || !suggestList) return;
+
+    const phoneMatches = Array.isArray(window.__phoneContactMatches) ? window.__phoneContactMatches : [];
+    const phoneMatchIds = new Set(phoneMatches.map(m => String(m.id)));
+
+    onAppList.innerHTML = '';
+    if (phoneMatches.length === 0) {
+        if (onAppEmpty) onAppEmpty.style.display = '';
+    } else {
+        if (onAppEmpty) onAppEmpty.style.display = 'none';
+        const fragment = document.createDocumentFragment();
+        phoneMatches.forEach(user => {
+            const item = createUserSearchItemElement(user);
+            if (item && item.nodeType === Node.ELEMENT_NODE) fragment.appendChild(item);
+        });
+        onAppList.appendChild(fragment);
+    }
+
+    let suggestions = [];
+    try {
+        const result = await loadFriendSuggestions(10);
+        suggestions = (result && result.suggestions) || [];
+    } catch (e) {
+        suggestions = [];
+    }
+    const filteredSuggestions = suggestions.filter(u => u && !phoneMatchIds.has(String(u.id)));
+
+    suggestList.innerHTML = '';
+    if (filteredSuggestions.length === 0) {
+        if (suggestEmpty) suggestEmpty.style.display = '';
+    } else {
+        if (suggestEmpty) suggestEmpty.style.display = 'none';
+        const fragment = document.createDocumentFragment();
+        filteredSuggestions.forEach(user => {
+            const item = createUserSearchItemElement(user);
+            if (item && item.nodeType === Node.ELEMENT_NODE) fragment.appendChild(item);
+        });
+        suggestList.appendChild(fragment);
+    }
+}
+
+function closeContactsSyncScreen() {
+    const screen = document.getElementById('contactsSyncScreen');
+    if (screen) screen.classList.remove('active');
+}
+
+(function wireContactsSyncScreen() {
+    const backBtn = document.getElementById('contactsSyncBackBtn');
+    if (backBtn) backBtn.addEventListener('click', closeContactsSyncScreen);
+})();
 
 // BUG FIX: importPhoneContacts() (friend-core.ui-bridge.js) dispatches this event
 // with real matched users once device contacts are hashed and checked against
@@ -5872,16 +5947,12 @@ function bindAllEvents() {
                 }
                 await loadContactsFromBackend();
                 renderContacts();
-                // Refresh "People You May Know" so phone-contact matches merge into it.
-                // showEmptyState: true because this was a manual, explicit sync click —
-                // the user needs to see *something* changed, even if it's "nobody found".
-                if (typeof renderFriendSuggestions === 'function') {
-                    await renderFriendSuggestions({ showEmptyState: true }).catch(() => {});
-                    const suggestionsEl = document.getElementById('friendSuggestionsContainer');
-                    if (suggestionsEl && suggestionsEl.style.display !== 'none') {
-                        suggestionsEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                    }
-                }
+                // BUG FIX: this used to just refresh the inline "People You May Know"
+                // section in place and scroll to it, so contacts who ARE on the app and
+                // suggestions from other signals ended up mixed into one list with no
+                // way to tell them apart. Open a dedicated results screen instead, with
+                // the two kept separate: "From your contacts" vs "People you may know".
+                await openContactsSyncScreen();
             } catch (error) {
                 console.warn('Contact sync failed:', error);
                 showNotification('Failed to sync contacts', 'error');
