@@ -1538,6 +1538,22 @@ async function loadUserSettings() {
         window.addEventListener('message', (event) => {
     // ── OFFLINE-FIRST: Apply setting changes immediately ──
     const data = event.data;
+    // FIX (theme-sparking bug, round 11): Tools had no handler at all for
+    // THEME_CHANGED — the dedicated message chat.html relays to every
+    // iframe the instant a theme is saved in Settings (see settings-ui.js's
+    // applyTheme(), which sends THEME_CHANGED, not SETTING_CHANGED). Every
+    // other module already listens for it; Tools silently ignored it, so
+    // an already-open Tools tab kept showing whatever theme it had at its
+    // own last load until a full page reload.
+    if (data && data.type === 'THEME_CHANGED' && data.theme) {
+        const theme = (data.theme === 'dark' ? 'dark' : 'light');
+        if (window.ThemeManager) {
+            window.ThemeManager.setTheme(theme);
+        } else {
+            document.documentElement.setAttribute('data-theme', theme);
+            document.body.setAttribute('data-theme', theme);
+        }
+    }
     if (data && (data.type === 'SETTING_CHANGED' || data.type === 'SETTINGS_UPDATED')) {
         const payload = data.payload || data;
         

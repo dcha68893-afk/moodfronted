@@ -2019,7 +2019,25 @@ function handleProfileUpdatedMessage(message) {}
 function handlePrivacyUpdatedMessage(message) {}
 function handleNotificationsUpdatedMessage(message) {}
 function handleLanguageChangedMessage(message) {}
-function handleThemeChangedMessage(message) {}
+// FIX (theme-sparking bug, round 11): this was a literal no-op — status.html
+// registers it for the live THEME_CHANGED broadcast chat.html relays the
+// instant a theme is saved in Settings, but doing nothing here meant status
+// never actually picked up that change until its next full reload. Since
+// status.css's --bg-color/--text-primary/etc already correctly follow
+// data-theme, the fix is just to make sure data-theme actually gets updated
+// live, the same way every other module's THEME_CHANGED handler does.
+function handleThemeChangedMessage(message) {
+    var theme = message && message.theme;
+    if (!theme) return;
+    if (window.ThemeManager) {
+        window.ThemeManager.setTheme(theme);
+    } else {
+        var resolved = theme === 'dark' ? 'dark' : 'light';
+        document.documentElement.setAttribute('data-theme', resolved);
+        document.documentElement.style.colorScheme = resolved;
+        try { localStorage.setItem('app_theme', resolved); } catch (_) {}
+    }
+}
 function handleAccountLoggedOutMessage(message) {}
 function handleBlockedUsersUpdatedMessage(message) {}
 function handleActiveSessionsUpdatedMessage(message) {}
