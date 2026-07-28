@@ -3235,6 +3235,16 @@
                 
                 // Handle chat panel state
                 if (data.type === 'CHAT_OPENED' || data.type === 'CONVERSATION_OPENED') {
+                    // FIX (dead ACK flags): window.__dcChatOpened / __ocwuChatOpened
+                    // are checked by the DIRECT_CHAT_REQUEST and OPEN_CHAT_WITH_USER
+                    // relay loops further down this file to know when to stop
+                    // retrying — but nothing ever set them back to true on a
+                    // successful open, so every "open chat from friends/calls/status"
+                    // action fired 3 duplicate OPEN_CHAT_WITH_USER postMessages into
+                    // messagesIframe 600ms apart regardless of whether the first one
+                    // already worked. Confirming here (this IS the ACK) stops that.
+                    window.__dcChatOpened = true;
+                    window.__ocwuChatOpened = true;
                     // Apply on all widths — CSS only shows effect on mobile
                     document.body.classList.add('chat-panel-active');
                     // FIX (back-navigation-skips-chat): opening a 1:1 chat never
@@ -7320,6 +7330,48 @@
                 window.wsService.on('user:online',     _fwdPresenceToFriends);
                 window.wsService.on('user:offline',    function(d) { _fwdPresenceToFriends(Object.assign({}, d, { online: false })); });
                 window.wsService.on('presence:update', _fwdPresenceToFriends);
+
+                // FIX (REAL-PRESENCE — calls + status module coverage): the
+                // comment this replaces explicitly said calls-ui.js was left out
+                // of the FRIEND_ONLINE/FRIEND_OFFLINE relay because it had no
+                // listener for it — that gap is now closed on the calls-ui.js
+                // side (see its message listener), and status-ui.js already had
+                // a real, working FRIEND_ONLINE/FRIEND_OFFLINE handler
+                // (_patchStatusPresenceDots) that was simply never being fed
+                // live events — only the initial FRIENDS_LIST_UPDATE snapshot.
+                // Both modules were therefore stuck showing whatever presence
+                // happened to be true at page load / last full refresh, drifting
+                // further out of sync with reality the longer the tab stayed
+                // open. Wire the same relay already used for friends/messages.
+                function _fwdPresenceToCalls(presPayload) {
+                    const uid = presPayload && (presPayload.userId || presPayload.id || presPayload.friendId);
+                    if (!uid) return;
+                    const online = presPayload && (presPayload.online !== false && presPayload.status !== 'offline');
+                    const callsIf = document.getElementById('callsIframe');
+                    if (!callsIf || !callsIf.contentWindow) return;
+                    callsIf.contentWindow.postMessage({
+                        type: online ? 'FRIEND_ONLINE' : 'FRIEND_OFFLINE',
+                        payload: { userId: uid, online: online, lastSeen: presPayload.lastSeen || null }
+                    }, '*');
+                }
+                window.wsService.on('user:online',     _fwdPresenceToCalls);
+                window.wsService.on('user:offline',    function(d) { _fwdPresenceToCalls(Object.assign({}, d, { online: false })); });
+                window.wsService.on('presence:update', _fwdPresenceToCalls);
+
+                function _fwdPresenceToStatus(presPayload) {
+                    const uid = presPayload && (presPayload.userId || presPayload.id || presPayload.friendId);
+                    if (!uid) return;
+                    const online = presPayload && (presPayload.online !== false && presPayload.status !== 'offline');
+                    const statusIf = document.getElementById('statusIframe');
+                    if (!statusIf || !statusIf.contentWindow) return;
+                    statusIf.contentWindow.postMessage({
+                        type: online ? 'FRIEND_ONLINE' : 'FRIEND_OFFLINE',
+                        payload: { userId: uid, online: online, lastSeen: presPayload.lastSeen || null }
+                    }, '*');
+                }
+                window.wsService.on('user:online',     _fwdPresenceToStatus);
+                window.wsService.on('user:offline',    function(d) { _fwdPresenceToStatus(Object.assign({}, d, { online: false })); });
+                window.wsService.on('presence:update', _fwdPresenceToStatus);
 
                 // ── GROUP REAL-TIME BRIDGE ────────────────────────────────────
                 // Forward all group WebSocket events from wsService into groupIframe
