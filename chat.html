@@ -3607,6 +3607,14 @@
     <script src="js/phase15.delivery.patch.js"></script>
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
     <script src="js/app.realtime.socket.js"></script>
+    <!-- FIX (REAL-PRESENCE): PresenceEngineFoundation.js was already fully built
+         (heartbeats, idle detection, multi-tab coordination, matching backend
+         listener at webSocketService.js socket.on('presence:heartbeat')) but was
+         never loaded on any page, so the server never got the heartbeats it was
+         designed to expect and "last active" only updated on raw connect/disconnect.
+         Loaded here so real presence (online / idle / offline + accurate last-seen)
+         actually works app-wide, replacing the old self-declared status setting. -->
+    <script src="js/core/presence/PresenceEngineFoundation.js"></script>
     <!-- FIX-DEAD-RECOVERY-LAYER: this Phase 5 recovery module (exponential
          backoff reconnect, group/chat room restoration, offline-queue flush,
          missed-event resync) was fully written but never included on any
@@ -7215,6 +7223,39 @@
                 window.wsService.on('user:online',     _fwdPresenceToMessages);
                 window.wsService.on('user:offline',    function(d) { _fwdPresenceToMessages(Object.assign({}, d, { online: false })); });
                 window.wsService.on('presence:update', _fwdPresenceToMessages);
+
+                // FIX (REAL-PRESENCE — module coverage): the friends module
+                // already has real code waiting for exactly this
+                // FRIEND_ONLINE/FRIEND_OFFLINE message shape (see
+                // friend-core.bootstrap.js's handler for it), but only the
+                // messages iframe was ever sent these events — friends only
+                // ever saw presence as of whatever the last full friends-list
+                // fetch happened to contain. Forward the same event to the
+                // friends iframe too so its online dots / "last seen" text
+                // update live instead of just at page load.
+                //
+                // NOTE: calls-ui.js was deliberately left out of this relay —
+                // unlike friends, it has no listener anywhere for
+                // FRIEND_ONLINE/FRIEND_OFFLINE, so sending it there would be
+                // a message nobody reads, not a real fix. Wiring that up
+                // needs its own pass through calls-ui.js's several
+                // overlapping contact-list caches (UIState.contacts,
+                // window.__cachedCallContacts, window.__contactsList) to find
+                // the actual render path — flagging it rather than guessing.
+                function _fwdPresenceToFriends(presPayload) {
+                    const uid = presPayload && (presPayload.userId || presPayload.id || presPayload.friendId);
+                    if (!uid) return;
+                    const online = presPayload && (presPayload.online !== false && presPayload.status !== 'offline');
+                    const friendsIf = document.getElementById('friendsIframe');
+                    if (!friendsIf || !friendsIf.contentWindow) return;
+                    friendsIf.contentWindow.postMessage({
+                        type: online ? 'FRIEND_ONLINE' : 'FRIEND_OFFLINE',
+                        payload: { userId: uid, online: online, lastSeen: presPayload.lastSeen || null }
+                    }, '*');
+                }
+                window.wsService.on('user:online',     _fwdPresenceToFriends);
+                window.wsService.on('user:offline',    function(d) { _fwdPresenceToFriends(Object.assign({}, d, { online: false })); });
+                window.wsService.on('presence:update', _fwdPresenceToFriends);
 
                 // ── GROUP REAL-TIME BRIDGE ────────────────────────────────────
                 // Forward all group WebSocket events from wsService into groupIframe

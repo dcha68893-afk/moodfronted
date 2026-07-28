@@ -3461,114 +3461,76 @@ export function loadCallsSection(container) {
 // =============================================
 export function loadStatusSection(container) {
     debugLog('Loading status section');
-    const settings = SettingsState.getSection('status') || DEFAULT_SETTINGS.status;
-    
+
+    // FIX (PER USER REQUEST — REMOVE SELF-DECLARED PRESENCE): this section
+    // used to let the user manually pick "Current Status" (online/away/busy/
+    // offline) plus "Auto Status Reset"/"Status Timeout"/"Save Status
+    // History" toggles. Those saved to the backend fine but were never read
+    // by anything — presence is not something a user should be able to
+    // declare for themselves anyway (that's exactly what made it fake: you
+    // could set yourself "online" while genuinely idle for hours). Real
+    // presence now comes from js/core/presence/PresenceEngineFoundation.js,
+    // which was already fully built (heartbeats, idle detection, multi-tab
+    // coordination) but was never loaded on any page — see chat.html,
+    // calls.html, message.html <script> tags. This section is now a
+    // read-only display of that real, server-confirmed presence instead of
+    // a form the user fills in.
     container.innerHTML = `
         <div class="settings-section">
             <div class="section-header">
-                <h3><i class="fas fa-smile section-icon"></i> Status Settings</h3>
+                <h3><i class="fas fa-smile section-icon"></i> Your Presence</h3>
             </div>
             <div class="section-body">
                 <div class="setting-item">
                     <div class="setting-info">
-                        <div class="setting-label">Current Status</div>
-                        <div class="setting-description">Set your online status</div>
+                        <div class="setting-label">Status</div>
+                        <div class="setting-description">Determined automatically from real activity — not something you set yourself</div>
                     </div>
                     <div class="setting-control">
-                        <select class="setting-dropdown" id="currentStatus">
-                            <option value="online" ${settings.currentStatus === 'online' ? 'selected' : ''}>Online</option>
-                            <option value="away" ${settings.currentStatus === 'away' ? 'selected' : ''}>Away</option>
-                            <option value="busy" ${settings.currentStatus === 'busy' ? 'selected' : ''}>Busy</option>
-                            <option value="offline" ${(settings.currentStatus === 'offline' || !settings.currentStatus) ? 'selected' : ''}>Offline</option>
-                        </select>
+                        <span id="livePresenceBadge" style="font-weight:600;">Checking…</span>
                     </div>
                 </div>
-                
                 <div class="setting-item">
                     <div class="setting-info">
-                        <div class="setting-label">Auto Status Reset</div>
-                        <div class="setting-description">Auto reset status after inactivity</div>
+                        <div class="setting-label">Last Active</div>
+                        <div class="setting-description">Updates automatically while the app is open (heartbeat every ~25s), and whenever a device connects or disconnects</div>
                     </div>
                     <div class="setting-control">
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="autoStatusReset" ${settings.autoStatusReset !== false ? 'checked' : ''}>
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-                </div>
-                
-                <div class="setting-item">
-                    <div class="setting-info">
-                        <div class="setting-label">Status Timeout</div>
-                        <div class="setting-description">Minutes until auto status reset</div>
-                    </div>
-                    <div class="setting-control">
-                        <select class="setting-dropdown" id="statusTimeout">
-                            <option value="5" ${settings.statusTimeout === '5' ? 'selected' : ''}>5 minutes</option>
-                            <option value="15" ${(settings.statusTimeout === '15' || !settings.statusTimeout) ? 'selected' : ''}>15 minutes</option>
-                            <option value="30" ${settings.statusTimeout === '30' ? 'selected' : ''}>30 minutes</option>
-                            <option value="60" ${settings.statusTimeout === '60' ? 'selected' : ''}>60 minutes</option>
-                        </select>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <div class="settings-section">
-            <div class="section-header">
-                <h3><i class="fas fa-clock section-icon"></i> Status History</h3>
-            </div>
-            <div class="section-body">
-                <div class="setting-item">
-                    <div class="setting-info">
-                        <div class="setting-label">Save Status History</div>
-                        <div class="setting-description">Keep track of previous statuses</div>
-                    </div>
-                    <div class="setting-control">
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="saveStatusHistory" ${settings.saveStatusHistory !== false ? 'checked' : ''}>
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-                </div>
-                
-                <div class="setting-item">
-                    <div class="setting-info">
-                        <div class="setting-label">Clear History</div>
-                        <div class="setting-description">Clear all status history</div>
-                    </div>
-                    <div class="setting-control">
-                        <button class="setting-button" id="clearStatusHistoryBtn">
-                            <i class="fas fa-trash"></i> Clear
-                        </button>
+                        <span id="livePresenceLastActive">—</span>
                     </div>
                 </div>
             </div>
         </div>
     `;
-    
-    const currentStatus = document.getElementById('currentStatus');
-    if (currentStatus) currentStatus.addEventListener('change', () => window.__updateSetting('status', 'currentStatus', currentStatus.value));
-    
-    const autoStatusReset = document.getElementById('autoStatusReset');
-    if (autoStatusReset) autoStatusReset.addEventListener('change', () => window.__updateSetting('status', 'autoStatusReset', autoStatusReset.checked));
-    
-    const statusTimeout = document.getElementById('statusTimeout');
-    if (statusTimeout) statusTimeout.addEventListener('change', () => window.__updateSetting('status', 'statusTimeout', statusTimeout.value));
-    
-    const saveStatusHistory = document.getElementById('saveStatusHistory');
-    if (saveStatusHistory) saveStatusHistory.addEventListener('change', () => window.__updateSetting('status', 'saveStatusHistory', saveStatusHistory.checked));
-    
-    const clearStatusHistoryBtn = document.getElementById('clearStatusHistoryBtn');
-    if (clearStatusHistoryBtn) clearStatusHistoryBtn.addEventListener('click', async () => {
-        if (!confirm('Clear all status history?')) return;
+
+    (async () => {
+        const badge = document.getElementById('livePresenceBadge');
+        const lastActiveEl = document.getElementById('livePresenceLastActive');
         try {
-            await window.__updateSetting('status', 'statusHistory', []);
-            showNotification('Status history cleared', 'success');
-        } catch (error) {
-            showNotification('Failed to clear status history', 'error');
+            let userId = null;
+            try {
+                userId = (window.currentUser && window.currentUser.id) || JSON.parse(localStorage.getItem('currentUser') || '{}').id;
+            } catch (_) {}
+            if (!userId) throw new Error('No user id');
+
+            const response = await secureFetchWrapper(`/api/user-status/${userId}`, 'GET');
+            const data = response && response.data && response.data.userStatus ? response.data.userStatus : {};
+            if (badge) badge.textContent = data.isOnline ? 'Active now' : 'Offline';
+            if (lastActiveEl) {
+                if (data.isOnline) {
+                    lastActiveEl.textContent = 'Now';
+                } else if (data.lastSeen) {
+                    const minutesAgo = Math.max(0, Math.round((Date.now() - new Date(data.lastSeen).getTime()) / 60000));
+                    lastActiveEl.textContent = minutesAgo < 1 ? 'Just now' : `${minutesAgo} minute${minutesAgo === 1 ? '' : 's'} ago`;
+                } else {
+                    lastActiveEl.textContent = 'Unknown';
+                }
+            }
+        } catch (e) {
+            if (badge) badge.textContent = 'Unavailable';
+            if (lastActiveEl) lastActiveEl.textContent = '—';
         }
-    });
+    })();
 }
 
 // =============================================
