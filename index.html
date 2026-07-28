@@ -4740,11 +4740,37 @@
                         if (window.CoreUtils) window.CoreUtils.showNotification('Error', 'Please enter a valid email', 'error');
                         return;
                     }
-                    /* In production this would POST to /api/contact */
+                    // FIX (contact-us-goes-nowhere): this used to just fake a
+                    // success message with no backend call at all. Now really
+                    // POSTs to /api/contact, which durably stores the message
+                    // and (if the visitor is logged in) also delivers it into
+                    // the admin's message panel — see backend routes/contact.js.
+                    var base = (window.__kynAPI && window.__kynAPI.baseUrl) || (window.API_BASE_URL ? window.API_BASE_URL + '/api' : 'https://nexora-3bla.onrender.com/api');
+                    var token = localStorage.getItem('authToken') || localStorage.getItem('token') || sessionStorage.getItem('authToken') || sessionStorage.getItem('token') || '';
                     sendBtn.disabled = true;
-                    sendBtn.innerHTML = '<i class="fas fa-check"></i> Message sent!';
-                    if (window.CoreUtils) window.CoreUtils.showNotification('Success', 'Your message has been sent. We\'ll reply within 24 hours.', 'success');
-                    setTimeout(function() { closeInfoModal(); }, 1800);
+                    sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending…';
+                    fetch(base + '/contact', {
+                        method: 'POST',
+                        headers: Object.assign({ 'Content-Type': 'application/json' }, token ? { Authorization: 'Bearer ' + token } : {}),
+                        body: JSON.stringify({ name: name, email: email, subject: subject, message: message })
+                    })
+                    .then(function(res) { return res.json().then(function(data) { return { ok: res.ok, data: data }; }); })
+                    .then(function(result) {
+                        if (result.ok && result.data && result.data.success !== false) {
+                            sendBtn.innerHTML = '<i class="fas fa-check"></i> Message sent!';
+                            if (window.CoreUtils) window.CoreUtils.showNotification('Success', "Your message has been sent. We'll reply within 24 hours.", 'success');
+                            setTimeout(function() { closeInfoModal(); }, 1800);
+                        } else {
+                            sendBtn.disabled = false;
+                            sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Send Message';
+                            if (window.CoreUtils) window.CoreUtils.showNotification('Error', (result.data && result.data.message) || 'Failed to send message. Please try again.', 'error');
+                        }
+                    })
+                    .catch(function() {
+                        sendBtn.disabled = false;
+                        sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Send Message';
+                        if (window.CoreUtils) window.CoreUtils.showNotification('Error', 'Network error — please check your connection and try again.', 'error');
+                    });
                 });
             }
         }
