@@ -1661,6 +1661,19 @@
     <script src="/js/settings-global-propagation.js"></script>
     <script src="/js/settings-module-subscriptions.js"></script>
     <script src="/js/app.cache.js"></script>
+    <!-- FIX (RECONNECT-EVENTBUS-MISSING): app.core.eventbus.js defines
+         window.KynectaEventBus, which app.realtime.socket.js emits
+         SOCKET_CONNECTED/SOCKET_DISCONNECTED onto and which
+         ReconnectOrchestrator.js (loaded later via phase6.bootstrap.js)
+         listens on for instant reconnect detection. chat.html already loads
+         this before app.realtime.socket.js — this iframe (message.html) never
+         loaded it at all, since each iframe is its own separate window/global
+         scope. Without it, ReconnectOrchestrator logs "KynectaEventBus not
+         found — relying on supervisor polling only" and only notices a
+         reconnect on its next 20s supervisor tick instead of immediately,
+         which delays things like the offline-queue flush and msg:sync
+         catch-up specifically within the Messages module. -->
+    <script src="js/app.core.eventbus.js"></script>
     <!-- FIX: Socket.IO client must load BEFORE app.realtime.socket.js so window.io is available -->
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
     <script src="/js/core/identity/IdentityProfileStore.js"></script>

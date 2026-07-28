@@ -12725,93 +12725,48 @@ Type: ${message.type || 'text'}`;
 
 
 
+            // FIX (PHASE21 — single canonical conversation engine): this used to
+            // branch across FOUR different ways to create a new conversation
+            // (ConversationManager.createConversation / core.createConversation /
+            // core.openConversation(rawFriendId) / a bare warn-and-give-up), each
+            // reachable only if the previous one's method happened to be absent
+            // from `core`. In practice core.ConversationManager.createConversation
+            // is always present (it's exposed on every core build via
+            // messages-core.ui-bridge.js), so branches 2-4 never actually ran —
+            // dead alternate pipelines that could silently diverge from the real
+            // one if `core` was ever restructured. There is exactly one canonical
+            // way to create a new conversation now: ConversationManager
+            // .createConversation(), which itself delegates to the same
+            // ConversationManager.openConversation() Chat History uses. If that
+            // method is ever missing, fail loudly rather than falling through to
+            // an alternate, unverified code path.
             if (core.ConversationManager?.createConversation) {
 
                 _uiLog('[messagesUI] Using ConversationManager.createConversation');
 
                 const result = core.ConversationManager.createConversation([id]);
 
-                
+                Promise.resolve(result).then((conversation) => {
 
-                if (result && typeof result.then === 'function') {
+                    _uiLog('[messagesUI] Conversation created/opened:', conversation);
 
-                    result.then((conversation) => {
-
-                        _uiLog('[messagesUI] Conversation created/opened:', conversation);
-
-                        if (conversation === false || conversation === null) {
-
-                            _uiLog('[messagesUI] createConversation returned false, opening panel anyway');
-
-                            ensureChatPanelOpen(id);
-
-                        } else {
-
-                            const conversationId = conversation?.id || conversation;
-
-                            ensureChatPanelOpen(conversationId);
-
-                        }
-
-                    }).catch((error) => {
-
-                        console.error('[messagesUI] Failed to create conversation:', error);
-
-                        ensureChatPanelOpen(id);
-
-                    });
-
-                } else {
-
-                    const conversationId = (result === false || result === null) ? id : (result?.id || result);
+                    const conversationId = (conversation === false || conversation === null)
+                        ? id
+                        : (conversation?.id || conversation);
 
                     ensureChatPanelOpen(conversationId);
 
-                }
+                }).catch((error) => {
 
-            } else if (core.createConversation) {
+                    console.error('[messagesUI] Failed to create conversation:', error);
 
-                _uiLog('[messagesUI] Using core.createConversation');
+                    ensureChatPanelOpen(id);
 
-                const result = core.createConversation([id]);
-
-                if (result && typeof result.then === 'function') {
-
-                    result.then((conversation) => {
-
-                        const conversationId = (conversation === false || conversation === null) ? id : (conversation?.id || conversation);
-
-                        ensureChatPanelOpen(conversationId);
-
-                    }).catch(() => {
-
-                        ensureChatPanelOpen(id);
-
-                    });
-
-                } else {
-
-                    const conversationId = (result === false || result === null) ? id : (result?.id || result);
-
-                    ensureChatPanelOpen(conversationId);
-
-                }
-
-            } else if (core.openConversation) {
-
-                _uiLog('[messagesUI] Using core.openConversation');
-
-                // FIX Bug2: pass friendId explicitly -- `id` here IS the friend/user id
-                // (the caller builds a conversation for this user), so without this the
-                // placeholder conversation built inside openConversation() has no way to
-                // resolve friendId and getActiveChatInfo() would fall back to the wrong id.
-                core.openConversation(id, { friendId: id });
-
-                ensureChatPanelOpen(id);
+                });
 
             } else {
 
-                console.warn('[messagesUI] No conversation creation method available');
+                console.error('[messagesUI] ConversationManager.createConversation unavailable — cannot open a new conversation via the canonical engine.');
 
                 ensureChatPanelOpen(id);
 
