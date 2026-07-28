@@ -2850,6 +2850,8 @@ export function setupEventListeners() {
     setupPostingRulesVisibility();
     // FIXED: members tab in create group
     setupMembersTab();
+    // Group Badges — relocated from the create-group screen to the in-group More menu
+    setupGroupBadgesModal();
 }
 
 /**
@@ -3028,6 +3030,68 @@ export function setupPostingRulesVisibility() {
         };
         registerUIEventListener(adminSel, 'change', update);
         update();
+    }
+}
+
+/**
+ * Group Badges — moved here from the create-group screen's Theme tab (which
+ * never actually read the selection; group-ui.js used to send a hardcoded
+ * `badges: ['star','fire']` on every create regardless of what was clicked,
+ * and no backend endpoint ever persisted it). Opens from the in-group More
+ * submenu instead, scoped to whichever group is currently open, and keeps
+ * the same level of functionality it always had — a per-device selection —
+ * stored in localStorage per group id since there is still no backend
+ * badges endpoint to save to.
+ */
+function setupGroupBadgesModal() {
+    const modal = safeGetElement('#groupBadgesModal');
+    const subMenuBtn = document.querySelector('[data-subaction="badges"]');
+    if (!modal || !subMenuBtn) return;
+
+    const storageKey = (groupId) => `kyn_group_badges_${groupId}`;
+
+    const openModal = () => {
+        const gid = currentChatGroup && currentChatGroup.id;
+        if (!gid) { if (typeof showNotification === 'function') showNotification('Open a group first', 'error'); return; }
+        let selected = [];
+        try { selected = JSON.parse(localStorage.getItem(storageKey(gid)) || '[]'); } catch (_) { selected = []; }
+        safeGetElements('.badge-option', modal).forEach(opt => {
+            const on = selected.includes(opt.dataset.badge);
+            opt.style.border = on ? '2px solid var(--primary-color)' : '1px solid var(--border-color)';
+            opt.dataset.selected = on ? '1' : '';
+        });
+        modal.style.display = 'flex';
+    };
+
+    const closeModal = () => { modal.style.display = 'none'; };
+
+    registerUIEventListener(subMenuBtn, 'click', openModal);
+
+    safeGetElements('.badge-option', modal).forEach(opt => {
+        registerUIEventListener(opt, 'click', () => {
+            const on = opt.dataset.selected === '1';
+            opt.dataset.selected = on ? '' : '1';
+            opt.style.border = on ? '1px solid var(--border-color)' : '2px solid var(--primary-color)';
+        });
+    });
+
+    const cancelBtn = safeGetElement('#groupBadgesCancelBtn');
+    const closeBtn = safeGetElement('#groupBadgesModalCloseBtn');
+    if (cancelBtn) registerUIEventListener(cancelBtn, 'click', closeModal);
+    if (closeBtn) registerUIEventListener(closeBtn, 'click', closeModal);
+
+    const saveBtn = safeGetElement('#groupBadgesSaveBtn');
+    if (saveBtn) {
+        registerUIEventListener(saveBtn, 'click', () => {
+            const gid = currentChatGroup && currentChatGroup.id;
+            if (!gid) { closeModal(); return; }
+            const selected = safeGetElements('.badge-option', modal)
+                .filter(opt => opt.dataset.selected === '1')
+                .map(opt => opt.dataset.badge);
+            try { localStorage.setItem(storageKey(gid), JSON.stringify(selected)); } catch (_) {}
+            if (typeof showNotification === 'function') showNotification('Group badges saved', 'success');
+            closeModal();
+        });
     }
 }
 

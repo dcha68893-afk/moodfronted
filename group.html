@@ -1135,6 +1135,7 @@
                             <button class="gcm-item" data-subaction="addtolist"><i class="fas fa-list"></i> Add to List</button>
                             <button class="gcm-item" data-subaction="share"><i class="fas fa-share"></i> Share Group</button>
                             <button class="gcm-item" data-subaction="favorite"><i class="fas fa-star"></i> <span data-favorite-label>Add to Favorites</span></button>
+                            <button class="gcm-item" data-subaction="badges"><i class="fas fa-award"></i> Group Badges</button>
                             <div style="height:1px;background:var(--border-color);margin:4px 0"></div>
                             <button class="gcm-item gcm-danger" data-subaction="block"><i class="fas fa-ban"></i> <span data-block-label>Block Group</span></button>
                             <button class="gcm-item gcm-danger" data-subaction="report"><i class="fas fa-flag"></i> Report</button>
@@ -1297,12 +1298,13 @@
                 <span class="groupc-topbar-spacer"></span>
             </div>
 
-            <div class="create-group-tabs" id="legacyCreateGroupTabs">
+            <div class="create-group-tabs" id="legacyCreateGroupTabs" style="display:none;">
+                <!-- Settings/Purpose/Theme/Members tabs removed from creation — all
+                     reachable from the group's own More menu once it exists. This bar
+                     (and its now-unreachable tab-content panels below) is kept in the DOM,
+                     hidden, purely so existing submit-time field reads keep working
+                     unchanged against their default values; nothing here is user-facing. -->
                 <button class="create-group-tab active" data-tab="basic">Basic</button>
-                <button class="create-group-tab" data-tab="settings">Settings</button>
-                <button class="create-group-tab" data-tab="purpose">Purpose</button>
-                <button class="create-group-tab" data-tab="theme">Theme</button>
-                <button class="create-group-tab" data-tab="members">Members</button>
             </div>
             
             <form id="createGroupForm" onsubmit="return false;">
@@ -1350,42 +1352,13 @@
                         <input type="text" class="text-input" id="groupLocationInput" placeholder="e.g. Downtown Denver, Yorkshire, Cook County" maxlength="100">
                     </div>
 
-                    <!-- REDESIGN: More options — Settings/Purpose/Theme/Members
-                         used to be permanently-visible tabs (5 tabs, one huge
-                         scrolling form). Each is now one tap away instead. -->
-                    <div class="groupc-more-title">More options</div>
-                    <div class="groupc-card" id="groupcCardSettings">
-                        <div class="groupc-card-icon"><i class="fas fa-sliders-h"></i></div>
-                        <div class="groupc-card-text">
-                            <div class="groupc-card-title">Settings</div>
-                            <div class="groupc-card-subtitle">Welcome message, rules, moderation</div>
-                        </div>
-                        <i class="fas fa-chevron-right"></i>
-                    </div>
-                    <div class="groupc-card" id="groupcCardPurpose">
-                        <div class="groupc-card-icon"><i class="fas fa-bullseye"></i></div>
-                        <div class="groupc-card-text">
-                            <div class="groupc-card-title">Purpose</div>
-                            <div class="groupc-card-subtitle">What this group is for</div>
-                        </div>
-                        <i class="fas fa-chevron-right"></i>
-                    </div>
-                    <div class="groupc-card" id="groupcCardTheme">
-                        <div class="groupc-card-icon"><i class="fas fa-palette"></i></div>
-                        <div class="groupc-card-text">
-                            <div class="groupc-card-title">Theme</div>
-                            <div class="groupc-card-subtitle">Icon, color, and appearance</div>
-                        </div>
-                        <i class="fas fa-chevron-right"></i>
-                    </div>
-                    <div class="groupc-card" id="groupcCardMembers">
-                        <div class="groupc-card-icon"><i class="fas fa-user-plus"></i></div>
-                        <div class="groupc-card-text">
-                            <div class="groupc-card-title">Members</div>
-                            <div class="groupc-card-subtitle">Invite friends to this group</div>
-                        </div>
-                        <i class="fas fa-chevron-right"></i>
-                    </div>
+                    <!-- The "More options" card section (Settings/Purpose/Theme/Members)
+                         that used to live here has been removed: all four are already
+                         reachable from the group's own More menu once it exists (see the
+                         gcm-item buttons in the group header menu), so there's no need to
+                         configure them during creation too. Group Badges — previously a
+                         non-functional picker in the Theme tab here — now lives in that
+                         in-group More menu instead (see #groupBadgesModal). -->
                 </div>
                 
                 <!-- ========== EXISTING: Settings Tab ========== -->
@@ -1573,29 +1546,8 @@
                         </div>
                         <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Select custom reactions for your group</div>
                     </div>
-                    
-                    <div class="input-group">
-                        <label class="input-label">Group Badges</label>
-                        <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap;">
-                            <div class="badge-option" data-badge="star" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center;">
-                                <i class="fas fa-star" style="color: gold;"></i>
-                                <div style="font-size: 12px; margin-top: 5px;">Helpful</div>
-                            </div>
-                            <div class="badge-option" data-badge="fire" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center;">
-                                <i class="fas fa-fire" style="color: orange;"></i>
-                                <div style="font-size: 12px; margin-top: 5px;">Active</div>
-                            </div>
-                            <div class="badge-option" data-badge="crown" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center;">
-                                <i class="fas fa-crown" style="color: purple;"></i>
-                                <div style="font-size: 12px; margin-top: 5px;">Moderator</div>
-                            </div>
-                            <div class="badge-option" data-badge="heart" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center;">
-                                <i class="fas fa-heart" style="color: red;"></i>
-                                <div style="font-size: 12px; margin-top: 5px;">Supporter</div>
-                            </div>
-                        </div>
-                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Select badges that admins can award to members</div>
-                    </div>
+                    <!-- Group Badges moved to the in-group More menu (see #groupBadgesModal) —
+                         configure badges after the group exists, not during creation. -->
                 </div>
                 <!-- ========== NEW: Members Tab ========== -->
                 <div class="create-group-tab-content" id="membersTab">
@@ -1753,6 +1705,44 @@
     </script>
     
     <!-- ========== EXISTING: ADMIN MANAGEMENT MODAL ========== -->
+    <!-- ========== Group Badges (moved here from the create-group screen) ========== -->
+    <div class="create-group-modal" id="groupBadgesModal" style="display:none;">
+        <div class="create-group-container" style="max-width:420px;">
+            <div class="create-group-header">
+                <h3>Group Badges</h3>
+                <button class="close-btn" id="groupBadgesModalCloseBtn"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="create-group-content groupc-scroll">
+                <div class="input-group">
+                    <label class="input-label">Select badges admins can award to members</label>
+                    <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap;">
+                        <div class="badge-option" data-badge="star" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center;">
+                            <i class="fas fa-star" style="color: gold;"></i>
+                            <div style="font-size: 12px; margin-top: 5px;">Helpful</div>
+                        </div>
+                        <div class="badge-option" data-badge="fire" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center;">
+                            <i class="fas fa-fire" style="color: orange;"></i>
+                            <div style="font-size: 12px; margin-top: 5px;">Active</div>
+                        </div>
+                        <div class="badge-option" data-badge="crown" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center;">
+                            <i class="fas fa-crown" style="color: purple;"></i>
+                            <div style="font-size: 12px; margin-top: 5px;">Moderator</div>
+                        </div>
+                        <div class="badge-option" data-badge="heart" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: center;">
+                            <i class="fas fa-heart" style="color: red;"></i>
+                            <div style="font-size: 12px; margin-top: 5px;">Supporter</div>
+                        </div>
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Tap to select. Saved per group on this device.</div>
+                </div>
+            </div>
+            <div class="create-group-footer" style="display:flex;gap:10px;padding:12px 16px;">
+                <button class="action-btn" id="groupBadgesCancelBtn" style="flex:1;">Cancel</button>
+                <button class="action-btn success" id="groupBadgesSaveBtn" style="flex:1;">Save</button>
+            </div>
+        </div>
+    </div>
+
     <div class="admin-management-modal" id="adminManagementModal">
         <div class="admin-management-container">
             <div class="admin-management-header">
@@ -3316,7 +3306,21 @@ function doDelete(){
 
 /* ─── Call buttons / banner ───────────────────────────────────── */
 function setupCall(){
-    function wire(id,type){var btn=document.getElementById(id);if(!btn||btn._gcC)return;btn._gcC=true;btn.addEventListener('click',function(){var g=window.__gcCurGroup;if(!g)return;
+    // FIX-GROUP-CALL-RACE: group-core-operations.js's setupGroupAttachmentControls()
+    // binds these same buttons too, and already defers to THIS file's _gcC/_gcCV
+    // flags if they were set first — but this file used to only check its own
+    // flag, not the other file's (_groupVoiceBound/_groupVideoBound). If
+    // group-core-operations.js happened to bind first, both handlers ended up
+    // attached, and a single click fired both: group-core-operations.js's
+    // version (fresh member list via GET /groups/:id/members) AND this one
+    // (participantIds derived from window.__gcCurGroup.members, which can be
+    // stale or empty). Both called __dispatchCallToIframe near-simultaneously
+    // with potentially different participant lists, racing at the backend's
+    // active-call-in-progress check — whichever lost either got silently
+    // dropped or carried the wrong/incomplete member list, which is why the
+    // "started a call" banner/notification didn't reach every member. Now
+    // symmetric: each side defers to whichever flag was set first.
+    function wire(id,type,otherFlag){var btn=document.getElementById(id);if(!btn||btn._gcC||btn[otherFlag])return;btn._gcC=true;btn.addEventListener('click',function(){var g=window.__gcCurGroup;if(!g)return;
         // FIX-GROUP-CALL-NOTICE-DUP: this is a second binding on the same button
         // group-core.js's setupGroupAttachmentControls() already wires up; without
         // the same groupId/isGroupCall/participantIds context that fix added
@@ -3325,7 +3329,7 @@ function setupCall(){
         var _participantIds=(Array.isArray(g.members)?g.members.map(function(m){return (m.user&&m.user.id)||m.userId||m.id;}).filter(Boolean):[]);
         var _extraCtx={groupId:g.id,groupName:g.name,isGroupCall:true,participantIds:_participantIds};
         try{if(window.parent&&window.parent.__dispatchCallToIframe){window.parent.__dispatchCallToIframe(g.id,g.name,type,'group',g.id,'group-module',_extraCtx);return;}}catch(e){}try{window.parent.postMessage({type:'INITIATE_CALL',payload:{userId:g.id,userName:g.name,callType:type,isGroup:true,groupId:g.id,returnTo:'group',participantIds:_participantIds}},'*');}catch(e){}});}
-    wire('chatCallBtn','voice');wire('chatVideoCallBtn','video');
+    wire('chatCallBtn','voice','_groupVoiceBound');wire('chatVideoCallBtn','video','_groupVideoBound');
 }
 function showCallBanner(callerName,groupName,groupId,callId){
     var ex=document.getElementById('gcCallBanner');if(ex)ex.remove();

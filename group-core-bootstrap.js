@@ -1211,8 +1211,20 @@ const MessageRouter = {
 
   handleApiResponse(message) {
     const payload = message.payload || {};
+    // FIX (groups-tabs-empty-root-cause): requestId is sent by the parent at
+    // the TOP LEVEL of the postMessage envelope ({ type, requestId, payload,
+    // timestamp }) — see chat.html's API_REQUEST handler — not nested inside
+    // payload. Reading it from payload (as this used to) meant requestId was
+    // always undefined here, so resolveRequest()/rejectRequest() never fired
+    // for ANY apiRequest() call in this module: every call (requestGroupList,
+    // etc.) silently ran out the clock and timed out after ~12-20s instead of
+    // resolving, which is why the all/joined/admin/invited tabs rendered
+    // nothing while Discover (which uses its own direct fetch() in
+    // panelFetch, bypassing this bridge entirely) worked fine. Every sibling
+    // module (friend-core.bootstrap.js, messages-core.bootstrap.js) reads
+    // requestId off the top-level message — matched that pattern here.
+    const requestId = message.requestId;
     const {
-      requestId,
       success,
       error
     } = payload;
