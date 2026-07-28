@@ -2837,6 +2837,9 @@ async function initiateCallWithPendingUser() {
         if (!window.__uiCallDispatchLock) window.__uiCallDispatchLock = { ts: 0, userId: null };
 
         function isUICallDuplicate(userId) {
+            if (!window.__uiCallDispatchLock || typeof window.__uiCallDispatchLock !== 'object') {
+                window.__uiCallDispatchLock = { ts: 0, userId: null };
+            }
             const lock = window.__uiCallDispatchLock;
             return lock.userId === String(userId) && (Date.now() - lock.ts) < 2000;
         }
@@ -5352,7 +5355,8 @@ handleContactItemClick: function(e) {
                 // Set avatar: photo or initials
                 if (elements.callingAvatar) {
                     const _avatarUrl = participant.avatar || participant.photo || '';
-                    const _safeAvatarUrl = SecuritySanitizer ? SecuritySanitizer.sanitizeURL(_avatarUrl) : _avatarUrl;
+                    const _looksLikeMarkup = /[<>]/.test(_avatarUrl);
+                    const _safeAvatarUrl = (!_looksLikeMarkup && SecuritySanitizer) ? SecuritySanitizer.sanitizeURL(_avatarUrl) : (_looksLikeMarkup ? '' : _avatarUrl);
                     if (_safeAvatarUrl && _safeAvatarUrl !== '#') {
                         elements.callingAvatar.textContent = '';
                         const img = document.createElement('img');

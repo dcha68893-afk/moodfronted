@@ -3852,7 +3852,7 @@
     window.__callActive = false;
     window.__callInitiatedAt = 0;
     window.__callEndedHandledAt = 0;
-    window.__uiCallDispatchLock = null;
+    window.__uiCallDispatchLock = { ts: 0, userId: null };
     if (window.UIState) {
         window.UIState.callActive = false;
         window.UIState.callState = 'idle';

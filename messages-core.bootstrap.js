@@ -1586,7 +1586,7 @@ try {
             // the other real source strings found in chat.html targeting this
             // iframe that were likewise missing: 'kyn-global-bridge',
             // 'parent-mp-bridge', 'parent-shell', 'stale-echo-retry'.
-            const ALLOWED_SOURCES = new Set(['parent', 'ws-bridge', 'banner-bridge', 'parent-echo', 'parent-ws-broadcast', 'parent-accept-broadcast', 'parent-end-broadcast', 'parent-frame', 'parent-reject-broadcast', 'background-sync', 'realtime-socket', 'message-iframe', 'parent-socket-relay', 'parent-chat-hdr', 'marketplace-bridge', 'kyn-global-bridge', 'parent-mp-bridge', 'parent-shell', 'stale-echo-retry']);
+            const ALLOWED_SOURCES = new Set(['parent', 'ws-bridge', 'banner-bridge', 'parent-echo', 'parent-ws-broadcast', 'parent-accept-broadcast', 'parent-end-broadcast', 'parent-frame', 'parent-reject-broadcast', 'background-sync', 'realtime-socket', 'message-iframe', 'parent-socket-relay', 'parent-chat-hdr', 'marketplace-bridge', 'kyn-global-bridge', 'parent-mp-bridge', 'parent-shell', 'stale-echo-retry', 'friend-core', 'AppSettings']);
             if (data.source && !ALLOWED_SOURCES.has(data.source)) {
                 return { valid: false, reason: 'invalid_source' };
             }
