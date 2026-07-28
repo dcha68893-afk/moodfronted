@@ -360,6 +360,13 @@
     }
 
     _showNotification(title, body, groupId) {
+      // FIX (NOTIFICATION-SETTINGS-INCONSISTENT): this only respected
+      // per-group mute (via the dedup layer / caller-side checks), never
+      // the app-wide Settings > Notifications toggle that every other
+      // module was also missing — so disabling notifications globally
+      // silenced everything except groups. window.__messageNotificationsEnabled
+      // is kept current by settings-broadcast-listener.js on this iframe.
+      if (window.__messageNotificationsEnabled === false) return;
       // Use Phase 1 NotifStab for dedup + storm prevention
       const notifStab = window.__NotificationStabilizationLayer;
       const key       = `${title}:${body}`;

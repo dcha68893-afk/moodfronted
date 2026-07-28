@@ -230,6 +230,13 @@ window.applyCallsSettings = window.applyCallsSettings || function applyCallsSett
         root.setAttribute('data-calls-auto-reject',   String(!!c.autoReject));
         root.setAttribute('data-calls-auto-answer',   String(!!c.autoAnswer));
         root.setAttribute('data-calls-ringtone',      c.callRingtone || 'default');
+        // FIX (RINGTONE-FILES-NOT-SUPPORTED): stashed as window globals rather
+        // than DOM attributes since these can be multi-hundred-KB data URLs —
+        // calls-ui.js's incoming-ringtone player reads these when
+        // data-calls-ringtone === 'custom' (audio) or whenever a video clip is
+        // set (independent of the audio choice).
+        window.__customRingtoneAudio = c.customRingtoneAudio || null;
+        window.__customRingtoneVideo = c.customRingtoneVideo || null;
         root.setAttribute('data-calls-vibration',     String(c.vibrateOnCall !== false));
         root.setAttribute('data-calls-speaker-default', String(c.speakerDefault !== false));
         root.setAttribute('data-calls-microphone-default', c.microphoneDefault || 'default');

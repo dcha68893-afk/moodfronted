@@ -5084,11 +5084,59 @@ handleContactItemClick: function(e) {
                 }).catch(() => {});
             })();
 
+            // ── INCOMING CALL VIDEO: user-uploaded short clip, looped, shown
+            // full-screen behind the caller name/avatar (Settings > Calls >
+            // "Incoming Call Video"). Independent of the ringtone audio
+            // choice — a video can be set alongside any ringtone. ──────────
+            (function _showIncomingRingtoneVideo() {
+                try {
+                    const bg = elements.incomingCallModal && elements.incomingCallModal.querySelector('.unified-call-bg');
+                    if (!bg) return;
+                    const existing = bg.querySelector('#incomingRingtoneVideo');
+                    if (existing) existing.remove();
+                    if (!window.__customRingtoneVideo) return;
+                    const video = document.createElement('video');
+                    video.id = 'incomingRingtoneVideo';
+                    video.src = window.__customRingtoneVideo;
+                    video.loop = true;
+                    video.autoplay = true;
+                    video.muted = false;
+                    video.playsInline = true;
+                    video.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;';
+                    bg.appendChild(video);
+                    video.play().catch(function () { video.muted = true; video.play().catch(function () {}); });
+                } catch (e) { /* silent fail — video ringtone is cosmetic */ }
+            })();
+
             // ── RINGTONE: musical chime for receiver, pattern chosen by Settings ──
             (function _playRingtone() {
                 try {
+                    // FIX (NOTIFICATION-SETTINGS-IGNORED-OUTSIDE-GROUPS): this used
+                    // to ring unconditionally regardless of Settings > Notifications.
+                    // window.__callNotificationsEnabled / window.__notificationSoundEnabled
+                    // are already kept current by settings-broadcast-listener.js on
+                    // every module iframe — they just were never checked here.
+                    if (window.__callNotificationsEnabled === false || window.__notificationSoundEnabled === false) return;
                     if (window._incomingRingtone) {
                         try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
+                    }
+                    const ringtoneChoice = (document.documentElement.getAttribute('data-calls-ringtone') || 'default');
+                    // FIX (RINGTONE-FILES-NOT-SUPPORTED): play the user's own
+                    // uploaded music file, looped, instead of only ever offering
+                    // 3 fixed synthesized chimes. Falls through to the
+                    // synthesized chime below if no file was uploaded or it
+                    // fails to play (e.g. autoplay restrictions).
+                    if (ringtoneChoice === 'custom' && window.__customRingtoneAudio) {
+                        try {
+                            const audioEl = new Audio(window.__customRingtoneAudio);
+                            audioEl.loop = true;
+                            window._incomingRingtone = audioEl;
+                            const playPromise = audioEl.play();
+                            if (playPromise && typeof playPromise.catch === 'function') {
+                                playPromise.catch(function () { _tryWebAudioChime(); });
+                            }
+                            return;
+                        } catch (e) { /* fall through to synthesized chime */ }
                     }
                     _tryWebAudioChime();
                     function _tryWebAudioChime() {
@@ -5106,7 +5154,6 @@ handleContactItemClick: function(e) {
                             };
                             // FIX: ringtone pattern now follows the user's "Call Ringtone" setting
                             // instead of always playing the same fixed chime.
-                            const ringtoneChoice = (document.documentElement.getAttribute('data-calls-ringtone') || 'default');
                             const PATTERNS = {
                                 // Default: ascending chime C5-E5-G5-C6
                                 default: { freqs: [523, 659, 784, 1047], noteGap: 0.12, noteDur: 0.5, cycleMs: 2500, wave: 'sine' },

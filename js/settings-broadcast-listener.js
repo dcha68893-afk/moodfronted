@@ -144,9 +144,44 @@
             window.__mediaAutoDownload = autoDownload;
             root.setAttribute('data-chat-auto-download', autoDownload ? 'true' : 'false');
         }
-        if (ch.wallpaper !== undefined) {
-            window.__chatWallpaper = ch.wallpaper;
-            root.setAttribute('data-chat-wallpaper', ch.wallpaper);
+        // FIX (WALLPAPER-NOT-FUNCTIONING): messages.css already reads
+        // `background-image: var(--chat-background)` on .messages-container,
+        // but nothing ever set that CSS variable — only a `data-chat-wallpaper`
+        // attribute nobody read. That's why "Change Wallpaper" had no visible
+        // effect even after the picker below saves a real value. Now both a
+        // preset name (ch.wallpaper) and/or a custom uploaded image data URL
+        // (ch.wallpaperImage) are translated into an actual --chat-background
+        // value, so .messages-container (which already fills the chat area
+        // from just below the header to just above the input bar via
+        // flex:1) renders it edge-to-edge.
+        if (ch.wallpaper !== undefined || ch.wallpaperImage !== undefined) {
+            var WALLPAPER_PRESETS = {
+                'default': null,
+                'solid-light': 'linear-gradient(#f0f2f5, #f0f2f5)',
+                'solid-dark': 'linear-gradient(#0b141a, #0b141a)',
+                'ocean': 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                'sunset': 'linear-gradient(135deg, #f6d365 0%, #fda085 100%)',
+                'forest': 'linear-gradient(135deg, #56ab2f 0%, #a8e063 100%)',
+                'doodle': 'url("data:image/svg+xml;utf8,<svg xmlns=%27http://www.w3.org/2000/svg%27 width=%2780%27 height=%2780%27><g fill=%27%23ffffff%27 fill-opacity=%270.06%27><circle cx=%2712%27 cy=%2712%27 r=%272%27/><circle cx=%2748%27 cy=%2732%27 r=%272%27/><circle cx=%2724%27 cy=%2760%27 r=%272%27/><circle cx=%2764%27 cy=%2764%27 r=%272%27/></g></svg>")'
+            };
+            var effectiveKey = ch.wallpaperImage ? 'custom' : (ch.wallpaper || 'default');
+            window.__chatWallpaper = effectiveKey;
+            root.setAttribute('data-chat-wallpaper', effectiveKey);
+            var bgValue = 'none';
+            var bgSize = 'cover';
+            var bgRepeat = 'no-repeat';
+            if (ch.wallpaperImage) {
+                bgValue = 'url("' + ch.wallpaperImage + '")';
+                bgSize = 'cover';
+                bgRepeat = 'no-repeat';
+            } else if (ch.wallpaper && WALLPAPER_PRESETS[ch.wallpaper]) {
+                bgValue = WALLPAPER_PRESETS[ch.wallpaper];
+                bgSize = ch.wallpaper === 'doodle' ? '80px 80px' : 'cover';
+                bgRepeat = ch.wallpaper === 'doodle' ? 'repeat' : 'no-repeat';
+            }
+            root.style.setProperty('--chat-background', bgValue);
+            root.style.setProperty('--chat-background-size', bgSize);
+            root.style.setProperty('--chat-background-repeat', bgRepeat);
         }
         if (ch.bubbleStyle !== undefined) {
             window.__chatBubbleStyle = ch.bubbleStyle;

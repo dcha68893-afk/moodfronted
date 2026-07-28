@@ -157,6 +157,152 @@ let unsavedChanges = false;          // Mutable local variable - FIXED
 // =============================================
 // GLOBAL HELPER FOR SETTING UPDATES - UNIFIED
 // =============================================
+// =============================================
+// CHAT WALLPAPER PICKER
+// FIX (WALLPAPER-NOT-FUNCTIONING): replaces the old "coming soon" stub.
+// Saves through the same window.__updateSetting path as every other
+// setting, which AppSettings.set() persists and broadcasts — messages.css
+// and js/settings-broadcast-listener.js already know how to render the
+// result (see those files), so this only needs to collect the choice.
+// =============================================
+const WALLPAPER_CHOICES = [
+    { key: 'default', label: 'Default', swatch: '#0b141a' },
+    { key: 'solid-light', label: 'Light', swatch: '#f0f2f5' },
+    { key: 'solid-dark', label: 'Dark', swatch: '#0b141a' },
+    { key: 'ocean', label: 'Ocean', swatch: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' },
+    { key: 'sunset', label: 'Sunset', swatch: 'linear-gradient(135deg, #f6d365 0%, #fda085 100%)' },
+    { key: 'forest', label: 'Forest', swatch: 'linear-gradient(135deg, #56ab2f 0%, #a8e063 100%)' }
+];
+
+function openWallpaperPicker() {
+    const existing = document.getElementById('wallpaperPickerOverlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'wallpaperPickerOverlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px;';
+
+    const currentWallpaper = (window.AppSettings && window.AppSettings.get && window.AppSettings.get('chat.wallpaper')) || 'default';
+
+    overlay.innerHTML = `
+        <div style="background:var(--bg-primary,#fff);color:var(--text-primary,#111);border-radius:16px;max-width:420px;width:100%;max-height:85vh;overflow-y:auto;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+                <h3 style="margin:0;font-size:18px;">Chat Wallpaper</h3>
+                <button id="wallpaperPickerClose" style="background:none;border:none;font-size:22px;cursor:pointer;color:inherit;line-height:1;">&times;</button>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px;">
+                ${WALLPAPER_CHOICES.map(c => `
+                    <button type="button" class="wallpaper-swatch" data-key="${c.key}"
+                        style="height:64px;border-radius:10px;border:3px solid ${c.key === currentWallpaper ? '#667eea' : 'transparent'};background:${c.swatch};cursor:pointer;position:relative;">
+                        <span style="position:absolute;bottom:4px;left:6px;right:6px;font-size:11px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.6);text-align:left;">${c.label}</span>
+                    </button>
+                `).join('')}
+            </div>
+            <label style="display:block;border:2px dashed var(--border-color,#ccc);border-radius:10px;padding:14px;text-align:center;cursor:pointer;font-size:13px;color:var(--text-secondary,#666);margin-bottom:8px;">
+                <i class="fas fa-upload"></i> Upload a photo from your device
+                <input type="file" id="wallpaperFileInput" accept="image/*" style="display:none;">
+            </label>
+            <div id="wallpaperUploadStatus" style="font-size:12px;color:var(--text-secondary,#666);min-height:16px;"></div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    document.getElementById('wallpaperPickerClose').addEventListener('click', () => overlay.remove());
+
+    overlay.querySelectorAll('.wallpaper-swatch').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const key = btn.getAttribute('data-key');
+            // Selecting a preset clears any previously uploaded custom image
+            // so it doesn't keep taking priority (see broadcast listener).
+            await window.__updateSetting('chat', 'wallpaperImage', null);
+            await window.__updateSetting('chat', 'wallpaper', key);
+            overlay.remove();
+        });
+    });
+
+    const fileInput = document.getElementById('wallpaperFileInput');
+    fileInput.addEventListener('change', async () => {
+        const file = fileInput.files && fileInput.files[0];
+        if (!file) return;
+        const statusEl = document.getElementById('wallpaperUploadStatus');
+        if (!file.type.startsWith('image/')) {
+            statusEl.textContent = 'Please choose an image file.';
+            return;
+        }
+        statusEl.textContent = 'Processing image…';
+        try {
+            const dataUrl = await downscaleImageToDataUrl(file, 1080, 0.72);
+            await window.__updateSetting('chat', 'wallpaperImage', dataUrl);
+            await window.__updateSetting('chat', 'wallpaper', 'custom');
+            overlay.remove();
+        } catch (e) {
+            statusEl.textContent = 'Could not load that image, please try another.';
+        }
+    });
+}
+
+// Downscales/compresses an uploaded image client-side before it's stored —
+// full-resolution photos as base64 can easily be several MB, which blows
+// past localStorage's per-key/per-origin limits and would fail to save
+// silently. Capping the longest edge and re-encoding as JPEG keeps it small
+// while still looking sharp as a background.
+// Simple FileReader wrapper for audio/video uploads (no resizing needed —
+// downscaleImageToDataUrl above is image-specific and uses a <canvas>,
+// which doesn't apply to audio/video).
+function fileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('read failed'));
+        reader.onload = () => resolve(reader.result);
+        reader.readAsDataURL(file);
+    });
+}
+
+// Reads a video file's duration without uploading it anywhere, so the
+// "about 2 seconds" limit on the incoming-call video can be enforced
+// before spending time/storage on the data URL conversion.
+function getVideoDuration(file) {
+    return new Promise((resolve, reject) => {
+        const video = document.createElement('video');
+        video.preload = 'metadata';
+        video.onloadedmetadata = () => {
+            const duration = video.duration;
+            URL.revokeObjectURL(video.src);
+            if (!isFinite(duration)) { reject(new Error('unreadable duration')); return; }
+            resolve(duration);
+        };
+        video.onerror = () => { URL.revokeObjectURL(video.src); reject(new Error('decode failed')); };
+        video.src = URL.createObjectURL(file);
+    });
+}
+
+function downscaleImageToDataUrl(file, maxDimension, quality) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('read failed'));
+        reader.onload = () => {
+            const img = new Image();
+            img.onerror = () => reject(new Error('decode failed'));
+            img.onload = () => {
+                let { width, height } = img;
+                if (width > maxDimension || height > maxDimension) {
+                    if (width >= height) { height = Math.round(height * (maxDimension / width)); width = maxDimension; }
+                    else { width = Math.round(width * (maxDimension / height)); height = maxDimension; }
+                }
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                resolve(canvas.toDataURL('image/jpeg', quality));
+            };
+            img.src = reader.result;
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
 window.__updateSetting = async (section, key, value) => {
     try {
         // Update AppSettings FIRST (single source of truth)
@@ -2973,7 +3119,7 @@ export function loadChatSection(container) {
     if (messageFontSize) messageFontSize.addEventListener('change', () => window.__updateSetting('chat', 'messageFontSize', messageFontSize.value));
     
     const changeWallpaperBtn = document.getElementById('changeWallpaperBtn');
-    if (changeWallpaperBtn) changeWallpaperBtn.addEventListener('click', () => showNotification('Wallpaper picker coming soon', 'info'));
+    if (changeWallpaperBtn) changeWallpaperBtn.addEventListener('click', openWallpaperPicker);
     
     const showTimestamps = document.getElementById('showTimestamps');
     if (showTimestamps) showTimestamps.addEventListener('change', () => window.__updateSetting('chat', 'showTimestamps', showTimestamps.checked));
@@ -3329,9 +3475,39 @@ export function loadCallsSection(container) {
                             <option value="default" ${settings.callRingtone === 'default' ? 'selected' : ''}>Default</option>
                             <option value="classic" ${settings.callRingtone === 'classic' ? 'selected' : ''}>Classic</option>
                             <option value="modern" ${(settings.callRingtone === 'modern' || !settings.callRingtone) ? 'selected' : ''}>Modern</option>
+                            <option value="custom" ${settings.callRingtone === 'custom' ? 'selected' : ''}>Custom (uploaded)</option>
                         </select>
                     </div>
                 </div>
+
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Upload Custom Ringtone</div>
+                        <div class="setting-description">${settings.customRingtoneName ? 'Current: ' + settings.customRingtoneName : 'Use a music/audio file from your device instead of a preset chime'}</div>
+                    </div>
+                    <div class="setting-control" style="gap:8px;display:flex;">
+                        <label class="setting-button" style="cursor:pointer;">
+                            <i class="fas fa-music"></i> Choose Audio
+                            <input type="file" id="customRingtoneInput" accept="audio/*" style="display:none;">
+                        </label>
+                        ${settings.customRingtoneAudio ? '<button class="setting-button" id="clearCustomRingtoneBtn"><i class="fas fa-times"></i> Remove</button>' : ''}
+                    </div>
+                </div>
+
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Incoming Call Video</div>
+                        <div class="setting-description">${settings.customRingtoneVideoName ? 'Current: ' + settings.customRingtoneVideoName : 'A short clip (2–3 sec) that loops on screen for incoming calls, instead of a static ringtone'}</div>
+                    </div>
+                    <div class="setting-control" style="gap:8px;display:flex;">
+                        <label class="setting-button" style="cursor:pointer;">
+                            <i class="fas fa-video"></i> Choose Video
+                            <input type="file" id="customRingtoneVideoInput" accept="video/*" style="display:none;">
+                        </label>
+                        ${settings.customRingtoneVideo ? '<button class="setting-button" id="clearCustomRingtoneVideoBtn"><i class="fas fa-times"></i> Remove</button>' : ''}
+                    </div>
+                </div>
+                <div id="ringtoneUploadStatus" class="setting-description" style="padding:0 0 4px;"></div>
                 
                 <div class="setting-item">
                     <div class="setting-info">
@@ -3445,6 +3621,72 @@ export function loadCallsSection(container) {
 
     const callRingtone = document.getElementById('callRingtone');
     if (callRingtone) callRingtone.addEventListener('change', () => window.__updateSetting('calls', 'callRingtone', callRingtone.value));
+
+    // FIX (RINGTONE-FILES-NOT-SUPPORTED): only 3 fixed synthesized chimes
+    // existed before — no way to use your own music or a short video clip.
+    // Both are read client-side and saved as data URLs through the same
+    // window.__updateSetting path as every other setting; calls-ui.js's
+    // ringtone player (see the FIX comment there) already knows to prefer
+    // these over the synthesized patterns when callRingtone === 'custom'.
+    const ringtoneStatus = document.getElementById('ringtoneUploadStatus');
+    const customRingtoneInput = document.getElementById('customRingtoneInput');
+    if (customRingtoneInput) customRingtoneInput.addEventListener('change', async () => {
+        const file = customRingtoneInput.files && customRingtoneInput.files[0];
+        if (!file) return;
+        if (!file.type.startsWith('audio/')) { if (ringtoneStatus) ringtoneStatus.textContent = 'Please choose an audio file.'; return; }
+        const MAX_BYTES = 2 * 1024 * 1024; // 2MB raw (~2.7MB base64) — leaves headroom under the backend's 10MB JSON body limit alongside the rest of the settings payload
+        if (file.size > MAX_BYTES) { if (ringtoneStatus) ringtoneStatus.textContent = 'That file is too large — please choose an audio clip under 2MB.'; return; }
+        if (ringtoneStatus) ringtoneStatus.textContent = 'Uploading…';
+        try {
+            const dataUrl = await fileToDataUrl(file);
+            await window.__updateSetting('calls', 'customRingtoneAudio', dataUrl);
+            await window.__updateSetting('calls', 'customRingtoneName', file.name);
+            await window.__updateSetting('calls', 'callRingtone', 'custom');
+            loadSection('calls');
+        } catch (e) {
+            if (ringtoneStatus) ringtoneStatus.textContent = 'Could not read that file — please try another.';
+        }
+    });
+
+    const clearCustomRingtoneBtn = document.getElementById('clearCustomRingtoneBtn');
+    if (clearCustomRingtoneBtn) clearCustomRingtoneBtn.addEventListener('click', async () => {
+        await window.__updateSetting('calls', 'customRingtoneAudio', null);
+        await window.__updateSetting('calls', 'customRingtoneName', null);
+        if (window.AppSettings && window.AppSettings.get('calls.callRingtone') === 'custom') {
+            await window.__updateSetting('calls', 'callRingtone', 'default');
+        }
+        loadSection('calls');
+    });
+
+    const customRingtoneVideoInput = document.getElementById('customRingtoneVideoInput');
+    if (customRingtoneVideoInput) customRingtoneVideoInput.addEventListener('change', async () => {
+        const file = customRingtoneVideoInput.files && customRingtoneVideoInput.files[0];
+        if (!file) return;
+        if (!file.type.startsWith('video/')) { if (ringtoneStatus) ringtoneStatus.textContent = 'Please choose a video file.'; return; }
+        const MAX_BYTES = 5 * 1024 * 1024; // 5MB raw (~6.7MB base64) — a 2-second clip should be well under this
+        if (file.size > MAX_BYTES) { if (ringtoneStatus) ringtoneStatus.textContent = 'That video is too large — please choose a clip under 5MB.'; return; }
+        if (ringtoneStatus) ringtoneStatus.textContent = 'Checking clip…';
+        try {
+            const duration = await getVideoDuration(file);
+            // A little headroom above 2s so a 2.1s export doesn't get rejected,
+            // but this is meant for a short repeating clip, not a full video.
+            if (duration > 4) { if (ringtoneStatus) ringtoneStatus.textContent = 'Please choose a short clip (about 2 seconds) — it will loop automatically.'; return; }
+            if (ringtoneStatus) ringtoneStatus.textContent = 'Uploading…';
+            const dataUrl = await fileToDataUrl(file);
+            await window.__updateSetting('calls', 'customRingtoneVideo', dataUrl);
+            await window.__updateSetting('calls', 'customRingtoneVideoName', file.name);
+            loadSection('calls');
+        } catch (e) {
+            if (ringtoneStatus) ringtoneStatus.textContent = 'Could not read that video — please try another.';
+        }
+    });
+
+    const clearCustomRingtoneVideoBtn = document.getElementById('clearCustomRingtoneVideoBtn');
+    if (clearCustomRingtoneVideoBtn) clearCustomRingtoneVideoBtn.addEventListener('click', async () => {
+        await window.__updateSetting('calls', 'customRingtoneVideo', null);
+        await window.__updateSetting('calls', 'customRingtoneVideoName', null);
+        loadSection('calls');
+    });
     
     const vibrateOnCall = document.getElementById('vibrateOnCall');
     if (vibrateOnCall) vibrateOnCall.addEventListener('change', () => window.__updateSetting('calls', 'vibrateOnCall', vibrateOnCall.checked));

@@ -267,9 +267,11 @@ body {
     overflow-y: auto;
     padding: 20px;
     background-color: #0b141a;
-    background-image: var(--chat-background);
-    background-size: 80px 80px;
+    background-image: var(--chat-background, none);
+    background-size: var(--chat-background-size, 80px 80px);
     background-position: center;
+    background-repeat: var(--chat-background-repeat, repeat);
+    background-attachment: local;
     display: flex;
     flex-direction: column;
     position: relative;

@@ -772,6 +772,53 @@
             box-shadow: 0 10px 40px var(--shadow-color);
             overflow: visible;
         }
+
+        /* FIX (LAPTOP-FEATURES-HIDDEN / LARGE-SCREEN-EMPTY-SPACE): see the
+           markup comment above #authSideHighlights for the full rationale.
+           Off by default (and on every screen below 1200px, where there's
+           no spare width for it) so it never competes with the login card
+           on laptop/tablet-width screens; only becomes a flex child of
+           .auth-content — sitting fixed beside the form, no scrolling
+           required — once the viewport is wide enough to fit both without
+           squeezing the form. */
+        .auth-side-highlights { display: none; }
+        @media (min-width: 1200px) {
+            .auth-content { justify-content: center; gap: clamp(32px, 5vw, 72px); }
+            .auth-side-highlights {
+                display: flex;
+                flex-direction: column;
+                gap: 18px;
+                width: clamp(320px, 30vw, 460px);
+                flex-shrink: 0;
+                align-self: center;
+            }
+            .auth-side-highlights h2 {
+                font-size: 20px;
+                font-weight: 700;
+                color: var(--text-primary);
+                margin: 0;
+            }
+            .auth-side-highlights .feature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+            .auth-side-highlights .feature-card {
+                flex-direction: column;
+                align-items: flex-start;
+                background: var(--panel-bg);
+                border: 1px solid var(--border-color, rgba(0,0,0,0.08));
+                box-shadow: 0 4px 16px var(--shadow-color);
+            }
+            .auth-side-highlights .feature-icon { background: var(--gradient-primary); }
+            .auth-side-highlights .feature-content h3 { color: var(--text-primary); }
+            .auth-side-highlights .feature-content p { color: var(--text-secondary, rgba(0,0,0,0.6)); }
+            .auth-side-highlights .mmp-stat-row {
+                display: flex;
+                justify-content: space-between;
+                background: var(--panel-bg);
+                border: 1px solid var(--border-color, rgba(0,0,0,0.08));
+                border-radius: var(--card-radius);
+                padding: 14px 10px;
+                box-shadow: 0 4px 16px var(--shadow-color);
+            }
+        }
         
         .auth-header {
             background: var(--gradient-primary);
@@ -2849,6 +2896,38 @@
                     </div>
                 </div>
             </div>
+
+            <!-- FIX (LAPTOP-FEATURES-HIDDEN / LARGE-SCREEN-EMPTY-SPACE):
+                 #desktopSidebar carries the full feature pitch, but it's a
+                 fixed-width, fixed-height (100vh) column with many stacked
+                 sections (branding, stats, features, tips, testimonials,
+                 downloads) — on laptop-height screens that's taller than
+                 the viewport, so the feature cards sit below the fold of an
+                 independently-scrolling sidebar most visitors never think
+                 to scroll. Meanwhile .auth-container is capped at
+                 max-width:500px and centered, so on wide monitors the rest
+                 of .auth-content next to it just sits empty.
+                 This panel reuses .feature-card/.mmp-stat-row (already
+                 defined for the mobile panel below) to show a short, fixed
+                 (non-scrolling) set of highlights directly beside the login
+                 form. It's hidden by default and only turned on at large
+                 widths (see @media (min-width: 1200px) below), so it fills
+                 that empty space with content instead of requiring a scroll
+                 discovery inside the narrow sidebar. -->
+            <aside class="auth-side-highlights" id="authSideHighlights" aria-label="Nexopa features">
+                <h2>Why people choose Nexopa</h2>
+                <div class="feature-grid">
+                    <div class="feature-card"><div class="feature-icon"><i class="fas fa-lock"></i></div><div class="feature-content"><h3>End-to-End Encrypted</h3><p>Your messages stay private, always</p></div></div>
+                    <div class="feature-card"><div class="feature-icon"><i class="fas fa-phone-volume"></i></div><div class="feature-content"><h3>Crystal-Clear Calls</h3><p>HD voice &amp; video, no lag</p></div></div>
+                    <div class="feature-card"><div class="feature-icon"><i class="fas fa-users"></i></div><div class="feature-content"><h3>Group &amp; Community Chats</h3><p>Stay close with everyone that matters</p></div></div>
+                    <div class="feature-card"><div class="feature-icon"><i class="fas fa-language"></i></div><div class="feature-content"><h3>Real-time Translation</h3><p>AI-powered multilingual chat</p></div></div>
+                </div>
+                <div class="mmp-stat-row">
+                    <div class="mmp-stat"><span class="mmp-stat-num"><i class="fas fa-star"></i> 4.8/5</span><span class="mmp-stat-label">Average Review</span></div>
+                    <div class="mmp-stat"><span class="mmp-stat-num">120+</span><span class="mmp-stat-label">Countries</span></div>
+                    <div class="mmp-stat"><span class="mmp-stat-num">99.9%</span><span class="mmp-stat-label">Uptime</span></div>
+                </div>
+            </aside>
         </div>
 
             <!-- BUG FIX (EMPTY-MOBILE-LANDING-SPACE): #desktopSidebar already
@@ -5291,6 +5370,59 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
             });
         });
 
+        // FIX (INSTALL-PROMPT-NOT-APPEARING-ON-LANDING): chat.html shows a
+        // hard-to-miss floating bottom banner ("Install Nexopa — Faster &
+        // works offline") the moment beforeinstallprompt fires, in-app,
+        // post-login. This page only had the small header/hero ghost
+        // buttons above, which are easy to scroll past and don't match
+        // what a returning user already recognizes from inside the app.
+        // Reusing the same banner here (same id/markup/style as
+        // chat.html's #pwaInstallBanner) means the prompt a user "sees
+        // inside the app when logged in" now also appears on the landing
+        // page, not just the subtler buttons.
+        function showLandingInstallBanner() {
+            if (document.getElementById('pwaInstallBanner')) return;
+            try {
+                if (localStorage.getItem('pwa_installed') === '1') return;
+                var dismissedAt = parseInt(localStorage.getItem('pwa_dismissed') || '0', 10);
+                if (Date.now() - dismissedAt < 3 * 86400000) return;
+            } catch (_) {}
+            var el = document.createElement('div');
+            el.id = 'pwaInstallBanner';
+            el.innerHTML =
+                '<div style="position:fixed;bottom:0;left:0;right:0;z-index:999999;background:#fff;border-top:2px solid #667eea;box-shadow:0 -4px 20px rgba(0,0,0,.15);padding:14px 16px;display:flex;align-items:center;gap:12px;font-family:-apple-system,sans-serif;animation:_pslide .35s ease">' +
+                '<style>@keyframes _pslide{from{transform:translateY(100%)}to{transform:translateY(0)}}</style>' +
+                '<img src="/nexopa-192.png" style="width:44px;height:44px;border-radius:10px;flex-shrink:0" onerror="this.style.display=\'none\'">' +
+                '<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:14px;color:#111">Install Nexopa</div>' +
+                '<div style="font-size:12px;color:#6b7280;margin-top:1px">Faster &amp; works offline</div></div>' +
+                '<button id="landingBannerInstallBtn" style="background:#667eea;color:#fff;border:none;border-radius:10px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0">Install</button>' +
+                '<button id="landingBannerDismissBtn" style="background:none;border:none;color:#9ca3af;font-size:22px;line-height:1;cursor:pointer;padding:2px;flex-shrink:0">&times;</button></div>';
+            document.body.appendChild(el);
+            document.getElementById('landingBannerInstallBtn').addEventListener('click', async function () {
+                if (!deferredInstallPrompt) return;
+                try {
+                    deferredInstallPrompt.prompt();
+                    var choice = await deferredInstallPrompt.userChoice;
+                    if (choice && choice.outcome === 'accepted') {
+                        try { localStorage.setItem('pwa_installed', '1'); } catch (_) {}
+                        renderInstalledState();
+                    }
+                } catch (_) {}
+                deferredInstallPrompt = null;
+                var b = document.getElementById('pwaInstallBanner');
+                if (b) b.remove();
+            });
+            document.getElementById('landingBannerDismissBtn').addEventListener('click', function () {
+                var b = document.getElementById('pwaInstallBanner');
+                if (b) b.remove();
+                try { localStorage.setItem('pwa_dismissed', String(Date.now())); } catch (_) {}
+            });
+        }
+        window.addEventListener('appinstalled', function () {
+            var b = document.getElementById('pwaInstallBanner');
+            if (b) b.remove();
+        });
+
         async function handleInstallClick() {
             if (!deferredInstallPrompt) return;
             var clickedBtns = installButtons.filter(function (b) { return !b.hidden; });
@@ -5399,6 +5531,7 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
                     e.preventDefault();
                     deferredInstallPrompt = e;
                     setInstallButtonsVisible(true);
+                    showLandingInstallBanner();
                 });
                 installButtons.forEach(function (btn) { btn.addEventListener('click', handleInstallClick); });
                 // Give the browser a reasonable window to fire
