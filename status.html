@@ -3745,8 +3745,22 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
                 </div>
 
                 <!-- ── VIEWED UPDATES (friend statuses user already saw) ── -->
+                <!-- FIX (two-section layout not showing): this used to lack the
+                     "active" class that .statuses-section relies on for
+                     display:flex (CSS default is display:none). The only code
+                     that ever added display:'' to this section was
+                     _switchFeedTab('friends'), which is exclusively wired to a
+                     tab button's onclick — it never runs on initial page load —
+                     and even then it early-returns immediately because
+                     _activeFeedTab already defaults to 'friends'. So on a fresh
+                     load/relogin this section was invisible until the user
+                     clicked away to another tab and back, which is exactly the
+                     "shows once, then empty on reload" symptom reported. Adding
+                     "active" here makes it visible by default, alongside
+                     allStatusSection, the way the two-section layout is supposed
+                     to work. -->
                 <div class="sw-section-label" id="viewedUpdatesLabel" style="display:none;">Viewed updates</div>
-                <div class="statuses-section" id="viewedStatusSection">
+                <div class="statuses-section active" id="viewedStatusSection">
                     <div class="statuses-list" id="viewedStatusList"></div>
                 </div>
 

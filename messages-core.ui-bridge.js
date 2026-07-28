@@ -1369,11 +1369,23 @@ const UIStateManager = {
                 // ✅ FIX: data may be the raw payload (from wsService.on) or a wrapper
                 // { payload:{...}, source:'ws-bridge' } (from postMessage bridge).
                 // Unwrap one level if needed, then fall back to data itself.
+                // FIX (STATUS-REPLY-NEVER-DISPLAYED): the /status/:id/reply backend
+                // route emits new_message with the actual message nested at
+                // `payload.message` (alongside statusId/statusPreview/chatId
+                // metadata) instead of flat at the top level like every other
+                // new_message event. None of the branches below ever checked
+                // `data.message`, so for a status reply `message` fell through to
+                // `data` itself — which has a real chatId but no id/content/text/body
+                // at the top level — and got silently dropped by the "nothing to
+                // show" guard just below. Adding this check is what actually lets a
+                // status reply reach the chat panel.
                 const message = (data && data.payload && (data.payload.id || data.payload.chatId))
                     ? data.payload
                     : (data && data.data && (data.data.id || data.data.chatId))
                         ? data.data
-                        : data;
+                        : (data && data.message && (data.message.id || data.message.chatId || data.message.content))
+                            ? { ...data.message, chatId: data.message.chatId || data.chatId, statusPreview: data.statusPreview, replyToStatusId: data.statusId }
+                            : data;
                 const chatId = String(
                     (message && (message.chatId || message.conversationId)) || ''
                 );

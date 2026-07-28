@@ -59,6 +59,27 @@ class StatusWebSocket {
 
         if (this.socket === manager) return true; // already wired
 
+        // FIX (postMessage storm / duplicate reply notifications): `manager`
+        // (window.KynectaRealtime / window.parent.KynectaRealtime) is a single
+        // shared, long-lived object — it is NOT recreated when this iframe
+        // reloads. But `this.socket === manager` above only guards re-registration
+        // within the lifetime of ONE StatusWebSocket instance. Every time the
+        // status iframe reloads (switching tabs and back, a re-render, etc.) a
+        // brand-new StatusWebSocket is constructed with `this.socket = null`, so
+        // the check above always fails to catch that listeners were already
+        // attached to the SAME shared manager by a previous instance — each
+        // reload silently stacked another full set of `s.on('status:reply', ...)`
+        // etc. listeners onto it, forever. A single incoming status:reply event
+        // then fired the handler once per stacked listener, which is exactly
+        // what the "postMessage storm detected" console warning was catching.
+        // Guard on the manager itself instead of on `this`.
+        if (manager.__statusWsListenersAttached) {
+            this.socket = manager;
+            this.isConnected = manager.isConnected ? manager.isConnected() : true;
+            return true;
+        }
+        manager.__statusWsListenersAttached = true;
+
         // KynectaRealtime.on() has identical signature to socket.on() so assign directly
         this.socket = manager;
         this._setupSocketListeners();
