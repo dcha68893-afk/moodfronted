@@ -214,6 +214,22 @@ function updateCurrentSection() {
 }
 
 function renderAllGroups() {
+    // FIX-DUAL-RENDER-PIPELINE (see matching comment in group-ui.js above
+    // renderAllGroupsSecure): this function used to be a fully separate
+    // implementation — its own DOM writes to #allGroupsList, its own
+    // de-dupe of GroupCore.groups/myGroups/joinedGroups, and its own
+    // in-flight-fetch guard (GC._allGroupsFetchInFlight) that the tab-click
+    // pipeline in group-ui.js never checked. Two independent triggers —
+    // clicking the "All" tab (group-ui.js) and any data/visibility update
+    // that calls updateCurrentSection() (this file) — could each run their
+    // own version around the same time; whichever ran last cleared and
+    // rewrote the list, sometimes with a stale empty read that clobbered a
+    // correct render. Delegating both triggers to the SAME function and
+    // the SAME fetch removes the race entirely.
+    if (typeof window !== 'undefined' && typeof window.__renderAllGroupsSecure === 'function') {
+        window.__renderAllGroupsSecure();
+        return;
+    }
     try {
         const allGroupsList = safeGetElement('#allGroupsList');
         if (!allGroupsList) return;
@@ -294,6 +310,7 @@ function renderAllGroups() {
             `;
         }
     } catch (error) {}
+
 }
 
 function renderMyGroups() {

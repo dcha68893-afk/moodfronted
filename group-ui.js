@@ -2210,6 +2210,19 @@ export function createSecureGroupItemElement(groupData, type = 'group') {
 export const renderAllGroupsSecure = createUIErrorBoundary('renderAllGroupsSecure', () => {
     _groupListErrorFallback('#allGroupsList', () => renderAllGroupsSecure());
 })(
+    // FIX-DUAL-RENDER-PIPELINE: group-core-bridge.js has its own separate,
+    // independently-maintained renderAllGroups() that also writes directly
+    // to #allGroupsList and has its own separate in-flight-fetch guard
+    // (GroupCore._allGroupsFetchInFlight). Two different events —  a tab
+    // click (handled by this file) and a data/visibility update (handled
+    // by group-core-bridge.js's updateCurrentSection()) — can each trigger
+    // their OWN pipeline around the same time. Whichever one runs LAST
+    // wins, clearing and rewriting the list; if it happens to run before
+    // GroupCore.groups is (re)populated after navigating back to this tab,
+    // it wipes out a correct render with an empty state. Exposing this
+    // implementation on window lets group-core-bridge.js delegate to this
+    // SAME function/fetch instead of racing its own copy against it — see
+    // the matching change in group-core-bridge.js's renderAllGroups().
     function() {
         const allGroupsList = safeGetElement('#allGroupsList');
         if (!allGroupsList) return;
@@ -2264,6 +2277,12 @@ export const renderAllGroupsSecure = createUIErrorBoundary('renderAllGroupsSecur
         }
     }
 );
+
+// FIX-DUAL-RENDER-PIPELINE: see the comment above renderAllGroupsSecure.
+// Expose it on window so group-core-bridge.js's renderAllGroups() can
+// delegate to this single implementation instead of maintaining and
+// racing its own separate copy.
+window.__renderAllGroupsSecure = renderAllGroupsSecure;
 
 /**
  * Render my groups securely

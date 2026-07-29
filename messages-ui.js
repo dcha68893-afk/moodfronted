@@ -12623,9 +12623,32 @@ Type: ${message.type || 'text'}`;
 
                 _uiLog('[messagesUI] Ensuring chat panel open with ID:', conversationId);
 
-                
+                // FIX-ACTIVE-CHAT-ID-TRACKING: window.__activeChatId and
+                // chatPanel.dataset.chatId are read by the incoming-message
+                // render-matching logic (both the primary pipeline and the
+                // v4.0 visibility-patch fallback) as tie-breakers alongside
+                // ChatManager._activeConversation.id, but neither was ever
+                // actually written anywhere — so they were always empty and
+                // that matching silently depended on _activeConversation.id
+                // alone. Chat History always opens a conversation that
+                // already has its real backend ID, so this never showed up
+                // there. Any OTHER entry point (friends list, search,
+                // notification, call return) can open a chat before the
+                // real conversation exists yet (a "pending_" id) — if the
+                // real ID arrives later and something reads one of these
+                // now-stale trackers instead of _activeConversation.id, an
+                // incoming reply silently fails to match and never renders,
+                // even though the notification for it still fires. Stamping
+                // both here, and keeping them synced below whenever a
+                // pending conversation is replaced by its real one, closes
+                // that gap regardless of which source opened the chat.
+                if (conversationId) {
+                    window.__activeChatId = String(conversationId);
+                }
 
                 if (chatPanel) {
+
+                    if (conversationId) chatPanel.dataset.chatId = String(conversationId);
 
                     chatPanel.classList.remove('hidden');
 
@@ -14369,6 +14392,46 @@ Type: ${message.type || 'text'}`;
     if (window.__MESSAGES_DEBUG__) console.log('[KynPatch v3.0] ✅ All runtime patches installed');
 })();
 
+
+// ============================================================
+// KYNECTA ACTIVE-CHAT-ID SYNC PATCH v1.0
+// Fixes: incoming replies not appearing in the chat panel when the
+//   chat was opened from somewhere other than Chat History.
+// Root cause: window.__activeChatId and #chatPanel's data-chat-id
+//   attribute were read by the incoming-message matching logic as
+//   fallbacks, but nothing in the codebase ever wrote to either —
+//   ensureChatPanelOpen() now stamps both when a chat opens, but
+//   that snapshot goes stale the moment a "pending_<id>" conversation
+//   (created when messaging someone with no prior conversation) is
+//   swapped for its real backend-assigned ID. ChatManager itself
+//   already dispatches a 'conversationReplaced' CustomEvent for
+//   exactly this moment — it just had no listener anywhere. Chat
+//   History never hits this at all, since it only ever opens
+//   conversations that already have a real ID, which is why the
+//   symptom only showed up when starting a chat from another source.
+// ============================================================
+(function _kynActiveChatIdSyncPatch() {
+    'use strict';
+    window.addEventListener('conversationReplaced', function (evt) {
+        try {
+            const detail = evt.detail || {};
+            const oldId = detail.oldId ? String(detail.oldId) : '';
+            const newId = detail.newConversation && detail.newConversation.id ? String(detail.newConversation.id) : '';
+            if (!newId) return;
+
+            // Only resync if the panel/tracker was actually pointing at the
+            // conversation that just got replaced — don't clobber tracking
+            // for a different chat the user has since switched to.
+            if (window.__activeChatId && String(window.__activeChatId) === oldId) {
+                window.__activeChatId = newId;
+            }
+            const panel = document.getElementById('chatPanel');
+            if (panel && panel.dataset.chatId === oldId) {
+                panel.dataset.chatId = newId;
+            }
+        } catch (_) {}
+    });
+})();
 
 // ============================================================
 // KYNECTA MESSAGE VISIBILITY PATCH v4.0
