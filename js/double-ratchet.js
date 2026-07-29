@@ -421,6 +421,44 @@
     }
   }
 
+  // ── Per-chat operation lock ──────────────────────────────────────────────────
+  // FIX-ROOT-CAUSE-CONCURRENT-RATCHET-CORRUPTION: encrypt()/decrypt()/initSend()/
+  // initRecv() all follow the same pattern — load state, mutate it in memory,
+  // save it back — with NOTHING serializing calls for the same chatId. When
+  // more than one message for the same chat needs encrypting or decrypting
+  // close together (a burst of messages delivered after opening a chat from
+  // somewhere other than the chat list, several arriving while reconnecting,
+  // or simply two messages sent/received back to back), two calls can both
+  // load the same on-disk state before either has saved its own update. Each
+  // one advances and persists its own copy — but whichever save happens last
+  // wins, silently discarding the OTHER call's advanced recvMsgNum/skippedKeys/
+  // chainKey. That desyncs the chain for every message after it, which is
+  // exactly the pattern of several consecutive "[Unable to decrypt message]"
+  // bubbles landing together. Routing every state-touching operation for a
+  // given chatId through this queue makes them run strictly one at a time,
+  // so a load can never observe a state another in-flight call hasn't saved
+  // yet.
+  const _chatQueues = new Map(); // chatId -> Promise (tail of the queue)
+  function _runExclusive(chatId, fn) {
+    const key = String(chatId);
+    const tail = _chatQueues.get(key) || Promise.resolve();
+    const run = tail.then(fn, fn);
+    // Keep the queue advancing even if this step fails; callers still see
+    // the real result/error via `run`, which is returned below unwrapped.
+    _chatQueues.set(key, run.then(() => {}, () => {}));
+    return run;
+  }
+
+  const _encryptImpl = encrypt;
+  const _decryptImpl = decrypt;
+  const _initSendImpl = initSend;
+  const _initRecvImpl = initRecv;
+
+  encrypt  = (chatId, plaintext, myIdentityPrivKey) => _runExclusive(chatId, () => _encryptImpl(chatId, plaintext, myIdentityPrivKey));
+  decrypt  = (chatId, cipherEnvelope, senderIdentityPubB64, myIdentityPrivKey) => _runExclusive(chatId, () => _decryptImpl(chatId, cipherEnvelope, senderIdentityPubB64, myIdentityPrivKey));
+  initSend = (chatId, myIdentityPrivKey, theirIdentityPubB64) => _runExclusive(chatId, () => _initSendImpl(chatId, myIdentityPrivKey, theirIdentityPubB64));
+  initRecv = (chatId, myIdentityPrivKey, senderEphPubB64, senderIdentityPubB64) => _runExclusive(chatId, () => _initRecvImpl(chatId, myIdentityPrivKey, senderEphPubB64, senderIdentityPubB64));
+
   // ── Session management ───────────────────────────────────────────────────────
   function clearSession(chatId) {
     localStorage.removeItem(`kyn_dr_session_v2_${chatId}`);

@@ -1040,18 +1040,44 @@ function _patchRequestGroupList(GC) {
                     const serverIds = new Set(serverGroups.map(g => String(g.id)));
                     const keepLocal = localOnly.filter(g => !serverIds.has(String(g.id)));
 
+                    // BUG FIX (ADMIN-TAB-EMPTY-FOR-CREATOR): the server's own
+                    // `adminGroups` field is sometimes missing a group the
+                    // current user just created (e.g. no explicit admin-role
+                    // record written yet server-side), which made the creator
+                    // vanish from their own Admin tab. Creating a group makes
+                    // you its admin by definition — until you leave or another
+                    // admin removes you — so we always union in whatever
+                    // creator/admin groups are already known locally (from the
+                    // in-memory state before this fetch, e.g. just-created
+                    // groups) on top of whatever the server sends, deduped by id.
+                    const priorKnownAdmin = [...(this.myGroups || []), ...(this.adminGroups || [])]
+                        .filter(g => g.isCreator || g.isAdmin || String(g.createdBy) === uid);
+
                     this.groups       = [...serverGroups, ...keepLocal];
                     // Use server-partitioned arrays when provided; fall back to
                     // recomputing only if server didn't send them
-                    this.myGroups     = serverMy.length    ? [...serverMy,     ...keepLocal.filter(g => g.isCreator)] : this.groups.filter(g => g.isCreator || String(g.createdBy) === uid);
-                    this.adminGroups  = serverAdmin.length ? [...serverAdmin,  ...keepLocal.filter(g => g.isAdmin || g.isCreator)] : this.groups.filter(g => g.isAdmin || g.isCreator);
+                    const baseMy    = serverMy.length    ? serverMy    : this.groups.filter(g => g.isCreator || String(g.createdBy) === uid);
+                    const baseAdmin = serverAdmin.length ? serverAdmin : this.groups.filter(g => g.isAdmin || g.isCreator);
+
+                    this.myGroups     = _dedupById([...baseMy,    ...keepLocal.filter(g => g.isCreator), ...priorKnownAdmin.filter(g => g.isCreator || String(g.createdBy) === uid)]);
+                    this.adminGroups  = _dedupById([...baseAdmin, ...keepLocal.filter(g => g.isAdmin || g.isCreator), ...priorKnownAdmin]);
                     this.joinedGroups = serverJoined.length? [...serverJoined, ...keepLocal.filter(g => !g.isCreator && !g.isAdmin)] : this.groups.filter(g => !g.isCreator && !g.isAdmin);
                 } else {
-                    // Server returned empty — keep local-only groups (they may be pending sync)
-                    const localOnly = this.groups.filter(g => g.isLocalOnly);
-                    if (!localOnly.length) {
-                        this.groups = this.myGroups = this.joinedGroups = this.adminGroups = [];
-                    }
+                    // BUG FIX (ALL-GROUPS-EMPTY-AFTER-INVITE/ADMIN-TAB): every
+                    // group tab click triggers a full re-fetch of the entire
+                    // group list from the server, not just that tab's data. If
+                    // any one of those rapid, repeated fetches happened to come
+                    // back momentarily empty (network hiccup, or an older slow
+                    // request resolving after a newer one), this used to wipe
+                    // groups/myGroups/joinedGroups/adminGroups to empty arrays
+                    // outright — with nothing to ever restore them. An empty
+                    // response must never erase already-loaded groups, so we
+                    // simply leave the existing in-memory arrays untouched here.
+                    // A genuine "removed from every group" case still
+                    // self-corrects on the next real successful fetch, since
+                    // that fetch will legitimately return empty too and this
+                    // branch will again just leave things as they already are.
+                    console.warn('[GROUP FLOW] Server returned empty groups list — leaving existing groups untouched');
                 }
 
                 await this.saveGroups();
@@ -1095,6 +1121,19 @@ function _safeArr(v) {
     if (v == null) return [];
     if (typeof v === 'object' && Array.isArray(v.data)) return v.data;
     return [];
+}
+
+function _dedupById(arr) {
+    const seen = new Set();
+    const out = [];
+    for (const g of arr) {
+        if (!g || g.id == null) continue;
+        const key = String(g.id);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(g);
+    }
+    return out;
 }
 
 // =============================================================================

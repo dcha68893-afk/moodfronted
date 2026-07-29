@@ -83,18 +83,25 @@
         goBack();
     });
 
-    // Device hardware back / browser back button
-    window.addEventListener('popstate', function(e) {
-        e.preventDefault();
-        goBack();
-    });
-
-    // Push a dummy state so popstate fires on back
-    try {
-        history.pushState({ page: 'app' }, '', window.location.href);
-    } catch(_) {}
-
-    // Expose globally
+    // FIX-ROOT-CAUSE-BACK-NOT-RESTORING-EXACT-STATE: every one of the ~8
+    // module pages this script is injected into (message/group/calls/Tools/
+    // friend/settings/status/game.html) is loaded once as an always-present
+    // hidden iframe inside chat.html and never navigated away from — so this
+    // used to ALSO push its own dummy history entry and listen for the
+    // device/hardware back button (popstate) independently, in every single
+    // one of those iframes at once. chat.html (the parent) already has its
+    // own single, authoritative popstate/backbutton handler with a real
+    // navigation history stack (window.__navHistory) that knows exactly
+    // which page/panel the user was on before the current one. With up to
+    // 8 iframes each *also* reacting to the same device back press, a
+    // single press could trigger this iframe's local goBack() (which falls
+    // through to a generic NAVIGATE_BACK postMessage) in addition to — and
+    // racing against — the parent's own handling of that same press,
+    // effectively consuming it twice and landing the user somewhere other
+    // than the one exact previous step back. The parent is the only one
+    // that should decide what the device back button does; this file's
+    // goBack() stays available for in-page back-button taps (closing a
+    // modal/panel within a module), which is a separate, legitimate use.
     window.kynGoBack = goBack;
     window.kynPushPage = pushPage;
 

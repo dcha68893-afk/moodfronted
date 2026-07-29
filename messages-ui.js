@@ -11386,6 +11386,24 @@ Type: ${message.type || 'text'}`;
 
             messageInput.placeholder = `Message ${resolvedName}...`;
 
+            // FIX-ROOT-CAUSE-INPUT-LAG-NON-HISTORY-OPEN: this already enabled
+            // the input synchronously, but never focused it. The chat-history
+            // path gets an instant focus() via ensureChatPanelOpen (see the
+            // matching FIX comment there) before its own async conversation
+            // load finishes. This entry point — used by Friend/Calls/Status,
+            // i.e. every "different source than chat history" — has no such
+            // early focus: loadChatByFriendId() below can, on first open this
+            // session, defer through a real network round trip
+            // (fetchConversations) before it ever reaches ensureChatPanelOpen
+            // and calls .focus() for the first time. Until then the box is
+            // enabled but not actually focused, which is what shows up as the
+            // typing box "taking time before it responds". Focus it here too,
+            // immediately, so it's ready the instant it's visible regardless
+            // of how long the conversation lookup underneath takes.
+            if (document.activeElement !== messageInput) {
+                setTimeout(() => messageInput.focus(), 50);
+            }
+
         }
 
         const sendButton = document.getElementById('sendButton');
