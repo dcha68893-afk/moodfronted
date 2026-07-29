@@ -12617,6 +12617,20 @@ Type: ${message.type || 'text'}`;
 
             }
 
+            // ROOT-CAUSE FIX (messages missing when opened from Friends/Calls/
+            // Status/etc. instead of Chat History): see comment above. Mirror
+            // exactly what ConversationManager.openConversation() already does
+            // for the Chat History path — a forced network refresh of this
+            // conversation's messages, regardless of what cache/IDB had. This
+            // is fire-and-forget: ChatManager.setMessages() (called inside
+            // fetchMessages) notifies its subscribers, which is what re-renders
+            // the panel once the real history arrives, same as every other
+            // consumer of fetchMessages already relies on.
+            if (existingConversation?.id && core.ChatManager && typeof core.ChatManager.fetchMessages === 'function'
+                && !String(existingConversation.id).startsWith('pending_')) {
+                core.ChatManager.fetchMessages(existingConversation.id, { force: true }).catch(() => {});
+            }
+
 
 
             const ensureChatPanelOpen = (conversationId) => {
