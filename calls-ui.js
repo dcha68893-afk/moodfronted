@@ -5408,7 +5408,18 @@ handleContactItemClick: function(e) {
             // ⚠ DO NOT set callStartTime here — timer only starts when receiver answers.
             // callStartTime stays null until handleCallAccepted fires.
             UIState.callStartTime = null;
-            UIState.callType = callData.callType;
+            // FIX (video call silently becomes voice call): this used to be
+            // `UIState.callType = callData.callType;` with no fallback — if
+            // the server's call:initiated/call:ringing event doesn't echo
+            // callType back in its payload (it doesn't always), this wiped
+            // the correct 'video' value (set moments earlier in
+            // startCallWithUser) to undefined, and everything downstream
+            // that reads UIState.callType — including handleCallAccepted's
+            // own fallback chain — silently settled on the 'voice' default
+            // by the time the call actually connected. Same class of bug as
+            // the activeCallId clobber fixed just above; apply the same
+            // "don't clobber a known value with undefined" rule here.
+            UIState.callType = callData.callType || UIState.callType || 'voice';
             UIState.callActive = true;
             UIState.callState = 'initiating';
             // Track whether receiver is online so we can show correct status text
@@ -7944,8 +7955,21 @@ handleContactItemClick: function(e) {
                 });
             };
 
-            if (coreInstance && coreInstance.startScreenShare) {
-                coreInstance.startScreenShare()
+            // FIX (screen share only visible locally, never reaches the remote
+            // party): `coreInstance` is a module-level variable that only gets
+            // (re)assigned inside a handful of specific socket-event handlers —
+            // it can still be null/stale at the moment the user taps "Share
+            // screen", even though window.callCore itself is already set up.
+            // When that happened, this fell into the raw getDisplayMedia()
+            // branch below, which never calls callsCoreReplaceVideoTrack() to
+            // push the captured track onto the live peer connection's video
+            // sender — so only the local preview/annotation toolbar ever saw
+            // it. Check window.callCore directly as well, and make even the
+            // raw fallback push the track to the peer connection.
+            const _screenShareCore = (coreInstance && coreInstance.startScreenShare) ? coreInstance : window.callCore;
+
+            if (_screenShareCore && _screenShareCore.startScreenShare) {
+                _screenShareCore.startScreenShare()
                     .then(result => {
                         if (result && result.success && result.stream) {
                             _onShareStarted(result.stream);
@@ -7960,13 +7984,25 @@ handleContactItemClick: function(e) {
                     .catch(err => showNotification('Failed to start screen sharing', 'error'));
             } else {
                 navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'always' }, audio: true })
-                    .then(_onShareStarted)
+                    .then(stream => {
+                        // window.callCore wasn't available at all — still push
+                        // the captured track to the peer connection directly
+                        // so the remote party actually sees it, not just us.
+                        if (typeof window.callsCoreReplaceVideoTrack === 'function') {
+                            const vTrack = stream.getVideoTracks()[0];
+                            if (vTrack) window.callsCoreReplaceVideoTrack(vTrack);
+                        } else {
+                            console.warn('[Calls UI] callsCoreReplaceVideoTrack unavailable -- shared screen will not reach the remote party');
+                        }
+                        _onShareStarted(stream);
+                    })
                     .catch(err => showNotification('Failed to start screen sharing', 'error'));
             }
         },
 
         stopScreenShare: function() {
-            if (coreInstance && coreInstance.stopScreenShare) coreInstance.stopScreenShare();
+            const _screenShareCore = (coreInstance && coreInstance.stopScreenShare) ? coreInstance : window.callCore;
+            if (_screenShareCore && _screenShareCore.stopScreenShare) _screenShareCore.stopScreenShare();
             if (UIState.screenStream) {
                 UIState.screenStream.getTracks().forEach(t => t.stop());
                 UIState.screenStream = null;
@@ -9115,7 +9151,14 @@ declineIncomingCall: async function() {
     if (typeof window._stopRingtones === 'function') window._stopRingtones();
     if (typeof window._stopAllRingtones === 'function') window._stopAllRingtones();
     if (window.parent && window.parent !== window) { window.__callEndedNavigating = true; setTimeout(function(){window.__callEndedNavigating=false;},3000); const _dr=window.__callOriginReturnTo||window.__pendingCallReturnTo||'messages'; const _drChatId=window.__callOriginChatUserId||window.__pendingCallChatUserId||null; const _drChatName=window.__callOriginChatUserName||null; window.parent.postMessage({type:'CALL_ENDED_RETURN',timestamp:Date.now(),returnTo:_dr,chatUserId:_drChatId,chatUserName:_drChatName},'*'); setTimeout(function(){if(window.parent&&window.parent!==window)window.parent.postMessage({type:'SWITCH_MODULE',module:_dr,payload:{returnFromCall:true,openChatWith:_drChatId,openChatWithName:_drChatName},timestamp:Date.now()},'*');},350); }
-    showIdleScreen(true);
+    // Safe call: showIdleScreen may not be resolvable in this execution context
+    // (same hoisting/scope issue already worked around elsewhere in this file —
+    // this call site was the one left throwing "showIdleScreen is not defined").
+    if (typeof showIdleScreen === 'function') {
+        showIdleScreen(true);
+    } else if (typeof window.showIdleScreen === 'function') {
+        window.showIdleScreen(true);
+    }
     showNotification('Call declined', 'info');
 
     setTimeout(() => UIEventHandlers.refreshCallHistoryAfterCall && UIEventHandlers.refreshCallHistoryAfterCall(), 800);

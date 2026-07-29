@@ -442,141 +442,6 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-famil
 #backBtn:hover{background:rgba(245,197,24,0.14);}
 #gameFrame{flex:1;overflow:hidden;}
 
-/* ── POOL ─────────────────────────────────────────────────────────────────── */
-#poolGame{display:none;width:100%;height:100%;flex-direction:column;}
-#poolGame.show{display:flex;}
-
-/* Premium HUD */
-#poolHud{display:flex;align-items:center;gap:7px;padding:5px 10px;width:100%;
-  background:linear-gradient(180deg,rgba(0,0,0,0.7) 0%,rgba(0,0,0,0.3) 100%);
-  border-bottom:1px solid rgba(255,255,255,0.07);min-height:38px;}
-.hud-badge{background:linear-gradient(135deg,#f5c518,#e67e22);border-radius:8px;
-  padding:2px 10px;font-weight:900;font-size:13px;color:#111;white-space:nowrap;}
-.hud-score{background:rgba(0,0,0,0.5);border:1px solid rgba(245,197,24,0.3);border-radius:8px;
-  padding:2px 10px;color:#f5c518;font-weight:800;font-size:14px;white-space:nowrap;}
-.hud-lives{display:flex;gap:1px;align-items:center;}
-.hud-pill{display:flex;align-items:center;gap:4px;background:rgba(0,0,0,0.5);
-  border:1px solid rgba(255,255,255,0.12);border-radius:20px;padding:3px 10px 3px 7px;
-  font-size:12px;font-weight:800;color:#eee;white-space:nowrap;flex-shrink:0;}
-.hud-pill .ic{font-size:13px;line-height:1;}
-.hud-progress-track{flex:1;height:6px;min-width:36px;background:rgba(0,0,0,0.45);
-  border-radius:4px;overflow:hidden;border:1px solid rgba(255,255,255,0.1);box-shadow:inset 0 1px 3px rgba(0,0,0,0.6);}
-.hud-progress-fill{height:100%;width:0%;border-radius:4px;
-  background:linear-gradient(90deg,#f5c518,#ff8a00);
-  box-shadow:0 0 8px rgba(245,197,24,0.7);transition:width .35s cubic-bezier(.34,1.56,.64,1);}
-.spacer{flex:1;}
-#muteBtn{width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,0.08);
-  border:1px solid rgba(255,255,255,0.15);color:#ccc;font-size:14px;cursor:pointer;
-  display:flex;align-items:center;justify-content:center;flex-shrink:0;}
-#muteBtn:hover{background:rgba(255,255,255,0.15);}
-
-#poolMain{position:relative;flex:1;display:flex;overflow:hidden;}
-#poolCanvas{display:block;touch-action:none;cursor:crosshair;}
-
-/* Coin badge — floats over top-left corner of the table, like a stage/reward tracker */
-#poolCoinBadge{position:absolute;top:8px;left:8px;z-index:11;
-  width:56px;height:56px;border-radius:50%;cursor:pointer;
-  background:radial-gradient(circle at 35% 30%,#3a3a3a,#1a1a1a 70%);
-  border:3px solid #f5c518;box-shadow:0 0 0 2px rgba(0,0,0,0.5),0 4px 14px rgba(0,0,0,0.6),inset 0 2px 4px rgba(255,255,255,0.15);
-  display:flex;flex-direction:column;align-items:center;justify-content:center;}
-#poolCoinBadge .cb-icon{font-size:16px;line-height:1;}
-#poolCoinBadge .cb-val{font-size:10px;font-weight:900;color:#f5c518;line-height:1;margin-top:1px;}
-#poolCoinBadge:active{transform:scale(0.93);}
-
-/* Spin selector — compact chrome dial */
-#spinSelector{position:absolute;left:6px;top:50%;transform:translateY(-50%);
-  width:64px;display:flex;flex-direction:column;align-items:center;gap:3px;z-index:10;}
-#spinLabel{font-size:8px;color:#888;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:1px;}
-#spinPad{width:54px;height:54px;background:radial-gradient(circle at 35% 30%,#2a2a2a,#0a0a0a 75%);
-  border:2px solid rgba(255,255,255,0.25);
-  border-radius:50%;position:relative;cursor:pointer;
-  box-shadow:0 0 0 2px rgba(0,0,0,0.5),0 0 14px rgba(0,0,0,0.6),inset 0 1px 0 rgba(255,255,255,0.12);}
-#spinPad::before{content:'';position:absolute;inset:4px;border-radius:50%;
-  border:1px solid rgba(255,255,255,0.09);}
-#spinIndicator{width:16px;height:16px;
-  background:radial-gradient(circle at 35% 35%,#fff 0%,#f5c518 50%,#e67e22 100%);
-  border-radius:50%;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
-  box-shadow:0 0 10px rgba(245,197,24,0.8),0 2px 4px rgba(0,0,0,0.5);transition:background .15s;}
-#spinReset{font-size:9px;color:#555;cursor:pointer;margin-top:1px;text-decoration:underline;}
-#spinReset:hover{color:#888;}
-.spin-marker{position:absolute;font-size:7px;color:rgba(255,255,255,0.3);user-select:none;font-weight:700;}
-#spinTypeLbl{font-size:8px;color:#f5c518;font-weight:800;letter-spacing:0.5px;min-height:10px;text-align:center;}
-
-/* Power slider — vertical ruler/gauge, chrome housing with tick marks */
-#powerSlider{position:absolute;right:6px;top:50%;transform:translateY(-50%);
-  width:34px;height:180px;display:flex;flex-direction:column;align-items:center;gap:3px;}
-#powerSliderTrack{width:16px;height:150px;background:linear-gradient(90deg,#111,#222,#111);
-  border-radius:4px;position:relative;cursor:pointer;border:1px solid rgba(255,255,255,0.18);
-  box-shadow:inset 0 2px 8px rgba(0,0,0,0.7),0 0 0 2px rgba(0,0,0,0.4);overflow:visible;}
-#powerSliderTrack::before{content:'';position:absolute;left:-7px;top:0;bottom:0;width:5px;
-  background-image:repeating-linear-gradient(to bottom,rgba(255,255,255,0.55) 0,rgba(255,255,255,0.55) 1px,transparent 1px,transparent 9px);
-  opacity:0.7;}
-#powerSliderTrack::after{content:'';position:absolute;right:-7px;top:0;bottom:0;width:5px;
-  background-image:repeating-linear-gradient(to bottom,rgba(255,255,255,0.55) 0,rgba(255,255,255,0.55) 1px,transparent 1px,transparent 9px);
-  opacity:0.7;}
-#powerFill{position:absolute;bottom:0;left:0;right:0;
-  background:linear-gradient(to top,#3498db,#2ecc71);border-radius:3px;height:0%;}
-#powerGlow{position:absolute;bottom:0;left:-2px;right:-2px;
-  background:linear-gradient(to top,rgba(52,152,219,0.3),rgba(46,204,113,0.3));
-  border-radius:8px;height:0%;filter:blur(4px);}
-#powerThumb{position:absolute;left:50%;transform:translateX(-50%);width:24px;height:14px;
-  background:linear-gradient(180deg,#f5f5f5,#c8c8c8 45%,#8a8a8a);
-  border-radius:3px;border:1px solid rgba(0,0,0,0.4);cursor:grab;bottom:0;
-  box-shadow:0 2px 8px rgba(0,0,0,0.6),inset 0 1px 0 rgba(255,255,255,0.6);}
-#sliderLabel{font-size:8px;color:#888;font-weight:700;letter-spacing:1px;text-transform:uppercase;}
-#powerPctLabel{font-size:10px;color:#f5c518;font-weight:800;}
-
-/* Pool overlay */
-#poolOverlay{display:none;position:absolute;inset:0;background:rgba(0,0,0,0.85);
-  align-items:center;justify-content:center;z-index:50;backdrop-filter:blur(8px);}
-#poolOverlay.show{display:flex;}
-#poolOverlayBox{background:linear-gradient(135deg,#1a2a0a,#0a1205);
-  border:2px solid #f5c518;border-radius:22px;padding:28px 44px;text-align:center;
-  box-shadow:0 0 60px rgba(245,197,24,0.3),0 20px 80px rgba(0,0,0,0.7);
-  animation:overlayIn .4s cubic-bezier(.34,1.56,.64,1);}
-@keyframes overlayIn{from{transform:scale(0.7);opacity:0}to{transform:scale(1);opacity:1}}
-#poolOverlayBox .oi{font-size:60px;margin-bottom:6px;animation:bounce .6s ease .3s both;}
-@keyframes bounce{0%,100%{transform:scale(1)}50%{transform:scale(1.2)}}
-#poolOverlayBox .ot{font-size:26px;font-weight:900;color:#f5c518;margin-bottom:4px;letter-spacing:2px;}
-#poolOverlayBox .os{font-size:14px;color:#aaa;margin-bottom:20px;}
-#poolOverlayBox button{background:linear-gradient(135deg,#f5c518,#e67e22);border:none;
-  border-radius:40px;padding:13px 36px;color:#111;font-weight:900;font-size:15px;cursor:pointer;
-  letter-spacing:1px;box-shadow:0 4px 20px rgba(245,197,24,0.5);transition:transform .15s,box-shadow .15s;}
-#poolOverlayBox button:hover{transform:translateY(-2px);box-shadow:0 6px 28px rgba(245,197,24,0.7);}
-
-/* Floating message */
-#poolMsg{position:absolute;top:26%;left:50%;transform:translate(-50%,-50%);
-  background:rgba(0,0,0,0.92);border:2px solid rgba(245,197,24,0.6);border-radius:14px;
-  padding:10px 26px;color:#f5c518;font-size:17px;font-weight:900;pointer-events:none;
-  opacity:0;transition:opacity .3s;white-space:nowrap;z-index:30;
-  box-shadow:0 0 24px rgba(245,197,24,0.25),0 0 60px rgba(0,0,0,0.5);}
-#poolMsg.show{opacity:1;}
-
-/* Combo notification */
-#comboMsg{position:absolute;top:18%;left:50%;transform:translate(-50%,-50%) scale(0);
-  background:linear-gradient(135deg,rgba(245,197,24,0.15),rgba(230,126,34,0.15));
-  border:2px solid rgba(245,197,24,0.8);border-radius:50px;
-  padding:8px 28px;color:#f5c518;font-size:22px;font-weight:900;pointer-events:none;
-  opacity:0;z-index:31;transition:all .25s cubic-bezier(.34,1.56,.64,1);letter-spacing:2px;
-  white-space:nowrap;text-shadow:0 0 20px rgba(245,197,24,0.8);}
-#comboMsg.show{opacity:1;transform:translate(-50%,-50%) scale(1);}
-
-/* Pool info bar */
-#poolInfo{padding:3px 10px;display:flex;align-items:center;gap:10px;background:rgba(0,0,0,0.25);
-  border-bottom:1px solid rgba(255,255,255,0.04);}
-.pool-hint{font-size:10px;color:#555;font-weight:600;text-transform:uppercase;letter-spacing:1px;}
-#powerPct{font-size:11px;color:#f5c518;font-weight:800;min-width:36px;}
-#targetInfo{font-size:11px;color:#888;font-weight:700;}
-#shotTypeInfo{font-size:10px;color:#3498db;font-weight:700;letter-spacing:0.5px;}
-
-/* Theme selector */
-#themeBar{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);
-  display:flex;gap:5px;z-index:10;background:rgba(0,0,0,0.5);
-  border-radius:20px;padding:4px 8px;border:1px solid rgba(255,255,255,0.08);}
-.theme-dot{width:14px;height:14px;border-radius:50%;cursor:pointer;border:2px solid rgba(255,255,255,0.15);
-  transition:all .2s;flex-shrink:0;}
-.theme-dot.active{border-color:#fff;transform:scale(1.25);}
-
 /* ── WATER SORT ──────────────────────────────────────────────────────────────*/
 #waterGame{display:none;width:100%;height:100%;flex-direction:column;overflow:hidden;}
 #waterGame.show{display:flex;}
@@ -772,48 +637,6 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-famil
 #tvLevelBanner .tlb-right{font-size:11px;color:#888;font-weight:700;cursor:pointer;text-decoration:underline;}
 #tvSubjectTag{font-size:10px;color:#888;font-weight:700;text-transform:uppercase;letter-spacing:1px;}
 
-/* ── NENO WORDLE ──────────────────────────────────────────────────────────────*/
-#wordleGame{display:none;width:100%;height:100%;flex-direction:column;background:#0a1410;overflow:hidden;position:relative;}
-#wordleGame.show{display:flex;}
-#wdHud{display:flex;align-items:center;gap:8px;padding:6px 10px;background:rgba(0,0,0,0.4);flex-shrink:0;}
-#wdContent{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:14px 10px;gap:14px;overflow:hidden;}
-#wdGrid{display:grid;grid-template-rows:repeat(6,1fr);gap:5px;}
-.wd-row{display:grid;grid-template-columns:repeat(5,1fr);gap:5px;}
-.wd-cell{width:46px;height:46px;border:2px solid rgba(255,255,255,0.18);border-radius:8px;
-  display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:900;
-  color:#fff;text-transform:uppercase;transition:transform .15s, background .3s, border-color .3s;
-  background:rgba(255,255,255,0.03);}
-.wd-cell.filled{border-color:rgba(255,255,255,0.4);transform:scale(1.04);}
-.wd-cell.correct{background:#1abc9c;border-color:#1abc9c;color:#04201a;}
-.wd-cell.present{background:#f39c12;border-color:#f39c12;color:#2b1900;}
-.wd-cell.absent{background:rgba(255,255,255,0.06);border-color:rgba(255,255,255,0.08);color:#666;}
-.wd-cell.flip{animation:wdFlip .4s ease;}
-@keyframes wdFlip{0%{transform:rotateX(0)}50%{transform:rotateX(90deg)}100%{transform:rotateX(0)}}
-.wd-row.shake{animation:shake .35s;}
-#wdMsg{font-size:14px;font-weight:900;color:#1abc9c;min-height:20px;text-align:center;}
-#wdKeyboard{display:flex;flex-direction:column;gap:6px;width:100%;max-width:380px;}
-.wd-krow{display:flex;gap:5px;justify-content:center;}
-.wd-key{flex:1;max-width:34px;height:46px;border-radius:6px;border:none;
-  background:rgba(255,255,255,0.1);color:#fff;font-size:13px;font-weight:800;
-  display:flex;align-items:center;justify-content:center;cursor:pointer;
-  text-transform:uppercase;transition:background .2s;user-select:none;}
-.wd-key.wide{max-width:58px;font-size:11px;}
-.wd-key:active{background:rgba(255,255,255,0.25);}
-.wd-key.correct{background:#1abc9c;color:#04201a;}
-.wd-key.present{background:#f39c12;color:#2b1900;}
-.wd-key.absent{background:rgba(255,255,255,0.04);color:#555;}
-#wdOverlay{display:none;position:absolute;inset:0;background:rgba(0,0,0,0.88);align-items:center;justify-content:center;z-index:50;backdrop-filter:blur(8px);}
-#wdOverlay.show{display:flex;}
-#wdOverlayBox{background:linear-gradient(135deg,#0a2a22,#0a1410);border:2px solid #1abc9c;border-radius:22px;padding:28px 44px;text-align:center;box-shadow:0 0 60px rgba(26,188,156,0.3);max-width:320px;width:90%;}
-#wdOverlayBox .oi{font-size:60px;margin-bottom:6px;}
-#wdOverlayBox .ot{font-size:22px;font-weight:900;color:#1abc9c;margin-bottom:4px;letter-spacing:1px;}
-#wdOverlayBox .os{font-size:13px;color:#aaa;margin-bottom:16px;line-height:1.5;}
-#wdOverlayBox button{background:linear-gradient(135deg,#16a085,#1abc9c);border:none;border-radius:40px;padding:12px 30px;color:#04201a;font-weight:900;font-size:14px;cursor:pointer;letter-spacing:1px;}
-</style>
-</head>
-<body>
-<div id="appRoot">
-
 <!-- PLATFORM TOP BAR -->
 <div id="platformBar">
   <div id="avatarBtn" onclick="openProfileModal()">
@@ -858,13 +681,6 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-famil
     </div>
     <div class="hub-section">GAMES</div>
     <div class="hub-grid">
-      <div class="hub-card" onclick="openGame('pool')">
-        <span class="icon">🎱</span>
-        <div class="name">Pool</div>
-        <div class="sub">Billiards</div>
-        <div class="badge">PRO</div>
-        <div class="card-score" id="poolCardScore"></div>
-      </div>
       <div class="hub-card" onclick="openGame('water')">
         <span class="icon">🧪</span>
         <div class="name">Water Sort</div>
@@ -891,13 +707,6 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-famil
         <div class="badge new-badge">NEW</div>
         <div class="card-score" id="triviaCardScore"></div>
       </div>
-      <div class="hub-card" onclick="openGame('wordle')">
-        <span class="icon">🔤</span>
-        <div class="name">Neno Wordle</div>
-        <div class="sub">Guess the Word</div>
-        <div class="badge new-badge">NEW</div>
-        <div class="card-score" id="wordleCardScore"></div>
-      </div>
     </div>
     <div id="statsRow">
       <div class="stat-card" onclick="openAchModal()">
@@ -921,73 +730,6 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-famil
   <div id="backBtn" onclick="goBack()">← Back to Games</div>
   <div id="gameFrame">
 
-    <!-- POOL GAME -->
-    <div id="poolGame">
-      <div id="poolHud">
-        <div class="hud-badge" id="poolStage">LV.01</div>
-        <div class="hud-pill"><span class="ic">❤️</span><span id="poolLivesNum">8</span></div>
-        <div class="hud-pill"><span class="ic">🎱</span><span id="targetInfo">0/3</span></div>
-        <div class="hud-progress-track"><div class="hud-progress-fill" id="poolProgressFill"></div></div>
-        <div class="hud-score" id="poolScore">⭐ 0</div>
-        <button id="muteBtn" onclick="AudioMgr.toggle()">🔊</button>
-      </div>
-      <div id="poolInfo">
-        <span class="pool-hint" id="patternHint">TRIANGLE</span>
-        <div class="spacer"></div>
-        <span id="shotTypeInfo">CENTER</span>
-        <span class="pool-hint" style="margin-left:6px">PWR</span>
-        <span id="powerPct">0%</span>
-      </div>
-      <div id="poolMain">
-        <canvas id="poolCanvas"></canvas>
-
-        <!-- Coin badge -->
-        <div id="poolCoinBadge" onclick="AudioMgr.uiClick();openShopModal();">
-          <span class="cb-icon">🪙</span>
-          <span class="cb-val" id="poolCoinVal">0</span>
-        </div>
-
-        <!-- Spin Selector -->
-        <div id="spinSelector">
-          <div id="spinLabel">ENGLISH</div>
-          <div id="spinPad">
-            <span class="spin-marker" style="top:5px;left:50%;transform:translateX(-50%)">T</span>
-            <span class="spin-marker" style="bottom:5px;left:50%;transform:translateX(-50%)">B</span>
-            <span class="spin-marker" style="left:5px;top:50%;transform:translateY(-50%)">L</span>
-            <span class="spin-marker" style="right:5px;top:50%;transform:translateY(-50%)">R</span>
-            <div id="spinIndicator"></div>
-          </div>
-          <div id="spinTypeLbl"></div>
-          <div id="spinReset" onclick="resetSpin()">reset</div>
-        </div>
-
-        <!-- Power Slider -->
-        <div id="powerSlider">
-          <span id="sliderLabel">PWR</span>
-          <div id="powerSliderTrack">
-            <div id="powerGlow"></div>
-            <div id="powerFill"></div>
-            <div id="powerThumb"></div>
-          </div>
-          <span id="powerPctLabel">0%</span>
-        </div>
-
-        <!-- Theme dots -->
-        <div id="themeBar"></div>
-
-        <div id="poolOverlay">
-          <div id="poolOverlayBox">
-            <div class="oi" id="poolOIcon">🎱</div>
-            <div class="ot" id="poolOTitle">STAGE CLEAR!</div>
-            <div class="os" id="poolOSub">Tap to continue</div>
-            <button id="poolOBtn">NEXT STAGE →</button>
-          </div>
-        </div>
-        <div id="poolMsg"></div>
-        <div id="comboMsg"></div>
-      </div>
-    </div>
-
     <!-- WATER SORT GAME -->
     <div id="waterGame">
       <div style="position:relative;flex:1;display:flex;flex-direction:column;">
@@ -1001,7 +743,8 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-famil
           <div id="waterBottles"></div>
           <div id="waterControls">
             <button class="water-btn" onclick="waterUndo()">↩️ Undo (<span id="undoCount">5</span>)</button>
-            <button class="water-btn" onclick="waterRestart()">🔄 Restart</button>
+            <button class="water-btn" onclick="waterRestart()">🔄 Restart Level</button>
+            <button class="water-btn" onclick="if(confirm('Restart the whole game from Level 1? Your current progress will be lost.')) waterRestartGame();">⏮ Restart Game</button>
             <button class="water-btn" onclick="waterNextLevel()">⏭ Skip</button>
           </div>
         </div>
@@ -1023,6 +766,10 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-famil
         <div id="blkTarget"><span>🎯</span><span id="blkTargetTxt">0/0</span></div>
         <div class="hud-progress-track"><div class="hud-progress-fill" id="blkProgressFill"></div></div>
         <div id="blkScore">⭐ 0</div>
+        <button onclick="if(confirm('Restart the whole game from Level 1? Your current progress will be lost.')) blkRestartGame();" style="
+          background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);
+          border-radius:14px;padding:4px 10px;font-size:10px;font-weight:800;
+          color:#ddd;cursor:pointer;margin-left:6px;">⏮ Restart Game</button>
       </div>
       <div id="blockMain">
         <div id="blkBoardWrap">
@@ -1052,6 +799,10 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-famil
         <div class="spacer"></div>
         <div id="cwScore" class="hud-score">⭐ 0</div>
         <div id="cwLevel" class="hud-score" style="margin-left:4px">LV.1</div>
+        <button onclick="if(confirm('Restart the whole game from Level 1? Your current progress will be lost.')) cwRestartGame();" style="
+          background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);
+          border-radius:14px;padding:4px 10px;font-size:10px;font-weight:800;
+          color:#ddd;cursor:pointer;margin-left:6px;">⏮ Restart Game</button>
       </div>
       <div id="cwContent">
         <div id="cwClue"></div>
@@ -1146,29 +897,6 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-famil
           <button id="tvNextBtn" onclick="tvNextRound()">NEXT LEVEL →</button>
           <br>
           <button class="tv-restart-btn" onclick="tvRestartSubject()">🔄 Restart Subject</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- NENO WORDLE -->
-    <div id="wordleGame">
-      <div id="wdHud">
-        <div class="hud-badge" style="background:linear-gradient(135deg,#16a085,#1abc9c)">NENO WORDLE</div>
-        <div class="spacer"></div>
-        <div id="wdStreak" class="hud-score">🔥 0</div>
-        <div id="wdScore" class="hud-score" style="margin-left:4px">⭐ 0</div>
-      </div>
-      <div id="wdContent">
-        <div id="wdGrid"></div>
-        <div id="wdMsg"></div>
-        <div id="wdKeyboard"></div>
-      </div>
-      <div id="wdOverlay">
-        <div id="wdOverlayBox">
-          <div class="oi" id="wdOIcon">🎉</div>
-          <div class="ot" id="wdOTitle">You got it!</div>
-          <div class="os" id="wdOSub"></div>
-          <button id="wdOBtn" onclick="initWordle()">PLAY AGAIN →</button>
         </div>
       </div>
     </div>
@@ -1365,6 +1093,24 @@ const _getUserId = () => {
     return p.userId || p.id || p.sub || null;
   } catch(_){ return null; }
 };
+
+// ─── PER-USER GAME PROGRESS (resume-on-reopen) ─────────────────────────────
+// Used by Water Sort / Block Puzzle / Crossword so a refresh, reload, or
+// relogin always continues from the exact level the player was on. Progress
+// is only ever cleared by an explicit "Restart Game" action — never by
+// simply opening/reopening a game.
+function _gameProgressKey(gameId){
+  return 'kyn_game_progress_' + (_getUserId() || 'guest') + '_' + gameId;
+}
+function saveGameProgress(gameId, data){
+  try { localStorage.setItem(_gameProgressKey(gameId), JSON.stringify(data)); } catch(_){}
+}
+function loadGameProgress(gameId){
+  try { return JSON.parse(localStorage.getItem(_gameProgressKey(gameId)) || 'null'); } catch(_){ return null; }
+}
+function clearGameProgress(gameId){
+  try { localStorage.removeItem(_gameProgressKey(gameId)); } catch(_){}
+}
 
 function psApplyDefaults() {
   PS.coins        = PS.coins        ?? 250;
@@ -1607,7 +1353,7 @@ function updatePlatformBar() {
   document.getElementById('statRank').textContent = 'LV.'+PS.level;
   // Card scores
   const bs = PS.bestScores;
-  ['pool','water','block','crossword','trivia'].forEach(g=>{
+  ['water','block','crossword','trivia'].forEach(g=>{
     const el = document.getElementById(g+'CardScore');
     if(el && bs[g]) el.textContent = '⭐ '+formatNum(bs[g]);
   });
@@ -1706,8 +1452,6 @@ const ACH_DEFS = [
   {id:'first_game',   cat:'gameplay',   icon:'🎮', name:'First Game',      desc:'Play your first game',          target:1,  reward:50,  xp:20},
   {id:'games_10',     cat:'gameplay',   icon:'🕹️', name:'Game Addict',     desc:'Play 10 games',                 target:10, reward:100, xp:30},
   {id:'games_50',     cat:'gameplay',   icon:'🎯', name:'Dedicated Player',desc:'Play 50 games',                 target:50, reward:300, xp:80},
-  {id:'pool_pocket5', cat:'gameplay',   icon:'🎱', name:'Sharp Shooter',   desc:'Pocket 5 balls in Pool',        target:5,  reward:75,  xp:25},
-  {id:'pool_pocket50',cat:'gameplay',   icon:'🏆', name:'Pool Shark',      desc:'Pocket 50 balls in Pool',       target:50, reward:250, xp:60},
   {id:'levels_5',     cat:'gameplay',   icon:'📈', name:'Level Climber',   desc:'Clear 5 levels across games',   target:5,  reward:100, xp:30},
   {id:'levels_25',    cat:'gameplay',   icon:'🚀', name:'Level Master',    desc:'Clear 25 levels across games',  target:25, reward:400, xp:100},
   {id:'streak_7',     cat:'gameplay',   icon:'🔥', name:'On Fire',         desc:'Answer 7 trivia in a row',      target:7,  reward:150, xp:40},
@@ -1770,8 +1514,6 @@ function checkAchievements() {
   setAchProg('first_game',    Math.min(PS.totalGames, 1));
   setAchProg('games_10',      Math.min(PS.totalGames, 10));
   setAchProg('games_50',      Math.min(PS.totalGames, 50));
-  setAchProg('pool_pocket5',  Math.min(PS.totalPockets, 5));
-  setAchProg('pool_pocket50', Math.min(PS.totalPockets, 50));
   setAchProg('levels_5',      Math.min(PS.totalLevels, 5));
   setAchProg('levels_25',     Math.min(PS.totalLevels, 25));
   setAchProg('coins_1000',    Math.min(PS.coins, 1000));
@@ -1839,7 +1581,7 @@ async function renderLb() {
     // Offline fallback: show only the player's own score
     list.innerHTML = `<div style="text-align:center;padding:20px;color:#888;font-size:13px;">
       🔒 Sign in to see the real leaderboard.<br>
-      <span style="color:var(--gold);font-weight:700">Your best pool score: ${formatNum(PS.bestScores['pool']||0)}</span>
+      <span style="color:var(--gold);font-weight:700">Your best score: ${formatNum(Math.max(0, ...['water','block','crossword','trivia'].map(g=>PS.bestScores[g]||0)))}</span>
     </div>`;
     return;
   }
@@ -1850,7 +1592,7 @@ async function renderLb() {
   try {
     const endpoint = _lbMode === 'friends'
       ? `${_API_BASE}/api/games/leaderboard/friends`
-      : `${_API_BASE}/api/games/leaderboard?tab=${_lbTab}&gameType=pool`;
+      : `${_API_BASE}/api/games/leaderboard?tab=${_lbTab}`;
 
     const r = await fetch(endpoint, { headers: { 'Authorization': `Bearer ${token}` } });
     if (!r.ok) throw new Error('fetch failed');
@@ -2144,15 +1886,9 @@ function onLevelCleared(gameId, score) {
   addXP(15 + Math.floor(score/200));
   checkAchievements();
   updatePlatformBar();
-  // Celebration for non-pool games (pool has its own canvas particle burst)
-  if (gameId !== 'pool') confettiBurst();
+  confettiBurst();
   // Show social actions after level clear
   showPostGameActions(gameId, score);
-}
-function onPoolPocket() {
-  PS.totalPockets++;
-  psSave();
-  checkAchievements();
 }
 function onTriviaStreak(streak) {
   setAchProg('streak_7', Math.min(streak, 7));
@@ -2163,7 +1899,7 @@ let _pgaBanner = null;
 function showPostGameActions(gameId, score) {
   // Remove any existing banner
   if(_pgaBanner) _pgaBanner.remove();
-  const gameNames = {pool:'Pool 🎱',water:'Water Sort 💧',block:'Block Puzzle 🧩',crossword:'Crossword Jam 📖',trivia:'Trivia Master 🧠'};
+  const gameNames = {water:'Water Sort 💧',block:'Block Puzzle 🧩',crossword:'Crossword Jam 📖',trivia:'Trivia Master 🧠'};
   const gameName = gameNames[gameId] || gameId;
   const banner = document.createElement('div');
   banner.id = 'pgaBanner';
@@ -2273,7 +2009,7 @@ function showShareModal(gameId, score, shareType, achievementName, achievementIc
   if (!token) {
     // Fallback: postMessage to parent iframe (works even without auth)
     try {
-      const gameName = {pool:'Pool 🎱',water:'Water Sort 💧',block:'Block Puzzle 🧩',crossword:'Crossword Jam 📖',trivia:'Trivia Master 🧠'}[gameId]||gameId;
+      const gameName = {water:'Water Sort 💧',block:'Block Puzzle 🧩',crossword:'Crossword Jam 📖',trivia:'Trivia Master 🧠'}[gameId]||gameId;
       window.parent.postMessage({
         type: 'SHARE_GAME_SCORE',
         gameType: gameId, score,
@@ -2373,7 +2109,7 @@ window.addEventListener('message', evt => {
         <b style="color:#e74c3c;">${c.challengerName||'Someone'}</b> challenged you!<br>
         Beat <b style="color:var(--gold)">${formatNum(c.challengerScore||0)}</b> in ${c.gameType||'a game'}
       </div>
-      <button onclick="openGame('${c.gameType||'pool'}');this.closest('[style*=inset\\,top]').remove()" style="
+      <button onclick="openGame('${c.gameType||'trivia'}');this.closest('[style*=inset\\,top]').remove()" style="
         background:linear-gradient(135deg,#e74c3c,#c0392b);
         border:none;border-radius:20px;padding:6px 12px;font-size:11px;
         font-weight:900;color:#fff;cursor:pointer;">PLAY</button>
@@ -2391,12 +2127,6 @@ buildDailyCalendar();
 
 // ─── TUTORIAL SYSTEM ─────────────────────────────────────────────────────────
 const TUTORIALS = {
-  pool: [
-    { title:'🎱 Pool Basics', body:'Drag the cue backwards to aim, then release to shoot. The longer you drag, the more power!' },
-    { title:'🎱 Pocketing Balls', body:'Sink all coloured balls before the white (cue) ball. Pocketing the cue ball is a scratch — avoid it!' },
-    { title:'🎱 Power Shot', body:'Hold the cue pressed for 1 second to charge a Power Shot — it glows gold when ready!' },
-    { title:'🎯 Ready to play!', body:'Tap anywhere to start. Good luck!' },
-  ],
   water: [
     { title:'💧 Water Sort', body:'Tap a bottle to select it, then tap a destination to pour. You can only pour matching colours!' },
     { title:'💧 Full Bottles', body:'A bottle is complete when it holds a single colour all the way to the top. Fill all bottles to win!' },
@@ -2420,12 +2150,6 @@ const TUTORIALS = {
     { title:'🔥 Streak Bonus', body:'Answer consecutive questions correctly to build a streak. The higher your streak, the bigger the multiplier!' },
     { title:'⏱️ Timer', body:'You have 20 seconds per question. The timer bar shrinks — watch it!' },
     { title:'🎯 Ready to play!', body:'Tap anywhere to start. Test your knowledge!' },
-  ],
-  wordle: [
-    { title:'🔤 Wordle Swahili', body:'Guess the hidden 5-letter word in 6 tries. Type a letter and hit ENTER to submit your guess.' },
-    { title:'🟩 Colour Clues', body:'🟩 Green = correct letter, right spot. 🟨 Yellow = right letter, wrong spot. ⬛ Grey = letter not in word.' },
-    { title:'📚 Kiswahili Words', body:'All words are common Kiswahili or English words used in East Africa. A new word every session!' },
-    { title:'🎯 Ready to play!', body:'Tap anywhere to start. Bahati njema (Good luck)!' },
   ],
 };
 
@@ -2529,17 +2253,15 @@ function openGame(type) {
   document.getElementById('hub').style.display = 'none';
   document.getElementById('platformBar').classList.add('hidden');
   document.getElementById('gameWrap').classList.add('show');
-  ['pool','water','block','crossword','trivia','wordle'].forEach(g=>{
+  ['water','block','crossword','trivia'].forEach(g=>{
     const el=document.getElementById(g+'Game');
     if(el) el.classList.remove('show');
   });
   const launchers = {
-    pool:      () => { document.getElementById('poolGame').classList.add('show');      initPool(); },
     water:     () => { document.getElementById('waterGame').classList.add('show');     initWater(); },
     block:     () => { document.getElementById('blockGame').classList.add('show');     initBlock(); },
     crossword: () => { document.getElementById('crosswordGame').classList.add('show'); initCrossword(); },
     trivia:    () => { document.getElementById('triviaGame').classList.add('show');    initTrivia(); },
-    wordle:    () => { document.getElementById('wordleGame').classList.add('show');    initWordle(); },
   };
   const launch = launchers[type];
   if (!launch) return;
@@ -2552,7 +2274,6 @@ function goBack() {
   document.getElementById('hub').style.display = '';
   document.getElementById('platformBar').classList.remove('hidden');
   document.getElementById('gameWrap').classList.remove('show');
-  if (poolAnimId) { cancelAnimationFrame(poolAnimId); poolAnimId = null; }
   if(tvTimerInterval){ clearInterval(tvTimerInterval); tvTimerInterval=null; }
   updatePlatformBar();
 }
@@ -2739,19 +2460,6 @@ const AudioMgr = (function(){
       setTimeout(()=>playTone(f*1.2,'sine',0.09,0.09),60);
     },
     triviaTimeWarn(){ if(muted) return; playTone(400,'square',0.08,0.06); },
-    // Wordle sounds
-    wordleLetter(){ if(muted) return; playTone(500+Math.random()*200,'sine',0.04,0.04); },
-    wordleSubmit(){ if(muted) return; playNoise(0.07,0.08,600,'bandpass'); },
-    wordleCorrect(){
-      if(muted) return;
-      [0,60,120,180,240,300].forEach((d,i)=>setTimeout(()=>
-        playTone([523,587,659,698,784,880][i],'sine',0.15,0.14),d));
-    },
-    wordleFail(){
-      if(muted) return;
-      [0,100,200].forEach((d,i)=>setTimeout(()=>
-        playTone([300,250,200][i],'sawtooth',0.15,0.12),d));
-    },
     toggle(){
       muted=!muted;
       document.getElementById('muteBtn').textContent=muted?'🔇':'🔊';
@@ -2768,1741 +2476,6 @@ const Haptic = {
   error()  { try{ if(navigator.vibrate) navigator.vibrate([80,40,80]); }catch(_){} },
 };
 
-// ────────────────────────────────────────────────────────────
-// PARTICLE MANAGER — Lightweight canvas particles
-// ────────────────────────────────────────────────────────────
-const Particles = (function(){
-  let particles=[];
-
-  function add(x, y, opts){
-    const count=opts.count||8;
-    for(let i=0;i<count;i++){
-      const angle=Math.random()*Math.PI*2;
-      const speed=(opts.minSpeed||1)+Math.random()*(opts.maxSpeed||3);
-      particles.push({
-        x, y,
-        vx:Math.cos(angle)*speed,
-        vy:Math.sin(angle)*speed,
-        life:1,
-        decay:(opts.minDecay||0.02)+Math.random()*(opts.maxDecay||0.03),
-        size:(opts.minSize||2)+Math.random()*(opts.maxSize||3),
-        color:Array.isArray(opts.color)?opts.color[Math.floor(Math.random()*opts.color.length)]:(opts.color||'#fff'),
-        gravity:opts.gravity||0,
-        glow:opts.glow||false,
-        shape:opts.shape||'circle',
-        trail:opts.trail||false,
-        trailOpacity:0,
-      });
-    }
-  }
-
-  function update(){
-    for(let i=particles.length-1;i>=0;i--){
-      const p=particles[i];
-      p.x+=p.vx; p.y+=p.vy;
-      p.vy+=p.gravity;
-      p.vx*=0.97; p.vy*=0.97;
-      p.life-=p.decay;
-      if(p.life<=0) particles.splice(i,1);
-    }
-  }
-
-  function draw(ctx, scale){
-    ctx.save();
-    particles.forEach(p=>{
-      const alpha=Math.max(0, p.life);
-      ctx.globalAlpha=alpha;
-      if(p.glow){
-        ctx.shadowColor=p.color;
-        ctx.shadowBlur=10/scale;
-      }
-      ctx.fillStyle=p.color;
-      if(p.shape==='star'){
-        drawStar(ctx,p.x,p.y,p.size*p.life*0.6,p.size*p.life*1.4,5);
-        ctx.fill();
-      } else if(p.shape==='square'){
-        const s=p.size*p.life;
-        ctx.fillRect(p.x-s/2,p.y-s/2,s,s);
-      } else {
-        ctx.beginPath();
-        ctx.arc(p.x,p.y,Math.max(0.1,p.size*p.life),0,Math.PI*2);
-        ctx.fill();
-      }
-    });
-    ctx.globalAlpha=1;
-    ctx.shadowBlur=0;
-    ctx.restore();
-  }
-
-  function drawStar(ctx,cx,cy,r1,r2,pts){
-    ctx.beginPath();
-    for(let i=0;i<pts*2;i++){
-      const a=i*Math.PI/pts - Math.PI/2;
-      const r=i%2===0?r2:r1;
-      i===0?ctx.moveTo(cx+Math.cos(a)*r,cy+Math.sin(a)*r):ctx.lineTo(cx+Math.cos(a)*r,cy+Math.sin(a)*r);
-    }
-    ctx.closePath();
-  }
-
-  function burst(x,y,color,count){
-    add(x,y,{count,color,minSpeed:2,maxSpeed:6,minDecay:0.025,maxDecay:0.055,minSize:2,maxSize:4,glow:true,gravity:0.1});
-  }
-
-  function sparkBurst(x,y,color,count){
-    add(x,y,{count:count||6,color:['#fff','#ffe566',color],minSpeed:1,maxSpeed:4,minDecay:0.03,maxDecay:0.07,minSize:1,maxSize:3,glow:true,gravity:0.08,shape:'square'});
-  }
-
-  function pocketBurst(x,y,color){
-    add(x,y,{count:20,color:[color,'#fff','#f5c518','#ffdd00'],minSpeed:1,maxSpeed:7,minDecay:0.012,maxDecay:0.035,minSize:2,maxSize:5,glow:true,gravity:0.14});
-    add(x,y,{count:8,color:['#fff',color],minSpeed:3,maxSpeed:9,minDecay:0.018,maxDecay:0.04,minSize:1.5,maxSize:3,glow:true,gravity:0.2,shape:'star'});
-  }
-
-  function powerShotBurst(x,y){
-    add(x,y,{count:12,color:['#ff4444','#ff8800','#ffee00'],minSpeed:3,maxSpeed:8,minDecay:0.015,maxDecay:0.04,minSize:2,maxSize:5,glow:true,gravity:0.15});
-  }
-
-  function winBurst(cx,cy){
-    const cols=['#f5c518','#e67e22','#2ecc71','#3498db','#e74c3c','#9b59b6','#fff','#ffdd00'];
-    for(let i=0;i<50;i++){
-      setTimeout(()=>{
-        const x=cx+(Math.random()-0.5)*320;
-        const y=cy+(Math.random()-0.5)*160;
-        const c=cols[Math.floor(Math.random()*cols.length)];
-        const s=['circle','star','square'][Math.floor(Math.random()*3)];
-        add(x,y,{count:5,color:[c,'#fff'],minSpeed:2,maxSpeed:8,minDecay:0.012,maxDecay:0.03,minSize:2,maxSize:5,glow:true,gravity:0.1,shape:s});
-      },i*35);
-    }
-  }
-
-  function trailBurst(x,y,color){
-    add(x,y,{count:3,color:[color,'rgba(255,255,255,0.5)'],minSpeed:0.5,maxSpeed:1.5,minDecay:0.04,maxDecay:0.08,minSize:1,maxSize:2.5,glow:true,gravity:0});
-  }
-
-  return { update, draw, burst, pocketBurst, sparkBurst, powerShotBurst, winBurst, trailBurst, getCount:()=>particles.length };
-})();
-
-// ────────────────────────────────────────────────────────────
-// CAMERA MANAGER — Shake + pulse + transitions
-// ────────────────────────────────────────────────────────────
-const Camera = (function(){
-  let shakeX=0, shakeY=0, shakeMag=0, shakeDur=0;
-  let pulseScale=1, pulseTarget=1;
-  let flashAlpha=0, flashColor='#fff';
-
-  function shake(magnitude, duration){
-    if(magnitude>shakeMag){ shakeMag=magnitude; shakeDur=duration; }
-  }
-
-  function update(){
-    if(shakeDur>0){
-      const decay=shakeDur/10;
-      shakeX=(Math.random()-0.5)*shakeMag*2*decay;
-      shakeY=(Math.random()-0.5)*shakeMag*2*decay;
-      shakeDur--;
-      if(shakeDur<=0){ shakeX=0; shakeY=0; shakeMag=0; }
-    }
-    pulseScale+=(pulseTarget-pulseScale)*0.15;
-    if(Math.abs(pulseScale-pulseTarget)<0.001) pulseScale=pulseTarget;
-    if(flashAlpha>0) flashAlpha*=0.88;
-  }
-
-  function apply(ctx){
-    ctx.translate(shakeX,shakeY);
-  }
-
-  function pulse(amount,color){
-    pulseTarget=1+amount;
-    flashAlpha=amount*2.5;
-    flashColor=color||'#fff';
-    setTimeout(()=>{pulseTarget=1;},100);
-  }
-
-  function drawFlash(ctx,CW,CH){
-    if(flashAlpha<0.005) return;
-    ctx.save();
-    ctx.globalAlpha=Math.min(0.5,flashAlpha);
-    ctx.fillStyle=flashColor;
-    ctx.fillRect(0,0,CW,CH);
-    ctx.restore();
-  }
-
-  return { shake, update, apply, pulse, drawFlash };
-})();
-
-// ────────────────────────────────────────────────────────────
-// POOL CONSTANTS
-// ────────────────────────────────────────────────────────────
-const POOL = {
-  CW:640, CH:360,
-  RAIL:36, BALL_R:10, POCKET_R:22,
-  FRICTION:0.985,
-  ROLLING_FRICTION:0.978,
-  CUSHION:0.72,
-  RESTITUTION:0.93,
-  MIN_V:0.12,
-  MAX_PWR:18,
-  SPIN_DECAY:0.985,
-  SPIN_CUSHION:0.65,
-  THEMES:[
-    {felt:'#1a6b3c',felt2:'#104a28',rail:'#5c2e0a',rail2:'#7a3c0f',cushion:'#145c30',dot:'rgba(255,255,255,0.5)',name:'Classic Green'},
-    {felt:'#0a3d7a',felt2:'#072a58',rail:'#2c1a0a',rail2:'#3c2410',cushion:'#082d5c',dot:'rgba(255,230,100,0.5)',name:'Royal Blue'},
-    {felt:'#4a0a2a',felt2:'#380718',rail:'#1a0a30',rail2:'#2a1040',cushion:'#3a0820',dot:'rgba(200,150,255,0.5)',name:'Crimson'},
-    {felt:'#1a3a1a',felt2:'#102810',rail:'#3c1a0a',rail2:'#4e2210',cushion:'#122812',dot:'rgba(180,255,180,0.5)',name:'Forest'},
-    {felt:'#2a1a4a',felt2:'#1c1030',rail:'#1a2a1a',rail2:'#243524',cushion:'#1c1030',dot:'rgba(150,200,255,0.5)',name:'Midnight'},
-    {felt:'#0a3030',felt2:'#061e1e',rail:'#1a3010',rail2:'#243e14',cushion:'#082020',dot:'rgba(100,255,220,0.5)',name:'Teal'},
-    {felt:'#3a2a0a',felt2:'#281808',rail:'#2a1a0a',rail2:'#382210',cushion:'#2a1a08',dot:'rgba(255,200,100,0.5)',name:'Amber'},
-    {felt:'#1a1a4a',felt2:'#101038',rail:'#0a1a2a',rail2:'#102238',cushion:'#101038',dot:'rgba(180,180,255,0.5)',name:'Sapphire'},
-  ],
-  BALL_COLORS:[
-    null,
-    '#f5c518','#1a4bb5','#c0392b','#6c2dc7','#e67e22','#1abc9c','#8e1b1b','#111111',
-    '#f5c518','#1a4bb5','#c0392b','#6c2dc7','#e67e22','#1abc9c','#8e1b1b'
-  ],
-  POCKETS:null,
-};
-
-// ────────────────────────────────────────────────────────────
-// POOL STATE
-// ────────────────────────────────────────────────────────────
-let poolCanvas, poolCtx, poolAnimId=null;
-let pStage=1, pScore=0, pLives=8, pShooting=false;
-let pPocketed=0, pTarget=3;
-let pBalls=[], pCue={x:0,y:0,vx:0,vy:0,spinX:0,spinY:0};
-let pAimAngle=0, pPower=0;
-let pTheme=POOL.THEMES[0], pPattern='triangle';
-let pScratch=false, pScratchTimer=0;
-let pSliderDragging=false, pSpinDragging=false;
-let pMsgTimer=null, pComboTimer=null;
-let pCombo=0;
-let pTrailFrames=0;
-
-// Spin state
-let pSpinX=0, pSpinY=0;
-
-// Motion blur offscreen buffers
-let blurCanvas=null, blurCtx=null;
-
-// Felt texture cache
-let feltTextureCache={};
-let lightingTime=0;
-
-// ────────────────────────────────────────────────────────────
-// INIT
-// ────────────────────────────────────────────────────────────
-function initPool() {
-  poolCanvas=document.getElementById('poolCanvas');
-  poolCtx=poolCanvas.getContext('2d',{alpha:false});
-
-  const wrap=document.getElementById('poolMain');
-  const leftOffset=76, rightOffset=44;
-  const W=wrap.clientWidth-leftOffset-rightOffset;
-  const H=wrap.clientHeight;
-  const scale=Math.min(W/POOL.CW,H/POOL.CH);
-  poolCanvas.width=Math.round(POOL.CW*scale);
-  poolCanvas.height=Math.round(POOL.CH*scale);
-  poolCanvas.style.width=poolCanvas.width+'px';
-  poolCanvas.style.height=poolCanvas.height+'px';
-  poolCanvas.style.marginLeft=leftOffset+'px';
-
-  // Motion blur buffer
-  blurCanvas=document.createElement('canvas');
-  blurCanvas.width=poolCanvas.width;
-  blurCanvas.height=poolCanvas.height;
-  blurCtx=blurCanvas.getContext('2d');
-
-  POOL.POCKETS=[
-    {x:POOL.RAIL-2,   y:POOL.RAIL-2},
-    {x:POOL.CW/2,     y:POOL.RAIL-5},
-    {x:POOL.CW-POOL.RAIL+2, y:POOL.RAIL-2},
-    {x:POOL.RAIL-2,   y:POOL.CH-POOL.RAIL+2},
-    {x:POOL.CW/2,     y:POOL.CH-POOL.RAIL+5},
-    {x:POOL.CW-POOL.RAIL+2, y:POOL.CH-POOL.RAIL+2},
-  ];
-
-  buildThemeBar();
-  poolStartStage(1);
-  if(poolAnimId) cancelAnimationFrame(poolAnimId);
-  poolLastTime=null; poolAccumulator=0;
-  poolAnimId=requestAnimationFrame(poolLoop);
-  poolBindInput();
-  poolBindSlider();
-  poolBindSpinPad();
-}
-
-function buildThemeBar(){
-  const bar=document.getElementById('themeBar');
-  bar.innerHTML='';
-  POOL.THEMES.forEach((t,i)=>{
-    const dot=document.createElement('div');
-    dot.className='theme-dot'+(i===0?' active':'');
-    dot.style.background=t.felt;
-    dot.title=t.name;
-    dot.addEventListener('click',()=>{
-      pTheme=POOL.THEMES[i];
-      feltTextureCache={};
-      bar.querySelectorAll('.theme-dot').forEach((d,j)=>d.classList.toggle('active',j===i));
-      AudioMgr.uiClick();
-    });
-    bar.appendChild(dot);
-  });
-}
-
-// ────────────────────────────────────────────────────────────
-// STAGE SETUP
-// ────────────────────────────────────────────────────────────
-function rng(s){
-  let x=s;
-  return function(){ x=(x*1664525+1013904223)&0xffffffff; return(x>>>0)/0xffffffff; };
-}
-
-function poolStartStage(s) {
-  pStage=s; pPocketed=0; pShooting=false; pScratch=false; pPower=0; pCombo=0;
-  pSpinX=0; pSpinY=0; updateSpinIndicator();
-  const r=rng(s*1337+42);
-  const patterns=['triangle','diamond','cross','scatter','twoCluster','line','arc','zigzag','spiral','pyramid','wide','compact','snake','ring','random'];
-  pPattern=patterns[(s-1)%patterns.length];
-  pTheme=POOL.THEMES[(s-1)%POOL.THEMES.length];
-  // Update theme dot active state
-  const bar=document.getElementById('themeBar');
-  if(bar) bar.querySelectorAll('.theme-dot').forEach((d,j)=>d.classList.toggle('active',j===(s-1)%POOL.THEMES.length));
-  feltTextureCache={};
-  pTarget=Math.min(3+Math.floor((s-1)/2),12);
-  const cueX=POOL.CW*0.25;
-  const cueY=POOL.CH/2+(-30+60*r());
-  pCue={x:cueX,y:cueY,vx:0,vy:0,spinX:0,spinY:0};  pAimAngle=0;
-  pBalls=poolBuildBalls(pPattern,r);
-  poolUpdateHUD();
-  document.getElementById('patternHint').textContent=pPattern.toUpperCase();
-  document.getElementById('poolOverlay').classList.remove('show');
-}
-
-function poolBuildBalls(pat, r) {
-  const nums=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15];
-  for(let i=nums.length-1;i>0;i--){const j=Math.floor(r()*(i+1));[nums[i],nums[j]]=[nums[j],nums[i]];}
-  const i8=nums.indexOf(8); nums.splice(i8,1); nums.splice(7,0,8);
-  const sp=POOL.BALL_R*2.2, cx=POOL.CW*0.63, cy=POOL.CH/2;
-  const pts=[];
-  if(pat==='triangle'){
-    for(let row=0;row<5;row++) for(let col=0;col<=row;col++)
-      pts.push({x:cx+row*sp*0.866,y:cy-row*sp*0.5+col*sp});
-  } else if(pat==='diamond'){
-    [[0,0],[1,-1],[1,0],[1,1],[2,-2],[2,-1],[2,0],[2,1],[2,2],[3,-1],[3,0],[3,1],[4,-1],[4,0],[5,0]]
-    .forEach(([a,b])=>pts.push({x:cx+a*sp*0.8,y:cy+b*sp*0.8}));
-  } else if(pat==='cross'){
-    [[2,0],[1,0],[0,0],[-1,0],[-2,0],[0,1],[0,-1],[0,2],[0,-2],[1,1],[1,-1],[-1,1],[-1,-1],[2,1],[0,3]]
-    .slice(0,15).forEach(([a,b])=>pts.push({x:cx+a*sp,y:cy+b*sp}));
-  } else if(pat==='scatter'){
-    for(let i=0;i<15;i++) pts.push({x:cx-40+r()*200,y:cy-100+r()*200});
-  } else if(pat==='twoCluster'){
-    for(let i=0;i<8;i++) pts.push({x:cx-30+(i%3)*sp,y:cy-20+Math.floor(i/3)*sp});
-    for(let i=0;i<7;i++) pts.push({x:cx+90+(i%3)*sp,y:cy-15+Math.floor(i/3)*sp});
-  } else if(pat==='line'){
-    for(let i=0;i<15;i++) pts.push({x:cx+(i%5)*sp,y:cy-30+Math.floor(i/5)*sp});
-  } else if(pat==='arc'){
-    for(let i=0;i<15;i++){
-      const a=(i/14)*Math.PI-Math.PI/2;
-      const rad=70+Math.floor(i/5)*sp;
-      pts.push({x:cx+Math.cos(a)*rad*0.7,y:cy+Math.sin(a)*rad});
-    }
-  } else if(pat==='spiral'){
-    for(let i=0;i<15;i++){
-      const a=(i/15)*Math.PI*3;
-      const rad=18+i*5.5;
-      pts.push({x:cx+Math.cos(a)*rad*0.65,y:cy+Math.sin(a)*rad*0.5});
-    }
-  } else if(pat==='pyramid'){
-    [[0,0],[1,-1],[1,1],[2,-2],[2,0],[2,2],[3,-3],[3,-1],[3,1],[3,3],[4,-2],[4,0],[4,2],[5,-1],[5,1]]
-    .forEach(([a,b])=>pts.push({x:cx+a*sp*0.82,y:cy+b*sp*0.82}));
-  } else if(pat==='wide'){
-    for(let i=0;i<15;i++) pts.push({x:cx+(i%8)*sp*0.85,y:cy+Math.floor(i/8)*sp-(Math.floor(i/8)?0:30)});
-  } else if(pat==='compact'){
-    [[0,0],[1,0],[0,1],[1,1],[0,-1],[1,-1],[-1,0],[-1,1],[-1,-1],[2,0],[2,1],[2,-1],[0,2],[1,2],[2,2]]
-    .forEach(([a,b])=>pts.push({x:cx+a*sp*0.92,y:cy+b*sp*0.92}));
-  } else if(pat==='snake'){
-    for(let i=0;i<15;i++){
-      const row=Math.floor(i/5);
-      const col=row%2===0?(i%5):(4-i%5);
-      pts.push({x:cx+col*sp*0.9,y:cy+(row-1)*sp*0.9});
-    }
-  } else if(pat==='ring'){
-    for(let i=0;i<12;i++){
-      const a=(i/12)*Math.PI*2;
-      pts.push({x:cx+Math.cos(a)*60,y:cy+Math.sin(a)*45});
-    }
-    pts.push({x:cx,y:cy},{x:cx+sp*0.4,y:cy},{x:cx-sp*0.4,y:cy});
-  } else {
-    for(let i=0;i<15;i++) pts.push({x:cx+(i%5)*sp*0.95,y:cy-30+Math.floor(i/5)*sp+(i%2)*16});
-  }
-  return pts.slice(0,15).map((p,i)=>({
-    num:nums[i],
-    x:Math.max(POOL.RAIL+POOL.BALL_R+5,Math.min(POOL.CW-POOL.RAIL-POOL.BALL_R-5,p.x)),
-    y:Math.max(POOL.RAIL+POOL.BALL_R+5,Math.min(POOL.CH-POOL.RAIL-POOL.BALL_R-5,p.y)),
-    vx:0,vy:0,pocketed:false,
-    spinX:0,spinY:0,
-    rotation:0,
-    prevX:p.x,prevY:p.y,
-  }));
-}
-
-// ────────────────────────────────────────────────────────────
-// PHYSICS ENGINE — Advanced elastic collisions with spin
-// ────────────────────────────────────────────────────────────
-function poolStep() {
-  const R=POOL.RAIL, BR=POOL.BALL_R, PR=POOL.POCKET_R;
-  const all=[pCue,...pBalls.filter(b=>!b.pocketed)];
-
-  all.forEach(b=>{ b.prevX=b.x; b.prevY=b.y; });
-
-  all.forEach(b=>{
-    // Store previous position for motion blur
-    b.x+=b.vx; b.y+=b.vy;
-    const speed=Math.sqrt(b.vx*b.vx+b.vy*b.vy);
-
-    // Rolling vs sliding friction
-    const isRolling=speed<2.5;
-    const fric=isRolling?POOL.ROLLING_FRICTION:POOL.FRICTION;
-    b.vx*=fric; b.vy*=fric;
-
-    // Spin decay
-    if(b.spinX) b.spinX*=POOL.SPIN_DECAY;
-    if(b.spinY) b.spinY*=POOL.SPIN_DECAY;
-
-    // Spin-induced curve — uses ball's own stored spin, only during rolling phase
-    if(b===pCue && speed>0.3 && speed<6){
-      const spinInfluence=0.008;
-      // sidespin curves perpendicular to motion
-      const vLen=speed||1;
-      const nx=b.vx/vLen, ny=b.vy/vLen;
-      const perpX=-ny, perpY=nx;
-      b.vx+=perpX*b.spinX*spinInfluence*speed;
-      b.vy+=perpY*b.spinX*spinInfluence*speed;
-      // topspin/backspin nudges along motion direction
-      b.vx+=nx*(-b.spinY)*spinInfluence*speed*0.5;
-      b.vy+=ny*(-b.spinY)*spinInfluence*speed*0.5;
-    }
-
-    // Stop tiny movements
-    if(Math.abs(b.vx)<POOL.MIN_V&&Math.abs(b.vy)<POOL.MIN_V){b.vx=0;b.vy=0;}
-
-    // Ball rotation for visual
-    b.rotation=(b.rotation||0)+speed*0.06;
-
-    // Cushion collisions with energy loss and spin transfer
-    const cushionEnergyLoss=POOL.CUSHION;
-    if(b.x-BR<R){
-      b.x=R+BR;
-      const prevVX=b.vx;
-      b.vx=Math.abs(b.vx)*cushionEnergyLoss;
-      if(b===pCue){ b.vx+=b.spinX*Math.abs(prevVX)*POOL.SPIN_CUSHION*0.12; }
-      const hitV=Math.abs(prevVX);
-      AudioMgr.cushion(hitV*0.06);
-      Camera.shake(hitV*0.5,4);
-      Particles.burst(b.x,b.y,'#ddd',Math.min(6,Math.round(hitV)));
-      Particles.sparkBurst(b.x,b.y,pTheme.cushion||'#1a6b3c',3);
-    }
-    if(b.x+BR>POOL.CW-R){
-      b.x=POOL.CW-R-BR;
-      const prevVX=b.vx;
-      b.vx=-Math.abs(b.vx)*cushionEnergyLoss;
-      if(b===pCue){ b.vx-=b.spinX*Math.abs(prevVX)*POOL.SPIN_CUSHION*0.12; }
-      const hitV=Math.abs(prevVX);
-      AudioMgr.cushion(hitV*0.06);
-      Camera.shake(hitV*0.5,4);
-      Particles.burst(b.x,b.y,'#ddd',Math.min(6,Math.round(hitV)));
-    }
-    if(b.y-BR<R){
-      b.y=R+BR;
-      const prevVY=b.vy;
-      b.vy=Math.abs(b.vy)*cushionEnergyLoss;
-      if(b===pCue){ b.vy+=b.spinY*Math.abs(prevVY)*POOL.SPIN_CUSHION*0.12; }
-      const hitV=Math.abs(prevVY);
-      AudioMgr.cushion(hitV*0.06);
-      Camera.shake(hitV*0.5,4);
-      Particles.burst(b.x,b.y,'#ddd',Math.min(6,Math.round(hitV)));
-    }
-    if(b.y+BR>POOL.CH-R){
-      b.y=POOL.CH-R-BR;
-      const prevVY=b.vy;
-      b.vy=-Math.abs(b.vy)*cushionEnergyLoss;
-      if(b===pCue){ b.vy-=b.spinY*Math.abs(prevVY)*POOL.SPIN_CUSHION*0.12; }
-      const hitV=Math.abs(prevVY);
-      AudioMgr.cushion(hitV*0.06);
-      Camera.shake(hitV*0.5,4);
-      Particles.burst(b.x,b.y,'#ddd',Math.min(6,Math.round(hitV)));
-    }
-  });
-
-  // Ball-ball elastic collisions with position correction and spin transfer
-  for(let i=0;i<all.length;i++){
-    for(let j=i+1;j<all.length;j++){
-      const a=all[i], b=all[j];
-      const dx=b.x-a.x, dy=b.y-a.y;
-      const distSq=dx*dx+dy*dy;
-      const minDist=BR*2;
-      if(distSq<minDist*minDist && distSq>0.001){
-        const dist=Math.sqrt(distSq);
-        const nx=dx/dist, ny=dy/dist;
-        // Positional correction — Baumgarte stabilization
-        const overlap=(minDist-dist)*0.52;
-        a.x-=nx*overlap; a.y-=ny*overlap;
-        b.x+=nx*overlap; b.y+=ny*overlap;
-
-        // Velocity along normal
-        const dvx=a.vx-b.vx, dvy=a.vy-b.vy;
-        const dot=dvx*nx+dvy*ny;
-        if(dot>0){
-          // Restitution factor applied to impulse
-          const restitution=POOL.RESTITUTION;
-          const j=(1+restitution)*dot*0.5;
-
-          // Spin transfer: cue ball's spin imparted to target
-          let spinTransferX=0, spinTransferY=0;
-          if(a===pCue){
-            spinTransferX=a.spinX*dot*0.18;
-            spinTransferY=a.spinY*dot*0.18;
-          }
-
-          a.vx-=j*nx; a.vy-=j*ny;
-          b.vx+=j*nx+spinTransferX; b.vy+=j*ny+spinTransferY;
-
-          // Sidespin causes slight curve on target ball post-hit
-          if(a===pCue){
-            const sideSpinInfluence=a.spinX*0.06;
-            const perp={x:-ny,y:nx};
-            b.vx+=perp.x*sideSpinInfluence*Math.abs(dot);
-            b.vy+=perp.y*sideSpinInfluence*Math.abs(dot);
-          }
-
-          const hitSpeed=Math.abs(dot);
-          AudioMgr.ballHit(hitSpeed*0.07);
-          Camera.shake(hitSpeed*0.7,5);
-          Camera.pulse(hitSpeed*0.008, '#fff');
-          const px=(a.x+b.x)*0.5, py=(a.y+b.y)*0.5;
-          const color=b===pCue?'#fff':(POOL.BALL_COLORS[b.num]||'#ccc');
-          Particles.burst(px,py,color,Math.min(14,Math.round(hitSpeed*2.2)));
-          if(hitSpeed>8) Particles.sparkBurst(px,py,color,Math.min(8,Math.round(hitSpeed)));
-        }
-      }
-    }
-  }
-
-  // Pocket detection — object balls
-  pBalls.forEach(b=>{
-    if(b.pocketed) return;
-    for(const p of POOL.POCKETS){
-      const dx=b.x-p.x, dy=b.y-p.y;
-      if(Math.sqrt(dx*dx+dy*dy)<PR){
-        b.pocketed=true; b.vx=0; b.vy=0;
-        const pts=b.num===8?50:(b.num>8?15:10);
-        pScore+=pts; pPocketed++;
-        pCombo++;
-        poolUpdateHUD();
-        AudioMgr.pocket();
-        b.num===8?Haptic.heavy():Haptic.success();
-        onPoolPocket();
-        Camera.shake(5,9);
-        Camera.pulse(0.05,POOL.BALL_COLORS[b.num]||'#fff');
-        Particles.pocketBurst(p.x,p.y,POOL.BALL_COLORS[b.num]||'#fff');
-        const msg=b.num===8?'🎱 8-Ball! +50':`Ball ${b.num} pocketed! +${pts}`;
-        poolShowMsg(msg);
-        if(pCombo>1) showCombo(pCombo);
-        AudioMgr.combo(pCombo);
-        break;
-      }
-    }
-  });
-
-  // Cue ball scratch
-  if(!pScratch){
-    for(const p of POOL.POCKETS){
-      const dx=pCue.x-p.x, dy=pCue.y-p.y;
-      if(Math.sqrt(dx*dx+dy*dy)<PR){
-        pScratch=true; pScratchTimer=90; pCue.vx=0; pCue.vy=0; pCombo=0;
-        pLives=Math.max(0,pLives-1); poolUpdateHUD();
-        AudioMgr.scratch();
-        Haptic.error();
-        Camera.shake(7,12);
-        Camera.pulse(0.06,'#ff3333');
-        Particles.burst(p.x,p.y,'#ff4444',16);
-        poolShowMsg('Scratch! -1 Life ❤️');
-        if(pLives<=0) setTimeout(()=>poolGameOver(),700);
-        break;
-      }
-    }
-  }
-
-  if(pScratch && pScratchTimer>0){
-    pScratchTimer--;
-    if(pScratchTimer<=0){
-      pScratch=false;
-      pCue.x=POOL.CW*0.25; pCue.y=POOL.CH/2; pCue.vx=0; pCue.vy=0;
-      pSpinX=0; pSpinY=0; updateSpinIndicator();
-    }
-  }
-
-  // Motion trail particles for fast balls
-  pTrailFrames=(pTrailFrames||0)+1;
-  if(pTrailFrames%2===0){
-    all.forEach(b=>{
-      const spd=Math.sqrt(b.vx*b.vx+b.vy*b.vy);
-      if(spd>6){
-        const col=b===pCue?'#fff':(POOL.BALL_COLORS[b.num]||'#888');
-        Particles.trailBurst(b.prevX,b.prevY,col);
-      }
-    });
-  }
-
-  Particles.update();
-  Camera.update();
-  lightingTime+=0.02;
-
-  const moving=all.some(b=>Math.abs(b.vx)>0.04||Math.abs(b.vy)>0.04);
-  if(!moving && pShooting){
-    pShooting=false; pCombo=0;
-    if(pPocketed>=pTarget) setTimeout(()=>poolStageClear(),500);
-  }
-}
-
-// ────────────────────────────────────────────────────────────
-// AIM SYSTEM — Ghost ball + trajectory prediction
-// ────────────────────────────────────────────────────────────
-function castRay(ox, oy, dx, dy, excludeIdx, maxLen){
-  const R=POOL.RAIL, BR=POOL.BALL_R;
-  let bestT=maxLen||350;
-  let hitBall=null, hitNX=0, hitNY=0;
-
-  const tSlabs=[
-    {t:(R+BR-ox)/dx,nx:-1,ny:0},
-    {t:(POOL.CW-R-BR-ox)/dx,nx:1,ny:0},
-    {t:(R+BR-oy)/dy,nx:0,ny:-1},
-    {t:(POOL.CH-R-BR-oy)/dy,nx:0,ny:1},
-  ];
-  tSlabs.forEach(s=>{
-    if(s.t>0.1&&s.t<bestT){ bestT=s.t; hitNX=s.nx; hitNY=s.ny; hitBall=null; }
-  });
-
-  const activeBalls=pBalls.filter((b,i)=>!b.pocketed&&i!==excludeIdx);
-  activeBalls.forEach(b=>{
-    const fx=ox-b.x, fy=oy-b.y;
-    const a2=dx*dx+dy*dy;
-    const b2=2*(fx*dx+fy*dy);
-    const c2=fx*fx+fy*fy-(BR*2)*(BR*2);
-    const disc=b2*b2-4*a2*c2;
-    if(disc>=0){
-      const t=(-b2-Math.sqrt(disc))/(2*a2);
-      if(t>0.5&&t<bestT){ bestT=t; hitBall=b; hitNX=0; hitNY=0; }
-    }
-  });
-
-  const hx=ox+dx*bestT, hy=oy+dy*bestT;
-  let bnx=0, bny=0, bx=hx, by=hy;
-  if(hitBall){
-    const d=Math.sqrt((hx-hitBall.x)**2+(hy-hitBall.y)**2)||1;
-    bnx=(hx-hitBall.x)/d; bny=(hy-hitBall.y)/d;
-  } else {
-    bnx=hitNX; bny=hitNY;
-  }
-  if(bnx!==0||bny!==0){
-    const dot2=dx*bnx+dy*bny;
-    bx=hx+(dx-2*dot2*bnx)*80;
-    by=hy+(dy-2*dot2*bny)*80;
-  }
-  return {x:hx,y:hy,hitBall,bnx,bny,bx,by,t:bestT};
-}
-
-// Cast second bank reflection
-function castRay2(ox, oy, dx, dy, maxLen){
-  const R=POOL.RAIL, BR=POOL.BALL_R;
-  let bestT=maxLen||200;
-  let hitNX=0, hitNY=0;
-  const tSlabs=[
-    {t:(R+BR-ox)/dx,nx:-1,ny:0},
-    {t:(POOL.CW-R-BR-ox)/dx,nx:1,ny:0},
-    {t:(R+BR-oy)/dy,nx:0,ny:-1},
-    {t:(POOL.CH-R-BR-oy)/dy,nx:0,ny:1},
-  ];
-  tSlabs.forEach(s=>{
-    if(s.t>0.1&&s.t<bestT){ bestT=s.t; hitNX=s.nx; hitNY=s.ny; }
-  });
-  const hx=ox+dx*bestT, hy=oy+dy*bestT;
-  return {x:hx,y:hy,hitNX,hitNY};
-}
-
-// ────────────────────────────────────────────────────────────
-// RENDERER
-// ────────────────────────────────────────────────────────────
-function poolDraw() {
-  const ctx=poolCtx, CW=POOL.CW, CH=POOL.CH, R=POOL.RAIL;
-  const sc=poolCanvas.width/CW;
-
-  // Motion blur: blend previous frame for fast balls
-  const allBalls=[pCue,...pBalls.filter(b=>!b.pocketed)];
-  const maxSpeed=Math.max(...allBalls.map(b=>Math.sqrt(b.vx*b.vx+b.vy*b.vy)));
-  const doBlur=pShooting && maxSpeed>5 && blurCtx;
-  if(doBlur){
-    blurCtx.clearRect(0,0,blurCanvas.width,blurCanvas.height);
-    blurCtx.drawImage(poolCanvas,0,0);
-  }
-
-  ctx.save();
-  ctx.scale(sc,sc);
-  Camera.apply(ctx);
-
-  drawTable(ctx,CW,CH,R);
-
-  if(!pShooting&&!pScratch){
-    drawAimSystem(ctx,CW,CH,R);
-    drawCueStick(ctx);
-  }
-
-  // Shadows pass
-  allBalls.forEach(b=>{
-    if(b===pCue) drawBallShadow(ctx,b.x,b.y,maxSpeed>3?Math.sqrt(b.vx*b.vx+b.vy*b.vy):0);
-    else drawBallShadow(ctx,b.x,b.y,0);
-  });
-
-  // Balls pass with glow for fast balls
-  allBalls.forEach(b=>{
-    const spd=Math.sqrt(b.vx*b.vx+b.vy*b.vy);
-    if(b===pCue) drawCueBall(ctx,spd);
-    else drawPoolBall(ctx,b,spd);
-  });
-
-  Particles.draw(ctx,sc);
-  Camera.drawFlash(ctx,CW,CH);
-
-  ctx.restore();
-
-  // Motion blur composite over scene
-  if(doBlur){
-    const blurAlpha=Math.min(0.35, maxSpeed*0.025);
-    poolCtx.save();
-    poolCtx.globalAlpha=blurAlpha;
-    poolCtx.drawImage(blurCanvas,0,0);
-    poolCtx.restore();
-  }
-
-  // Power bar
-  const pct=pShooting?0:pPower*100;
-  document.getElementById('powerPct').textContent=Math.round(pct)+'%';
-  document.getElementById('powerPctLabel').textContent=Math.round(pct)+'%';
-  const fill=document.getElementById('powerFill');
-  const glow=document.getElementById('powerGlow');
-  fill.style.height=pct+'%';
-  glow.style.height=pct+'%';
-  if(pct>72){
-    fill.style.background='linear-gradient(to top,#e74c3c,#ff6b35)';
-    glow.style.background='linear-gradient(to top,rgba(231,76,60,0.4),rgba(255,107,53,0.4))';
-  } else if(pct>42){
-    fill.style.background='linear-gradient(to top,#f39c12,#f5c518)';
-    glow.style.background='linear-gradient(to top,rgba(243,156,18,0.35),rgba(245,197,24,0.35))';
-  } else {
-    fill.style.background='linear-gradient(to top,#2980b9,#2ecc71)';
-    glow.style.background='linear-gradient(to top,rgba(41,128,185,0.3),rgba(46,204,113,0.3))';
-  }
-  document.getElementById('powerThumb').style.bottom=pct+'%';
-}
-
-function drawTable(ctx, CW, CH, R){
-  // Outer shadow for depth
-  ctx.save();
-  ctx.shadowColor='rgba(0,0,0,0.9)';
-  ctx.shadowBlur=30;
-  ctx.shadowOffsetX=4; ctx.shadowOffsetY=6;
-
-  // Wood rail with rich gradient
-  const woodGrad=ctx.createLinearGradient(0,0,CW,CH);
-  woodGrad.addColorStop(0,lighten(pTheme.rail2,30));
-  woodGrad.addColorStop(0.2,lighten(pTheme.rail2,15));
-  woodGrad.addColorStop(0.5,pTheme.rail2);
-  woodGrad.addColorStop(0.8,pTheme.rail);
-  woodGrad.addColorStop(1,darken(pTheme.rail,25));
-  ctx.fillStyle=woodGrad;
-  roundRect(ctx,0,0,CW,CH,14);
-  ctx.fill();
-  ctx.restore();
-
-  // Wood grain texture lines
-  ctx.save();
-  ctx.globalAlpha=0.055;
-  for(let i=0;i<16;i++){
-    const y=(i/15)*CH;
-    const wave=Math.sin(i*0.8)*3;
-    ctx.beginPath();
-    ctx.moveTo(0,y+wave);
-    for(let x=0;x<CW;x+=20){
-      ctx.lineTo(x,y+wave+Math.sin(x*0.03+i)*1.5);
-    }
-    ctx.strokeStyle=i%3===0?'rgba(255,255,255,1)':'rgba(0,0,0,1)';
-    ctx.lineWidth=i%3===0?1.2:0.8;
-    ctx.stroke();
-  }
-  ctx.restore();
-
-  // Inner metallic frame
-  const metalGrad=ctx.createLinearGradient(0,0,0,CH);
-  metalGrad.addColorStop(0,'rgba(255,255,255,0.22)');
-  metalGrad.addColorStop(0.4,'rgba(255,255,255,0.08)');
-  metalGrad.addColorStop(1,'rgba(0,0,0,0.3)');
-  ctx.fillStyle=metalGrad;
-  roundRect(ctx,4,4,CW-8,CH-8,11);
-  ctx.fill();
-
-  // Cushion rubber strip
-  const cushionW=5;
-  ctx.fillStyle=pTheme.cushion||pTheme.felt;
-  // Top cushion
-  ctx.beginPath();
-  ctx.moveTo(R-cushionW,R-cushionW);
-  ctx.lineTo(CW-R+cushionW,R-cushionW);
-  ctx.lineTo(CW-R,R);
-  ctx.lineTo(R,R);
-  ctx.closePath(); ctx.fill();
-  // Bottom cushion
-  ctx.beginPath();
-  ctx.moveTo(R,CH-R);
-  ctx.lineTo(CW-R,CH-R);
-  ctx.lineTo(CW-R+cushionW,CH-R+cushionW);
-  ctx.lineTo(R-cushionW,CH-R+cushionW);
-  ctx.closePath(); ctx.fill();
-  // Left cushion
-  ctx.beginPath();
-  ctx.moveTo(R-cushionW,R-cushionW);
-  ctx.lineTo(R,R);
-  ctx.lineTo(R,CH-R);
-  ctx.lineTo(R-cushionW,CH-R+cushionW);
-  ctx.closePath(); ctx.fill();
-  // Right cushion
-  ctx.beginPath();
-  ctx.moveTo(CW-R,R);
-  ctx.lineTo(CW-R+cushionW,R-cushionW);
-  ctx.lineTo(CW-R+cushionW,CH-R+cushionW);
-  ctx.lineTo(CW-R,CH-R);
-  ctx.closePath(); ctx.fill();
-
-  // Cushion highlight
-  ctx.save();
-  ctx.globalAlpha=0.15;
-  ctx.strokeStyle='#fff';
-  ctx.lineWidth=0.8;
-  ctx.strokeRect(R,R,CW-2*R,CH-2*R);
-  ctx.restore();
-
-  // ── Premium Felt surface ──
-  const feltGrad=ctx.createRadialGradient(CW*0.42,CH*0.38,10,CW/2,CH/2,CW*0.7);
-  feltGrad.addColorStop(0,lighten(pTheme.felt,22));
-  feltGrad.addColorStop(0.4,lighten(pTheme.felt,8));
-  feltGrad.addColorStop(0.75,pTheme.felt);
-  feltGrad.addColorStop(1,darken(pTheme.felt2,8));
-  ctx.fillStyle=feltGrad;
-  ctx.fillRect(R,R,CW-2*R,CH-2*R);
-
-  // Felt micro-texture pattern (crosshatch)
-  ctx.save();
-  ctx.globalAlpha=0.025;
-  ctx.strokeStyle='rgba(255,255,255,1)';
-  ctx.lineWidth=0.4;
-  const spacing=8;
-  for(let x=R;x<CW-R;x+=spacing){
-    ctx.beginPath(); ctx.moveTo(x,R); ctx.lineTo(x,CH-R); ctx.stroke();
-  }
-  for(let y=R;y<CH-R;y+=spacing){
-    ctx.beginPath(); ctx.moveTo(R,y); ctx.lineTo(CW-R,y); ctx.stroke();
-  }
-  ctx.restore();
-
-  // Felt nap sheen (diagonal brush strokes)
-  ctx.save();
-  ctx.globalAlpha=0.018;
-  ctx.strokeStyle='rgba(255,255,255,1)';
-  ctx.lineWidth=1;
-  for(let i=-20;i<60;i++){
-    const x=R+(i/40)*(CW-2*R);
-    ctx.beginPath(); ctx.moveTo(x,R); ctx.lineTo(x+30,CH-R); ctx.stroke();
-  }
-  ctx.restore();
-
-  // Dynamic lighting — moving highlight
-  const lightX=CW*0.35+Math.sin(lightingTime*0.5)*50;
-  const lightY=CH*0.3+Math.cos(lightingTime*0.3)*25;
-  const lightGrad=ctx.createRadialGradient(lightX,lightY,10,lightX,lightY,CW*0.55);
-  lightGrad.addColorStop(0,'rgba(255,255,255,0.045)');
-  lightGrad.addColorStop(0.5,'rgba(255,255,255,0.012)');
-  lightGrad.addColorStop(1,'rgba(0,0,0,0)');
-  ctx.fillStyle=lightGrad;
-  ctx.fillRect(R,R,CW-2*R,CH-2*R);
-
-  // Head string line
-  ctx.save();
-  ctx.setLineDash([5,9]);
-  ctx.beginPath(); ctx.moveTo(CW*0.25,R); ctx.lineTo(CW*0.25,CH-R);
-  ctx.strokeStyle='rgba(255,255,255,0.1)'; ctx.lineWidth=1; ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.restore();
-
-  // Balk line
-  ctx.save();
-  ctx.setLineDash([3,6]);
-  ctx.beginPath();
-  const bY=CH/2-35; const bY2=CH/2+35;
-  ctx.moveTo(CW*0.25,bY); ctx.lineTo(CW*0.25,bY2);
-  ctx.strokeStyle='rgba(255,255,255,0.06)'; ctx.lineWidth=0.8; ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.restore();
-
-  // Center dot, spot, pink spot
-  [[CW/2,CH/2,2.5],[CW*0.25,CH/2,2],[CW*0.67,CH/2,2]].forEach(([x,y,r])=>{
-    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2);
-    ctx.fillStyle='rgba(255,255,255,0.2)'; ctx.fill();
-  });
-
-  // Diamond sights
-  drawDiamondSights(ctx,CW,CH,R);
-
-  // Pockets
-  POOL.POCKETS.forEach(p=>{
-    // Deep pocket shadow
-    const pg=ctx.createRadialGradient(p.x+1,p.y+1,0,p.x,p.y,POOL.POCKET_R+8);
-    pg.addColorStop(0,'#000');
-    pg.addColorStop(0.4,'#030201');
-    pg.addColorStop(0.7,'rgba(0,0,0,0.85)');
-    pg.addColorStop(1,'rgba(0,0,0,0)');
-    ctx.beginPath(); ctx.arc(p.x,p.y,POOL.POCKET_R+8,0,Math.PI*2);
-    ctx.fillStyle=pg; ctx.fill();
-
-    // Pocket void
-    ctx.beginPath(); ctx.arc(p.x,p.y,POOL.POCKET_R,0,Math.PI*2);
-    ctx.fillStyle='#020100'; ctx.fill();
-
-    // Leather binding
-    const lr=ctx.createRadialGradient(p.x-4,p.y-4,0,p.x,p.y,POOL.POCKET_R+2);
-    lr.addColorStop(0,'rgba(120,70,20,0.6)');
-    lr.addColorStop(0.5,'rgba(60,30,5,0.3)');
-    lr.addColorStop(1,'rgba(0,0,0,0)');
-    ctx.beginPath(); ctx.arc(p.x,p.y,POOL.POCKET_R+2,0,Math.PI*2);
-    ctx.fillStyle=lr; ctx.fill();
-
-    // Rim highlight
-    ctx.beginPath(); ctx.arc(p.x,p.y,POOL.POCKET_R,Math.PI*1.1,Math.PI*1.8);
-    ctx.strokeStyle='rgba(255,255,255,0.12)'; ctx.lineWidth=2; ctx.stroke();
-
-    // Pocket glow (animated)
-    const glowA=0.03+0.02*Math.sin(lightingTime*1.5+p.x);
-    const glow=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,POOL.POCKET_R+4);
-    glow.addColorStop(0,`rgba(0,0,0,0)`);
-    glow.addColorStop(0.6,`rgba(30,10,5,${glowA})`);
-    glow.addColorStop(1,'rgba(0,0,0,0)');
-    ctx.beginPath(); ctx.arc(p.x,p.y,POOL.POCKET_R+6,0,Math.PI*2);
-    ctx.fillStyle=glow; ctx.fill();
-  });
-
-  // Table vignette
-  const vig=ctx.createRadialGradient(CW/2,CH/2,CH*0.12,CW/2,CH/2,CW*0.8);
-  vig.addColorStop(0,'rgba(255,255,255,0.03)');
-  vig.addColorStop(0.6,'rgba(0,0,0,0.05)');
-  vig.addColorStop(1,'rgba(0,0,0,0.28)');
-  ctx.fillStyle=vig;
-  ctx.fillRect(R,R,CW-2*R,CH-2*R);
-}
-
-function drawDiamondSights(ctx, CW, CH, R){
-  const xPos=[CW*0.125,CW*0.375,CW*0.625,CW*0.875];
-  const yPos=[CH*0.25,CH*0.5,CH*0.75];
-  ctx.save();
-  ctx.shadowColor='rgba(255,255,255,0.4)'; ctx.shadowBlur=3;
-  ctx.fillStyle='rgba(255,255,255,0.65)';
-  xPos.forEach(x=>{
-    [R*0.5,CH-R*0.5].forEach(y=>{
-      ctx.save(); ctx.translate(x,y); ctx.rotate(Math.PI/4);
-      ctx.fillRect(-2,-2,4,4); ctx.restore();
-    });
-  });
-  yPos.forEach(y=>{
-    [R*0.5,CW-R*0.5].forEach(x=>{
-      ctx.save(); ctx.translate(x,y); ctx.rotate(Math.PI/4);
-      ctx.fillRect(-2,-2,4,4); ctx.restore();
-    });
-  });
-  ctx.restore();
-}
-
-function drawAimSystem(ctx, CW, CH, R){
-  const cx=pCue.x, cy=pCue.y;
-  const fwdX=Math.cos(pAimAngle), fwdY=Math.sin(pAimAngle);
-  const primary=castRay(cx,cy,fwdX,fwdY,-1,420);
-
-  ctx.save();
-
-  // ── Primary aim line — straight and accurate ──
-
-  ctx.setLineDash([6,7]);
-  ctx.strokeStyle='rgba(255,255,255,0.30)';
-  ctx.lineWidth=1.4;
-  ctx.shadowColor='rgba(255,255,255,0.15)'; ctx.shadowBlur=5;
-  ctx.beginPath();
-  ctx.moveTo(cx, cy);
-  ctx.lineTo(primary.x, primary.y);
-  ctx.stroke();
-
-  if(primary.hitBall){
-    const gh={x:primary.x,y:primary.y};
-
-    // ── Ghost ball ──
-    ctx.setLineDash([]);
-    ctx.shadowBlur=0;
-    // Ghost ball shadow
-    const gs=ctx.createRadialGradient(gh.x+2,gh.y+3,0,gh.x+2,gh.y+3,POOL.BALL_R*1.3);
-    gs.addColorStop(0,'rgba(0,0,0,0.2)'); gs.addColorStop(1,'rgba(0,0,0,0)');
-    ctx.beginPath(); ctx.arc(gh.x+2,gh.y+3,POOL.BALL_R*1.3,0,Math.PI*2);
-    ctx.fillStyle=gs; ctx.fill();
-
-    // Ghost ball body
-    ctx.beginPath(); ctx.arc(gh.x,gh.y,POOL.BALL_R,0,Math.PI*2);
-    ctx.fillStyle='rgba(255,255,255,0.08)'; ctx.fill();
-    ctx.strokeStyle='rgba(255,255,255,0.55)';
-    ctx.lineWidth=1.8;
-    ctx.shadowColor='rgba(255,255,255,0.4)'; ctx.shadowBlur=8;
-    ctx.stroke();
-
-    // Ghost ball crosshair
-    ctx.shadowBlur=0;
-    ctx.strokeStyle='rgba(255,255,255,0.3)';
-    ctx.lineWidth=0.8;
-    ctx.beginPath();
-    ctx.moveTo(gh.x-POOL.BALL_R*0.6,gh.y); ctx.lineTo(gh.x+POOL.BALL_R*0.6,gh.y);
-    ctx.moveTo(gh.x,gh.y-POOL.BALL_R*0.6); ctx.lineTo(gh.x,gh.y+POOL.BALL_R*0.6);
-    ctx.stroke();
-
-    // Contact point marker on target ball
-    const cpx=primary.hitBall.x, cpy=primary.hitBall.y;
-    const cpNormX=gh.x-cpx, cpNormY=gh.y-cpy;
-    const cpLen=Math.sqrt(cpNormX*cpNormX+cpNormY*cpNormY)||1;
-    const contactX=cpx+cpNormX/cpLen*POOL.BALL_R;
-    const contactY=cpy+cpNormY/cpLen*POOL.BALL_R;
-    ctx.beginPath(); ctx.arc(contactX,contactY,4,0,Math.PI*2);
-    ctx.fillStyle='rgba(255,220,0,0.9)';
-    ctx.shadowColor='rgba(255,220,0,0.8)'; ctx.shadowBlur=8;
-    ctx.fill();
-    ctx.shadowBlur=0;
-
-    // Target ball outline (selected glow)
-    ctx.beginPath(); ctx.arc(cpx,cpy,POOL.BALL_R+2,0,Math.PI*2);
-    ctx.strokeStyle='rgba(255,220,0,0.25)'; ctx.lineWidth=2;
-    ctx.shadowColor='rgba(255,220,0,0.3)'; ctx.shadowBlur=10;
-    ctx.stroke();
-    ctx.shadowBlur=0;
-
-    // ── Target ball outgoing trajectory ──
-    const bnLen=Math.sqrt(primary.bnx**2+primary.bny**2)||1;
-    const tnx=primary.bnx/bnLen, tny=primary.bny/bnLen;
-    const tRay=castRay(cpx,cpy,tnx,tny,pBalls.indexOf(primary.hitBall),200);
-    ctx.setLineDash([4,6]);
-    ctx.strokeStyle='rgba(245,197,24,0.55)';
-    ctx.lineWidth=1.3;
-    ctx.shadowColor='rgba(245,197,24,0.3)'; ctx.shadowBlur=7;
-    ctx.beginPath(); ctx.moveTo(cpx,cpy); ctx.lineTo(tRay.x,tRay.y); ctx.stroke();
-    // Target ball endpoint circle
-    ctx.setLineDash([]);
-    ctx.beginPath(); ctx.arc(tRay.x,tRay.y,POOL.BALL_R*0.7,0,Math.PI*2);
-    ctx.strokeStyle='rgba(245,197,24,0.3)'; ctx.lineWidth=1;
-    ctx.shadowBlur=4;
-    ctx.stroke();
-    ctx.shadowBlur=0;
-
-    // ── Cue ball deflection path ──
-    const dot=fwdX*primary.bnx+fwdY*primary.bny;
-    const refX=fwdX-2*dot*primary.bnx, refY=fwdY-2*dot*primary.bny;
-    // Apply spin influence to deflection
-    const spinInfluencedRefX=refX+pSpinX*0.08*(1-Math.abs(dot));
-    const spinInfluencedRefY=refY+pSpinY*0.08*(1-Math.abs(dot));
-    const cueRay=castRay(gh.x,gh.y,spinInfluencedRefX,spinInfluencedRefY,-1,160);
-    ctx.setLineDash([3,6]);
-    ctx.strokeStyle='rgba(120,200,255,0.45)';
-    ctx.lineWidth=1.2;
-    ctx.shadowColor='rgba(120,200,255,0.25)'; ctx.shadowBlur=6;
-    ctx.beginPath(); ctx.moveTo(gh.x,gh.y); ctx.lineTo(cueRay.x,cueRay.y); ctx.stroke();
-    ctx.shadowBlur=0;
-
-    // Cue ball endpoint
-    ctx.setLineDash([]);
-    ctx.beginPath(); ctx.arc(cueRay.x,cueRay.y,POOL.BALL_R*0.5,0,Math.PI*2);
-    ctx.fillStyle='rgba(120,200,255,0.2)';
-    ctx.strokeStyle='rgba(120,200,255,0.35)'; ctx.lineWidth=1;
-    ctx.fill(); ctx.stroke();
-
-    // Two-bank prediction for target ball
-    if(tRay.hitBall===null){
-      const d2=castRay2(tRay.x,tRay.y,
-        tnx-2*(tnx*tRay.bnx+tny*tRay.bny)*tRay.bnx,
-        tny-2*(tnx*tRay.bnx+tny*tRay.bny)*tRay.bny,
-        120);
-      ctx.setLineDash([2,7]);
-      ctx.strokeStyle='rgba(245,197,24,0.2)';
-      ctx.lineWidth=0.8;
-      ctx.beginPath(); ctx.moveTo(tRay.x,tRay.y); ctx.lineTo(d2.x,d2.y); ctx.stroke();
-    }
-
-  } else {
-    // Bank shot prediction (no ball hit — cushion bounce)
-    // First bank
-    const d1=primary;
-    if(d1.bnx!==0||d1.bny!==0){
-      const dot2=fwdX*d1.bnx+fwdY*d1.bny;
-      const r2x=fwdX-2*dot2*d1.bnx, r2y=fwdY-2*dot2*d1.bny;
-      const bank2=castRay2(d1.x,d1.y,r2x,r2y,180);
-      ctx.setLineDash([4,7]);
-      ctx.strokeStyle='rgba(100,200,255,0.28)';
-      ctx.lineWidth=1.1;
-      ctx.shadowColor='rgba(100,200,255,0.15)'; ctx.shadowBlur=5;
-      ctx.beginPath(); ctx.moveTo(d1.x,d1.y); ctx.lineTo(bank2.x,bank2.y); ctx.stroke();
-      ctx.shadowBlur=0;
-
-      // Second bank
-      if(bank2.hitNX!==0||bank2.hitNY!==0){
-        const dot3=r2x*bank2.hitNX+r2y*bank2.hitNY;
-        const r3x=r2x-2*dot3*bank2.hitNX, r3y=r2y-2*dot3*bank2.hitNY;
-        const bank3=castRay2(bank2.x,bank2.y,r3x,r3y,120);
-        ctx.setLineDash([3,9]);
-        ctx.strokeStyle='rgba(100,200,255,0.14)';
-        ctx.lineWidth=0.9;
-        ctx.beginPath(); ctx.moveTo(bank2.x,bank2.y); ctx.lineTo(bank3.x,bank3.y); ctx.stroke();
-      }
-    }
-  }
-
-  ctx.setLineDash([]);
-  ctx.shadowBlur=0;
-
-  // Power ring with glow
-  const ringR=POOL.BALL_R+5+pPower*14;
-  const rColor=pPower>0.72?`rgba(255,80,80,0.8)`:pPower>0.42?`rgba(245,197,24,0.8)`:`rgba(50,220,120,0.8)`;
-  const ringGColor=pPower>0.72?'rgba(255,80,80,0.3)':pPower>0.42?'rgba(245,197,24,0.3)':'rgba(50,220,120,0.3)';
-  ctx.beginPath(); ctx.arc(cx,cy,ringR,0,Math.PI*2);
-  ctx.strokeStyle=rColor;
-  ctx.shadowColor=ringGColor; ctx.shadowBlur=8;
-  ctx.setLineDash([4,4]); ctx.lineWidth=1.8; ctx.stroke();
-  ctx.setLineDash([]); ctx.shadowBlur=0;
-
-  // Spin indicator on cue ball (show offset contact point)
-  if(Math.abs(pSpinX)>0.05||Math.abs(pSpinY)>0.05){
-    const spX=cx+pSpinX*POOL.BALL_R*0.6;
-    const spY=cy+pSpinY*POOL.BALL_R*0.6;
-    ctx.beginPath(); ctx.arc(spX,spY,3,0,Math.PI*2);
-    ctx.fillStyle='rgba(255,100,100,0.9)';
-    ctx.shadowColor='rgba(255,100,100,0.6)'; ctx.shadowBlur=6;
-    ctx.fill(); ctx.shadowBlur=0;
-  }
-
-  ctx.restore();
-}
-
-function drawCueStick(ctx){
-  const cx=pCue.x, cy=pCue.y;
-  // Aim direction: from cue to target direction
-  const fwdX=Math.cos(pAimAngle), fwdY=Math.sin(pAimAngle);
-  // Stick points AWAY from aim direction (behind cue ball)
-  const bkX=-fwdX, bkY=-fwdY;
-  const gap=POOL.BALL_R+5+pPower*26;
-  // Tip of stick (near cue ball)
-  const tipX=cx+bkX*gap, tipY=cy+bkY*gap;
-  // Total stick length — longer and more realistic
-  const stickLen=160+pPower*40;
-  const handleX=tipX+bkX*stickLen, handleY=tipY+bkY*stickLen;
-  const perpX=-bkY, perpY=bkX;
-
-  // Widths — thin tip, wider handle
-  const tipWidth=1.8, midWidth=5, handleWidth=11;
-
-  ctx.save();
-
-  // ── DROP SHADOW pointing from handle toward ball ──
-  const sOff=7; // shadow offset perpendicular (down-right feel)
-  const shadowOX=sOff*0.7, shadowOY=sOff;
-  const sAlpha=0.5;
-  ctx.save();
-  ctx.filter='blur(5px)';
-  ctx.globalAlpha=sAlpha;
-  ctx.beginPath();
-  ctx.moveTo(tipX+perpX*tipWidth+shadowOX,     tipY+perpY*tipWidth+shadowOY);
-  ctx.lineTo(tipX-perpX*tipWidth+shadowOX,     tipY-perpY*tipWidth+shadowOY);
-  ctx.lineTo(handleX-perpX*handleWidth+shadowOX, handleY-perpY*handleWidth+shadowOY);
-  ctx.lineTo(handleX+perpX*handleWidth+shadowOX, handleY+perpY*handleWidth+shadowOY);
-  ctx.closePath();
-  ctx.fillStyle='rgba(0,0,0,0.9)';
-  ctx.fill();
-  ctx.filter='none';
-  ctx.restore();
-
-  // ── SHAFT — maple/ash gradient split into segments ──
-  // Tip segment (ivory/white ash)
-  const tipEnd=tipX+bkX*stickLen*0.3, tipEndY=tipY+bkY*stickLen*0.3;
-  ctx.save();
-  ctx.beginPath();
-  ctx.moveTo(tipX+perpX*tipWidth, tipY+perpY*tipWidth);
-  ctx.lineTo(tipEnd+perpX*(tipWidth+(midWidth-tipWidth)*0.3), tipEndY+perpY*(tipWidth+(midWidth-tipWidth)*0.3));
-  ctx.lineTo(tipEnd-perpX*(tipWidth+(midWidth-tipWidth)*0.3), tipEndY-perpY*(tipWidth+(midWidth-tipWidth)*0.3));
-  ctx.lineTo(tipX-perpX*tipWidth, tipY-perpY*tipWidth);
-  ctx.closePath();
-  const sg1=ctx.createLinearGradient(tipX+perpX*4,tipY+perpY*4,tipX-perpX*4,tipY-perpY*4);
-  sg1.addColorStop(0,'#f0ead0');
-  sg1.addColorStop(0.4,'#d6c890');
-  sg1.addColorStop(0.7,'#b8a060');
-  sg1.addColorStop(1,'#6a4820');
-  ctx.fillStyle=sg1; ctx.fill();
-  ctx.restore();
-
-  // Mid + handle segment (darker wood)
-  ctx.save();
-  ctx.beginPath();
-  ctx.moveTo(tipEnd+perpX*(midWidth*0.3), tipEndY+perpY*(midWidth*0.3));
-  ctx.lineTo(handleX+perpX*handleWidth, handleY+perpY*handleWidth);
-  ctx.lineTo(handleX-perpX*handleWidth, handleY-perpY*handleWidth);
-  ctx.lineTo(tipEnd-perpX*(midWidth*0.3), tipEndY-perpY*(midWidth*0.3));
-  ctx.closePath();
-  const sg2=ctx.createLinearGradient(tipEnd+perpX*8,tipEndY+perpY*8,tipEnd-perpX*8,tipEndY-perpY*8);
-  sg2.addColorStop(0,'#d4a84b');
-  sg2.addColorStop(0.25,'#b8892a');
-  sg2.addColorStop(0.55,'#8c6010');
-  sg2.addColorStop(0.8,'#5a3808');
-  sg2.addColorStop(1,'#2e1802');
-  ctx.fillStyle=sg2; ctx.fill();
-  ctx.restore();
-
-  // ── WOOD GRAIN lines on shaft ──
-  ctx.save();
-  ctx.globalAlpha=0.1;
-  for(let i=0;i<5;i++){
-    const t=0.05+i*0.15;
-    const gx=tipX+bkX*stickLen*t, gy=tipY+bkY*stickLen*t;
-    const gw=(tipWidth+(handleWidth-tipWidth)*t)*0.8;
-    ctx.strokeStyle='rgba(60,30,5,1)';
-    ctx.lineWidth=0.5;
-    ctx.beginPath();
-    ctx.moveTo(gx+perpX*gw,gy+perpY*gw);
-    ctx.lineTo(gx+bkX*6+perpX*(gw*0.6),gy+bkY*6+perpY*(gw*0.6));
-    ctx.stroke();
-  }
-  ctx.restore();
-
-  // ── COLOR WRAPS / rings (near ferrule) ──
-  const ringPositions=[
-    {t:0.28, color:'#c0392b', w:3},
-    {t:0.30, color:'#f0f0f0', w:1.5},
-    {t:0.32, color:'#c0392b', w:3},
-    {t:0.35, color:'rgba(0,0,0,0.5)', w:1.5},
-  ];
-  ringPositions.forEach(ring=>{
-    const rx=tipX+bkX*stickLen*ring.t, ry=tipY+bkY*stickLen*ring.t;
-    const rw=(tipWidth+(handleWidth-tipWidth)*ring.t)+ring.w;
-    ctx.save();
-    ctx.strokeStyle=ring.color;
-    ctx.lineWidth=ring.w*2;
-    ctx.beginPath();
-    ctx.moveTo(rx+perpX*rw, ry+perpY*rw);
-    ctx.lineTo(rx-perpX*rw, ry-perpY*rw);
-    ctx.stroke();
-    ctx.restore();
-  });
-
-  // ── GLOSS HIGHLIGHT along shaft ──
-  ctx.save();
-  ctx.globalAlpha=0.30;
-  ctx.strokeStyle='rgba(255,255,255,1)';
-  ctx.lineWidth=0.9;
-  ctx.beginPath();
-  ctx.moveTo(tipX+perpX*tipWidth*0.4, tipY+perpY*tipWidth*0.4);
-  ctx.lineTo(handleX+perpX*handleWidth*0.25, handleY+perpY*handleWidth*0.25);
-  ctx.stroke();
-  ctx.restore();
-
-  // ── FERRULE (white collar near tip) ──
-  ctx.save();
-  const ferrX=tipX+bkX*8, ferrY=tipY+bkY*8;
-  ctx.beginPath();
-  ctx.moveTo(ferrX+perpX*2.5, ferrY+perpY*2.5);
-  ctx.lineTo(tipX+perpX*tipWidth, tipY+perpY*tipWidth);
-  ctx.lineTo(tipX-perpX*tipWidth, tipY-perpY*tipWidth);
-  ctx.lineTo(ferrX-perpX*2.5, ferrY-perpY*2.5);
-  ctx.closePath();
-  const fg=ctx.createLinearGradient(ferrX+perpX*3,ferrY+perpY*3,ferrX-perpX*3,ferrY-perpY*3);
-  fg.addColorStop(0,'#f0f0f0');
-  fg.addColorStop(0.4,'#e0e0e0');
-  fg.addColorStop(1,'#a0a0a0');
-  ctx.fillStyle=fg; ctx.fill();
-  ctx.restore();
-
-  // ── LEATHER TIP (blue/grey chalked tip) ──
-  ctx.save();
-  ctx.shadowColor='rgba(0,0,0,0.5)'; ctx.shadowBlur=4;
-  ctx.beginPath(); ctx.arc(tipX,tipY,3.2,0,Math.PI*2);
-  const tipG=ctx.createRadialGradient(tipX-1,tipY-1,0,tipX,tipY,3.2);
-  tipG.addColorStop(0,'#a8d8ea'); tipG.addColorStop(0.5,'#5aaecc'); tipG.addColorStop(1,'#2a6880');
-  ctx.fillStyle=tipG; ctx.fill();
-  ctx.strokeStyle='rgba(0,0,0,0.35)'; ctx.lineWidth=0.5; ctx.stroke();
-  ctx.restore();
-
-  // ── HANDLE BUTT CAP (dark rubber/ebony end) ──
-  ctx.save();
-  ctx.beginPath(); ctx.arc(handleX,handleY,handleWidth*0.85,0,Math.PI*2);
-  const hg=ctx.createRadialGradient(handleX-3,handleY-3,0,handleX,handleY,handleWidth);
-  hg.addColorStop(0,'#6a3a9a'); hg.addColorStop(0.4,'#4a1880'); hg.addColorStop(1,'#1a0830');
-  ctx.fillStyle=hg; ctx.fill();
-  ctx.strokeStyle='rgba(255,255,255,0.25)'; ctx.lineWidth=1.2; ctx.stroke();
-
-  // Butt cap brand ring
-  ctx.beginPath();
-  ctx.arc(handleX,handleY,handleWidth*0.65,0,Math.PI*2);
-  ctx.strokeStyle='rgba(245,197,24,0.5)'; ctx.lineWidth=1; ctx.stroke();
-  ctx.restore();
-
-  // ── Power glow effect for high power shots ──
-  if(pPower>0.55){
-    const glowA=((pPower-0.55)/0.45)*0.5;
-    ctx.save();
-    ctx.globalAlpha=glowA;
-    ctx.shadowColor='rgba(255,130,20,0.9)'; ctx.shadowBlur=22;
-    ctx.strokeStyle='rgba(255,180,60,0.7)';
-    ctx.lineWidth=3;
-    ctx.beginPath();
-    ctx.moveTo(tipX,tipY);
-    ctx.lineTo(tipX+bkX*stickLen*0.4,tipY+bkY*stickLen*0.4);
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  ctx.restore();
-}
-
-function drawBallShadow(ctx, x, y, speed){
-  const offset=3+speed*0.15;
-  const radius=POOL.BALL_R*(1.4+speed*0.02);
-  const sg=ctx.createRadialGradient(x+offset,y+offset*1.2,0,x+offset,y+offset*1.2,radius);
-  sg.addColorStop(0,'rgba(0,0,0,0.4)');
-  sg.addColorStop(0.5,'rgba(0,0,0,0.15)');
-  sg.addColorStop(1,'rgba(0,0,0,0)');
-  ctx.beginPath(); ctx.arc(x+offset,y+offset*1.2,radius,0,Math.PI*2);
-  ctx.fillStyle=sg; ctx.fill();
-}
-
-function drawPoolBall(ctx, b, speed){
-  const {x,y,num,rotation}=b;
-  const R=POOL.BALL_R;
-  const isStripe=num>8;
-  const col=POOL.BALL_COLORS[num]||'#888';
-  const rot=rotation||0;
-  const spd=speed||0;
-
-  ctx.save();
-
-  // Speed glow
-  if(spd>4){
-    const glowA=Math.min(0.5,(spd-4)*0.06);
-    ctx.beginPath(); ctx.arc(x,y,R+4,0,Math.PI*2);
-    ctx.fillStyle=`rgba(255,255,255,${glowA*0.15})`;
-    ctx.shadowColor=col; ctx.shadowBlur=Math.min(16,spd*1.2);
-    ctx.fill(); ctx.shadowBlur=0;
-  }
-
-  ctx.translate(x,y);
-
-  // Base ball
-  ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2);
-  if(isStripe){
-    ctx.fillStyle='#f5f0e0'; ctx.fill();
-    // Stripe band with rotation
-    ctx.save(); ctx.rotate(rot*0.5);
-    ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2); ctx.clip();
-    ctx.fillStyle=col; ctx.fillRect(-R,-R*0.48,R*2,R*0.96);
-    ctx.restore();
-  } else {
-    // Solid ball — base color
-    const baseG=ctx.createRadialGradient(-R*0.1,-R*0.15,0,0,0,R*1.05);
-    baseG.addColorStop(0,lighten(col,18));
-    baseG.addColorStop(0.5,col);
-    baseG.addColorStop(1,darken(col,22));
-    ctx.fillStyle=baseG; ctx.fill();
-  }
-
-  // Number disc
-  ctx.beginPath(); ctx.arc(0,0,R*0.47,0,Math.PI*2);
-  ctx.fillStyle='rgba(255,255,255,0.95)'; ctx.fill();
-
-  // Number text
-  ctx.font=`900 ${R*0.64}px 'Trebuchet MS',sans-serif`;
-  ctx.textAlign='center'; ctx.textBaseline='middle';
-  ctx.fillStyle=num===8?'#111':darken(col,15);
-  ctx.fillText(num,0,0.5);
-
-  // Primary gloss gradient
-  const g1=ctx.createRadialGradient(-R*0.3,-R*0.32,0,0,0,R);
-  g1.addColorStop(0,'rgba(255,255,255,0.52)');
-  g1.addColorStop(0.3,'rgba(255,255,255,0.12)');
-  g1.addColorStop(0.7,'rgba(255,255,255,0.03)');
-  g1.addColorStop(1,'rgba(0,0,0,0.35)');
-  ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2);
-  ctx.fillStyle=g1; ctx.fill();
-
-  // Specular highlights (2-layer)
-  ctx.save(); ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2); ctx.clip();
-  ctx.beginPath(); ctx.ellipse(-R*0.25,-R*0.38,R*0.28,R*0.13,-0.5,0,Math.PI*2);
-  ctx.fillStyle='rgba(255,255,255,0.68)'; ctx.fill();
-  ctx.beginPath(); ctx.ellipse(R*0.12,-R*0.18,R*0.1,R*0.055,-0.8,0,Math.PI*2);
-  ctx.fillStyle='rgba(255,255,255,0.35)'; ctx.fill();
-  ctx.restore();
-
-  // Edge rim darkening (sphere illusion)
-  const rim=ctx.createRadialGradient(0,0,R*0.75,0,0,R);
-  rim.addColorStop(0,'rgba(0,0,0,0)');
-  rim.addColorStop(1,'rgba(0,0,0,0.22)');
-  ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2);
-  ctx.fillStyle=rim; ctx.fill();
-
-  ctx.restore();
-}
-
-function drawCueBall(ctx, speed){
-  if(pScratch&&pScratchTimer>40) return;
-  const {x,y}=pCue;
-  const R=POOL.BALL_R;
-  const spd=speed||0;
-
-  if(pScratch){
-    const a=0.4+0.4*Math.sin(pScratchTimer*0.4);
-    ctx.beginPath(); ctx.arc(x,y,R+7,0,Math.PI*2);
-    ctx.fillStyle=`rgba(255,60,60,${a*0.2})`; ctx.fill();
-    ctx.strokeStyle=`rgba(255,60,60,${a})`; ctx.lineWidth=2.5;
-    ctx.shadowColor=`rgba(255,60,60,${a})`; ctx.shadowBlur=12;
-    ctx.stroke(); ctx.shadowBlur=0;
-    return;
-  }
-
-  ctx.save();
-  ctx.translate(x,y);
-
-  // Speed glow
-  if(spd>5){
-    const ga=Math.min(0.6,(spd-5)*0.07);
-    ctx.beginPath(); ctx.arc(0,0,R+5,0,Math.PI*2);
-    ctx.shadowColor='rgba(200,230,255,0.8)'; ctx.shadowBlur=Math.min(20,spd*1.5);
-    ctx.fillStyle=`rgba(200,230,255,${ga*0.12})`; ctx.fill(); ctx.shadowBlur=0;
-  }
-
-  // Base ivory
-  const g=ctx.createRadialGradient(-R*0.28,-R*0.32,0,0,0,R);
-  g.addColorStop(0,'#ffffff');
-  g.addColorStop(0.45,'#f2ecdc');
-  g.addColorStop(1,'#c0b898');
-  ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2);
-  ctx.fillStyle=g; ctx.fill();
-
-  // Gloss overlay
-  const g2=ctx.createRadialGradient(-R*0.2,-R*0.25,0,0,0,R);
-  g2.addColorStop(0,'rgba(255,255,255,0.58)');
-  g2.addColorStop(0.4,'rgba(255,255,255,0.1)');
-  g2.addColorStop(1,'rgba(0,0,0,0.2)');
-  ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2);
-  ctx.fillStyle=g2; ctx.fill();
-
-  // English/spin marker — shows where the cue will strike the ball,
-  // matching the spin pad setting, only while lining up a shot.
-  if(!pShooting && !pScratch && (Math.abs(pSpinX)>0.05 || Math.abs(pSpinY)>0.05)){
-    const dotX=pSpinX*R*0.62, dotY=pSpinY*R*0.62;
-    ctx.save();
-    ctx.beginPath(); ctx.arc(dotX,dotY,R*0.16,0,Math.PI*2);
-    const dg=ctx.createRadialGradient(dotX-1,dotY-1,0,dotX,dotY,R*0.16);
-    dg.addColorStop(0,'#ff8a80'); dg.addColorStop(1,'#c0392b');
-    ctx.fillStyle=dg; ctx.fill();
-    ctx.strokeStyle='rgba(0,0,0,0.4)'; ctx.lineWidth=0.6; ctx.stroke();
-    ctx.restore();
-  }
-
-  // Specular
-  ctx.save(); ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2); ctx.clip();
-  ctx.beginPath(); ctx.ellipse(-R*0.26,-R*0.38,R*0.3,R*0.14,-0.45,0,Math.PI*2);
-  ctx.fillStyle='rgba(255,255,255,0.75)'; ctx.fill();
-  ctx.beginPath(); ctx.ellipse(R*0.1,-R*0.18,R*0.12,R*0.06,-0.6,0,Math.PI*2);
-  ctx.fillStyle='rgba(255,255,255,0.38)'; ctx.fill();
-  ctx.restore();
-
-  // Subtle cross hatch texture (ivory look)
-  ctx.save(); ctx.globalAlpha=0.04;
-  ctx.save(); ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2); ctx.clip();
-  for(let i=-R;i<R;i+=4){
-    ctx.beginPath(); ctx.moveTo(i,-R); ctx.lineTo(i,R);
-    ctx.strokeStyle='rgba(150,120,60,1)'; ctx.lineWidth=0.4; ctx.stroke();
-  }
-  ctx.restore(); ctx.restore();
-
-  ctx.restore();
-}
-
-// ────────────────────────────────────────────────────────────
-// GAME LOOP
-// ────────────────────────────────────────────────────────────
-// Fixed-timestep accumulator: keeps physics speed/friction/spin identical
-// across 60Hz, 90Hz and 120Hz+ displays (previously one poolStep() ran per
-// rAF callback, so the simulation silently ran ~2x too fast on 120Hz phones).
-const POOL_STEP_MS = 1000/60;
-let poolLastTime=null, poolAccumulator=0;
-
-function poolLoop(ts){
-  if(typeof ts!=='number'){ poolAnimId=requestAnimationFrame(poolLoop); return; }
-  if(poolLastTime===null) poolLastTime=ts;
-  let delta=ts-poolLastTime;
-  poolLastTime=ts;
-  if(delta>250) delta=250; // clamp huge gaps (tab switch, breakpoint) to avoid spiral of death
-  poolAccumulator+=delta;
-  let steps=0;
-  while(poolAccumulator>=POOL_STEP_MS && steps<8){
-    if(pShooting) poolStep();
-    poolAccumulator-=POOL_STEP_MS;
-    steps++;
-  }
-  poolDraw();
-  poolAnimId=requestAnimationFrame(poolLoop);
-}
-
-// Pause pool loop (and other timers) when tab is hidden to save battery
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    if (poolAnimId) { cancelAnimationFrame(poolAnimId); poolAnimId = null; }
-    if (tvTimerInterval) { clearInterval(tvTimerInterval); tvTimerInterval = null; }
-    if (typeof wTimer !== 'undefined' && wTimer) { clearInterval(wTimer); wTimer = null; }
-  } else {
-    // Resume pool if pool game is active
-    const poolEl = document.getElementById('poolGame');
-    if (poolEl && poolEl.classList.contains('show') && !poolAnimId) { poolLastTime=null; poolAccumulator=0; poolAnimId=requestAnimationFrame(poolLoop); }
-    // Resume trivia timer if trivia is active
-    const triviaEl = document.getElementById('triviaGame');
-    if (triviaEl && triviaEl.classList.contains('show') && typeof tvStartTimer === 'function') tvStartTimer();
-  }
-});
-
-// ────────────────────────────────────────────────────────────
-// INPUT — Aiming
-// ────────────────────────────────────────────────────────────
-function poolGetPos(e){
-  const rect=poolCanvas.getBoundingClientRect();
-  const cssW=poolCanvas.clientWidth, cssH=poolCanvas.clientHeight;
-  const cx=e.touches?e.touches[0].clientX:e.clientX;
-  const cy=e.touches?e.touches[0].clientY:e.clientY;
-  return {
-    x:(cx-rect.left)*(POOL.CW/cssW),
-    y:(cy-rect.top)*(POOL.CH/cssH)
-  };
-}
-
-function poolAimFrom(e){
-  if(pShooting||pScratch) return;
-  const p=poolGetPos(e);
-  pAimAngle=Math.atan2(p.y-pCue.y,p.x-pCue.x);
-}
-
-function poolBindInput(){
-  poolCanvas.addEventListener('mousemove',poolAimFrom);
-  poolCanvas.addEventListener('touchmove',e=>{e.preventDefault();poolAimFrom(e);},{passive:false});
-  poolCanvas.addEventListener('click',poolShoot);
-  poolCanvas.addEventListener('touchend',e=>{
-    e.preventDefault();
-    poolShoot({clientX:e.changedTouches[0].clientX,clientY:e.changedTouches[0].clientY});
-  },{passive:false});
-}
-
-function poolShoot(e){
-  if(pShooting||pScratch) return;
-  if(pPower<0.04) return;
-  const pwr=pPower*POOL.MAX_PWR;
-  const stored=pPower;
-  // Shoot exactly along aim angle — spin affects rolling curve, NOT initial direction
-  pCue.vx=Math.cos(pAimAngle)*pwr;
-  pCue.vy=Math.sin(pAimAngle)*pwr;
-  // Store spin on cue ball for physics engine to apply during roll
-  pCue.spinX=pSpinX;
-  pCue.spinY=pSpinY;
-  pShooting=true; pPower=0;
-  AudioMgr.cueStrike(stored);
-  stored>0.6?Haptic.heavy():(stored>0.25?Haptic.medium():Haptic.light());
-  Camera.shake(pwr*0.55,6);
-  Camera.pulse(pwr*0.004,'rgba(255,255,200,0.3)');
-  if(stored>0.75) Particles.powerShotBurst(pCue.x,pCue.y);
-}
-
-// ────────────────────────────────────────────────────────────
-// POWER SLIDER
-// ────────────────────────────────────────────────────────────
-function poolBindSlider(){
-  const track=document.getElementById('powerSliderTrack');
-  function setFromEvent(e){
-    const rect=track.getBoundingClientRect();
-    const y=e.touches?e.touches[0].clientY:e.clientY;
-    let pct=1-((y-rect.top)/rect.height);
-    pPower=Math.max(0,Math.min(1,pct));
-  }
-  track.addEventListener('mousedown',e=>{pSliderDragging=true;setFromEvent(e);e.preventDefault();});
-  document.addEventListener('mousemove',e=>{if(pSliderDragging){setFromEvent(e);e.preventDefault();}});
-  document.addEventListener('mouseup',()=>{pSliderDragging=false;});
-  track.addEventListener('touchstart',e=>{pSliderDragging=true;setFromEvent(e);e.preventDefault();},{passive:false});
-  document.addEventListener('touchmove',e=>{if(pSliderDragging){setFromEvent(e);e.preventDefault();}},{passive:false});
-  document.addEventListener('touchend',()=>{pSliderDragging=false;});
-}
-
-// ────────────────────────────────────────────────────────────
-// SPIN PAD
-// ────────────────────────────────────────────────────────────
-function poolBindSpinPad(){
-  const pad=document.getElementById('spinPad');
-  function setSpinFromEvent(e){
-    const rect=pad.getBoundingClientRect();
-    const cx=e.touches?e.touches[0].clientX:e.clientX;
-    const cy=e.touches?e.touches[0].clientY:e.clientY;
-    const relX=(cx-rect.left)/(rect.width)-0.5;
-    const relY=(cy-rect.top)/(rect.height)-0.5;
-    const dist=Math.sqrt(relX*relX+relY*relY);
-    const maxDist=0.38;
-    if(dist>maxDist){
-      const s=maxDist/dist;
-      pSpinX=relX*s*2; pSpinY=relY*s*2;
-    } else {
-      pSpinX=relX*2; pSpinY=relY*2;
-    }
-    updateSpinIndicator();
-  }
-  pad.addEventListener('mousedown',e=>{pSpinDragging=true;setSpinFromEvent(e);e.preventDefault();});
-  document.addEventListener('mousemove',e=>{if(pSpinDragging){setSpinFromEvent(e);e.preventDefault();}});
-  document.addEventListener('mouseup',()=>{pSpinDragging=false;});
-  pad.addEventListener('touchstart',e=>{pSpinDragging=true;setSpinFromEvent(e);e.preventDefault();},{passive:false});
-  document.addEventListener('touchmove',e=>{if(pSpinDragging){setSpinFromEvent(e);e.preventDefault();}},{passive:false});
-  document.addEventListener('touchend',()=>{pSpinDragging=false;});
-}
-
-function updateSpinIndicator(){
-  const ind=document.getElementById('spinIndicator');
-  const pad=document.getElementById('spinPad');
-  const pw=pad.clientWidth||54, ph=pad.clientHeight||54;
-  const cx=pw/2, cy=ph/2;
-  const ix=cx+pSpinX*cx*0.78-8;
-  const iy=cy+pSpinY*cy*0.78-8;
-  ind.style.left=ix+'px'; ind.style.top=iy+'px';
-  ind.style.transform='none';
-  const dist=Math.sqrt(pSpinX*pSpinX+pSpinY*pSpinY);
-  if(dist>0.15){
-    ind.style.background='radial-gradient(circle at 35% 35%,#fff 0%,#ff6060 45%,#c00 100%)';
-    ind.style.boxShadow='0 0 10px rgba(255,80,80,0.8),0 2px 4px rgba(0,0,0,0.5)';
-  } else {
-    ind.style.background='radial-gradient(circle at 35% 35%,#fff 0%,#f5c518 50%,#e67e22 100%)';
-    ind.style.boxShadow='0 0 10px rgba(245,197,24,0.8),0 2px 4px rgba(0,0,0,0.5)';
-  }
-  // Label spin type
-  const lbl=document.getElementById('spinTypeLbl');
-  const shotInfo=document.getElementById('shotTypeInfo');
-  let label='';
-  if(dist<0.1){ label='CENTER'; }
-  else if(pSpinY<-0.3&&Math.abs(pSpinX)<0.25){ label='TOP'; }
-  else if(pSpinY>0.3&&Math.abs(pSpinX)<0.25){ label='BACK'; }
-  else if(pSpinX<-0.3&&Math.abs(pSpinY)<0.25){ label='LEFT'; }
-  else if(pSpinX>0.3&&Math.abs(pSpinY)<0.25){ label='RIGHT'; }
-  else if(pSpinX<-0.15&&pSpinY<-0.15){ label='TOP-L'; }
-  else if(pSpinX>0.15&&pSpinY<-0.15){ label='TOP-R'; }
-  else if(pSpinX<-0.15&&pSpinY>0.15){ label='BACK-L'; }
-  else { label='BACK-R'; }
-  lbl.textContent=label;
-  if(shotInfo) shotInfo.textContent=label;
-}
-
-function resetSpin(){
-  pSpinX=0; pSpinY=0; updateSpinIndicator();
-}
-
-// ────────────────────────────────────────────────────────────
-// HUD / OVERLAYS
-// ────────────────────────────────────────────────────────────
-function poolUpdateHUD(){
-  document.getElementById('poolStage').textContent='LV.'+(pStage<10?'0'+pStage:pStage);
-  document.getElementById('poolScore').textContent='⭐ '+pScore;
-  document.getElementById('targetInfo').textContent=pPocketed+'/'+pTarget;
-  document.getElementById('poolLivesNum').textContent=pLives;
-  const pf=document.getElementById('poolProgressFill');
-  if(pf) pf.style.width=Math.min(100,Math.round((pPocketed/pTarget)*100))+'%';
-  const cv=document.getElementById('poolCoinVal');
-  if(cv) cv.textContent=(typeof PS!=='undefined' && PS) ? PS.coins : 0;
-}
-
-function poolShowMsg(txt){
-  const el=document.getElementById('poolMsg');
-  el.textContent=txt; el.classList.add('show');
-  if(pMsgTimer) clearTimeout(pMsgTimer);
-  pMsgTimer=setTimeout(()=>el.classList.remove('show'),2000);
-}
-
-function showCombo(count){
-  const el=document.getElementById('comboMsg');
-  el.textContent=`🔥 COMBO x${count}`;
-  el.classList.add('show');
-  if(pComboTimer) clearTimeout(pComboTimer);
-  pComboTimer=setTimeout(()=>el.classList.remove('show'),1500);
-}
-
-function poolStageClear(){
-  const bonus=pPocketed*5+(pLives*2);
-  pScore+=bonus; poolUpdateHUD();
-  AudioMgr.stageClear();
-  Haptic.success();
-  Particles.winBurst(POOL.CW/2,POOL.CH/2);
-  Camera.pulse(0.08,'rgba(245,197,24,0.2)');
-  onLevelCleared('pool', pScore);
-  document.getElementById('poolOIcon').textContent='🏆';
-  document.getElementById('poolOTitle').textContent='STAGE CLEAR!';
-  document.getElementById('poolOSub').textContent=`Stage ${pStage} — Bonus: +${bonus} pts`;
-  document.getElementById('poolOBtn').textContent='NEXT STAGE →';
-  document.getElementById('poolOBtn').onclick=()=>{
-    AudioMgr.uiClick();
-    document.getElementById('poolOverlay').classList.remove('show');
-    poolStartStage(pStage+1);
-  };
-  document.getElementById('poolOverlay').classList.add('show');
-}
-
-function poolGameOver(){
-  AudioMgr.gameOver();
-  Haptic.error();
-  Camera.shake(8,15);
-  document.getElementById('poolOIcon').textContent='😔';
-  document.getElementById('poolOTitle').textContent='GAME OVER';
-  document.getElementById('poolOSub').textContent='Final Score: '+pScore+' pts';
-  document.getElementById('poolOBtn').textContent='PLAY AGAIN';
-  document.getElementById('poolOBtn').onclick=()=>{
-    AudioMgr.uiClick();
-    document.getElementById('poolOverlay').classList.remove('show');
-    pScore=0; pLives=8; poolStartStage(1);
-  };
-  document.getElementById('poolOverlay').classList.add('show');
-}
-
-// ────────────────────────────────────────────────────────────
-// CANVAS UTILS
-// ────────────────────────────────────────────────────────────
-function roundRect(ctx,x,y,w,h,r){
-  ctx.beginPath();
-  ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y);
-  ctx.quadraticCurveTo(x+w,y,x+w,y+r);
-  ctx.lineTo(x+w,y+h-r);
-  ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
-  ctx.lineTo(x+r,y+h);
-  ctx.quadraticCurveTo(x,y+h,x,y+h-r);
-  ctx.lineTo(x,y+r);
-  ctx.quadraticCurveTo(x,y,x+r,y);
-  ctx.closePath();
-}
-
-function lighten(hex,pct){
-  if(!hex||hex[0]!=='#') return hex||'#888';
-  const n=parseInt(hex.slice(1),16);
-  const r=Math.min(255,((n>>16)&0xff)+pct);
-  const g=Math.min(255,((n>>8)&0xff)+pct);
-  const b=Math.min(255,(n&0xff)+pct);
-  return `rgb(${r},${g},${b})`;
-}
-function darken(hex,pct){ return lighten(hex,-pct); }
 
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -4555,7 +2528,7 @@ function waterGenerateLevel(level){
 }
 
 function initWater(level){
-  wLevel=level||wLevel;
+  wLevel = level || loadGameProgress('water')?.level || wLevel;
   wMoves=0; wSelected=-1; wHistory=[]; wUndos=5;
   document.getElementById('waterLevel').textContent='LV.'+wLevel;
   document.getElementById('waterMoves').textContent='0';
@@ -4621,6 +2594,7 @@ function waterTap(i){
         Haptic.success();
         onLevelCleared('water', wLevel*200);
         wLevel++;
+        saveGameProgress('water', {level: wLevel});
       }
     },300);
   }
@@ -4652,6 +2626,7 @@ function waterUndo(){
   renderWater();
 }
 function waterRestart(){ initWater(wLevel); }
+function waterRestartGame(){ clearGameProgress('water'); initWater(1); }
 function waterNextLevel(){ initWater(wLevel); }
 
 
@@ -4700,7 +2675,8 @@ let blkCellSize=28, blkMsgTimer=null;
 let blkDragOffR=0, blkDragOffC=0;
 
 function initBlock(level){
-  blkLevel = level||1;
+  blkLevel = level || loadGameProgress('block')?.level || 1;
+  saveGameProgress('block', {level: blkLevel});
   blkScore = 0; blkCleared = 0;
   blkTarget = blkLevel * 3 + 2; // lines to clear
   blkBoard = Array.from({length:BLK.ROWS},()=>Array(BLK.COLS).fill(null));
@@ -4712,6 +2688,7 @@ function initBlock(level){
   blkRefillTray();
   blkUpdateHUD();
 }
+function blkRestartGame(){ clearGameProgress('block'); initBlock(1); }
 
 function blkSizeCells(){
   const wrap = document.getElementById('blockMain');
@@ -6515,7 +4492,7 @@ function cwToggleLanguage(){
   cwScore = 0;
   document.getElementById('cwScore').textContent='⭐ 0';
   document.getElementById('cwLangBtn').textContent = cwLanguage==='sw' ? '🌍 KISWAHILI' : '🇬🇧 ENGLISH';
-  initCrossword();
+  initCrossword(0);
 }
 
 // ── Procedural crossword level generator ─────────────────────────────────────
@@ -6667,8 +4644,10 @@ function cwPickDecoys(correctWord, count){
   return chosen;
 }
 
-function initCrossword(){
-  cwLevelIdx=0; cwScore=0; cwFoundWords=[];
+function initCrossword(level){
+  cwLevelIdx = (typeof level === 'number' ? level : loadGameProgress('crossword')?.level) || 0;
+  saveGameProgress('crossword', {level: cwLevelIdx});
+  cwScore=0; cwFoundWords=[];
   document.getElementById('cwOverlay').classList.remove('show');
   cwLoadLevel();
 }
@@ -6830,7 +4809,10 @@ function cwLevelComplete(){
   document.getElementById('cwOverlay').classList.add('show');
   onLevelCleared('crossword', cwScore);
   cwLevelIdx++;
+  saveGameProgress('crossword', {level: cwLevelIdx});
 }
+
+function cwRestartGame(){ clearGameProgress('crossword'); initCrossword(0); }
 
 function cwNextLevel(){
   document.getElementById('cwOverlay').classList.remove('show');
@@ -7250,7 +5232,7 @@ let tvQueue = [], tvUsedIds = [];
 // ── Persistence helpers ───────────────────────────────────────────────────────
 function tvSaveProgress(){
   try {
-    const key = 'trivia_progress';
+    const key = 'trivia_progress_' + (_getUserId() || 'guest');
     const all = JSON.parse(localStorage.getItem(key)||'{}');
     all[tvSubject] = { level: tvLevel, score: tvScore, streak: tvStreak };
     localStorage.setItem(key, JSON.stringify(all));
@@ -7259,21 +5241,22 @@ function tvSaveProgress(){
 
 function tvLoadProgress(subject){
   try {
-    const all = JSON.parse(localStorage.getItem('trivia_progress')||'{}');
+    const all = JSON.parse(localStorage.getItem('trivia_progress_' + (_getUserId() || 'guest'))||'{}');
     return all[subject] || null;
   } catch(e){ return null; }
 }
 
 function tvGetAllProgress(){
-  try { return JSON.parse(localStorage.getItem('trivia_progress')||'{}'); }
+  try { return JSON.parse(localStorage.getItem('trivia_progress_' + (_getUserId() || 'guest'))||'{}'); }
   catch(e){ return {}; }
 }
 
 function tvResetProgress(subject){
   try {
-    const all = JSON.parse(localStorage.getItem('trivia_progress')||'{}');
+    const key = 'trivia_progress_' + (_getUserId() || 'guest');
+    const all = JSON.parse(localStorage.getItem(key)||'{}');
     delete all[subject];
-    localStorage.setItem('trivia_progress', JSON.stringify(all));
+    localStorage.setItem(key, JSON.stringify(all));
   } catch(e){}
 }
 
@@ -7506,222 +5489,6 @@ function tvRestartSubject(){
   document.getElementById('tvScore').textContent='⭐ 0';
   document.getElementById('tvStreak').textContent='🔥 0';
   tvStartLevel();
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// NENO WORDLE — Kiswahili / English 5-letter word guessing game
-// ═══════════════════════════════════════════════════════════════════════════
-const WD_WORDS = [
-  // Kiswahili 5-letter words (common East African vocabulary)
-  'CHAKU','DUNIA','HABAR','IMANI','JIRAN','KALAM','LUGHA','MACHO','NDEGE','PESAA',
-  'RAFIK','SAFAR','TUMAI','UMOJA','WAZAZ','AMANI','BARUA','DAFTA','ELIMU','FAMIL',
-  'GHARI','HEKAL','JAMHU','KAZIM','LIMAU','MAJID','NCHIN','OFISI','PEMBE','QALAM',
-  // English 5-letter words used commonly
-  'BREAD','CHAIR','DANCE','EARTH','FLAME','GRAPE','HOUSE','IVORY','JOKER','KNIFE',
-  'LEMON','MONEY','NIGHT','OCEAN','PLANT','QUEEN','RIVER','STONE','TIGER','UNCLE',
-  'VOICE','WATER','XENON','YOUTH','ZEBRA','BRAVE','CLOUD','DREAM','EAGLE','FRESH',
-];
-
-let wdAnswer='', wdRow=0, wdCol=0, wdGuesses=[], wdGameOver=false;
-let wdScore=0, wdStreak=0;
-
-function _wdLoadStats(){
-  try{
-    const s=JSON.parse(localStorage.getItem('wordle_stats')||'{}');
-    wdScore = s.score||0; wdStreak = s.streak||0;
-  }catch(_){ wdScore=0; wdStreak=0; }
-}
-function _wdSaveStats(){
-  try{ localStorage.setItem('wordle_stats', JSON.stringify({score:wdScore, streak:wdStreak})); }catch(_){}
-}
-
-function initWordle(){
-  _wdLoadStats();
-  // Pick a word — daily-seeded so all players get the same word per day (like real Wordle)
-  const dayNum = Math.floor(Date.now() / 86400000);
-  wdAnswer = WD_WORDS[dayNum % WD_WORDS.length];
-  wdRow=0; wdCol=0; wdGuesses=[]; wdGameOver=false;
-  document.getElementById('wdScore').textContent='⭐ '+wdScore;
-  document.getElementById('wdStreak').textContent='🔥 '+wdStreak;
-  document.getElementById('wdMsg').textContent='';
-  document.getElementById('wdOverlay').classList.remove('show');
-  wdRenderGrid();
-  wdRenderKeyboard();
-  // Keyboard input listener
-  const handler = (e) => {
-    if (wdGameOver) return;
-    const k = e.key.toUpperCase();
-    if (k==='ENTER') wdSubmit();
-    else if (k==='BACKSPACE') wdBackspace();
-    else if (/^[A-Z]$/.test(k) && k.length===1) wdType(k);
-  };
-  _addGameListener(document, 'keydown', handler);
-}
-
-function wdRenderGrid(){
-  const grid=document.getElementById('wdGrid');
-  grid.innerHTML='';
-  for(let r=0;r<6;r++){
-    const row=document.createElement('div');
-    row.className='wd-row';
-    row.id='wdRow'+r;
-    for(let c=0;c<5;c++){
-      const cell=document.createElement('div');
-      cell.className='wd-cell';
-      cell.id=`wdCell${r}_${c}`;
-      const guess=wdGuesses[r];
-      if(guess){
-        cell.textContent=guess.letters[c];
-        cell.classList.add(guess.states[c]);
-      } else if(r===wdRow && c<wdCol){
-        cell.textContent=_wdCurrent[c]||'';
-        cell.classList.add('filled');
-      }
-      row.appendChild(cell);
-    }
-    grid.appendChild(row);
-  }
-}
-
-let _wdCurrent=[];
-
-function wdRenderKeyboard(){
-  const kb=document.getElementById('wdKeyboard');
-  kb.innerHTML='';
-  const rows=['QWERTYUIOP','ASDFGHJKL','ZXCVBNM'];
-  // Compute letter states from all guesses
-  const letterState={};
-  wdGuesses.forEach(g=>{
-    g.letters.forEach((l,i)=>{
-      const st=g.states[i];
-      const rank={absent:0,present:1,correct:2};
-      if(!letterState[l] || rank[st]>rank[letterState[l]]) letterState[l]=st;
-    });
-  });
-  rows.forEach((r,ri)=>{
-    const rowEl=document.createElement('div');
-    rowEl.className='wd-krow';
-    if(ri===2){
-      const enter=document.createElement('button');
-      enter.className='wd-key wide';
-      enter.textContent='ENTER';
-      enter.onclick=()=>wdSubmit();
-      rowEl.appendChild(enter);
-    }
-    r.split('').forEach(letter=>{
-      const key=document.createElement('button');
-      key.className='wd-key'+(letterState[letter]?(' '+letterState[letter]):'');
-      key.textContent=letter;
-      key.onclick=()=>wdType(letter);
-      rowEl.appendChild(key);
-    });
-    if(ri===2){
-      const back=document.createElement('button');
-      back.className='wd-key wide';
-      back.textContent='⌫';
-      back.onclick=()=>wdBackspace();
-      rowEl.appendChild(back);
-    }
-    kb.appendChild(rowEl);
-  });
-}
-
-function wdType(letter){
-  if(wdGameOver || wdCol>=5) return;
-  _wdCurrent[wdCol]=letter;
-  wdCol++;
-  AudioMgr.wordleLetter();
-  Haptic.light();
-  wdRenderGrid();
-}
-
-function wdBackspace(){
-  if(wdGameOver || wdCol<=0) return;
-  wdCol--;
-  _wdCurrent[wdCol]='';
-  wdRenderGrid();
-}
-
-function wdSubmit(){
-  if(wdGameOver || wdCol<5) {
-    if(wdCol<5){
-      const row=document.getElementById('wdRow'+wdRow);
-      row.classList.add('shake');
-      setTimeout(()=>row.classList.remove('shake'),400);
-      document.getElementById('wdMsg').textContent='Not enough letters';
-      AudioMgr.wordWrong();
-    }
-    return;
-  }
-  const guess = _wdCurrent.join('');
-  AudioMgr.wordleSubmit();
-  Haptic.medium();
-
-  // Compute letter states (Wordle algorithm w/ duplicate handling)
-  const states=new Array(5).fill('absent');
-  const answerArr=wdAnswer.split('');
-  const guessArr=guess.split('');
-  const used=new Array(5).fill(false);
-  // First pass: correct
-  for(let i=0;i<5;i++){
-    if(guessArr[i]===answerArr[i]){ states[i]='correct'; used[i]=true; }
-  }
-  // Second pass: present
-  for(let i=0;i<5;i++){
-    if(states[i]==='correct') continue;
-    const idx=answerArr.findIndex((l,j)=>l===guessArr[i] && !used[j]);
-    if(idx!==-1){ states[i]='present'; used[idx]=true; }
-  }
-
-  wdGuesses.push({letters:guessArr, states});
-  wdRow++; wdCol=0; _wdCurrent=[];
-  wdRenderGrid();
-  wdRenderKeyboard();
-
-  // Flip animation
-  for(let c=0;c<5;c++){
-    setTimeout(()=>{
-      const el=document.getElementById(`wdCell${wdRow-1}_${c}`);
-      if(el) el.classList.add('flip');
-    }, c*80);
-  }
-
-  if(guess===wdAnswer){
-    wdGameOver=true;
-    wdScore += (7-wdRow)*20;
-    wdStreak++;
-    _wdSaveStats();
-    document.getElementById('wdScore').textContent='⭐ '+wdScore;
-    document.getElementById('wdStreak').textContent='🔥 '+wdStreak;
-    setTimeout(()=>{
-      AudioMgr.wordleCorrect();
-      Haptic.success();
-      confettiBurst();
-      document.getElementById('wdOIcon').textContent=['🤩','🎉','😄','👏','🙂','😅'][wdRow-1]||'🎉';
-      document.getElementById('wdOTitle').textContent='Solved in '+wdRow+'/6!';
-      document.getElementById('wdOSub').textContent='The word was '+wdAnswer+'. Streak: 🔥'+wdStreak;
-      document.getElementById('wdOBtn').textContent='Come back tomorrow!';
-      document.getElementById('wdOBtn').onclick=()=>{ document.getElementById('wdOverlay').classList.remove('show'); };
-      document.getElementById('wdOverlay').classList.add('show');
-      onLevelCleared('wordle', wdScore);
-      addCoins(20+wdStreak*5, 'Wordle Win');
-    }, 600);
-  } else if(wdRow>=6){
-    wdGameOver=true;
-    wdStreak=0;
-    _wdSaveStats();
-    document.getElementById('wdStreak').textContent='🔥 0';
-    setTimeout(()=>{
-      AudioMgr.wordleFail();
-      Haptic.error();
-      document.getElementById('wdOIcon').textContent='😔';
-      document.getElementById('wdOTitle').textContent='So close!';
-      document.getElementById('wdOSub').textContent='The word was '+wdAnswer;
-      document.getElementById('wdOBtn').textContent='Come back tomorrow!';
-      document.getElementById('wdOBtn').onclick=()=>{ document.getElementById('wdOverlay').classList.remove('show'); };
-      document.getElementById('wdOverlay').classList.add('show');
-    }, 600);
-  }
 }
 </script>
 </body>

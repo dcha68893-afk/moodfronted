@@ -353,6 +353,102 @@
         badge.textContent = Math.max(0, current + delta);
     }
 
+    /* ═══════════════════════════════════════════════════════════════════════
+       FIX 10 — "All Groups" / "Joined" / "Admin" tabs show nothing
+       ───────────────────────────────────────────────────────────────────────
+       Root cause: group.html only loads THIS file (group-ui-patch.js) plus
+       group-os/*.js. It does NOT load group-ui.js or the group-core-bootstrap
+       -> group-core-operations -> group-core-bridge ES-module chain that this
+       file's own header comment assumes ("loads after group-core.js +
+       group-ui.js"). That chain is what used to set window.GroupCore and
+       populate these three sections via updateCurrentSection() /
+       initGroupPage(). Since none of it is loaded, every call site in this
+       codebase that references updateCurrentSection() is wrapped in
+       `typeof updateCurrentSection === 'function'`, so it just silently does
+       nothing instead of throwing — the sections stay stuck on their
+       "Loading groups…" / empty placeholder HTML forever.
+
+       Discover and Invites already work because they're fully self-contained
+       REST loaders inside this same file, independent of GroupCore. This
+       gives All Groups / Joined / Admin the same treatment: one call to the
+       existing GET /api/groups endpoint (which already returns groups,
+       joinedGroups and adminGroups pre-split — see groupController.js
+       getUserGroups), rendered with the same .group-item markup Invites uses.
+       ═══════════════════════════════════════════════════════════════════════ */
+    let _userGroupsCache = null;
+
+    function _renderUserGroupCard(g, roleLabel) {
+        const name        = g.name || 'Unnamed group';
+        const initials     = name.slice(0, 2).toUpperCase();
+        const memberCount  = g.memberCount || (g.stats && g.stats.totalMembers) || 0;
+        const avatarStyle  = g.avatar
+            ? `background-image:url('${g.avatar}');background-size:cover;background-position:center;`
+            : 'background:linear-gradient(135deg,#667eea,#764ba2)';
+        const card = document.createElement('div');
+        card.className = 'group-item';
+        card.dataset.groupId = g.id;
+        card.style.cursor = 'pointer';
+        card.innerHTML = `
+            <div class="group-avatar" style="${avatarStyle}">
+                ${g.avatar ? '' : `<span>${initials}</span>`}
+            </div>
+            <div class="group-info">
+                <div class="group-name">${name}</div>
+                <div style="font-size:12px;color:var(--text-secondary)">
+                    ${memberCount} member${memberCount === 1 ? '' : 's'}${roleLabel ? ' · ' + roleLabel : ''}
+                </div>
+            </div>`;
+        card.addEventListener('click', () => _openGroupChat(g));
+        return card;
+    }
+
+    function _renderUserGroupList(listEl, groups, roleLabel, emptyText) {
+        if (!listEl) return;
+        if (!groups || !groups.length) {
+            listEl.innerHTML = `<div class="empty-state"><i class="fas fa-users"></i><p>${emptyText}</p></div>`;
+            return;
+        }
+        listEl.innerHTML = '';
+        const frag = document.createDocumentFragment();
+        groups.forEach(g => frag.appendChild(_renderUserGroupCard(g, roleLabel)));
+        listEl.appendChild(frag);
+    }
+
+    function _applyUserGroupsCache() {
+        if (!_userGroupsCache) return;
+        _renderUserGroupList(qs('#allGroupsList'), _userGroupsCache.all, null,
+            'No groups yet — create or join one to get started');
+        _renderUserGroupList(qs('#joinedList'), _userGroupsCache.joined, 'Member',
+            "You haven't joined any groups yet");
+        _renderUserGroupList(qs('#adminList'), _userGroupsCache.admin, 'Admin',
+            "You're not an admin of any groups yet");
+        const joinedBadge = qs('#joinedCount'); if (joinedBadge) joinedBadge.textContent = _userGroupsCache.joined.length;
+        const adminBadge  = qs('#adminCount');  if (adminBadge)  adminBadge.textContent  = _userGroupsCache.admin.length;
+    }
+
+    async function loadUserGroupSections(force) {
+        if (_userGroupsCache && !force) { _applyUserGroupsCache(); return; }
+        const allList = qs('#allGroupsList');
+        if (allList) {
+            allList.innerHTML = '<div style="text-align:center;padding:24px"><i class="fas fa-spinner fa-spin"></i> Loading groups…</div>';
+        }
+        try {
+            const data = await apiFetch('/groups?limit=100');
+            const d = (data && data.data) || {};
+            _userGroupsCache = {
+                all:    d.groups        || [],
+                joined: d.joinedGroups  || [],
+                admin:  d.adminGroups   || [],
+            };
+            _applyUserGroupsCache();
+        } catch (err) {
+            const msg = `<div class="empty-state"><i class="fas fa-exclamation-triangle"></i><p>${(err && err.message) || 'Failed to load groups'}</p></div>`;
+            if (allList) allList.innerHTML = msg;
+            const joinedList = qs('#joinedList'); if (joinedList) joinedList.innerHTML = msg;
+            const adminList  = qs('#adminList');  if (adminList)  adminList.innerHTML  = msg;
+        }
+    }
+
     /* ─── Group events loader ─────────────────────────────────────────────── */
     async function loadGroupEvents(mode) {
         const listEl = qs('#eventsListContent') || qs('#eventsList') || qs('#groupEventsContent');
@@ -703,6 +799,7 @@
                 if (typeof updateGroupCounts   === 'function') updateGroupCounts();
                 if (typeof updateCurrentSection === 'function') updateCurrentSection();
                 if (GC && GC.requestGroupList) GC.requestGroupList().catch(() => {});
+                loadUserGroupSections(true);
             } catch (_) {}
         } catch (err) {
             toast(err.message || 'Failed to create group', 'error');
@@ -1005,6 +1102,7 @@
                     } catch (_) {}
                     // Load invitations when switching to Invites tab
                     if (fresh.id === 'invitesTab') loadUserInvitations();
+                    if (['allTab', 'joinedTab', 'adminTab'].includes(fresh.id)) loadUserGroupSections();
                 }
             });
         });
@@ -1019,6 +1117,7 @@
         try { patchAdminManagementModal();     } catch (e) { console.warn('[patch] adminModal:', e); }
         try { patchOpenAdminManagement();      } catch (e) { console.warn('[patch] openAdminMgmt:', e); }
         try { patchCategoryTabs();             } catch (e) { console.warn('[patch] categoryTabs:', e); }
+        try { loadUserGroupSections();         } catch (e) { console.warn('[patch] userGroups:', e); }
         // Wire GroupCore real-time events → UI (retry until GroupCore exists)
         wireGroupCoreEvents();
         // (log suppressed)
@@ -1236,6 +1335,7 @@
                         toast('Join request sent! You will be added once approved.');
                         const gc2 = window.GroupCore;
                         if (gc2?.requestGroupList) gc2.requestGroupList().catch(()=>{});
+                        loadUserGroupSections(true);
                         // Broadcast to parent so other users' panels can refresh
                         try { window.parent.postMessage({ type: 'GROUP_MEMBER_JOINED', groupId: g.id }, '*'); } catch(_) {}
                     } catch(err) {
@@ -1708,7 +1808,7 @@
                         const doIt = gc2 && gc2.deleteGroup
                             ? () => gc2.deleteGroup(parseInt(gid) || gid)
                             : () => apiFetch('/groups/' + gid, { method: 'DELETE' });
-                        doIt().then(() => toast('Group deleted')).catch(err => toast(err.message || 'Failed', 'error'));
+                        doIt().then(() => { toast('Group deleted'); loadUserGroupSections(true); }).catch(err => toast(err.message || 'Failed', 'error'));
                     });
                     btn.parentNode.appendChild(del);
                 }
@@ -1726,6 +1826,7 @@
                         toast('Join request sent!');
                         const gc2 = window.GroupCore;
                         if (gc2 && gc2.requestGroupList) gc2.requestGroupList().catch(() => {});
+                        loadUserGroupSections(true);
                     } catch (err) {
                         newBtn.disabled = false;
                         newBtn.innerHTML = '<i class="fas fa-user-plus"></i>';
@@ -1818,6 +1919,7 @@
                                 toast('Join request sent!');
                                 const gc2 = window.GroupCore;
                                 if (gc2 && gc2.requestGroupList) gc2.requestGroupList().catch(() => {});
+                                loadUserGroupSections(true);
                             } catch (err) {
                                 b.disabled = false;
                                 b.innerHTML = '<i class="fas fa-user-plus"></i>';

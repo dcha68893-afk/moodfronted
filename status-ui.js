@@ -5381,8 +5381,18 @@ function renderStatusesListUI(container, statusesList, allViewed) {
 
     const fragment = document.createDocumentFragment();
     sortedGroups.forEach(([uid, statuses]) => {
-        const el = createGroupedStatusElement(statuses, allViewed);
-        if (el) fragment.appendChild(el);
+        // FIX (statuses vanishing instead of moving to Viewed updates):
+        // if building one group threw here, the forEach used to abort
+        // entirely — the code below that clears+repopulates the container
+        // never ran, so the container just kept whatever it had before
+        // (often nothing, for a friend that had never appeared in this
+        // section yet). One bad group must never blank the whole list.
+        try {
+            const el = createGroupedStatusElement(statuses, allViewed);
+            if (el) fragment.appendChild(el);
+        } catch (err) {
+            console.error('[status-ui] Failed to render status group for user', uid, err);
+        }
     });
     container.innerHTML = '';
     container.appendChild(fragment);

@@ -2811,8 +2811,21 @@ const ChatManager = {
                 _idbSnapshot = await window.KynectaLocalStore.getMessagesByChat(actualId, { limit: 100 }).catch(function() { return []; });
             }
             if (!isPending) {
-                if (navigator.onLine && SessionManager.isAuthenticated() && currentState === LIFECYCLE_STATES.ACTIVE) {
+                // FIX-NOTIF-DISPLAY: previously also required currentState === ACTIVE.
+                // That flag only flips once this module's postMessage handshake with the
+                // parent frame completes — which has not necessarily happened yet the
+                // moment a user opens a specific conversation right after a cold app
+                // launch (e.g. tapping a push notification). When the gate failed, this
+                // fetch was skipped with NO retry and NO error, so the chat panel just
+                // kept rendering whatever was already in IndexedDB before the new
+                // message arrived — exactly "notification shown, message never displayed
+                // in the chat panel". A REST refresh of one already-open conversation is
+                // safe regardless of the parent-handshake lifecycle state, so only
+                // online + authenticated are required to actually run it now.
+                if (navigator.onLine && SessionManager.isAuthenticated()) {
                     await ChatManager.fetchMessages(actualId, { ...options, force: true }).catch(function() {});
+                } else if (currentState !== LIFECYCLE_STATES.ACTIVE) {
+                    debugLog('[ConversationManager] Module not ACTIVE yet — fetched messages anyway (online+authed) for', actualId);
                 }
             } else {
                 debugLog('[ConversationManager] Skipping message fetch for pending conversation:', actualId);

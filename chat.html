@@ -1727,8 +1727,21 @@
         </div>
     </div>
 
-    <!-- Mobile Back Button: hidden — device back-gesture (popstate) and backbutton event handle navigation -->
-    <button id="mobileBackBtn" class="mobile-back-btn" style="display:none!important;" aria-hidden="true">
+    <!-- Mobile Back Button.
+         FIX: this used to carry `style="display:none!important;"` inline,
+         on the assumption that the device back-gesture (popstate) alone
+         would be enough. In practice mobile users expect a visible, tappable
+         back icon, and — more importantly — an inline `!important` can never
+         be overridden by any stylesheet rule, `!important` or not, so the
+         `body.chat-panel-active .mobile-back-btn { display: flex !important; }`
+         rule below (and its call/group/status equivalents) was silently
+         dead: this button could never appear no matter what state the app
+         was in. Removing the inline override lets that existing CSS do what
+         it was always meant to — show this button only while the user is
+         actually inside a sub-view of Messages/Calls/Group/Status, tapping
+         it routes through handleAppBackNavigation(), which already knows
+         how to return to exactly where the user was one step at a time. -->
+    <button id="mobileBackBtn" class="mobile-back-btn" aria-label="Back">
         <i class="fas fa-arrow-left"></i>
     </button>
 
@@ -7497,12 +7510,20 @@
                 // already maintains a correct history stack at window.__navHistory
                 // (see its definition above) — use that instead of a second,
                 // disconnected one.
+                //
+                // FIX 2: this also used to be its own bare `hist.pop()` with no
+                // fallback — if a module's in-page back button fired NAVIGATE_BACK
+                // before __navHistory had anything in it (e.g. the very first
+                // module opened in the session), the back tap silently did
+                // nothing. handleAppBackNavigation() (used by the floating back
+                // button and the hardware back button) already has correct,
+                // panel-aware fallbacks for every module — route through that
+                // single function instead of duplicating a weaker version of it,
+                // so every way of triggering "back" behaves identically.
                 (function() {
                     function _goBackOnePage() {
-                        var hist = window.__navHistory;
-                        if (hist && hist.length > 0) {
-                            var prev = hist.pop();
-                            if (typeof navigateToPage === 'function') navigateToPage(prev, { fromHistory: true });
+                        if (typeof handleAppBackNavigation === 'function') {
+                            handleAppBackNavigation();
                         }
                     }
                     window._kynTrackedNav = navigateToPage; // kept for backward compatibility with any external caller
