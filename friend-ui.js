@@ -248,6 +248,65 @@ function navigateToChatWithUser(userId, userName, additionalData = {}) {
 // [2C] CALL NAVIGATION FIX - RELIABLE IMPLEMENTATION
 // =============================================
 
+// FIX (call icon gave no voice/video choice): the friend-card "call" button
+// only ever fired navigateToCallModule(userId, userName) with no callType,
+// which silently defaulted to 'voice' every time -- the user was never
+// asked. Every other call-starting source in the app (message.html's chat
+// header, group.html, chat.html's own group-call buttons, calls.html's New
+// Call modal) already has separate Voice/Video buttons, so this was the one
+// real gap. This shows a small "Voice call or Video call?" choice and
+// resolves with 'voice' | 'video' | null (cancelled).
+function askCallType(displayName) {
+    return new Promise((resolve) => {
+        const existing = document.getElementById('callTypeChoiceOverlay');
+        if (existing) existing.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'callTypeChoiceOverlay';
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;';
+
+        const box = document.createElement('div');
+        box.style.cssText = 'background:#1e1e2e;border-radius:14px;padding:24px;max-width:300px;width:85%;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,0.5);';
+
+        const title = document.createElement('div');
+        title.style.cssText = 'font-size:16px;font-weight:600;color:#fff;margin-bottom:18px;';
+        title.textContent = 'Call ' + (displayName || 'User');
+        box.appendChild(title);
+
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;gap:12px;';
+
+        const voiceBtn = document.createElement('button');
+        voiceBtn.style.cssText = 'flex:1;padding:14px 0;border:none;border-radius:10px;background:#4338ca;color:#fff;font-size:14px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:6px;';
+        voiceBtn.innerHTML = '<i class="fas fa-phone" style="font-size:18px;"></i>Voice Call';
+
+        const videoBtn = document.createElement('button');
+        videoBtn.style.cssText = 'flex:1;padding:14px 0;border:none;border-radius:10px;background:#0084ff;color:#fff;font-size:14px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:6px;';
+        videoBtn.innerHTML = '<i class="fas fa-video" style="font-size:18px;"></i>Video Call';
+
+        row.appendChild(voiceBtn);
+        row.appendChild(videoBtn);
+        box.appendChild(row);
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.style.cssText = 'margin-top:14px;background:none;border:none;color:#999;font-size:13px;cursor:pointer;';
+        cancelBtn.textContent = 'Cancel';
+        box.appendChild(cancelBtn);
+
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+
+        function cleanup(result) {
+            overlay.remove();
+            resolve(result);
+        }
+        voiceBtn.addEventListener('click', () => cleanup('voice'));
+        videoBtn.addEventListener('click', () => cleanup('video'));
+        cancelBtn.addEventListener('click', () => cleanup(null));
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(null); });
+    });
+}
+
 function navigateToCallModule(userId, userName, callType = 'voice') {
     if (!userId) {
         console.error('[CallNav] Cannot navigate to call: No user ID provided');
@@ -3753,7 +3812,10 @@ function createFriendItemElement(friendData, type, instantMode = false) {
                 if (action === 'start-chat') {
                     navigateToChatWithUser(userId, userName);
                 } else if (action === 'call') {
-                    navigateToCallModule(userId, userName);
+                    askCallType(userName).then((chosenType) => {
+                        if (!chosenType) return; // cancelled
+                        navigateToCallModule(userId, userName, chosenType);
+                    });
                 } else if (action === 'add') {
                     sendFriendRequest(userId);
                 } else if (action === 'more') {
@@ -4152,7 +4214,10 @@ function createUserSearchItemElement(user) {
                         const callUserId = btn.dataset.userId;
                         const callUserName = btn.dataset.userName;
                         console.log('[UserSearch] Start call with:', { callUserId, callUserName });
-                        navigateToCallModule(callUserId, callUserName);
+                        askCallType(callUserName).then((chosenType) => {
+                            if (!chosenType) return;
+                            navigateToCallModule(callUserId, callUserName, chosenType);
+                        });
                         break;
                     case 'add':
                         btn.disabled = true;
@@ -4543,7 +4608,11 @@ export const loadFriendDetails = async function(friendData, type) {
                             return;
                         }
                         logUI(`Start call from details: ${this.dataset.userId}`);
-                        navigateToCallModule(this.dataset.userId, this.dataset.userName);
+                        const _detailsUserId = this.dataset.userId, _detailsUserName = this.dataset.userName;
+                        askCallType(_detailsUserName).then((chosenType) => {
+                            if (!chosenType) return;
+                            navigateToCallModule(_detailsUserId, _detailsUserName, chosenType);
+                        });
                     });
                 }
 
@@ -5091,7 +5160,10 @@ export const showFriendOptions = function(friendData) {
                 }
                 closeModal();
                 logUI(`View call history: ${friendId}`);
-                navigateToCallModule(friendId, displayName);
+                askCallType(displayName).then((chosenType) => {
+                    if (!chosenType) return;
+                    navigateToCallModule(friendId, displayName, chosenType);
+                });
             });
         }
 
@@ -5443,7 +5515,10 @@ export const handleFriendAction = function(action, friendData, type, button) {
                 navigateToChatWithUser(userId, userName);
                 break;
             case 'call':
-                navigateToCallModule(userId, userName);
+                askCallType(userName).then((chosenType) => {
+                    if (!chosenType) return;
+                    navigateToCallModule(userId, userName, chosenType);
+                });
                 break;
             case 'add':
                 sendFriendRequest(userId);

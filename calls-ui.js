@@ -7869,43 +7869,27 @@ handleContactItemClick: function(e) {
                         if (icon) icon.className = 'fas fa-video';
                         if (elements.videoBtn) elements.videoBtn.classList.add('active');
 
-                        // Add video track to peer connection and renegotiate
-                        const cs = window.callsState;
-                        const callId = cs && (cs.serverCallId || cs.activeCallId);
-                        const pc = (window.callCore && window.callCore.getPeerConnection && window.callCore.getPeerConnection())
-                                || (window.KynectaCallSession && window.KynectaCallSession.peerConnection);
-                        if (pc && pc.addTrack) {
-                            try {
-                                const existingVideoSender = pc.getSenders && pc.getSenders().find(sender => sender.track && sender.track.kind === 'video');
-                                if (existingVideoSender && existingVideoSender.replaceTrack) {
-                                    existingVideoSender.replaceTrack(vTrack);
-                                } else {
-                                    pc.addTrack(vTrack, UIState.localStream);
-                                }
-                                // Renegotiate: create new offer with video and send via core signaling
-                                pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true })
-                                    .then(offer => pc.setLocalDescription(offer))
-                                    .then(() => {
-                                        // Send via callCore signaling (goes through WS to remote peer)
-                                        if (coreInstance && coreInstance.sendAction) {
-                                            coreInstance.sendAction('SIGNAL_OFFER', {
-                                                offer:  pc.localDescription,
-                                                callId: callId,
-                                                isVideoUpgrade: true
-                                            }).catch(() => {});
-                                        } else if (window.callCore && window.callCore.sendToParent) {
-                                            window.callCore.sendToParent('SIGNAL_OFFER', {
-                                                offer:  pc.localDescription,
-                                                callId: callId,
-                                                isVideoUpgrade: true
-                                            });
-                                        }
-                                        console.log('[Calls UI] Video upgrade offer sent via renegotiation');
-                                    })
-                                    .catch(err => console.warn('[Calls UI] Video upgrade renegotiation failed:', err));
-                            } catch(e) {
-                                console.warn('[Calls UI] Failed to add video track to PC:', e);
-                            }
+                        // FIX (video toggle never reached the peer -- local-only bug):
+                        // this used to look up the peer connection via
+                        // window.callCore.getPeerConnection() and
+                        // window.KynectaCallSession.peerConnection -- neither of those
+                        // is ever defined anywhere in this codebase, so `pc` was always
+                        // undefined and this whole block silently did nothing. The camera
+                        // turned on locally (PiP shows it) but the track never reached
+                        // the peer connection, so the friend saw nothing at all -- exactly
+                        // the reported symptom. Route through the same
+                        // window.callsCoreReplaceVideoTrack() helper screen-share already
+                        // uses (calls-core.part5.js): it finds the real peer connection
+                        // (window.__CallsCoreShared.WebRTCManager._peerConnection),
+                        // replaces an existing video sender's track if one exists, or
+                        // adds a brand-new track + renegotiates (createOffer -> SIGNAL_OFFER)
+                        // when the call had no video track yet -- so turning the camera on
+                        // mid-voice-call now actually reaches the other side instantly
+                        // instead of only ever updating the local preview.
+                        if (typeof window.callsCoreReplaceVideoTrack === 'function') {
+                            window.callsCoreReplaceVideoTrack(vTrack);
+                        } else {
+                            console.warn('[Calls UI] callsCoreReplaceVideoTrack unavailable -- video track not sent to peer');
                         }
 
                         // Remote video upgrade now rides on the SDP renegotiation offer.

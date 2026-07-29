@@ -3550,8 +3550,18 @@
             if (document.hidden && window.Notification && Notification.permission === 'granted' && _kynDesktopNotificationsAllowed()) {
                 try {
                     const senderName = (msg.sender && (msg.sender.displayName || msg.sender.username)) || 'New message';
+                    // FIX (ciphertext-in-notification, path #2): this is a SEPARATE
+                    // notification path from service-worker.js's push handler — an
+                    // in-page `new Notification()` built directly from the socket
+                    // payload's msg.content. If decryption hasn't completed yet (or
+                    // this message belongs to a chat whose keys aren't loaded), that
+                    // content is still the raw E2E envelope ({"v":2,"eph":"...")
+                    // and was being shown verbatim. Same sanitization as the SW path.
+                    const _rawContent = msg.content || '';
+                    const _looksEncrypted = typeof _rawContent === 'string' && _rawContent.trim().charAt(0) === '{' &&
+                        (_rawContent.indexOf('"v"') !== -1 || _rawContent.indexOf('"eph"') !== -1 || _rawContent.indexOf('"ct"') !== -1);
                     new Notification(senderName, {
-                        body: msg.content || 'You have a new message',
+                        body: _looksEncrypted ? 'You have a new message' : (_rawContent || 'You have a new message'),
                         icon: '/favicon.ico',
                         tag: 'kyn-msg-' + (msg.chatId || msg.conversationId || Date.now())
                     });

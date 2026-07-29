@@ -12395,7 +12395,35 @@ Type: ${message.type || 'text'}`;
 
             const currentUserId = getCurrentUserId();
 
-
+            // FIX (root cause: notification arrives but chat panel never
+            // updates, specifically for chats opened from Friend/Status/
+            // Calls rather than Chat History): getConversations() is a
+            // synchronous read of an in-memory array that's only populated
+            // by an ASYNC fetchConversations() call triggered once at
+            // bootstrap. Chat History always waits for that to resolve
+            // before it's even clickable — but Friend/Status/Calls jump
+            // straight here the moment their own module loads, which can
+            // easily race ahead of that fetch (a friend never messaged
+            // before this session, or a fast tap right after page load).
+            // When that race is lost, core.getConversations() comes back
+            // empty even though a real conversation exists server-side, so
+            // the code below falls through to getOrCreatePendingConversation()
+            // and activates a throwaway pending_<id> chat. Every message
+            // that later arrives carries the REAL chatId, which never
+            // matches that pending id — so it notifies (correctly, from the
+            // server's point of view) but never renders live, exactly the
+            // reported symptom. Fetch once before deciding, only when the
+            // list looks unpopulated, so the common already-loaded case
+            // (including brand-new users with zero real conversations)
+            // pays no extra cost.
+            if (!window.__kynConversationsFetchedOnce && core.getConversations().length === 0 &&
+                core.ChatManager && typeof core.ChatManager.fetchConversations === 'function') {
+                window.__kynConversationsFetchedOnce = true;
+                core.ChatManager.fetchConversations().catch(() => {}).finally(() => {
+                    window.messagesUI.loadChatByFriendId(friendId, friendName);
+                });
+                return;
+            }
 
             const existingConversation = core.getConversations?.()?.find?.((conversation) =>
 
