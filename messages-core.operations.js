@@ -1484,6 +1484,23 @@ const ChatManager = {
                     SafeStorage.set('lastChatId', String(conversation.id));
                 } catch (e) {}
             }
+
+            // FIX (push-notification-while-open): the service worker's push
+            // handler has no way to know which chat (if any) is currently on
+            // screen, so it always showed an OS notification even when the
+            // recipient was already looking at that exact conversation and
+            // the message was rendering live. Tell the SW controlling THIS
+            // iframe which chat is active on every change (including null,
+            // when the panel closes) — relayed up to the parent frame, which
+            // actually owns the service-worker-registered top-level page.
+            try {
+                const _activeChatId = conversation ? String(conversation.id || '') : null;
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({ type: 'kyn:activeChatChanged', chatId: _activeChatId }, '*');
+                } else if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+                    navigator.serviceWorker.controller.postMessage({ type: 'ACTIVE_CHAT_CHANGED', chatId: _activeChatId });
+                }
+            } catch (_e) {}
         },
         
         getActiveChat: function() {

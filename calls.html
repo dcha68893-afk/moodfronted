@@ -120,6 +120,20 @@ window.__CALLS_IFRAME__ = {
             if (calling) {
                 calling.classList.add('active');
                 calling.style.setProperty('display', 'flex', 'important');
+                // FIX-CALLINGSCREEN-POISONED-ON-REDIAL: calls-ui.js's
+                // transitionToInCall() nuclear-hides this same element with
+                // visibility:hidden!important / z-index:-1!important /
+                // pointer-events:none!important baked into its inline style
+                // once a call connects. Only clearing display here (as this
+                // used to) left those three behind, so the NEXT call's
+                // outgoing screen got display:flex but stayed invisible,
+                // behind everything, and unclickable -- ringing/connecting
+                // in the background with nothing visible until the other
+                // side answered and #inCallScreen (a different, unaffected
+                // element) took over.
+                calling.style.removeProperty('visibility');
+                calling.style.removeProperty('z-index');
+                calling.style.removeProperty('pointer-events');
             }
             document.body.classList.add('call-active');
 
@@ -246,6 +260,10 @@ window.__CALLS_IFRAME__ = {
                 var modal = document.getElementById('incomingCallModal');
                 if (modal) {
                     modal.style.removeProperty('display');
+                    // FIX-CALLINGSCREEN-POISONED-ON-REDIAL (incoming side)
+                    modal.style.removeProperty('visibility');
+                    modal.style.removeProperty('z-index');
+                    modal.style.removeProperty('pointer-events');
                     modal.classList.add('active');
                     if (data) {
                         var callerName = data.callerName || data.userName || data.name || 'Unknown';
@@ -4891,6 +4909,10 @@ window.__CALLS_IFRAME__ = {
             if (modal) {
                 modal.classList.add('active');
                 modal.style.removeProperty('display');
+                // FIX-CALLINGSCREEN-POISONED-ON-REDIAL (incoming side)
+                modal.style.removeProperty('visibility');
+                modal.style.removeProperty('z-index');
+                modal.style.removeProperty('pointer-events');
             }
             _startIncomingRingtone();
         }

@@ -34,7 +34,7 @@
     <title>Kynecta - Advanced Mood-Based Chat</title>
     <!-- PWA: manifest MUST be linked from the main shell so beforeinstallprompt fires -->
     <link rel="manifest" href="/manifest.json">
-    <meta name="theme-color" content="#1a73e8">
+    <!-- theme-color is now set dynamically by theme.engine.js to match the saved theme -->
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -3519,6 +3519,18 @@
         window.addEventListener('message', function(evt) {
             if (!isTrustedOrigin(evt.origin)) return;
             const d = evt.data || {};
+            // FIX (push-notification-while-open): relay which chat (if any) is
+            // currently open in the messages iframe to the service worker that
+            // actually owns push events — the iframe itself isn't the
+            // controlled client, this top-level page is.
+            if (d.type === 'kyn:activeChatChanged') {
+                try {
+                    if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+                        navigator.serviceWorker.controller.postMessage({ type: 'ACTIVE_CHAT_CHANGED', chatId: d.chatId || null });
+                    }
+                } catch (_) {}
+                return;
+            }
             if (d.type !== 'kyn:incomingMessage') return;
             const msg = d.detail || d.payload || d;
             if (!msg) return;

@@ -5390,9 +5390,18 @@ function renderStatusesListUI(container, statusesList, allViewed) {
     bindGroupedStatusHandlers(container);
     setTimeout(() => bindGroupedStatusHandlers(container), 100);
 
-    // Show "Recent updates" label when there are friend statuses
-    const recentLabel = document.getElementById('recentUpdatesLabel');
-    if (recentLabel) recentLabel.style.display = fragment.childElementCount > 0 ? '' : 'none';
+    // Show the correct section label based on which list this call rendered.
+    // FIX (status Viewed-section label bug): this used to always toggle
+    // #recentUpdatesLabel regardless of whether `container` was the Recent
+    // list or the Viewed list. renderStatusListInstantlyUI() calls this
+    // function twice per refresh — once for Recent, once for Viewed — and
+    // the Viewed call ran last, so its (unrelated) child count silently
+    // overwrote the Recent label's visibility that the wrapper had just set
+    // correctly moments earlier. Toggle the label that actually matches the
+    // container being rendered.
+    const _labelId = (container && container.id === 'viewedStatusList') ? 'viewedUpdatesLabel' : 'recentUpdatesLabel';
+    const _label = document.getElementById(_labelId);
+    if (_label) _label.style.display = fragment.childElementCount > 0 ? '' : 'none';
 }
 
 // Create one list item that represents all statuses from one user

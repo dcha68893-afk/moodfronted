@@ -253,6 +253,12 @@ function showCallingScreenViaPatch(callInfo) {
     if (!callingScreen) { console.error('[UI] #callingScreen not found'); return; }
     callingScreen.classList.add('active');
     callingScreen.style.setProperty('display','flex','important');
+    // Belt-and-suspenders for FIX-CALLINGSCREEN-POISONED-ON-REDIAL (see
+    // showIdleScreen): make sure this screen can never still be carrying
+    // the previous call's transitionToInCall() nuclear-hide styles.
+    callingScreen.style.removeProperty('visibility');
+    callingScreen.style.removeProperty('z-index');
+    callingScreen.style.removeProperty('pointer-events');
 
     // ── Populate contact info ──
     const avatar = callingScreen.querySelector('#callingAvatar') || document.getElementById('callingAvatar');
@@ -665,6 +671,12 @@ const GlobalCallHistory = {
     if (callingScreen) {
         callingScreen.classList.add('active');
         callingScreen.style.setProperty('display', 'flex', 'important');
+        // FIX-CALLINGSCREEN-POISONED-ON-REDIAL: see showIdleScreen — clear
+        // any leftover visibility/z-index/pointer-events left behind by a
+        // previous call's transitionToInCall() nuclear-hide.
+        callingScreen.style.removeProperty('visibility');
+        callingScreen.style.removeProperty('z-index');
+        callingScreen.style.removeProperty('pointer-events');
         console.log('[Calls UI] Calling screen is now VISIBLE');
         
         // Update calling screen content — scope queries to callingScreen to avoid duplicate ID confusion
@@ -793,10 +805,33 @@ function showIdleScreen(force) {
     const inCallScreen  = document.getElementById('inCallScreen');
     const callContainer = document.getElementById('callContainer');
 
+    // FIX-CALLINGSCREEN-POISONED-ON-REDIAL: transitionToInCall()'s guard
+    // cleanup (further down in this file) leaves callingScreen/incomingCallModal
+    // with visibility:hidden!important, z-index:-1!important and
+    // pointer-events:none!important baked into their inline style, on top of
+    // display:none!important. Every place that re-shows these screens for a
+    // NEW call only ever set display back to flex/block — it never cleared
+    // those other three properties, since normally showIdleScreen() runs in
+    // between and nobody expected it to matter. It does: if a user places a
+    // brand new call again shortly after being in one (e.g. B redials A right
+    // after a call with A just ended), the new outgoing calling screen got
+    // display:flex but stayed invisible/behind everything/unclickable from
+    // the stale inline styles — the call itself proceeded normally in the
+    // background (ringing, WebRTC setup) with nothing on screen until the
+    // other side answered and transitionToInCall swapped to #inCallScreen
+    // (a different, unaffected element), which is exactly the "empty screen
+    // until they accept" symptom. Clear all four properties here — the one
+    // place every call-end path already runs through — so the next call
+    // always starts from a clean slate no matter which of the several
+    // "show calling screen" / "show incoming call" code paths runs next.
+
     // ── Hide outgoing calling screen ──
     if (callingScreen) {
         callingScreen.classList.remove('active');
         callingScreen.style.setProperty('display', 'none', 'important');
+        callingScreen.style.removeProperty('visibility');
+        callingScreen.style.removeProperty('z-index');
+        callingScreen.style.removeProperty('pointer-events');
         const s = document.getElementById('callingStatus');
         if (s) s.textContent = 'Ringing...';
     }
@@ -805,6 +840,9 @@ function showIdleScreen(force) {
     if (inCallScreen) {
         inCallScreen.classList.remove('active');
         inCallScreen.style.setProperty('display', 'none', 'important');
+        inCallScreen.style.removeProperty('visibility');
+        inCallScreen.style.removeProperty('z-index');
+        inCallScreen.style.removeProperty('pointer-events');
     }
 
     // ── Hide incoming call screen (receiver declined or caller cancelled) ──
@@ -812,6 +850,9 @@ function showIdleScreen(force) {
     if (incoming) {
         incoming.classList.remove('active');
         incoming.style.setProperty('display', 'none', 'important');
+        incoming.style.removeProperty('visibility');
+        incoming.style.removeProperty('z-index');
+        incoming.style.removeProperty('pointer-events');
     }
 
     // ── Show idle screen — ONLY if this call actually belongs to the calls
@@ -5292,6 +5333,13 @@ handleContactItemClick: function(e) {
 
                 elements.incomingCallModal.dataset.timer = timer;
                 elements.incomingCallModal.classList.add('active'); elements.incomingCallModal.style.setProperty('display','flex','important');
+                // FIX-CALLINGSCREEN-POISONED-ON-REDIAL (same bug, incoming side):
+                // clear leftover visibility/z-index/pointer-events left behind by
+                // a previous call's transitionToInCall() nuclear-hide, so a
+                // second incoming call in a row isn't invisible.
+                elements.incomingCallModal.style.removeProperty('visibility');
+                elements.incomingCallModal.style.removeProperty('z-index');
+                elements.incomingCallModal.style.removeProperty('pointer-events');
                 UIState.activeModals.add('incomingCallModal');
                 // GUARD FIX: Mark call as active so showScreen('idle') can't fire during ring
                 window.__callActive = true;
@@ -11303,6 +11351,9 @@ if (detectExistingCore()) {
                 }
 
                 modal.style.display = 'flex';
+                modal.style.removeProperty('visibility');
+                modal.style.removeProperty('z-index');
+                modal.style.removeProperty('pointer-events');
                 requestAnimationFrame(() => { modal.classList.add('active'); });
             }
 

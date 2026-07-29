@@ -411,6 +411,28 @@
         if (document.body) {
             document.body.classList.toggle('dark-theme', theme === 'dark');
         }
+
+        // FIX (hardcoded theme-color / OS chrome mismatch): every page had its
+        // own <meta name="theme-color"> baked into the HTML at build time
+        // (chat.html #1a73e8, Tools/friend/group/index/settings #4F46E5,
+        // message.html #0084ff, status.html #111b21, upload.html #000000) —
+        // none of them ever changed when the user switched/saved a theme, so
+        // Android's status bar / edge-to-edge nav chrome stayed stuck on
+        // whatever bright fixed color that page shipped with, clashing with
+        // a saved dark theme (this is the "hardcoded light colour in the
+        // footer" report — that strip is the OS chrome tint, not app CSS).
+        // Single source of truth: derive it from the same palette as
+        // everything else and keep the one <meta> tag in sync on every paint.
+        try {
+            var metaColor = palette['--kyn-bg-root'] || (theme === 'dark' ? '#0f172a' : '#ffffff');
+            var metaTag = document.querySelector('meta[name="theme-color"]');
+            if (!metaTag) {
+                metaTag = document.createElement('meta');
+                metaTag.setAttribute('name', 'theme-color');
+                (document.head || document.documentElement).appendChild(metaTag);
+            }
+            metaTag.setAttribute('content', metaColor);
+        } catch (_e) {}
     }
 
     function paint(theme, fontSize, accentColor, iconScale) {

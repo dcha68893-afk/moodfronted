@@ -1717,11 +1717,75 @@
                     if (!newTrack) return;
                     var pc = window.__CallsCoreShared.WebRTCManager._peerConnection;
                     if (!pc) return;
-                    pc.getSenders().forEach(function(sender) {
-                        if (sender.track && sender.track.kind === 'video') {
-                            sender.replaceTrack(newTrack).catch(function() {});
-                        }
+                    var videoSender = pc.getSenders().find(function(sender) {
+                        return sender.track && sender.track.kind === 'video';
                     });
+                    if (videoSender) {
+                        videoSender.replaceTrack(newTrack).catch(function(err) {
+                            window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'replaceTrack failed', err);
+                        });
+                        return;
+                    }
+                    // FIX-SCREENSHARE-VOICE-CALL: there was no existing video sender
+                    // to hijack -- this happens on a call that started as voice-only
+                    // (no video track was ever added to the peer connection), so
+                    // screen-share (and camera-on-mid-voice-call) silently did
+                    // nothing: the forEach above found no sender.track to match, so
+                    // nothing was ever sent and the remote party saw no share at all,
+                    // with no error either since the failure was a silent no-op.
+                    // Add a brand-new video track/transceiver and renegotiate so the
+                    // remote party actually receives it as a real new track (their
+                    // ontrack fires properly for it, same as any fresh video call).
+                    try {
+                        pc.addTrack(newTrack, new MediaStream([newTrack]));
+                    } catch (err) {
+                        window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'addTrack for screen share failed', err);
+                        return;
+                    }
+                    window.__CallsCoreShared.WebRTCManager.createOffer({})
+                        .then(function(offer) {
+                            return window.__CallsCoreShared.IframeTransport.sendAction('SIGNAL_OFFER', {
+                                offer: offer,
+                                callId: window.__CallsCoreShared.WebRTCManager._currentCallId,
+                                renegotiate: true
+                            });
+                        })
+                        .catch(function(err) {
+                            window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Renegotiation for screen share failed', err);
+                        });
+                };
+
+                // Counterpart to the addTrack path above: when screen share
+                // ends on a call that had no video track before sharing
+                // started (voice-only call), just leaving the now-stopped
+                // screen track on the sender left the remote party staring at
+                // a frozen/black frame forever with no way back to voice-only.
+                // Remove the sender/transceiver entirely and renegotiate so
+                // the call cleanly returns to audio-only for both sides.
+                window.callsCoreDropVideoSender = function() {
+                    var pc = window.__CallsCoreShared.WebRTCManager._peerConnection;
+                    if (!pc) return;
+                    var videoSender = pc.getSenders().find(function(sender) {
+                        return sender.track && sender.track.kind === 'video';
+                    });
+                    if (!videoSender) return;
+                    try {
+                        pc.removeTrack(videoSender);
+                    } catch (err) {
+                        window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'removeTrack for screen share revert failed', err);
+                        return;
+                    }
+                    window.__CallsCoreShared.WebRTCManager.createOffer({})
+                        .then(function(offer) {
+                            return window.__CallsCoreShared.IframeTransport.sendAction('SIGNAL_OFFER', {
+                                offer: offer,
+                                callId: window.__CallsCoreShared.WebRTCManager._currentCallId,
+                                renegotiate: true
+                            });
+                        })
+                        .catch(function(err) {
+                            window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Renegotiation for screen share revert failed', err);
+                        });
                 };
                 // FIX: hook for AdaptiveBitrateEngine.js's CallRecoveryEngine tab-visibility
                 // recovery. DeviceMediaManager.recoverTracks() is a no-op in this app (its

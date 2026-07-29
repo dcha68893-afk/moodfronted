@@ -857,6 +857,19 @@ self.addEventListener('message', function(event) {
       console.warn('[SW] Background sync registration failed:', tag, err);
     });
   }
+  // FIX (push-notification-while-open): remember which chat (if any) is
+  // currently open in a client tab, so the push handler can skip showing a
+  // redundant OS notification for a message that's already rendering live
+  // on screen. Keyed per client id since more than one tab/window can be
+  // controlled at once; a client reports null when its chat panel closes.
+  if (event.data && event.data.type === 'ACTIVE_CHAT_CHANGED') {
+    if (!self.__kynActiveChatByClient) self.__kynActiveChatByClient = new Map();
+    const _cid = event.source && event.source.id;
+    if (_cid) {
+      if (event.data.chatId) self.__kynActiveChatByClient.set(_cid, String(event.data.chatId));
+      else self.__kynActiveChatByClient.delete(_cid);
+    }
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -887,9 +900,25 @@ self.addEventListener('push', function(event) {
         try { data = { title: 'Nexopa', body: event.data.text() }; } catch(__) { return; }
     }
 
+    // FIX (ciphertext-in-notification): the server can't decrypt end-to-end
+    // encrypted message content, so for E2E chats data.body IS the raw
+    // encrypted envelope (e.g. {"v":2,"eph":"...","ct":"..."}) — that JSON
+    // blob was being shown verbatim as the notification preview instead of
+    // any human-readable text. The service worker has no access to the
+    // page's decryption keys/session, so it can't decrypt it either; the
+    // correct fix is to never surface the raw envelope and fall back to a
+    // generic "You have a new message" whenever the body looks like one.
+    const _looksEncrypted = function(s) {
+        if (typeof s !== 'string' || !s) return false;
+        const t = s.trim();
+        return t.charAt(0) === '{' && (t.indexOf('"v"') !== -1 || t.indexOf('"eph"') !== -1 || t.indexOf('"ct"') !== -1);
+    };
+    const _rawBody = data.body || data.message || '';
+    const _safeBody = _looksEncrypted(_rawBody) ? 'You have a new message' : (_rawBody || 'You have a new notification');
+
     const title   = data.title   || 'Nexopa';
     const options = {
-        body:    data.body    || data.message || 'You have a new notification',
+        body:    _safeBody,
         icon:    data.icon    || '/icons/nexopa-192.png',
         badge:   data.badge   || '/icons/nexopa-192.png',
         tag:     data.tag     || 'nexopa-notification',
@@ -923,8 +952,31 @@ self.addEventListener('push', function(event) {
         options.data = { url: '/game.html' };
     }
 
+    // FIX (redundant notification while chat is open): a message notification
+    // used to fire unconditionally even when the recipient already has that
+    // exact conversation open and focused in a foreground tab — the message
+    // renders live in the chat panel via the socket AND a duplicate OS banner
+    // pops up on top of it. Skip showNotification in that one case; every
+    // other state (app backgrounded, a different chat open, app closed)
+    // still notifies normally.
     event.waitUntil(
-        self.registration.showNotification(title, options)
+        (async function() {
+            if (data.type === 'message' || data.type === 'new_message') {
+                try {
+                    const _chatId = String(data.chatId || (data.data && data.data.chatId) || '');
+                    const _map = self.__kynActiveChatByClient;
+                    const _viewingThisChat = _chatId && _map && Array.from(_map.values()).some(function(v) { return v === _chatId; });
+                    if (_viewingThisChat) {
+                        // Confirm the client reporting it is still focused right now —
+                        // the map can lag a closed/backgrounded tab by a few seconds.
+                        const allClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+                        const _stillFocused = allClients.some(function(c) { return c.focused && _map.get(c.id) === _chatId; });
+                        if (_stillFocused) return;
+                    }
+                } catch (_) { /* best-effort — fall through and notify */ }
+            }
+            return self.registration.showNotification(title, options);
+        })()
     );
 });
 

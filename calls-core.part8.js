@@ -4237,6 +4237,8 @@ clearActiveCall: function() {
             // party's video frozen on the last screen-share frame forever.
             if (typeof window.callsCoreReplaceVideoTrack === 'function' && _stopResult && _stopResult.revertTrack) {
                 window.callsCoreReplaceVideoTrack(_stopResult.revertTrack);
+            } else if (typeof window.callsCoreDropVideoSender === 'function') {
+                window.callsCoreDropVideoSender();
             }
 
             window.__CallsCoreShared.IframeTransport.sendAction('STOP_SCREEN_SHARE', {
