@@ -3,7 +3,36 @@
 <head>
 <script>window.API_BASE_URL = "https://nexora-3bla.onrender.com"; window.__kynAPI = window.__kynAPI || {}; window.__kynAPI.baseUrl = "https://nexora-3bla.onrender.com/api";</script>
 <script src="/js/theme.engine.js"></script>
+<script>
+  // FIX (stray back-arrow button at the bottom of the app): this page has
+  // its own #chatHeader (avatar, name, back button, call/video/more icons)
+  // which is only meant to be used when message.html is opened standalone.
+  // When it's embedded inside chat.html's iframe shell, chat.html renders
+  // its OWN header (#headerChatCtx / #hdrChatBack) instead — the comment
+  // above #chatHeader already said this page's copy should be "kept
+  // functional but visually hidden there", but no CSS ever actually hid it.
+  // Run this before first paint so there's no flash of the duplicate header
+  // either.
+  try {
+    if (window.self !== window.top) {
+      document.documentElement.classList.add('kyn-embedded-shell');
+    }
+  } catch (_e) {
+    // Cross-origin access to window.top threw — treat that as "embedded"
+    // too, since a same-origin app would never throw here.
+    document.documentElement.classList.add('kyn-embedded-shell');
+  }
+</script>
 <style id="kynCriticalHeaderFix">
+    /* FIX (stray back-arrow at bottom of app): see the classList.add(...)
+       script just above. chat.html already shows its own header for this
+       conversation, so this page's own #chatHeader (and its back button)
+       must not render at all when embedded — previously there was no rule
+       doing this despite the code comment on #chatHeader claiming it. */
+    html.kyn-embedded-shell #chatHeader {
+        display: none !important;
+    }
+
     header, .header, .top-bar, .toolbar, .app-header, .chat-header,
     .module-header, [class*="header"], [class*="topbar"], [class*="top-bar"] {
         background: var(--kyn-bg-header) !important;

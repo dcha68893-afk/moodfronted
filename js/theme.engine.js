@@ -128,6 +128,14 @@
             '--kyn-navbar-notch-shadow': 'rgba(13,17,26,0.97)',
             '--kyn-navbar-icon-inactive': 'rgba(148,163,184,0.55)',
 
+            /* FIX (header spark): .header-action-btn (call/video/more icons
+               in #globalHeader) used to be hardcoded to a light translucent
+               white in its base rule, corrected only by a [data-theme=dark]
+               override ~1250 lines further down the same stylesheet — same
+               class of bug as the navbar sparkle above. */
+            '--kyn-header-action-bg': 'rgba(255,255,255,0.08)',
+            '--kyn-header-action-bg-hover': 'rgba(255,255,255,0.15)',
+
             '--bg-color': '#0f172a', '--text-primary': '#e5e7eb', '--text-color': '#e5e7eb',
             '--text-secondary': '#9ca3af', '--sidebar-bg': '#0f172a', '--card-bg': '#1e293b',
             '--border-color': '#374151', '--hover-color': '#1f2c33',
@@ -166,6 +174,9 @@
             '--kyn-navbar-ring': 'rgba(255,255,255,0.98)',
             '--kyn-navbar-notch-shadow': 'rgba(248,250,252,0.97)',
             '--kyn-navbar-icon-inactive': 'rgba(100,116,139,0.65)',
+
+            '--kyn-header-action-bg': 'rgba(255,255,255,0.70)',
+            '--kyn-header-action-bg-hover': 'rgba(255,255,255,0.95)',
 
             '--bg-color': '#ffffff', '--text-primary': '#111b21', '--text-color': '#111b21',
             '--text-secondary': '#667781', '--sidebar-bg': '#ffffff', '--card-bg': '#ffffff',
@@ -410,6 +421,15 @@
 
         if (document.body) {
             document.body.classList.toggle('dark-theme', theme === 'dark');
+        } else {
+            // First paint runs before <body> exists (this script is the very
+            // first thing in <head>), so the toggle above is a silent no-op.
+            // Catch up exactly once as soon as <body> is available so
+            // nothing keyed off body.dark-theme is ever stuck on the wrong
+            // value for even one frame.
+            document.addEventListener('DOMContentLoaded', function () {
+                document.body.classList.toggle('dark-theme', state.theme === 'dark');
+            }, { once: true });
         }
 
         // FIX (hardcoded theme-color / OS chrome mismatch): every page had its

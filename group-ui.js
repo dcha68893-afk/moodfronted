@@ -1946,6 +1946,27 @@ export function registerMessageHandlers() {
                 return;
             }
 
+            // ── MODULE FOCUSED (FIX: "All Groups" empty after leaving and
+            // returning to the group module) ──────────────────────────────
+            // Root cause: chat.html keeps this iframe permanently mounted
+            // (never reloaded) when switching modules, so GroupCore's
+            // in-memory list is never actually lost. But nothing ever told
+            // this iframe "you're visible again, re-render" — the messages
+            // module has exactly this same mechanism (MODULE_FOCUSED,
+            // handled in messages-ui.js) for the identical symptom of
+            // stale/blank state after switching away and back; the group
+            // module never had the matching piece. Whatever section is
+            // currently active (All/My/Joined/Invites/Admin) gets forced to
+            // re-render from whatever GroupCore already has in memory, and
+            // if that's genuinely empty, renderAllGroupsSecure()'s own
+            // built-in fetch-if-empty branch kicks in and requests a fresh
+            // list from the server instead of sitting on a blank screen.
+            if (message.type === 'MODULE_FOCUSED') {
+                if (typeof renderGroupsListSecure === 'function') renderGroupsListSecure();
+                else if (typeof window.renderGroupsListSecure === 'function') window.renderGroupsListSecure();
+                return;
+            }
+
             // ── GROUP INVITE RECEIVED ─────────────────────────────────────────
             if (message.type === 'GROUP_INVITE_RECEIVED' || message.type === 'group:invitation:received') {
                 // (log suppressed)
