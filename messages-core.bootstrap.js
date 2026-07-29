@@ -1094,6 +1094,49 @@ try {
             return byFriend;
         }
 
+        // ROOT-CAUSE FIX (messages never appear unless BOTH sides opened the
+        // chat from Chat History): the search above deliberately excluded
+        // `isPending` rows, so when the RECEIVER had opened this chat from
+        // Friend/Calls/Group/Status (which always creates a local
+        // `pending_<friendId>` placeholder — see openChatWithUserInUI /
+        // getOrCreatePendingConversation) and the sender's first message
+        // arrives, this function never found that pending row and fell
+        // through to creating a brand-new SECOND conversation object at the
+        // real chatId. The receiver's screen was still pointed at (and
+        // "active" on) the old pending_<friendId> object, which nothing ever
+        // updates — so the incoming message got stored under the real chatId
+        // while the visible panel kept comparing against the stale pending
+        // id, and any reply the receiver typed afterwards went out on that
+        // same dead pending id again. Only Chat History ever avoided this,
+        // because opening from there loads/knows the real chatId up front
+        // and never creates a pending row to begin with.
+        // Fix: treat a matching PENDING row the same as a real one — reuse
+        // the existing replacePendingConversation() path (already handles
+        // re-keying _conversationsMap, active-conversation swap, and
+        // re-stamping cached messages) instead of silently duplicating it.
+        const byPendingFriend = (ChatManager._conversations || [])
+            .find(c => c && c.isPending && String(c.friendId ?? c.pendingReceiverId) === friendId);
+        if (byPendingFriend && typeof ChatManager.replacePendingConversation === 'function') {
+            const friendRecordForPending = FriendManager && FriendManager.getFriend
+                ? (FriendManager.getFriend(friendId) || FriendManager.getFriend(Number(friendId)))
+                : null;
+            const replaced = ChatManager.replacePendingConversation(byPendingFriend.id, {
+                id: String(chatId),
+                chatId: String(chatId),
+                type: 'direct',
+                friendId,
+                participantIds: [myId, friendId].filter(Boolean),
+                friendName: byPendingFriend.friendName || friendRecordForPending?.displayName || friendRecordForPending?.username || `User_${friendId}`,
+                friendAvatar: byPendingFriend.friendAvatar || friendRecordForPending?.avatar || friendRecordForPending?.photoURL || '',
+                lastMessage: normalizedMessage.content || '',
+                lastMessageAt: normalizedMessage.createdAt || normalizedMessage.timestamp || Date.now(),
+                unreadCount: senderId && senderId !== myId ? (byPendingFriend.unreadCount || 0) + 1 : (byPendingFriend.unreadCount || 0),
+                online: !!(friendRecordForPending?.online || friendRecordForPending?.status === 'online'),
+                isPending: false
+            });
+            if (replaced) return replaced;
+        }
+
         const friendRecord = FriendManager && FriendManager.getFriend
             ? (FriendManager.getFriend(friendId) || FriendManager.getFriend(Number(friendId)))
             : null;
