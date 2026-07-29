@@ -439,7 +439,7 @@
   // so a load can never observe a state another in-flight call hasn't saved
   // yet.
   const _chatQueues = new Map(); // chatId -> Promise (tail of the queue)
-  function _runExclusive(chatId, fn) {
+  function _runExclusiveLocal(chatId, fn) {
     const key = String(chatId);
     const tail = _chatQueues.get(key) || Promise.resolve();
     const run = tail.then(fn, fn);
@@ -447,6 +447,30 @@
     // the real result/error via `run`, which is returned below unwrapped.
     _chatQueues.set(key, run.then(() => {}, () => {}));
     return run;
+  }
+
+  // FIX-ROOT-CAUSE-CROSS-TAB-RATCHET-CORRUPTION: _runExclusiveLocal above
+  // only ever serialized calls made from the SAME page/JS realm. Ratchet
+  // state is persisted to localStorage, which is shared across every tab,
+  // window, and iframe reload for this origin — but each of those has its
+  // own independent in-memory queue. Opening a chat from a source that pops
+  // a new window (e.g. a notification click that doesn't match an already-
+  // open tab, via clients.openWindow), or simply reloading the messages
+  // iframe while a background sync elsewhere is mid-decrypt, lets two live
+  // ratchet instances both load the same on-disk state before either saves.
+  // Whichever saves last wins, silently discarding the other's advanced
+  // recvMsgNum/skippedKeys/chainKey — permanently desyncing the chain for
+  // every message after it. The Web Locks API provides a mutex that's
+  // honored across ALL browsing contexts for the origin, not just one page,
+  // so wrapping the existing per-page queue in a named lock per chatId
+  // closes the race everywhere it can occur. Falls back to the local-only
+  // queue on browsers without Web Locks (e.g. older Safari).
+  function _runExclusive(chatId, fn) {
+    if (global.navigator?.locks?.request) {
+      const lockName = `kyn-dr-${String(chatId)}`;
+      return global.navigator.locks.request(lockName, () => _runExclusiveLocal(chatId, fn));
+    }
+    return _runExclusiveLocal(chatId, fn);
   }
 
   const _encryptImpl = encrypt;
