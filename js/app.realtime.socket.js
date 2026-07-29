@@ -1279,24 +1279,43 @@
                 // listener patterns in calls-core.js and calls-ui.js are satisfied.
                 if (evType.startsWith('call') || evType.startsWith('webrtc') || evType.startsWith('ice')) {
                     try {
-                        var _callAllFrames = document.querySelectorAll('iframe');
+                        // FIX (CALL-EVENT-RELAY-CONSOLIDATION): this fan-out is one of 3
+                        // independent paths that deliver the same call-state event to the
+                        // calls iframe (chat.html's _fwdEnded/_fwdAccepted/_fwdForceEnded
+                        // and the kyn: CustomEvent bridge are the other two) — AND it
+                        // already re-sends each event under 3-4 aliases (colon/underscore/
+                        // REALTIME_EVENT: forms) on top of that, because different
+                        // receivers listen for different alias names. That combination
+                        // was confirmed (via console trace) to fire handleCallEnded 3x for
+                        // a single real call end, which is what made calls appear to end
+                        // prematurely and a duplicate call spin up right after ending.
+                        // Only gate discrete call-STATE events here (ended/accepted/
+                        // rejected/cancelled/initiated/missed/force_ended) — NOT webrtc/ice
+                        // signaling, where every offer/answer/candidate is unique and must
+                        // always be delivered.
+                        var _callStateEvents = ['call:ended','call:accepted','call:rejected','call:cancelled','call:initiated','call:missed','call:force_ended'];
                         var _colonForm = evType.indexOf('_') !== -1 ? evType.replace(/_/g, ':') : evType;
                         var _underForm = evType.indexOf(':') !== -1 ? evType.replace(/:/g, '_') : evType;
-                        _callAllFrames.forEach(function(f) {
-                            try {
-                                // Always send original form
-                                f.contentWindow.postMessage({ type: evType, payload: payload }, '*');
-                                // Send colon form if different
-                                if (_colonForm !== evType) f.contentWindow.postMessage({ type: _colonForm, payload: payload }, '*');
-                                // Send underscore form if different
-                                if (_underForm !== evType) f.contentWindow.postMessage({ type: _underForm, payload: payload }, '*');
-                                // Also REALTIME_EVENT prefix form for compatibility
-                                f.contentWindow.postMessage({ type: 'REALTIME_EVENT:' + evType, payload: payload }, '*');
-                            } catch(_) {}
-                        });
-                        // Also normalise kyn: dispatch for same-frame listeners
-                        if (_colonForm !== evType) {
-                            try { window.dispatchEvent(new CustomEvent('kyn:' + _colonForm, { detail: payload })); } catch (_) {}
+                        var _isDupClaimedElsewhere = _callStateEvents.indexOf(_colonForm) !== -1 &&
+                            window.__kynRelayCallEventOnce && !window.__kynRelayCallEventOnce(_colonForm, payload);
+                        if (!_isDupClaimedElsewhere) {
+                            var _callAllFrames = document.querySelectorAll('iframe');
+                            _callAllFrames.forEach(function(f) {
+                                try {
+                                    // Always send original form
+                                    f.contentWindow.postMessage({ type: evType, payload: payload }, '*');
+                                    // Send colon form if different
+                                    if (_colonForm !== evType) f.contentWindow.postMessage({ type: _colonForm, payload: payload }, '*');
+                                    // Send underscore form if different
+                                    if (_underForm !== evType) f.contentWindow.postMessage({ type: _underForm, payload: payload }, '*');
+                                    // Also REALTIME_EVENT prefix form for compatibility
+                                    f.contentWindow.postMessage({ type: 'REALTIME_EVENT:' + evType, payload: payload }, '*');
+                                } catch(_) {}
+                            });
+                            // Also normalise kyn: dispatch for same-frame listeners
+                            if (_colonForm !== evType) {
+                                try { window.dispatchEvent(new CustomEvent('kyn:' + _colonForm, { detail: payload })); } catch (_) {}
+                            }
                         }
                     } catch(_) {}
                 }

@@ -1744,11 +1744,37 @@
                     }
                     window.__CallsCoreShared.WebRTCManager.createOffer({})
                         .then(function(offer) {
-                            return window.__CallsCoreShared.IframeTransport.sendAction('SIGNAL_OFFER', {
-                                offer: offer,
+                            // FIX (screen-share/camera-mid-call never reaches remote peer):
+                            // this used to call IframeTransport.sendAction('SIGNAL_OFFER', ...),
+                            // which wraps the offer as {type:'ACTION', payload:{action:'SIGNAL_OFFER',
+                            // data:{...}}}. chat.html's WebRTC Signaling Bridge only recognizes the
+                            // BARE {type:'SIGNAL_OFFER', payload:{...}} shape (confirmed working —
+                            // see calls-core.part7.js's initial-offer path) and has no handler at
+                            // all for a generic ACTION envelope, so this renegotiation offer was
+                            // silently dropped at chat.html and never reached the socket. That's
+                            // why turning the camera on mid-call, or starting screen share on a
+                            // voice-only call, updated the local preview but never showed up on the
+                            // friend's screen. Post it directly in the same bare shape as the
+                            // already-working initial-offer path.
+                            var _cs = window.__CallsCoreShared.callsState || {};
+                            var _resolvedTarget = (function() {
+                                if (_cs.activeCall && _cs.activeCall.participants && _cs.activeCall.participants.length > 0) {
+                                    var p = _cs.activeCall.participants[0];
+                                    return typeof p === 'object' ? (p.id || p.userId) : p;
+                                }
+                                return _cs.activePeerId || _cs.remoteUserId || null;
+                            })();
+                            var _offerPayload = {
                                 callId: window.__CallsCoreShared.WebRTCManager._currentCallId,
-                                renegotiate: true
-                            });
+                                offer: offer,
+                                targetUserId: _resolvedTarget,
+                                remoteUserId: _resolvedTarget,
+                                renegotiate: true,
+                                timestamp: Date.now()
+                            };
+                            if (window.parent && window.parent !== window) {
+                                window.parent.postMessage({ type: 'SIGNAL_OFFER', payload: _offerPayload, source: 'calls-core-direct' }, '*');
+                            }
                         })
                         .catch(function(err) {
                             window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Renegotiation for screen share failed', err);
@@ -1777,11 +1803,28 @@
                     }
                     window.__CallsCoreShared.WebRTCManager.createOffer({})
                         .then(function(offer) {
-                            return window.__CallsCoreShared.IframeTransport.sendAction('SIGNAL_OFFER', {
-                                offer: offer,
+                            // FIX (same root cause as callsCoreReplaceVideoTrack above): send
+                            // the bare {type:'SIGNAL_OFFER', payload} shape chat.html's signaling
+                            // bridge actually listens for, not the ACTION envelope it ignores.
+                            var _cs = window.__CallsCoreShared.callsState || {};
+                            var _resolvedTarget = (function() {
+                                if (_cs.activeCall && _cs.activeCall.participants && _cs.activeCall.participants.length > 0) {
+                                    var p = _cs.activeCall.participants[0];
+                                    return typeof p === 'object' ? (p.id || p.userId) : p;
+                                }
+                                return _cs.activePeerId || _cs.remoteUserId || null;
+                            })();
+                            var _offerPayload = {
                                 callId: window.__CallsCoreShared.WebRTCManager._currentCallId,
-                                renegotiate: true
-                            });
+                                offer: offer,
+                                targetUserId: _resolvedTarget,
+                                remoteUserId: _resolvedTarget,
+                                renegotiate: true,
+                                timestamp: Date.now()
+                            };
+                            if (window.parent && window.parent !== window) {
+                                window.parent.postMessage({ type: 'SIGNAL_OFFER', payload: _offerPayload, source: 'calls-core-direct' }, '*');
+                            }
                         })
                         .catch(function(err) {
                             window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Renegotiation for screen share revert failed', err);

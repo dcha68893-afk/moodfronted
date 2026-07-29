@@ -1061,6 +1061,38 @@
             100% { transform: scale(1); }
         }
 
+        /* ---- Mobile back button ---- */
+        .mobile-back-btn {
+            display: none;
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            width: 48px;
+            height: 48px;
+            background: linear-gradient(135deg, #1e40af, #2563eb);
+            border-radius: 50%;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 20px;
+            z-index: 1001;
+            box-shadow: 0 4px 16px rgba(37,99,235,0.45), 0 2px 8px rgba(0,0,0,0.3);
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+        }
+
+        .mobile-back-btn:active {
+            transform: scale(0.93);
+        }
+
+        body.chat-panel-active .mobile-back-btn,
+        body.call-screen-active .mobile-back-btn,
+        body.group-panel-active .mobile-back-btn,
+        body.status-panel-active .mobile-back-btn {
+            display: flex !important;
+        }
+
         /* Desktop styles */
         @media (max-width: 768px) {
             #permanentSidebar {
@@ -1173,6 +1205,9 @@
 
         @media (min-width: 769px) {
             .mobile-nav-bar {
+                display: none !important;
+            }
+            .mobile-back-btn {
                 display: none !important;
             }
         }
@@ -1691,6 +1726,24 @@
             </div>
         </div>
     </div>
+
+    <!-- Mobile Back Button.
+         FIX: this used to carry `style="display:none!important;"` inline,
+         on the assumption that the device back-gesture (popstate) alone
+         would be enough. In practice mobile users expect a visible, tappable
+         back icon, and — more importantly — an inline `!important` can never
+         be overridden by any stylesheet rule, `!important` or not, so the
+         `body.chat-panel-active .mobile-back-btn { display: flex !important; }`
+         rule below (and its call/group/status equivalents) was silently
+         dead: this button could never appear no matter what state the app
+         was in. Removing the inline override lets that existing CSS do what
+         it was always meant to — show this button only while the user is
+         actually inside a sub-view of Messages/Calls/Group/Status, tapping
+         it routes through handleAppBackNavigation(), which already knows
+         how to return to exactly where the user was one step at a time. -->
+    <button id="mobileBackBtn" class="mobile-back-btn" aria-label="Back">
+        <i class="fas fa-arrow-left"></i>
+    </button>
 
     <!-- IFrame Containers for each module -->
     <div id="messagesContent" class="iframe-container">
@@ -3135,6 +3188,13 @@
                 applyParentShellToIframe(iframe, iframe.dataset.module || 'messages');
             });
 
+            // Mobile back button
+            const mobileBackBtn = document.getElementById('mobileBackBtn');
+            if (mobileBackBtn) {
+                mobileBackBtn.addEventListener('click', () => {
+                    handleAppBackNavigation();
+                });
+            }
         }
 
         // Attach listeners immediately if DOM is ready, otherwise wait
@@ -3673,6 +3733,48 @@
                 );
                 return true;
             } catch (_) { return false; }
+        };
+
+        // ── FIX (CALL-EVENT-RELAY-CONSOLIDATION): same class of bug as the
+        // message:new relay above, but for call lifecycle events. THREE
+        // independent, uncoordinated paths each deliver the same underlying
+        // call:ended/call:accepted/call:rejected/etc. server event into the
+        // calls iframe: (1) the direct socket listener → _fwdEnded/
+        // _fwdAccepted/_fwdForceEnded in this file, (2) the generic "fan out
+        // ALL call events" block in app.realtime.socket.js's _routeMessage
+        // (which additionally re-sends the SAME event under 3-4 different
+        // type-string aliases — colon form, underscore form, REALTIME_EVENT:
+        // prefix — because different receivers key off different alias
+        // names), and (3) the kyn:* CustomEvent bridge installed below
+        // (_installKynBridge). Because calls-core.part8.js and calls-ui.js
+        // separately register listeners for BOTH the colon form ('call:ended')
+        // and the underscore form ('call_ended') of the same event, a single
+        // real server event could trigger handleCallEnded 3+ times in a row —
+        // confirmed live via console trace (three consecutive "handleCallEnded:
+        // no active call screen visible" warnings for one call end). Racing,
+        // redundant handleCallEnded/handleCallAccepted invocations are what
+        // caused calls to appear to end prematurely ("no session") while still
+        // being set up, and a fresh duplicate call session to spin back up
+        // right after a call was ended.
+        //
+        // window.__kynRelayCallEventOnce(type, payload) is the single gate all
+        // three paths now route through: it claims a (canonicalType + callId)
+        // key and returns true only for the FIRST caller, so the other paths
+        // (and their internal aliases) become safe no-ops instead of duplicate
+        // deliveries. Nothing is deleted — every path still runs — but only one
+        // of them actually reaches the iframe per real event.
+        window.__kynRelayedCallEventKeys = window.__kynRelayedCallEventKeys || new Set();
+        window.__kynRelayCallEventOnce = function (type, payload) {
+            try {
+                const p = (payload && payload.payload) ? payload.payload : (payload || {});
+                const canonical = String(type || '').replace(/_/g, ':');
+                const callId = String(p.callId || p.call_id || p.id || 'none');
+                const key = canonical + ':' + callId;
+                if (window.__kynRelayedCallEventKeys.has(key)) return false; // already delivered by another path
+                window.__kynRelayedCallEventKeys.add(key);
+                setTimeout(function () { window.__kynRelayedCallEventKeys.delete(key); }, 4000);
+                return true;
+            } catch (_) { return true; } // fail open — never block a real call event
         };
     </script>
     <script>
@@ -6925,6 +7027,9 @@
                 }
                 function _fwdAccepted(callData) {
                     hideGlobalBanner();
+                    // FIX (CALL-EVENT-RELAY-CONSOLIDATION): only the first of the 3
+                    // independent relay paths for this event actually broadcasts.
+                    if (!window.__kynRelayCallEventOnce('call:accepted', callData)) return;
                     // Broadcast to ALL iframes so caller's calling screen → in-call
                     document.querySelectorAll('iframe').forEach(f => {
                         if (f.contentWindow) f.contentWindow.postMessage({ type: 'CALL_ACCEPTED', payload: callData, source: 'ws-bridge' }, '*');
@@ -6940,6 +7045,13 @@
                     hideGlobalBanner();
                     document.body.classList.remove('call-screen-active');
                     window.__activeCallInProgress = false;
+                    // FIX (CALL-EVENT-RELAY-CONSOLIDATION): only the first of the 3
+                    // independent relay paths for this event actually broadcasts —
+                    // this is what was causing handleCallEnded to fire 3x per real
+                    // call end (confirmed via console trace), which is what made
+                    // calls appear to end prematurely and a duplicate call spin up
+                    // right after ending.
+                    if (!window.__kynRelayCallEventOnce('call:ended', callData)) { setTimeout(() => refreshCallHistoryForUser(cachedUserId), 500); return; }
                     // Broadcast CALL_ENDED to ALL iframes — both caller and receiver reset
                     document.querySelectorAll('iframe').forEach(f => {
                         if (f.contentWindow) f.contentWindow.postMessage({ type: 'CALL_ENDED', payload: callData, source: 'ws-bridge' }, '*');
@@ -6950,6 +7062,8 @@
                     hideGlobalBanner();
                     document.body.classList.remove('call-screen-active');
                     window.__activeCallInProgress = false;
+                    // FIX (CALL-EVENT-RELAY-CONSOLIDATION): dedup this path too.
+                    if (!window.__kynRelayCallEventOnce('call:force_ended', callData)) return;
                     // PHASE15 FIX: Broadcast to ALL iframes (not just callsIframe) so both
                     // caller and receiver screens reset when call is force-ended.
                     document.querySelectorAll('iframe').forEach(f => {
@@ -7831,7 +7945,15 @@
                     ['kyn:call:initiated',   'CALL_INITIATED'], ['kyn:call_initiated',   'CALL_INITIATED'],
                     ['kyn:call:missed',      'CALL_MISSED'],    ['kyn:call_missed',      'CALL_MISSED'],
                 ].forEach(([evt, type]) => {
-                    window.addEventListener(evt, (e) => _post('callsIframe', type, e.detail || {}));
+                    // FIX (CALL-EVENT-RELAY-CONSOLIDATION): this bridge is one of 3
+                    // independent paths that deliver the same call-state event to the
+                    // calls iframe (see __kynRelayCallEventOnce definition above for the
+                    // full explanation). Gate every dispatch through it so only the
+                    // first path to see a given real event actually posts to the iframe.
+                    window.addEventListener(evt, (e) => {
+                        if (!window.__kynRelayCallEventOnce(type, e.detail || {})) return;
+                        _post('callsIframe', type, e.detail || {});
+                    });
                 });
 
                 // WebRTC signals → calls iframe
