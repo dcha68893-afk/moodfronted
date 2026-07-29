@@ -1064,48 +1064,27 @@
 
     /* ═══════════════════════════════════════════════════════════════════════
        FIX 9 — Category tab wiring (allTab, myGroupsTab, joinedTab, etc.)
-       These should already work via group-ui.js but we ensure fresh clones
+       ROOT-CAUSE FIX: only 'discoverTab' actually needs handling here (it
+       opens an overlay panel that group-ui.js's setupCategoryTabs() doesn't
+       know about). All other tabs (allTab/joinedTab/invitesTab/adminTab)
+       already have a complete, always-fresh-refetching handler registered
+       by group-ui.js's own setupCategoryTabs() — cloning/replacing those
+       buttons here silently deleted that handler on every page load, which
+       is why "All Groups" stopped re-populating after switching tabs or
+       navigating away and back (see full explanation above patchCategoryTabs).
        ═══════════════════════════════════════════════════════════════════════ */
     function patchCategoryTabs() {
-        qsa('.category-btn').forEach(btn => {
-            const fresh = freshClone(btn);
-            fresh.addEventListener('click', () => {
-                // Discover is a sheet/overlay (same as the old Discover quick-
-                // action), not a section to switch to — leave tab/section
-                // active state untouched and just open the panel on top.
-                if (fresh.id === 'discoverTab') {
-                    const panel = qs('#discoverPanel');
-                    if (panel) {
-                        panel.style.display = 'flex';
-                        loadDiscoverPanel();
-                    }
-                    return;
-                }
-
-                qsa('.category-btn').forEach(b => b.classList.remove('active'));
-                qsa('.groups-section').forEach(s => s.classList.remove('active'));
-                fresh.classList.add('active');
-                // Map button ID to section ID
-                const sectionMap = {
-                    allTab       : 'allGroupsSection',
-                    joinedTab    : 'joinedSection',
-                    invitesTab   : 'invitesSection',
-                    adminTab     : 'adminSection',
-                };
-                const sectionId = sectionMap[fresh.id] || (fresh.id.replace('Tab', 'Section'));
-                const section   = document.getElementById(sectionId);
-                if (section) {
-                    section.classList.add('active');
-                    // Trigger re-render
-                    try {
-                        if (typeof updateCurrentSection === 'function') updateCurrentSection();
-                    } catch (_) {}
-                    // Load invitations when switching to Invites tab
-                    if (fresh.id === 'invitesTab') loadUserInvitations();
-                    if (['allTab', 'joinedTab', 'adminTab'].includes(fresh.id)) loadUserGroupSections();
+        const discoverBtn = document.getElementById('discoverTab');
+        if (discoverBtn && !discoverBtn.__kynDiscoverWired) {
+            discoverBtn.__kynDiscoverWired = true;
+            discoverBtn.addEventListener('click', () => {
+                const panel = qs('#discoverPanel');
+                if (panel) {
+                    panel.style.display = 'flex';
+                    loadDiscoverPanel();
                 }
             });
-        });
+        }
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
