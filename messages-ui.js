@@ -10206,37 +10206,50 @@ Type: ${message.type || 'text'}`;
                     // and hand the text back to the user if the retry also
                     // fails.
                     if (response && response.success === false) {
-                        const _retryable = response.error === 'no_conversation' || response.error === 'invalid_conversation';
-                        if (_retryable && !this._sendRetried) {
-                            this._sendRetried = true;
-                            setTimeout(() => {
-                                const _c2 = getMessagesCore();
-                                const _r2 = _c2?.sendMessage(content, {
-                                    type: attachment?.type || 'text',
-                                    attachment: attachment,
-                                });
-                                if (_r2 && typeof _r2.then === 'function') {
-                                    _r2.then((resp2) => {
-                                        this._sendRetried = false;
-                                        if (resp2 && resp2.success === false) {
-                                            input.value = content;
-                                            UIRenderer.showNotification('Failed to send — try again', 'error');
-                                        } else {
-                                            setTimeout(_renderNow, 0);
-                                        }
-                                    }).catch(() => {
-                                        this._sendRetried = false;
+                        // FIX-SEND-RETRY-BUDGET-TOO-SHORT: this used to allow
+                        // exactly ONE 500ms retry before giving up and dumping
+                        // the text back into the input box. That budget was
+                        // sized for the common case (conversation finishes
+                        // wiring up within a few hundred ms), but chats opened
+                        // from Friend/Calls/Status/Marketplace/notifications
+                        // can also be doing a cold E2E key fetch and/or a
+                        // first-ever fetchConversations() round trip at the
+                        // same time (see FIX-COLD-CACHE-PENDING-DUPLICATE in
+                        // openChatWithUserInUI) — on a slow connection that can
+                        // genuinely take longer than 500ms, and the send was
+                        // reported as failed even though the conversation
+                        // would have been ready moments later. Retry up to 3
+                        // times with increasing backoff (500ms/1000ms/1500ms)
+                        // via a small recursive helper before actually giving
+                        // up and returning the text to the user.
+                        const _attemptResend = (attempt) => {
+                            const _core2 = getMessagesCore();
+                            const _r = _core2?.sendMessage(content, {
+                                type: attachment?.type || 'text',
+                                attachment: attachment,
+                            });
+                            Promise.resolve(_r).then((resp) => {
+                                if (resp && resp.success === false) {
+                                    const _retryable = resp.error === 'no_conversation' || resp.error === 'invalid_conversation';
+                                    if (_retryable && attempt < 3) {
+                                        setTimeout(() => _attemptResend(attempt + 1), 500 * (attempt + 1));
+                                    } else {
                                         input.value = content;
                                         UIRenderer.showNotification('Failed to send — try again', 'error');
-                                    });
+                                    }
                                 } else {
-                                    this._sendRetried = false;
-                                    input.value = content;
-                                    UIRenderer.showNotification('Failed to send — try again', 'error');
+                                    setTimeout(_renderNow, 0);
                                 }
-                            }, 500);
+                            }).catch(() => {
+                                input.value = content;
+                                UIRenderer.showNotification('Failed to send — try again', 'error');
+                            });
+                        };
+
+                        const _retryable = response.error === 'no_conversation' || response.error === 'invalid_conversation';
+                        if (_retryable) {
+                            setTimeout(() => _attemptResend(1), 500);
                         } else {
-                            this._sendRetried = false;
                             input.value = content;
                             UIRenderer.showNotification('Failed to send — try again', 'error');
                         }
@@ -11618,35 +11631,49 @@ Type: ${message.type || 'text'}`;
                 return;
             }
 
-            const _existing = (findExisting !== false)
-                ? _core.ChatManager.findExistingConversation(numericUserId)
-                : null;
-            const _conv = _existing || _core.ChatManager.getOrCreatePendingConversation(numericUserId, resolvedName, resolvedAvatar);
+            // FIX-USE-SAME-PROTOCOL-AS-HISTORY: this used to resolve
+            // pending-vs-real by scanning the local, possibly-stale
+            // _conversations cache (findExistingConversation) and falling
+            // back to a fabricated local pending_<id> shadow when it
+            // guessed wrong — which is what actually caused the "delivered
+            // but not displayed" / "reply fails" bugs, because the sender
+            // and the real backend conversation could end up tracked under
+            // two different IDs until a later reconciliation. Chat History
+            // never has this problem because it only ever hands
+            // openConversation() an ID the server already gave it. Do the
+            // same thing here: resolve the real conversation from the
+            // server via ChatManager.startOrGetDirectConversation() (backed
+            // by POST /chats/start, which already did exactly this
+            // find-or-create lookup server-side — it just was never called
+            // from the frontend) and only then hand off to
+            // window.messagesUI.openChat(), the literal same call Chat
+            // History's row click makes. No pending shadow, no local
+            // guessing, nothing to reconcile later.
+            _core.ChatManager.startOrGetDirectConversation(numericUserId, resolvedName, resolvedAvatar)
+                .then((_conv) => {
+                    if (!_conv) throw new Error('empty conversation');
+                    window.messagesUI.openChat(_conv);
 
-            if (!_conv) {
-                console.error('[MessageUI] openChatWithUserInUI: could not resolve or create a conversation for', numericUserId);
-                try { UIRenderer.showNotification('Could not open this chat — invalid user', 'error'); } catch (_) {}
-                return;
-            }
-
-            // Same call Chat History's _chatItemClick → openChat() makes.
-            window.messagesUI.openChat(_conv);
-
-            // FIX (marketplace product-inquiry text silently lost): every layer of the
-            // shared open-chat pipeline (message.html's OPEN_CHAT_WITH_USER handler,
-            // then this function) used to discard payload.message entirely — a seller
-            // DM opened from a product page never carried the buyer's pre-typed
-            // inquiry. Fill it in now that the chat panel/input exist.
-            if (draftMessage) {
-                setTimeout(() => {
-                    const _mi = document.getElementById('messageInput');
-                    if (_mi && !_mi.value) {
-                        _mi.value = draftMessage;
-                        _mi.dispatchEvent(new Event('input', { bubbles: true }));
-                        _mi.focus();
+                    // FIX (marketplace product-inquiry text silently lost): every layer of the
+                    // shared open-chat pipeline (message.html's OPEN_CHAT_WITH_USER handler,
+                    // then this function) used to discard payload.message entirely — a seller
+                    // DM opened from a product page never carried the buyer's pre-typed
+                    // inquiry. Fill it in now that the chat panel/input exist.
+                    if (draftMessage) {
+                        setTimeout(() => {
+                            const _mi = document.getElementById('messageInput');
+                            if (_mi && !_mi.value) {
+                                _mi.value = draftMessage;
+                                _mi.dispatchEvent(new Event('input', { bubbles: true }));
+                                _mi.focus();
+                            }
+                        }, 300);
                     }
-                }, 300);
-            }
+                })
+                .catch((err) => {
+                    console.error('[MessageUI] openChatWithUserInUI: could not resolve a real conversation for', numericUserId, err?.message || err);
+                    try { UIRenderer.showNotification('Could not open this chat — try again', 'error'); } catch (_) {}
+                });
         };
 
         _openViaUnifiedPipeline(0);

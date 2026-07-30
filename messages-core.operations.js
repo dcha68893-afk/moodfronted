@@ -114,6 +114,79 @@ const ChatManager = {
             });
         },
         
+        // FIX-USE-SAME-PROTOCOL-AS-HISTORY (replaces the local-cache-guessing
+        // findExistingConversation()/getOrCreatePendingConversation() pair for
+        // every entry point except true offline compose): Chat History never
+        // has a "is this real or do I have to guess" problem because it only
+        // ever hands openConversation() an ID the server already gave it.
+        // The backend has always exposed exactly that same lookup as a
+        // reusable endpoint — POST /chats/start — which finds the existing
+        // direct chat with this user or creates it, atomically, server-side,
+        // and returns its real id in one round trip. Nothing on the frontend
+        // was calling it. This is that call: every "open chat with user X"
+        // entry point can now resolve straight to a real, fully-formed
+        // conversation object — the same shape Chat History's own
+        // fetchConversations() produces — with no local pending_<id>
+        // shadow, no cache-freshness race, and therefore nothing to
+        // reconcile later. Retries a bounded number of times on transient
+        // network failure (never silently substitutes a fake local object
+        // for a real backend error), so callers can simply await it and know
+        // they either got the real chat or a genuine, reportable failure.
+        async startOrGetDirectConversation(userId, name, avatar, _attempt = 0) {
+            if (!userId) throw new Error('startOrGetDirectConversation: missing userId');
+            try {
+                const response = await makeApiRequest('/chats/start', 'POST', { userId });
+                const chat = response?.data?.chat || response?.chat || response?.data || response;
+                if (!chat || !chat.id) throw new Error('startOrGetDirectConversation: malformed response');
+
+                const realId = chat.id;
+                const existing = this._conversationsMap.get(realId);
+                const conversation = {
+                    ...(existing || {}),
+                    ...chat,
+                    id: realId,
+                    chatId: realId,
+                    type: 'direct',
+                    friendId: chat.friendId ?? chat.otherParticipant?.id ?? userId,
+                    friendName: name || chat.friendName || chat.otherParticipant?.displayName || chat.chatName || (existing && existing.friendName) || `User_${userId}`,
+                    friendAvatar: avatar || chat.friendAvatar || chat.otherParticipant?.avatar || (existing && existing.friendAvatar) || null,
+                    online: (chat.otherParticipant && (chat.otherParticipant.status === 'online')) || (existing && existing.online) || false,
+                    unreadCount: (existing && existing.unreadCount) || chat.unreadCount || 0,
+                    lastMessage: (existing && existing.lastMessage) || chat.lastMessage || '',
+                    lastMessageAt: (existing && existing.lastMessageAt) || Date.now(),
+                    isPending: false
+                };
+
+                if (existing) {
+                    Object.assign(existing, conversation);
+                } else {
+                    this._conversations.unshift(conversation);
+                    this._conversationsMap.set(realId, conversation);
+                }
+                this._saveToCache();
+                this._notifySubscribers();
+                return this._conversationsMap.get(realId);
+            } catch (err) {
+                // Bounded retry with backoff for genuine transient failures
+                // (network blip, cold backend, request timeout) — NOT an
+                // arbitrary "give up and guess" timeout. The bridged
+                // makeApiRequest() layer doesn't carry HTTP status codes
+                // through to the rejected Error, so distinguish by message:
+                // real validation failures from the server ("required",
+                // "not found", "yourself") won't be fixed by retrying and
+                // surface immediately; anything else (timeouts, "failed",
+                // generic network errors) gets retried.
+                const _msg = String(err?.message || '');
+                const _nonRetryable = /required|not found|yourself|invalid endpoint|no valid session/i.test(_msg);
+                if (!_nonRetryable && _attempt < 4) {
+                    await new Promise(r => setTimeout(r, 400 * (_attempt + 1)));
+                    return this.startOrGetDirectConversation(userId, name, avatar, _attempt + 1);
+                }
+                console.error('[ChatManager] startOrGetDirectConversation failed:', _msg);
+                throw err;
+            }
+        },
+
         getPendingConversationByReceiverId: function(receiverId) {
             if (!receiverId) return null;
             const pendingId = `pending_${receiverId}`;

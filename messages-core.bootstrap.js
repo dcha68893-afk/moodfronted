@@ -2235,6 +2235,44 @@ try {
                         { serverId: message.id, localId: message.localId || null }
                     );
                 }
+                // FIX-ECHO-NEVER-RE-RENDERS (root cause of "message sends and
+                // is delivered to the receiver, but never shows up in my own
+                // chat panel" for chats opened from anywhere other than Chat
+                // History): this branch used to return immediately after
+                // patching status, unlike the receiver branch just below it
+                // which always re-dispatches 'renderMessages' when the
+                // affected chat is the one currently open. A chat opened via
+                // the pending_<id> → real-chatId handoff (Friend/Calls/
+                // Status/Marketplace/notifications — see
+                // FIX-COLD-CACHE-PENDING-DUPLICATE) can have this echo land
+                // in the same tick the message's chatId is being rewritten
+                // from pending_<id> to the real id; if that in-place patch
+                // and the UI's own optimistic render raced each other, the
+                // bubble could end up filtered out of the currently-rendered
+                // list with nothing left to trigger a corrective re-render.
+                // Chat History never hits this because its conversations
+                // never carry a pending id to begin with. Re-render here too,
+                // gated the same way the receiver branch is, so a message
+                // that server-confirms as delivered is guaranteed to show.
+                try {
+                    const _echoChatId = message.chatId || message.conversationId;
+                    const _echoActiveChat = ChatManager && ChatManager.getActiveChat && ChatManager.getActiveChat();
+                    if (_echoActiveChat && _echoChatId && String(_echoActiveChat.id) === String(_echoChatId)) {
+                        const _all = (ChatManager._messages || []);
+                        const _chatMsgs = _all
+                            .filter(m => String(m.chatId || m.conversationId || '') === String(_echoChatId))
+                            .sort((a, b) => _normalizeTs(a) - _normalizeTs(b));
+                        if (_chatMsgs.length > 0) {
+                            window.dispatchEvent(new CustomEvent('renderMessages', {
+                                detail: {
+                                    messages: _chatMsgs,
+                                    currentChat: _echoActiveChat,
+                                    currentUser: SessionManager.getUser ? SessionManager.getUser() : null
+                                }
+                            }));
+                        }
+                    }
+                } catch (_e) {}
                 Logger.debug('ParentConnectionManager', `Own-message echo ignored (status updated): ${message.id}`);
                 return;
             }
