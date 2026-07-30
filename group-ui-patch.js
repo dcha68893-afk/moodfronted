@@ -416,14 +416,31 @@
 
     function _applyUserGroupsCache() {
         if (!_userGroupsCache) return;
-        _renderUserGroupList(qs('#allGroupsList'), _userGroupsCache.all, null,
+        // FIX (Admin/Joined counts showing 0 despite real groups existing):
+        // this whole subsystem keeps its own separate _userGroupsCache
+        // snapshot, built once at module boot and only refreshed on a few
+        // specific actions (create/delete/leave a group). group-ui.js's
+        // canonical renderer (used by tab clicks and the MODULE_FOCUSED
+        // return-to-module refresh) reads live window.GroupCore.adminGroups/
+        // .joinedGroups directly instead, so the two can disagree — and if
+        // this function's own trigger points ever run after that canonical
+        // one (e.g. the boot-time call landing after a fast reconnect), a
+        // stale/empty snapshot here would silently overwrite correct counts
+        // with 0. Prefer live GroupCore data whenever it's available; only
+        // fall back to this function's own cache if GroupCore genuinely
+        // isn't ready yet.
+        const _gcLive = window.GroupCore;
+        const _all    = (_gcLive && Array.isArray(_gcLive.groups))       ? _gcLive.groups       : _userGroupsCache.all;
+        const _joined = (_gcLive && Array.isArray(_gcLive.joinedGroups)) ? _gcLive.joinedGroups : _userGroupsCache.joined;
+        const _admin  = (_gcLive && Array.isArray(_gcLive.adminGroups))  ? _gcLive.adminGroups  : _userGroupsCache.admin;
+        _renderUserGroupList(qs('#allGroupsList'), _all, null,
             'No groups yet — create or join one to get started');
-        _renderUserGroupList(qs('#joinedList'), _userGroupsCache.joined, 'Member',
+        _renderUserGroupList(qs('#joinedList'), _joined, 'Member',
             "You haven't joined any groups yet");
-        _renderUserGroupList(qs('#adminList'), _userGroupsCache.admin, 'Admin',
+        _renderUserGroupList(qs('#adminList'), _admin, 'Admin',
             "You're not an admin of any groups yet");
-        const joinedBadge = qs('#joinedCount'); if (joinedBadge) joinedBadge.textContent = _userGroupsCache.joined.length;
-        const adminBadge  = qs('#adminCount');  if (adminBadge)  adminBadge.textContent  = _userGroupsCache.admin.length;
+        const joinedBadge = qs('#joinedCount'); if (joinedBadge) joinedBadge.textContent = _joined.length;
+        const adminBadge  = qs('#adminCount');  if (adminBadge)  adminBadge.textContent  = _admin.length;
     }
 
     async function loadUserGroupSections(force) {
