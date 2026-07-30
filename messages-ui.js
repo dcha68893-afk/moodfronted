@@ -11570,9 +11570,26 @@ Type: ${message.type || 'text'}`;
         // the literal same function the chat-history row's onclick calls.
         const _openViaUnifiedPipeline = (attempts) => {
             const _core = getMessagesCore();
-            if (!_core || !_core.ChatManager) {
+            // FIX (RACE: messagesUI.openChat not yet assigned): messagesCore and the
+            // window.messagesUI object initialize independently. messagesCore.ChatManager
+            // can (and often does) become ready before the messagesUI object literal
+            // (which defines .openChat) has finished being built and assigned to
+            // window.messagesUI. Calling window.messagesUI.openChat() the instant
+            // ChatManager is ready — without checking messagesUI itself — is exactly
+            // what produced the intermittent "window.messagesUI.openChat is not a
+            // function" crash on Friend/Calls/Status/Marketplace entry points: the call
+            // hit window.messagesUI while it was still just the early stub object
+            // ({ scrollToMessage }) set up elsewhere, before the real object with
+            // .openChat replaced it. Chat History's own click handler uses `?.` and so
+            // degrades silently instead of throwing, which is why it looked reliable
+            // while this path wasn't. Gate on BOTH being ready, same retry pattern.
+            const _uiReady = window.messagesUI && typeof window.messagesUI.openChat === 'function';
+            if (!_core || !_core.ChatManager || !_uiReady) {
                 if (attempts >= 20) {
-                    console.error('[MessageUI] openChatWithUserInUI: messagesCore never became available');
+                    console.error('[MessageUI] openChatWithUserInUI: messagesCore/messagesUI never became fully available', {
+                        coreReady: !!(_core && _core.ChatManager),
+                        uiReady: _uiReady
+                    });
                     try { UIRenderer.showNotification('Could not open chat — try again', 'error'); } catch (_) {}
                     return;
                 }
