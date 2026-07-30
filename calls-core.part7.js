@@ -8220,7 +8220,10 @@ function _handleRealtimeMessage(messageData) {
 
 
 
-            window.showNotification(`New message from ${messageData.senderName}: ${messageData.text}`, 'message');
+            const _rawText = messageData && messageData.text;
+            const _looksEncrypted = typeof _rawText === 'string' && _rawText.trim().charAt(0) === '{' &&
+                (_rawText.indexOf('"v"') !== -1 || _rawText.indexOf('"eph"') !== -1 || _rawText.indexOf('"ct"') !== -1);
+            window.showNotification(`New message from ${messageData.senderName}: ${_looksEncrypted ? '🔒 New message' : _rawText}`, 'message');
 
 
 

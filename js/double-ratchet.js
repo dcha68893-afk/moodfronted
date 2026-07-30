@@ -576,8 +576,45 @@
           try { parsed = JSON.parse(ciphertext); } catch { return ciphertext; }
           if (parsed?.v === DR_VERSION && global.KynectaE2E.enabled && senderUserId) {
             const ctx = global.KynectaE2E.getEncryptionContext(chatId, senderUserId);
+            // FIX-ROOT-CAUSE-INTERMITTENT-UNABLE-TO-DECRYPT: myPriv/theirPub used
+            // to be read exactly once, synchronously, right before calling
+            // decrypt(). If the sender's identity key hadn't finished being
+            // fetched from the server yet (getIdentityPublicKeyB64 does a
+            // network round-trip on cache miss — a real race on the very first
+            // message of a new/rotated session, or right after a fresh
+            // login/reload), theirPub came back null. decrypt() has no
+            // null-guard of its own: on the bootstrap path (first message of a
+            // session) it feeds that straight into initRecv()'s ECDH derivation,
+            // which throws synchronously for a null key — BEFORE decrypt() ever
+            // reaches its own internal try/catch (that catch only wraps the
+            // final AES-GCM step, producing the friendly "[Decryption failed]"
+            // string). The throw was only ever caught out here, which fell
+            // through to the legacy static-ECDH decrypter — but that can't
+            // parse a v2 envelope, so it returned the ciphertext unchanged,
+            // which callers render as "[Unable to decrypt message]" — and
+            // because that string doesn't start with "[Decryption failed",
+            // nothing ever un-memoized it for a later retry. Net effect: a
+            // message that arrived one beat too early for the key cache was
+            // unreadable forever, with no way to tell it apart from a real
+            // failure. Retrying the KEY FETCH (not decrypt() itself — that
+            // part stays single-shot, since it's stateful and a second call
+            // would desync the ratchet) closes the race without touching that
+            // invariant: nothing below has mutated any ratchet state yet.
             const myPriv = global.KynectaE2E.getMyIdentityPrivateKey();
-            const theirPub = await global.KynectaE2E.getIdentityPublicKeyB64(senderUserId);
+            let theirPub = await global.KynectaE2E.getIdentityPublicKeyB64(senderUserId);
+            let keyAttempts = 0;
+            while (!theirPub && keyAttempts < 5) {
+              await new Promise(r => setTimeout(r, 400));
+              theirPub = await global.KynectaE2E.getIdentityPublicKeyB64(senderUserId);
+              keyAttempts++;
+            }
+            if (!theirPub || !myPriv) {
+              // Still not available after retrying — a genuinely missing key,
+              // not just a slow fetch. Fail closed with the "[Decryption
+              // failed" prefix so it's explicitly NOT memoized (see below),
+              // instead of silently falling through to the legacy decrypter.
+              return '[Decryption failed — identity key unavailable]';
+            }
             return await decrypt(ctx, ciphertext, theirPub, myPriv);
           }
         } catch (e) {

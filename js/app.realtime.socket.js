@@ -1231,7 +1231,22 @@
                             if (_senderId && String(_senderId) !== String(_myId)) {
                                 var _senderName = (payload && (payload.senderName || payload.fromName)) || 'New message';
                                 var _preview = (payload && (payload.content || payload.text)) || '';
-                                if (_preview.length > 60) _preview = _preview.slice(0, 60) + '…';
+                                // FIX (ciphertext leaking into the notification toast): this
+                                // fires straight off the raw socket payload, before the
+                                // message ever reaches the decrypt pipeline in messages-ui.js
+                                // — for an E2E-encrypted DM, payload.content IS the still-
+                                // encrypted envelope (a JSON blob like {"v":2,"eph":"...",...}),
+                                // so it was being shown verbatim as the notification preview.
+                                // There's no safe way to decrypt it here (no chat context,
+                                // no guarantee KynectaE2E/ratchet state is even loaded in this
+                                // realtime layer), so just detect the envelope shape and show
+                                // a generic placeholder instead of the ciphertext.
+                                var _looksEncrypted = typeof _preview === 'string' && _preview.charAt(0) === '{' && _preview.indexOf('"v"') !== -1 && _preview.indexOf('"eph"') !== -1;
+                                if (_looksEncrypted) {
+                                    _preview = '🔒 New message';
+                                } else if (_preview.length > 60) {
+                                    _preview = _preview.slice(0, 60) + '…';
+                                }
                                 window.__NotificationStabilizationLayer && window.__NotificationStabilizationLayer.notifyApp(
                                     _senderName,
                                     _preview || 'Sent you a message',

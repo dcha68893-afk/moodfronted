@@ -37,29 +37,6 @@
         transform: translateX(0) !important;
       }
 
-      /* Reply icon that fades in behind the bubble */
-      .msg-reply-hint {
-        position: absolute;
-        left: -44px;
-        top: 50%;
-        transform: translateY(-50%) scale(0.5);
-        width: 32px; height: 32px;
-        background: var(--kyn-accent-primary);
-        border-radius: 50%;
-        display: flex; align-items: center; justify-content: center;
-        color: #fff; font-size: 14px;
-        opacity: 0;
-        transition: opacity 0.12s, transform 0.12s;
-        pointer-events: none;
-      }
-      .msg-swipe-wrapper.swiping .msg-reply-hint {
-        opacity: 1;
-        transform: translateY(-50%) scale(1);
-      }
-      .msg-swipe-wrapper.triggered .msg-reply-hint {
-        background: #22c55e; /* green = activated */
-      }
-
       /* Desktop: hover reply button */
       .message-wrapper:not(.touch-device) .msg-hover-reply {
         position: absolute;
@@ -134,13 +111,17 @@
     const bubble = wrapper.querySelector('.message-bubble');
     if (!bubble) return;
 
+    // REMOVED (not just hidden): this wrapper used to also create a
+    // .msg-reply-hint circle (a 32px icon that visually reads as a
+    // back-arrow) that faded in during the swipe. Repeated defensive
+    // resets (touchend/touchcancel/visibilitychange/blur/pagehide/
+    // MutationObserver nets, all still below) never fully closed every
+    // way a gesture can be interrupted without firing those events, so
+    // the icon kept getting stuck visible over the input area. The
+    // element is no longer created at all — the swipe-to-reply gesture
+    // itself (slide + vibrate + trigger reply) still works without it.
     const swipeWrap = document.createElement('div');
     swipeWrap.className = 'msg-swipe-wrapper';
-
-    const replyHint = document.createElement('div');
-    replyHint.className = 'msg-reply-hint';
-    replyHint.innerHTML = '<i class="fas fa-reply"></i>';
-    swipeWrap.appendChild(replyHint);
 
     bubble.parentNode.insertBefore(swipeWrap, bubble);
     swipeWrap.appendChild(bubble);
