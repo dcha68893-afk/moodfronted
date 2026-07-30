@@ -11597,6 +11597,45 @@ Type: ${message.type || 'text'}`;
             // degrades silently instead of throwing, which is why it looked reliable
             // while this path wasn't. Gate on BOTH being ready, same retry pattern.
             const _uiReady = window.messagesUI && typeof window.messagesUI.openChat === 'function';
+            // TEMP BYPASS (round 20 — unblock send/receive while messagesUI
+            // construction is investigated): if core is ready but the real
+            // messagesUI object never replaced its early stub within ~5s
+            // (attempts >= 33), stop waiting on window.messagesUI.openChat
+            // and open the chat directly using the exact same steps
+            // openChat() itself runs — getMessagesCore()/UIStateManager are
+            // the same closures openChat() uses, not globals, so this does
+            // not depend on window.messagesUI or window.UIRenderer existing.
+            // This does not fix why construction stalls — it only stops that
+            // stall from also blocking messaging. Remove once the FATAL
+            // construction-throw log (see _buildAndAssignMessagesUI) is
+            // captured and the real cause is fixed.
+            if (_core && _core.ChatManager && !_uiReady && attempts >= 33) {
+                console.warn('[MessageUI] messagesUI.openChat still not ready after ~5s — using direct-open bypass instead of waiting the full 20s', { coreReady: true, uiReady: _uiReady });
+                _core.ChatManager.startOrGetDirectConversation(numericUserId, resolvedName, resolvedAvatar)
+                    .then((_conv) => {
+                        if (!_conv) throw new Error('empty conversation');
+                        const chatPanel = document.getElementById('chatPanel');
+                        const sidebar = document.getElementById('sidebar');
+                        if (chatPanel) { chatPanel.classList.remove('hidden'); UIStateManager.setState('chatVisible', true); }
+                        if (sidebar && window.innerWidth <= 768) sidebar.classList.remove('active');
+                        if (window.innerWidth <= 768) document.body.classList.add('chat-active');
+                        const coreState = _core.getState?.();
+                        const _chatId = (_conv && _conv.id) ? _conv.id : _conv;
+                        const _chatOpts = (_conv && typeof _conv === 'object') ? { friendName: _conv.friendName || _conv.name, friendAvatar: _conv.friendAvatar || _conv.avatar, userName: _conv.friendName || _conv.name } : {};
+                        // Same dedupe key the real openChat() checks — if construction
+                        // finishes later and messagesUIReady fires the real openChat()
+                        // for this same conversation, its own guard will see this and
+                        // skip instead of opening it a second time.
+                        try { window['opening_chat_' + String(_chatId)] = true; setTimeout(() => { try { delete window['opening_chat_' + String(_chatId)]; } catch(_){} }, 3000); } catch(_) {}
+                        if (coreState?.state === 'ACTIVE') {
+                            _core.openConversation(_chatId, _chatOpts).catch?.(() => {});
+                        }
+                    })
+                    .catch((err) => {
+                        console.error('[MessageUI] direct-open bypass failed', err);
+                    });
+                return;
+            }
             if (!_core || !_core.ChatManager || !_uiReady) {
                 // FIX (timing budget too short): 20 attempts * 150ms = 3s was tuned for
                 // Chat History's case (user already looking at a loaded list — the
