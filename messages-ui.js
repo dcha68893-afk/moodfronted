@@ -10016,9 +10016,27 @@ Type: ${message.type || 'text'}`;
             if (this._sending) return;
             this._sending = true;
 
+            // FIX (SEND-HANG-FEEDBACK): the button was never given any visual
+            // "working" state — while `_sending` blocked repeat taps, nothing
+            // on screen told the user that. On a chat opened from Friend/
+            // Calls/Status (where the E2E key fetch + first real network
+            // round trip can take several seconds, see prefetchRecipientKey
+            // above), that silence is exactly what reads as "the send button
+            // is hanging / not responding". Disable it and mark it visually
+            // busy for the duration; both are cleared at every settle point
+            // below (the .finally() on the async path, the sync-result else
+            // branch, and the new core-not-ready retry path).
+            const _sendBtnUI = UIFailsafe.safeGetElement('sendButton');
+            if (_sendBtnUI) { _sendBtnUI.disabled = true; _sendBtnUI.classList.add('kyn-sending'); _sendBtnUI.style.opacity = '0.55'; }
+
             const input = UIFailsafe.safeGetElement('messageInput');
 
-            if (!input) { this._sending = false; return; }
+            const _clearSendingUI = () => {
+                const _b = UIFailsafe.safeGetElement('sendButton');
+                if (_b) { _b.disabled = false; _b.classList.remove('kyn-sending'); _b.style.removeProperty('opacity'); }
+            };
+
+            if (!input) { this._sending = false; _clearSendingUI(); return; }
 
 
 
@@ -10030,7 +10048,7 @@ Type: ${message.type || 'text'}`;
 
             
 
-            if (!content && !attachment) { this._sending = false; return; }
+            if (!content && !attachment) { this._sending = false; _clearSendingUI(); return; }
 
 
 
@@ -10091,6 +10109,44 @@ Type: ${message.type || 'text'}`;
 
 
 
+            // FIX-ROOT-CAUSE-SILENT-DROP-CORE-NOT-READY: `core` can still be
+            // null/undefined right after opening a chat from Friend/Calls/
+            // Status — the input is enabled+focused early (see
+            // FIX-ROOT-CAUSE-INPUT-LAG-NON-HISTORY-OPEN) but messagesCore
+            // itself can still be finishing init. When that happens,
+            // `core?.sendMessage(...)` below short-circuits to `undefined`
+            // (not a Promise, not a {success:false} object) and — because the
+            // input was already cleared above — the typed message vanished
+            // with zero feedback: no bubble, no retry, no error toast. Detect
+            // that specific case up front and retry shortly once core exists,
+            // exactly like the existing retry path for a resolved
+            // {success:false, error:'no_conversation'} response below.
+            if (!core) {
+                if (!this._sendRetried) {
+                    this._sendRetried = true;
+                    setTimeout(() => {
+                        const _c2 = getMessagesCore();
+                        this._sendRetried = false;
+                        this._sending = false;
+                        _clearSendingUI();
+                        if (_c2) {
+                            input.value = content;
+                            window.messagesUI?._handleSendMessage?.();
+                        } else {
+                            input.value = content;
+                            UIRenderer.showNotification('Failed to send — try again', 'error');
+                        }
+                    }, 500);
+                } else {
+                    this._sendRetried = false;
+                    this._sending = false;
+                    _clearSendingUI();
+                    input.value = content;
+                    UIRenderer.showNotification('Failed to send — try again', 'error');
+                }
+                return;
+            }
+
             let result;
             try {
                 // FIX: include replyToId / replyTo from window.replyToMessage
@@ -10115,6 +10171,7 @@ Type: ${message.type || 'text'}`;
                 });
             } catch (sendErr) {
                 this._sending = false;
+                _clearSendingUI();
                 throw sendErr;
             }
 
@@ -10205,6 +10262,7 @@ Type: ${message.type || 'text'}`;
                 }).finally(() => {
 
                     this._sending = false;
+                    _clearSendingUI();
 
                 });
 
@@ -10222,6 +10280,7 @@ Type: ${message.type || 'text'}`;
                 // while it's true, so every further tap of Send (or Enter)
                 // silently did nothing for the rest of that chat session.
                 this._sending = false;
+                _clearSendingUI();
 
                 if (result && result.success !== false) {
 
@@ -11288,7 +11347,17 @@ Type: ${message.type || 'text'}`;
 
         const core = getMessagesCore();
 
-
+        // FIX (SEND-HANG-NON-HISTORY-OPEN): kick off the recipient's E2E key
+        // fetch right now, in the background, instead of leaving it to run
+        // in-line inside encryptForChat() the moment the user taps Send. This
+        // is the one entry point every Friend/Calls/Status "Open Chat" passes
+        // through, and — unlike Chat History — is very often the FIRST
+        // message to this person this session, so the key isn't cached yet.
+        // Doing this here means the network round trip (with its cold-start
+        // retries) has a head start of however long the user takes to read
+        // the chat and type, rather than sitting entirely inside the Send
+        // path where it reads as the button being frozen/unresponsive.
+        try { window.KynectaE2E?.prefetchRecipientKey?.(numericUserId); } catch (_) {}
 
         // Resolve name/avatar from FriendManager if not provided
         const _stripUserSuffix = (n) => n ? n.replace(/\s+User$/i, '').trim() || n : n;

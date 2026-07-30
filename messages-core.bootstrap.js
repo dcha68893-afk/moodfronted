@@ -637,7 +637,15 @@
     resolve,
     reject,
     timestamp: timestamp,
-    type: 'API_REQUEST'
+    type: 'API_REQUEST',
+    // FIX: this field was previously omitted, so handleApiResponse()'s
+    // `if (pending.timeout) clearTimeout(pending.timeout)` was always a
+    // no-op — the 45s timeout timer below kept running even after a normal,
+    // on-time response had already resolved this request. Harmless in
+    // isolation (the stale timer just no-ops against an already-deleted
+    // requestId), but it's dead weight and masks the intent of that
+    // clearTimeout call. Store the real handle so it's actually cleared.
+    timeout: timeoutId
 });
 
 try {

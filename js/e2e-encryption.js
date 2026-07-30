@@ -367,6 +367,26 @@
     return null;
   }
 
+  // ── FIX (SEND-HANG-NON-HISTORY-OPEN): warm the recipient's public key cache
+  // as soon as a chat is OPENED (openChatWithUserInUI), instead of only ever
+  // fetching it lazily inside encryptForChat() at the moment the user hits
+  // Send. Chats opened from Chat History are almost always chats you've
+  // already messaged before this session, so PUB_CACHE/PUB_KEY_STORE already
+  // has the key and encryptForChat() resolves instantly. Chats opened from
+  // Friend/Calls/Status are far more often the FIRST message to that person —
+  // encryptForChat() then has to do the full network fetch (plus retries on a
+  // cold Render backend) synchronously inside the send path, which is exactly
+  // the multi-second-to-tens-of-seconds delay users on that path perceive as
+  // the Send button "hanging"/not responding. Fire this in the background the
+  // moment the chat panel opens so that work is already done (or in flight)
+  // well before the user finishes typing and taps Send. Errors are swallowed —
+  // this is purely a warm-up; encryptForChat() still does its own full
+  // fetch+retry if this hasn't finished or failed.
+  function prefetchRecipientKey(userId) {
+    if (!userId) return;
+    try { _getRecipientPublicKey(userId).catch(() => {}); } catch (_) {}
+  }
+
   // ── Encrypt a message for a chat ──────────────────────────────────────────
   async function encryptForChat(plaintext, chatId, recipientUserId) {
     if (!_enabled || !_myPrivKey) return plaintext; // fallback to plaintext if keys not ready
@@ -584,6 +604,8 @@
     init,
     encryptForChat,
     decryptFromChat,
+    // FIX (SEND-HANG-NON-HISTORY-OPEN): see prefetchRecipientKey definition above.
+    prefetchRecipientKey,
     encryptAttachment,
     decryptAttachment,
     getSafetyNumbers,
