@@ -486,6 +486,23 @@
             z-index: 90;
         }
 
+        /* FIX (chat-history list flashes before a specific chat opens): opening
+           a chat from friends/calls/status/group reveals #messagesContent via
+           navigateToPage() so the module's background work (conversation
+           lookup/creation, history fetch) can proceed — but message.html's own
+           default internal view is its chat LIST, and it only swaps to the
+           specific conversation once it processes the OPEN_CHAT_WITH_USER
+           postMessage a beat later. That gap is what showed the list first.
+           This veil hides the container's paint (not its DOM — the iframe
+           keeps running and the background lookup is unaffected) until the
+           CHAT_OPENED ack below confirms the specific chat is actually showing,
+           so every path still goes through the same open-chat logic — it just
+           never paints the in-between list state. Ordinary navigation to the
+           Messages tab (browsing the list on purpose) never applies this class. */
+        #messagesContent.chat-opening-veil {
+            visibility: hidden !important;
+        }
+
         /* Iframes are hidden via visibility+pointer-events so their JS initialises
            eagerly in the background — tab switching is instant instead of waiting
            for the iframe to boot on first click. */
@@ -2909,6 +2926,27 @@
             } catch (_) {}
         }
 
+        // FIX (chat-history list flashes before a specific chat opens): see the
+        // #messagesContent.chat-opening-veil CSS rule for the full explanation.
+        // Called right before navigateToPage('messages') by every path that's
+        // opening one SPECIFIC chat (never by a plain "go to Messages tab"
+        // click, which should show the list immediately as intended).
+        function _veilMessagesUntilChatOpen() {
+            const el = document.getElementById('messagesContent');
+            if (!el) return;
+            el.classList.add('chat-opening-veil');
+            if (window.__unveilMessagesTimer) clearTimeout(window.__unveilMessagesTimer);
+            // Safety net: if CHAT_OPENED never arrives (e.g. the target
+            // conversation failed to resolve), don't leave the tab permanently
+            // blank — reveal it after a few seconds even without the ack.
+            window.__unveilMessagesTimer = setTimeout(_unveilMessages, 3000);
+        }
+        function _unveilMessages() {
+            const el = document.getElementById('messagesContent');
+            if (el) el.classList.remove('chat-opening-veil');
+            if (window.__unveilMessagesTimer) { clearTimeout(window.__unveilMessagesTimer); window.__unveilMessagesTimer = null; }
+        }
+
         function navigateToPage(page, options = {}) {
             _chatLog('[Navigation] navigateToPage called with:', page, options);
             if (!page) {
@@ -3011,6 +3049,7 @@
             // that legitimate case is unaffected.
             if (page !== 'messages') {
                 document.body.classList.remove('chat-panel-active');
+                _unveilMessages();
             }
             
             // FIX (message module stuck in chat panel after navigating away
@@ -3225,6 +3264,10 @@
                 
                 // Handle chat panel state
                 if (data.type === 'CHAT_OPENED' || data.type === 'CONVERSATION_OPENED') {
+                    // FIX (chat-history list flashes before a specific chat opens):
+                    // this IS the confirmation that message.html has swapped from
+                    // its list view to the actual conversation — safe to reveal now.
+                    _unveilMessages();
                     // FIX (dead ACK flags): window.__dcChatOpened / __ocwuChatOpened
                     // are checked by the DIRECT_CHAT_REQUEST and OPEN_CHAT_WITH_USER
                     // relay loops further down this file to know when to stop
@@ -3277,6 +3320,7 @@
                     }
                 }
                 if (data.type === 'CHAT_LIST_SHOWN' || data.type === 'CHAT_CLOSED' || data.type === 'GO_BACK_TO_CHAT_LIST') {
+                    _unveilMessages();
                     // FIX: previously only cleared chat-panel-active on mobile widths (and only
                     // if messagesContent wasn't hidden), which — now that the flag is applied
                     // unconditionally on open (see CHAT_OPENED/CONVERSATION_OPENED above) — left
@@ -4693,12 +4737,13 @@
                     const _ff = document.getElementById('friendsIframe');
                     if (_ff && _ff.contentWindow) setTimeout(() => _ff.contentWindow.postMessage({ type: 'RETURN_FROM_CALL', payload: { returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*'), 300);
                 } else if (_returnTo === 'messages') {
+                    const _naChatUserId = (_ctx && _ctx.chatUserId) || window.__lastOpenChatUserId;
+                    const _naChatUserName = (_ctx && _ctx.userName) || window.__lastOpenChatName;
+                    if (_naChatUserId) _veilMessagesUntilChatOpen();
                     navigateToPage('messages');
                     // _ctx.chatUserId only exists for the call's initiator. Fall back to the
                     // last chat this parent frame saw opened (captured from CHAT_OPENED) for
                     // the receiver's case — so the receiver also lands exactly where they were.
-                    const _naChatUserId = (_ctx && _ctx.chatUserId) || window.__lastOpenChatUserId;
-                    const _naChatUserName = (_ctx && _ctx.userName) || window.__lastOpenChatName;
                     if (_naChatUserId) {
                         const _mf = document.getElementById('messagesIframe');
                         if (_mf && _mf.contentWindow) setTimeout(() => { _mf.contentWindow.postMessage({ type: 'OPEN_CHAT_WITH_USER', payload: { userId: _naChatUserId, userName: _naChatUserName || 'User', returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*'); document.body.classList.add('chat-panel-active'); }, 300);
@@ -5466,6 +5511,7 @@
                     if (returnTo === 'calls') {
                         navigateToPage('calls');
                     } else if (returnTo === 'messages') {
+                        if (_cerChatUserId) _veilMessagesUntilChatOpen();
                         navigateToPage('messages');
                         if (_cerChatUserId) {
                             const msgIframe = document.getElementById('messagesIframe');
@@ -6198,6 +6244,7 @@
                                 timestamp: Date.now()
                             };
                             sessionStorage.setItem('pending_chat', JSON.stringify(_callChatPayload));
+                            _veilMessagesUntilChatOpen();
                             document.body.classList.add('chat-panel-active'); /* FIX: was gated to mobile-only (window.innerWidth<=768), so desktop never got this flag and the header/avatar/call/video/more icons never fully activated on wide screens for these code paths. Now applied on all widths, matching group-panel-active. */
                             // Retry until iframe ACKs (clears pending_chat via CHAT_OPENED)
                             let _rfcAttempts = 0;
@@ -6214,7 +6261,10 @@
                                     setTimeout(() => { if (sessionStorage.getItem('pending_chat')) _postRFC(); }, 800);
                                 }
                             };
-                            setTimeout(_postRFC, 400);
+                            // FIX: was delayed 400ms before the FIRST attempt too, widening
+                            // the visible list-flash window for no benefit — fire immediately,
+                            // the veil above is what actually hides the gap now.
+                            _postRFC();
                         } else if (payload.userId || payload.userName) {
                             // ✅ FIXED: Regular navigation from friends/calls - open chat with user
                             const chatPayload = {
@@ -6226,6 +6276,7 @@
                             };
                             
                             sessionStorage.setItem('pending_chat', JSON.stringify(chatPayload));
+                            _veilMessagesUntilChatOpen();
                             document.body.classList.add('chat-panel-active'); /* FIX: was gated to mobile-only (window.innerWidth<=768), so desktop never got this flag and the header/avatar/call/video/more icons never fully activated on wide screens for these code paths. Now applied on all widths, matching group-panel-active. */
                             
                             // Retry until iframe ACKs
@@ -6243,7 +6294,9 @@
                                     setTimeout(() => { if (sessionStorage.getItem('pending_chat')) _postChatOpen(); }, 600);
                                 }
                             };
-                            setTimeout(_postChatOpen, 400);
+                            // FIX: fire the first attempt immediately (see veil comment above)
+                            // instead of waiting 400ms before even trying.
+                            _postChatOpen();
                         }
                     } else if (data.module === 'friends' && data.payload?.returnFromCall) {
                         const friendsIframe = document.getElementById('friendsIframe');
@@ -6258,6 +6311,7 @@
                         findExisting: true,
                         timestamp: Date.now()
                     };
+                    _veilMessagesUntilChatOpen();
                     navigateToPage('messages');
                     // FIX-HEADER-ICON-CONFLICT: navigateToPage('messages') only shows the
                     // chat LIST — it deliberately never sets chat-panel-active on its own
@@ -6300,7 +6354,9 @@
                     // Reset state before starting new request
                     window.__dcChatOpened = false;
                     window.__dcAttempts = 0;
-                    setTimeout(_postChatOpen, 300);
+                    // FIX: fire immediately — was delayed 300ms before the first
+                    // attempt, widening the visible list-flash window for no benefit.
+                    _postChatOpen();
                 }
 
                 // ROOT-CAUSE FIX (Phase 18 canonical-pipeline audit — Status module):
@@ -6329,6 +6385,7 @@
                             findExisting: _ocwuPayload.findExisting !== false,
                             timestamp: Date.now()
                         };
+                        _veilMessagesUntilChatOpen();
                         navigateToPage('messages');
                         document.body.classList.add('chat-panel-active');
 
@@ -6353,7 +6410,9 @@
                                 window.__ocwuAttempts = 0;
                             }
                         };
-                        setTimeout(_postOcwuOpen, 300);
+                        // FIX: fire immediately (see veil comment above) instead of
+                        // waiting 300ms before the first attempt.
+                        _postOcwuOpen();
                     }
                 }
 
@@ -6450,6 +6509,7 @@
                         timestamp:    Date.now(),
                     };
 
+                    _veilMessagesUntilChatOpen();
                     navigateToPage('messages');
                     // FIX-HEADER-ICON-CONFLICT: see identical fix/comment on the
                     // DIRECT_CHAT_REQUEST handler above — this path opens one specific
@@ -6469,7 +6529,9 @@
                         }
                         if (_srAttempts++ < 3) setTimeout(_postStatusReplyOpen, 500);
                     };
-                    setTimeout(_postStatusReplyOpen, 300);
+                    // FIX: fire immediately (see veil comment above) instead of
+                    // waiting 300ms before the first attempt.
+                    _postStatusReplyOpen();
                     _chatLog('[chat.html] STATUS_REPLY → navigated to messages, opening chat userId:', targetUserId, 'chatId:', targetChatId);
                 }
 
@@ -6874,16 +6936,17 @@
                         productId: data.payload.product_id,
                         timestamp: Date.now()
                     };
+                    _veilMessagesUntilChatOpen();
                     navigateToPage('messages');
                     // FIX-HEADER-ICON-CONFLICT: see identical fix/comment on the
                     // DIRECT_CHAT_REQUEST handler above.
                     document.body.classList.add('chat-panel-active');
-                    setTimeout(function() {
+                    (function() {
                         const msgIframe = document.getElementById('messagesIframe');
                         if (msgIframe && msgIframe.contentWindow) {
                             msgIframe.contentWindow.postMessage({ type: 'OPEN_CHAT_WITH_USER', payload: chatPayload, source: 'marketplace-bridge' }, '*');
                         }
-                    }, 400);
+                    })();
                     return;
                 }
                 // ── END MARKETPLACE BRIDGE ────────────────────────────────────────────
@@ -8327,6 +8390,9 @@ window.addEventListener('message', function (e) {
                 }, 300);
             }
         } else if (_pcPage === 'messages') {
+            var _pcChatUserId = (_pcCtx && _pcCtx.chatUserId) || d.chatUserId;
+            var _pcChatUserName = (_pcCtx && _pcCtx.userName) || d.chatUserName;
+            if (_pcChatUserId && typeof _veilMessagesUntilChatOpen === 'function') _veilMessagesUntilChatOpen();
             navigateToPage('messages');
             // FIX (receiver-side exact return): _pcCtx.chatUserId only exists
             // when the CURRENT user initiated the call (__dispatchCallToIframe
@@ -8335,8 +8401,6 @@ window.addEventListener('message', function (e) {
             // calls-core.js's pendingCallReturnChatUserId, itself set from
             // chat.html's callData._receiverReturnChatUserId at the moment the
             // incoming call interrupted them).
-            var _pcChatUserId = (_pcCtx && _pcCtx.chatUserId) || d.chatUserId;
-            var _pcChatUserName = (_pcCtx && _pcCtx.userName) || d.chatUserName;
             if (_pcChatUserId) {
                 var _pcMf = document.getElementById('messagesIframe');
                 if (_pcMf && _pcMf.contentWindow) {

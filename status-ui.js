@@ -2890,335 +2890,56 @@ const SkeletonLoader = {
     }
 };
 
-// =============================================
-// INITIAL RENDER - USING REAL STATUS DATA
-// =============================================
-const InitialRender = {
-    execute() {
-        this.renderMyStatusPreview();
-        this.renderAllStatuses();
-        this.renderUserAvatar();
-        this.renderStreakCounter();
-        this.renderMoodChart();
-        UIRenderPipeline.setStage('initialRender');
-    },
-
-    renderMyStatusPreview() {
-        const myStatusPreview = UIElements.getElement('myStatusPreview');
-        if (!myStatusPreview) return;
-        const hasStatuses = myStatuses && myStatuses.length > 0;
-        if (hasStatuses) {
-            const latest = myStatuses[0];
-            const previewText = getStatusPreviewText(latest);
-            const timeAgo = latest.createdAt ? formatTimeAgo(latest.createdAt) : 'Just now';
-            myStatusPreview.innerHTML = `
-                <div class="my-status-preview-content">
-                    <div class="my-status-preview-text">${UISanitizer.sanitizeHTML(previewText)}</div>
-                    <div class="my-status-preview-time">${timeAgo}</div>
-                </div>
-            `;
-        } else {
-            myStatusPreview.innerHTML = `
-                <div class="my-status-preview-placeholder">
-                    <i class="fas fa-plus-circle"></i>
-                    <span>Create your first status</span>
-                </div>
-            `;
-        }
-    },
-
-    renderAllStatuses() {
-        const container = UIElements.allStatusList;
-        if (!container) return;
-        if (!statuses || statuses.length === 0) {
-            container.innerHTML = this.createEmptyState();
-            return;
-        }
-        const fragment = document.createDocumentFragment();
-        const filtered = this.filterStatuses(statuses);
-        const limited = filtered.slice(0, 10);
-        limited.forEach(status => {
-            const element = this.createStatusElement(status);
-            if (element) fragment.appendChild(element);
-        });
-        container.innerHTML = '';
-        container.appendChild(fragment);
-        setTimeout(() => {
-            this.bindStatusItemHandlers(container);
-        }, 50);
-    },
-    
-    bindStatusItemHandlers(container) {
-        const statusItems = container.querySelectorAll('.status-item');
-        statusItems.forEach(item => {
-            if (item._handlersBound) return;
-            item._handlersBound = true;
-            const viewBtn = item.querySelector('[data-action="view"]');
-            if (viewBtn) {
-                viewBtn.removeEventListener('click', item._viewHandler);
-                item._viewHandler = (e) => {
-                    e.stopPropagation();
-                    if (!ensureUIActive('viewStatus')) return;
-                    const statusId = item.dataset.statusId;
-                    // FIX: status.id may be a number from server; dataset is always string
-                    const status = statuses.find(s => String(s.id) === String(statusId));
-                    if (status) showStatusViewer(status);
-                    else console.warn('[status-ui] status not found for id:', statusId, 'total:', statuses.length);
-                };
-                viewBtn.addEventListener('click', item._viewHandler);
-            }
-            const pinBtn = item.querySelector('[data-action="pin"], [data-action="unpin"]');
-            if (pinBtn) {
-                pinBtn.removeEventListener('click', item._pinHandler);
-                item._pinHandler = (e) => {
-                    e.stopPropagation();
-                    if (!ensureUIActive('pinStatus')) return;
-                    const action = pinBtn.dataset.action;
-                    const statusId = item.dataset.statusId;
-                    const status = statuses.find(s => s.id === statusId);
-                    if (status) handleStatusAction(action, status, pinBtn);
-                };
-                pinBtn.addEventListener('click', item._pinHandler);
-            }
-            const muteBtn = item.querySelector('[data-action="mute"], [data-action="unmute"]');
-            if (muteBtn) {
-                muteBtn.removeEventListener('click', item._muteHandler);
-                item._muteHandler = (e) => {
-                    e.stopPropagation();
-                    if (!ensureUIActive('muteUser')) return;
-                    const action = muteBtn.dataset.action;
-                    const status = statuses.find(s => String(s.id) === String(item.dataset.statusId));
-                    if (status) handleStatusAction(action, status, muteBtn);
-                };
-                muteBtn.addEventListener('click', item._muteHandler);
-            }
-            item.removeEventListener('click', item._itemClickHandler);
-            item._itemClickHandler = (e) => {
-                if (!e.target.closest('.status-actions') && ensureUIActive('viewStatus')) {
-                    const statusId = item.dataset.statusId;
-                    // FIX: String() coercion so number IDs from server match dataset strings
-                    const status = statuses.find(s => String(s.id) === String(statusId));
-                    if (status) showStatusViewer(status);
-                    else console.warn('[status-ui] item click: status not found id:', statusId);
-                }
-            };
-            item.addEventListener('click', item._itemClickHandler);
-        });
-    },
-
-    renderUserAvatar() {
-        if (!currentUser) return;
-        const avatarElements = UIElements.querySelectorAll('.user-avatar, .status-avatar, .my-status-avatar, .viewer-user-avatar');
-        avatarElements.forEach(avatar => {
-            if (currentUser.photoURL) {
-                const url = UISanitizer.sanitizeUrl(currentUser.photoURL);
-                avatar.style.backgroundImage = `url('${url}')`;
-                avatar.innerHTML = '';
-            } else if (currentUser.displayName) {
-                const initials = currentUser.displayName
-                    .split(' ')
-                    .map(n => n[0])
-                    .join('')
-                    .toUpperCase()
-                    .substring(0, 2);
-                avatar.innerHTML = `<span>${initials}</span>`;
-            }
-        });
-    },
-
-    renderStreakCounter() {
-        const streakCountEl = UIElements.getElement('streakCount');
-        if (streakCountEl) {
-            streakCountEl.textContent = streakCount || 0;
-        }
-    },
-renderMoodChart() {
-    const chart = UIElements.getElement('moodChart');
-    if (!chart) return;
-    chart.innerHTML = '';
-    const data = moodChartData.length > 0 ? moodChartData.slice(-7) : [];
-    if (data.length === 0) {
-        chart.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:12px">Post statuses to see mood chart</div>';
-        return;
-    }
-    data.forEach((day) => {
-        const bar = document.createElement('div');
-        bar.className = 'mood-bar';
-        bar.style.backgroundColor = statusMoods[day.mood]?.color || 'var(--mood-happy)';
-        bar.style.height = `${day.value}%`;
-        bar.title = `${statusMoods[day.mood]?.name || 'Happy'} (${day.value}%)`;
-        chart.appendChild(bar);
-    });
-},
-
-    createEmptyState() {
-        const isAuth = isUserAuthenticated_StatusUI();
-        // If not authenticated yet, show shimmer so user doesn't see empty state
-        if (!isAuth) {
-            return `
-                <div class="status-skeleton-list">
-                    ${[1,2,3].map(() => `
-                        <div class="status-item skeleton-item">
-                            <div class="skeleton-avatar"></div>
-                            <div class="skeleton-content">
-                                <div class="skeleton-line short"></div>
-                                <div class="skeleton-line long"></div>
-                            </div>
-                        </div>
-                    `).join('')}
-                </div>
-            `;
-        }
-        return `
-            <div class="empty-state">
-                <i class="fas fa-camera"></i>
-                <p>No statuses yet</p>
-                <p class="subtext">Share what's on your mind!</p>
-                <button class="action-btn primary" id="emptyStateCreateBtn" onclick="document.getElementById('createStatusBtn')?.click()">
-                    <i class="fas fa-plus"></i> Create Status
-                </button>
-            </div>
-        `;
-    },
-
-    filterStatuses(statusArray) {
-        if (!Array.isArray(statusArray)) return [];
-        let filtered = [...statusArray];
-        if (currentIntentFilter) {
-            filtered = filtered.filter(s => s.intent === currentIntentFilter);
-        }
-        if (currentMoodFilter) {
-            filtered = filtered.filter(s => s.mood === currentMoodFilter);
-        }
-        if (activeFilters && activeFilters.size > 0) {
-            filtered = filtered.filter(s => {
-                return Array.from(activeFilters).every(filter => {
-                    if (filter.startsWith('intent-')) return s.intent === filter.replace('intent-', '');
-                    if (filter.startsWith('mood-')) return s.mood === filter.replace('mood-', '');
-                    return true;
-                });
-            });
-        }
-        if (mutedUsers && mutedUsers.size > 0) {
-            filtered = filtered.filter(s => !mutedUsers.has(s.userId));
-        }
-        // FIX-022: Filter out expired statuses client-side using UTC timestamps.
-        // The previous code never filtered expired items here — it relied entirely on the
-        // server, which meant cached/stale statuses appeared until next API refresh.
-        const nowUtc = Date.now();
-        filtered = filtered.filter(s => {
-            // If server already set expiresAt, trust it
-            if (s.expiresAt) {
-                return new Date(s.expiresAt).getTime() > nowUtc;
-            }
-            // Otherwise compute from createdAt + 24h
-            if (s.createdAt) {
-                const createdUtc = new Date(s.createdAt).getTime();
-                return (createdUtc + 86400000) > nowUtc;
-            }
-            return true; // no timestamps — keep it
-        });
-
-        return filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    },
-
-    createStatusElement(status) {
-        if (!status || !status.id) return null;
-        const sanitized = UISanitizer.validateStatusData(status);
-        if (!sanitized) return null;
-        const item = document.createElement('div');
-        item.className = 'status-item';
-        item.dataset.statusId = String(sanitized.id);
-        item.dataset.userId = sanitized.userId || '';
-        const user = sanitized.user || { displayName: 'Unknown User' };
-        const initials = user.displayName
-            .split(' ')
-            .map(n => n[0])
-            .join('')
-            .toUpperCase()
-            .substring(0, 2);
-        const isViewed = viewedStatuses?.has(sanitized.id) || false;
-        const isPinned = sanitized.isPinned || false;
-        const isMuted = mutedUsers?.has(sanitized.userId) || false;
-        let previewText = '';
-        if (sanitized.type === 'text') {
-            previewText = UISanitizer.sanitizeHTML(sanitized.content || sanitized.text || '').substring(0, 100);
-            if ((sanitized.content || sanitized.text || '').length > 100) previewText += '...';
-        } else if (sanitized.type === 'media' || sanitized.type === 'image') {
-            previewText = `<i class="fas fa-image"></i> ${UISanitizer.sanitizeHTML(sanitized.caption || sanitized.content || 'Photo').substring(0, 50)}`;
-        } else if (sanitized.type === 'video') {
-            previewText = `<i class="fas fa-video"></i> ${UISanitizer.sanitizeHTML(sanitized.caption || sanitized.content || 'Video').substring(0, 50)}`;
-        } else if (sanitized.type === 'audio') {
-            previewText = `<i class="fas fa-microphone"></i> ${UISanitizer.sanitizeHTML(sanitized.caption || sanitized.content || 'Audio').substring(0, 50)}`;
-        } else if (sanitized.type === 'poll') {
-            previewText = `<i class="fas fa-poll"></i> ${UISanitizer.sanitizeHTML(sanitized.question || sanitized.content || 'Poll').substring(0, 50)}`;
-        } else if (sanitized.type === 'mood') {
-            previewText = `<i class="fas fa-smile"></i> ${UISanitizer.sanitizeHTML(sanitized.moodType || sanitized.content || 'Mood').substring(0, 50)}`;
-        } else if (sanitized.type === 'location') {
-            previewText = `<i class="fas fa-map-marker-alt"></i> ${UISanitizer.sanitizeHTML(sanitized.location || sanitized.content || 'Location').substring(0, 50)}`;
-        } else if (sanitized.mediaUrl) {
-            // Fallback: has a media URL even if type is unrecognised
-            const isVid = /\.(mp4|webm|ogg|mov)/i.test(sanitized.mediaUrl);
-            previewText = isVid
-                ? `<i class="fas fa-video"></i> Video`
-                : `<i class="fas fa-image"></i> ${UISanitizer.sanitizeHTML(sanitized.content || 'Media').substring(0, 50)}`;
-        } else {
-            previewText = UISanitizer.sanitizeHTML(sanitized.content || sanitized.text || '').substring(0, 100);
-        }
-        const timeAgo = sanitized.createdAt ? formatTimeAgo(sanitized.createdAt) : 'Just now';
-        item.innerHTML = `
-            <div class="status-avatar">
-                <div class="status-ring ${isViewed ? 'viewed' : ''}"></div>
-                <div class="status-avatar-inner" ${user.photoURL ? `style="background-image: url('${UISanitizer.sanitizeUrl(user.photoURL)}')"` : ''}>
-                    ${user.photoURL ? '' : `<span>${initials}</span>`}
-                </div>
-            </div>
-            <div class="status-info">
-                <div class="status-name">
-                    <span class="status-name-text">${UISanitizer.sanitizeHTML(user.displayName || 'Unknown User')}</span>
-                    <span class="status-time">${timeAgo}</span>
-                </div>
-                <div class="status-preview">${previewText}</div>
-            </div>
-            <div class="status-actions">
-                <button class="status-action-btn" data-action="view" title="View Status">
-                    <i class="fas fa-eye"></i>
-                </button>
-                ${isPinned ? `
-                    <button class="status-action-btn warning" data-action="unpin" title="Unpin Status">
-                        <i class="fas fa-thumbtack"></i>
-                    </button>
-                ` : `
-                    <button class="status-action-btn" data-action="pin" title="Pin Status">
-                        <i class="fas fa-thumbtack"></i>
-                    </button>
-                `}
-                ${isMuted ? `
-                    <button class="status-action-btn" data-action="unmute" title="Unmute User">
-                        <i class="fas fa-volume-up"></i>
-                    </button>
-                ` : `
-                    <button class="status-action-btn" data-action="mute" title="Mute User">
-                        <i class="fas fa-volume-mute"></i>
-                    </button>
-                `}
-            </div>
-        `;
-        return item;
-    }
-};
+// FIX (duplicate/dead status renderer removed): this file used to also
+// contain an entire InitialRender object — renderAllStatuses()/
+// createStatusElement() — that rendered into this same #allStatusList
+// container from a different, ungrouped data source (the flat `statuses`
+// array, not friendsStatuses) with no viewed/unviewed split logic at all,
+// and no connection to the Recent/Viewed sections used everywhere else in
+// this file. InitialRender.execute() had zero callers (confirmed via a
+// full-file reference search — nothing invoked it), so it never actually
+// ran; the only live remnant was enhanceInteractivity() below calling
+// InitialRender.bindStatusItemHandlers() on a container that could never
+// exist, which is what was silently crashing ProgressiveEnhancement.execute()
+// on every init (see the fix note there). Removed entirely rather than left
+// as unreachable duplicate code that could get wired back in by accident.
 
 // =============================================
 // PROGRESSIVE ENHANCEMENT
 // =============================================
 const ProgressiveEnhancement = {
     execute() {
-        this.enhanceImages();
-        this.enhanceInteractivity();
-        this.enhanceAccessibility();
-        this.setupLazyLoading();
-        this.enhanceForms();
-        this.enhanceAnimations();
+        // FIX (status "Viewed updates" not updating / live sync silently
+        // stalling): this used to call each enhancement back-to-back with no
+        // isolation. enhanceInteractivity() unconditionally called
+        // InitialRender.bindStatusItemHandlers(statusItems[0]?.parentNode) —
+        // but .status-item elements only ever came from the legacy
+        // InitialRender.renderAllStatuses() path, which nothing calls
+        // anymore (the current grouped-by-friend renderer uses
+        // .status-group-item instead). So statusItems was always empty,
+        // statusItems[0] was always undefined, and bindStatusItemHandlers
+        // was called with an undefined container — which throws immediately
+        // on container.querySelectorAll(...). That throw was never caught,
+        // so it silently aborted everything after it in this function,
+        // INCLUDING the setStage('progressiveEnhancement') call below —
+        // and every call site of execute() runs setStage('liveUpdate') +
+        // LiveUpdateEngine.initialize() + updateCurrentSectionUI() on the
+        // very next lines, so those never ran either. Without the live
+        // update engine actually initializing, sidebar state (like a status
+        // moving from Recent to Viewed) had no reliable way to stay in sync
+        // beyond the one-shot 50ms re-render fired at view-time — any later
+        // refresh, tab return, or reconnect could show stale state. Wrapping
+        // each step means one broken enhancement can never take the rest
+        // down with it — same principle as the per-group try/catch in
+        // renderStatusesListUI above.
+        const _steps = [
+            'enhanceImages', 'enhanceInteractivity', 'enhanceAccessibility',
+            'setupLazyLoading', 'enhanceForms', 'enhanceAnimations'
+        ];
+        _steps.forEach(step => {
+            try { this[step](); }
+            catch (err) { console.error('[ProgressiveEnhancement] ' + step + ' failed, continuing:', err); }
+        });
         UIRenderPipeline.setStage('progressiveEnhancement');
     },
 
@@ -3242,7 +2963,11 @@ const ProgressiveEnhancement = {
 
     enhanceInteractivity() {
         const statusItems = UIElements.querySelectorAll('.status-item');
-        InitialRender.bindStatusItemHandlers(statusItems[0]?.parentNode);
+        // FIX: .status-item elements only ever came from the legacy
+        // InitialRender.renderAllStatuses() renderer, which has been removed
+        // entirely (see the note above) — nothing produces .status-item
+        // elements anymore, so there is nothing to bind here.
+        if (!statusItems.length) return;
     },
 
     enhanceAccessibility() {
