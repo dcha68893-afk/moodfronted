@@ -12299,7 +12299,21 @@ Type: ${message.type || 'text'}`;
 
 
 
-    const messagesUI = {
+    // FIX (silent construction abort / self-healing): the entire messagesUI
+    // object build + window.messagesUI assignment is now wrapped in try/catch.
+    // Previously, any exception thrown while building this object aborted
+    // silently — no console output — leaving window.messagesUI permanently
+    // unset (or stuck on an earlier partial stub) for the rest of the page's
+    // life, which is exactly what produced the "messagesCore/messagesUI never
+    // became fully available" dead-end even after the openChatWithUserInUI
+    // retry loop waited the full 3 seconds. Now: (1) the real error is logged,
+    // and (2) construction is retried, so window.messagesUI actually recovers
+    // instead of staying broken for the whole session.
+    let messagesUI = null;
+    function _buildAndAssignMessagesUI(attempt) {
+        attempt = attempt || 0;
+        try {
+    messagesUI = {
 
         version: VERSION,
 
@@ -12327,13 +12341,22 @@ Type: ${message.type || 'text'}`;
 
         
 
-        showNotification: UIRenderer.showNotification.bind(UIRenderer),
+        // FIX (silent construction abort): these five .bind() calls used to run
+        // immediately at object-literal construction time with no guard. If
+        // UIRenderer.<method> wasn't a function at that exact instant for any
+        // reason, .bind() threw, the entire messagesUI object never finished
+        // building, window.messagesUI was NEVER assigned (line ~12787 never ran),
+        // and the failure was completely silent — no console error at all. That
+        // is the real, previously-invisible cause behind "messagesCore/messagesUI
+        // never became fully available" even after 20 retries: there was nothing
+        // to become available, the constructor died partway with no trace.
+        showNotification: (typeof UIRenderer.showNotification === 'function') ? UIRenderer.showNotification.bind(UIRenderer) : function(){ console.warn('[MessageUI] UIRenderer.showNotification unavailable at init'); },
 
         
 
-        renderMultiSendChats: UIRenderer.renderMultiSendChats.bind(UIRenderer),
+        renderMultiSendChats: (typeof UIRenderer.renderMultiSendChats === 'function') ? UIRenderer.renderMultiSendChats.bind(UIRenderer) : function(){ console.warn('[MessageUI] UIRenderer.renderMultiSendChats unavailable at init'); },
 
-        updateSelectedCount: UIRenderer.updateSelectedCount.bind(UIRenderer),
+        updateSelectedCount: (typeof UIRenderer.updateSelectedCount === 'function') ? UIRenderer.updateSelectedCount.bind(UIRenderer) : function(){ console.warn('[MessageUI] UIRenderer.updateSelectedCount unavailable at init'); },
 
         
 
@@ -12405,9 +12428,9 @@ Type: ${message.type || 'text'}`;
 
         
 
-        openThread: UIRenderer.openThread.bind(UIRenderer),
+        openThread: (typeof UIRenderer.openThread === 'function') ? UIRenderer.openThread.bind(UIRenderer) : function(){ console.warn('[MessageUI] UIRenderer.openThread unavailable at init'); },
 
-        closeThread: UIRenderer.closeThread.bind(UIRenderer),
+        closeThread: (typeof UIRenderer.closeThread === 'function') ? UIRenderer.closeThread.bind(UIRenderer) : function(){ console.warn('[MessageUI] UIRenderer.closeThread unavailable at init'); },
 
         
 
@@ -12785,6 +12808,21 @@ Type: ${message.type || 'text'}`;
 
 
     window.messagesUI = messagesUI;
+        } catch (err) {
+            // This log is the whole point of the wrap: previously this error
+            // was never seen anywhere. Whatever prints here IS the actual root
+            // cause of the "openChat is not a function" / "never became fully
+            // available" symptoms — please share this exact message+stack if
+            // it appears, since it will point at the true failing line.
+            console.error('[MessageUI] FATAL: messagesUI object construction threw (attempt ' + attempt + '):', err && err.stack || err);
+            if (attempt < 10) {
+                setTimeout(() => _buildAndAssignMessagesUI(attempt + 1), 200);
+            } else {
+                console.error('[MessageUI] FATAL: giving up building messagesUI after 10 attempts. Chat opened from Friends/Calls/Status/Marketplace will not work until page reload.');
+            }
+        }
+    }
+    _buildAndAssignMessagesUI(0);
 
     
 
