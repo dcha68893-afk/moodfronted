@@ -1723,7 +1723,21 @@
     <script src="messages-core.bootstrap.js" defer></script>
     <script src="messages-core.operations.js" defer></script>
     <script src="messages-core.ui-bridge.js" defer></script>
-    <script type="module" src="messages-ui.js?v=3"></script>
+    <!-- FIX (window.messagesUI never built — silent failure): this was
+         `type="module"`, but messages-ui.js has zero top-level import/export
+         statements (its one dynamic `await import(...)` deep inside an async
+         function works fine in a classic script too). Module scripts are
+         held to much stricter loading rules than classic scripts (MIME-type
+         strictness, CORS-mode fetch, different failure handling), and can
+         fail to execute *silently* — no thrown error, no console output —
+         in many WebView/Capacitor contexts. That silent failure is the true
+         root cause of "window.messagesUI.openChat is not a function" /
+         "never became fully available after ~20s": window.messagesUI was
+         never assigned at all (not even its early stub), while
+         messages-core.bootstrap.js/.operations.js/.ui-bridge.js loaded fine
+         because they're plain `defer` scripts, unaffected. `defer` preserves
+         the same relative execution order as the sibling core scripts. -->
+    <script defer src="messages-ui.js?v=4"></script>
     <script src="js/e2e-encryption.js" defer></script>
     <script defer>
         // FIX-E2E-WIRING: js/e2e-encryption.js only activates via a
