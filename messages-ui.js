@@ -11548,13 +11548,51 @@ Type: ${message.type || 'text'}`;
 
         window.currentFriendName = resolvedName;
 
+        // ── FIX (UNIFY-OPEN-CHAT-PIPELINE) ──────────────────────────────────
+        // Root cause of "works from Chat History, still flaky from Friend/
+        // Calls/Status even after individual patches": this entry point never
+        // actually called the same function Chat History does. Chat History's
+        // openChat() calls core.openConversation() (ConversationManager, in
+        // messages-core.operations.js), which does several things this
+        // entry point's old loadChatByFriendId() path did NOT:
+        //   - loads cached messages from IndexedDB instantly (no white screen)
+        //   - calls ChatManager.fetchMessages() to refresh from the server
+        //   - sends OPEN_CONVERSATION to the parent shell over the socket
+        //     bridge (so read receipts / room join happen the same way)
+        //   - re-enables input/send button and focuses input via the exact
+        //     same _showChatPanel() Chat History uses
+        // Those gaps are the actual reason a chat opened this way could look
+        // like it "hangs", or a sent message doesn't render, or a reply
+        // doesn't decrypt: it was never fully wired up the same way. Rather
+        // than continue patching the separate reimplementation piecemeal,
+        // resolve to a real conversation object (or a pending_ placeholder,
+        // same as before) and hand off to window.messagesUI.openChat() —
+        // the literal same function the chat-history row's onclick calls.
+        const _openViaUnifiedPipeline = (attempts) => {
+            const _core = getMessagesCore();
+            if (!_core || !_core.ChatManager) {
+                if (attempts >= 20) {
+                    console.error('[MessageUI] openChatWithUserInUI: messagesCore never became available');
+                    try { UIRenderer.showNotification('Could not open chat — try again', 'error'); } catch (_) {}
+                    return;
+                }
+                setTimeout(() => _openViaUnifiedPipeline(attempts + 1), 150);
+                return;
+            }
 
+            const _existing = (findExisting !== false)
+                ? _core.ChatManager.findExistingConversation(numericUserId)
+                : null;
+            const _conv = _existing || _core.ChatManager.getOrCreatePendingConversation(numericUserId, resolvedName, resolvedAvatar);
 
-        if (window.messagesUI && typeof window.messagesUI.loadChatByFriendId === 'function') {
+            if (!_conv) {
+                console.error('[MessageUI] openChatWithUserInUI: could not resolve or create a conversation for', numericUserId);
+                try { UIRenderer.showNotification('Could not open this chat — invalid user', 'error'); } catch (_) {}
+                return;
+            }
 
-            _uiLog('[MessageUI] Using messagesUI.loadChatByFriendId');
-
-            window.messagesUI.loadChatByFriendId(numericUserId, resolvedName);
+            // Same call Chat History's _chatItemClick → openChat() makes.
+            window.messagesUI.openChat(_conv);
 
             // FIX (marketplace product-inquiry text silently lost): every layer of the
             // shared open-chat pipeline (message.html's OPEN_CHAT_WITH_USER handler,
@@ -11571,22 +11609,9 @@ Type: ${message.type || 'text'}`;
                     }
                 }, 300);
             }
+        };
 
-            return;
-
-        }
-
-        // FIX-ROOT-CAUSE (dead-code removal, Phase 18 canonical-pipeline audit):
-        // everything below this point used to be four more cascading fallback
-        // branches (core.openConversation()/findExistingConversation(),
-        // ConversationManager.createConversation(), window.ChatManager.openChat(),
-        // then raw DOM-selector-click hacks and a simulated search-input flow) —
-        // all ~330 lines of it were 100% unreachable. window.messagesUI.loadChatByFriendId
-        // is always a real function once messagesUI exists (it's assigned in the same
-        // object literal as this very function), so the branch above always returns
-        // first. Removed rather than left in place: dead branches that look like valid
-        // alternate paths are exactly the kind of duplicate implementation that makes
-        // this pipeline hard to trust and audit, even though they never actually ran.
+        _openViaUnifiedPipeline(0);
     }
 
 
@@ -12487,494 +12512,44 @@ Type: ${message.type || 'text'}`;
         
 
         loadChatByFriendId: (friendId, friendName) => {
+            // FIX (UNIFY-OPEN-CHAT-PIPELINE): this used to be a ~490-line
+            // separate reimplementation of "open a chat" — its own dedup,
+            // its own UUID/parseInt handling, its own conversation lookup,
+            // its own DOM paint, its own cached-message render, and its own
+            // ConversationManager.createConversation() fallback for a chat
+            // with zero history. None of that ever called
+            // core.openConversation() (ConversationManager.openConversation,
+            // the function Chat History's openChat() calls), so it never got
+            // that function's IndexedDB-instant-load, fetchMessages()
+            // refresh, or OPEN_CONVERSATION-to-parent notification. That gap
+            // is what made a chat opened this way behave differently from
+            // the identical chat opened via Chat History — occasionally
+            // "hanging", or a sent message not rendering, or a reply not
+            // decrypting, because the underlying conversation/session was
+            // simply wired up less completely than the history path.
+            //
+            // Every caller of loadChatByFriendId() only ever had a
+            // friendId/friendName anyway (the same inputs
+            // openChatWithUserInUI() takes) — so route through that single
+            // unified entry point instead, which now resolves the real/
+            // pending conversation and hands off to the exact same
+            // window.messagesUI.openChat() → core.openConversation() call
+            // Chat History uses. One implementation, every source.
             const _dk = 'loadchat_' + friendId, _nt = Date.now();
             if (window.__loadChatDedup && window.__loadChatDedup[_dk] && (_nt - window.__loadChatDedup[_dk]) < 1500) return;
             if (!window.__loadChatDedup) window.__loadChatDedup = {};
             window.__loadChatDedup[_dk] = _nt;
             setTimeout(() => { if (window.__loadChatDedup) delete window.__loadChatDedup[_dk]; }, 1500);
 
-            const core = getMessagesCore();
-
-            if (!core) {
-
-                _uiLog('[messagesUI] Core not available, retrying in 500ms');
-
-                setTimeout(() => {
-
-                    const retryCore = getMessagesCore();
-
-                    if (retryCore) {
-
-                        window.messagesUI.loadChatByFriendId(friendId, friendName);
-
-                    }
-
-                }, 500);
-
-                return;
-
-            }
-
-
-
-            const displayName = friendName || 'User';
-
-            window.currentFriendName = displayName;
-
-            
-
-            _uiLog('[messagesUI] loadChatByFriendId called with:', { friendId, friendName: displayName });
-
-
-
-            // FIX: same UUID-vs-parseInt bug as openChatWithUserInUI above —
-            // parseInt() on a UUID-based friendId returns NaN (or a
-            // truncated garbage number), which either aborted this entry
-            // point outright or created a conversation against the wrong
-            // participant. Coerce to a number only when the ID is purely
-            // numeric; otherwise keep the original string.
-            const _rawFriendId = String(friendId || '').trim();
-            const _parsedFriendId = parseInt(_rawFriendId, 10);
-            const id = (!isNaN(_parsedFriendId) && String(_parsedFriendId) === _rawFriendId) ? _parsedFriendId : _rawFriendId;
-
-            if (!id) {
-
-                console.error('[messagesUI] Invalid friend ID:', friendId);
-
-                return;
-
-            }
-
-            const currentUserId = getCurrentUserId();
-
-            // FIX (root cause: notification arrives but chat panel never
-            // updates, specifically for chats opened from Friend/Status/
-            // Calls rather than Chat History): getConversations() is a
-            // synchronous read of an in-memory array that's only populated
-            // by an ASYNC fetchConversations() call triggered once at
-            // bootstrap. Chat History always waits for that to resolve
-            // before it's even clickable — but Friend/Status/Calls jump
-            // straight here the moment their own module loads, which can
-            // easily race ahead of that fetch (a friend never messaged
-            // before this session, or a fast tap right after page load).
-            // When that race is lost, core.getConversations() comes back
-            // empty even though a real conversation exists server-side, so
-            // the code below falls through to getOrCreatePendingConversation()
-            // and activates a throwaway pending_<id> chat. Every message
-            // that later arrives carries the REAL chatId, which never
-            // matches that pending id — so it notifies (correctly, from the
-            // server's point of view) but never renders live, exactly the
-            // reported symptom. Fetch once before deciding, only when the
-            // list looks unpopulated, so the common already-loaded case
-            // (including brand-new users with zero real conversations)
-            // pays no extra cost.
-            if (!window.__kynConversationsFetchedOnce && core.getConversations().length === 0 &&
-                core.ChatManager && typeof core.ChatManager.fetchConversations === 'function') {
-                window.__kynConversationsFetchedOnce = true;
-                core.ChatManager.fetchConversations().catch(() => {}).finally(() => {
-                    window.messagesUI.loadChatByFriendId(friendId, friendName);
-                });
+            if (typeof openChatWithUserInUI === 'function') {
+                openChatWithUserInUI(friendId, friendName || 'User', null, { findExisting: true });
                 return;
             }
 
-            const existingConversation = core.getConversations?.()?.find?.((conversation) =>
-
-                getConversationPeerId(conversation, currentUserId) === String(id)
-
-            );
-
-            // ROOT-CAUSE FIX (Phase 19 — canonical send pipeline): see comment
-            // above. Make ChatManager.getActiveChat() (what core.sendMessage()
-            // actually reads) agree with what this function just displayed —
-            // exactly what core.openConversation() does for the Chat History
-            // path, applied here too so every entry point ends in the same
-            // state before Send can be pressed.
-            if (core.ChatManager && typeof core.ChatManager.setActiveConversation === 'function') {
-                if (existingConversation) {
-                    core.ChatManager.setActiveConversation(existingConversation);
-                } else if (typeof core.ChatManager.getOrCreatePendingConversation === 'function') {
-                    const _pendingConv = core.ChatManager.getOrCreatePendingConversation(id, displayName, null);
-                    if (_pendingConv) core.ChatManager.setActiveConversation(_pendingConv);
-                }
-            }
-
-
-
-            const contactsSidebar = document.getElementById('contactsSidebar');
-
-            const sidebar = document.getElementById('sidebar');
-
-            const chatPanel = document.getElementById('chatPanel');
-
-            
-
-            if (contactsSidebar) { contactsSidebar.classList.add('hidden'); contactsSidebar.style.pointerEvents = 'none'; }
-
-            // FIX: On mobile, HIDE sidebar when opening chat
-            if (sidebar && window.innerWidth <= 768) { sidebar.classList.remove('active'); }
-            // BUG FIX (CHAT-PANEL-SHOWS-SIDEBAR-HEADER): see openChat() above —
-            // body.chat-active is what messages.css uses (with !important) to
-            // forcefully push the sidebar off-screen; without it here too,
-            // this entry point had the same intermittent header-flash bug.
-            if (window.innerWidth <= 768) { document.body.classList.add('chat-active'); }
-
-            
-
-            const nameEl = document.getElementById('chatFriendName');
-
-            if (nameEl) {
-
-                nameEl.textContent = displayName;
-
-            }
-
-            
-
-            if (chatPanel) {
-
-                chatPanel.classList.remove('hidden');
-
-                UIStateManager.setState('chatVisible', true);
-
-                // FIX: Send ACK immediately so chat.html retry loop stops on attempt 1
-
-                try {
-                    window.parent?.postMessage({
-                        type: 'CHAT_OPENED',
-                        timestamp: Date.now(),
-                        payload: { userId: id, name: displayName, avatarUrl: existingConversation && existingConversation.friendAvatar }
-                    }, '*');
-                } catch(_) {}
-
-                
-
-                const messagesContainer = document.getElementById('messagesContainer');
-
-                if (messagesContainer) {
-
-                    const cachedMessages = existingConversation?.id && core.getCachedMessages
-
-                        ? core.getCachedMessages(existingConversation.id)
-
-                        : [];
-
-                    if (Array.isArray(cachedMessages) && cachedMessages.length > 0) {
-
-                        // FIX-MISSING-RENDER-ARGS: renderMessages(messages, currentChat,
-                        // currentUser) treats a missing/undefined currentChat as "no chat
-                        // selected" and immediately wipes messagesContainer to the empty-
-                        // chat placeholder — it does not fall back to inferring the chat
-                        // from the messages themselves. Calling it with only the messages
-                        // array (as before) discarded the just-loaded cached history on
-                        // every single chat-open, showing an empty conversation until (if
-                        // ever) a later fetch re-populated it.
-                        const _curUser = core?.getCurrentUser?.() || { id: currentUserId, userId: currentUserId };
-                        UIRenderer.renderMessages(cachedMessages, existingConversation, _curUser);
-
-                    } else if (existingConversation?.id && window.KynectaLocalStore) {
-
-                        // ✅ FIX C2: Load from IDB before showing "empty" state.
-
-                        // getCachedMessages() only checks the in-memory map which may
-
-                        // not be populated yet on first load — IDB has the real history.
-
-                        window.KynectaLocalStore.getMessagesByChat(String(existingConversation.id), { limit: 100 })
-
-                            .then(idbMsgs => {
-
-                                if (idbMsgs && idbMsgs.length > 0) {
-
-                                    // Same missing-args bug as above — see FIX-MISSING-RENDER-ARGS.
-                                    const _curUser2 = core?.getCurrentUser?.() || { id: currentUserId, userId: currentUserId };
-                                    UIRenderer.renderMessages(idbMsgs, existingConversation, _curUser2);
-
-                                    _uiLog('[messagesUI] ✅ FIX C2 Loaded', idbMsgs.length, 'messages from IDB for chat', existingConversation.id);
-
-                                } else {
-
-                                    messagesContainer.innerHTML = `
-
-                                        <div class="empty-chat">
-
-                                            <i class="fas fa-comment-dots empty-chat-icon"></i>
-
-                                            <div class="empty-chat-title">Conversation ready</div>
-
-                                            <div class="empty-chat-message">Type your first message below to start the conversation with ${displayName}</div>
-
-                                        </div>
-
-                                    `;
-
-                                }
-
-                            })
-
-                            .catch(() => {
-
-                                messagesContainer.innerHTML = `
-
-                                    <div class="empty-chat">
-
-                                        <i class="fas fa-comment-dots empty-chat-icon"></i>
-
-                                        <div class="empty-chat-title">Conversation ready</div>
-
-                                        <div class="empty-chat-message">Type your first message below to start the conversation with ${displayName}</div>
-
-                                    </div>
-
-                                `;
-
-                            });
-
-                    } else {
-
-                        messagesContainer.innerHTML = `
-
-                            <div class="empty-chat">
-
-                                <i class="fas fa-comment-dots empty-chat-icon"></i>
-
-                                <div class="empty-chat-title">Conversation ready</div>
-
-                                <div class="empty-chat-message">Type your first message below to start the conversation with ${displayName}</div>
-
-                            </div>
-
-                        `;
-
-                    }
-
-                }
-
-            }
-
-
-
-            const ensureChatPanelOpen = (conversationId) => {
-
-                _uiLog('[messagesUI] Ensuring chat panel open with ID:', conversationId);
-
-                // FIX-ACTIVE-CHAT-ID-TRACKING: window.__activeChatId and
-                // chatPanel.dataset.chatId are read by the incoming-message
-                // render-matching logic (both the primary pipeline and the
-                // v4.0 visibility-patch fallback) as tie-breakers alongside
-                // ChatManager._activeConversation.id, but neither was ever
-                // actually written anywhere — so they were always empty and
-                // that matching silently depended on _activeConversation.id
-                // alone. Chat History always opens a conversation that
-                // already has its real backend ID, so this never showed up
-                // there. Any OTHER entry point (friends list, search,
-                // notification, call return) can open a chat before the
-                // real conversation exists yet (a "pending_" id) — if the
-                // real ID arrives later and something reads one of these
-                // now-stale trackers instead of _activeConversation.id, an
-                // incoming reply silently fails to match and never renders,
-                // even though the notification for it still fires. Stamping
-                // both here, and keeping them synced below whenever a
-                // pending conversation is replaced by its real one, closes
-                // that gap regardless of which source opened the chat.
-                if (conversationId) {
-                    window.__activeChatId = String(conversationId);
-                }
-
-                if (chatPanel) {
-
-                    if (conversationId) chatPanel.dataset.chatId = String(conversationId);
-
-                    chatPanel.classList.remove('hidden');
-
-                    UIStateManager.setState('chatVisible', true);
-
-                    try {
-
-                        window.parent?.postMessage({
-                            type: 'CHAT_OPENED',
-                            timestamp: Date.now(),
-                            payload: { userId: id, name: displayName, avatarUrl: existingConversation && existingConversation.friendAvatar }
-                        }, '*');
-
-                    } catch (_error) {}
-
-                }
-
-                
-
-                const nameEl = document.getElementById('chatFriendName');
-
-                if (nameEl) {
-
-                    nameEl.textContent = displayName;
-
-                }
-
-                
-
-                const coreInstance = getMessagesCore();
-
-                if (coreInstance) {
-
-                    const friends = coreInstance.getFriends ? coreInstance.getFriends() : [];
-
-                    const friend = friends.find(f => f.id === id);
-
-                    if (friend) {
-
-                        const avatarEl = document.getElementById('chatFriendAvatar');
-
-                        const statusEl = document.getElementById('chatStatusText');
-
-                        const indicatorEl = document.getElementById('chatStatusIndicator');
-
-                        
-
-                        if (nameEl) nameEl.textContent = friend.displayName || friend.username || displayName;
-
-                        if (statusEl) {
-
-                            const friendOnline = !!friend.online;
-
-                            statusEl.textContent = friendOnline ? 'Active now' : '';
-
-                        }
-
-                        if (indicatorEl) indicatorEl.className = `chat-status ${friend.online ? 'online' : 'offline'}`;
-
-                        if (avatarEl) {
-
-                            if (friend.avatar || friend.photoURL) {
-
-                                avatarEl.innerHTML = `<img src="${friend.avatar || friend.photoURL}" alt="${friend.displayName}" loading="lazy">`;
-
-                            } else {
-
-                                avatarEl.innerHTML = '<i class="fas fa-user"></i>';
-
-                            }
-
-                            if (indicatorEl) avatarEl.appendChild(indicatorEl);
-
-                        }
-
-                    } else {
-
-                        const avatarEl = document.getElementById('chatFriendAvatar');
-
-                        if (avatarEl) {
-
-                            const initials = displayName.charAt(0).toUpperCase();
-
-                            avatarEl.innerHTML = `<div style="width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#667eea,#764ba2);color:white;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:16px;">${initials}</div>`;
-
-                            const indicatorEl = document.getElementById('chatStatusIndicator');
-
-                            if (indicatorEl) avatarEl.appendChild(indicatorEl);
-
-                        }
-
-                    }
-
-                }
-
-                
-
-
-                // FIX: this function makes the chat panel LOOK open and ready
-                // immediately (header/avatar/status), as instant feedback while
-                // core.openConversation() is still resolving asynchronously in
-                // the background. But messageInput.disabled/.focus() was only
-                // ever set later, inside _showChatPanel (messages-core.js),
-                // which only runs once that async call finishes. Opening a
-                // chat from the history list calls this function first and
-                // core.openConversation() second -- so there was a real window
-                // where the panel appeared open but the input wasn't focused
-                // yet, and keystrokes typed in that window (or a stray
-                // keystroke landing exactly as focus finally arrived) were
-                // silently lost or dropped a character. Enable + focus here
-                // too so the panel is functionally ready the instant it looks
-                // ready, not just visually.
-                const _mInput = document.getElementById('messageInput');
-                const _mSendBtn = document.getElementById('sendButton');
-                if (_mInput) _mInput.disabled = false;
-                if (_mSendBtn) _mSendBtn.disabled = false;
-                if (_mInput && document.activeElement !== _mInput) {
-                    setTimeout(() => { _mInput.focus(); }, 50);
-                }
-
-            };
-
-
-
-            if (existingConversation?.id && core.openConversation) {
-
-                _uiLog('[messagesUI] Opening existing conversation instantly:', existingConversation.id);
-
-                // FIX Bug3: ensureChatPanelOpen must run AFTER openConversation resolves
-                // so messages are loaded before the panel is shown (no more blank panel).
-                // FIX Bug4: pass friendName/userName so _showChatPanel never falls back to 'Loading…'.
-                core.openConversation(existingConversation.id, { minFetchGap: 0, friendName: displayName, userName: displayName })
-                    .then(() => ensureChatPanelOpen(existingConversation.id))
-                    .catch(() => ensureChatPanelOpen(existingConversation.id));
-
-                // Also call ensureChatPanelOpen immediately for instant visual feedback
-                // (shows the panel with correct name right away, messages fill in async)
-                ensureChatPanelOpen(existingConversation.id);
-
-                return;
-
-            }
-
-
-
-            // FIX (PHASE21 — single canonical conversation engine): this used to
-            // branch across FOUR different ways to create a new conversation
-            // (ConversationManager.createConversation / core.createConversation /
-            // core.openConversation(rawFriendId) / a bare warn-and-give-up), each
-            // reachable only if the previous one's method happened to be absent
-            // from `core`. In practice core.ConversationManager.createConversation
-            // is always present (it's exposed on every core build via
-            // messages-core.ui-bridge.js), so branches 2-4 never actually ran —
-            // dead alternate pipelines that could silently diverge from the real
-            // one if `core` was ever restructured. There is exactly one canonical
-            // way to create a new conversation now: ConversationManager
-            // .createConversation(), which itself delegates to the same
-            // ConversationManager.openConversation() Chat History uses. If that
-            // method is ever missing, fail loudly rather than falling through to
-            // an alternate, unverified code path.
-            if (core.ConversationManager?.createConversation) {
-
-                _uiLog('[messagesUI] Using ConversationManager.createConversation');
-
-                const result = core.ConversationManager.createConversation([id]);
-
-                Promise.resolve(result).then((conversation) => {
-
-                    _uiLog('[messagesUI] Conversation created/opened:', conversation);
-
-                    const conversationId = (conversation === false || conversation === null)
-                        ? id
-                        : (conversation?.id || conversation);
-
-                    ensureChatPanelOpen(conversationId);
-
-                }).catch((error) => {
-
-                    console.error('[messagesUI] Failed to create conversation:', error);
-
-                    ensureChatPanelOpen(id);
-
-                });
-
-            } else {
-
-                console.error('[messagesUI] ConversationManager.createConversation unavailable — cannot open a new conversation via the canonical engine.');
-
-                ensureChatPanelOpen(id);
-
-            }
-
+            // Defensive fallback — openChatWithUserInUI is defined in this
+            // same module and should always be present; this only runs if
+            // something upstream changes that guarantee in the future.
+            console.error('[messagesUI] loadChatByFriendId: openChatWithUserInUI unavailable — cannot open chat via the canonical pipeline.');
         },
 
         
