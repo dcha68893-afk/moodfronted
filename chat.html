@@ -1061,38 +1061,6 @@
             100% { transform: scale(1); }
         }
 
-        /* ---- Mobile back button ---- */
-        .mobile-back-btn {
-            display: none;
-            position: fixed;
-            bottom: 20px;
-            left: 20px;
-            width: 48px;
-            height: 48px;
-            background: linear-gradient(135deg, #1e40af, #2563eb);
-            border-radius: 50%;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 20px;
-            z-index: 1001;
-            box-shadow: 0 4px 16px rgba(37,99,235,0.45), 0 2px 8px rgba(0,0,0,0.3);
-            cursor: pointer;
-            border: none;
-            transition: all 0.2s;
-        }
-
-        .mobile-back-btn:active {
-            transform: scale(0.93);
-        }
-
-        body.chat-panel-active .mobile-back-btn,
-        body.call-screen-active .mobile-back-btn,
-        body.group-panel-active .mobile-back-btn,
-        body.status-panel-active .mobile-back-btn {
-            display: flex !important;
-        }
-
         /* Desktop styles */
         @media (max-width: 768px) {
             #permanentSidebar {
@@ -1205,9 +1173,6 @@
 
         @media (min-width: 769px) {
             .mobile-nav-bar {
-                display: none !important;
-            }
-            .mobile-back-btn {
                 display: none !important;
             }
         }
@@ -1726,24 +1691,6 @@
             </div>
         </div>
     </div>
-
-    <!-- Mobile Back Button.
-         FIX: this used to carry `style="display:none!important;"` inline,
-         on the assumption that the device back-gesture (popstate) alone
-         would be enough. In practice mobile users expect a visible, tappable
-         back icon, and — more importantly — an inline `!important` can never
-         be overridden by any stylesheet rule, `!important` or not, so the
-         `body.chat-panel-active .mobile-back-btn { display: flex !important; }`
-         rule below (and its call/group/status equivalents) was silently
-         dead: this button could never appear no matter what state the app
-         was in. Removing the inline override lets that existing CSS do what
-         it was always meant to — show this button only while the user is
-         actually inside a sub-view of Messages/Calls/Group/Status, tapping
-         it routes through handleAppBackNavigation(), which already knows
-         how to return to exactly where the user was one step at a time. -->
-    <button id="mobileBackBtn" class="mobile-back-btn" aria-label="Back">
-        <i class="fas fa-arrow-left"></i>
-    </button>
 
     <!-- IFrame Containers for each module -->
     <div id="messagesContent" class="iframe-container">
@@ -3224,13 +3171,6 @@
                 applyParentShellToIframe(iframe, iframe.dataset.module || 'messages');
             });
 
-            // Mobile back button
-            const mobileBackBtn = document.getElementById('mobileBackBtn');
-            if (mobileBackBtn) {
-                mobileBackBtn.addEventListener('click', () => {
-                    handleAppBackNavigation();
-                });
-            }
         }
 
         // Attach listeners immediately if DOM is ready, otherwise wait

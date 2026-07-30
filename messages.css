@@ -4035,33 +4035,6 @@ input:focus + .toggle-slider,
     max-width: fit-content !important;
 }
 
-/* ── Floating scroll-date badge ─────────────────────────────────────────── */
-/* Sits inside .chat-header, absolutely positioned so it doesn't shift layout */
-.scroll-date-badge {
-    position: absolute;
-    left: 50%;
-    transform: translateX(-50%);
-    top: 50%;
-    margin-top: -11px;   /* vertically center inside header */
-    background: rgba(0, 0, 0, 0.55);
-    color: #fff;
-    font-size: 11px;
-    font-weight: 500;
-    padding: 3px 10px;
-    border-radius: 12px;
-    white-space: nowrap;
-    pointer-events: none;
-    z-index: 20;
-    opacity: 0;
-    transition: opacity 0.25s ease;
-    max-width: 140px;
-    text-align: center;
-    backdrop-filter: blur(4px);
-}
-.scroll-date-badge.visible {
-    opacity: 1;
-}
-
 /* ================================================================
    MOBILE-RESPONSIVE IMPROVEMENTS FOR CHAT PANEL
    ================================================================ */
@@ -4125,13 +4098,6 @@ input:focus + .toggle-slider,
     /* Input area: adjust for virtual keyboard */
     .input-area {
         padding: 6px 8px !important;
-    }
-
-    /* Scroll badge position on mobile */
-    .scroll-date-badge {
-        font-size: 10px !important;
-        padding: 2px 8px !important;
-        max-width: 110px !important;
     }
 }
 

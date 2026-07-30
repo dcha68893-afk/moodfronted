@@ -8631,45 +8631,12 @@ Type: ${message.type || 'text'}`;
 
             }
 
-            // ── Scroll-date badge: shows current date group when user scrolls ──
-            (function _initScrollDateBadge() {
-                const msgContainer = document.getElementById('messagesContainer');
-                const badge = document.getElementById('scrollDateBadge');
-                if (!msgContainer || !badge) return;
-
-                let _badgeTimer = null;
-
-                function _showBadge(text) {
-                    if (!text) return;
-                    badge.textContent = text;
-                    badge.classList.add('visible');
-                    clearTimeout(_badgeTimer);
-                    _badgeTimer = setTimeout(() => badge.classList.remove('visible'), 1800);
-                }
-
-                function _getVisibleDateLabel() {
-                    // Find the first date separator that is at or above the current scroll position
-                    const separators = msgContainer.querySelectorAll('.message-date-separator, .date-separator, .chat-date-separator');
-                    if (!separators.length) return null;
-                    const containerTop = msgContainer.scrollTop;
-                    let label = null;
-                    separators.forEach(sep => {
-                        if (sep.offsetTop <= containerTop + 80) {
-                            label = (sep.querySelector('span') || sep).textContent.trim();
-                        }
-                    });
-                    return label;
-                }
-
-                let _scrollDebounce = null;
-                msgContainer.addEventListener('scroll', function() {
-                    clearTimeout(_scrollDebounce);
-                    _scrollDebounce = setTimeout(() => {
-                        const label = _getVisibleDateLabel();
-                        if (label) _showBadge(label);
-                    }, 60);
-                }, { passive: true });
-            })();
+            // Scroll-date badge feature removed per request — the floating
+            // pill that used to pop up over the chat header while scrolling
+            // (showing "Today"/a date in a dark rounded box) was reported as
+            // visually intrusive. The in-line plain-text date separators
+            // between message groups are unaffected — only this floating
+            // badge is gone.
 
 
 
@@ -10163,6 +10130,62 @@ Type: ${message.type || 'text'}`;
 
                 result.then((response) => {
 
+                    // FIX-ROOT-CAUSE-MESSAGE-NOT-DISPLAYED: this used to treat
+                    // ANY resolved result as a successful send, even
+                    // {success:false, error:'no_conversation'/'invalid_conversation'} —
+                    // which is exactly what core.sendMessage() returns (still a
+                    // resolved value, never a rejection, since it catches its
+                    // own errors) when the active conversation isn't wired up
+                    // yet. That early bail happens BEFORE any optimistic
+                    // message is ever created, so nothing renders — the input
+                    // was already cleared above, so the typed message just
+                    // vanished with no bubble and no error shown. This is most
+                    // likely right after opening a chat from somewhere other
+                    // than the chat list (see the matching
+                    // FIX-ROOT-CAUSE-INPUT-LAG-NON-HISTORY-OPEN comment for the
+                    // same underlying race). Retry once shortly after for the
+                    // "not ready yet" errors, since the conversation usually
+                    // finishes wiring up within a few hundred ms; only give up
+                    // and hand the text back to the user if the retry also
+                    // fails.
+                    if (response && response.success === false) {
+                        const _retryable = response.error === 'no_conversation' || response.error === 'invalid_conversation';
+                        if (_retryable && !this._sendRetried) {
+                            this._sendRetried = true;
+                            setTimeout(() => {
+                                const _c2 = getMessagesCore();
+                                const _r2 = _c2?.sendMessage(content, {
+                                    type: attachment?.type || 'text',
+                                    attachment: attachment,
+                                });
+                                if (_r2 && typeof _r2.then === 'function') {
+                                    _r2.then((resp2) => {
+                                        this._sendRetried = false;
+                                        if (resp2 && resp2.success === false) {
+                                            input.value = content;
+                                            UIRenderer.showNotification('Failed to send — try again', 'error');
+                                        } else {
+                                            setTimeout(_renderNow, 0);
+                                        }
+                                    }).catch(() => {
+                                        this._sendRetried = false;
+                                        input.value = content;
+                                        UIRenderer.showNotification('Failed to send — try again', 'error');
+                                    });
+                                } else {
+                                    this._sendRetried = false;
+                                    input.value = content;
+                                    UIRenderer.showNotification('Failed to send — try again', 'error');
+                                }
+                            }, 500);
+                        } else {
+                            this._sendRetried = false;
+                            input.value = content;
+                            UIRenderer.showNotification('Failed to send — try again', 'error');
+                        }
+                        return;
+                    }
+
                     if (core) {
 
                         core.removeAttachment?.();
@@ -10185,19 +10208,36 @@ Type: ${message.type || 'text'}`;
 
                 });
 
-            } else if (result && result.success !== false) {
+            } else {
 
-                if (core) {
+                // FIX-ROOT-CAUSE-SEND-BUTTON-STUCK: this used to only reset
+                // `this._sending` inside the Promise `.finally()` above. When
+                // core.sendMessage() instead returns synchronously (no
+                // conversation set up yet, most common right after opening a
+                // chat from somewhere other than the chat list — see the
+                // matching FIX-ROOT-CAUSE-INPUT-LAG-NON-HISTORY-OPEN comment
+                // for that same race), neither `else if` branch below ever
+                // ran a `.finally()`, so `_sending` stayed `true` forever —
+                // and `_handleSendMessage()` bails out immediately at the top
+                // while it's true, so every further tap of Send (or Enter)
+                // silently did nothing for the rest of that chat session.
+                this._sending = false;
 
-                    core.removeAttachment?.();
+                if (result && result.success !== false) {
 
-                    if (core.replyToMessage) core.setReplyToMessage?.(null);
+                    if (core) {
+
+                        core.removeAttachment?.();
+
+                        if (core.replyToMessage) core.setReplyToMessage?.(null);
+
+                    }
+
+                } else if (result && result.success === false) {
+
+                    UIRenderer.showNotification('Failed to send — check connection', 'error');
 
                 }
-
-            } else if (result && result.success === false) {
-
-                UIRenderer.showNotification('Failed to send — check connection', 'error');
 
             }
 
@@ -11421,7 +11461,19 @@ Type: ${message.type || 'text'}`;
 
         const sendButton = document.getElementById('sendButton');
 
-        if (sendButton) sendButton.disabled = false;
+        if (sendButton) {
+            sendButton.disabled = false;
+            // FIX-ROOT-CAUSE-SEND-BUTTON-NOT-DISPLAYED: nothing in this file
+            // sets display:none on #sendButton directly, but this entry point
+            // (Friend/Calls/Status — any "different source than chat history")
+            // is the one place that never re-affirmed it was actually visible,
+            // unlike the input field right above. If any earlier state (e.g.
+            // a stale inline style left over from a previous panel) had hidden
+            // it, nothing here would ever bring it back. Clearing any inline
+            // display override guarantees the button shows up every time a
+            // chat opens this way, regardless of what left it hidden before.
+            sendButton.style.removeProperty('display');
+        }
 
         
 
