@@ -11585,8 +11585,29 @@ Type: ${message.type || 'text'}`;
             // while this path wasn't. Gate on BOTH being ready, same retry pattern.
             const _uiReady = window.messagesUI && typeof window.messagesUI.openChat === 'function';
             if (!_core || !_core.ChatManager || !_uiReady) {
-                if (attempts >= 20) {
-                    console.error('[MessageUI] openChatWithUserInUI: messagesCore/messagesUI never became fully available', {
+                // FIX (timing budget too short): 20 attempts * 150ms = 3s was tuned for
+                // Chat History's case (user already looking at a loaded list — the
+                // script has had plenty of time). Friends/Calls/Status can fire this
+                // the instant the module opens, sometimes before this ~14k-line script
+                // has finished loading/executing on a slow or cold connection — that's
+                // a genuine timing difference, not a bug in the retry logic itself.
+                // Rather than just raise the cap (still blind polling), react instantly
+                // once ready via a 'messagesUIReady' event (dispatched the moment
+                // _buildAndAssignMessagesUI actually succeeds below), and keep polling
+                // only as a slow-path safety net with real headroom (~20s) instead of
+                // giving up after 3s.
+                if (attempts === 0) {
+                    const _onReady = () => {
+                        window.removeEventListener('messagesUIReady', _onReady);
+                        _openViaUnifiedPipeline(0);
+                    };
+                    window.addEventListener('messagesUIReady', _onReady);
+                    // Safety: don't leak the listener forever if this exact call
+                    // never gets a chance to complete (e.g. user navigates away).
+                    setTimeout(() => window.removeEventListener('messagesUIReady', _onReady), 20000);
+                }
+                if (attempts >= 130) {
+                    console.error('[MessageUI] openChatWithUserInUI: messagesCore/messagesUI never became fully available after ~20s', {
                         coreReady: !!(_core && _core.ChatManager),
                         uiReady: _uiReady
                     });
@@ -12808,6 +12829,8 @@ Type: ${message.type || 'text'}`;
 
 
     window.messagesUI = messagesUI;
+        _uiLog('[MessageUI] messagesUI fully built and assigned to window.messagesUI (attempt ' + attempt + ') at ' + new Date().toISOString());
+        try { window.dispatchEvent(new CustomEvent('messagesUIReady')); } catch (_) {}
         } catch (err) {
             // This log is the whole point of the wrap: previously this error
             // was never seen anywhere. Whatever prints here IS the actual root
