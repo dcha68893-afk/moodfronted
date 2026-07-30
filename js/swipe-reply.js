@@ -148,6 +148,30 @@
     let startX = 0, startY = 0, dx = 0;
     let tracking = false, triggered = false;
 
+    // FIX (stuck blue "reply" circle at the bottom of the chat / overlapping
+    // the input box): .msg-reply-hint only ever got reset inside the
+    // touchend handler below. touchend does NOT fire in several ordinary
+    // situations — the finger drags off the edge of the bubble/container,
+    // the OS interrupts the gesture (incoming call, notification shade,
+    // app-switch), or messagesContainer re-renders (new message arrives,
+    // conversation reloads) while a finger is still down, tearing down this
+    // exact element mid-gesture. Whenever that happens the swipeWrap is left
+    // with the 'swiping' (and sometimes 'triggered') class permanently
+    // applied, so its .msg-reply-hint (a 32px circle with a fa-reply icon
+    // that reads as a back-arrow) stays visibly faded in — typically on the
+    // LAST message right above the input box, exactly where it was reported.
+    // _reset() is now the one place that clears swipe state, called from
+    // every path that can end a gesture (touchend, touchcancel, and
+    // document-level safety nets that catch a gesture interrupted by
+    // something other than a normal touch event ending on this element).
+    const _reset = () => {
+      swipeWrap.classList.remove('swiping', 'triggered');
+      swipeWrap.classList.add('spring-back');
+      swipeWrap.style.transform = 'translateX(0)';
+      tracking = false;
+      dx = 0;
+    };
+
     swipeWrap.addEventListener('touchstart', (e) => {
       const t = e.changedTouches[0];
       startX = t.clientX;
@@ -189,16 +213,30 @@
     }, { passive: true });
 
     swipeWrap.addEventListener('touchend', () => {
-      swipeWrap.classList.remove('swiping', 'triggered');
-      swipeWrap.classList.add('spring-back');
-      swipeWrap.style.transform = 'translateX(0)';
-      tracking = false;
-
-      if (triggered) {
+      const wasTriggered = triggered;
+      triggered = false;
+      _reset();
+      if (wasTriggered) {
         _triggerReply(message);
-        triggered = false;
       }
     });
+
+    // FIX: touchcancel is fired by the browser itself when a gesture is
+    // interrupted (system UI taking over, palm-rejection, scroll hijack,
+    // etc.) — it never fires touchend, so without this listener _reset()
+    // never ran for that interruption. Never treat a cancelled gesture as a
+    // completed reply.
+    swipeWrap.addEventListener('touchcancel', () => {
+      triggered = false;
+      _reset();
+    });
+
+    // Track this wrapper's reset function so the document-level safety nets
+    // below can force-clear it even if this element's own listeners never
+    // fire again (e.g. it was mid-gesture when the container re-rendered
+    // and this exact node was replaced).
+    if (!global.__kynSwipeResets) global.__kynSwipeResets = new Set();
+    global.__kynSwipeResets.add(_reset);
   }
 
   // ── Observe message list for new messages ──────────────────────────────────
@@ -234,10 +272,37 @@
 
     // Watch for new messages
     const obs = new MutationObserver(mutations => {
+      // FIX (stuck blue reply-hint circle, continued): if this render pass
+      // removed any nodes (list re-render, chat switch, history reload)
+      // while a finger was mid-swipe on one of them, that wrapper's own
+      // touchend/touchcancel never gets a chance to fire. Force every
+      // tracked wrapper back to rest before processing the new content.
+      if (mutations.some(m => m.removedNodes && m.removedNodes.length > 0) && global.__kynSwipeResets) {
+        global.__kynSwipeResets.forEach(fn => { try { fn(); } catch (_) {} });
+      }
       mutations.forEach(m => _processNodes(Array.from(m.addedNodes)));
     });
     obs.observe(container, { childList: true, subtree: true });
   }
+
+  // FIX (stuck blue reply-hint circle, continued): a wrapper can be
+  // mid-gesture when messagesContainer re-renders (a new message arrives,
+  // the conversation switches, history reloads) — the old swipeWrap node is
+  // discarded along with its listeners, but the browser never gets a chance
+  // to fire touchend/touchcancel on it first, so its own two fixes above
+  // never run. These document-level nets force every tracked wrapper back
+  // to rest whenever something app-wide signals the gesture can no longer
+  // be legitimately in progress, independent of whether that wrapper's own
+  // events ever fire again.
+  function _forceResetAllSwipes() {
+    if (!global.__kynSwipeResets) return;
+    global.__kynSwipeResets.forEach(fn => { try { fn(); } catch (_) {} });
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) _forceResetAllSwipes();
+  });
+  window.addEventListener('blur', _forceResetAllSwipes);
+  window.addEventListener('pagehide', _forceResetAllSwipes);
 
   // ── Listen for kyn:replyToMessage events ───────────────────────────────────
   window.addEventListener('kyn:replyToMessage', (e) => {

@@ -91,9 +91,11 @@
             left: 60px;
             right: 0;
             height: 56px;
-            background: var(--kyn-bg-header, #f0f2f5);
+            background:
+                linear-gradient(135deg, rgba(255,255,255,0.97), rgba(244,247,251,0.94)),
+                linear-gradient(90deg, rgba(17,24,39,0.03), rgba(14,165,233,0.04));
             backdrop-filter: blur(8px);
-            border-bottom: 1px solid var(--kyn-border, rgba(15,23,42,0.08));
+            border-bottom: 1px solid rgba(15,23,42,0.08);
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -131,7 +133,7 @@
         .header-module-title {
             font-size: 15px;
             font-weight: 700;
-            color: var(--kyn-text-primary, #0f172a);
+            color: #0f172a;
             line-height: 1.1;
             white-space: nowrap;
             overflow: hidden;
@@ -140,7 +142,7 @@
 
         .header-module-subtitle {
             font-size: 12px;
-            color: var(--kyn-text-secondary, #64748b);
+            color: #64748b;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -182,9 +184,9 @@
             width: 36px;
             height: 36px;
             border-radius: 12px;
-            border: 1px solid var(--kyn-border, rgba(148, 163, 184, 0.25));
-            background: var(--kyn-header-action-bg, rgba(255,255,255,0.70));
-            color: var(--kyn-text-primary, #0f172a);
+            border: 1px solid rgba(148, 163, 184, 0.25);
+            background: rgba(255,255,255,0.70);
+            color: #0f172a;
             display: inline-flex;
             align-items: center;
             justify-content: center;
@@ -194,7 +196,7 @@
 
         .header-action-btn:hover {
             transform: translateY(-1px);
-            background: var(--kyn-header-action-bg-hover, rgba(255,255,255,0.95));
+            background: rgba(255,255,255,0.95);
         }
 
         .header-action-btn i {
@@ -3072,21 +3074,6 @@
             if (page === 'status')   sendFriendsToStatusIframe();
             if (page === 'tools')    sendFriendsToToolsIframe();
 
-            // FIX ("All Groups" empty after leaving and returning to the group
-            // module): groupIframe is never destroyed/reloaded on module switch
-            // (same as messagesIframe below), but unlike messages, nothing ever
-            // told it "you're visible again" — so its list only ever rendered
-            // once, on first load. Mirrors the MODULE_FOCUSED message already
-            // sent to messagesIframe just below for the identical symptom.
-            if (page === 'group') {
-                const _groupIframeFocus = document.getElementById('groupIframe');
-                if (_groupIframeFocus && _groupIframeFocus.contentWindow) {
-                    setTimeout(() => {
-                        _groupIframeFocus.contentWindow.postMessage({ type: 'MODULE_FOCUSED', source: 'parent', timestamp: Date.now() }, '*');
-                    }, 150);
-                }
-            }
-
             // FIX Bug 6: When user navigates TO the messages page, notify the iframe
             // so it can clear processedMessageIds and re-render messages that arrived
             // while the user was on another tab. Without this, off-screen messages
@@ -3096,6 +3083,26 @@
                 if (_msgIframe && _msgIframe.contentWindow) {
                     setTimeout(() => {
                         _msgIframe.contentWindow.postMessage({ type: 'MODULE_FOCUSED', source: 'parent', timestamp: Date.now() }, '*');
+                    }, 150);
+                }
+            }
+
+            // FIX ("All Groups" — and whichever other tab was active — going
+            // blank after navigating away and back): the group module never
+            // received any "you're visible again" signal, unlike messages
+            // above. Its list-rendering only ever re-runs on data/sync
+            // events (kyn:groupsLoaded, groupSync:*, etc.) or an explicit
+            // tab click — neither of which fires just from the iframe
+            // becoming visible again, even though its in-memory data is
+            // still perfectly correct. Sending the same MODULE_FOCUSED
+            // signal messages already relies on, and having group.html
+            // re-render its currently-active section on receipt (see the
+            // matching listener added there), closes that gap the same way.
+            if (page === 'group') {
+                const _groupIframe = document.getElementById('groupIframe');
+                if (_groupIframe && _groupIframe.contentWindow) {
+                    setTimeout(() => {
+                        _groupIframe.contentWindow.postMessage({ type: 'MODULE_FOCUSED', source: 'parent', timestamp: Date.now() }, '*');
                     }, 150);
                 }
             }

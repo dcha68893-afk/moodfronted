@@ -305,6 +305,37 @@ let isBackgroundInitialized = false;
 let isTokenReady = false;
 let parentReady = false;
 
+// FIX (viewing a status makes it disappear from BOTH "Recent" and "Viewed
+// updates" instead of moving to "Viewed"): friendsStatuses gets replaced
+// wholesale in several places below (syncDataFromCore, the core.subscribe
+// callback) every time the core's underlying store changes for ANY reason —
+// including the exact same tick a view is being recorded, since viewing a
+// status also triggers a server call and a socket update that flow back
+// through this same state. If whatever snapshot arrives at that moment
+// doesn't happen to include every status the previous snapshot had (a
+// partial/delta update mistaken for a full one, a request that raced and
+// resolved out of order, etc.), a blind replace drops it from memory
+// entirely — not just from one section, from both, since both sections are
+// rendered from this same array. A friend's status that's still active and
+// not explicitly deleted should never vanish just because one particular
+// refresh's snapshot happened not to include it; merge by id instead of
+// replacing outright so the newest replaces the old where present, but
+// nothing already known just disappears.
+function _mergeStatusesById(existing, incoming) {
+    if (!Array.isArray(incoming)) return existing;
+    if (!Array.isArray(existing) || existing.length === 0) return incoming;
+    const _delReg = window.__PHASE10_DeletionRegistry;
+    const byId = new Map();
+    existing.forEach(s => { if (s && s.id != null) byId.set(String(s.id), s); });
+    incoming.forEach(s => { if (s && s.id != null) byId.set(String(s.id), s); });
+    // Drop only what's explicitly, actually deleted — everything else known
+    // locally survives even if this particular incoming snapshot omitted it.
+    return Array.from(byId.values()).filter(s => {
+        const sid = String(s.id);
+        return !(_delReg && _delReg.isDeleted && _delReg.isDeleted('status', sid));
+    });
+}
+
 function syncDataFromCore() {
     const core = getCore();
 
@@ -341,7 +372,7 @@ function syncDataFromCore() {
     if (core && core.getFriendsStatuses) {
         const newFriendsStatuses = core.getFriendsStatuses();
         if (newFriendsStatuses !== friendsStatuses) {
-            friendsStatuses = newFriendsStatuses;
+            friendsStatuses = _mergeStatusesById(friendsStatuses, newFriendsStatuses);
         }
     }
     
@@ -585,7 +616,7 @@ function subscribeToStatusChanges() {
             }
             // Core may return friend statuses under different keys
             if (newState.friendsStatuses) {
-                friendsStatuses = newState.friendsStatuses;
+                friendsStatuses = _mergeStatusesById(friendsStatuses, newState.friendsStatuses);
                 needsRender = true;
             }
             if (newState.allStatuses) {
@@ -593,9 +624,9 @@ function subscribeToStatusChanges() {
                 const uid = String((window.currentUser && (window.currentUser.id || window.currentUser.userId)) || '');
                 if (uid) {
                     myStatuses = newState.allStatuses.filter(s => String(s.userId || s.user_id || '') === uid);
-                    friendsStatuses = newState.allStatuses.filter(s => String(s.userId || s.user_id || '') !== uid);
+                    friendsStatuses = _mergeStatusesById(friendsStatuses, newState.allStatuses.filter(s => String(s.userId || s.user_id || '') !== uid));
                 } else {
-                    friendsStatuses = newState.allStatuses;
+                    friendsStatuses = _mergeStatusesById(friendsStatuses, newState.allStatuses);
                 }
                 needsRender = true;
             }

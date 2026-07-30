@@ -1946,27 +1946,6 @@ export function registerMessageHandlers() {
                 return;
             }
 
-            // ── MODULE FOCUSED (FIX: "All Groups" empty after leaving and
-            // returning to the group module) ──────────────────────────────
-            // Root cause: chat.html keeps this iframe permanently mounted
-            // (never reloaded) when switching modules, so GroupCore's
-            // in-memory list is never actually lost. But nothing ever told
-            // this iframe "you're visible again, re-render" — the messages
-            // module has exactly this same mechanism (MODULE_FOCUSED,
-            // handled in messages-ui.js) for the identical symptom of
-            // stale/blank state after switching away and back; the group
-            // module never had the matching piece. Whatever section is
-            // currently active (All/My/Joined/Invites/Admin) gets forced to
-            // re-render from whatever GroupCore already has in memory, and
-            // if that's genuinely empty, renderAllGroupsSecure()'s own
-            // built-in fetch-if-empty branch kicks in and requests a fresh
-            // list from the server instead of sitting on a blank screen.
-            if (message.type === 'MODULE_FOCUSED') {
-                if (typeof renderGroupsListSecure === 'function') renderGroupsListSecure();
-                else if (typeof window.renderGroupsListSecure === 'function') window.renderGroupsListSecure();
-                return;
-            }
-
             // ── GROUP INVITE RECEIVED ─────────────────────────────────────────
             if (message.type === 'GROUP_INVITE_RECEIVED' || message.type === 'group:invitation:received') {
                 // (log suppressed)
@@ -2080,7 +2059,6 @@ export function createSecureGroupItemElement(groupData, type = 'group') {
         // Extract and validate group properties with comprehensive fallbacks
         const id = String(groupData.id || groupData.groupId || `temp_${Date.now()}`);
         const name = sanitizeInput(groupData.name || groupData.title || 'Unnamed Group');
-        const initials = (groupData.name || groupData.title || 'G').trim().split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2) || 'G';
         const description = sanitizeInput(groupData.description || groupData.subtitle || '');
         const avatar = validateURL(groupData.avatar) || groupData.avatar || null;
         const memberCount = Math.max(
@@ -2104,13 +2082,11 @@ export function createSecureGroupItemElement(groupData, type = 'group') {
                           groupData.created_by === (currentUser?.id || currentUser?.uid));
         const groupTopic = sanitizeInput(groupData.topic || groupData.subject || '');
         const groupType = sanitizeInput(groupData.type || groupData.group_type || privacy);
-        const typeInfo = (groupTypes && groupTypes[groupType]) || { name: 'Private', icon: 'fas fa-lock' };
         const theme = sanitizeInput(groupData.theme || 'blue');
         const themeInfo = groupThemes && groupThemes[theme] ? groupThemes[theme] : { gradient: 'linear-gradient(135deg, #2196F3, #1976D2)', name: 'Blue' };
         
         const purposeInfo = purpose && groupPurposes ? groupPurposes[purpose] : null;
         const moodInfo = mood && groupMoods ? groupMoods[mood] : null;
-        const postingRule = groupData.postingRule || 'everyone';
         const ruleInfo = postingRules && postingRules[postingRule] ? postingRules[postingRule] : { name: 'Everyone can post', color: '#4CAF50' };
         
         const pulse = typeof calculateGroupPulse === 'function' ? calculateGroupPulse(groupData) : null;
@@ -2307,6 +2283,12 @@ export const renderAllGroupsSecure = createUIErrorBoundary('renderAllGroupsSecur
 // delegate to this single implementation instead of maintaining and
 // racing its own separate copy.
 window.__renderAllGroupsSecure = renderAllGroupsSecure;
+// FIX (All Groups / My Groups / Joined / Admin — whichever tab was active —
+// going blank after navigating away and back): expose the generic
+// active-section rerender (not just the All Groups one above) so the
+// MODULE_FOCUSED listener added in group.html can refresh whatever tab the
+// user actually left on, not only "All".
+window.__rerenderActiveGroupSection = _rerenderActiveSection;
 
 /**
  * Render my groups securely
@@ -2352,18 +2334,7 @@ export const renderJoinedGroupsSecure = createUIErrorBoundary('renderJoinedGroup
         joinedList.innerHTML = '';
         
         const _gcJn=window.GroupCore;
-        let _liveJn=(_gcJn&&_gcJn.joinedGroups&&_gcJn.joinedGroups.length>0)?_gcJn.joinedGroups:(joinedGroups||[]);
-        // FIX (Joined tab shows empty despite non-zero badge count): joinedGroups
-        // is populated by several separate, sometimes-racing code paths across
-        // group-core-bootstrap.js / group-core-patch.js. If it's empty but the
-        // master `groups` array (the one "All Groups" already renders from
-        // successfully) has data, derive the joined subset from it directly
-        // instead of trusting a possibly-stale/never-populated joinedGroups copy.
-        if (!_liveJn.length && _gcJn && Array.isArray(_gcJn.groups) && _gcJn.groups.length) {
-            const _uidJn = currentUser?.id || currentUser?.uid;
-            _liveJn = _gcJn.groups.filter(g => g && !g.isCreator && g.role !== 'owner' &&
-                !(_uidJn && (String(g.createdBy) === String(_uidJn) || String(g.creatorId) === String(_uidJn))));
-        }
+        const _liveJn=(_gcJn&&_gcJn.joinedGroups&&_gcJn.joinedGroups.length>0)?_gcJn.joinedGroups:(joinedGroups||[]);
         if(!_liveJn.length){joinedList.appendChild(createSecureEmptyStateElement('joined'));return;}
         const fragment=document.createDocumentFragment();
         _liveJn.forEach(group => {
@@ -2421,17 +2392,7 @@ export const renderAdminGroupsSecure = createUIErrorBoundary('renderAdminGroupsS
         // had actually loaded. Read the live object first, same as the
         // other two tabs.
         const _gcAdm = window.GroupCore;
-        const _liveAdmin0 = (_gcAdm && _gcAdm.adminGroups && _gcAdm.adminGroups.length > 0) ? _gcAdm.adminGroups : (adminGroups || []);
-        // FIX (Admin tab shows empty despite non-zero badge count): same class
-        // of bug as the Joined tab above — adminGroups is populated by several
-        // separate, sometimes-racing code paths. Fall back to deriving it from
-        // the master `groups` array (proven to work, since All Groups renders
-        // from it) if the dedicated array is empty.
-        const _liveAdmin = _liveAdmin0.length ? _liveAdmin0 : (
-            (_gcAdm && Array.isArray(_gcAdm.groups) && _gcAdm.groups.length)
-                ? _gcAdm.groups.filter(g => g && (g.isAdmin || g.isCreator || ['owner', 'admin'].includes(g.role)))
-                : _liveAdmin0
-        );
+        const _liveAdmin = (_gcAdm && _gcAdm.adminGroups && _gcAdm.adminGroups.length > 0) ? _gcAdm.adminGroups : (adminGroups || []);
         
         if (!_liveAdmin || _liveAdmin.length === 0) {
             adminList.appendChild(createSecureEmptyStateElement('admin'));
@@ -5238,7 +5199,35 @@ if (typeof document !== 'undefined') {
     });
     try {
         var cached = localStorage.getItem("knecta_settings_cache");
-        if (cached) { var parsed = JSON.parse(cached); var settings = (parsed && parsed.data) ? parsed.data : parsed; if (parsed.timestamp && (Date.now() - parsed.timestamp) < 86400000) applyAll(settings); }
+        if (cached) {
+            var parsed = JSON.parse(cached);
+            var settings = (parsed && parsed.data) ? parsed.data : parsed;
+            if (parsed.timestamp && (Date.now() - parsed.timestamp) < 86400000) {
+                // FIX (theme flash on load — 8th copy of the round-6 bug):
+                // this cold-boot replay unconditionally re-applied
+                // appearance.theme/fontSize/accentColor from the general,
+                // up-to-24h-stale knecta_settings_cache blob, through a path
+                // that even hardcodes data-theme directly when ThemeManager
+                // hasn't loaded yet — bypassing the single authoritative
+                // app_theme key entirely and racing window.ThemeManager's
+                // own (correct) boot-time read of it. Every other known copy
+                // of this exact pattern (status, messages, group-bridge,
+                // friend, Tools) was fixed the same way in an earlier round;
+                // this standalone copy in group-ui.js itself was missed.
+                // Skip those 3 appearance keys here — ThemeManager already
+                // owns them — unless app_theme is missing entirely (a true
+                // first run with no authoritative value to race against).
+                var _settingsForColdBoot = settings;
+                if (localStorage.getItem('app_theme') !== null && settings && settings.appearance) {
+                    var _appearanceCopy = Object.assign({}, settings.appearance);
+                    delete _appearanceCopy.theme;
+                    delete _appearanceCopy.fontSize;
+                    delete _appearanceCopy.accentColor;
+                    _settingsForColdBoot = Object.assign({}, settings, { appearance: _appearanceCopy });
+                }
+                applyAll(_settingsForColdBoot);
+            }
+        }
     } catch(e) {}
 })();
 

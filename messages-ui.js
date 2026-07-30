@@ -3746,7 +3746,8 @@
             const chatId = currentChat?.id;
             const attemptDecrypt = (message, attemptsLeft) => {
                 const raw = message.content;
-                const isSent = String(message.senderId) === String(currentUserId);
+                const isSent = (message.local === true || message.optimistic === true || message.isOwn === true)
+                || String(message.senderId) === String(currentUserId);
                 const otherPartyId = resolveOtherPartyId();
                 const senderForDecrypt = isSent ? otherPartyId : message.senderId;
                 if (!senderForDecrypt || !chatId) {
@@ -3914,7 +3915,8 @@
 
             const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
 
-            const isSent = String(message.senderId) === String(currentUserId);
+            const isSent = (message.local === true || message.optimistic === true || message.isOwn === true)
+                || String(message.senderId) === String(currentUserId);
 
             const status = message.status || 'sent';
 
@@ -4038,7 +4040,8 @@
 
             const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
 
-            const isSent = String(message.senderId) === String(currentUserId);
+            const isSent = (message.local === true || message.optimistic === true || message.isOwn === true)
+                || String(message.senderId) === String(currentUserId);
 
             const status = message.status || 'sent';
 
@@ -4121,7 +4124,8 @@
 
             const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
 
-            const isSent = String(message.senderId) === String(currentUserId);
+            const isSent = (message.local === true || message.optimistic === true || message.isOwn === true)
+                || String(message.senderId) === String(currentUserId);
 
             const status = message.status || 'sent';
 
@@ -4187,7 +4191,8 @@
 
             const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
 
-            const isSent = String(message.senderId) === String(currentUserId);
+            const isSent = (message.local === true || message.optimistic === true || message.isOwn === true)
+                || String(message.senderId) === String(currentUserId);
 
             const status = message.status || 'sent';
 
@@ -4261,7 +4266,8 @@
 
             const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
 
-            const isSent = String(message.senderId) === String(currentUserId);
+            const isSent = (message.local === true || message.optimistic === true || message.isOwn === true)
+                || String(message.senderId) === String(currentUserId);
 
             const status = message.status || 'sent';
 
@@ -4341,7 +4347,8 @@
 
             const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
 
-            const isSent = String(message.senderId) === String(currentUserId);
+            const isSent = (message.local === true || message.optimistic === true || message.isOwn === true)
+                || String(message.senderId) === String(currentUserId);
 
             const status = message.status || 'sent';
 
@@ -4407,7 +4414,8 @@
 
             const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
 
-            const isSent = String(message.senderId) === String(currentUserId);
+            const isSent = (message.local === true || message.optimistic === true || message.isOwn === true)
+                || String(message.senderId) === String(currentUserId);
 
             const status = message.status || 'sent';
 
@@ -4503,7 +4511,8 @@
         _createGifMessageTemplate(message, currentUser) {
             const core = getMessagesCore();
             const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
-            const isSent = String(message.senderId) === String(currentUserId);
+            const isSent = (message.local === true || message.optimistic === true || message.isOwn === true)
+                || String(message.senderId) === String(currentUserId);
             const time = core?.formatTime
                 ? core.formatTime(message.createdAt || message.timestamp)
                 : new Date(message.createdAt || message.timestamp).toLocaleTimeString([],{hour:'numeric',minute:'2-digit',hour12:true});
@@ -4537,7 +4546,8 @@
         _createViewOnceMessageTemplate(message, currentUser) {
             const core = getMessagesCore();
             const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
-            const isSent = String(message.senderId) === String(currentUserId);
+            const isSent = (message.local === true || message.optimistic === true || message.isOwn === true)
+                || String(message.senderId) === String(currentUserId);
             const time = core?.formatTime
                 ? core.formatTime(message.createdAt || message.timestamp)
                 : new Date(message.createdAt || message.timestamp).toLocaleTimeString([],{hour:'numeric',minute:'2-digit',hour12:true});
@@ -4568,7 +4578,8 @@
         _createStickerMessageTemplate(message, currentUser) {
             const core = getMessagesCore();
             const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
-            const isSent = String(message.senderId) === String(currentUserId);
+            const isSent = (message.local === true || message.optimistic === true || message.isOwn === true)
+                || String(message.senderId) === String(currentUserId);
             const time = core?.formatTime
                 ? core.formatTime(message.createdAt || message.timestamp)
                 : new Date(message.createdAt || message.timestamp).toLocaleTimeString([],{hour:'numeric',minute:'2-digit',hour12:true});
@@ -4601,7 +4612,8 @@
 
             const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
 
-            const isSent = String(message.senderId) === String(currentUserId);
+            const isSent = (message.local === true || message.optimistic === true || message.isOwn === true)
+                || String(message.senderId) === String(currentUserId);
 
             const status = message.status || 'sent';
 
@@ -4667,7 +4679,8 @@
 
             const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
 
-            const isSent = String(message.senderId) === String(currentUserId);
+            const isSent = (message.local === true || message.optimistic === true || message.isOwn === true)
+                || String(message.senderId) === String(currentUserId);
 
             const time = core?.formatTime ?
 
@@ -12617,20 +12630,6 @@ Type: ${message.type || 'text'}`;
 
             }
 
-            // ROOT-CAUSE FIX (messages missing when opened from Friends/Calls/
-            // Status/etc. instead of Chat History): see comment above. Mirror
-            // exactly what ConversationManager.openConversation() already does
-            // for the Chat History path — a forced network refresh of this
-            // conversation's messages, regardless of what cache/IDB had. This
-            // is fire-and-forget: ChatManager.setMessages() (called inside
-            // fetchMessages) notifies its subscribers, which is what re-renders
-            // the panel once the real history arrives, same as every other
-            // consumer of fetchMessages already relies on.
-            if (existingConversation?.id && core.ChatManager && typeof core.ChatManager.fetchMessages === 'function'
-                && !String(existingConversation.id).startsWith('pending_')) {
-                core.ChatManager.fetchMessages(existingConversation.id, { force: true }).catch(() => {});
-            }
-
 
 
             const ensureChatPanelOpen = (conversationId) => {
@@ -13302,13 +13301,31 @@ Type: ${message.type || 'text'}`;
 
                 if (parsed.timestamp && (Date.now() - parsed.timestamp) < 86400000) {
 
+                    // FIX (theme flash on load — 9th copy of the round-6
+                    // bug, and the most visible one since messages is the
+                    // default tab shown on every load): this replayed
+                    // appearance.theme/fontSize/accentColor from the
+                    // general, up-to-24h-stale knecta_settings_cache blob
+                    // unconditionally, racing window.ThemeManager's own
+                    // correct boot-time read of the single authoritative
+                    // app_theme key. Skip those 3 keys here — ThemeManager
+                    // already owns them — unless app_theme is missing
+                    // entirely (a true first run with nothing to race).
+                    var _skipAppearance = localStorage.getItem('app_theme') !== null;
+
                     Object.entries(settings).forEach(function(se) {
 
                         var sec = se[0], secVal = se[1];
 
                         if (secVal && typeof secVal === 'object') {
 
-                            Object.entries(secVal).forEach(function(ke) { try { applyUISettingChange(sec, ke[0], ke[1]); } catch(e) {} });
+                            Object.entries(secVal).forEach(function(ke) {
+                                if (_skipAppearance && sec === 'appearance' &&
+                                    (ke[0] === 'theme' || ke[0] === 'fontSize' || ke[0] === 'accentColor')) {
+                                    return;
+                                }
+                                try { applyUISettingChange(sec, ke[0], ke[1]); } catch(e) {}
+                            });
 
                         }
 

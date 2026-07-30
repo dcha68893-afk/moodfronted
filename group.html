@@ -2838,20 +2838,6 @@ function hookRT(){
             if(d.source==='parent-hdr'||d.source==='group-module')return;
             if(d.type==='GROUP_MESSAGE'||d.type==='group:message'||d.type==='group_message'){var gid2=d.payload&&(d.payload.groupId||d.payload.group_id);var msg2=d.payload&&(d.payload.message||d.payload);if(gid2&&msg2)_handle(gid2,msg2);return;}
             if(d.type==='PARENT_GROUP_CLOSE'){closePanel();return;}
-            // FIX (All Groups list not showing after navigating away and back):
-            // chat.html's app/hardware back-button handler (handleAppBackNavigation)
-            // sends { type: 'GO_BACK_TO_LIST' } to this iframe whenever the user was
-            // inside an open group chat (body had 'group-panel-active'), removes that
-            // class on the PARENT side, then expects THIS iframe to close its own
-            // internal chat panel in response. Nothing ever listened for that message
-            // here, so openPanel()'s changes were never reverted: #groupChatPanel
-            // stayed display:flex, and on mobile #sidebar (which contains the entire
-            // All/My/Joined/Invites/Admin tab UI, including #allGroupsList) stayed
-            // display:none. The data/render pipeline (renderAllGroupsSecure etc.) was
-            // always correct underneath — the sidebar hosting it was simply still
-            // hidden behind the never-closed chat panel. Also handle the equivalent
-            // explicit-navigation message from status/messages-style back flows.
-            if(d.type==='GO_BACK_TO_LIST'||d.type==='GROUP_LIST_SHOWN'){closePanel();return;}
             if(d.type==='PARENT_GROUP_ACTION'){var a=d.payload&&d.payload.action;if(a==='leave')doLeave();else if(a==='delete')doDelete();else if(a)openSub(a);return;}
             if(d.type==='PARENT_GROUP_CALL'){var ct=(d.payload&&d.payload.type)||'voice';var grp=window.__gcCurGroup;if(!grp)return;try{if(window.parent&&window.parent.__dispatchCallToIframe){window.parent.__dispatchCallToIframe(grp.id,grp.name,ct,'group',grp.id,'group-hdr');return;}}catch(e){}try{window.parent.postMessage({type:'INITIATE_CALL',payload:{userId:grp.id,userName:grp.name,callType:ct,isGroup:true,groupId:grp.id,returnTo:'group'}},'*');}catch(e){}return;}
             if(d.type==='PARENT_REFRESH_GROUPS'){var gc3=gc();if(gc3&&typeof gc3.requestGroupList==='function')gc3.requestGroupList().catch(function(){});return;}
@@ -3018,6 +3004,27 @@ function setupMenu(){
     window.addEventListener('message', function(ev) {
         var d = ev.data;
         if (!d || typeof d !== 'object') return;
+        // FIX ("All Groups" — or whichever tab was active — blank after
+        // navigating away and back): chat.html now sends this on every
+        // return to the group module, mirroring the same fix already in
+        // place for the messages module. GroupCore's in-memory data is
+        // still correct at this point (nothing here clears it) — the
+        // problem was only ever that nothing re-ran the render after the
+        // module went hidden and became visible again. Re-render whatever
+        // section is currently active rather than assuming it's "All".
+        if (d.type === 'MODULE_FOCUSED') {
+            if (typeof window.__rerenderActiveGroupSection === 'function') {
+                window.__rerenderActiveGroupSection();
+            }
+            // Also kick a background refresh so a genuinely stale list
+            // (e.g. a group created/left while this module was hidden)
+            // catches up, without blocking the instant re-render above.
+            var _gcFocus = (typeof gc === 'function') ? gc() : window.GroupCore;
+            if (_gcFocus && typeof _gcFocus.requestGroupList === 'function') {
+                _gcFocus.requestGroupList().catch(function() {});
+            }
+            return;
+        }
         if (d.type === 'OPEN_GROUP_MORE_MENU') {
             var m = document.getElementById('chatMoreMenu');
             if (m) {
