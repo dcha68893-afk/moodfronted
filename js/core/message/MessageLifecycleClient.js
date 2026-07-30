@@ -315,6 +315,43 @@
     }
   }
 
+  // ---------------------------------------------------------------------
+  // FIX-SEND-CUTOVER: standalone, promise-based send used by the EXISTING
+  // send path (messages-core.operations.js ChatManager.sendMessageToBackend)
+  // as its preferred transport. Unlike sendMessage() above, this does NOT
+  // write its own optimistic-render copy (the existing pipeline already
+  // renders its own optimistic bubble) and does NOT enter the durable
+  // retry queue on failure — callers are expected to fall back to their
+  // own existing REST/offline-queue handling when this resolves
+  // { ok: false }. It exists purely so outgoing sends go out over the
+  // same msg:send socket path that the receiving side
+  // (bindSocketListeners' 'msg:new' handler) already listens for
+  // exclusively — see MESSAGE_LIFECYCLE_REBUILD.md: messages sent via
+  // the OLD message:new/REST path never reach this module's dedupe-safe
+  // render, because the backend only emits the new `msg:new` event from
+  // the `msg:send` socket handler. Routing sends through here is what
+  // actually closes that gap end-to-end.
+  function sendViaSocket(payload, timeoutMs = 6000) {
+    return new Promise((resolve) => {
+      const socket = getSocket();
+      if (!socket || !socket.connected) { resolve({ ok: false, reason: 'no_socket' }); return; }
+      let done = false;
+      const timer = setTimeout(() => {
+        if (!done) { done = true; resolve({ ok: false, reason: 'timeout' }); }
+      }, timeoutMs);
+      try {
+        socket.emit('msg:send', payload, (ack) => {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          resolve(ack || { ok: false, reason: 'empty_ack' });
+        });
+      } catch (e) {
+        if (!done) { done = true; clearTimeout(timer); resolve({ ok: false, reason: (e && e.message) || 'emit_failed' }); }
+      }
+    });
+  }
+
   async function tryRestFallback(item, payload, onResult) {
     try {
       const base = (global.__kynAPI && global.__kynAPI.baseUrl) || global.BACKEND_URL || '';
@@ -480,6 +517,7 @@
   global.MessageLifecycleClient = {
     init,
     sendMessage,
+    sendViaSocket,
     markRead,
     requestSync,
     _internal: { getSocket, flushOutgoingQueue }, // exposed for debugging only
