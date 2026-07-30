@@ -3030,7 +3030,23 @@
             }
 
             // FIX: Clean up group/status panel classes when navigating away from those modules
-            if (page !== 'group')  document.body.classList.remove('group-panel-active');
+            if (page !== 'group') {
+                // FIX (All Groups list not showing after navigating away and back,
+                // path 2): this used to only clear the PARENT's own CSS class.
+                // If the user tapped a different bottom-nav icon (Messages, Calls,
+                // etc.) while a group chat was open, instead of using the hardware
+                // back button, the groupIframe was never told to close its internal
+                // #groupChatPanel — so #sidebar (holding the All/My/Joined/Invites/
+                // Admin tabs and #allGroupsList) stayed hidden on mobile exactly like
+                // the GO_BACK_TO_LIST case above. Mirror that same notification here.
+                if (document.body.classList.contains('group-panel-active')) {
+                    const _groupIframeAway = document.getElementById('groupIframe');
+                    if (_groupIframeAway && _groupIframeAway.contentWindow) {
+                        _groupIframeAway.contentWindow.postMessage({ type: 'GO_BACK_TO_LIST', source: 'parent', timestamp: Date.now() }, '*');
+                    }
+                }
+                document.body.classList.remove('group-panel-active');
+            }
             if (page !== 'status') document.body.classList.remove('status-panel-active');
 
             // BUG FIX (no icon nav after a call ends / after leaving a screen):
