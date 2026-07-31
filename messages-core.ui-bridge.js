@@ -1244,6 +1244,45 @@ const UIStateManager = {
                         window.dispatchEvent(new CustomEvent('renderMessages', {
                             detail: { messages: _renderMsgs, currentChat: _now, currentUser: SessionManager && SessionManager.getUser && SessionManager.getUser() }
                         }));
+                        // FIX-ROOT-CAUSE-LISTENER-NOT-READY: the 'renderMessages'
+                        // CustomEvent above only does anything if UIRenderer's
+                        // _setupEventListeners() has already run and attached its
+                        // window.addEventListener('renderMessages', ...) handler.
+                        // On a slow/cold load (many iframes — friends, calls,
+                        // groups, tools, status — all doing their own startup
+                        // sync work concurrently) messages-ui.js's own init can
+                        // still be mid-flight when the very first realtime
+                        // message arrives: the event fires into the void, nothing
+                        // is listening yet, and the message never appears even
+                        // though isThisChat correctly matched. Verify the bubble
+                        // actually landed shortly after, and if not, paint it
+                        // directly via window.UIRenderer (the same object the
+                        // event listener itself calls into) as a fallback that
+                        // doesn't depend on that listener having been attached.
+                        try {
+                            const _verifyId = normalizedMessage ? String(normalizedMessage.id || normalizedMessage.localId || '') : '';
+                            if (_verifyId) {
+                                let _verifyAttempts = 0;
+                                const _verifyRender = function() {
+                                    _verifyAttempts++;
+                                    try {
+                                        const _landed = document.querySelector('[data-message-id="' + _verifyId + '"], [data-id="' + _verifyId + '"]');
+                                        if (_landed) return; // rendered normally — nothing to do
+                                        if (window.UIRenderer && typeof window.UIRenderer.renderMessages === 'function') {
+                                            debugLog(`[FORENSIC] UI_RENDER_FALLBACK | messageId=${_verifyId} | reason=listener_not_ready | attempt=${_verifyAttempts} | ts=${Date.now()}`);
+                                            window.UIRenderer.renderMessages(_renderMsgs, _now, SessionManager && SessionManager.getUser && SessionManager.getUser());
+                                            return;
+                                        }
+                                        // UIRenderer itself isn't exposed on window yet (messages-ui.js
+                                        // still mid-init) — keep polling for up to ~8s rather than
+                                        // giving up after one look, since that's the observed real-world
+                                        // range for how late this can complete on a congested load.
+                                        if (_verifyAttempts < 16) setTimeout(_verifyRender, 500);
+                                    } catch (_) {}
+                                };
+                                setTimeout(_verifyRender, 350);
+                            }
+                        } catch (_) {}
                         try {
                             const _c = document.getElementById('messagesContainer');
                             if (_c) requestAnimationFrame(function() { _c.scrollTop = _c.scrollHeight; });
