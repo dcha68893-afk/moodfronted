@@ -3675,7 +3675,23 @@
 
             this._lastRenderedMessagesSignature = renderSignature;
 
-            this.scrollToBottom(container);
+            // FIX-SCROLL-ON-OPEN: this is the "opening/switching to a
+            // conversation" render path (full re-render, container was just
+            // cleared above) — NOT the "a new message arrived while I'm
+            // already looking at this chat" path (that one is handled
+            // separately above at the isSameConversation branch and correctly
+            // stays unforced, so it doesn't hijack the scroll position while
+            // someone is reading old history).
+            //
+            // scrollToBottom() without force only scrolls when already within
+            // 150px of the bottom. A freshly-opened container always starts
+            // at scrollTop=0, so for any chat with more than a screenful of
+            // history, distFromBottom is far past that 150px threshold and the
+            // scroll silently never happened — the chat opened showing the
+            // TOP of history instead of jumping to where the user left off /
+            // the latest message. Force it here so opening a chat always lands
+            // on the last message, regardless of history length.
+            this.scrollToBottom(container, true);
 
             // FIX-E2E-DECRYPT-WIRING: messages get encrypted before sending
             // (see messages-core.js's encryptForChat call) but nothing ever
