@@ -46,8 +46,24 @@
 // almost certainly why the fix "didn't work": it was shipped, but the
 // browser never fetched it. All 6 are now network-first, and the cache name
 // is bumped again for an immediate one-time clean slate.
-const SW_VERSION = '19.3.0';
-const CACHE_NAME = 'nexopa-static-v24'; // Bumped — theme-critical module bridge files now network-first (round 7)
+// FIX v19.4.0 (SW-STALE-MESSAGES-CORE): messages-core.bootstrap.js and
+// messages-core.operations.js — the files that hold ChatManager,
+// sendMessageToBackend, and the pending-conversation-to-real-chatId
+// reconciliation logic — were never added to NETWORK_FIRST_PATTERNS, so
+// they sat cache-first with up to 7-day staleness like any other static
+// asset. This is the identical failure mode already diagnosed and fixed
+// for messages-core.ui-bridge.js, group-core-bridge.js, and
+// friend-core.ui-bridge.js in v19.3.0 — those three were fixed, but these
+// two sibling files in the same module were missed. Practically, this
+// meant that after any deploy touching send/receive message logic, some
+// devices kept silently running the old cached version of these two files
+// for up to a week (or until a hard refresh), which produces exactly the
+// kind of "works for one user, not the other" asymmetry this causes.
+// Both files are now network-first, and the cache name is bumped for an
+// immediate one-time clean slate so this deploy reaches everyone right away
+// instead of waiting on staleness expiry.
+const SW_VERSION = '19.4.0';
+const CACHE_NAME = 'nexopa-static-v25'; // Bumped — messages-core.bootstrap.js + messages-core.operations.js now network-first
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
 
 // ---------------------------------------------------------------------------
@@ -167,6 +183,24 @@ const NETWORK_FIRST_PATTERNS = [
   // ✅ NEW: Messages module
   /\/messages-core\.js/i,
   /\/messages-ui\.js/i,
+
+  // FIX (SW-STALE-MESSAGES-CORE): messages-core.bootstrap.js and
+  // messages-core.operations.js were the only two files in the messages
+  // module NOT covered by any pattern above — the /messages-core\.js/
+  // pattern only matches a literal "messages-core.js", never
+  // "messages-core.bootstrap.js" or "messages-core.operations.js" (the
+  // ".bootstrap"/".operations" segment breaks the substring match). These
+  // two files hold ChatManager, sendMessageToBackend, and the
+  // pending-conversation-to-real-chatId reconciliation logic — exactly the
+  // kind of actively-patched, correctness-critical code this list exists
+  // to protect. Without this, they fell through to the generic cache-first
+  // static-asset rule (up to 7-day staleness), so after any deploy some
+  // devices kept silently running the old versions of this code — the same
+  // failure mode already diagnosed and fixed for messages-core.ui-bridge.js,
+  // group-core-bridge.js, and friend-core.ui-bridge.js in v19.3.0 above,
+  // just missed for these two.
+  /\/messages-core\.bootstrap\.js/i,
+  /\/messages-core\.operations\.js/i,
 
   // ✅ NEW (theme-sparking bug, round 7): the actual files patched for the
   // theme cold-boot stale-cache-replay bug. See v19.3.0 note above for why
