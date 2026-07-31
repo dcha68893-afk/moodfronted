@@ -6049,6 +6049,27 @@
 
                 });
 
+                // FIX-SCROLL-LANDS-SHORT: a single requestAnimationFrame jump
+                // measures scrollHeight before avatars/images/attachments in the
+                // just-rendered batch have finished loading. Each of those
+                // loading in later grows scrollHeight further, so the one jump
+                // above can land short of the true bottom — this is exactly
+                // the "did scroll down itself, then later stopped and waited
+                // for me to scroll" behavior: it scrolled once, content then
+                // grew taller, and nothing re-asserted the position afterward.
+                // Re-assert a few more times over the next second, but only
+                // while the container is still within the same near-bottom
+                // band each time — if the user has manually scrolled away in
+                // the meantime, stop immediately and never fight them for it.
+                if (force) {
+                    [120, 350, 800].forEach(function(delay) {
+                        setTimeout(function() {
+                            const _d = container.scrollHeight - container.scrollTop - container.clientHeight;
+                            if (_d < 150) container.scrollTop = container.scrollHeight;
+                        }, delay);
+                    });
+                }
+
             }
 
         },
@@ -11388,6 +11409,24 @@ Type: ${message.type || 'text'}`;
         // path where it reads as the button being frozen/unresponsive.
         try { window.KynectaE2E?.prefetchRecipientKey?.(numericUserId); } catch (_) {}
 
+        // FIX-COLD-START-WAKE: Friend/Calls/Status opens are the entry points
+        // most likely to be the FIRST network activity in a while (the user
+        // was browsing another module, not idling on Messages), which is
+        // exactly when a Render free-tier backend is most likely to be
+        // asleep. A sleeping backend takes many seconds to spin back up, and
+        // until now nothing woke it until either the conversation-resolve
+        // call or the E2E key fetch happened to hit it — both already on the
+        // critical path to Send. Fire a throwaway GET to /health here too, in
+        // parallel, purely to start that wake-up clock as early as possible;
+        // its result is never used and its failure is never surfaced.
+        try {
+            const _wakeBase = (window.__kynAPI && window.__kynAPI.baseUrl) || window.API_BASE_URL ||
+                (typeof window.__getApiBase === 'function' ? window.__getApiBase() : null);
+            if (_wakeBase) {
+                fetch(_wakeBase.replace(/\/api\/?$/, '') + '/health', { method: 'GET', cache: 'no-store' }).catch(() => {});
+            }
+        } catch (_) {}
+
         // Resolve name/avatar from FriendManager if not provided
         const _stripUserSuffix = (n) => n ? n.replace(/\s+User$/i, '').trim() || n : n;
 
@@ -11625,8 +11664,19 @@ Type: ${message.type || 'text'}`;
             // stall from also blocking messaging. Remove once the FATAL
             // construction-throw log (see _buildAndAssignMessagesUI) is
             // captured and the real cause is fixed.
-            if (_core && _core.ChatManager && !_uiReady && attempts >= 33) {
-                console.warn('[MessageUI] messagesUI.openChat still not ready after ~5s — using direct-open bypass instead of waiting the full 20s', { coreReady: true, uiReady: _uiReady });
+            // FIX-BYPASS-DELAY: was attempts >= 33 (~5s @ 150ms/attempt). The
+            // bypass below is not a degraded fallback — it calls the exact
+            // same startOrGetDirectConversation()/openConversation() steps the
+            // real messagesUI.openChat() uses, just without going through the
+            // messagesUI object wrapper. Making every Friend/Calls/Status open
+            // sit through a full 5s of polling before using an equally-correct
+            // path was pure wasted latency stacked on top of whatever network
+            // delay (cold backend, slow key fetch) already exists. Drop to
+            // ~1.2s — enough to give a warm page every reasonable chance to
+            // finish constructing messagesUI first, without making a cold one
+            // wait needlessly.
+            if (_core && _core.ChatManager && !_uiReady && attempts >= 8) {
+                console.warn('[MessageUI] messagesUI.openChat still not ready after ~1.2s — using direct-open bypass instead of waiting the full 20s', { coreReady: true, uiReady: _uiReady });
                 _core.ChatManager.startOrGetDirectConversation(numericUserId, resolvedName, resolvedAvatar)
                     .then((_conv) => {
                         if (!_conv) throw new Error('empty conversation');

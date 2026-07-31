@@ -761,9 +761,19 @@ const ChatManager = {
                     // shouldn't ever sit in "loading" longer than this outer cap —
                     // race it against a timeout and fall back to plaintext so the
                     // message still goes out instead of hanging indefinitely.
+                    // FIX-COLD-START-TIMEOUT: was 8000ms, which is shorter than a
+                    // genuine Render free-tier cold start (can take 10-30s+) — every
+                    // first message sent right after waking the backend from sleep
+                    // hit this cap and silently downgraded to plaintext even though
+                    // the key fetch would have succeeded a few seconds later. Now
+                    // that openChatWithUserInUI fires both prefetchRecipientKey() and
+                    // a /health wake ping the moment the chat opens (see there), the
+                    // fetch already has a head start by the time Send is pressed, so
+                    // raising this cap mainly helps fast typists / cold starts rather
+                    // than making genuinely-stuck sends wait any longer than before.
                     requestBody.content = await Promise.race([
                         window.KynectaE2E.encryptForChat(content, conversationId, _recipientUserIdForEncryption),
-                        new Promise((_, reject) => setTimeout(() => reject(new Error('E2E encrypt timeout')), 8000))
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('E2E encrypt timeout')), 15000))
                     ]);
                 } catch (e) {
                     console.warn('[ChatManager] E2E encryption failed/timed out, sending as plaintext:', e?.message);
