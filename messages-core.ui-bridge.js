@@ -1157,6 +1157,37 @@ const UIStateManager = {
                 }
             }
 
+            // FIX-ROUND-22 (ON-SCREEN DIAGNOSTIC): the existing FORENSIC log below
+            // only reaches a devtools console, which isn't practically reachable on
+            // this user's test devices. Whenever a message arrives, the chat panel
+            // is actually open/visible, but none of the three isThisChat strategies
+            // matched (so the message would silently fail to render live), paint a
+            // small on-screen banner with the exact values instead — visible on any
+            // device, no console required. Auto-dismisses; never blocks anything.
+            try {
+                const _panelVisible = (function () {
+                    const _p = document.getElementById('chatPanel');
+                    return !!(_p && !_p.classList.contains('hidden'));
+                })();
+                if (!isThisChat && _panelVisible && normalizedMessage) {
+                    const _msg = 'RENDER MISS | incoming=' + _rcId + ' active=' + _acId +
+                        ' senderId=' + (normalizedMessage.senderId || '?') +
+                        ' activeFriendId=' + (activeChat ? String(activeChat.friendId || '') : '?');
+                    let _bar = document.getElementById('__kynDebugToast');
+                    if (!_bar) {
+                        _bar = document.createElement('div');
+                        _bar.id = '__kynDebugToast';
+                        _bar.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:999999;' +
+                            'background:#c0392b;color:#fff;font:11px monospace;padding:8px 10px;' +
+                            'border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,.4);word-break:break-all;';
+                        (document.body || document.documentElement).appendChild(_bar);
+                    }
+                    _bar.textContent = _msg;
+                    clearTimeout(_bar.__hideTimer);
+                    _bar.__hideTimer = setTimeout(function () { try { _bar.remove(); } catch (_) {} }, 15000);
+                }
+            } catch (_) { /* diagnostic only — never let this affect real rendering */ }
+
             if (ChatManager && ChatManager._conversationsMap && chatId) {
                 const conversation = ChatManager._conversationsMap.get(chatId) || ChatManager._conversationsMap.get(String(chatId));
                 if (conversation && normalizedMessage) {

@@ -659,8 +659,16 @@ const ChatManager = {
         },
         
         async sendMessageToBackend(content, conversationId, options = {}) {
+            // FIX-ROUND-22 (user request): the lifecycle-state guard on sendMessage
+            // was blocking real sends with "Cannot send message - module not
+            // active" whenever the module's internal ACTIVE-state bookkeeping
+            // hadn't caught up yet — even though the module was functionally
+            // ready to send (session valid, socket connected). That bookkeeping
+            // has proven unreliable across many rounds and the messaging module
+            // has not reached a stage where blocking on it is worth the false
+            // positives. Log only; never block an actual send attempt on it.
             if (!ensureActive('sendMessage')) {
-                throw new Error('Cannot send message - module not active');
+                console.warn('[ChatManager] sendMessage proceeding despite non-ACTIVE lifecycle state (guard disabled per user request)');
             }
             
             if (!SessionManager.isAuthenticated()) {
