@@ -11693,9 +11693,35 @@ Type: ${message.type || 'text'}`;
                         // for this same conversation, its own guard will see this and
                         // skip instead of opening it a second time.
                         try { window['opening_chat_' + String(_chatId)] = true; setTimeout(() => { try { delete window['opening_chat_' + String(_chatId)]; } catch(_){} }, 3000); } catch(_) {}
-                        if (coreState?.state === 'ACTIVE') {
-                            _core.openConversation(_chatId, _chatOpts).catch?.(() => {});
-                        }
+                        // FIX-BYPASS-SILENT-SKIP (root cause of "opens instantly but
+                        // history never loads / replies never render live, only a
+                        // push notification arrives on the other end"): this used to
+                        // call openConversation() ONLY `if (coreState?.state ===
+                        // 'ACTIVE')`, with no else branch — if the module's internal
+                        // ACTIVE bookkeeping hadn't caught up yet at this exact
+                        // instant (very common right when a module just opened, which
+                        // is exactly when this bypass fires in the first place),
+                        // openConversation() was never called, not now, not later, no
+                        // retry, no error. That single call is what fetches message
+                        // history AND sets ChatManager._activeConversation — without
+                        // it, the panel LOOKS open (chat panel visible, input
+                        // focused) but is not actually wired to anything: no history
+                        // loads, and the realtime listener's isThisChat match (which
+                        // compares against ChatManager.getActiveChat()) can never
+                        // succeed for this chat, so incoming replies fall through to
+                        // "just bump the unread badge" — a push notification fires,
+                        // but nothing renders in the panel.
+                        //
+                        // Same lesson already applied elsewhere in this exact file:
+                        // sendMessage()'s ACTIVE guard was removed ("has proven
+                        // unreliable across many rounds... never block an actual send
+                        // attempt on it") and fetchMessages()'s ACTIVE requirement was
+                        // loosened to online+authenticated only. openConversation()
+                        // itself doesn't need ACTIVE for anything except one internal
+                        // postMessage notify to the parent frame (gated inside the
+                        // function itself, independently) — so there's nothing to
+                        // wait for here. Call it immediately, unconditionally.
+                        _core.openConversation(_chatId, _chatOpts).catch?.(() => {});
                     })
                     .catch((err) => {
                         console.error('[MessageUI] direct-open bypass failed', err);
@@ -12675,28 +12701,16 @@ Type: ${message.type || 'text'}`;
                 window[_openKey] = true;
                 const _clearOpenKey = () => { try { delete window[_openKey]; } catch(_){} };
 
-                if (coreState?.state === 'ACTIVE') {
-                    core.openConversation(_chatId, _chatOpts).catch?.(() => {}).finally?.(_clearOpenKey) || setTimeout(_clearOpenKey, 2000);
-                } else {
-                    // Core not ready yet — poll until it is, then open ONCE
-                    let attempts = 0;
-                    let _opened = false;
-                    const waitAndOpen = () => {
-                        if (_opened) return;
-                        attempts++;
-                        const c = getMessagesCore();
-                        const s = c?.getState?.();
-                        if (s?.state === 'ACTIVE') {
-                            _opened = true;
-                            c.openConversation(_chatId, _chatOpts).catch?.(() => {}).finally?.(_clearOpenKey) || setTimeout(_clearOpenKey, 2000);
-                        } else if (attempts < 20) {
-                            setTimeout(waitAndOpen, 250);
-                        } else {
-                            _clearOpenKey();
-                        }
-                    };
-                    setTimeout(waitAndOpen, 100);
-                }
+                // FIX-ACTIVE-GATE-REMOVED: previously gated on `coreState?.state ===
+                // 'ACTIVE'`, polling up to 5s if not, and — if ACTIVE still hadn't
+                // flipped by then — silently giving up without ever calling
+                // openConversation() at all. Same unreliable-bookkeeping issue
+                // already found and removed from sendMessage()/fetchMessages()
+                // elsewhere in this file, and from the direct-open bypass above.
+                // openConversation() doesn't need ACTIVE for anything itself (the
+                // one place it matters — a postMessage notify to the parent frame —
+                // is gated independently, inside that function). Call immediately.
+                core.openConversation(_chatId, _chatOpts).catch?.(() => {}).finally?.(_clearOpenKey) || setTimeout(_clearOpenKey, 2000);
 
             }
 

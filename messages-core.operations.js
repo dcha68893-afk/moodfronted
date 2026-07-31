@@ -3067,14 +3067,18 @@ const ChatManager = {
                 debugLog('[ConversationManager] Skipping fetchMessages for pending conversation:', conversationId);
                 return;
             }
-            if (!ensureActive('fetchMessages')) return;
+            // FIX-ACTIVE-GATE-REMOVED: same unreliable-bookkeeping gate already
+            // removed from sendMessage/openConversation elsewhere in this file —
+            // it silently skipped the fetch (no retry) whenever the module's
+            // internal ACTIVE flag hadn't caught up yet. Authentication is the
+            // only real requirement.
             if (!SessionManager.isAuthenticated()) return;
             
             await ChatManager.fetchMessages(conversationId, options);
         },
         
         async fetchConversations() {
-            if (!ensureActive('fetchConversations')) return;
+            // FIX-ACTIVE-GATE-REMOVED: see matching comment on fetchMessages above.
             if (!SessionManager.isAuthenticated()) return;
             
             await ChatManager.fetchConversations();
