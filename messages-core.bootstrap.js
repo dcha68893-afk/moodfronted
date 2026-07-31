@@ -1076,13 +1076,49 @@ try {
     function upsertRealtimeConversation(chatId, normalizedMessage = null) {
         if (!chatId || !normalizedMessage || !ChatManager) return null;
 
-        const existing = ChatManager._conversationsMap.get(chatId) || ChatManager._conversationsMap.get(String(chatId));
-        if (existing) return existing;
-
         const myId = SessionManager && SessionManager.getUserId ? String(SessionManager.getUserId() || '') : '';
         const senderId = normalizedMessage.senderId != null ? String(normalizedMessage.senderId) : '';
         const receiverId = normalizedMessage.receiverId != null ? String(normalizedMessage.receiverId) : '';
         const friendId = senderId && senderId !== myId ? senderId : (receiverId && receiverId !== myId ? receiverId : '');
+
+        const existing = ChatManager._conversationsMap.get(chatId) || ChatManager._conversationsMap.get(String(chatId));
+        if (existing) {
+            // FIX-ROOT-CAUSE-MIXED-OPEN-SOURCE (messages arrive but don't render
+            // live when the two users opened this chat from DIFFERENT sources —
+            // e.g. one from Chat History, the other from Friends/Status/Calls):
+            // this early-return used to fire BEFORE friendId was even computed,
+            // and unconditionally handed back whatever conversation object was
+            // already keyed under the incoming message's real chatId — WITHOUT
+            // ever checking whether the panel currently open on screen is a
+            // *different*, still-pending ('pending_<friendId>') object for the
+            // same friend. That split happens whenever a background
+            // fetchConversations() call (periodic refresh, reconnect, etc.) has
+            // already populated the real-chatId entry in _conversationsMap while
+            // the user is still actively viewing the pending placeholder they
+            // opened from Friends/Status/Calls/Groups. From that point on,
+            // every render decision downstream (isThisChat) compares the
+            // incoming real chatId against activeConversation.id, which is
+            // still 'pending_<friendId>' — permanent mismatch, so the message
+            // gets saved but never rendered live, no matter how many messages
+            // are exchanged afterward. Reconcile the active pending placeholder
+            // onto the real conversation right here, the same way the
+            // byPendingFriend branch below already does for the "no existing
+            // real entry yet" case, so this path is covered too.
+            const _activeConv = ChatManager._activeConversation;
+            if (_activeConv && _activeConv.isPending && friendId &&
+                String(_activeConv.friendId ?? _activeConv.pendingReceiverId) === friendId &&
+                String(_activeConv.id) !== String(existing.id) &&
+                typeof ChatManager.replacePendingConversation === 'function') {
+                const _reconciled = ChatManager.replacePendingConversation(_activeConv.id, {
+                    ...existing,
+                    id: String(chatId),
+                    chatId: String(chatId),
+                });
+                if (_reconciled) return _reconciled;
+            }
+            return existing;
+        }
+
         if (!friendId) return null;
 
         // FIX (duplicate chat-history entries): the chatId lookup above only
