@@ -1562,9 +1562,20 @@ const UIStateManager = {
                                (message.receiver && message.receiver.id) || (message.recipient && message.recipient.id) ||
                                message.senderId)
                             : message.senderId;
-                        const _plaintext = await window.KynectaE2E.decryptFromChat(
-                            message.content, chatId, _senderIdForDecrypt
-                        );
+                        // FIX-ROOT-CAUSE-RECEIVE-HANG: this await used to be able to hang
+                        // indefinitely if the sender's public-key fetch inside
+                        // decryptFromChat stalled (see e2e-encryption.js) — the socket
+                        // had already delivered message:new (so anything driven off the
+                        // raw socket event, like a notification/unread badge, still
+                        // fired), but this function never returned, so the message never
+                        // got appended to the chat panel. Race against a timeout so a
+                        // slow/stuck key fetch degrades to showing the ciphertext
+                        // placeholder (retried later by messages-ui.js's render-time
+                        // decrypt) instead of blocking the message from appearing at all.
+                        const _plaintext = await Promise.race([
+                            window.KynectaE2E.decryptFromChat(message.content, chatId, _senderIdForDecrypt),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error('E2E decrypt timeout')), 8000))
+                        ]);
                         if (_plaintext && _plaintext !== message.content &&
                             _plaintext.indexOf('[Decryption failed') !== 0) {
                             message.content = _plaintext;

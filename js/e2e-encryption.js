@@ -270,12 +270,20 @@
 
     // Upload public key to server
     try {
-      const resp = await fetch(`${await _apiBase()}/api/encryption/keys`, {
-        method: 'POST',
-        headers: await _authHeaders(),
-        body: JSON.stringify({ publicKey: pubKeyB64, keyId }),
-        credentials: 'include',
-      });
+      const _regController = new AbortController();
+      const _regTimeout = setTimeout(() => _regController.abort(), 8000);
+      let resp;
+      try {
+        resp = await fetch(`${await _apiBase()}/api/encryption/keys`, {
+          method: 'POST',
+          headers: await _authHeaders(),
+          body: JSON.stringify({ publicKey: pubKeyB64, keyId }),
+          credentials: 'include',
+          signal: _regController.signal,
+        });
+      } finally {
+        clearTimeout(_regTimeout);
+      }
       if (!resp.ok) throw new Error(`Upload failed: ${resp.status}`);
       const data = await resp.json();
       _myKeyId = data.data?.keyId || keyId;
@@ -340,10 +348,31 @@
     for (let attempt = 0; attempt < 3; attempt++) {
       if (attempt > 0) await _sleep(500 * attempt);
       try {
-        const resp = await fetch(`${await _apiBase()}/api/encryption/keys/${userId}`, {
-          headers: await _authHeaders(),
-          credentials: 'include',
-        });
+        // FIX-ROOT-CAUSE-SEND-RECEIVE-HANG: fetch() has no default timeout —
+        // if this request stalls (dropped packet, cold/overloaded backend,
+        // browser's per-origin connection limit queuing it behind other
+        // in-flight requests), it never resolves OR rejects, so this await
+        // — and therefore the caller's await (encryptForChat on the SEND
+        // path, decryptFromChat on the RECEIVE/render path) — hangs forever.
+        // On send that's the "stuck loading, message never goes" symptom;
+        // on receive it's "socket delivered message:new (so a notification
+        // can fire) but handleRealtimePayload never finishes awaiting
+        // decrypt, so the message never reaches the chat panel." Bounding
+        // every attempt with an AbortController guarantees this always
+        // settles, so callers fall back to plaintext/placeholder instead of
+        // hanging the whole pipeline.
+        const _keyFetchController = new AbortController();
+        const _keyFetchTimeout = setTimeout(() => _keyFetchController.abort(), 6000);
+        let resp;
+        try {
+          resp = await fetch(`${await _apiBase()}/api/encryption/keys/${userId}`, {
+            headers: await _authHeaders(),
+            credentials: 'include',
+            signal: _keyFetchController.signal,
+          });
+        } finally {
+          clearTimeout(_keyFetchTimeout);
+        }
         if (!resp.ok) {
           // Don't retry a definitive "no key" (404) — only retry things that
           // look transient (5xx, or a 401 that might resolve after refresh).

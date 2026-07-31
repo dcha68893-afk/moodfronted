@@ -747,13 +747,18 @@ const ChatManager = {
             // ── FIX-E2E-WIRING: encrypt before transport, never store plaintext ──
             if (requestBody.type === 'text' && typeof content === 'string' && _recipientUserIdForEncryption && window.KynectaE2E) {
                 try {
-                    requestBody.content = await window.KynectaE2E.encryptForChat(
-                        content,
-                        conversationId,
-                        _recipientUserIdForEncryption
-                    );
+                    // FIX-ROOT-CAUSE-SEND-HANG: encryptForChat can internally retry a
+                    // stalled key fetch up to ~20s (see e2e-encryption.js). That's
+                    // an acceptable backend-side ceiling, but the Send button itself
+                    // shouldn't ever sit in "loading" longer than this outer cap —
+                    // race it against a timeout and fall back to plaintext so the
+                    // message still goes out instead of hanging indefinitely.
+                    requestBody.content = await Promise.race([
+                        window.KynectaE2E.encryptForChat(content, conversationId, _recipientUserIdForEncryption),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('E2E encrypt timeout')), 8000))
+                    ]);
                 } catch (e) {
-                    console.warn('[ChatManager] E2E encryption failed, sending as plaintext:', e?.message);
+                    console.warn('[ChatManager] E2E encryption failed/timed out, sending as plaintext:', e?.message);
                 }
             }
 
@@ -849,61 +854,8 @@ const ChatManager = {
                     offlineQueue.markInFlight({ ...requestBody, type: 'message' }).catch(() => {});
                 }
 
-                // ── FIX-LIFECYCLE-FASTPATH ───────────────────────────────────
-                // Try the new msg:send socket lifecycle (src/sockets/messageLifecycleSocket.js)
-                // FIRST. Root cause (see MESSAGE_LIFECYCLE_REBUILD.md): the receiving
-                // side's dedupe-safe renderer (MessageLifecycleClient.js) only ever
-                // fires on the server's new `msg:new` event, which is only emitted
-                // from this socket path — never from the REST POST /messages below.
-                // As long as sends only ever went out over REST, the receiver's
-                // reliable render path could never be reached, so the OLD shared
-                // relay/claim-race system (which silently drops a message whenever
-                // its single claimant fails partway) stayed the only thing rendering
-                // incoming messages. Routing the send itself over this socket path
-                // closes that gap. It also uses the real underlying Socket.IO
-                // connection directly (no iframe->parent postMessage->fetch->
-                // postMessage round trip), so a send can no longer get stuck
-                // indefinitely in "sending" because of a broken hop in that longer
-                // chain — if the socket path doesn't ack within 6s or isn't
-                // connected, we fall straight through to the existing REST path
-                // below completely unchanged.
-                if (window.MessageLifecycleClient && typeof window.MessageLifecycleClient.sendViaSocket === 'function') {
-                    try {
-                        const _lcPayload = {
-                            chatId: isPending ? undefined : conversationId,
-                            receiverId: isPending ? _recipientUserIdForEncryption : undefined,
-                            content: requestBody.content,
-                            type: requestBody.type,
-                            clientMessageId: requestBody.localId || options.localId,
-                            replyToId: requestBody.replyToId,
-                        };
-                        const _lcAck = await window.MessageLifecycleClient.sendViaSocket(_lcPayload, 6000);
-                        if (_lcAck && _lcAck.ok) {
-                            debugLog('[ChatManager] ✅ Sent via msg:send lifecycle fast-path', _lcAck);
-                            hybridEngine?.recordSuccess?.('INTERNET', 0);
-                            if (offlineQueue && requestBody.localId) {
-                                offlineQueue.markDelivered(requestBody.localId).catch(() => {});
-                            }
-                            result = {
-                                message: {
-                                    id: _lcAck.serverId,
-                                    chatId: _lcAck.chatId || conversationId,
-                                    conversationId: _lcAck.chatId || conversationId,
-                                    status: _lcAck.status || 'sent',
-                                    createdAt: _lcAck.sentAt || new Date().toISOString(),
-                                },
-                                chatId: _lcAck.chatId || conversationId,
-                            };
-                        } else {
-                            debugLog('[ChatManager] Lifecycle fast-path unavailable/unacked, falling back to REST:', _lcAck && _lcAck.reason);
-                        }
-                    } catch (_lcErr) {
-                        debugLog('[ChatManager] Lifecycle fast-path threw, falling back to REST:', _lcErr && _lcErr.message);
-                    }
-                }
-
                 // Internet (primary, and now the ONLY path attempted up front)
-                if (!result) try {
+                try {
                     result = await makeApiRequest('/messages', 'POST', requestBody);
                     hybridEngine?.recordSuccess?.('INTERNET', 0);
                     // Send succeeded — clear the write-ahead record so it's
