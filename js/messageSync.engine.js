@@ -103,7 +103,23 @@
             if (!localStore) return;
 
             try {
-                const since = options.since || await localStore.getSyncMeta(`last_sync_${chatId}`) || 0;
+                // FIX-SINCE-FALSY-ZERO: `options.since || getSyncMeta(...) || 0` treated an
+                // explicit since:0 (meaning "fetch everything, ignore the stored watermark")
+                // as "caller passed nothing" — 0 is falsy in JS, so the OR-chain fell through
+                // to the stored last_sync_<chatId> watermark regardless. Every plain
+                // "reopen this chat" call (ChatManager.openConversation → fetchMessages,
+                // with no explicit options.after) passes since:0 for exactly this reason —
+                // to force a real catch-up fetch — but it was silently getting the stale
+                // watermark instead. If an earlier periodic background sync ever advanced
+                // that watermark past a message it failed to actually persist (a partial
+                // failure, a race, a decrypt error that aborted before the merge), that
+                // message became permanently unreachable through this path: reopening the
+                // chat, closing and reopening again, anything — always asked the server for
+                // "messages after the same too-late watermark" and always got nothing back.
+                // Use a real presence check so an explicit 0 is honored as 0.
+                const since = (options.since !== undefined && options.since !== null)
+                    ? options.since
+                    : ((await localStore.getSyncMeta(`last_sync_${chatId}`)) || 0);
                 const serverMessages = await this._fetchServerMessages(chatId, since, options.limit || 100);
                 if (!serverMessages || serverMessages.length === 0) return;
 
