@@ -63,7 +63,7 @@
 // immediate one-time clean slate so this deploy reaches everyone right away
 // instead of waiting on staleness expiry.
 const SW_VERSION = '19.4.0';
-const CACHE_NAME = 'nexopa-static-v25'; // Bumped — messages-core.bootstrap.js + messages-core.operations.js now network-first
+const CACHE_NAME = 'nexopa-static-v26'; // Bumped — MessageLifecycleClient.js now network-first (SW-STALE-LIFECYCLE-CLIENT)
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
 
 // ---------------------------------------------------------------------------
@@ -183,6 +183,19 @@ const NETWORK_FIRST_PATTERNS = [
   // ✅ NEW: Messages module
   /\/messages-core\.js/i,
   /\/messages-ui\.js/i,
+
+  // FIX-STALE-LIFECYCLE-CLIENT: MessageLifecycleClient.js was never covered
+  // by any pattern above (or anywhere else in this file) and fell through
+  // to the default cache-first static-asset rule — up to 7 days of
+  // staleness, same failure mode already found and fixed for
+  // messages-core.bootstrap.js/operations.js below. This is exactly the
+  // file that listens for msg:new and sends msg:delivered_ack back — one
+  // device silently running a stale cached copy of it (missing a fix, or
+  // a bug from an earlier deploy) while another device has a fresh copy
+  // would look exactly like "the same code behaves differently per
+  // device/user" with no visible error anywhere, because it genuinely
+  // isn't the same code underneath.
+  /\/MessageLifecycleClient\.js/i,
 
   // FIX (SW-STALE-MESSAGES-CORE): messages-core.bootstrap.js and
   // messages-core.operations.js were the only two files in the messages
