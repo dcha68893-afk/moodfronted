@@ -128,11 +128,11 @@
 
 
 
-            'nexora-3bla.onrender.com',
+            'noxopa.onrender.com',
 
 
 
-            'nexopa.onrender.com',
+            'nexipa.onrender.com',
 
 
 

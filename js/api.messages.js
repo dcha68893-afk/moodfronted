@@ -203,8 +203,8 @@ const ALLOWED_ORIGINS = Object.freeze([
     'http://localhost:5500',
     'http://127.0.0.1:5500',
     'http://localhost:4000',
-    'https://nexora-3bla.onrender.com',
-    'https://nexopa.onrender.com'
+    'https://noxopa.onrender.com',
+    'https://nexipa.onrender.com'
 ]);
 
 const MESSAGE_SCHEMAS = Object.freeze({

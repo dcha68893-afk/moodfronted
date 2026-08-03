@@ -2151,8 +2151,8 @@ const TrustedOrigins = {
             }
         } catch (e) {}
         
-        this.addTrustedOrigin('https://nexora-3bla.onrender.com');
-        this.addTrustedOrigin('https://nexopa.onrender.com');
+        this.addTrustedOrigin('https://noxopa.onrender.com');
+        this.addTrustedOrigin('https://nexipa.onrender.com');
     },
     
     addTrustedOrigin(origin) {

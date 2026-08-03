@@ -6609,7 +6609,7 @@ clearActiveCall: function() {
                     window.__apiBaseUrl ||
                     (window.parent && window.parent.__apiBaseUrl) ||
                     (window.parent && window.parent.__getApiBase && window.parent.__getApiBase()) ||
-                    'https://nexora-3bla.onrender.com'
+                    'https://noxopa.onrender.com'
                 ).replace(/\/+$/, '');
                 fetch(baseUrl + '/api/calls/ice-config', {
                     method: 'GET',

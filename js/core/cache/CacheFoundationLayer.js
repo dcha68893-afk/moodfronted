@@ -26,8 +26,8 @@
   // deletion-sync runs (depending on load order / iframe context), causing
   // `${base}/deletions` to become a bare '/deletions' — a root-relative path
   // that resolves against the CURRENT PAGE's origin (e.g.
-  // nexopa.onrender.com/deletions, 404) instead of the backend API
-  // (nexora-3bla.onrender.com/api/deletions). This mirrors
+  // nexipa.onrender.com/deletions, 404) instead of the backend API
+  // (noxopa.onrender.com/api/deletions). This mirrors
   // NetworkIntelligenceManager.js's safe fallback so deletion sync always
   // targets the backend, with /api included.
   function _resolveApiBase() {
@@ -38,7 +38,7 @@
     if (window.__kynAPI && window.__kynAPI.baseUrl) {
       return window.__kynAPI.baseUrl.replace(/\/+$/, '');
     }
-    return 'https://nexora-3bla.onrender.com/api';
+    return 'https://noxopa.onrender.com/api';
   }
 
   // ─── CacheInvalidationManager ────────────────────────────────────────────────

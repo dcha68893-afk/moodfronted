@@ -2210,8 +2210,8 @@ const TrustedOrigins = {
             }
         } catch (e) {}
         
-        this.addTrustedOrigin('https://nexora-3bla.onrender.com');
-        this.addTrustedOrigin('https://nexopa.onrender.com');
+        this.addTrustedOrigin('https://noxopa.onrender.com');
+        this.addTrustedOrigin('https://nexipa.onrender.com');
     },
     
     addTrustedOrigin(origin) {
@@ -2783,8 +2783,8 @@ const IframeEnvironment = {
         backendReachable: true
     },
     _detected: false,
-    _backendUrl: 'https://nexora-3bla.onrender.com',
-    _frontendUrl: 'https://nexopa.onrender.com',
+    _backendUrl: 'https://noxopa.onrender.com',
+    _frontendUrl: 'https://nexipa.onrender.com',
     _detectionComplete: false,
     
     detect() {
@@ -3237,8 +3237,8 @@ const OriginAdapter = {
     _validationCache: new Map(),
     _parentOrigin: null,
     _parentVerified: false,
-    _backendOrigin: 'https://nexora-3bla.onrender.com',
-    _frontendOrigin: 'https://nexopa.onrender.com',
+    _backendOrigin: 'https://noxopa.onrender.com',
+    _frontendOrigin: 'https://nexipa.onrender.com',
     
     init() {
         initLog('OriginAdapter initializing');

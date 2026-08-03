@@ -73,7 +73,7 @@
     }
 
     function getApiOrigin() {
-        return detectLocalEnvironment() ? 'http://localhost:4000' : 'https://nexora-3bla.onrender.com';
+        return detectLocalEnvironment() ? 'http://localhost:4000' : 'https://noxopa.onrender.com';
     }
 
     function getApiBase() {

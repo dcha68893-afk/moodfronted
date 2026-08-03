@@ -817,8 +817,8 @@
             }
             
             // Priority 5: Production default
-            console.log('[AUTH] Base URL from production default: https://nexora-3bla.onrender.com');
-            return 'https://nexora-3bla.onrender.com';
+            console.log('[AUTH] Base URL from production default: https://noxopa.onrender.com');
+            return 'https://noxopa.onrender.com';
         } catch (error) {
             console.error('[AUTH] Error getting base URL:', error);
             return typeof window.__getApiOrigin === 'function' ? window.__getApiOrigin() : 'http://localhost:4000';

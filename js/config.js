@@ -18,8 +18,8 @@ window.__isProductionConsoleHost = window.__isProductionConsoleHost || function(
 window.__getApiOrigin = window.__getApiOrigin || function() {
     const host = String(window.location?.hostname || '').toLowerCase();
     if (window.__isLocalEnvironment(host)) return 'http://localhost:4000';
-    if (host.includes('nexopa.onrender.com')) return 'https://nexora-3bla.onrender.com';
-    return 'https://nexora-3bla.onrender.com';
+    if (host.includes('nexipa.onrender.com')) return 'https://noxopa.onrender.com';
+    return 'https://noxopa.onrender.com';
 };
 
 window.__getApiBase = window.__getApiBase || function() {
@@ -146,7 +146,7 @@ if (!window.__KYNECTA_API_XHR_PATCHED__ && typeof XMLHttpRequest !== 'undefined'
 
 // Helper function
 window.apiCall = async function(endpoint, options = {}) {
-    const baseUrl = window.BACKEND_URL || (typeof window.__getApiBase === 'function' ? window.__getApiBase() : 'https://nexora-3bla.onrender.com/api');
+    const baseUrl = window.BACKEND_URL || (typeof window.__getApiBase === 'function' ? window.__getApiBase() : 'https://noxopa.onrender.com/api');
     const url = `${baseUrl}${endpoint}`;
     console.log('Calling:', url);
     

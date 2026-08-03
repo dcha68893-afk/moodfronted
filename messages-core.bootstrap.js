@@ -447,8 +447,8 @@
             window.location.origin,
             'http://localhost',
             'http://127.0.0.1',
-            'https://nexora-3bla.onrender.com',
-            'https://nexopa.onrender.com',
+            'https://noxopa.onrender.com',
+            'https://nexipa.onrender.com',
             'null'
         ]),
         

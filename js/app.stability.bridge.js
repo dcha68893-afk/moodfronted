@@ -51,14 +51,14 @@
         }
 
         // FIX: relative /api/* paths (no host prefix) resolve against the
-        // current page origin (nexopa.onrender.com) instead of the
+        // current page origin (nexipa.onrender.com) instead of the
         // backend. Prepend the backend origin so inline scripts in calls.html,
         // marketplace-advanced.js, etc. that use bare '/api/...' paths work.
         // Applied AFTER all path rewrites above so the regex anchors (^) still work.
         if (normalizedUrl.startsWith('/api/') || normalizedUrl.startsWith('/socket.io/')) {
             const apiOrigin = (typeof window !== 'undefined' && window.__getApiOrigin)
                 ? window.__getApiOrigin()
-                : 'https://nexora-3bla.onrender.com';
+                : 'https://noxopa.onrender.com';
             normalizedUrl = apiOrigin + normalizedUrl;
         }
 

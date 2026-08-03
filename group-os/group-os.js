@@ -11,7 +11,7 @@
 
 (function GroupOS() {
     // FIX: Was hardcoded '/api/groups' — fails in iframe since relative URL
-    // hits the frontend server (nexopa.onrender.com/api/groups → 404).
+    // hits the frontend server (nexipa.onrender.com/api/groups → 404).
     // Now resolves the backend API base from the window context (set by group.html)
     // or falls back to the known production backend URL.
     const _apiOrigin = (
@@ -19,7 +19,7 @@
         window.__kynApiBase ||
         window.__API_BASE ||
         (window.__getApiBase && window.__getApiBase()) ||
-        'https://nexora-3bla.onrender.com/api'
+        'https://noxopa.onrender.com/api'
     ).replace(/\/$/, '');
     const BASE = _apiOrigin.endsWith('/api')
         ? _apiOrigin + '/groups'

@@ -266,7 +266,7 @@ const BYPASS_PATTERNS = [
   // FIX (WiFi→Offline): Backend health probe URLs must bypass cache.
   // Without this, the SW returned a 503 from its catch() for the health probe,
   // causing NetworkIntelligenceManager to mark internet OFFLINE even on WiFi.
-  /nexora-3bla\.onrender\.com/i,
+  /noxopa\.onrender\.com/i,
   /onrender\.com\/health/i,
   /\.onrender\.com\/api/i,
   /www\.google\.com\/generate_204/i,

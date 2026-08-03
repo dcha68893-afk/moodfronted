@@ -32,7 +32,7 @@
     if (window.__kynAPI && window.__kynAPI.baseUrl) {
       return window.__kynAPI.baseUrl.replace(/\/+$/, '').replace(/\/api\/?$/, '');
     }
-    return 'https://nexora-3bla.onrender.com';
+    return 'https://noxopa.onrender.com';
   })();
 
   const PROBE_URLS = [

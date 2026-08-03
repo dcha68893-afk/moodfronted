@@ -135,7 +135,7 @@
             if (origin) return String(origin).replace(/\/+$/, '');
         }
         if (!detectLocalEnvironment()) {
-            return 'https://nexora-3bla.onrender.com';
+            return 'https://noxopa.onrender.com';
         }
         return 'http://localhost:4000';
     }

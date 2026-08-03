@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <script>window.API_BASE_URL = "https://nexora-3bla.onrender.com"; window.__kynAPI = window.__kynAPI || {}; window.__kynAPI.baseUrl = "https://nexora-3bla.onrender.com/api";
+    <script>window.API_BASE_URL = "https://noxopa.onrender.com"; window.__kynAPI = window.__kynAPI || {}; window.__kynAPI.baseUrl = "https://noxopa.onrender.com/api";
     // FIX (theme-engine generic-accent opt-out): index.html's dashboard keeps its
     // own intentional purple/blue brand look (see THEME_FIX_CHANGELOG.md) instead
     // of the shared green/purple accent used by the chat interior + module
@@ -3747,7 +3747,7 @@
                     // Probe the health endpoint: if it doesn't respond within 3s, server is sleeping
                     (async () => {
                         try {
-                            const _hBase = window.__getApiOrigin ? window.__getApiOrigin().replace(/\/api\/?$/, '') : 'https://nexora-3bla.onrender.com';
+                            const _hBase = window.__getApiOrigin ? window.__getApiOrigin().replace(/\/api\/?$/, '') : 'https://noxopa.onrender.com';
                             const ctrl = new AbortController();
                             const tid = setTimeout(() => { ctrl.abort(); _showWakeNotice(); }, 3000);
                             const hr = await fetch(_hBase + '/health', { method: 'GET', cache: 'no-store', signal: ctrl.signal });
@@ -3762,7 +3762,7 @@
                     const doLogin = async () => {
                         const baseUrl = window.__getApiOrigin
                             ? window.__getApiOrigin()
-                            : (location.hostname === 'localhost' ? 'http://localhost:3000' : 'https://nexora-3bla.onrender.com');
+                            : (location.hostname === 'localhost' ? 'http://localhost:3000' : 'https://noxopa.onrender.com');
                         if (window.api?.auth?.login) {
                             // FIX: 65s timeout to survive Render cold start (~50s)
                             const loginPromise = window.api.auth.login({ identifier, password, rememberMe });
@@ -3881,7 +3881,7 @@
                     };
                     (async () => {
                         try {
-                            const _hBase = window.__getApiOrigin ? window.__getApiOrigin().replace(/\/api\/?$/, '') : 'https://nexora-3bla.onrender.com';
+                            const _hBase = window.__getApiOrigin ? window.__getApiOrigin().replace(/\/api\/?$/, '') : 'https://noxopa.onrender.com';
                             const ctrl = new AbortController();
                             const tid = setTimeout(() => { ctrl.abort(); _showWakeNoticeReg(); }, 3000);
                             const hr = await fetch(_hBase + '/health', { method: 'GET', cache: 'no-store', signal: ctrl.signal });
@@ -3900,7 +3900,7 @@
                             const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Request timed out. The server may be starting up — please try again in a moment.')), 65000));
                             response = await Promise.race([regPromise, timeout]);
                         } else {
-                            const baseUrl = window.__getApiOrigin ? window.__getApiOrigin() : (location.hostname === 'localhost' ? 'http://localhost:3000' : 'https://nexora-3bla.onrender.com');
+                            const baseUrl = window.__getApiOrigin ? window.__getApiOrigin() : (location.hostname === 'localhost' ? 'http://localhost:3000' : 'https://noxopa.onrender.com');
                             const res = await fetch(`${baseUrl}/api/auth/register`, {
                                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ email: email, username: username, password: password, displayName: displayName || username, name: displayName || username, acceptPrivacyPolicy: accept })
@@ -3976,7 +3976,7 @@
                         if (window.api?.auth?.forgotPassword) {
                             response = await window.api.auth.forgotPassword({ email: email });
                         } else {
-                            const baseUrl = window.__getApiOrigin ? window.__getApiOrigin() : (location.hostname === 'localhost' ? 'http://localhost:3000' : 'https://nexora-3bla.onrender.com');
+                            const baseUrl = window.__getApiOrigin ? window.__getApiOrigin() : (location.hostname === 'localhost' ? 'http://localhost:3000' : 'https://noxopa.onrender.com');
                             const res = await fetch(`${baseUrl}/api/auth/forgot-password`, {
                                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ email: email })
@@ -4745,7 +4745,7 @@
                     // POSTs to /api/contact, which durably stores the message
                     // and (if the visitor is logged in) also delivers it into
                     // the admin's message panel — see backend routes/contact.js.
-                    var base = (window.__kynAPI && window.__kynAPI.baseUrl) || (window.API_BASE_URL ? window.API_BASE_URL + '/api' : 'https://nexora-3bla.onrender.com/api');
+                    var base = (window.__kynAPI && window.__kynAPI.baseUrl) || (window.API_BASE_URL ? window.API_BASE_URL + '/api' : 'https://noxopa.onrender.com/api');
                     var token = localStorage.getItem('authToken') || localStorage.getItem('token') || sessionStorage.getItem('authToken') || sessionStorage.getItem('token') || '';
                     sendBtn.disabled = true;
                     sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending…';
