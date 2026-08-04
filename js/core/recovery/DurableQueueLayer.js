@@ -113,7 +113,15 @@
               store.createIndex('createdAt', 'createdAt', { unique: false });
             }
           };
-          req.onsuccess = e => { this._db = e.target.result; resolve(this._db); };
+          req.onsuccess = e => {
+            this._db = e.target.result;
+            // Account-switch isolation: release this connection the moment
+            // authStorage.js's wipePreviousAccountData() tries to delete this
+            // DB, otherwise deleteDatabase() blocks forever and this account's
+            // durable op queue survives the switch silently.
+            this._db.onversionchange = () => { try { this._db.close(); } catch (_) {} this._db = null; };
+            resolve(this._db);
+          };
           req.onerror   = e => {
             console.warn('[DurableQueue] IDB open failed, using localStorage fallback:', e.target.error);
             this._fallback = true;

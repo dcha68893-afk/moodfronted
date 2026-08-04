@@ -43,7 +43,13 @@
     // ------------------------------------------------------------------
     const KNOWN_INDEXEDDB_NAMES = [
         'KnectaToolsDB', 'kynectaMesh', 'AppDB', 'calls-db', 'KnectaStatusDB',
-        'kyn_offline_queue', 'nexopa_repair_v1', 'kyn_stories_v1', 'nexopa_dq_v1'
+        'kyn_offline_queue', 'nexopa_repair_v1', 'kyn_stories_v1', 'nexopa_dq_v1',
+        // Message history — was missing here, which meant that on any
+        // browser/webview without IDBFactory.databases() support (older
+        // Android System WebView), the account-switch wipe silently never
+        // touched the message-history DB at all, and it uses this exact
+        // fallback list as its only source of truth in that case.
+        'nexopa_message_lifecycle_v1'
     ];
     // Device-level (not account) keys that are safe to keep across switches.
     const WIPE_ALLOWLIST = ['nexopa_theme', 'nexopa_nav_state'];
@@ -58,25 +64,54 @@
         return null;
     }
 
+    // Deletes one IndexedDB database and actually waits to know whether it
+    // worked. Fire-and-forget deleteDatabase() calls silently hang forever
+    // if any tab/module still holds an open connection to that DB (a
+    // "blocked" delete never resolves on its own) — the previous account's
+    // data then just stays on disk while the wipe appears to have "run".
+    function deleteOneDB(name) {
+        return new Promise((resolve) => {
+            let settled = false;
+            const finish = (ok) => { if (!settled) { settled = true; resolve(ok); } };
+            try {
+                const req = indexedDB.deleteDatabase(name);
+                req.onsuccess = () => finish(true);
+                req.onerror = () => finish(false);
+                // onblocked fires when a connection (e.g. one opened before this
+                // module's account-switch handler ran, or in another tab) is
+                // still open. We already broadcast kyn:accountSwitchWipe first
+                // so in-page connections should self-close via onversionchange;
+                // if it's still blocked after that, give it a short grace
+                // window rather than hanging forever.
+                req.onblocked = () => {
+                    console.warn(`[AuthStorage] deleteDatabase("${name}") blocked by an open connection — waiting briefly for it to close.`);
+                    setTimeout(() => finish(false), 1500);
+                };
+            } catch (_) { finish(false); }
+        });
+    }
+
     function wipeIndexedDBData() {
         try {
             if (typeof indexedDB === 'undefined') return;
+            const deleteAll = (names) => {
+                Promise.all(names.map(deleteOneDB)).then((results) => {
+                    const failed = names.filter((_, i) => !results[i]);
+                    if (failed.length) {
+                        console.warn('[AuthStorage] Some databases were not confirmed deleted (still open elsewhere):', failed);
+                    }
+                });
+            };
             if (typeof indexedDB.databases === 'function') {
                 indexedDB.databases().then((dbs) => {
-                    (dbs || []).forEach((db) => {
-                        if (db && db.name) {
-                            try { indexedDB.deleteDatabase(db.name); } catch (_) { /* ignore */ }
-                        }
-                    });
-                }).catch(() => {
-                    KNOWN_INDEXEDDB_NAMES.forEach((name) => {
-                        try { indexedDB.deleteDatabase(name); } catch (_) { /* ignore */ }
-                    });
-                });
+                    const names = Array.from(new Set([
+                        ...((dbs || []).map((d) => d && d.name).filter(Boolean)),
+                        ...KNOWN_INDEXEDDB_NAMES // union, in case databases() under-reports on this webview
+                    ]));
+                    deleteAll(names);
+                }).catch(() => deleteAll(KNOWN_INDEXEDDB_NAMES));
             } else {
-                KNOWN_INDEXEDDB_NAMES.forEach((name) => {
-                    try { indexedDB.deleteDatabase(name); } catch (_) { /* ignore */ }
-                });
+                deleteAll(KNOWN_INDEXEDDB_NAMES);
             }
         } catch (_) { /* ignore */ }
     }
@@ -92,6 +127,17 @@
             });
         } catch (_) { /* ignore */ }
         try { sessionStorage.clear(); } catch (_) { /* ignore */ }
+        // Tell every module holding an open IndexedDB connection (message
+        // history, calls, status/stories, offline queues, mesh, cache) to
+        // close it *now*, synchronously, before we start deleting databases.
+        // Without this, deleteDatabase() below just blocks forever against
+        // whichever connections are already open on the page and the wipe
+        // silently does nothing for those DBs.
+        try {
+            if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+                window.dispatchEvent(new CustomEvent('kyn:accountSwitchWipe'));
+            }
+        } catch (_) { /* ignore */ }
         wipeIndexedDBData();
         console.warn('[AuthStorage] Detected sign-in from a different account on this device — cleared previous account local data.');
     }

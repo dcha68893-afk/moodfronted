@@ -42,6 +42,11 @@
 
         req.onsuccess = function (e) {
             _db = e.target.result;
+            // Account-switch isolation: release this connection the moment
+            // authStorage.js's wipePreviousAccountData() tries to delete this
+            // DB, otherwise deleteDatabase() blocks forever and this account's
+            // call history survives the switch silently.
+            _db.onversionchange = () => { try { _db.close(); } catch (_) {} _db = null; };
             console.log('[CallIDB] ✅ IndexedDB open — calls-db v1');
             resolve(_db);
         };

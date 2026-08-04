@@ -57,7 +57,15 @@
             store.createIndex('chatId',    'chatId',    { unique: false });
           }
         };
-        req.onsuccess = e => { this._db = e.target.result; resolve(this._db); };
+        req.onsuccess = e => {
+          this._db = e.target.result;
+          // Account-switch isolation: release this connection the moment
+          // authStorage.js's wipePreviousAccountData() tries to delete this
+          // DB, otherwise deleteDatabase() blocks forever and this account's
+          // queued outbound messages survive the switch silently.
+          this._db.onversionchange = () => { try { this._db.close(); } catch (_) {} this._db = null; };
+          resolve(this._db);
+        };
         req.onerror   = e => reject(e.target.error);
       });
     }

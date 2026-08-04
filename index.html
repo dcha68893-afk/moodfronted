@@ -3630,7 +3630,15 @@
             window.CoreUtils.showNotification('Success', 'Login successful! Redirecting...', 'success');
             // See FIX-E2E-WIRING note below (unchanged) — persist plaintext
             // password for the tab session so any iframe can derive the E2E key.
-            try { sessionStorage.setItem('kyn_e2e_pw_session', password); } catch (_) {}
+            // E2E-WRAP-SECRET FIX: prefer the stable, backend-issued
+            // e2eWrapSecret over the raw typed password now that the server
+            // returns one (see moodchat routes/auth.js). This is what lets
+            // Google login — which has no typed password at all — reach
+            // exactly the same code path (see js/google-auth.js) instead of
+            // silently never initializing encryption. Falls back to the
+            // password for safety if an older/unmigrated backend response
+            // doesn't include it yet.
+            try { sessionStorage.setItem('kyn_e2e_pw_session', (user && user.e2eWrapSecret) || password); } catch (_) {}
             // FIX (perf audit): this was `setTimeout(..., 1000)` — a full second of
             // pure dead time on EVERY login before the browser even starts requesting
             // chat.html, let alone anything inside it. The toast above is purely

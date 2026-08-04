@@ -44,6 +44,11 @@ class StatusCache {
 
             request.onsuccess = () => {
                 this.db = request.result;
+                // Account-switch isolation: release this connection the moment
+                // authStorage.js's wipePreviousAccountData() tries to delete this
+                // DB, otherwise deleteDatabase() blocks forever and this account's
+                // status/story data survives the switch silently.
+                this.db.onversionchange = () => { try { this.db.close(); } catch (_) {} this.db = null; };
                 this._setupOnlineListeners();
                 console.log('[StatusCache] ✅ IndexedDB ready');
                 resolve(this.db);

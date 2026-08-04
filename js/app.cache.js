@@ -124,6 +124,11 @@
 
         request.onsuccess = () => {
           this._db = request.result;
+          // Account-switch isolation: release this connection the moment
+          // authStorage.js's wipePreviousAccountData() tries to delete this
+          // DB, otherwise deleteDatabase() blocks forever and this account's
+          // cached data survives the switch silently.
+          this._db.onversionchange = () => { try { this._db.close(); } catch (_) {} this._db = null; };
           // Rate limit DB initialized messages
           if (!window._lastDBInitializedLogAt || Date.now() - window._lastDBInitializedLogAt > 5000) {
             window._lastDBInitializedLogAt = Date.now();

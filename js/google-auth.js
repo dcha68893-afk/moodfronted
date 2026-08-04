@@ -97,6 +97,22 @@
                 }
             }
 
+            // E2E-WRAP-SECRET FIX (root cause of "Manual login fails
+            // encryption, Google login works"): message.html/group.html only
+            // call KynectaE2E.init() if 'kyn_e2e_pw_session' is present in
+            // sessionStorage — index.html's password-login path sets it, but
+            // this Google login path never did, since Google sign-in has no
+            // client-side password at all. That meant E2E encryption was
+            // never initialized for Google accounts, and
+            // js/e2e-encryption.js's encryptForChat() silently fell back to
+            // sending PLAINTEXT for every Google-authenticated user — it
+            // "worked" only because it was never actually encrypting.
+            // The backend (routes/auth.js POST /api/auth/google) now issues
+            // a stable e2eWrapSecret per account, independent of any
+            // password, specifically so this path can reach the same
+            // sessionStorage key index.html's password login already uses.
+            try { sessionStorage.setItem('kyn_e2e_pw_session', (user && user.e2eWrapSecret) || ''); } catch (_) {}
+
             // Let the rest of the app (socket init, session manager, etc.) know
             // login succeeded, the same way password login does.
             window.dispatchEvent(new CustomEvent('auth-login-success', {

@@ -387,7 +387,15 @@ const MeshRouter = (() => {
                     db.createObjectStore(IDB_STORE, { keyPath: 'packetId' });
                 }
             };
-            req.onsuccess = e => resolve(e.target.result);
+            req.onsuccess = e => {
+                const db = e.target.result;
+                // Account-switch isolation: release this connection the moment
+                // authStorage.js's wipePreviousAccountData() tries to delete this
+                // DB, otherwise deleteDatabase() blocks forever and mesh queue
+                // data from the previous account survives the switch silently.
+                db.onversionchange = () => { try { db.close(); } catch (_) {} _idb = null; };
+                resolve(db);
+            };
             req.onerror   = e => reject(e.target.error);
         });
     }

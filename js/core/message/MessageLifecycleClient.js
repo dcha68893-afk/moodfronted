@@ -100,13 +100,43 @@
           _db.createObjectStore(STORE_SYNC_STATE, { keyPath: 'chatId' });
         }
       };
-      req.onsuccess = (evt) => resolve(evt.target.result);
+      req.onsuccess = (evt) => {
+        const _db = evt.target.result;
+        // Account-switch isolation: release this connection the moment
+        // authStorage.js's wipePreviousAccountData() tries to delete this DB
+        // (nexopa_message_lifecycle_v1), otherwise deleteDatabase() blocks
+        // forever while this connection is open and the previous account's
+        // full message history survives the switch — this was the concrete
+        // root cause of manual-login history appearing under a Google
+        // account (and vice versa) on the same device.
+        _db.onversionchange = () => { try { _db.close(); } catch (_) {} db = null; };
+        resolve(_db);
+      };
       req.onerror = () => resolve(null);
     });
   }
 
   // Fallback in-memory maps used only if IndexedDB truly isn't available.
+  // Also cleared on account switch (see resetForAccountSwitch below) since
+  // these live for the lifetime of the page and would otherwise leak the
+  // previous account's messages into the new session without a reload.
   const memFallback = { outgoing: new Map(), messages: new Map(), syncState: new Map() };
+
+  // Called by authStorage.js right before it wipes IndexedDB for an account
+  // switch, so this module drops its open connection and any in-memory
+  // fallback state instead of continuing to serve the previous account's
+  // cached messages for the rest of the page session.
+  function resetForAccountSwitch() {
+    try { if (db) db.close(); } catch (_) { /* ignore */ }
+    db = null;
+    currentUserId = null;
+    memFallback.outgoing.clear();
+    memFallback.messages.clear();
+    memFallback.syncState.clear();
+  }
+  if (typeof global.addEventListener === 'function') {
+    global.addEventListener('kyn:accountSwitchWipe', resetForAccountSwitch);
+  }
 
   function idbPut(storeName, value) {
     return new Promise((resolve) => {
@@ -520,6 +550,7 @@
     sendViaSocket,
     markRead,
     requestSync,
+    resetForAccountSwitch,
     _internal: { getSocket, flushOutgoingQueue }, // exposed for debugging only
   };
 })(typeof window !== 'undefined' ? window : this);

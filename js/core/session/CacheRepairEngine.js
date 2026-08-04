@@ -41,7 +41,15 @@
             store.createIndex('deletedAt', 'deletedAt', { unique: false });
           }
         };
-        req.onsuccess = e => { this._db = e.target.result; resolve(this._db); };
+        req.onsuccess = e => {
+          this._db = e.target.result;
+          // Account-switch isolation: release this connection the moment
+          // authStorage.js's wipePreviousAccountData() tries to delete this
+          // DB, otherwise deleteDatabase() blocks forever and stale tombstone
+          // data from the previous account survives the switch silently.
+          this._db.onversionchange = () => { try { this._db.close(); } catch (_) {} this._db = null; };
+          resolve(this._db);
+        };
         req.onerror   = e => reject(e.target.error);
       });
     }
