@@ -4305,6 +4305,23 @@ export const showFriendDetails = function(friendData, type) {
                 window.scrollTo(0, 0);
                 document.body.classList.add('mobile-details-open');
             }
+
+            // NAV-STACK FIX (Android back button returns wrong module):
+            // Tell the parent shell (chat.html) that this profile panel is
+            // now the "current screen" within the Friends module. If the
+            // user goes on to open a chat (or call) from here, chat.html
+            // records this as the chat's true origin so a single Back
+            // press from that chat returns to this exact profile — not to
+            // the bare Friends list. Cleared to null by the explicit
+            // back-button handler below when the user closes this panel
+            // directly instead of navigating elsewhere.
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({
+                    type: 'SCREEN_STATE_CHANGED',
+                    restore: { screen: 'friendProfile', friendId: friendData.id, profileType: type },
+                    timestamp: Date.now()
+                }, '*');
+            }
         }
 
         loadFriendDetails(friendData, type);
@@ -5946,6 +5963,14 @@ function bindAllEvents() {
             e.stopPropagation();
             if (domElements.friendDetailsPanel) {
                 domElements.friendDetailsPanel.classList.remove('active');
+                // NAV-STACK FIX: the user dismissed the profile directly
+                // (not by navigating into a chat/call from it), so it's no
+                // longer the "current screen" to restore later — clear it
+                // so a later chat opened from a plain Friends-list tap
+                // doesn't incorrectly try to reopen this profile on Back.
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({ type: 'SCREEN_STATE_CHANGED', restore: null, timestamp: Date.now() }, '*');
+                }
             }
             if (isMobile) {
                 document.body.classList.remove('mobile-details-open');
@@ -6925,6 +6950,25 @@ if (!window.__friendProfileLiveListenerBound) {
                     el.innerHTML = '';
                 });
         } catch (_) { /* non-fatal — next natural re-render will pick it up */ }
+    });
+}
+
+// NAV-STACK FIX (Android back button returns wrong module): chat.html asks
+// for this specific screen back when the user backs out of a chat/call that
+// was opened from a friend's profile panel (see SCREEN_STATE_CHANGED posts
+// above). Re-open the same profile the same way showFriendDetails always
+// does — loadFriendDetails() re-fetches/looks up the full record from the
+// friendId alone, so a minimal {id} stand-in is enough here.
+if (!window.__friendRestoreScreenListenerBound) {
+    window.__friendRestoreScreenListenerBound = true;
+    window.addEventListener('message', function (event) {
+        const data = event && event.data;
+        if (!data || data.type !== 'RESTORE_SCREEN') return;
+        const restore = data.restore;
+        if (!restore || restore.screen !== 'friendProfile' || !restore.friendId) return;
+        try {
+            showFriendDetails({ id: restore.friendId }, restore.profileType || 'friend');
+        } catch (_) { /* non-fatal — user just stays on the friends list */ }
     });
 }
 

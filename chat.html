@@ -2660,6 +2660,27 @@
 
         window.__currentPage = 'messages';
         window.__lastActivePage = 'messages';
+
+        // NAV-STACK FIX (Android back button returns previous module instead
+        // of previous screen): __currentScreenState tracks any sub-screen a
+        // module iframe has open on top of its own base list/view (e.g. a
+        // friend's profile panel inside the Friends module, a story viewer
+        // inside Status, a listing detail inside Marketplace) — reported by
+        // that iframe via a SCREEN_STATE_CHANGED postMessage. __chatOrigin
+        // captures where the user actually was (module + sub-screen) the
+        // instant they cross into the Messages module to open one specific
+        // chat, so backing out of that chat can return to that exact spot
+        // instead of always defaulting to the Messages list. See the
+        // navigateToPage() capture below and the chat-panel-active branch of
+        // handleAppBackNavigation() for where these are consumed.
+        window.__currentScreenState = null;
+        window.__chatOrigin = null;
+        window.addEventListener('message', function (evt) {
+            var d = evt && evt.data;
+            if (!d || d.type !== 'SCREEN_STATE_CHANGED') return;
+            window.__currentScreenState = d.restore || null;
+        });
+
         const headerPageMeta = {
             messages: { icon: 'fa-comments', title: 'Messages', subtitle: 'Your recent chats load from local cache first.' },
             status:   { icon: 'fa-circle', title: 'Status', subtitle: 'Stories and highlights refresh quietly in the background.' },
@@ -2863,6 +2884,36 @@
             if (document.body.classList.contains('chat-panel-active')) {
                 notifyMessagesBackToList();
                 document.body.classList.remove('chat-panel-active');
+
+                // NAV-STACK FIX (Android back button returns previous module
+                // instead of previous screen): if this chat was opened from
+                // outside Messages (Friends profile, Calls, Status, Group,
+                // Marketplace, a search result, a notification, etc.),
+                // __chatOrigin — captured once in navigateToPage() the
+                // moment we jumped into Messages — tells us exactly where.
+                // Go straight back there (and restore its sub-screen, if
+                // any) instead of stopping on the Messages list, which the
+                // user may never have actually seen.
+                const chatOrigin = window.__chatOrigin;
+                window.__chatOrigin = null;
+                if (chatOrigin && chatOrigin.page && chatOrigin.page !== 'messages') {
+                    navigateToPage(chatOrigin.page, { fromHistory: true });
+                    if (chatOrigin.restore) {
+                        const _originIframeId = moduleToIframeId[chatOrigin.page];
+                        const _originIframe = _originIframeId && document.getElementById(_originIframeId);
+                        if (_originIframe && _originIframe.contentWindow) {
+                            // Small delay: navigateToPage() just unhid this
+                            // iframe's container; give it a beat to be ready
+                            // to act on the restore before it arrives.
+                            setTimeout(() => {
+                                _originIframe.contentWindow.postMessage({ type: 'RESTORE_SCREEN', restore: chatOrigin.restore, timestamp: Date.now() }, '*');
+                            }, 60);
+                        }
+                    }
+                    logProcessStatus('back-navigation', true, 'returned-chat-origin:' + chatOrigin.page);
+                    return true;
+                }
+
                 logProcessStatus('back-navigation', true, 'returned-chat-list');
                 return true;
             }
@@ -2971,6 +3022,23 @@
                 window.__lastActivePage = window.__currentPage || 'messages';
                 window.__currentPage = page;
                 _chatLog('[Navigation] Page changed from', window.__lastActivePage, 'to', page);
+
+                // NAV-STACK FIX: jumping into 'messages' from any other
+                // module (Friends, Calls, Status, Group, Tools/Marketplace,
+                // etc.) to open one specific chat means that other module —
+                // including whatever sub-screen it had open, per
+                // __currentScreenState — is this chat's true "previous
+                // screen". Record it here, at the one place every such jump
+                // already passes through, rather than at each of the many
+                // separate call sites that open a chat.
+                if (!fromHistory) {
+                    if (page === 'messages' && window.__lastActivePage !== 'messages') {
+                        window.__chatOrigin = { page: window.__lastActivePage, restore: window.__currentScreenState || null };
+                    } else if (page !== 'messages') {
+                        window.__chatOrigin = null;
+                    }
+                    window.__currentScreenState = null;
+                }
             }
             updateHeaderContext(page);
             updateHeaderActions(page);

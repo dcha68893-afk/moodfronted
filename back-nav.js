@@ -29,6 +29,16 @@
             'marketplaceDetailPanel', 'createListingModal', 'analyticsModal',
             'adminManagementModal', 'friendSelectionModal', 'groupInviteModal',
             'addFriendModal', 'startChatModal', 'createGroupModal',
+            // FIX (Android back button returns previous module instead of
+            // previous screen): friendDetailsPanel (the friend/user profile
+            // view opened from the Friends list) was missing here, so
+            // pressing back while it was open skipped straight past both
+            // this panel AND the Friends list itself, falling through to
+            // the generic cross-module NAVIGATE_BACK path below. Listing it
+            // here means back-nav.js's own goBack() closes the profile and
+            // returns to the Friends list in one predictable local step,
+            // exactly like every other panel in this list.
+            'friendDetailsPanel',
             // FIX: status.html's story viewer (toggled via .active, same
             // mechanism as the others here) wasn't in this list, so tapping
             // its own back arrow fell through to postMessage NAVIGATE_BACK —
@@ -43,6 +53,15 @@
             if (el && (el.style.display === 'flex' || el.style.display === 'block' || el.classList.contains('active'))) {
                 el.style.display = 'none';
                 el.classList.remove('active');
+                // NAV-STACK FIX: any panel closed through this generic path
+                // means the user backed out to this module's base list, not
+                // into another module. Clear the "current screen" the parent
+                // shell is tracking (see SCREEN_STATE_CHANGED) so a chat/call
+                // opened afterward from the bare list doesn't incorrectly try
+                // to restore a panel the user already dismissed.
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({ type: 'SCREEN_STATE_CHANGED', restore: null, timestamp: Date.now() }, '*');
+                }
                 return;
             }
         }
