@@ -308,7 +308,19 @@
             
             .app-container {
                 flex-direction: column !important;
-                height: auto !important;
+                /* FIX (app-container-not-full-height): same root anti-pattern
+                   as Tool.css/friend.css/status.css — .sidebar right above is
+                   forced to height:100vh !important, but .app-container (its
+                   parent) was only min-height:100vh with an auto actual
+                   height. If any other in-flow sibling ever sits alongside
+                   .sidebar inside .app-container, the container can grow
+                   past one viewport instead of staying pinned to it, pushing
+                   header/footer out of sync with the app screen. Locking to
+                   height:100vh matches .sidebar exactly, consistent with
+                   this file's own base body { height:100vh; overflow:hidden }
+                   rule (line ~162), which was never overridden here — so no
+                   body-level fix was needed in this file, only this one. */
+                height: 100vh !important;
                 min-height: 100vh !important;
             }
             

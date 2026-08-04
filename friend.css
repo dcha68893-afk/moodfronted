@@ -1608,13 +1608,24 @@
         }
         
         @media (max-width: 768px) {
+            /* FIX (app-container-not-full-height): same root cause and fix
+               as Tool.css — body { overflow: auto } here silently overrode
+               the base body { height:100vh; overflow:hidden } rule (same
+               media-query specificity, later declaration wins), letting the
+               whole page grow taller than one screen and scroll as a block
+               instead of staying pinned to the viewport while only the
+               scrollable content region scrolls internally. That detaches
+               the header/footer from the app screen. Restoring overflow:
+               hidden re-locks body/.app-container to the viewport, and
+               height:100vh (was auto) matches .sidebar's own forced
+               height:100vh !important below. */
             body {
-                overflow: auto;
+                overflow: hidden;
             }
             
             .app-container {
                 flex-direction: column;
-                height: auto;
+                height: 100vh;
                 min-height: 100vh;
                 overflow: hidden;
             }

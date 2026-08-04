@@ -90,8 +90,12 @@
             }
             
             .app-container {
+                /* Kept in sync with the second (later, and therefore
+                   winning) .app-container rule in this file's other mobile
+                   media block — see the FIX comment there. Was previously
+                   height:auto here, contradicting the fix below it. */
                 flex-direction: column !important;
-                height: auto !important;
+                height: 100vh !important;
                 min-height: 100vh !important;
             }
             
@@ -1828,13 +1832,31 @@
         
         /* Responsive */
         @media (max-width: 768px) {
+            /* FIX (app-container-not-full-height): this block previously set
+               body { overflow: auto } on mobile, which SILENTLY OVERRODE the
+               base rule body { height:100vh; overflow:hidden; } (line ~42-48)
+               above — same media-query specificity, later declaration wins.
+               With body scrollable, the whole page (header, .app-container,
+               footer/bottom nav) could grow taller than one screen and
+               scroll together as a block, instead of staying pinned to
+               exactly the viewport while only .marketplace-list-content
+               (flex:1; overflow-y:auto — the actual intended scroll region)
+               scrolled internally. That's what caused "app container only
+               occupying the body" — header/footer drifting out of sync with
+               the app screen instead of staying fixed while content scrolls
+               under them. Restoring overflow:hidden here re-locks body (and
+               therefore .app-container, which already gets height:auto;
+               min-height:100vh below, and .sidebar, forced to height:100vh
+               !important) to the viewport, matching how chat.html's own
+               parent shell is built (fixed header/nav + one internally
+               scrolling content region). */
             body {
-                overflow: auto;
+                overflow: hidden;
             }
             
             .app-container {
                 flex-direction: column;
-                height: auto;
+                height: 100vh;
                 min-height: 100vh;
                 overflow: hidden;
             }

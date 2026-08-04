@@ -5495,7 +5495,14 @@ function _jmShowChooser(opts) {
 
 async function _jmOpenAdminWhatsApp() {
     try {
-        const res = await (window.apiCall ? window.apiCall('GET', '/api/tools/admin-contact') : fetch('/api/tools/admin-contact', { headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` } }).then(r => r.json()));
+        // FIX-404-ADMIN-CONTACT: window.apiCall's real signature is
+        // apiCall(endpoint, options) — baseUrl already includes '/api', so
+        // endpoint must NOT repeat it. The previous call
+        // `window.apiCall('GET', '/api/tools/admin-contact')` passed the
+        // string 'GET' as the endpoint and the path as `options`, building
+        // the URL 'https://noxopa.onrender.com/api' + 'GET' =
+        // '.../apiGET' — a nonexistent route, hence the 404.
+        const res = await (window.apiCall ? window.apiCall('/tools/admin-contact') : fetch('/api/tools/admin-contact', { headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` } }).then(r => r.json()));
         const data = res?.data || res;
         if (!data?.whatsapp) { _toast('Admin contact is not set up yet', 'error', '⚠️'); return; }
         const msg = encodeURIComponent(data.defaultMessage || 'Hi, I need help with my account.');
