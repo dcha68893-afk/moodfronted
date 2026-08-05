@@ -771,12 +771,38 @@ const ChatManager = {
                     // fetch already has a head start by the time Send is pressed, so
                     // raising this cap mainly helps fast typists / cold starts rather
                     // than making genuinely-stuck sends wait any longer than before.
-                    requestBody.content = await Promise.race([
-                        window.KynectaE2E.encryptForChat(content, conversationId, _recipientUserIdForEncryption),
-                        new Promise((_, reject) => setTimeout(() => reject(new Error('E2E encrypt timeout')), 15000))
-                    ]);
+                    // FIX (OUTER-TIMEOUT-SHORTER-THAN-INNER-RETRIES): the key-fetch
+                    // logic in e2e-encryption.js already retries a transient failure
+                    // up to 3 times with backoff (each attempt bounded at 6s), which
+                    // can legitimately take ~20s total on a cold backend — but this
+                    // outer race was cutting it off at 15s, before those retries had
+                    // a chance to finish succeeding. That meant the well-designed
+                    // retry logic was largely moot on the send path: this outer
+                    // timeout almost always won the race first. Raised to safely
+                    // exceed the inner worst case, and — since a definitive "no
+                    // recipient key" already resolves fast via a 404 short-circuit
+                    // inside encryptForChat rather than hitting this timeout at all —
+                    // hitting this outer timeout now really does mean "still
+                    // genuinely stuck," not "gave up too early." One more attempt is
+                    // given before ever falling back to plaintext, since prior data
+                    // showed most cold-start timeouts succeed on a second try shortly
+                    // after the backend finishes waking.
+                    const _encryptTimeout = () => new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error('E2E encrypt timeout')), 24000));
+                    try {
+                        requestBody.content = await Promise.race([
+                            window.KynectaE2E.encryptForChat(content, conversationId, _recipientUserIdForEncryption),
+                            _encryptTimeout()
+                        ]);
+                    } catch (firstErr) {
+                        console.warn('[ChatManager] E2E encryption timed out once, retrying before falling back to plaintext:', firstErr?.message);
+                        requestBody.content = await Promise.race([
+                            window.KynectaE2E.encryptForChat(content, conversationId, _recipientUserIdForEncryption),
+                            _encryptTimeout()
+                        ]);
+                    }
                 } catch (e) {
-                    console.warn('[ChatManager] E2E encryption failed/timed out, sending as plaintext:', e?.message);
+                    console.warn('[ChatManager] E2E encryption failed/timed out after retry, sending as plaintext:', e?.message);
                 }
             }
 

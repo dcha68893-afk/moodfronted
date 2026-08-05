@@ -202,6 +202,38 @@
     let stateHistory = [];
     const maxHistorySize = 50;
     const stateListeners = new Set();
+
+    // FIX (initializeUISafe-not-defined crash): initializeUISafe() lives in
+    // messages-core.ui-bridge.js, the 3rd of 3 companion scripts loaded after
+    // this file — normally guaranteed to exist by the time this fires, but a
+    // real-world race (PARENT_READY arriving unusually fast, or a slow/failed
+    // network fetch of that specific file) can mean it genuinely isn't
+    // defined yet at the moment we'd call it. The bug wasn't just a crash —
+    // every call site here calls initializeUISafe() immediately BEFORE
+    // flushMessageQueue()/startDataFlow(), so an uncaught ReferenceError on
+    // that line also silently skipped the code that wires up realtime
+    // message delivery for the rest of the session, with no visible error
+    // to the user beyond messages just never appearing live. This wrapper
+    // makes that impossible: a missing function now retries briefly instead
+    // of throwing and aborting everything after it.
+    function _safeInitializeUI(retriesLeft) {
+        if (typeof retriesLeft !== 'number') retriesLeft = 10;
+        try {
+            if (typeof initializeUISafe === 'function') {
+                initializeUISafe();
+                return;
+            }
+        } catch (e) {
+            console.warn('[MessagesCore] initializeUISafe() threw, continuing anyway:', e && e.message);
+            return; // don't retry on a real error inside the function itself, just move on
+        }
+        if (retriesLeft > 0) {
+            setTimeout(() => _safeInitializeUI(retriesLeft - 1), 100);
+        } else {
+            console.warn('[MessagesCore] initializeUISafe still not defined after retries — giving up on UI init for this cycle, continuing with data flow.');
+        }
+    }
+
     // FIX-007: Persist dedup sets in sessionStorage so they survive iframe navigation.
     // Without this, navigating away and back resets the Set, causing already-rendered
     // messages to appear again when the socket re-delivers or re-fetches them.
@@ -364,7 +396,7 @@
         notifyStateListeners(nextState, fromState, reason);
         
         if (nextState === LIFECYCLE_STATES.ACTIVE && !_uiInitialized) {
-            initializeUISafe();
+            _safeInitializeUI();
         }
         
         return true;
@@ -2104,7 +2136,29 @@ try {
             
             // FIX: Handle PARENT_READY from ANY pre-ACTIVE state, including INITIALIZING.
             // The key insight: INITIALIZING can now transition directly to ACTIVE (validTransitions updated).
+            // FIX (BOOT-STATE-PARENT-READY-RACE): PARENT_READY can legitimately
+            // arrive while this module is still in its very first state (BOOT —
+            // before this iframe's own init() has even started transitioning
+            // through INITIALIZING/READY/WAIT_PARENT). That's not an "unexpected"
+            // state, it's just a fast parent — treat it exactly like the other
+            // pre-active states below instead of falling into the emergency
+            // fallback branch further down, which force-attempted an invalid
+            // BOOT→ACTIVE transition and then called initializeUISafe()
+            // unconditionally. Root cause of "Uncaught ReferenceError:
+            // initializeUISafe is not defined" seen in the wild: at the moment
+            // this fires, messages-core.ui-bridge.js (the 3rd of 3 companion
+            // scripts, loaded/executed after this file) may not have finished
+            // executing yet — a real race between this module's own script
+            // loading and the parent's postMessage round-trip, not just a
+            // theoretical one. That crash aborted THIS function before it ever
+            // reached flushMessageQueue()/startDataFlow() below — meaning the
+            // realtime incoming-message listener those set up never got
+            // attached for the rest of the session, which is almost certainly
+            // why a client that hit this race stopped rendering the other
+            // side's messages live (push notifications still arrived since
+            // those don't depend on this listener at all).
             const preActiveStates = [
+                LIFECYCLE_STATES.BOOT,
                 LIFECYCLE_STATES.INITIALIZING,
                 LIFECYCLE_STATES.READY,
                 LIFECYCLE_STATES.WAIT_PARENT,
@@ -2121,7 +2175,7 @@ try {
                         currentState = LIFECYCLE_STATES.ACTIVE;
                     }
                     debugLog(`[${MODULE_NAME}] ✅ ACTIVE (parent ready + valid session)`);
-                    initializeUISafe();
+                    _safeInitializeUI();
                     flushMessageQueue();
                     startDataFlow();
                 } else {
@@ -2140,7 +2194,7 @@ try {
                         module: MODULE_NAME,
                         timestamp: Date.now()
                     }, { requireAck: false });
-                    initializeUISafe();
+                    _safeInitializeUI();
                 }
             } else if (currentState === LIFECYCLE_STATES.ACTIVE) {
                 // Already ACTIVE — just refresh data
@@ -2153,7 +2207,7 @@ try {
                 debugLog(`[${MODULE_NAME}] PARENT_READY received in unexpected state: ${currentState}`);
                 if (SessionManager.isAuthenticated()) {
                     setState(LIFECYCLE_STATES.ACTIVE, 'parent_ready_late_activate');
-                    initializeUISafe();
+                    _safeInitializeUI();
                     flushMessageQueue();
                     startDataFlow();
                 }
@@ -2184,6 +2238,7 @@ try {
                 // promote directly to ACTIVE so the UI isn't stuck waiting for a handshake that
                 // may never arrive on first load.
                 const earlyStates = [
+                    LIFECYCLE_STATES.BOOT,
                     LIFECYCLE_STATES.INITIALIZING,
                     LIFECYCLE_STATES.READY,
                     LIFECYCLE_STATES.WAIT_PARENT,
@@ -2193,7 +2248,7 @@ try {
                     debugLog(`[${MODULE_NAME}] SESSION_DATA arrived early (state: ${currentState}) — promoting to ACTIVE`);
                     const promoted = setState(LIFECYCLE_STATES.ACTIVE, 'early_session_data');
                     if (promoted) {
-                        initializeUISafe();
+                        _safeInitializeUI();
                         flushMessageQueue();
                         startDataFlow();
                     }
