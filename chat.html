@@ -2660,27 +2660,6 @@
 
         window.__currentPage = 'messages';
         window.__lastActivePage = 'messages';
-
-        // NAV-STACK FIX (Android back button returns previous module instead
-        // of previous screen): __currentScreenState tracks any sub-screen a
-        // module iframe has open on top of its own base list/view (e.g. a
-        // friend's profile panel inside the Friends module, a story viewer
-        // inside Status, a listing detail inside Marketplace) — reported by
-        // that iframe via a SCREEN_STATE_CHANGED postMessage. __chatOrigin
-        // captures where the user actually was (module + sub-screen) the
-        // instant they cross into the Messages module to open one specific
-        // chat, so backing out of that chat can return to that exact spot
-        // instead of always defaulting to the Messages list. See the
-        // navigateToPage() capture below and the chat-panel-active branch of
-        // handleAppBackNavigation() for where these are consumed.
-        window.__currentScreenState = null;
-        window.__chatOrigin = null;
-        window.addEventListener('message', function (evt) {
-            var d = evt && evt.data;
-            if (!d || d.type !== 'SCREEN_STATE_CHANGED') return;
-            window.__currentScreenState = d.restore || null;
-        });
-
         const headerPageMeta = {
             messages: { icon: 'fa-comments', title: 'Messages', subtitle: 'Your recent chats load from local cache first.' },
             status:   { icon: 'fa-circle', title: 'Status', subtitle: 'Stories and highlights refresh quietly in the background.' },
@@ -2884,36 +2863,6 @@
             if (document.body.classList.contains('chat-panel-active')) {
                 notifyMessagesBackToList();
                 document.body.classList.remove('chat-panel-active');
-
-                // NAV-STACK FIX (Android back button returns previous module
-                // instead of previous screen): if this chat was opened from
-                // outside Messages (Friends profile, Calls, Status, Group,
-                // Marketplace, a search result, a notification, etc.),
-                // __chatOrigin — captured once in navigateToPage() the
-                // moment we jumped into Messages — tells us exactly where.
-                // Go straight back there (and restore its sub-screen, if
-                // any) instead of stopping on the Messages list, which the
-                // user may never have actually seen.
-                const chatOrigin = window.__chatOrigin;
-                window.__chatOrigin = null;
-                if (chatOrigin && chatOrigin.page && chatOrigin.page !== 'messages') {
-                    navigateToPage(chatOrigin.page, { fromHistory: true });
-                    if (chatOrigin.restore) {
-                        const _originIframeId = moduleToIframeId[chatOrigin.page];
-                        const _originIframe = _originIframeId && document.getElementById(_originIframeId);
-                        if (_originIframe && _originIframe.contentWindow) {
-                            // Small delay: navigateToPage() just unhid this
-                            // iframe's container; give it a beat to be ready
-                            // to act on the restore before it arrives.
-                            setTimeout(() => {
-                                _originIframe.contentWindow.postMessage({ type: 'RESTORE_SCREEN', restore: chatOrigin.restore, timestamp: Date.now() }, '*');
-                            }, 60);
-                        }
-                    }
-                    logProcessStatus('back-navigation', true, 'returned-chat-origin:' + chatOrigin.page);
-                    return true;
-                }
-
                 logProcessStatus('back-navigation', true, 'returned-chat-list');
                 return true;
             }
@@ -3022,23 +2971,6 @@
                 window.__lastActivePage = window.__currentPage || 'messages';
                 window.__currentPage = page;
                 _chatLog('[Navigation] Page changed from', window.__lastActivePage, 'to', page);
-
-                // NAV-STACK FIX: jumping into 'messages' from any other
-                // module (Friends, Calls, Status, Group, Tools/Marketplace,
-                // etc.) to open one specific chat means that other module —
-                // including whatever sub-screen it had open, per
-                // __currentScreenState — is this chat's true "previous
-                // screen". Record it here, at the one place every such jump
-                // already passes through, rather than at each of the many
-                // separate call sites that open a chat.
-                if (!fromHistory) {
-                    if (page === 'messages' && window.__lastActivePage !== 'messages') {
-                        window.__chatOrigin = { page: window.__lastActivePage, restore: window.__currentScreenState || null };
-                    } else if (page !== 'messages') {
-                        window.__chatOrigin = null;
-                    }
-                    window.__currentScreenState = null;
-                }
             }
             updateHeaderContext(page);
             updateHeaderActions(page);
@@ -3288,15 +3220,76 @@
         }
 
         syncBrowserHistoryState(window.__currentPage || 'messages', true);
+        // FIX (Log Out button did nothing at the app-shell level): every
+        // module iframe (Settings, Status, etc.) calls its own local logout
+        // handler, then broadcasts a 'SESSION_INVALIDATED' postMessage (or,
+        // for a genuinely expired/revoked token, AppRuntimeAuthority itself
+        // fires a 'SESSION_EXPIRED' window event via clearSession()) — but
+        // this shell (chat.html), which is the thing actually holding the
+        // auth token and rendering the whole app, never listened for either.
+        // The network logout call succeeded, the iframe's own state cleared,
+        // but the parent shell's AuthStorage/localStorage/IndexedDB were
+        // never wiped and the user was never sent back to the login page —
+        // they stayed inside a fully-rendered, still-"logged-in"-looking app
+        // shell with a token that (after the session-fix earlier) is now
+        // correctly revoked server-side, so the very next API call would 401
+        // with no explanation shown to the user. This is the single handler
+        // that makes both paths (explicit logout and detected-invalid
+        // session) actually take the user back to the login page.
+        function _performFullLogoutRedirect(reason) {
+            if (window.__loggingOut) return; // avoid double-fire from both SESSION_INVALIDATED and SESSION_EXPIRED
+            window.__loggingOut = true;
+            try {
+                if (window.AppRuntimeAuthority && typeof window.AppRuntimeAuthority.clearSession === 'function') {
+                    window.AppRuntimeAuthority.clearSession({ emit: false, reason: reason || 'logout' });
+                } else if (window.AuthStorage && typeof window.AuthStorage.clearAuth === 'function') {
+                    window.AuthStorage.clearAuth();
+                }
+            } catch (_) {}
+            window.location.href = 'index.html';
+        }
+        window.addEventListener('SESSION_EXPIRED', (e) => {
+            _performFullLogoutRedirect(e && e.detail && e.detail.reason);
+        });
+        window.addEventListener('message', (event) => {
+            if (!isTrustedOrigin(event.origin)) return;
+            const _d = event.data || {};
+            if (_d.type === 'SESSION_INVALIDATED' || _d.type === 'userLoggedOut') {
+                _performFullLogoutRedirect('module-initiated-logout');
+            }
+        });
+
         window.addEventListener('popstate', (event) => {
+            // FIX (root cause of "back from any sub-screen jumps straight to
+            // the previous MODULE instead of closing the sub-screen, in every
+            // module"): this handler used to check event.state.page BEFORE
+            // calling handleAppBackNavigation(), and jumped straight to
+            // navigateToPage(statePage) whenever it differed from
+            // window.__currentPage — completely bypassing
+            // handleAppBackNavigation()'s panel-aware checks (chat-panel-active,
+            // group-panel-active, status-panel-active, call-screen-active,
+            // profile modals). None of those sub-screens push their own
+            // browser history entry when they open, so the *previous* entry in
+            // browser history is always the previous MODULE, never the
+            // previous sub-screen — meaning this fast path fired on every
+            // single hardware-back press made while any sub-screen was open,
+            // in every module, and skipped straight past the code that closes
+            // it. handleAppBackNavigation() is already panel-aware AND
+            // module-stack-aware (it falls through to popping __navHistory
+            // itself when no sub-screen is open) — it must always run first.
+            // event.state.page is only a fallback for the rare case where the
+            // app has genuinely nothing left to handle but the browser still
+            // has its own history state to reconcile with.
+            const handled = handleAppBackNavigation();
+            if (handled) return;
+
             const statePage = event && event.state && event.state.appNav ? event.state.page : null;
             if (statePage && statePage !== window.__currentPage) {
                 navigateToPage(statePage, { fromHistory: true });
                 return;
             }
 
-            const handled = handleAppBackNavigation();
-            if (!handled) syncBrowserHistoryState(window.__currentPage || 'messages', true);
+            syncBrowserHistoryState(window.__currentPage || 'messages', true);
         });
 
         document.addEventListener('backbutton', function(event) {

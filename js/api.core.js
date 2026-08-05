@@ -4616,9 +4616,24 @@ SAIC.initialize();
             
             if (token) {
                 try {
+                    // FIX (logout on one device silently logs out every other
+                    // device too): this call never sent refreshToken, so the
+                    // backend's `if (refreshToken) { invalidate just this one
+                    // }` branch never ran — the ONLY thing that ever actually
+                    // revoked anything was its fallback "revoke every refresh
+                    // token this user has, on every device" block. That means
+                    // every ordinary logout — on any device — force-logged-out
+                    // every other device too, even though this backend
+                    // otherwise fully supports independent multi-device
+                    // sessions (see GET /auth/sessions). Sending the current
+                    // device's own refresh token lets the backend revoke only
+                    // this session, as intended.
+                    let _refreshToken = null;
+                    try { _refreshToken = TokenManager.getRefreshToken(); } catch (_) {}
                     await secureApiFetch('/api/auth/logout', {
                         method: 'POST',
-                        auth: true
+                        auth: true,
+                        body: _refreshToken ? JSON.stringify({ refreshToken: _refreshToken }) : undefined
                     });
                 } catch (e) {
                     // Ignore logout errors
