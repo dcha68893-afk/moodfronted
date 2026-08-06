@@ -22,7 +22,24 @@ const ChatManager = {
         _historyCache: new Map(),
         _lastMessagesFetchAt: new Map(),
         _loadingChats: false,
-        _loadingMessages: false,
+        // FIX-GLOBAL-LOADING-GUARD (root cause of chats opened from Friend/
+        // Status/Calls/Search/etc. appearing to "keep loading" / never
+        // showing history): this used to be a single shared boolean
+        // (`_loadingMessages: false`), guarding fetchMessages() for EVERY
+        // conversation at once. Chat History rarely tripped this because its
+        // conversations are usually already loaded before another fetch could
+        // overlap. Every other entry point can fire its fetchMessages() call
+        // while a completely unrelated fetch for a DIFFERENT chat is still in
+        // flight (e.g. a background reconnect delta-sync for whatever chat was
+        // last active) — the single boolean caused the new chat's fetch to be
+        // silently dropped at the top of fetchMessages() ("if
+        // (this._loadingMessages) return;"), with no error, no retry, and no
+        // loading-state ever cleared for that specific conversation, since it
+        // never even got as far as being marked loading. The panel would open
+        // (via openConversation()'s synchronous _showChatPanel()) but never
+        // receive its history. Fixed by tracking in-flight fetches per
+        // conversationId instead of one flag for the whole module.
+        _loadingMessagesByChat: new Set(),
         _pendingConversations: new Map(),
         
         init: function() {
@@ -510,8 +527,9 @@ const ChatManager = {
                 return;
             }
 
-            if (this._loadingMessages) return;
-            this._loadingMessages = true;
+            const _fetchGuardKey = String(conversationId);
+            if (this._loadingMessagesByChat.has(_fetchGuardKey)) return;
+            this._loadingMessagesByChat.add(_fetchGuardKey);
             this._notifyLoading('messages', true);
 
             try {
@@ -653,7 +671,7 @@ const ChatManager = {
                     this.setMessages([], conversationId);
                 }
             } finally {
-                this._loadingMessages = false;
+                this._loadingMessagesByChat.delete(_fetchGuardKey);
                 this._notifyLoading('messages', false);
             }
         },
@@ -1128,19 +1146,45 @@ const ChatManager = {
             this._loaded = true;
             this._saveToCache();
 
-            // FIX: Update active conversation name if it was cached with "User"
+            // FIX-STALE-ACTIVE-CONVERSATION (root cause of the persistent
+            // "GET /api/messages?chatId=X 403 Access denied to this chat" loop
+            // seen on every socket reconnect): setConversations() is the one
+            // place _conversations/_conversationsMap get replaced with the
+            // authoritative, server-confirmed list for the CURRENTLY
+            // authenticated user. If _activeConversation was pointing at an id
+            // that isn't in that fresh list — a stale object left over from a
+            // temporary placeholder created before this fetch resolved, a chat
+            // that was deleted/left server-side, or a leftover from a different
+          // account's cache on the same browser — nothing here ever cleared
+            // it before. It just sat there indefinitely as "active", and every
+            // background reconnect handler (SYNC_STARTED -> requestDeltaSync,
+            // see messages-core.ui-bridge.js) kept re-requesting that same
+            // dead/inaccessible chatId forever, since the server correctly and
+            // repeatedly says 403 for a chat this user doesn't (or no longer)
+            // belong to. A real chat's id will always be present here after a
+            // successful fetch (chat-history's own flow proves that), so this
+            // only fires for genuinely invalid state, never for a normal chat
+            // the user is mid-opening.
             if (this._activeConversation) {
-                const updated = this._conversationsMap.get(this._activeConversation.id);
-                if (updated && updated.friendName && updated.friendName !== 'User' &&
-                    (this._activeConversation.friendName === 'User' || !this._activeConversation.friendName)) {
-                    this._activeConversation = { ...this._activeConversation, ...updated };
-                    // Patch the DOM header immediately
-                    try {
-                        const nameEl = document.getElementById('chatFriendName');
-                        if (nameEl && nameEl.textContent === 'User') {
-                            nameEl.textContent = updated.friendName;
-                        }
-                    } catch (_e) {}
+                const _activeId = this._activeConversation.id;
+                const _isPendingActive = typeof _activeId === 'string' && _activeId.startsWith('pending_');
+                if (!_isPendingActive && !this._conversationsMap.has(_activeId)) {
+                    debugLog('[ChatManager] FIX-STALE-ACTIVE-CONVERSATION: clearing active conversation not present in fresh server list:', _activeId);
+                    this._activeConversation = null;
+                } else {
+                    // FIX: Update active conversation name if it was cached with "User"
+                    const updated = this._conversationsMap.get(_activeId);
+                    if (updated && updated.friendName && updated.friendName !== 'User' &&
+                        (this._activeConversation.friendName === 'User' || !this._activeConversation.friendName)) {
+                        this._activeConversation = { ...this._activeConversation, ...updated };
+                        // Patch the DOM header immediately
+                        try {
+                            const nameEl = document.getElementById('chatFriendName');
+                            if (nameEl && nameEl.textContent === 'User') {
+                                nameEl.textContent = updated.friendName;
+                            }
+                        } catch (_e) {}
+                    }
                 }
             }
 
@@ -1779,6 +1823,7 @@ const ChatManager = {
             this._historyCache.clear();
             this._lastMessagesFetchAt.clear();
             this._pendingConversations.clear();
+            this._loadingMessagesByChat.clear();
         }
     }.init();
 

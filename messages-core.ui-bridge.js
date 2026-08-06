@@ -970,7 +970,20 @@ const UIStateManager = {
 
                     // 2. Re-fetch messages for active conversation (delta since last sync)
                     const active = ChatManager._activeConversation;
-                    if (active?.id) {
+                    // FIX-STALE-ACTIVE-CONVERSATION (defense in depth alongside the
+                    // fix in ChatManager.setConversations()): fetchConversations()
+                    // just above is what actually rebuilds _conversationsMap from the
+                    // server; only trust `active` for a delta-sync request if it's
+                    // still present in that just-refreshed, server-confirmed map (or
+                    // is a local-only pending_ chat, which never has server messages
+                    // to sync anyway). Without this, a stale/invalid active id could
+                    // still get one more 403'd request in the same reconnect cycle
+                    // between fetchConversations() resolving and this check running.
+                    const _activeStillValid = active?.id && (
+                        (typeof active.id === 'string' && active.id.startsWith('pending_')) ||
+                        ChatManager._conversationsMap?.has(active.id)
+                    );
+                    if (_activeStillValid) {
                         const syncEngine = window.__RealtimeSyncEngine;
                         if (syncEngine?.requestDeltaSync) {
                             await syncEngine.requestDeltaSync(active.id, async (chatId, since) => {

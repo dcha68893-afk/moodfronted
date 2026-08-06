@@ -1806,6 +1806,20 @@ try {
             // never falls back to null when getCurrentUserId() is called
             // during async renders before the core reference is available.
             try { window._kynCurrentUserId = this._session.userId; } catch (_e) {}
+
+            // FIX-DEAD-SESSION-EPOCH: 'kyn_session_epoch' was read in exactly one
+            // place (restoreLastChat()'s once-per-session guard, in
+            // messages-core.ui-bridge.js) but never written anywhere in the
+            // codebase, so it always resolved to the same fallback value
+            // regardless of who was logged in or how many times they'd logged
+            // in/out on this browser. That guard is therefore not actually
+            // scoped per real session — set a genuine per-session value
+            // (userId + the moment this session was established) here, the one
+            // place a session actually becomes valid, so it varies correctly
+            // across different users and different logins on the same device.
+            try {
+                SafeStorage.set('kyn_session_epoch', String(this._session.userId) + '_' + Date.now());
+            } catch (_e) {}
             
             Logger.success('SessionManager', 'Session established', { 
                 authenticated: true,
