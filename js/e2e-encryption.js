@@ -235,7 +235,7 @@
   }
 
   // ── Init: load or generate keys ───────────────────────────────────────────
-  async function init(password) {
+  async function init(password, legacyPassword) {
     if (!subtle) {
       console.warn('[E2E] WebCrypto not available — encryption disabled');
       return false;
@@ -257,7 +257,46 @@
         console.log('[E2E] ✅ Keys loaded from storage');
         return true;
       } catch (e) {
-        console.warn('[E2E] Could not load stored keys:', e.message);
+        // FIX (KEY-REGEN-REGRESSION): this used to fall straight through to
+        // generating and publishing a brand new keypair on ANY decrypt
+        // failure here — which is exactly what happens for every account
+        // that already had a stored key wrapped with their raw login
+        // password from before the e2eWrapSecret fix (see moodchat
+        // routes/auth.js), since login now sends e2eWrapSecret here instead
+        // of the raw password. AES-GCM correctly refuses to decrypt with the
+        // wrong key, this branch was reached for essentially every existing
+        // manual-login account's first login after that fix, and each one
+        // silently got a brand new keypair published to the server —
+        // orphaning their real key and permanently breaking decryption for
+        // anyone who'd already cached their old public key. Before giving up
+        // and generating a new identity, try the caller-supplied legacy
+        // password (the raw password, when available) — if THAT decrypts
+        // successfully, re-wrap and persist the SAME key material under the
+        // new password instead of discarding it, so nobody's real identity
+        // key silently changes out from under people already messaging them.
+        console.warn('[E2E] Could not load stored keys with primary password:', e.message);
+        if (legacyPassword && legacyPassword !== password) {
+          try {
+            const obj      = JSON.parse(stored);
+            const pkcs8    = await _decryptPrivateKey(obj.encPrivKey, legacyPassword);
+            _myPrivKey     = await importPrivateKey(pkcs8);
+            _myPubKeyB64   = obj.pubKey;
+            _myKeyId       = obj.keyId;
+            _enabled       = true;
+            console.log('[E2E] ✅ Keys recovered via legacy password — migrating storage to new wrap secret.');
+            try {
+              const reEncPrivKey = await _encryptPrivateKey(pkcs8, password);
+              localStorage.setItem(STORE_KEY, JSON.stringify({ encPrivKey: reEncPrivKey, pubKey: _myPubKeyB64, keyId: _myKeyId }));
+              console.log('[E2E] ✅ Stored key migrated to new wrap secret — identity preserved.');
+            } catch (migrateErr) {
+              console.warn('[E2E] Key recovered but re-wrap/migration failed (will retry next login):', migrateErr.message);
+            }
+            return true;
+          } catch (legacyErr) {
+            console.warn('[E2E] Legacy password also failed to decrypt stored keys:', legacyErr.message);
+          }
+        }
+        console.warn('[E2E] No usable password recovered this identity — generating a new keypair as a last resort.');
       }
     }
 

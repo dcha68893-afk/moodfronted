@@ -1763,8 +1763,14 @@
                 let pw = null;
                 try { pw = sessionStorage.getItem('kyn_e2e_pw_session'); } catch (_) {}
                 if (!pw) return; // not logged in this session, or password not available
+                // FIX (KEY-REGEN-REGRESSION migration support): pass the raw
+                // legacy password too, if this session stashed one, so init()
+                // can recover and migrate a pre-existing key instead of
+                // silently generating a new one on primary-password mismatch.
+                let legacyPw = null;
+                try { legacyPw = sessionStorage.getItem('kyn_e2e_pw_legacy_session'); } catch (_) {}
 
-                window.KynectaE2E.init(pw).then(function (ok) {
+                window.KynectaE2E.init(pw, legacyPw).then(function (ok) {
                     if (ok) console.log('[message.html] ✅ E2E encryption initialized');
                 }).catch(function (e) {
                     console.warn('[message.html] E2E init failed:', e && e.message);

@@ -4898,9 +4898,17 @@
                 if (data.type === 'message:client_delivery_ack' && data.payload) {
                     try {
                         if (window.wsService && typeof window.wsService.emit === 'function') {
+                            // DIAGNOSTIC (temporary — undelivered-after-10s investigation):
+                            // confirm the relay actually had a connected socket to hand
+                            // this to, and log the exact payload forwarded, so a gap here
+                            // (vs. the iframe's own "relayed via parent postMessage" log)
+                            // would show up as this line being present or absent.
+                            console.log('[AckRelay] forwarding to real socket, connected=', !!(window.KynectaRealtime && window.KynectaRealtime._socket && window.KynectaRealtime._socket.connected), data.payload);
                             window.wsService.emit('message:delivery_ack', data.payload);
+                        } else {
+                            console.warn('[AckRelay] window.wsService.emit unavailable — ack dropped', data.payload);
                         }
-                    } catch (_ackRelayErr) {}
+                    } catch (_ackRelayErr) { console.warn('[AckRelay] threw:', _ackRelayErr?.message); }
                     return;
                 }
 

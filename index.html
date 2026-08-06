@@ -3639,6 +3639,15 @@
             // password for safety if an older/unmigrated backend response
             // doesn't include it yet.
             try { sessionStorage.setItem('kyn_e2e_pw_session', (user && user.e2eWrapSecret) || password); } catch (_) {}
+            // FIX (KEY-REGEN-REGRESSION migration support): also stash the raw
+            // typed password separately so js/e2e-encryption.js's init() can
+            // fall back to it if this account has a stored key that was
+            // wrapped with the OLD raw-password mechanism from before the
+            // e2eWrapSecret fix — letting it migrate that existing key
+            // forward instead of silently generating (and publishing) a
+            // brand new one, which would orphan the old identity for anyone
+            // who'd already cached this account's previous public key.
+            try { if (user && user.e2eWrapSecret && password) sessionStorage.setItem('kyn_e2e_pw_legacy_session', password); } catch (_) {}
             // FIX (perf audit): this was `setTimeout(..., 1000)` — a full second of
             // pure dead time on EVERY login before the browser even starts requesting
             // chat.html, let alone anything inside it. The toast above is purely

@@ -1398,11 +1398,18 @@ const UIStateManager = {
             // Returns true only if we had a live channel to actually hand the ack to —
             // best-effort like the rest of this pipeline (no ack-of-ack exists yet),
             // but now retried instead of dropped when neither channel is available.
+            //
+            // DIAGNOSTIC (temporary — undelivered-after-10s investigation): logs
+            // exactly which channel was used and the payload sent, so this can be
+            // matched directly against the backend's
+            // "[WSService] delivery_ack accepted/REJECTED" log for the same
+            // messageId to see precisely where a still-open delivery issue breaks.
             var sent = false;
             var _delSocket = window.KynectaRealtime && window.KynectaRealtime._socket;
             if (_delSocket && typeof _delSocket.emit === 'function' && _delSocket.connected) {
                 _delSocket.emit('message:delivery_ack', payload);
                 sent = true;
+                console.log('[AckDelivery] sent via direct iframe socket:', payload);
             }
             try {
                 if (window.parent && window.parent !== window) {
@@ -1412,8 +1419,12 @@ const UIStateManager = {
                         source: 'messages'
                     }, '*');
                     sent = true; // parent relay is itself best-effort, but count it as an attempt
+                    console.log('[AckDelivery] relayed via parent postMessage:', payload);
                 }
-            } catch(_pErr) { /* best-effort */ }
+            } catch(_pErr) { console.warn('[AckDelivery] parent relay threw:', _pErr?.message); }
+            if (!sent) {
+                console.warn('[AckDelivery] NEITHER channel available, queueing for retry:', payload);
+            }
             return sent;
         }
         function _flushPendingAcks() {

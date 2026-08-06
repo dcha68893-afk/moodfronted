@@ -84,8 +84,12 @@
                 let pw = null;
                 try { pw = sessionStorage.getItem('kyn_e2e_pw_session'); } catch (_) {}
                 if (!pw) return;
+                // FIX (KEY-REGEN-REGRESSION migration support): see message.html's
+                // identical comment — same fallback for this module.
+                let legacyPw = null;
+                try { legacyPw = sessionStorage.getItem('kyn_e2e_pw_legacy_session'); } catch (_) {}
 
-                window.KynectaE2E.init(pw).then(function (ok) {
+                window.KynectaE2E.init(pw, legacyPw).then(function (ok) {
                     if (ok) console.log('[group.html] ✅ E2E encryption initialized');
                 }).catch(function (e) {
                     console.warn('[group.html] E2E init failed:', e && e.message);
