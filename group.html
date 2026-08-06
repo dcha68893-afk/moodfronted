@@ -83,19 +83,29 @@
 
                 let pw = null;
                 try { pw = sessionStorage.getItem('kyn_e2e_pw_session'); } catch (_) {}
-                if (!pw) return;
+                if (!pw) {
+                    // FIX-NO-PERMANENT-GIVEUP: see message.html's identical fix.
+                    return setTimeout(tryInitE2E, 500);
+                }
                 // FIX (KEY-REGEN-REGRESSION migration support): see message.html's
                 // identical comment — same fallback for this module.
                 let legacyPw = null;
                 try { legacyPw = sessionStorage.getItem('kyn_e2e_pw_legacy_session'); } catch (_) {}
 
                 window.KynectaE2E.init(pw, legacyPw).then(function (ok) {
-                    if (ok) console.log('[group.html] ✅ E2E encryption initialized');
+                    if (ok) {
+                        console.log('[group.html] ✅ E2E encryption initialized');
+                    } else {
+                        console.warn('[group.html] E2E init did not unlock existing keys — will retry');
+                        setTimeout(tryInitE2E, 2000);
+                    }
                 }).catch(function (e) {
-                    console.warn('[group.html] E2E init failed:', e && e.message);
+                    console.warn('[group.html] E2E init failed, will retry:', e && e.message);
+                    setTimeout(tryInitE2E, 2000);
                 });
             }
             tryInitE2E();
+            document.addEventListener('kyn:e2eUnlockRetry', tryInitE2E);
         })();
     </script>
     <link rel="manifest" href="../manifest.json">

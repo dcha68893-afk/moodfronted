@@ -753,57 +753,28 @@ const ChatManager = {
             }
 
             // ── FIX-E2E-WIRING: encrypt before transport, never store plaintext ──
+            // FIX-NO-PLAINTEXT-FALLBACK (user directive): there used to be an
+            // outer timeout race here that, on expiry, sent the message body
+            // through UNENCRYPTED. That is a real security downgrade a person
+            // can't see happening — the bubble looks exactly like a normal
+            // sent message. Per explicit product decision this never happens
+            // again: we simply await encryptForChat(), which itself now waits
+            // (with its own internal, capped-backoff retry against the
+            // network — see e2e-encryption.js) for as long as it takes for
+            // E2E to be unlocked and the recipient's key to be discovered,
+            // instead of giving up. The optimistic message bubble added
+            // above already shows a "sending" state for exactly this
+            // duration — same UX as waiting on a slow network request, no
+            // separate spinner/timeout needed here.
+            //
+            // The only way this throws is a genuine, current business state
+            // (E2ENoRecipientKeyError — the recipient has never registered
+            // an encryption key at all) rather than a transient hiccup; that
+            // propagates up to the caller's catch block below, which queues
+            // for retry / surfaces a real error instead of silently sending
+            // plaintext.
             if (requestBody.type === 'text' && typeof content === 'string' && _recipientUserIdForEncryption && window.KynectaE2E) {
-                try {
-                    // FIX-ROOT-CAUSE-SEND-HANG: encryptForChat can internally retry a
-                    // stalled key fetch up to ~20s (see e2e-encryption.js). That's
-                    // an acceptable backend-side ceiling, but the Send button itself
-                    // shouldn't ever sit in "loading" longer than this outer cap —
-                    // race it against a timeout and fall back to plaintext so the
-                    // message still goes out instead of hanging indefinitely.
-                    // FIX-COLD-START-TIMEOUT: was 8000ms, which is shorter than a
-                    // genuine Render free-tier cold start (can take 10-30s+) — every
-                    // first message sent right after waking the backend from sleep
-                    // hit this cap and silently downgraded to plaintext even though
-                    // the key fetch would have succeeded a few seconds later. Now
-                    // that openChatWithUserInUI fires both prefetchRecipientKey() and
-                    // a /health wake ping the moment the chat opens (see there), the
-                    // fetch already has a head start by the time Send is pressed, so
-                    // raising this cap mainly helps fast typists / cold starts rather
-                    // than making genuinely-stuck sends wait any longer than before.
-                    // FIX (OUTER-TIMEOUT-SHORTER-THAN-INNER-RETRIES): the key-fetch
-                    // logic in e2e-encryption.js already retries a transient failure
-                    // up to 3 times with backoff (each attempt bounded at 6s), which
-                    // can legitimately take ~20s total on a cold backend — but this
-                    // outer race was cutting it off at 15s, before those retries had
-                    // a chance to finish succeeding. That meant the well-designed
-                    // retry logic was largely moot on the send path: this outer
-                    // timeout almost always won the race first. Raised to safely
-                    // exceed the inner worst case, and — since a definitive "no
-                    // recipient key" already resolves fast via a 404 short-circuit
-                    // inside encryptForChat rather than hitting this timeout at all —
-                    // hitting this outer timeout now really does mean "still
-                    // genuinely stuck," not "gave up too early." One more attempt is
-                    // given before ever falling back to plaintext, since prior data
-                    // showed most cold-start timeouts succeed on a second try shortly
-                    // after the backend finishes waking.
-                    const _encryptTimeout = () => new Promise((_, reject) =>
-                        setTimeout(() => reject(new Error('E2E encrypt timeout')), 24000));
-                    try {
-                        requestBody.content = await Promise.race([
-                            window.KynectaE2E.encryptForChat(content, conversationId, _recipientUserIdForEncryption),
-                            _encryptTimeout()
-                        ]);
-                    } catch (firstErr) {
-                        console.warn('[ChatManager] E2E encryption timed out once, retrying before falling back to plaintext:', firstErr?.message);
-                        requestBody.content = await Promise.race([
-                            window.KynectaE2E.encryptForChat(content, conversationId, _recipientUserIdForEncryption),
-                            _encryptTimeout()
-                        ]);
-                    }
-                } catch (e) {
-                    console.warn('[ChatManager] E2E encryption failed/timed out after retry, sending as plaintext:', e?.message);
-                }
+                requestBody.content = await window.KynectaE2E.encryptForChat(content, conversationId, _recipientUserIdForEncryption);
             }
 
             // ── PHASE10: HybridTransportRuntime — THE canonical transport path ──────

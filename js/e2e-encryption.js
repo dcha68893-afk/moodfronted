@@ -202,6 +202,24 @@
   let _myPubKeyB64 = null;  // base64 SPKI
   let _myKeyId     = null;
   let _enabled     = false;
+
+  // FIX-NO-PLAINTEXT-FALLBACK: previously any caller that needed encryption
+  // before init() had finished (or before it had even been called at all —
+  // see message.html/group.html's tryInitE2E, which used to give up
+  // permanently if the unlock password wasn't in sessionStorage yet) got a
+  // silent `return plaintext` from encryptForChat. That is a silent E2E
+  // bypass: a real message goes out over the wire — and gets stored — as
+  // plaintext, with nothing in the UI to say so. Per explicit product
+  // decision, this module never does that. Instead, anything that needs
+  // `_enabled` waits on this gate, which init() resolves the moment keys are
+  // actually ready. There is no timeout here on purpose: the caller (the
+  // Send button) is expected to just sit in "sending…" until this resolves,
+  // exactly like it already waits on a slow network request.
+  let _enabledGate;
+  function _newEnabledGate() { _enabledGate = new Promise(resolve => { _enabledGate.resolve = resolve; }); }
+  _newEnabledGate();
+  function _markEnabled() { _enabled = true; _enabledGate.resolve(); }
+  function _waitForEnabled() { return _enabled ? Promise.resolve() : _enabledGate; }
   // GROUP ENCRYPTION: a CryptoKey derived once per session (during init,
   // from the same password) and cached in memory, used to encrypt Sender
   // Keys before they're written to localStorage. Re-deriving via PBKDF2
@@ -253,7 +271,7 @@
         _myPrivKey    = await importPrivateKey(pkcs8);
         _myPubKeyB64  = obj.pubKey;
         _myKeyId      = obj.keyId;
-        _enabled      = true;
+        _markEnabled();
         console.log('[E2E] ✅ Keys loaded from storage');
         return true;
       } catch (e) {
@@ -282,7 +300,7 @@
             _myPrivKey     = await importPrivateKey(pkcs8);
             _myPubKeyB64   = obj.pubKey;
             _myKeyId       = obj.keyId;
-            _enabled       = true;
+            _markEnabled();
             console.log('[E2E] ✅ Keys recovered via legacy password — migrating storage to new wrap secret.');
             try {
               const reEncPrivKey = await _encryptPrivateKey(pkcs8, password);
@@ -296,7 +314,21 @@
             console.warn('[E2E] Legacy password also failed to decrypt stored keys:', legacyErr.message);
           }
         }
-        console.warn('[E2E] No usable password recovered this identity — generating a new keypair as a last resort.');
+        // FIX-KEY-REGEN-REGRESSION (part 2): this used to fall through to the
+        // "Generate new key pair" branch below on ANY decrypt failure,
+        // silently orphaning the account's real identity key and publishing
+        // a brand-new one to the server — permanently breaking decryption
+        // for everyone who already has this person's old public key cached.
+        // A stored key existing but failing to decrypt with every password
+        // we have almost always means the caller passed the wrong secret
+        // (e.g. a stale/partial value read from sessionStorage during a
+        // race), not "this identity needs to be recreated." Refuse to
+        // regenerate here — surface a distinct, catchable failure instead so
+        // the UI can ask the person to unlock again, exactly like a wrong
+        // password anywhere else in the app.
+        console.warn('[E2E] Could not unlock existing identity key with any available password — NOT generating a replacement (would orphan the real identity). Will retry when a working password is available.');
+        try { document.dispatchEvent(new CustomEvent('kyn:e2eUnlockFailed')); } catch (_) {}
+        return false;
       }
     }
 
@@ -336,7 +368,7 @@
 
     _myPrivKey   = kp.privateKey;
     _myPubKeyB64 = pubKeyB64;
-    _enabled     = true;
+    _markEnabled();
     console.log('[E2E] ✅ New key pair generated and registered');
     return true;
   }
@@ -361,7 +393,26 @@
   // ── Get recipient's public key ─────────────────────────────────────────────
   // forceRefresh=true skips both the in-memory and persisted cache and goes
   // straight to the network — used by decryptFromChat's stale-key retry.
-  async function _getRecipientPublicKey(userId, forceRefresh) {
+  //
+  // FIX-NO-FALLBACK-WAIT-FOR-KEY: this used to give up after 3 attempts
+  // (~500ms+1000ms+1500ms of backoff) and return null, which every caller
+  // then treated as "ok, send/receive as plaintext." That is exactly
+  // backwards for a brand-new chat opened from Friends/Calls/Status: the
+  // recipient's key is almost always just a beat away — either their key
+  // row genuinely hasn't synced to a read replica yet, or (see moodchat
+  // routes/encryption.js) the relationship check used to require an
+  // existing chat row that doesn't exist yet for a chat's very first
+  // message. Instead of giving up, this now keeps retrying with a capped
+  // backoff indefinitely, and de-dupes concurrent callers — 
+  // prefetchRecipientKey() firing on chat-open and encryptForChat() firing
+  // on Send both await the exact same in-flight attempt instead of racing
+  // two separate fetch loops. The ONLY way this resolves to null is a
+  // definitive, current "this person has never registered an encryption
+  // key" (404) — a real business state, not a transient failure — which
+  // callers surface as an error rather than a silent plaintext downgrade.
+  const _inflightKeyFetch = new Map(); // userId → Promise<entry|null>
+
+  async function _getRecipientPublicKey(userId, forceRefresh, signal) {
     if (!forceRefresh && PUB_CACHE.has(userId)) return PUB_CACHE.get(userId);
 
     // FIX-ROOT-CAUSE-DM-DECRYPT-FRAGILE: check the persistent store before
@@ -379,60 +430,64 @@
       } catch (_) { /* corrupted entry — fall through to re-fetch */ }
     }
 
-    // Retry a transient failure (cold start, timeout, brief 401 during token
-    // refresh) a couple of times with backoff before giving up. Previously a
-    // single failed fetch here permanently broke E2E for that person for the
-    // rest of the session — no retry, no memory of the failure.
-    let lastErr = null;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      if (attempt > 0) await _sleep(500 * attempt);
-      try {
-        // FIX-ROOT-CAUSE-SEND-RECEIVE-HANG: fetch() has no default timeout —
-        // if this request stalls (dropped packet, cold/overloaded backend,
-        // browser's per-origin connection limit queuing it behind other
-        // in-flight requests), it never resolves OR rejects, so this await
-        // — and therefore the caller's await (encryptForChat on the SEND
-        // path, decryptFromChat on the RECEIVE/render path) — hangs forever.
-        // On send that's the "stuck loading, message never goes" symptom;
-        // on receive it's "socket delivered message:new (so a notification
-        // can fire) but handleRealtimePayload never finishes awaiting
-        // decrypt, so the message never reaches the chat panel." Bounding
-        // every attempt with an AbortController guarantees this always
-        // settles, so callers fall back to plaintext/placeholder instead of
-        // hanging the whole pipeline.
-        const _keyFetchController = new AbortController();
-        const _keyFetchTimeout = setTimeout(() => _keyFetchController.abort(), 6000);
-        let resp;
+    if (_inflightKeyFetch.has(userId)) return _inflightKeyFetch.get(userId);
+
+    const promise = (async () => {
+      let attempt = 0;
+      while (true) {
+        if (signal?.aborted) return null;
+        attempt++;
         try {
-          resp = await fetch(`${await _apiBase()}/api/encryption/keys/${userId}`, {
-            headers: await _authHeaders(),
-            credentials: 'include',
-            signal: _keyFetchController.signal,
-          });
-        } finally {
-          clearTimeout(_keyFetchTimeout);
+          // FIX-ROOT-CAUSE-SEND-RECEIVE-HANG: fetch() has no default timeout —
+          // if this request stalls (dropped packet, cold/overloaded backend,
+          // browser's per-origin connection limit queuing it behind other
+          // in-flight requests), it never resolves OR rejects. Bound every
+          // attempt with an AbortController so a stalled attempt always
+          // settles and the retry loop moves on to try again, instead of
+          // hanging (old behaviour) or silently giving up into plaintext
+          // (older behaviour still).
+          const _keyFetchController = new AbortController();
+          const _keyFetchTimeout = setTimeout(() => _keyFetchController.abort(), 8000);
+          let resp;
+          try {
+            resp = await fetch(`${await _apiBase()}/api/encryption/keys/${userId}`, {
+              headers: await _authHeaders(),
+              credentials: 'include',
+              signal: _keyFetchController.signal,
+            });
+          } finally {
+            clearTimeout(_keyFetchTimeout);
+          }
+          if (!resp.ok) {
+            // A definitive "no key" (404) is a real state, not a transient
+            // failure — this person genuinely has not registered a key yet.
+            // Don't spin on that forever.
+            if (resp.status === 404) return null;
+            throw new Error(`Key fetch failed: ${resp.status}`);
+          }
+          const data = await resp.json();
+          if (!data.data?.publicKey) return null;
+          const key = await importPublicKey(data.data.publicKey);
+          const entry = { key, keyId: data.data.keyId };
+          PUB_CACHE.set(userId, entry);
+          store[userId] = { pub: data.data.publicKey, keyId: data.data.keyId };
+          _savePubKeyStore(store);
+          return entry;
+        } catch (e) {
+          console.warn(`[E2E] Recipient key fetch attempt ${attempt} for user ${userId} did not succeed yet, still waiting:`, e?.message);
+          try {
+            document.dispatchEvent(new CustomEvent('kyn:e2eWaitingForKey', { detail: { userId, attempt } }));
+          } catch (_) {}
+          // Capped exponential backoff: 500ms, 1s, 2s, 4s, then holds at 8s.
+          // No upper bound on attempts — the caller (e.g. the Send button)
+          // is meant to keep waiting rather than downgrade to plaintext.
+          await _sleep(Math.min(500 * Math.pow(2, attempt - 1), 8000));
         }
-        if (!resp.ok) {
-          // Don't retry a definitive "no key" (404) — only retry things that
-          // look transient (5xx, or a 401 that might resolve after refresh).
-          if (resp.status === 404) return null;
-          lastErr = new Error(`Key fetch failed: ${resp.status}`);
-          continue;
-        }
-        const data = await resp.json();
-        if (!data.data?.publicKey) return null;
-        const key = await importPublicKey(data.data.publicKey);
-        const entry = { key, keyId: data.data.keyId };
-        PUB_CACHE.set(userId, entry);
-        store[userId] = { pub: data.data.publicKey, keyId: data.data.keyId };
-        _savePubKeyStore(store);
-        return entry;
-      } catch (e) {
-        lastErr = e;
       }
-    }
-    console.warn('[E2E] Failed to fetch recipient public key after retries:', lastErr && lastErr.message);
-    return null;
+    })().finally(() => _inflightKeyFetch.delete(userId));
+
+    _inflightKeyFetch.set(userId, promise);
+    return promise;
   }
 
   // ── FIX (SEND-HANG-NON-HISTORY-OPEN): warm the recipient's public key cache
@@ -452,14 +507,34 @@
   // fetch+retry if this hasn't finished or failed.
   function prefetchRecipientKey(userId) {
     if (!userId) return;
-    try { _getRecipientPublicKey(userId).catch(() => {}); } catch (_) {}
+    // Returns the same in-flight/queued promise a later encryptForChat()
+    // call for this userId will also get from _getRecipientPublicKey's
+    // dedupe map — so the warm-up started here on chat-open IS the wait
+    // encryptForChat() does on Send, not a second, separate fetch.
+    try { return _getRecipientPublicKey(userId).catch(() => null); } catch (_) { return null; }
   }
 
+  // Distinct, catchable error types so callers (messages-core.operations.js)
+  // can tell "this person has genuinely never set up encryption" apart from
+  // "E2E isn't unlocked in this browser session yet" instead of both being
+  // silently swallowed into a plaintext send.
+  function E2ENotUnlockedError(message) { this.name = 'E2ENotUnlockedError'; this.message = message || 'Secure messaging is not unlocked in this session'; }
+  E2ENotUnlockedError.prototype = Object.create(Error.prototype);
+  function E2ENoRecipientKeyError(message) { this.name = 'E2ENoRecipientKeyError'; this.message = message || 'Recipient has not set up encryption'; }
+  E2ENoRecipientKeyError.prototype = Object.create(Error.prototype);
+
   // ── Encrypt a message for a chat ──────────────────────────────────────────
-  async function encryptForChat(plaintext, chatId, recipientUserId) {
-    if (!_enabled || !_myPrivKey) return plaintext; // fallback to plaintext if keys not ready
-    const recipient = await _getRecipientPublicKey(recipientUserId);
-    if (!recipient) return plaintext;
+  // FIX-NO-PLAINTEXT-FALLBACK: this never returns plaintext. If E2E isn't
+  // unlocked yet, or the recipient's key hasn't been discovered yet, this
+  // simply waits (see _waitForEnabled / _getRecipientPublicKey above) —
+  // callers (the Send button) are expected to stay in "sending…" for that
+  // duration, exactly as they already do for a slow network request. The
+  // returned promise only rejects for a genuine, current business state
+  // (recipient has no registered key at all — E2ENoRecipientKeyError).
+  async function encryptForChat(plaintext, chatId, recipientUserId, opts) {
+    await _waitForEnabled();
+    const recipient = await _getRecipientPublicKey(recipientUserId, false, opts?.signal);
+    if (!recipient) throw new E2ENoRecipientKeyError(`User ${recipientUserId} has not registered an encryption key`);
 
     const sharedBits = await _computeSharedBits(_myPrivKey, recipient.key);
     const aesKey     = await _hkdf(sharedBits, _chatContext(chatId, recipientUserId));
@@ -674,6 +749,12 @@
     decryptFromChat,
     // FIX (SEND-HANG-NON-HISTORY-OPEN): see prefetchRecipientKey definition above.
     prefetchRecipientKey,
+    // FIX-NO-PLAINTEXT-FALLBACK: catchable error constructors so callers can
+    // distinguish "not unlocked yet" / "recipient has no key" from other
+    // failures instead of guessing off error.message text.
+    E2ENotUnlockedError,
+    E2ENoRecipientKeyError,
+    waitForEnabled: _waitForEnabled,
     encryptAttachment,
     decryptAttachment,
     getSafetyNumbers,
@@ -700,6 +781,7 @@
       localStorage.removeItem(STORE_KEY);
       _myPrivKey = null; _myPubKeyB64 = null; _myKeyId = null; _enabled = false;
       PUB_CACHE.clear();
+      _newEnabledGate(); // future callers should wait again, not see a stale "ready" gate
     },
   };
 

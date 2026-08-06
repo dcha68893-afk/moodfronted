@@ -1762,7 +1762,22 @@
 
                 let pw = null;
                 try { pw = sessionStorage.getItem('kyn_e2e_pw_session'); } catch (_) {}
-                if (!pw) return; // not logged in this session, or password not available
+                if (!pw) {
+                    // FIX-NO-PERMANENT-GIVEUP: this used to just `return` here
+                    // forever, so E2E silently never initialized for the rest
+                    // of this page load whenever the password write hadn't
+                    // landed in sessionStorage yet at the moment this ran —
+                    // e.g. a "quick login" / auto-login from a persisted
+                    // session (no password typed this tab at all, so
+                    // kyn_e2e_pw_session is never set until the unlock prompt
+                    // — see index.html — completes), or a plain load-order
+                    // race against index.html/chat.html's own write. Keep
+                    // polling with backoff instead of giving up — the moment
+                    // something sets the password (fresh login in another
+                    // frame, or the unlock modal), this picks it up and
+                    // initializes without needing a page reload.
+                    return setTimeout(tryInitE2E, 500);
+                }
                 // FIX (KEY-REGEN-REGRESSION migration support): pass the raw
                 // legacy password too, if this session stashed one, so init()
                 // can recover and migrate a pre-existing key instead of
@@ -1771,12 +1786,32 @@
                 try { legacyPw = sessionStorage.getItem('kyn_e2e_pw_legacy_session'); } catch (_) {}
 
                 window.KynectaE2E.init(pw, legacyPw).then(function (ok) {
-                    if (ok) console.log('[message.html] ✅ E2E encryption initialized');
+                    if (ok) {
+                        console.log('[message.html] ✅ E2E encryption initialized');
+                    } else {
+                        // init() returned false without throwing: a stored key
+                        // exists but didn't decrypt with any password we have
+                        // (see e2e-encryption.js's FIX-KEY-REGEN-REGRESSION
+                        // part 2 — it deliberately does NOT regenerate/orphan
+                        // the identity in this case). Keep retrying in case a
+                        // more correct password shows up later (e.g. the
+                        // person re-enters it via an unlock prompt after a
+                        // 'kyn:e2eUnlockFailed' event) instead of leaving E2E
+                        // permanently off for this tab.
+                        console.warn('[message.html] E2E init did not unlock existing keys — will retry');
+                        setTimeout(tryInitE2E, 2000);
+                    }
                 }).catch(function (e) {
-                    console.warn('[message.html] E2E init failed:', e && e.message);
+                    console.warn('[message.html] E2E init failed, will retry:', e && e.message);
+                    setTimeout(tryInitE2E, 2000);
                 });
             }
             tryInitE2E();
+            // If index.html's unlock prompt (or any other frame) stores a
+            // working password after this already gave up waiting on this
+            // exact poll cycle, re-check immediately rather than waiting out
+            // the rest of the backoff interval.
+            document.addEventListener('kyn:e2eUnlockRetry', tryInitE2E);
         })();
     </script>
     <script src="js/voice-recorder.js" defer></script>

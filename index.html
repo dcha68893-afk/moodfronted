@@ -2642,6 +2642,36 @@
                     <button class="btn btn-secondary" id="useDifferentAccountBtn"><i class="fas fa-user"></i> Different Account</button>
                 </div>
             </div>
+
+            <!-- FIX-E2E-QUICK-LOGIN-NEVER-UNLOCKED: shown by __ensureE2EUnlocked()
+                 whenever someone is about to enter the app via a route that never
+                 asked for their password (Quick Login / auto-restored session),
+                 since that password is the only thing that can unlock their
+                 stored E2E identity key. Deliberately has no "skip" action. -->
+            <div class="e2e-unlock-overlay" id="e2eUnlockModal">
+                <div class="e2e-unlock-box">
+                    <div class="e2e-unlock-icon"><i class="fas fa-lock"></i></div>
+                    <h3>Unlock secure messaging</h3>
+                    <p>Enter <span id="e2eUnlockName">your account</span>'s password once to unlock end-to-end encryption for this device. This only decrypts your own key locally — it isn't sent anywhere.</p>
+                    <form id="e2eUnlockForm">
+                        <input type="password" id="e2eUnlockPassword" placeholder="Password" autocomplete="current-password" required>
+                        <div class="e2e-unlock-error" id="e2eUnlockError"></div>
+                        <button type="submit" class="btn btn-success" style="width:100%;margin-top:10px;">Unlock</button>
+                    </form>
+                    <a href="#" id="e2eUnlockLogout" class="e2e-unlock-logout">Not you? Log out</a>
+                </div>
+            </div>
+            <style>
+                .e2e-unlock-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 9999; align-items: center; justify-content: center; }
+                .e2e-unlock-overlay.visible { display: flex; }
+                .e2e-unlock-box { background: var(--card-bg, #1e1e2e); color: var(--text-color, #fff); border-radius: 14px; padding: 28px 24px; max-width: 340px; width: 90%; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,0.4); }
+                .e2e-unlock-icon { font-size: 28px; margin-bottom: 8px; opacity: 0.85; }
+                .e2e-unlock-box h3 { margin: 0 0 8px; }
+                .e2e-unlock-box p { font-size: 13px; opacity: 0.75; margin: 0 0 16px; line-height: 1.4; }
+                .e2e-unlock-box input { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.06); color: inherit; box-sizing: border-box; }
+                .e2e-unlock-error { min-height: 16px; color: #ff6b6b; font-size: 12px; margin-top: 6px; }
+                .e2e-unlock-logout { display: inline-block; margin-top: 14px; font-size: 12px; opacity: 0.6; color: inherit; text-decoration: underline; }
+            </style>
             
             <div class="auth-container" id="auth-container">
                 <div class="auth-header">
@@ -4072,10 +4102,25 @@
                     const token = window.SessionState.getToken();
                     const user = window.SessionState.getUser();
                     if (token && user) {
-                        window.AppRuntimeAuthority?.persistSession?.({ token: token, user: user });
-                        window.currentUser = user;
-                        window.CoreUtils.showNotification('Success', 'Quick login successful!', 'success');
-                        console.log('[Auth] Quick login successful, staying on current page');
+                        // FIX-E2E-QUICK-LOGIN-NEVER-UNLOCKED: Quick Login (and the
+                        // auto-restored-session "Enter Chat" path below) used to
+                        // finish here without ever asking for the account
+                        // password. js/e2e-encryption.js's init() can only unlock
+                        // the person's encryption keys with that password — with
+                        // no password, KynectaE2E.enabled stayed false for the
+                        // entire session. Per the no-plaintext-fallback fix in
+                        // e2e-encryption.js / messages-core.operations.js, that
+                        // no longer means "silently send unencrypted" — it now
+                        // means "the Send button waits forever" instead, which is
+                        // just as broken from this person's side. Gate entry on
+                        // actually unlocking first, exactly the way a fresh
+                        // password-login already does via finalizeLoginSuccess().
+                        window.__ensureE2EUnlocked(user, () => {
+                            window.AppRuntimeAuthority?.persistSession?.({ token: token, user: user });
+                            window.currentUser = user;
+                            window.CoreUtils.showNotification('Success', 'Quick login successful!', 'success');
+                            console.log('[Auth] Quick login successful, staying on current page');
+                        });
                     } else {
                         window.CoreUtils.showNotification('Error', 'Session expired. Please login again.', 'error');
                         card.classList.remove('visible');
@@ -4099,6 +4144,91 @@
                 });
             }
         }
+
+        // ── FIX-E2E-QUICK-LOGIN-NEVER-UNLOCKED ──────────────────────────────
+        // Single place that guarantees `kyn_e2e_pw_session` is populated
+        // before letting the person proceed into chat.html/message.html,
+        // regardless of which entry point got them there (Quick Login, or
+        // the "Enter Chat" button on an auto-restored session — see
+        // initializeDashboardButtons below). If it's already set (a normal
+        // password login this tab, or a previous unlock this session),
+        // resolves immediately with no UI shown. Otherwise shows a small
+        // password prompt; submitting it unlocks E2E for this tab exactly
+        // like typing the password on the login form does. There is
+        // deliberately no "skip" option that lets someone through
+        // unencrypted-by-default — the escape hatch is "Log out" (switch
+        // accounts / re-authenticate normally), not "continue without
+        // security."
+        function __ensureE2EUnlocked(user, afterFn) {
+            try {
+                if (sessionStorage.getItem('kyn_e2e_pw_session')) return afterFn();
+            } catch (_) { /* sessionStorage unavailable — fall through to prompt */ }
+
+            const modal      = document.getElementById('e2eUnlockModal');
+            const form       = document.getElementById('e2eUnlockForm');
+            const input      = document.getElementById('e2eUnlockPassword');
+            const errorEl    = document.getElementById('e2eUnlockError');
+            const nameEl     = document.getElementById('e2eUnlockName');
+            const logoutLink = document.getElementById('e2eUnlockLogout');
+            if (!modal || !form || !input) { afterFn(); return; } // markup missing — don't hard-block login
+
+            nameEl.textContent = (user && (user.displayName || user.username)) || 'your account';
+            errorEl.textContent = '';
+            input.value = '';
+            modal.classList.add('visible');
+            input.focus();
+
+            function cleanup() {
+                modal.classList.remove('visible');
+                form.removeEventListener('submit', onSubmit);
+                logoutLink.removeEventListener('click', onLogout);
+            }
+            async function onSubmit(ev) {
+                ev.preventDefault();
+                const pw = input.value;
+                if (!pw) { errorEl.textContent = 'Enter your password to continue.'; return; }
+                try { sessionStorage.setItem('kyn_e2e_pw_session', pw); } catch (_) {}
+                // Verify it actually unlocks the stored identity key before
+                // letting the person in — a wrong password should not look
+                // like success and then silently leave messaging waiting
+                // forever. window.KynectaE2E may not be loaded on this page
+                // at all (it's only wired into message.html/group.html); in
+                // that case we can't verify here, so just accept it — those
+                // pages will retry init() themselves and, on a genuine
+                // mismatch, dispatch 'kyn:e2eUnlockFailed' (see
+                // js/e2e-encryption.js) which we also listen for below.
+                if (window.KynectaE2E) {
+                    let legacyPw = null;
+                    try { legacyPw = sessionStorage.getItem('kyn_e2e_pw_legacy_session'); } catch (_) {}
+                    const ok = await window.KynectaE2E.init(pw, legacyPw).catch(() => false);
+                    if (!ok) {
+                        errorEl.textContent = 'That password didn\'t unlock secure messaging. Please try again.';
+                        try { sessionStorage.removeItem('kyn_e2e_pw_session'); } catch (_) {}
+                        return;
+                    }
+                }
+                cleanup();
+                afterFn();
+            }
+            function onLogout() {
+                cleanup();
+                window.AppRuntimeAuthority?.clearSession?.({ emit: true, reason: 'e2e-unlock-cancelled' });
+                window.SessionState?.clearToken?.();
+                window.SessionState?.clearUser?.();
+                switchForm('login');
+            }
+            form.addEventListener('submit', onSubmit);
+            logoutLink.addEventListener('click', onLogout);
+        }
+        window.__ensureE2EUnlocked = __ensureE2EUnlocked;
+        // If a page that already showed this same modal logic (or
+        // js/e2e-encryption.js itself) reports a password that looked right
+        // at storage-time but actually failed to decrypt the stored key,
+        // let the person immediately retry instead of being stuck on a
+        // false "unlocked" state.
+        document.addEventListener('kyn:e2eUnlockFailed', () => {
+            try { sessionStorage.removeItem('kyn_e2e_pw_session'); } catch (_) {}
+        });
         
         function initializeDashboardButtons() {
             const logout = document.getElementById('logoutBtn');
@@ -4113,7 +4243,13 @@
                 });
             }
             const enter = document.getElementById('enterChatBtn');
-            if (enter) enter.addEventListener('click', () => { window.location.href = 'chat.html'; });
+            if (enter) enter.addEventListener('click', () => {
+                // FIX-E2E-QUICK-LOGIN-NEVER-UNLOCKED: same gate as Quick Login
+                // above — this button is the other way to enter the app on an
+                // auto-restored session without ever typing a password.
+                const user = window.SessionState?.getUser?.() || window.currentUser;
+                window.__ensureE2EUnlocked(user, () => { window.location.href = 'chat.html'; });
+            });
         }
         
         function switchForm(formName) {
