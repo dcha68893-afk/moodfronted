@@ -149,8 +149,39 @@ const ChatManager = {
         // network failure (never silently substitutes a fake local object
         // for a real backend error), so callers can simply await it and know
         // they either got the real chat or a genuine, reportable failure.
-        async startOrGetDirectConversation(userId, name, avatar, _attempt = 0) {
+        // FIX-INSTANT-RESOLVE-KNOWN-CHAT (root cause of "instant + reliable
+        // from Chat History, but slow/failing from Friend/Calls/Status even
+        // after the E2E-prefetch and lifecycle-guard fixes"): Chat History
+        // never pays a network round trip to find out WHICH chat it's
+        // opening — the conversation object its row click hands to
+        // openConversation() is already sitting in this._conversations from
+        // the earlier fetchConversations() load, so the chat panel, the
+        // real chatId, and (via prefetchRecipientKey/PUB_KEY_STORE) the
+        // recipient's already-cached E2E key are all available the same
+        // instant the panel opens. Every other entry point used to call
+        // POST /chats/start completely unconditionally — even for someone
+        // this session (or a previous session) has already messaged and
+        // whose conversation+key are both already cached locally — paying a
+        // full network round trip (with retry/backoff on a cold backend)
+        // before Send was even usable. findExistingConversation() already
+        // does exactly the local lookup needed here; use it first so a
+        // known chat resolves synchronously, exactly like Chat History
+        // does, and only fall back to the network for a genuinely new pair.
+        // Still refresh from the server in the background (never blocking
+        // the caller) so a locally-cached copy can't go silently stale.
+        async startOrGetDirectConversation(userId, name, avatar, _attempt = 0, _skipCache = false) {
             if (!userId) throw new Error('startOrGetDirectConversation: missing userId');
+
+            if (!_skipCache) {
+                const _local = this.findExistingConversation(userId);
+                if (_local) {
+                    // Background refresh, fire-and-forget — keeps cached
+                    // fields from drifting without making the caller wait.
+                    this.startOrGetDirectConversation(userId, name, avatar, 0, true).catch(() => {});
+                    try { window.KynectaE2E?.prefetchRecipientKey?.(userId); } catch (_) {}
+                    return _local;
+                }
+            }
             try {
                 const response = await makeApiRequest('/chats/start', 'POST', { userId });
                 const chat = response?.data?.chat || response?.chat || response?.data || response;
