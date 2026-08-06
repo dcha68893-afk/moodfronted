@@ -216,7 +216,27 @@
   // Send button) is expected to just sit in "sending…" until this resolves,
   // exactly like it already waits on a slow network request.
   let _enabledGate;
-  function _newEnabledGate() { _enabledGate = new Promise(resolve => { _enabledGate.resolve = resolve; }); }
+  // FIX-BROKEN-ENABLED-GATE (root cause of messages hanging in "sending..."
+  // forever, and of the "_newEnabledGate ... Cannot set properties of
+  // undefined (setting 'resolve')" crash on every page load / clearKeys()):
+  // `new Promise(resolve => { _enabledGate.resolve = resolve; })` runs its
+  // executor SYNCHRONOUSLY, before the `_enabledGate = ...` assignment around
+  // it has actually completed — so inside the executor, `_enabledGate` still
+  // pointed at its OLD value (undefined the first time this ever ran).
+  // `undefined.resolve = resolve` threw immediately, every time, so
+  // `_enabledGate.resolve` was never actually set. `_markEnabled()` further
+  // down (which encryption init calls once keys are really ready) then also
+  // threw ("_enabledGate.resolve is not a function") instead of ever
+  // resolving the gate. Net effect: `_enabled` could never become true and
+  // `_waitForEnabled()` — which the Send button awaits before it will send,
+  // by explicit design per the comment below — could never resolve. Fixed by
+  // capturing the resolver in a local variable first and attaching it to the
+  // gate only after the Promise object actually exists.
+  function _newEnabledGate() {
+    let _resolve;
+    _enabledGate = new Promise(resolve => { _resolve = resolve; });
+    _enabledGate.resolve = _resolve;
+  }
   _newEnabledGate();
   function _markEnabled() { _enabled = true; _enabledGate.resolve(); }
   function _waitForEnabled() { return _enabled ? Promise.resolve() : _enabledGate; }
