@@ -442,8 +442,32 @@
         };
     }
 
+    // FIX-ROOT-CAUSE-SEND-FAILS-NON-HISTORY-OPEN: this used to require
+    // currentState === ACTIVE with zero tolerance. But __guardAction()
+    // (called immediately before this, at the top of sendMessage() and
+    // several other actions) already treats "session valid but lifecycle
+    // state hasn't caught up to ACTIVE yet" as allowed, and force-promotes
+    // the state via ensureActive()'s same check — this function just
+    // silently re-blocked what __guardAction had already let through, with
+    // no bypass of its own. A chat opened from Chat History has normally
+    // been sitting open for a while, so its module is long since ACTIVE by
+    // the time the user types and hits Send. A chat opened from Friend/
+    // Calls/Status/Marketplace is far more likely to still be mid parent-
+    // handshake (WAIT_PARENT/INITIALIZING) at that exact instant — and
+    // since 'module_not_active' was never in messages-ui.js's retryable
+    // error set (unlike 'no_conversation'/'invalid_conversation'), that
+    // first Send attempt failed outright instead of quietly retrying, which
+    // is exactly the "works from chat history, not from other modules"
+    // symptom. Mirror __guardAction's own bypass here instead of leaving a
+    // second, stricter gate right behind it.
     function canSendUserMessages() {
-        return currentState === LIFECYCLE_STATES.ACTIVE && _validSessionSet && __isValidSession(_storedSession);
+        if (currentState === LIFECYCLE_STATES.ACTIVE) return true;
+        if (_validSessionSet && _storedSession && __isValidSession(_storedSession)) {
+            console.warn(`[${MODULE_NAME}][LifecycleGuard] canSendUserMessages: session valid but state=${currentState} — forcing ACTIVE`);
+            setState(LIFECYCLE_STATES.ACTIVE, 'forced_by_canSendUserMessages');
+            return true;
+        }
+        return false;
     }
 
     function resetLifecycle() {

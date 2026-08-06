@@ -10267,7 +10267,14 @@ Type: ${message.type || 'text'}`;
                             });
                             Promise.resolve(_r).then((resp) => {
                                 if (resp && resp.success === false) {
-                                    const _retryable = resp.error === 'no_conversation' || resp.error === 'invalid_conversation';
+                                    // FIX: 'module_not_active' added alongside the existing two —
+                                    // same timing race (module lifecycle/session handshake still
+                                    // settling right after opening from Friend/Calls/Status/
+                                    // Marketplace), see canSendUserMessages() fix in
+                                    // messages-core.bootstrap.js for the primary fix; this is
+                                    // defense-in-depth for the narrow window where session itself
+                                    // hasn't arrived from the parent yet.
+                                    const _retryable = resp.error === 'no_conversation' || resp.error === 'invalid_conversation' || resp.error === 'module_not_active';
                                     if (_retryable && attempt < 3) {
                                         setTimeout(() => _attemptResend(attempt + 1), 500 * (attempt + 1));
                                     } else {
@@ -10283,7 +10290,7 @@ Type: ${message.type || 'text'}`;
                             });
                         };
 
-                        const _retryable = response.error === 'no_conversation' || response.error === 'invalid_conversation';
+                        const _retryable = response.error === 'no_conversation' || response.error === 'invalid_conversation' || response.error === 'module_not_active';
                         if (_retryable) {
                             setTimeout(() => _attemptResend(1), 500);
                         } else {
