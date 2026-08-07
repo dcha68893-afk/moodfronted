@@ -2193,6 +2193,12 @@
                 if (!_ep.chatId && data && data.conversationId) _ep.chatId = data.conversationId;
                 try { document.dispatchEvent(new CustomEvent('message:new', { detail: _ep })); } catch(_) {}
                 console.log('[Message HTML] FIX new message:', _nt, 'chatId:', _ep.chatId);
+                // PHASE24 FORENSIC: STAGE9 — receiver socket event observed.
+                // Grep this traceId (echoed from the sender's send-time trace)
+                // against the sender's and server's logs for the same message.
+                if (_ep && _ep.traceId) {
+                    console.log(`[FORENSIC][${_ep.traceId}] STAGE9_RECEIVER_SOCKET_EVENT | event=message:new | chatId=${_ep.chatId} | messageId=${_ep.id || _ep.serverId || 'n/a'} | ts=${Date.now()}`);
+                }
             } else if (_nt === 'message:sent' || _nt === 'message_sent') {
                 try { document.dispatchEvent(new CustomEvent('message:sent',          { detail: _p })); } catch(_) {}
                 try { window.dispatchEvent(new CustomEvent('messageStatusUpdated',    { detail: { messageId: _p.localId || _p.messageId, status: 'sent', serverId: _p.serverId || _p.id } })); } catch(_) {}

@@ -395,13 +395,33 @@
             if (since) url += `&after=${new Date(since).toISOString()}`;
 
             const doFetch = async () => {
-                const res = await fetch(url, {
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-                    },
-                    credentials: 'include'
-                });
+                // PHASE24 ROOT-CAUSE FIX: this fetch() had no timeout at all. On a
+                // stalling mobile connection (no clean error, the socket just never
+                // responds) this call hangs forever. syncChat() awaits it directly,
+                // and fetchMessages()'s finally block (which clears
+                // _loadingMessagesByChat and turns off the loading spinner) never
+                // runs until this promise settles. Because _loadingMessagesByChat is
+                // keyed per-conversation, once one entry point triggers a hang for a
+                // given chatId, EVERY other entry point (Friends, Status, Calls,
+                // Search, Marketplace, a manual refresh) that tries to open the same
+                // conversation silently no-ops at the guard check and the panel is
+                // stuck loading forever — exactly the reported symptom. A bounded
+                // AbortController timeout guarantees this promise always settles.
+                const _ac = new AbortController();
+                const _timeoutId = setTimeout(() => _ac.abort(), 15000);
+                let res;
+                try {
+                    res = await fetch(url, {
+                        headers: {
+                            'Content-Type': 'application/json',
+                            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                        },
+                        credentials: 'include',
+                        signal: _ac.signal
+                    });
+                } finally {
+                    clearTimeout(_timeoutId);
+                }
 
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
 

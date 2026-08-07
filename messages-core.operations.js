@@ -567,15 +567,37 @@ const ChatManager = {
                 debugLog(`[ChatManager] Fetching messages for conversation: ${conversationId}`);
 
                 if (window.KynectaLocalStore && window.KynectaSyncEngine) {
-                    await window.KynectaSyncEngine.syncChat(conversationId, {
-                        since: options.after || 0,
-                        limit: options.limit || 100
-                    });
+                    // PHASE24 ROOT-CAUSE FIX: syncChat() (and anything it awaits —
+                    // network fetch, IndexedDB, decrypt) was awaited with no upper
+                    // bound. If it ever hangs, the try/finally below never reaches
+                    // `finally`, so `_loadingMessagesByChat` for this conversationId
+                    // is never cleared. Every future attempt to open THIS conversation,
+                    // from ANY entry point (Friends/Status/Calls/Search/Marketplace/
+                    // Chat History/a manual refresh), then hits the guard check at
+                    // the top of this function and silently no-ops forever — matching
+                    // the reported "opening chat from other entry points is
+                    // unreliable" / "remains loading forever" symptom exactly. A hard
+                    // race against a timeout guarantees this function always reaches
+                    // its finally block and releases the guard, falling back to
+                    // whatever is already cached locally if the sync itself is stuck.
+                    const _syncTimeoutMs = 18000;
+                    let _syncTimedOut = false;
+                    await Promise.race([
+                        window.KynectaSyncEngine.syncChat(conversationId, {
+                            since: options.after || 0,
+                            limit: options.limit || 100
+                        }),
+                        new Promise(resolve => setTimeout(() => { _syncTimedOut = true; resolve(); }, _syncTimeoutMs))
+                    ]);
+                    if (_syncTimedOut) {
+                        console.warn(`[FORENSIC] STAGE12_SYNC_TIMEOUT | conversationId=${conversationId} | reason=syncChat_exceeded_${_syncTimeoutMs}ms | falling back to cached IDB messages`);
+                    }
 
                     const hydratedMessages = await window.KynectaLocalStore.getMessagesByChat(conversationId, {
                         limit: options.limit || 100,
                         before: options.before || null
                     });
+                    console.log(`[FORENSIC] STAGE12_REFRESH_TRACE | conversationId=${conversationId} | source=IDB_after_sync | count=${hydratedMessages ? hydratedMessages.length : 0} | ts=${Date.now()}`);
 
                     // FIX Bug3: When merge:true, add only new messages instead of replacing all
                     if (options.merge && hydratedMessages && hydratedMessages.length > 0) {
@@ -708,6 +730,18 @@ const ChatManager = {
         },
         
         async sendMessageToBackend(content, conversationId, options = {}) {
+            // ── PHASE24 FORENSIC: STAGE 1 — Send button pressed ──────────────────
+            // One traceId per message, generated client-side, threaded through the
+            // POST body → backend logs → socket broadcast payload → receiver logs.
+            // This lets a single grep for the traceId reconstruct the FULL
+            // cross-machine (sender laptop/phone → server → receiver laptop/phone)
+            // lifecycle of one specific message, which console logs on a single
+            // side can never do on their own.
+            const _traceId = 'msgtrace_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+            try {
+                console.log(`[FORENSIC][${_traceId}] STAGE1_SEND_PRESSED | user=${SessionManager.getUserId && SessionManager.getUserId()} | conversation=${conversationId} | localId=${options.localId || options.id || 'n/a'} | ts=${Date.now()}`);
+            } catch (_) {}
+
             // FIX-ROUND-22 (user request): the lifecycle-state guard on sendMessage
             // was blocking real sends with "Cannot send message - module not
             // active" whenever the module's internal ACTIVE-state bookkeeping
@@ -769,6 +803,7 @@ const ChatManager = {
                     replyToId: options.replyToId || options.replyTo,
                     mentions: options.mentions,
                     metadata: options.metadata || window.__pendingMsgMeta || undefined,
+                    traceId: _traceId,
                 };
                 if (window.__pendingMsgMeta) delete window.__pendingMsgMeta;
             } else {
@@ -796,6 +831,7 @@ const ChatManager = {
                     mentions: options.mentions,
                     // FIX: pass metadata so gif/poll/sticker data reaches the backend
                     metadata: options.metadata || window.__pendingMsgMeta || undefined,
+                    traceId: _traceId,
                 };
                 // Clear pending metadata after use
                 if (window.__pendingMsgMeta) delete window.__pendingMsgMeta;
@@ -974,7 +1010,12 @@ const ChatManager = {
             }
             
             debugLog(`[ChatManager] 📥 Message sent successfully:`, result);
-            
+            // ── PHASE24 FORENSIC: client-observed POST response ──────────────────
+            try {
+                const _srvMsg = (result && (result.message || (result.data && result.data.message))) || null;
+                console.log(`[FORENSIC][${_traceId}] STAGE_CLIENT_POST_RESOLVED | serverMessageId=${_srvMsg && _srvMsg.id || 'n/a'} | chatId=${(result && (result.chatId || (result.data && result.data.chatId))) || conversationId} | queued=${!!(result && result.queued)} | ts=${Date.now()}`);
+            } catch (_) {}
+
             if (isPending && result && (result.chatId || (result.data && result.data.chatId))) {
                 const realChatId = result.chatId || result.data.chatId;
                 if (realChatId) {

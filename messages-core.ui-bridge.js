@@ -1523,6 +1523,11 @@ const UIStateManager = {
                 // Gate only on chatId so we never silently drop a valid incoming message.
                 if (!message || !chatId) return;
 
+                // ── PHASE24 FORENSIC: STAGE10 — frontend store entry point ─────────
+                if (message && message.traceId) {
+                    console.log(`[FORENSIC][${message.traceId}] STAGE10_STORE_ENTRY | chatId=${chatId} | messageId=${message.id || 'n/a'} | localId=${message.localId || 'n/a'} | ts=${Date.now()}`);
+                }
+
                 // ✅ FIX 4: Guard against String(undefined) = "undefined" poisoning the local store.
                 const _safeId = message.id != null ? String(message.id) : null;
                 const _safeLocalId = message.localId != null ? String(message.localId) : null;
@@ -1703,6 +1708,7 @@ const UIStateManager = {
                     status: message.status || 'delivered',
                     conversationId: chatId,
                     chatId: chatId,
+                    traceId: message.traceId || null,
                     isLocalOnly: false,
                     // FIX-ATTACHMENT-PERSISTENCE: these were missing entirely
                     // from this normalization step, so even after the backend
@@ -1743,6 +1749,11 @@ const UIStateManager = {
                     }).catch(function(){});
                 }
 
+                // ── PHASE24 FORENSIC: STAGE11 — render decision ─────────────────────
+                if (normalizedMessage && normalizedMessage.traceId) {
+                    const _isActiveChat = !!(ChatManager && ChatManager.getActiveChat && ChatManager.getActiveChat() && String(ChatManager.getActiveChat().id) === String(chatId));
+                    console.log(`[FORENSIC][${normalizedMessage.traceId}] STAGE11_RENDER_DECISION | chatId=${chatId} | activeChatMatches=${_isActiveChat} | messageId=${normalizedMessage.id || 'n/a'} | ts=${Date.now()}`);
+                }
                 renderRealtimeUpdate(chatId, normalizedMessage);
                 ackMessageDelivered(normalizedMessage).catch(() => {});
                 // FIX-MSG-DELIVERY-ACK: Phase 2 — tell server we received this message
