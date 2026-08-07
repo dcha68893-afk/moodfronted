@@ -611,6 +611,9 @@
                     if (SOCKET_CONFIG.debug) console.log('[Realtime] ✅ Socket.IO connected, sid:', this._socket.id);
                     this._lastConnectLogState = 'connected';
                 }
+                // Reset so a later, genuinely new token expiry (hours from now)
+                // can also trigger one refresh+retry attempt.
+                this._didAttemptTokenRefreshForThisError = false;
                 this._onSocketIOConnect();
             });
 
@@ -621,6 +624,70 @@
                 // ── FIX #5: Don't loop on auth errors — they won't fix themselves ──
                 const isAuthError = msg.includes('auth/') || msg.includes('invalid-token') ||
                                     msg.includes('token-missing') || msg.includes('Authentication');
+
+                // PHASE24 ROOT-CAUSE FIX (SOCKET-AUTH-EXPIRED-NO-REFRESH): an expired
+                // access token is not the same failure as a genuinely invalid one
+                // (bad signature, malformed, missing) — it is the single most common,
+                // fully recoverable case, since the app already refreshes expired
+                // tokens for ordinary REST calls via window.api.auth.refreshToken().
+                // This handler used to lump TOKEN_EXPIRED in with every other auth
+                // failure and permanently give up (_state = ERROR, no reconnect,
+                // for the rest of the page session) instead of refreshing and
+                // retrying once. Confirmed live in production logs: "[Socket.IO]
+                // Auth rejected: TOKEN_EXPIRED — jwt expired" followed by
+                // "sendToUser: 0/1 delivered" for that user on every subsequent
+                // message — the socket never came back until a full page reload
+                // silently picked up a fresh token through the normal login flow.
+                // That is exactly the reported "messages just stop delivering to
+                // one user" symptom, and it is unrelated to the message pipeline
+                // itself — the socket was never connected to receive on.
+                const isExpiredTokenError = msg.includes('TOKEN_EXPIRED') || msg.toLowerCase().includes('jwt expired');
+
+                if (isExpiredTokenError && !this._didAttemptTokenRefreshForThisError) {
+                    this._didAttemptTokenRefreshForThisError = true;
+                    console.warn('[Realtime] ⚠️ Socket auth rejected — token expired. Attempting refresh + reconnect instead of giving up.');
+                    (async () => {
+                        try {
+                            const refreshFn = window.api && window.api.auth && window.api.auth.refreshToken;
+                            if (typeof refreshFn !== 'function') {
+                                console.error('[Realtime] ❌ Cannot refresh — window.api.auth.refreshToken not available');
+                                throw new Error('refresh unavailable');
+                            }
+                            const result = await refreshFn();
+                            if (result === false || (result && result.success === false)) {
+                                console.error('[Realtime] ❌ Token refresh failed — socket auth cannot recover this session');
+                                throw new Error('refresh failed');
+                            }
+                            // refreshToken() persists the new token to storage and returns
+                            // a plain boolean, not the token itself — re-read via the same
+                            // acquireToken() helper the normal connect() path already uses,
+                            // exactly as if this were a fresh page load.
+                            const newToken = acquireToken();
+                            if (!newToken) {
+                                console.error('[Realtime] ❌ Refresh reported success but no token found in storage');
+                                throw new Error('refresh produced no token');
+                            }
+                            console.log('[Realtime] ✅ Token refreshed — retrying socket connection');
+                            this._sessionToken = newToken;
+                            this._state = CONNECTION_STATE.DISCONNECTED;
+                            this._connectPromise = null;
+                            this._didAttemptTokenRefreshForThisError = false;
+                            this.connect(newToken).catch(() => {});
+                        } catch (_) {
+                            // Fall through to the permanent-give-up path below, same as
+                            // any other unrecoverable auth error.
+                            this._state = CONNECTION_STATE.ERROR;
+                            this._emitStateChange();
+                            if (this._connectPromise) {
+                                const p = this._connectPromise;
+                                this._connectPromise = null;
+                                try { p.reject(err); } catch (_) {}
+                            }
+                        }
+                    })();
+                    return;
+                }
+
                 if (isAuthError) {
                     console.error('[Realtime] ❌ Auth error from server:', msg);
                     console.error('[Realtime] ⚠️  Token in use:', this._sessionToken
