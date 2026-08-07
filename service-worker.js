@@ -62,8 +62,8 @@
 // Both files are now network-first, and the cache name is bumped for an
 // immediate one-time clean slate so this deploy reaches everyone right away
 // instead of waiting on staleness expiry.
-const SW_VERSION = '19.4.0';
-const CACHE_NAME = 'nexopa-static-v26'; // Bumped — MessageLifecycleClient.js now network-first (SW-STALE-LIFECYCLE-CLIENT)
+const SW_VERSION = '19.5.0';
+const CACHE_NAME = 'nexopa-static-v27'; // Bumped (PHASE24) — messageSync.engine.js now network-first (SW-STALE-MESSAGE-SYNC), forces fresh fetch of all PHASE24 forensic-audit files on next load
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
 
 // ---------------------------------------------------------------------------
@@ -214,6 +214,19 @@ const NETWORK_FIRST_PATTERNS = [
   // just missed for these two.
   /\/messages-core\.bootstrap\.js/i,
   /\/messages-core\.operations\.js/i,
+
+  // FIX (SW-STALE-MESSAGE-SYNC, PHASE24): messageSync.engine.js — the file
+  // holding syncChat()/_fetchServerMessages(), the exact code path patched
+  // for the timeout/hang fix and the STAGE12 refresh trace — was missing
+  // from this list entirely and fell through to the generic cache-first
+  // static-asset rule (up to 7 days stale). Confirmed by a client console
+  // log showing "[SW] Cache hit: .../js/messageSync.engine.js" with zero
+  // [FORENSIC] output anywhere, immediately after this exact file had been
+  // patched and redeployed — the running client was provably still
+  // executing the old pre-patch code. Same failure mode as every other
+  // entry in this list; this file is just as actively patched and just as
+  // correctness-critical as messages-core.operations.js above.
+  /\/messageSync\.engine\.js/i,
 
   // ✅ NEW (theme-sparking bug, round 7): the actual files patched for the
   // theme cold-boot stale-cache-replay bug. See v19.3.0 note above for why
