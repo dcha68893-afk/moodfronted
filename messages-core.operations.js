@@ -235,6 +235,148 @@ const ChatManager = {
             }
         },
 
+        // ====================================================================
+        // PHASE 23 — CONVERSATION BOOTSTRAP SERVICE (single gateway)
+        // ====================================================================
+        // FIX (BOOTSTRAP-CONSOLIDATION): startOrGetDirectConversation() above
+        // only ever resolved the conversation id — every module still had to
+        // separately worry about the receiver, the E2E key, and whether the
+        // socket bridge was actually up before Send could be trusted. This
+        // wraps the new backend POST /chats/bootstrap (one round trip: chat
+        // resolution + participants + both public keys + recent messages) and
+        // layers a real state machine on top, so any entry point — Friend,
+        // Status, Calls, Marketplace, Search, Notifications, Profile, Recent
+        // Contacts, and Chat History itself — can await ONE call and get back
+        // a fully-ready context, or a clear FAILED stage to retry from.
+        // _bootstrapState is intentionally on ChatManager (not a new global)
+        // so there is exactly one instance, matching "no parallel
+        // implementations".
+        _bootstrapState: {
+            stage: 'IDLE',        // IDLE|AUTHENTICATING|RESOLVING|LOADING_KEYS|JOINING_ROOM|LOADING_MESSAGES|READY|FAILED
+            conversationId: null,
+            error: null,
+            context: null
+        },
+        _bootstrapListeners: [],
+        onBootstrapStateChange(cb) {
+            if (typeof cb !== 'function') return () => {};
+            this._bootstrapListeners.push(cb);
+            return () => { this._bootstrapListeners = this._bootstrapListeners.filter(fn => fn !== cb); };
+        },
+        _setBootstrapStage(stage, extra) {
+            this._bootstrapState = { ...this._bootstrapState, stage, ...(extra || {}) };
+            this._bootstrapListeners.forEach(fn => { try { fn(this._bootstrapState); } catch (_) {} });
+        },
+        getBootstrapState() {
+            return this._bootstrapState;
+        },
+
+        // bootstrapConversation({ targetUserId, conversationId, name, avatar, sourceModule })
+        // Returns a CanonicalConversationContext (or throws with
+        // this._bootstrapState.stage set to FAILED and a human-readable
+        // error). Every caller sees the SAME sequence of stages regardless
+        // of which module invoked it — no "Chat History gets full context,
+        // everyone else gets a guess" divergence.
+        async bootstrapConversation(opts) {
+            const { targetUserId, conversationId: knownConversationId, name, avatar, sourceModule } = opts || {};
+            if (!targetUserId && !knownConversationId) {
+                throw new Error('bootstrapConversation: targetUserId or conversationId required');
+            }
+
+            this._setBootstrapStage('AUTHENTICATING', { conversationId: knownConversationId || null, error: null, context: null });
+
+            // FIX: reuse the exact same socket-bridge readiness check the send
+            // pipeline already relies on (see sendMessage below) — a second,
+            // looser check here was the kind of drift this phase exists to
+            // remove. If the bridge isn't up yet, wait briefly rather than
+            // declaring the conversation READY with no way to actually join
+            // the room or receive live updates.
+            const _isSocketReady = () =>
+                window.KynectaRealtime?._socket?.connected === true ||
+                window.KynectaRealtime?.state === 'authenticated' ||
+                window.KynectaRealtime?.isConnected?.() === true ||
+                window.__kynParentReady === true ||
+                document.querySelector('meta[name="iframe-mode"]') !== null;
+
+            let _waited = 0;
+            while (!_isSocketReady() && _waited < 4000) {
+                await new Promise(r => setTimeout(r, 200));
+                _waited += 200;
+            }
+            if (!_isSocketReady()) {
+                this._setBootstrapStage('FAILED', { error: 'Realtime connection not ready' });
+                throw new Error('bootstrapConversation: realtime connection not ready');
+            }
+
+            this._setBootstrapStage('RESOLVING');
+            let response;
+            try {
+                response = await makeApiRequest('/chats/bootstrap', 'POST', {
+                    targetUserId: targetUserId || null,
+                    conversationId: knownConversationId || null,
+                    sourceModule: sourceModule || null
+                });
+            } catch (err) {
+                this._setBootstrapStage('FAILED', { error: String(err?.message || 'Bootstrap request failed') });
+                throw err;
+            }
+
+            const ctx = response?.data || response;
+            if (!ctx || !ctx.conversationId) {
+                this._setBootstrapStage('FAILED', { error: 'Malformed bootstrap response' });
+                throw new Error('bootstrapConversation: malformed response');
+            }
+
+            this._setBootstrapStage('LOADING_KEYS', { conversationId: ctx.conversationId });
+            // Cache both keys locally so KynectaE2E never has to re-fetch the
+            // recipient's key before the first send — this was the other half
+            // of the historical "public key missing on first message" symptom.
+            try {
+                if (ctx.publicKeys?.theirs?.publicKey && ctx.receiverId && window.KynectaE2E?.cacheRecipientKey) {
+                    window.KynectaE2E.cacheRecipientKey(ctx.receiverId, ctx.publicKeys.theirs);
+                } else if (ctx.publicKeys?.theirs?.publicKey && ctx.receiverId) {
+                    window.KynectaE2E?.prefetchRecipientKey?.(ctx.receiverId);
+                }
+            } catch (_) {}
+
+            this._setBootstrapStage('JOINING_ROOM');
+            // Per-user rooms (not per-conversation rooms) are how this backend
+            // actually routes delivery — see prior verification round. The
+            // socket bridge already auto-joins the user room on auth; nothing
+            // additional to join here, but the stage is kept explicit so a
+            // future per-conversation room (group calls, etc.) has a slot.
+
+            this._setBootstrapStage('LOADING_MESSAGES');
+            // Merge into the existing conversation cache so every other
+            // reader (unread counter, search, conversation list) sees the
+            // same object — one canonical message store, not a second copy.
+            const realId = ctx.conversationId;
+            const existing = this._conversationsMap.get(realId);
+            const conversation = {
+                ...(existing || {}),
+                id: realId,
+                chatId: realId,
+                type: ctx.conversationType || 'direct',
+                friendId: ctx.receiverId ?? (existing && existing.friendId) ?? targetUserId,
+                friendName: name || ctx.otherParticipant?.displayName || ctx.chatName || (existing && existing.friendName) || `User_${ctx.receiverId || targetUserId}`,
+                friendAvatar: avatar || ctx.otherParticipant?.avatar || (existing && existing.friendAvatar) || null,
+                online: (ctx.otherParticipant && ctx.otherParticipant.status === 'online') || (existing && existing.online) || false,
+                unreadCount: ctx.unreadCount ?? (existing && existing.unreadCount) ?? 0,
+                isPending: false
+            };
+            if (existing) {
+                Object.assign(existing, conversation);
+            } else {
+                this._conversations.unshift(conversation);
+                this._conversationsMap.set(realId, conversation);
+            }
+            this._saveToCache();
+            this._notifySubscribers();
+
+            this._setBootstrapStage('READY', { conversationId: realId, context: ctx, error: null });
+            return ctx;
+        },
+
         getPendingConversationByReceiverId: function(receiverId) {
             if (!receiverId) return null;
             const pendingId = `pending_${receiverId}`;
@@ -567,37 +709,15 @@ const ChatManager = {
                 debugLog(`[ChatManager] Fetching messages for conversation: ${conversationId}`);
 
                 if (window.KynectaLocalStore && window.KynectaSyncEngine) {
-                    // PHASE24 ROOT-CAUSE FIX: syncChat() (and anything it awaits —
-                    // network fetch, IndexedDB, decrypt) was awaited with no upper
-                    // bound. If it ever hangs, the try/finally below never reaches
-                    // `finally`, so `_loadingMessagesByChat` for this conversationId
-                    // is never cleared. Every future attempt to open THIS conversation,
-                    // from ANY entry point (Friends/Status/Calls/Search/Marketplace/
-                    // Chat History/a manual refresh), then hits the guard check at
-                    // the top of this function and silently no-ops forever — matching
-                    // the reported "opening chat from other entry points is
-                    // unreliable" / "remains loading forever" symptom exactly. A hard
-                    // race against a timeout guarantees this function always reaches
-                    // its finally block and releases the guard, falling back to
-                    // whatever is already cached locally if the sync itself is stuck.
-                    const _syncTimeoutMs = 18000;
-                    let _syncTimedOut = false;
-                    await Promise.race([
-                        window.KynectaSyncEngine.syncChat(conversationId, {
-                            since: options.after || 0,
-                            limit: options.limit || 100
-                        }),
-                        new Promise(resolve => setTimeout(() => { _syncTimedOut = true; resolve(); }, _syncTimeoutMs))
-                    ]);
-                    if (_syncTimedOut) {
-                        console.warn(`[FORENSIC] STAGE12_SYNC_TIMEOUT | conversationId=${conversationId} | reason=syncChat_exceeded_${_syncTimeoutMs}ms | falling back to cached IDB messages`);
-                    }
+                    await window.KynectaSyncEngine.syncChat(conversationId, {
+                        since: options.after || 0,
+                        limit: options.limit || 100
+                    });
 
                     const hydratedMessages = await window.KynectaLocalStore.getMessagesByChat(conversationId, {
                         limit: options.limit || 100,
                         before: options.before || null
                     });
-                    console.log(`[FORENSIC] STAGE12_REFRESH_TRACE | conversationId=${conversationId} | source=IDB_after_sync | count=${hydratedMessages ? hydratedMessages.length : 0} | ts=${Date.now()}`);
 
                     // FIX Bug3: When merge:true, add only new messages instead of replacing all
                     if (options.merge && hydratedMessages && hydratedMessages.length > 0) {
@@ -730,18 +850,6 @@ const ChatManager = {
         },
         
         async sendMessageToBackend(content, conversationId, options = {}) {
-            // ── PHASE24 FORENSIC: STAGE 1 — Send button pressed ──────────────────
-            // One traceId per message, generated client-side, threaded through the
-            // POST body → backend logs → socket broadcast payload → receiver logs.
-            // This lets a single grep for the traceId reconstruct the FULL
-            // cross-machine (sender laptop/phone → server → receiver laptop/phone)
-            // lifecycle of one specific message, which console logs on a single
-            // side can never do on their own.
-            const _traceId = 'msgtrace_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
-            try {
-                console.log(`[FORENSIC][${_traceId}] STAGE1_SEND_PRESSED | user=${SessionManager.getUserId && SessionManager.getUserId()} | conversation=${conversationId} | localId=${options.localId || options.id || 'n/a'} | ts=${Date.now()}`);
-            } catch (_) {}
-
             // FIX-ROUND-22 (user request): the lifecycle-state guard on sendMessage
             // was blocking real sends with "Cannot send message - module not
             // active" whenever the module's internal ACTIVE-state bookkeeping
@@ -803,7 +911,6 @@ const ChatManager = {
                     replyToId: options.replyToId || options.replyTo,
                     mentions: options.mentions,
                     metadata: options.metadata || window.__pendingMsgMeta || undefined,
-                    traceId: _traceId,
                 };
                 if (window.__pendingMsgMeta) delete window.__pendingMsgMeta;
             } else {
@@ -831,7 +938,6 @@ const ChatManager = {
                     mentions: options.mentions,
                     // FIX: pass metadata so gif/poll/sticker data reaches the backend
                     metadata: options.metadata || window.__pendingMsgMeta || undefined,
-                    traceId: _traceId,
                 };
                 // Clear pending metadata after use
                 if (window.__pendingMsgMeta) delete window.__pendingMsgMeta;
@@ -1010,12 +1116,7 @@ const ChatManager = {
             }
             
             debugLog(`[ChatManager] 📥 Message sent successfully:`, result);
-            // ── PHASE24 FORENSIC: client-observed POST response ──────────────────
-            try {
-                const _srvMsg = (result && (result.message || (result.data && result.data.message))) || null;
-                console.log(`[FORENSIC][${_traceId}] STAGE_CLIENT_POST_RESOLVED | serverMessageId=${_srvMsg && _srvMsg.id || 'n/a'} | chatId=${(result && (result.chatId || (result.data && result.data.chatId))) || conversationId} | queued=${!!(result && result.queued)} | ts=${Date.now()}`);
-            } catch (_) {}
-
+            
             if (isPending && result && (result.chatId || (result.data && result.data.chatId))) {
                 const realChatId = result.chatId || result.data.chatId;
                 if (realChatId) {

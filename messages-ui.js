@@ -8172,11 +8172,78 @@ Type: ${message.type || 'text'}`;
 
                         if (!this._canPerformAction('sendMessage')) return;
 
+                        // FIX (PHASE23-SEND-GATING): "Send" used to only be
+                        // gated by the general session-readiness check above,
+                        // with nothing verifying the CONVERSATION itself —
+                        // key, receiver, socket join — was actually ready.
+                        // This is the acceptance-criteria requirement that
+                        // the Send button must stay disabled/blocked until
+                        // ConversationBootstrapService reaches READY. Only
+                        // blocks when a bootstrap is genuinely in flight for
+                        // the currently-open chat and hasn't finished — a
+                        // chat opened via the older cached/instant path (no
+                        // bootstrap promise at all) is left unaffected so
+                        // this can't regress the existing fast path.
+                        const _activeConv = window.ChatManager?.getActiveChat?.();
+                        const _bootstrapState = window.ChatManager?.getBootstrapState?.();
+                        const _bootstrapPromise = window.__kynLastBootstrapPromise;
+                        const _bootstrapTargetsActiveChat =
+                            _bootstrapPromise && _bootstrapState &&
+                            _activeConv && _bootstrapState.conversationId &&
+                            String(_bootstrapState.conversationId) === String(_activeConv.id);
+
+                        if (_bootstrapTargetsActiveChat && _bootstrapState.stage === 'FAILED') {
+                            try { window.showToast?.('Chat is not ready yet — retrying…', 'error'); } catch (_) {}
+                            try {
+                                window.__kynLastBootstrapPromise = window.ChatManager?.bootstrapConversation?.({
+                                    targetUserId: _activeConv.friendId,
+                                    conversationId: _activeConv.id,
+                                    name: _activeConv.friendName,
+                                    avatar: _activeConv.friendAvatar,
+                                    sourceModule: 'send-retry'
+                                });
+                            } catch (_) {}
+                            return;
+                        }
+                        if (_bootstrapPromise && _bootstrapState && _bootstrapState.stage !== 'READY' && _bootstrapState.stage !== 'IDLE'
+                            && _activeConv && _activeConv.isPending !== true
+                            && String(_bootstrapState.conversationId || '') !== String(_activeConv.id || '')) {
+                            // A bootstrap is running but hasn't resolved to this
+                            // exact chat yet — wait for it (bounded) rather than
+                            // sending against a possibly-unready conversation.
+                            try { await Promise.race([_bootstrapPromise, new Promise(r => setTimeout(r, 6000))]); } catch (_) {}
+                        }
+
                         await this._handleSendMessage();
 
                     });
 
                 });
+
+                // FIX (PHASE23-SEND-GATING): visual half of the same rule —
+                // dim/disable Send while the active conversation's bootstrap
+                // is still in progress, re-enable at READY, and surface
+                // FAILED with a retry hint instead of leaving it looking
+                // permanently clickable-but-broken.
+                try {
+                    window.ChatManager?.onBootstrapStateChange?.((state) => {
+                        const _activeConv = window.ChatManager?.getActiveChat?.();
+                        if (!_activeConv || String(state.conversationId || '') !== String(_activeConv.id || '')) return;
+                        if (state.stage === 'READY') {
+                            sendBtn.disabled = false;
+                            sendBtn.classList.remove('kyn-bootstrap-pending');
+                            sendBtn.removeAttribute('title');
+                        } else if (state.stage === 'FAILED') {
+                            sendBtn.disabled = false; // keep clickable so the retry-on-click path above can run
+                            sendBtn.classList.remove('kyn-bootstrap-pending');
+                            sendBtn.title = 'Connection issue — tap Send to retry';
+                        } else {
+                            sendBtn.disabled = true;
+                            sendBtn.classList.add('kyn-bootstrap-pending');
+                            sendBtn.title = 'Setting up secure chat…';
+                        }
+                    });
+                } catch (_) {}
 
             }
 
@@ -11456,6 +11523,30 @@ Type: ${message.type || 'text'}`;
             }
 
         }
+
+        // FIX (PHASE23-BOOTSTRAP-WIRE): kick off the consolidated
+        // ConversationBootstrapService call right alongside the existing
+        // key-prefetch/wake calls above — same "start early, in parallel,
+        // never block opening the panel" pattern already established in
+        // this function. This is what actually drives Send-button gating
+        // (see the send-button readiness wiring further down): the button
+        // stays disabled until this resolves to the READY stage. Errors are
+        // caught, not thrown — a failed bootstrap surfaces via
+        // ChatManager.getBootstrapState().stage === 'FAILED' and a retry
+        // affordance, not as an unhandled rejection that blocks the panel
+        // from opening at all (the existing conversation-cache / Chat
+        // History path must keep working even if this call fails).
+        try {
+            window.__kynLastBootstrapPromise = core?.bootstrapConversation?.({
+                targetUserId: numericUserId,
+                name: resolvedName,
+                avatar: resolvedAvatar,
+                sourceModule: options.sourceModule || 'unknown'
+            });
+            window.__kynLastBootstrapPromise?.catch?.(err => {
+                _uiLog('[MessageUI] bootstrapConversation failed (non-fatal to panel open):', err?.message || err);
+            });
+        } catch (_) {}
 
         
 
