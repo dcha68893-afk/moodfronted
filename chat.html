@@ -6764,18 +6764,21 @@
                                 // all). Also emit call:webrtc_offer / call:webrtc_answer for
                                 // CallSignalingService, using the event name (and field name) that
                                 // actually matches what's being sent.
+                                // FIX-DUP-SIGNAL-DELIVERY (relay): this used to emit the SAME
+                                // offer/answer twice — once as 'call:webrtc_offer'/
+                                // 'call:webrtc_answer' AND once as 'webrtc:signal' — so the
+                                // other side's calls-core.js received it via two different
+                                // socket events for a single postMessage relay. Combined with
+                                // calls-core.js's own direct-socket send (see calls-core.part7.js
+                                // FIX-DUP-SIGNAL-DELIVERY), the far side could see the same SDP
+                                // 2-3 times, which is why setRemoteDescription()/negotiation
+                                // could end up corrupted and remote video never routed on either
+                                // side. Emit via exactly ONE canonical event.
                                 _rtSocket.emit(signalType === 'offer' ? 'call:webrtc_offer' : 'call:webrtc_answer', {
                                     callId: resolvedCallId,
                                     targetUserId: payload.targetUserId || payload.toUserId || null,
                                     [signalType]: sdpPayload,
                                     type: signalType,
-                                    timestamp: Date.now()
-                                });
-                                _rtSocket.emit('webrtc:signal', {
-                                    callId: resolvedCallId,
-                                    type: signalType,
-                                    sdp: typeof sdpPayload === 'string' ? sdpPayload : JSON.stringify(sdpPayload),
-                                    targetUserId: payload.targetUserId || payload.toUserId || null,
                                     timestamp: Date.now()
                                 });
                             }

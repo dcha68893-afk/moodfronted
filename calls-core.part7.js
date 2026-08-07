@@ -7341,10 +7341,20 @@ _escapeHtml: function(text) {
                         remoteUserId: _resolvedTarget,
                         timestamp: Date.now()
                     };
-                    if (window.parent && window.parent !== window) {
-                        window.parent.postMessage({ type: 'SIGNAL_OFFER', payload: _offerPayload, source: 'calls-core-direct' }, '*');
-                    }
-                    // FIX-CALL-DIRECT: Emit directly via Socket.IO for lowest latency
+                    // FIX-DUP-SIGNAL-DELIVERY (offer): this used to ALWAYS postMessage
+                    // the offer to the parent (chat.html), which independently relays
+                    // it onward via its own 'call:webrtc_offer'/'webrtc:signal' socket
+                    // emits, AND THEN separately emit 'call:webrtc_offer' again directly
+                    // over this frame's own socket below — delivering the same SDP
+                    // offer to the receiver 2-3 times over different event names. Each
+                    // extra delivery re-enters handleSignalOffer on the receiver and,
+                    // even though a same-call/same-length dedup guard exists there,
+                    // corrupts the receiver's negotiation state often enough that its
+                    // ontrack never routes real remote audio/video (both sides end up
+                    // seeing only local video). Deliver via exactly ONE path: prefer the
+                    // direct Socket.IO emit (lowest latency, has delivery ack/retry);
+                    // fall back to the postMessage→chat.html relay only when no direct
+                    // socket is available.
                     var _directSocket = window.__socket || window.__io || (window.KynectaRealtime && window.KynectaRealtime._socket);
                     var _offerId = callId;
                     var _offTarget = _resolvedTarget;
@@ -9082,10 +9092,16 @@ window.CallHandlers = {
             remoteUserId: _answerTargetId,
             timestamp: Date.now()
         };
-        if (window.parent && window.parent !== window) {
-            window.parent.postMessage({ type: 'SIGNAL_ANSWER', payload: _answerPayload, source: 'calls-core-direct' }, '*');
-        }
-        // Also emit directly via Socket.IO for reliability
+        // FIX-DUP-SIGNAL-DELIVERY (answer): same bug class as the offer-sending
+        // fix above — this used to ALWAYS postMessage the answer to chat.html
+        // (which relays it onward over its own socket emits) AND separately
+        // emit 'call:webrtc_answer' directly below, delivering the same SDP
+        // answer to the caller multiple times and risking a second
+        // setRemoteDescription() on an already-stable connection, which is
+        // exactly why the caller could end up with no working remote video
+        // even though the offer/answer exchange appeared to complete. Deliver
+        // via exactly ONE path: direct Socket.IO when available, otherwise
+        // fall back to the postMessage→chat.html relay.
         var _directSockAns = window.__socket || window.__io || (window.KynectaRealtime && window.KynectaRealtime._socket);
         if (_directSockAns && typeof _directSockAns.emit === 'function' && _answerTargetId) {
             _directSockAns.emit('call:webrtc_answer', {
