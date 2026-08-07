@@ -1146,21 +1146,24 @@ const UIStateManager = {
             // shows unread) while the richer check correctly resolved
             // isThisChat=true and rendered the message live (no badge should
             // show while the panel displaying that exact message is open).
-            // Compute isThisChat ONCE, up front, with 'pending_' stripped from
-            // both sides, and reuse it for the unread counter, the
-            // notification, and the live render so they can never disagree.
-            const _stripPendPrefix = function(s) { s = String(s || ''); return s.startsWith('pending_') ? s.slice(8) : s; };
+            // Compute isThisChat ONCE, up front, and reuse it for the unread
+            // counter, the notification, and the live render so they can never
+            // disagree.
+            // FIX-UNIFY-CHAT-MATCH: this used to have its own private copy of the
+            // pending_-stripping + friendId-fallback logic. That copy was correct,
+            // but three OTHER call sites elsewhere (ChatManager.addMessage's own
+            // render block, and two spots in messages-ui.js) had their own,
+            // weaker, un-stripped copies — which is what actually caused a message
+            // you send to never appear in your own panel while still reaching the
+            // other person. Now calls the one shared resolver
+            // (window.__kynResolveIsThisChat, defined in messages-core.operations.js)
+            // that every render call site uses, so this file's logic and theirs can
+            // never drift apart again. See the root-cause comment block at the top
+            // of messages-core.operations.js for the full writeup.
             const activeChat = ChatManager && ChatManager.getActiveChat && ChatManager.getActiveChat();
             const _rcId = String(chatId || '');
             const _acId = activeChat ? String(activeChat.id || '') : '';
-            let isThisChat = !!(_rcId && _acId && (_rcId === _acId || _stripPendPrefix(_rcId) === _stripPendPrefix(_acId)));
-            // SECONDARY: friendId match — when User A receives User B's reply, senderId=B
-            // and activeChat.friendId=B, so we match even if chatId check somehow fails
-            if (!isThisChat && activeChat && normalizedMessage && normalizedMessage.senderId) {
-                const _afid = String(activeChat.friendId || activeChat.otherUserId ||
-                    (activeChat.otherParticipant && activeChat.otherParticipant.id) || '');
-                if (_afid && _afid === String(normalizedMessage.senderId)) isThisChat = true;
-            }
+            let isThisChat = window.__kynResolveIsThisChat(_rcId, normalizedMessage && normalizedMessage.senderId, activeChat);
             // TERTIARY: panel is open but _activeConversation cleared — recover from map
             if (!isThisChat && _rcId) {
                 const _panel = document.getElementById('chatPanel');
@@ -1258,14 +1261,11 @@ const UIStateManager = {
                     // server confirms the real numeric chatId) fails this exact-string match
                     // the instant the real chatId becomes active — e.g. right when the other
                     // user's reply arrives — and silently drops out of the re-rendered list.
-                    const _stripPend = function(s) { s = String(s || ''); return s.startsWith('pending_') ? s.slice(8) : s; };
-                    const _midStripped = _stripPend(_mid);
-                    const _acIdStripped = _stripPend(_acId);
+                    // Consolidated onto the same shared resolver used everywhere else
+                    // (was a private duplicate of the identical stripping logic).
                     let _msgs = _all.filter(function(m) {
                         const mid = String(m.chatId || m.conversationId || '');
-                        const midStripped = _stripPend(mid);
-                        return mid === _mid || mid === _acId ||
-                               midStripped === _midStripped || midStripped === _acIdStripped;
+                        return window.__kynChatIdsMatch(mid, _mid) || window.__kynChatIdsMatch(mid, _acId);
                     }).sort(function(a, b) {
                         return _tsMs3(a.createdAt || a.timestamp) - _tsMs3(b.createdAt || b.timestamp);
                     });

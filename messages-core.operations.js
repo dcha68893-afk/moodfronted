@@ -10,6 +10,99 @@
 // =============================================
 'use strict';
 
+// ============================================================================
+// CANONICAL CHAT-MATCH RESOLVER — SINGLE SOURCE OF TRUTH
+// ----------------------------------------------------------------------------
+// ROOT CAUSE (sender never sees their own sent message on Friend/Calls/
+// Status/Marketplace-opened chats, while the receiver sees it fine):
+//
+// "Should this message render into the currently-open chat panel right now?"
+// used to be answered independently in FOUR different places:
+//   1. ChatManager.addMessage()'s own "render immediately" block (below)
+//   2. the ChatManager.subscribe(...) UI callback wired in messages-ui.js
+//   3. the 'kyn:incomingMessage' window listener in messages-ui.js
+//   4. renderRealtimeUpdate() in messages-core.ui-bridge.js (fed by the
+//      socket 'message:new' event)
+//
+// Only #4 stripped the 'pending_' local-placeholder prefix before comparing
+// chat ids and had a working sender/friend fallback. #1-#3 did a bare
+// string-equality compare with no stripping. Chat History always opens a
+// conversation using an id the server already issued, so the bare compare
+// never had a chance to fail there. Friend/Calls/Status/Marketplace can
+// still legitimately produce an optimistic outgoing message stamped with a
+// 'pending_<id>' chatId while the active conversation object has already
+// been resolved to the real numeric id (or vice-versa) for a brief window —
+// and #1/#2/#3, the only paths that ever fire for a message YOU send, both
+// silently failed to match and never rendered it. #4, which only fires for
+// messages you RECEIVE (delivered over the socket), matched fine — hence
+// the exact asymmetry reported: delivered to the other person, invisible in
+// your own panel.
+//
+// Fix: one resolver, used everywhere a "does this message belong to the
+// open chat" decision is made. The four call sites above have been changed
+// to call this instead of re-implementing their own comparison — see the
+// FIX-UNIFY-CHAT-MATCH comments at each site.
+// ============================================================================
+function __kynStripPendingPrefix(id) {
+    const s = String(id || '');
+    return s.startsWith('pending_') ? s.slice(8) : s;
+}
+
+function __kynChatIdsMatch(idA, idB) {
+    const a = String(idA || '');
+    const b = String(idB || '');
+    if (!a || !b) return false;
+    return a === b || __kynStripPendingPrefix(a) === __kynStripPendingPrefix(b);
+}
+
+// Resolves whether a message (by chatId and, optionally, senderId) belongs
+// to the given active-chat object. `activeChat` is whatever
+// ChatManager.getActiveChat()/_activeConversation currently holds.
+//
+// IMPORTANT: a 'pending_<id>' chatId embeds the FRIEND'S user id, not the
+// eventual conversation id (see openChatWithUserInUI: `pending_${numericUserId}`
+// in messages-ui.js). So a pending placeholder can never be matched to a real
+// conversation id by stripping the prefix and comparing ids directly — it has
+// to be compared against the active chat's *friend* id instead. This was the
+// actual, further root cause behind the "sender doesn't see own message" bug:
+// even after unifying the 4 render call sites onto one resolver, a naive
+// pending-strip-then-compare-to-conversation-id still fails for exactly the
+// case that matters (Friend/Calls/Status/Marketplace opening a brand-new
+// chat), because pending_<friendId> and the real conversation id are
+// unrelated numbers.
+function __kynResolveIsThisChat(msgChatId, msgSenderId, activeChat) {
+    if (!activeChat) return false;
+    const msgIdStr = String(msgChatId || '');
+    if (__kynChatIdsMatch(msgIdStr, activeChat.id)) return true;
+
+    const friendId = String(
+        (activeChat.friendId) ||
+        (activeChat.otherUserId) ||
+        (activeChat.otherParticipant && activeChat.otherParticipant.id) ||
+        ''
+    );
+
+    // A pending_<friendId> chatId matches this chat if the embedded id is
+    // this chat's friend — this is what makes a message YOU send, still
+    // stamped with the local pending_<friendId> guess, render in your own
+    // panel even though the active conversation already holds the real id.
+    if (friendId && msgIdStr.startsWith('pending_') && __kynStripPendingPrefix(msgIdStr) === friendId) {
+        return true;
+    }
+
+    // Fallback used by received messages whose chatId hasn't been normalized
+    // yet: match on the other participant instead.
+    if (friendId && msgSenderId && friendId === String(msgSenderId)) return true;
+
+    return false;
+}
+
+if (typeof window !== 'undefined') {
+    window.__kynChatIdsMatch = __kynChatIdsMatch;
+    window.__kynResolveIsThisChat = __kynResolveIsThisChat;
+    window.__kynStripPendingPrefix = __kynStripPendingPrefix;
+}
+
 const ChatManager = {
         _conversations: [],
         _conversationsMap: new Map(),
@@ -1571,9 +1664,23 @@ const ChatManager = {
             if (!_chatId && _activeChatIdRaw) {
                 _chatId = _activeChatIdRaw;
             }
-            // Restamp pending_ to real ID when the active chat has already been resolved
-            if (_chatId && _activeChatIdRaw && !_activeChatIdRaw.startsWith('pending_')) {
-                if (_chatId === `pending_${_activeChatIdRaw}`) {
+            // Restamp pending_ to real ID when the active chat has already been resolved.
+            // FIX-UNIFY-CHAT-MATCH: a 'pending_<id>' chatId embeds the FRIEND's user id
+            // (see openChatWithUserInUI in messages-ui.js: `pending_${numericUserId}`),
+            // not the conversation id — so comparing/stripping it against
+            // _activeChatIdRaw (the conversation id) directly, as this used to do, could
+            // only ever coincidentally match. Compare the stripped id against the active
+            // conversation's *friend* id instead, which is what the pending id actually
+            // encodes.
+            if (_chatId && _activeChatIdRaw && !_activeChatIdRaw.startsWith('pending_') && _chatId.startsWith('pending_')) {
+                const _pendingFriendId = window.__kynStripPendingPrefix(_chatId);
+                const _activeFriendId = String(
+                    (this._activeConversation && this._activeConversation.friendId) ||
+                    (this._activeConversation && this._activeConversation.otherUserId) ||
+                    (this._activeConversation && this._activeConversation.otherParticipant && this._activeConversation.otherParticipant.id) ||
+                    ''
+                );
+                if (_pendingFriendId && _activeFriendId && _pendingFriendId === _activeFriendId) {
                     _chatId = _activeChatIdRaw;
                 }
             }
@@ -1679,17 +1786,17 @@ const ChatManager = {
             EventBus.emit('message:added', message);
 
             // ── Render new message into the active chat panel immediately ──
+            // FIX-UNIFY-CHAT-MATCH: was a bare `_msgCid === _actCid` string
+            // compare with no 'pending_' stripping — this is the path that
+            // fires for a message YOU just sent (via sendMessage() ->
+            // addMessage()), so this exact spot is where the "sender never
+            // sees their own message" bug lived. See the big comment block
+            // at the top of this file for the full root-cause writeup.
             try {
                 const _ar = this._activeConversation;
                 const _msgCid = String(message.chatId || message.conversationId || '');
                 const _actCid = _ar ? String(_ar.id || '') : '';
-                let _render = !!(_msgCid && _actCid && _msgCid === _actCid);
-                // Fallback: friendId match for receiver-reply
-                if (!_render && _ar && message.senderId) {
-                    const _afid = String(_ar.friendId || _ar.otherUserId ||
-                        (_ar.otherParticipant && _ar.otherParticipant.id) || '');
-                    if (_afid && _afid === String(message.senderId)) _render = true;
-                }
+                let _render = window.__kynResolveIsThisChat(_msgCid, message.senderId, _ar);
                 // Fallback: panel open but _activeConversation cleared — recover from map
                 if (!_render && _msgCid) {
                     const _p = document.getElementById('chatPanel');
@@ -1704,7 +1811,7 @@ const ChatManager = {
                     const _renderConv = this._activeConversation;
                     const _chatMsgs = this._messages.filter(function(m) {
                         const mid = String(m.chatId || m.conversationId || '');
-                        return mid === _fid || mid === _actCid;
+                        return window.__kynChatIdsMatch(mid, _fid) || window.__kynChatIdsMatch(mid, _actCid);
                     }).sort(function(a, b) { return _tsF(a) - _tsF(b); });
                     window.dispatchEvent(new CustomEvent('renderMessages', {
                         detail: { messages: _chatMsgs, currentChat: _renderConv, currentUser: null }

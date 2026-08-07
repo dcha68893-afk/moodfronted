@@ -3162,14 +3162,14 @@
                     // wiping the whole panel to an empty render even though
                     // renderRealtimeUpdate had already found and forwarded the
                     // message correctly.
-                    const _stripPend2 = function(s) { s = String(s || ''); return s.startsWith('pending_') ? s.slice(8) : s; };
+                    // Consolidated onto the shared resolver (window.__kynChatIdsMatch,
+                    // defined in messages-core.operations.js) instead of a private
+                    // duplicate of the same pending_-stripping logic.
                     if (currentChat && currentChat.id && messages.length > 0) {
                         const cid = String(currentChat.id);
-                        const cidStripped = _stripPend2(cid);
                         const filtered = messages.filter(function(m) {
                             const mid = String(m.chatId || m.conversationId || '');
-                            const midStripped = _stripPend2(mid);
-                            return mid === cid || mid === '' || midStripped === cidStripped;
+                            return mid === '' || window.__kynChatIdsMatch(mid, cid);
                         });
                         if (filtered.length > 0) {
                             messages = filtered.sort(function(a,b) { return _ts(a)-_ts(b); });
@@ -6282,10 +6282,8 @@
             // pending conversation IS the friend/user id). Without this, a not-yet-cached chat's
             // placeholder conversation (which has no friendId of its own) would resolve to the
             // conversation id itself, so calls/messages could be sent to the wrong id.
-            const _stripPendingPrefix = function(v) {
-                const s = String(v || '');
-                return s.startsWith('pending_') ? s.slice(8) : s;
-            };
+            // Consolidated onto the shared window.__kynStripPendingPrefix helper
+            // (messages-core.operations.js) instead of a private duplicate.
 
             const receiverId = activeChat.friendId || 
 
@@ -6297,7 +6295,7 @@
 
                               activeChat.participantId ||
 
-                              _stripPendingPrefix(activeChat.id);
+                              window.__kynStripPendingPrefix(activeChat.id);
 
             
 
@@ -12018,9 +12016,13 @@ Type: ${message.type || 'text'}`;
             var core = getMessagesCore();
             var active = (core && core.getCurrentConversation && core.getCurrentConversation()) || (core && core.ChatManager && core.ChatManager.getActiveChat && core.ChatManager.getActiveChat());
             var _ts = function(m) { var v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
-            if (active && String(active.id) === inChat) {
+            // FIX-UNIFY-CHAT-MATCH: was `String(active.id) === inChat` / a matching
+            // exact-string filter below — no 'pending_' stripping. Now uses the same
+            // resolver every other render call site uses. See the root-cause comment
+            // block at the top of messages-core.operations.js.
+            if (active && window.__kynResolveIsThisChat(inChat, inMsg.senderId, active)) {
                 var all = (core && core.getMessages && core.getMessages()) || (core && core.ChatManager && core.ChatManager._messages) || [];
-                var msgs = all.filter(function(m) { return String(m.chatId || m.conversationId || '') === inChat; }).sort(function(a,b) { return _ts(a)-_ts(b); });
+                var msgs = all.filter(function(m) { return window.__kynChatIdsMatch(String(m.chatId || m.conversationId || ''), inChat); }).sort(function(a,b) { return _ts(a)-_ts(b); });
                 UIRenderer.renderMessages(msgs.length > 0 ? msgs : [], active, core && core.getCurrentUser && core.getCurrentUser());
                 try { var el=document.getElementById('messagesContainer'); if(el) requestAnimationFrame(function(){el.scrollTop=el.scrollHeight;}); } catch(_e){}
             } else {
@@ -12165,12 +12167,20 @@ Type: ${message.type || 'text'}`;
                             // frequent trigger of messages from other chats leaking in, or
                             // of a later correctly-filtered render wiping bubbles that
                             // weren't in its (correct) smaller list.
-                            const _subCid = String(activeChat.id || '');
-                            const _subFid = String(activeChat.friendId || activeChat.otherUserId ||
-                                (activeChat.otherParticipant && activeChat.otherParticipant.id) || '');
+                            // FIX-UNIFY-CHAT-MATCH: was a bare `mCid === _subCid` /
+                            // `mCid === _subFid` string compare with no 'pending_'
+                            // stripping. This callback fires on every ChatManager
+                            // state change, INCLUDING right after you send a message
+                            // from a Friend/Calls/Status/Marketplace-opened chat — it
+                            // is one of only two places (the other is
+                            // ChatManager.addMessage() itself) that ever render your
+                            // OWN sent message. Now uses the same resolver as every
+                            // other render call site so it can no longer disagree
+                            // with them. See the root-cause comment block at the top
+                            // of messages-core.operations.js.
                             const _filteredMsgs = (Array.isArray(messages) ? messages : []).filter(m => {
                                 const mCid = String(m.chatId || m.conversationId || '');
-                                return (_subCid && mCid === _subCid) || (_subFid && mCid === _subFid);
+                                return window.__kynResolveIsThisChat(mCid, m.senderId, activeChat);
                             });
 
                             UIRenderer.renderMessages(_filteredMsgs, activeChat, user);
@@ -14693,13 +14703,10 @@ Type: ${message.type || 'text'}`;
         );
         const msgChatId = String(payload.chatId || payload.conversationId || '');
 
-        // Only append if this message belongs to the open chat (FIX-MSG-VANISH-B:
-        // tolerate a 'pending_' prefix on either side, same as the primary
-        // render pipeline, so this fallback doesn't reject a message the
-        // primary pipeline would have accepted).
-        const _stripPend3 = function(s) { return s.startsWith('pending_') ? s.slice(8) : s; };
-        const _fallbackMatches = !(activeChatId && msgChatId && activeChatId !== msgChatId &&
-            _stripPend3(activeChatId) !== _stripPend3(msgChatId));
+        // Only append if this message belongs to the open chat. Consolidated onto
+        // the shared window.__kynChatIdsMatch helper (messages-core.operations.js)
+        // instead of a private duplicate of the same pending_-stripping logic.
+        const _fallbackMatches = !activeChatId || !msgChatId || window.__kynChatIdsMatch(activeChatId, msgChatId);
         // FORENSIC: same visibility gap as the primary pipeline — this fallback
         // silently returns here when it's a "no match", giving zero trace that
         // it was even considered. Log unconditionally so a live test shows
