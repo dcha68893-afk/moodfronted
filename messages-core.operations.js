@@ -2107,6 +2107,19 @@ const ChatManager = {
         }
     }.init();
 
+    // FIX (WINDOW-CHATMANAGER-NEVER-SET): window.ChatManager was read in 30+
+    // places throughout messages-ui.js (guard checks, cache eviction, the
+    // Send button's PHASE23-SEND-GATING wait, etc.) but was never actually
+    // assigned anywhere in the codebase — only the bare `ChatManager`
+    // identifier (accessible to other classic <script> tags loaded after
+    // this one, but NOT via `window.`) ever existed. Every one of those
+    // `window.ChatManager` reads was therefore always undefined, silently
+    // no-opping the guard/gating logic that depended on it (including the
+    // Send button's own wait-for-conversation-ready check, which is why it
+    // never actually waited for anything). Exposing the real object here
+    // fixes all of those call sites at once.
+    window.ChatManager = ChatManager;
+
     // =============================================
     // FRIEND MANAGER (REAL DATA ONLY)
     // =============================================

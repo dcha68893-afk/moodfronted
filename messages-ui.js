@@ -8182,9 +8182,56 @@ Type: ${message.type || 'text'}`;
                         // chat opened via the older cached/instant path (no
                         // bootstrap promise at all) is left unaffected so
                         // this can't regress the existing fast path.
-                        const _activeConv = window.ChatManager?.getActiveChat?.();
-                        const _bootstrapState = window.ChatManager?.getBootstrapState?.();
+                        const _activeConv0 = window.ChatManager?.getActiveChat?.();
+                        let _bootstrapState = window.ChatManager?.getBootstrapState?.();
                         const _bootstrapPromise = window.__kynLastBootstrapPromise;
+
+                        // FIX (RACE-NO-ACTIVE-CONV-YET): the two gating branches below only
+                        // ever applied when _activeConv was already a truthy object (i.e. a
+                        // conversation record — even a pending one — already existed and was
+                        // merely still resolving). In the first moments right after opening a
+                        // chat from Friends/Calls/Status/Marketplace there is often NO
+                        // conversation object at all yet, so both branches were skipped and a
+                        // send fired straight through to _handleSendMessage() with nothing to
+                        // send to — guaranteed 'no_conversation' guard failure, silently
+                        // dropped. This is the reproducible cross-open-source message loss:
+                        // chat-history opens always have an active conversation already;
+                        // Friends/Calls/Status opens frequently do not, yet.
+                        //
+                        // Waiting on window.__kynLastBootstrapPromise alone is not reliable
+                        // here: this app has at least 8 separate call sites (chat.html alone)
+                        // that fire the OPEN_CHAT_WITH_USER postMessage that ultimately drives
+                        // bootstrapConversation(), each racing to set/overwrite that global, and
+                        // message.html deliberately drops duplicates arriving within 2s of each
+                        // other. Depending on which of those sites fired (and whether it was
+                        // deduped), __kynLastBootstrapPromise may never get set at all even
+                        // though a conversation genuinely is being resolved in the background.
+                        // So: prefer the promise if we have one, but either way fall back to
+                        // directly polling ChatManager.getActiveChat() itself, which is the one
+                        // thing every one of those code paths is actually required to populate
+                        // once resolution finishes. This makes Send correct regardless of which
+                        // duplicate emitter handled this particular chat-open.
+                        if (!_activeConv0) {
+                            if (_bootstrapPromise) {
+                                try { await Promise.race([_bootstrapPromise, new Promise(r => setTimeout(r, 8000))]); } catch (_) {}
+                            }
+                            if (!window.ChatManager?.getActiveChat?.()) {
+                                const _pollDeadline = Date.now() + 8000;
+                                while (Date.now() < _pollDeadline && !window.ChatManager?.getActiveChat?.()) {
+                                    await new Promise(r => setTimeout(r, 150));
+                                }
+                            }
+                            _bootstrapState = window.ChatManager?.getBootstrapState?.();
+                        }
+
+                        const _activeConv = window.ChatManager?.getActiveChat?.() || _activeConv0;
+                        if (!_activeConv) {
+                            // Still nothing after waiting on every available signal — genuinely
+                            // no conversation to send to. Tell the user instead of the previous
+                            // silent no-op, and bail without touching the network.
+                            try { window.showToast?.('Could not open this chat yet — please try again', 'error'); } catch (_) {}
+                            return;
+                        }
                         const _bootstrapTargetsActiveChat =
                             _bootstrapPromise && _bootstrapState &&
                             _activeConv && _bootstrapState.conversationId &&
