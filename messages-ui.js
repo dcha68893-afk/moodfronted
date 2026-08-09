@@ -8259,7 +8259,25 @@ Type: ${message.type || 'text'}`;
                             try { await Promise.race([_bootstrapPromise, new Promise(r => setTimeout(r, 6000))]); } catch (_) {}
                         }
 
-                        await this._handleSendMessage();
+                        await this._handleSendMessage().catch((err) => {
+                            // FIX (E2E-KEY-FETCH-INFINITE-HANG follow-through): a
+                            // thrown error here was an unhandled rejection before
+                            // (queueAction's try/catch only catches synchronous
+                            // throws, not async rejections), so even once the E2E
+                            // retry loop stopped hanging forever and started
+                            // throwing after ~45s, the user still saw nothing —
+                            // just a button that quietly re-enabled itself with no
+                            // explanation. Surface it.
+                            const name = err?.name || '';
+                            if (name === 'E2EKeyFetchTimeoutError') {
+                                try { window.showToast?.('Could not reach the recipient\'s encryption key. Check your connection and try sending again.', 'error'); } catch (_) {}
+                            } else if (name === 'E2ENoRecipientKeyError') {
+                                try { window.showToast?.('This person has not set up encryption yet — message not sent.', 'error'); } catch (_) {}
+                            } else {
+                                try { window.showToast?.('Message could not be sent — please try again.', 'error'); } catch (_) {}
+                            }
+                            console.warn('[Send] failed:', err);
+                        });
 
                     });
 

@@ -6764,21 +6764,18 @@
                                 // all). Also emit call:webrtc_offer / call:webrtc_answer for
                                 // CallSignalingService, using the event name (and field name) that
                                 // actually matches what's being sent.
-                                // FIX-DUP-SIGNAL-DELIVERY (relay): this used to emit the SAME
-                                // offer/answer twice — once as 'call:webrtc_offer'/
-                                // 'call:webrtc_answer' AND once as 'webrtc:signal' — so the
-                                // other side's calls-core.js received it via two different
-                                // socket events for a single postMessage relay. Combined with
-                                // calls-core.js's own direct-socket send (see calls-core.part7.js
-                                // FIX-DUP-SIGNAL-DELIVERY), the far side could see the same SDP
-                                // 2-3 times, which is why setRemoteDescription()/negotiation
-                                // could end up corrupted and remote video never routed on either
-                                // side. Emit via exactly ONE canonical event.
                                 _rtSocket.emit(signalType === 'offer' ? 'call:webrtc_offer' : 'call:webrtc_answer', {
                                     callId: resolvedCallId,
                                     targetUserId: payload.targetUserId || payload.toUserId || null,
                                     [signalType]: sdpPayload,
                                     type: signalType,
+                                    timestamp: Date.now()
+                                });
+                                _rtSocket.emit('webrtc:signal', {
+                                    callId: resolvedCallId,
+                                    type: signalType,
+                                    sdp: typeof sdpPayload === 'string' ? sdpPayload : JSON.stringify(sdpPayload),
+                                    targetUserId: payload.targetUserId || payload.toUserId || null,
                                     timestamp: Date.now()
                                 });
                             }
@@ -7447,22 +7444,77 @@
                 }
 
                 // All naming conventions the backend might use
-                window.wsService.on('message:sent',       _fwdMessageSent);      // ✅ FIX 8
-                window.wsService.on('message_sent',       _fwdMessageSent);      // ✅ FIX 8
-                window.wsService.on('message:new',        _fwdNewMessage);
-                window.wsService.on('new_message',        _fwdNewMessage);
-                window.wsService.on('newMessage',         _fwdNewMessage);
-                window.wsService.on('chat:message',       _fwdNewMessage);
-                // FIX: receive_message / message:received are sent ONLY to the recipient's
-                // user room by the backend. Without binding these the receiver NEVER sees
-                // the incoming message in their chat panel — the payload reaches the parent
-                // window but is silently dropped because no listener existed for it.
-                window.wsService.on('receive_message',    function(p) { _fwdNewMessageSourceEvent = 'receive_message';  _fwdNewMessage(p); });
-                window.wsService.on('message:received',   function(p) { _fwdNewMessageSourceEvent = 'message:received'; _fwdNewMessage(p); });
-                window.wsService.on('message:delivered',  _fwdMessageDelivered);
-                window.wsService.on('message_delivered',  _fwdMessageDelivered);
-                window.wsService.on('message:read',       _fwdMessageRead);
-                window.wsService.on('message_read',       _fwdMessageRead);
+                // FIX (WSSERVICE-LEGACY-SHIM-NEVER-RECEIVES-EVENTS): window.wsService is
+                // documented elsewhere in this codebase (messages-core.ui-bridge.js) as
+                // "the legacy shim" — it is a real, separately-connected object, but it is
+                // NOT the one that actually receives the server's pushed 'message:new'
+                // events; window.KynectaRealtime is. Binding _fwdNewMessage (the ONLY
+                // function that relays an incoming message into the messages iframe for
+                // live rendering) exclusively to wsService means it silently never fires
+                // for real incoming messages, even though wsService itself reports
+                // connected — the message notification/badge machinery elsewhere in the
+                // app binds directly to KynectaRealtime and works fine, which is why this
+                // symptom looked like "notification appears but the message never renders
+                // in the open chat panel" rather than a total connection failure. Bind to
+                // BOTH: when wsService and KynectaRealtime happen to be the same object
+                // (the intended/common case once the alias in _ensureWsService() above
+                // succeeds) this registers once, since .on() below already de-dupes by
+                // handler reference; when they differ, this ensures the relay is attached
+                // to whichever one is actually live.
+                const _msgEventTargets = [window.wsService, window.KynectaRealtime].filter(
+                    (t, i, arr) => t && typeof t.on === 'function' && arr.indexOf(t) === i
+                );
+                _msgEventTargets.forEach(function(_t) {
+                    _t.on('message:sent',       _fwdMessageSent);      // ✅ FIX 8
+                    _t.on('message_sent',       _fwdMessageSent);      // ✅ FIX 8
+                    _t.on('message:new',        _fwdNewMessage);
+                    _t.on('new_message',        _fwdNewMessage);
+                    _t.on('newMessage',         _fwdNewMessage);
+                    _t.on('chat:message',       _fwdNewMessage);
+                    // FIX: receive_message / message:received are sent ONLY to the recipient's
+                    // user room by the backend. Without binding these the receiver NEVER sees
+                    // the incoming message in their chat panel — the payload reaches the parent
+                    // window but is silently dropped because no listener existed for it.
+                    _t.on('receive_message',    function(p) { _fwdNewMessageSourceEvent = 'receive_message';  _fwdNewMessage(p); });
+                    _t.on('message:received',   function(p) { _fwdNewMessageSourceEvent = 'message:received'; _fwdNewMessage(p); });
+                    _t.on('message:delivered',  _fwdMessageDelivered);
+                    _t.on('message_delivered',  _fwdMessageDelivered);
+                    _t.on('message:read',       _fwdMessageRead);
+                    _t.on('message_read',       _fwdMessageRead);
+                });
+                // FIX (WSSERVICE-LEGACY-SHIM-NEVER-RECEIVES-EVENTS, part 2): the block
+                // above only binds to whichever of [wsService, KynectaRealtime] already
+                // exists at the exact moment _bindWsCallListeners() first clears its
+                // wsService-only readiness guard. wsService is frequently ready slightly
+                // before window.KynectaRealtime is assigned, so relying on that one
+                // snapshot can permanently miss binding to KynectaRealtime — the object
+                // that actually receives real incoming messages — even though it becomes
+                // available moments later. This independent poller (decoupled from the
+                // wsService gate above, so it can't regress call-listener binding) keeps
+                // checking for up to 18s and binds directly to KynectaRealtime the moment
+                // it's available, if it wasn't already covered above.
+                (function _ensureKynectaMsgBinding(attempt) {
+                    attempt = attempt || 0;
+                    const rt = window.KynectaRealtime;
+                    if (rt && typeof rt.on === 'function') {
+                        if (rt.__kynMsgFwdBound) return;
+                        rt.__kynMsgFwdBound = true;
+                        rt.on('message:sent',      _fwdMessageSent);
+                        rt.on('message_sent',      _fwdMessageSent);
+                        rt.on('message:new',       _fwdNewMessage);
+                        rt.on('new_message',       _fwdNewMessage);
+                        rt.on('newMessage',        _fwdNewMessage);
+                        rt.on('chat:message',      _fwdNewMessage);
+                        rt.on('receive_message',   function(p) { _fwdNewMessageSourceEvent = 'receive_message';  _fwdNewMessage(p); });
+                        rt.on('message:received',  function(p) { _fwdNewMessageSourceEvent = 'message:received'; _fwdNewMessage(p); });
+                        rt.on('message:delivered', _fwdMessageDelivered);
+                        rt.on('message_delivered', _fwdMessageDelivered);
+                        rt.on('message:read',      _fwdMessageRead);
+                        rt.on('message_read',      _fwdMessageRead);
+                        return;
+                    }
+                    if (attempt < 120) setTimeout(function() { _ensureKynectaMsgBinding(attempt + 1); }, 150);
+                })();
                 window.wsService.on('user:online',        _fwdPresence);
                 window.wsService.on('user:offline',       d => _fwdPresence({ ...d, online: false }));
                 window.wsService.on('presence:update',    _fwdPresence);

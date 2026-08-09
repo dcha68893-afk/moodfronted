@@ -454,6 +454,7 @@
 
     const promise = (async () => {
       let attempt = 0;
+      const _startedAt = Date.now();
       while (true) {
         if (signal?.aborted) return null;
         attempt++;
@@ -498,9 +499,22 @@
           try {
             document.dispatchEvent(new CustomEvent('kyn:e2eWaitingForKey', { detail: { userId, attempt } }));
           } catch (_) {}
+          // FIX (E2E-KEY-FETCH-INFINITE-HANG): this used to have no upper
+          // bound at all -- by design, to avoid ever silently downgrading to
+          // plaintext. In practice that means any sustained failure (backend
+          // hiccup, rate limiting, an auth-check gap for a brand new chat
+          // between users who aren't confirmed friends yet) leaves the Send
+          // button spinning forever with zero feedback and no way to
+          // recover short of reloading the page. Keep the same
+          // never-downgrade-to-plaintext posture (still no automatic
+          // plaintext fallback), but stop hanging silently: after ~45s of
+          // real retrying, throw a distinct, catchable error so the caller
+          // (messages-ui.js's Send handler) can show the user an actual
+          // message and let them retry, instead of an infinite silent spin.
+          if (Date.now() - _startedAt > 45000) {
+            throw new E2EKeyFetchTimeoutError(`Could not reach recipient's encryption key after ${attempt} attempts`);
+          }
           // Capped exponential backoff: 500ms, 1s, 2s, 4s, then holds at 8s.
-          // No upper bound on attempts — the caller (e.g. the Send button)
-          // is meant to keep waiting rather than downgrade to plaintext.
           await _sleep(Math.min(500 * Math.pow(2, attempt - 1), 8000));
         }
       }
@@ -542,6 +556,14 @@
   E2ENotUnlockedError.prototype = Object.create(Error.prototype);
   function E2ENoRecipientKeyError(message) { this.name = 'E2ENoRecipientKeyError'; this.message = message || 'Recipient has not set up encryption'; }
   E2ENoRecipientKeyError.prototype = Object.create(Error.prototype);
+
+  // FIX (E2E-KEY-FETCH-INFINITE-HANG): distinct, catchable error for "we
+  // kept retrying and it still never resolved" so callers can tell this
+  // apart from E2ENoRecipientKeyError (a definitive, real "no key exists")
+  // and show an appropriate retry-able message instead of either failing
+  // silently or treating it as a permanent state.
+  function E2EKeyFetchTimeoutError(message) { this.name = 'E2EKeyFetchTimeoutError'; this.message = message || 'Timed out waiting for recipient encryption key'; }
+  E2EKeyFetchTimeoutError.prototype = Object.create(Error.prototype);
 
   // ── Encrypt a message for a chat ──────────────────────────────────────────
   // FIX-NO-PLAINTEXT-FALLBACK: this never returns plaintext. If E2E isn't
@@ -774,6 +796,7 @@
     // failures instead of guessing off error.message text.
     E2ENotUnlockedError,
     E2ENoRecipientKeyError,
+    E2EKeyFetchTimeoutError,
     waitForEnabled: _waitForEnabled,
     encryptAttachment,
     decryptAttachment,
