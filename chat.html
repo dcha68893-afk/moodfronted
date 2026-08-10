@@ -7497,12 +7497,25 @@
                 // any of the existing machinery, so it can't regress anything that
                 // currently works, and its own dedup (by message id, via a small local
                 // Set) prevents double-rendering if the legacy path ever also succeeds.
-                (function _ensureDirectSocketMsgRelay(attempt) {
-                    attempt = attempt || 0;
+                //
+                // FIX (RECONNECT-ORPHANS-BINDING): the first version of this bound once,
+                // to whichever raw socket object existed at page-load time, then stopped
+                // checking forever. app.realtime.socket.js creates a BRAND NEW _socket
+                // object on every reconnect (this._socket = socketIOClient(...)) — a
+                // network blip, a backgrounded tab, a mobile network switch, anything
+                // that triggers a reconnect silently orphans the binding on the old, now
+                // -dead socket object, leaving the new live one with no relay at all.
+                // This is a real, ordinary, frequent event in real usage — far more
+                // likely there than in a short test session — and matches exactly the
+                // reported symptom of delivery working right after opening a chat but
+                // failing later in the same session. This is now a PERSISTENT watcher
+                // that keeps checking every 2s for the lifetime of the page, re-binding
+                // to whatever the CURRENT raw socket object is whenever it changes,
+                // rather than a one-shot bind that only ever covers the first socket.
+                (function _watchAndBindDirectSocketMsgRelay() {
                     const rt = window.KynectaRealtime;
                     const rawSocket = rt && rt._socket;
-                    if (rawSocket && typeof rawSocket.on === 'function' && rawSocket.connected) {
-                        if (rawSocket.__kynDirectRelayBound) return;
+                    if (rawSocket && typeof rawSocket.on === 'function' && rawSocket.connected && !rawSocket.__kynDirectRelayBound) {
                         rawSocket.__kynDirectRelayBound = true;
                         const _seenIds = new Set();
                         const _directRelay = function(payload) {
@@ -7525,9 +7538,8 @@
                         rawSocket.on('message:sent', _fwdMessageSent);
                         rawSocket.on('message:delivered', _fwdMessageDelivered);
                         rawSocket.on('message:read', _fwdMessageRead);
-                        return;
                     }
-                    if (attempt < 160) setTimeout(function() { _ensureDirectSocketMsgRelay(attempt + 1); }, 150); // up to 24s
+                    setTimeout(_watchAndBindDirectSocketMsgRelay, 2000);
                 })();
                 window.wsService.on('user:online',        _fwdPresence);
                 window.wsService.on('user:offline',       d => _fwdPresence({ ...d, online: false }));
