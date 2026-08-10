@@ -7482,38 +7482,52 @@
                     _t.on('message:read',       _fwdMessageRead);
                     _t.on('message_read',       _fwdMessageRead);
                 });
-                // FIX (WSSERVICE-LEGACY-SHIM-NEVER-RECEIVES-EVENTS, part 2): the block
-                // above only binds to whichever of [wsService, KynectaRealtime] already
-                // exists at the exact moment _bindWsCallListeners() first clears its
-                // wsService-only readiness guard. wsService is frequently ready slightly
-                // before window.KynectaRealtime is assigned, so relying on that one
-                // snapshot can permanently miss binding to KynectaRealtime — the object
-                // that actually receives real incoming messages — even though it becomes
-                // available moments later. This independent poller (decoupled from the
-                // wsService gate above, so it can't regress call-listener binding) keeps
-                // checking for up to 18s and binds directly to KynectaRealtime the moment
-                // it's available, if it wasn't already covered above.
-                (function _ensureKynectaMsgBinding(attempt) {
+                // FIX (DIRECT-RAW-SOCKET-RELAY): the KynectaRealtime/wsService wrapper
+                // layer above has proven unreliable for message delivery specifically —
+                // extensive live testing showed messages reaching this exact browser's
+                // socket (confirmed via server delivery logs, confirmed via the raw
+                // socket.io client's own internal listener registry showing the handler
+                // correctly attached) and STILL never invoking the relay handler. Rather
+                // than keep patching an already many-times-patched dispatch chain, this
+                // binds directly to the one thing proven live end-to-end: the raw
+                // socket.io client instance itself (window.KynectaRealtime._socket),
+                // completely bypassing _routeMessage(), its dedup map, event
+                // canonicalization, and the legacy wsService shim. This is intentionally
+                // a second, independent, minimal path — it does not remove or depend on
+                // any of the existing machinery, so it can't regress anything that
+                // currently works, and its own dedup (by message id, via a small local
+                // Set) prevents double-rendering if the legacy path ever also succeeds.
+                (function _ensureDirectSocketMsgRelay(attempt) {
                     attempt = attempt || 0;
                     const rt = window.KynectaRealtime;
-                    if (rt && typeof rt.on === 'function') {
-                        if (rt.__kynMsgFwdBound) return;
-                        rt.__kynMsgFwdBound = true;
-                        rt.on('message:sent',      _fwdMessageSent);
-                        rt.on('message_sent',      _fwdMessageSent);
-                        rt.on('message:new',       _fwdNewMessage);
-                        rt.on('new_message',       _fwdNewMessage);
-                        rt.on('newMessage',        _fwdNewMessage);
-                        rt.on('chat:message',      _fwdNewMessage);
-                        rt.on('receive_message',   function(p) { _fwdNewMessageSourceEvent = 'receive_message';  _fwdNewMessage(p); });
-                        rt.on('message:received',  function(p) { _fwdNewMessageSourceEvent = 'message:received'; _fwdNewMessage(p); });
-                        rt.on('message:delivered', _fwdMessageDelivered);
-                        rt.on('message_delivered', _fwdMessageDelivered);
-                        rt.on('message:read',      _fwdMessageRead);
-                        rt.on('message_read',      _fwdMessageRead);
+                    const rawSocket = rt && rt._socket;
+                    if (rawSocket && typeof rawSocket.on === 'function' && rawSocket.connected) {
+                        if (rawSocket.__kynDirectRelayBound) return;
+                        rawSocket.__kynDirectRelayBound = true;
+                        const _seenIds = new Set();
+                        const _directRelay = function(payload) {
+                            try {
+                                const id = payload && (payload.id || payload.serverId || payload.localId);
+                                if (id != null) {
+                                    const key = String(id);
+                                    if (_seenIds.has(key)) return;
+                                    _seenIds.add(key);
+                                    if (_seenIds.size > 500) { const it = _seenIds.values().next(); if (!it.done) _seenIds.delete(it.value); }
+                                }
+                            } catch (_) {}
+                            _fwdNewMessage(payload);
+                        };
+                        rawSocket.on('message:new', _directRelay);
+                        rawSocket.on('new_message', _directRelay);
+                        rawSocket.on('chat:message', _directRelay);
+                        rawSocket.on('receive_message', function(p) { _fwdNewMessageSourceEvent = 'receive_message'; _directRelay(p); });
+                        rawSocket.on('message:received', function(p) { _fwdNewMessageSourceEvent = 'message:received'; _directRelay(p); });
+                        rawSocket.on('message:sent', _fwdMessageSent);
+                        rawSocket.on('message:delivered', _fwdMessageDelivered);
+                        rawSocket.on('message:read', _fwdMessageRead);
                         return;
                     }
-                    if (attempt < 120) setTimeout(function() { _ensureKynectaMsgBinding(attempt + 1); }, 150);
+                    if (attempt < 160) setTimeout(function() { _ensureDirectSocketMsgRelay(attempt + 1); }, 150); // up to 24s
                 })();
                 window.wsService.on('user:online',        _fwdPresence);
                 window.wsService.on('user:offline',       d => _fwdPresence({ ...d, online: false }));
