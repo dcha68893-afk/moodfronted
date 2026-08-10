@@ -1172,6 +1172,44 @@ const UIStateManager = {
                     if (_conv) { ChatManager._activeConversation = _conv; isThisChat = true; }
                 }
             }
+            // QUATERNARY (RECEIVE-WHILE-UNRESOLVED): the tertiary recovery above
+            // only helps when _rcId is already the exact key some conversation is
+            // stored under. A chat opened from a non-history source (Friend/Calls/
+            // Status/notification tap) can still be sitting on this device as a
+            // 'pending_<friendId>' entry — or with no _activeConversation set at
+            // all yet, because its bootstrap/openConversation() hasn't finished —
+            // at the exact moment the other side's reply/first message arrives.
+            // In that window _rcId (the server's real chatId) matches neither the
+            // pending key nor an unset activeConversation, so the panel can be
+            // open, visible, and still silently miss the message. If the panel is
+            // visible but we still don't know which conversation it's showing,
+            // fall back to whichever open/recently-touched conversation this
+            // sender maps to (by friendId), rather than requiring an exact chatId
+            // match that a not-yet-resolved chat can't have yet.
+            const _panelVisibleNow = (function () {
+                const _p = document.getElementById('chatPanel');
+                return !!(_p && !_p.classList.contains('hidden'));
+            })();
+            if (!isThisChat && _panelVisibleNow && normalizedMessage && normalizedMessage.senderId && ChatManager._conversationsMap) {
+                let _byFriend = null;
+                try {
+                    for (const _c of ChatManager._conversationsMap.values()) {
+                        if (_c && String(_c.friendId || (_c.otherParticipant && _c.otherParticipant.id) || '') === String(normalizedMessage.senderId)) {
+                            _byFriend = _c;
+                            break;
+                        }
+                    }
+                } catch (_) {}
+                // Only trust this when either there is no active conversation at
+                // all yet (nothing to disagree with), or the current active
+                // conversation is itself an unresolved pending_ placeholder for
+                // this same sender — never override an already-resolved,
+                // genuinely-different open conversation.
+                if (_byFriend && (!activeChat || (activeChat.isPending && String(activeChat.friendId || '') === String(normalizedMessage.senderId)))) {
+                    ChatManager._activeConversation = _byFriend;
+                    isThisChat = true;
+                }
+            }
 
             // FIX-ROUND-22 (ON-SCREEN DIAGNOSTIC): the existing FORENSIC log below
             // only reaches a devtools console, which isn't practically reachable on

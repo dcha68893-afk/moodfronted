@@ -8211,23 +8211,43 @@ Type: ${message.type || 'text'}`;
                         // thing every one of those code paths is actually required to populate
                         // once resolution finishes. This makes Send correct regardless of which
                         // duplicate emitter handled this particular chat-open.
+                        // FIX (TEMP-KEYS-UNTIL-RESOLVED): the block below used to
+                        // hold the reply hostage on a brand-new chat — waiting up
+                        // to 8s for an active conversation, then up to another 6s
+                        // for bootstrapConversation() to reach READY, and outright
+                        // retrying-and-returning (dropping the tap) whenever the
+                        // bootstrap for THIS chat had failed. That's exactly the
+                        // "keeps hanging" symptom: the very first person to reply
+                        // in a new conversation is, by definition, the one whose
+                        // local bootstrap is least likely to have finished yet
+                        // (cold key fetch, cold backend, or a bootstrap that was
+                        // never even started because this chat was opened by an
+                        // incoming message rather than a click). The person who
+                        // started the chat never hits this at all, because
+                        // _handleSendMessage()/core sendMessage() already know how
+                        // to send against a pending_<friendId> conversation and a
+                        // not-yet-resolved key — that's the exact same "temporary
+                        // id, resolve later" path Chat History's first message
+                        // always used. Reply should go through that identical
+                        // tolerant path instead of being gated on bootstrap state
+                        // — so wait only very briefly for an active/pending
+                        // conversation object to exist (so there's SOMETHING to
+                        // address the send to), then always attempt the send. A
+                        // failed bootstrap no longer blocks or swallows the tap —
+                        // it's kicked off again in the background (so keys/room
+                        // still resolve) while the message itself goes out now.
                         if (!_activeConv0) {
-                            if (_bootstrapPromise) {
-                                try { await Promise.race([_bootstrapPromise, new Promise(r => setTimeout(r, 8000))]); } catch (_) {}
-                            }
-                            if (!window.ChatManager?.getActiveChat?.()) {
-                                const _pollDeadline = Date.now() + 8000;
-                                while (Date.now() < _pollDeadline && !window.ChatManager?.getActiveChat?.()) {
-                                    await new Promise(r => setTimeout(r, 150));
-                                }
+                            const _pollDeadline = Date.now() + 3000;
+                            while (Date.now() < _pollDeadline && !window.ChatManager?.getActiveChat?.()) {
+                                await new Promise(r => setTimeout(r, 100));
                             }
                             _bootstrapState = window.ChatManager?.getBootstrapState?.();
                         }
 
                         const _activeConv = window.ChatManager?.getActiveChat?.() || _activeConv0;
                         if (!_activeConv) {
-                            // Still nothing after waiting on every available signal — genuinely
-                            // no conversation to send to. Tell the user instead of the previous
+                            // Still genuinely nothing to send to (no chat was ever
+                            // opened this session) — tell the user instead of a
                             // silent no-op, and bail without touching the network.
                             try { window.showToast?.('Could not open this chat yet — please try again', 'error'); } catch (_) {}
                             return;
@@ -8238,7 +8258,10 @@ Type: ${message.type || 'text'}`;
                             String(_bootstrapState.conversationId) === String(_activeConv.id);
 
                         if (_bootstrapTargetsActiveChat && _bootstrapState.stage === 'FAILED') {
-                            try { window.showToast?.('Chat is not ready yet — retrying…', 'error'); } catch (_) {}
+                            // Retry bootstrap in the background (keys/room still
+                            // need to resolve eventually) but do NOT return here —
+                            // fall through and send now against the pending/known
+                            // conversation, same as a first-time sender would.
                             try {
                                 window.__kynLastBootstrapPromise = window.ChatManager?.bootstrapConversation?.({
                                     targetUserId: _activeConv.friendId,
@@ -8248,16 +8271,13 @@ Type: ${message.type || 'text'}`;
                                     sourceModule: 'send-retry'
                                 });
                             } catch (_) {}
-                            return;
                         }
-                        if (_bootstrapPromise && _bootstrapState && _bootstrapState.stage !== 'READY' && _bootstrapState.stage !== 'IDLE'
-                            && _activeConv && _activeConv.isPending !== true
-                            && String(_bootstrapState.conversationId || '') !== String(_activeConv.id || '')) {
-                            // A bootstrap is running but hasn't resolved to this
-                            // exact chat yet — wait for it (bounded) rather than
-                            // sending against a possibly-unready conversation.
-                            try { await Promise.race([_bootstrapPromise, new Promise(r => setTimeout(r, 6000))]); } catch (_) {}
-                        }
+                        // NOTE: no more bounded wait-for-READY here. Bootstrap
+                        // keeps resolving keys/room membership in the background
+                        // (see bootstrapConversation itself and its onBootstrapStateChange
+                        // subscribers); the send path below already knows how to
+                        // encrypt/queue against a pending conversation and retry
+                        // once the real key/id lands, exactly like a first message.
 
                         await this._handleSendMessage().catch((err) => {
                             // FIX (E2E-KEY-FETCH-INFINITE-HANG follow-through): a
@@ -8283,27 +8303,33 @@ Type: ${message.type || 'text'}`;
 
                 });
 
-                // FIX (PHASE23-SEND-GATING): visual half of the same rule —
-                // dim/disable Send while the active conversation's bootstrap
-                // is still in progress, re-enable at READY, and surface
-                // FAILED with a retry hint instead of leaving it looking
-                // permanently clickable-but-broken.
+                // FIX (TEMP-KEYS-UNTIL-RESOLVED — visual half): this used to
+                // actually DISABLE Send (sendBtn.disabled = true) for the
+                // entire time a chat's bootstrap sat in any non-READY stage,
+                // with only a tooltip explaining why. On a brand-new
+                // conversation — which is exactly when a reply is most
+                // likely to land here, mid key-fetch — that disables the
+                // only way to respond, which is the reported "hang". Send
+                // must stay usable at all times; a temporary conversation id
+                // and not-yet-resolved key are exactly what the send path
+                // already tolerates (same as the very first message in any
+                // new chat). Keep this purely informational: never disable,
+                // just show a light "setting up" affordance while it's in
+                // flight and clear it once ready.
                 try {
                     window.ChatManager?.onBootstrapStateChange?.((state) => {
                         const _activeConv = window.ChatManager?.getActiveChat?.();
                         if (!_activeConv || String(state.conversationId || '') !== String(_activeConv.id || '')) return;
+                        sendBtn.disabled = false;
                         if (state.stage === 'READY') {
-                            sendBtn.disabled = false;
                             sendBtn.classList.remove('kyn-bootstrap-pending');
                             sendBtn.removeAttribute('title');
                         } else if (state.stage === 'FAILED') {
-                            sendBtn.disabled = false; // keep clickable so the retry-on-click path above can run
                             sendBtn.classList.remove('kyn-bootstrap-pending');
-                            sendBtn.title = 'Connection issue — tap Send to retry';
+                            sendBtn.title = 'Connection issue — message will still send and sync once reconnected';
                         } else {
-                            sendBtn.disabled = true;
                             sendBtn.classList.add('kyn-bootstrap-pending');
-                            sendBtn.title = 'Setting up secure chat…';
+                            sendBtn.title = 'Finishing secure setup in the background — you can send now';
                         }
                     });
                 } catch (_) {}
