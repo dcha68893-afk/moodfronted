@@ -3135,7 +3135,11 @@ function buildSub(type,g,el){
                         var checked=Array.prototype.slice.call(picker.querySelectorAll('[data-invite-uid]:checked'));
                         if(!checked.length){ntf('Select at least one friend','error');return;}
                         Promise.all(checked.map(function(cb){
-                            return api('/groups/'+g.id+'/invitations',{method:'POST',body:{targetUserId:cb.getAttribute('data-invite-uid')}}).catch(function(){return null;});
+                            // FIX-GROUP-INVITE-404: backend only exposes POST /groups/:groupId/invite
+                            // (singular) accepting { userId }; this was calling the non-existent
+                            // '/invitations' (plural) endpoint with { targetUserId }, so every
+                            // invite attempt from this dialog silently 404'd.
+                            return api('/groups/'+g.id+'/invite',{method:'POST',body:{userId:cb.getAttribute('data-invite-uid')}}).catch(function(){return null;});
                         })).then(function(results){
                             var sent=results.filter(Boolean).length;
                             ntf(sent>0?(sent+' invite'+(sent===1?'':'s')+' sent'):'Failed to send invites',sent>0?'success':'error');
