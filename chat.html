@@ -3907,7 +3907,15 @@
                             userId: derivedId,
                             username: payload.username || payload.name || payload.email?.split('@')[0] || 'User',
                             displayName: payload.displayName || payload.username || payload.name || payload.email?.split('@')[0] || 'User',
-                            email: payload.email || ''
+                            email: payload.email || '',
+                            // FIX (admin-panel-ignores-env-admin): the backend embeds
+                            // role in the access token (tokenService.generateAccessToken),
+                            // set to 'admin' when login matches ADMIN_EMAIL/ADMIN_USERNAME
+                            // in .env — but it was never read out of the decoded payload
+                            // here, so window.currentUser.role was always undefined no
+                            // matter what the backend set. Tool-ui.js's admin panel check
+                            // (and anything else gating on role) depends on this.
+                            role: payload.role || 'user'
                         };
                     } catch (_) {
                         return null;
@@ -4281,7 +4289,17 @@
                         headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }
                     });
                     if (res.ok) {
-                        const profile = await res.json();
+                        const body = await res.json();
+                        // FIX (admin-panel-ignores-env-admin): actual response
+                        // shape from profileController.getProfile is
+                        // {success, data:{profile:{role,...}}} — this used to
+                        // read .role/.user.role directly off the top-level
+                        // body, which never has either key, so role silently
+                        // fell back to 'user' every time regardless of what
+                        // the backend actually set (including for the
+                        // .env-configured admin, whose role IS correctly
+                        // 'admin' in the DB/JWT/profile response).
+                        const profile = body?.data?.profile || body?.profile || body;
                         const role = profile?.role || profile?.user?.role || 'user';
                         const isAdmin = role === 'admin' || role === 'moderator' || profile?.isAdmin === true;
                         // P1 FIX: Do NOT persist role in localStorage — keeps role in memory only

@@ -971,6 +971,25 @@ const ChatManager = {
             let requestBody = {};
             let _recipientUserIdForEncryption = null;
             
+            // ── REPLY-TO TARGET RESOLUTION ──────────────────────────────────
+            // FIX (reply-first-time-fails / lacking-of-id-and-keys): two bugs
+            // lived here together. (1) `options.replyToId || options.replyTo`
+            // could assign the entire replyTo *object* to replyToId when only
+            // the object was passed — not a usable ID at all. (2) When the
+            // reply target is a message this client only just sent
+            // optimistically (still has a local 'msg_...' id, not yet
+            // confirmed by the server), sending that string as replyToId
+            // meant the backend's numeric parse always failed and silently
+            // dropped the reply link. Resolve to a real id when we have one;
+            // otherwise send it as replyToLocalId so the backend can
+            // reconcile it server-side (see messages.js) instead of losing
+            // it. Either way the send proceeds immediately — nothing here
+            // blocks or waits.
+            const _replyTargetRaw = options.replyToId || (options.replyTo && options.replyTo.id) || null;
+            const _replyTargetIsNumeric = _replyTargetRaw != null && /^\d+$/.test(String(_replyTargetRaw));
+            const _replyToIdForRequest      = _replyTargetIsNumeric ? _replyTargetRaw : null;
+            const _replyToLocalIdForRequest = (_replyTargetRaw != null && !_replyTargetIsNumeric) ? String(_replyTargetRaw) : null;
+
             if (isPending) {
                 let pendingConv = this._conversationsMap.get(conversationId);
                 // FIX-ROOT-CAUSE-MISSING-RECEIVERID (defense in depth): this
@@ -1001,7 +1020,8 @@ const ChatManager = {
                     content: content,
                     type: options.type || 'text',
                     attachment: options.attachment,
-                    replyToId: options.replyToId || options.replyTo,
+                    replyToId: _replyToIdForRequest,
+                    replyToLocalId: _replyToLocalIdForRequest,
                     mentions: options.mentions,
                     metadata: options.metadata || window.__pendingMsgMeta || undefined,
                 };
@@ -1027,7 +1047,8 @@ const ChatManager = {
                     content: content,
                     type: options.type || 'text',
                     attachment: options.attachment,
-                    replyToId: options.replyToId || options.replyTo,
+                    replyToId: _replyToIdForRequest,
+                    replyToLocalId: _replyToLocalIdForRequest,
                     mentions: options.mentions,
                     // FIX: pass metadata so gif/poll/sticker data reaches the backend
                     metadata: options.metadata || window.__pendingMsgMeta || undefined,

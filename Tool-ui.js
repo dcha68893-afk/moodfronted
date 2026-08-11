@@ -5560,6 +5560,24 @@ window.addEventListener('message', (e) => {
         const count = e.data.payload?.count || e.data.count || 0;
         if (badge) { badge.textContent = count; badge.style.display = count > 0 ? 'flex' : 'none'; }
     }
+    // FIX (admin-panel-ignores-env-admin, "instantly" requirement): the
+    // parent frame (chat.html) fetches the real role from /api/profile in
+    // the background and posts USER_ROLE_UPDATE once it resolves — but
+    // nothing here was ever listening for it, so even after the role bugs
+    // upstream were fixed, the admin panel would only pick up the correct
+    // role on the *next full reload* of this iframe, not instantly as
+    // requested. Update the local user object and, if the account page is
+    // currently open, re-render it immediately so the Admin Command Center
+    // appears without the user needing to navigate away and back.
+    if (e.data?.type === 'USER_ROLE_UPDATE') {
+        const { role, isAdmin } = e.data;
+        if (window.currentUser) { window.currentUser.role = role; window.currentUser.isAdmin = isAdmin; }
+        if (window.__kynUser)   { window.__kynUser.role   = role; window.__kynUser.isAdmin   = isAdmin; }
+        const accountPage = document.getElementById('jmAccountContent');
+        if (accountPage && accountPage.offsetParent !== null && typeof _renderAccount === 'function') {
+            _renderAccount();
+        }
+    }
 });
 
 // ── More sheet ─────────────────────────────────────────────────────────────
@@ -6585,12 +6603,16 @@ function _renderAccount() {
     const pts    = user.loyaltyPoints || 0;
     const tier   = user.loyaltyTier || 'bronze';
     const tc     = { bronze:'#cd7f32', silver:'#9ca3af', gold:'#f59e0b', platinum:'#8b5cf6' };
-    // PHASE15 FIX Phase-E: Admin panel must ONLY show for mwita@gmail.com.
-    // Previous broad detection (role === 'admin', isAdmin flag, localStorage _adminMode)
-    // allowed any user who had an admin role in their profile to see admin tools.
-    // Per spec: only ONE specific email gets the admin panel.
-    const ADMIN_EMAIL = 'mwita@gmail.com';
-    const isAdmin = (email.toLowerCase().trim() === ADMIN_EMAIL);
+    // FIX (admin-panel-ignores-env-admin): this was hardcoded to a single
+    // literal email ('mwita@gmail.com') by a prior "PHASE15 Phase-E" pass,
+    // which explicitly threw away the role==='admin' check. But the backend
+    // (authController.js) promotes whoever matches ADMIN_EMAIL/ADMIN_USERNAME
+    // in .env to role='admin' on login/register — that's the actual admin
+    // mechanism now. The hardcoded email here was never updated to match, so
+    // logging in as the .env-configured admin correctly got role='admin' in
+    // the JWT/user object, but this panel never checked it and stayed
+    // hidden. Restore the role check as the source of truth.
+    const isAdmin = (user.role === 'admin');
 
     container.innerHTML = `
     <!-- Profile hero with chat + WhatsApp buttons -->

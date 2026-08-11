@@ -5668,12 +5668,22 @@ function setupBasicEventListeners_StatusUI() {
             if (mediaFileInput) mediaFileInput.click(); // regular gallery/file picker, no capture attr
         });
     }
-    // Tapping anywhere outside the two chooser buttons closes it
+    // Tapping anywhere outside the two chooser buttons closes it.
+    // FIX (status file upload not opening): this used to only exempt clicks
+    // on #composerFileBtn (the bottom toolbar camera icon). But
+    // #mediaUploadArea's own click handler above also opens this same
+    // chooser — and that same click event then bubbles up to this
+    // document-level listener, which saw a target that was neither
+    // composerFileBtn nor inside fileChooser and immediately closed what
+    // had just been opened, all within the same click. Net effect: tapping
+    // "Upload Photo or Video" appeared to do nothing. Exempt clicks
+    // originating on/inside mediaUploadArea too.
     if (fileChooser && !fileChooser._outsideBound) {
         fileChooser._outsideBound = true;
         document.addEventListener('click', (e) => {
             if (fileChooser.style.display === 'none') return;
             if (e.target === document.getElementById('composerFileBtn')) return;
+            if (mediaUploadArea && mediaUploadArea.contains(e.target)) return;
             if (fileChooser.contains(e.target)) return;
             fileChooser.style.display = 'none';
         });

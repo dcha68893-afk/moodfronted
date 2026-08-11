@@ -63,7 +63,7 @@
 // immediate one-time clean slate so this deploy reaches everyone right away
 // instead of waiting on staleness expiry.
 const SW_VERSION = '19.5.0';
-const CACHE_NAME = 'nexopa-static-v27'; // Bumped (PHASE24) — messageSync.engine.js now network-first (SW-STALE-MESSAGE-SYNC), forces fresh fetch of all PHASE24 forensic-audit files on next load
+const CACHE_NAME = 'nexopa-static-v28'; // Bumped — group-ui.js/group-core-bootstrap.js/group-core-operations.js and status-ui.js/status-core.part[1-3].js/status-core-transport.js/status-core-state.js added to NETWORK_FIRST_PATTERNS (SW-STALE-GROUP-STATUS-MODULES); forces fresh fetch of the group-tabs-blank-until-refresh fix and any status Recently-Viewed fixes on next load
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
 
 // ---------------------------------------------------------------------------
@@ -237,6 +237,27 @@ const NETWORK_FIRST_PATTERNS = [
   /\/friend-core\.ui-bridge\.js/i,
   /\/Tool-core\.part3\.js/i,
   /\/Tool-ui\.js/i,
+
+  // ✅ NEW (SW-STALE-GROUP-STATUS-MODULES): group-ui.js, group-core-
+  // bootstrap.js and group-core-operations.js were only ever in the
+  // install-time precache array below, never in this list — same failure
+  // mode already found and fixed for messages-core.bootstrap.js/
+  // operations.js above. group-ui.js is the file that owns the group tab
+  // click handlers and cache-first render pipeline (init-race fix,
+  // 2026-08-10); without this, that fix — and any future one — can sit
+  // stale on an already-installed PWA for up to 7 days. Same reasoning
+  // applies to every status-core*.js / status-ui.js file: only
+  // status-core-runtime.js was ever covered, so status-ui.js (owns the
+  // Recently Viewed/Updated split) and the three status-core.partN.js
+  // files could each independently be running week-old code with no
+  // visible error, indistinguishable from the bug never having been fixed.
+  /\/group-ui\.js/i,
+  /\/group-core-bootstrap\.js/i,
+  /\/group-core-operations\.js/i,
+  /\/status-ui\.js/i,
+  /\/status-core\.part[1-3]\.js/i,
+  /\/status-core-transport\.js/i,
+  /\/status-core-state\.js/i,
 
   // ✅ NEW: Safety layer (handles localStorage, used by token reading)
   /\/kynecta\.safety\.layer\.js/i,

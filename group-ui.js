@@ -287,17 +287,24 @@ function onProtocolActivation() {
     if (_uiInitializationCompleted) {
         return;
     }
-    
+
     // Protocol is ACTIVE - UI can fully initialize
     _sessionReady = checkSessionReady();
-    
-    // Trigger any pending UI operations
-    if (_UI_STATE.isInitialized) {
-        refreshUIData();
-    } else {
-        // Complete UI initialization if not yet done
-        completeUIInitialization();
-    }
+
+    // FIX (group tabs blank until app refresh): this used to branch on
+    // _UI_STATE.isInitialized and call refreshUIData() directly whenever it
+    // was already true. But initGroupUI() sets isInitialized = true as soon
+    // as it *runs* renderPipeline(), regardless of whether renderPipeline's
+    // cache-render + setupEventListeners() stages actually executed — they're
+    // separately gated behind protocol-ready and silently no-op (just setting
+    // a pendingDataRefresh flag that nothing ever reads) if the parent-iframe
+    // handshake wasn't done yet. So the very first time this fired, it could
+    // take the refreshUIData() branch — which only refreshes counts/user UI
+    // and kicks a network fetch — without ever having rendered from cache or
+    // attached a single tab click listener. Always go through
+    // completeUIInitialization() instead; it now checks what actually
+    // happened rather than assuming, and is safe to call unconditionally.
+    completeUIInitialization();
 }
 
 // Check if UI operations are allowed (STRICT: only when ACTIVE)
@@ -336,23 +343,38 @@ function completeUIInitialization() {
     if (_uiInitializationCompleted) {
         return;
     }
-    
+
     _uiInitializationCompleted = true;
-    
-    if (_UI_STATE.initialRenderComplete) {
-        refreshUIData();
-    } else {
-        // Complete the render pipeline
-        if (_UI_STATE.skeletonRendered) {
-            initialRenderFromCache();
-            _UI_STATE.initialRenderComplete = true;
-            progressiveEnhancement();
-            _UI_STATE.progressiveEnhancementComplete = true;
-            setupLiveUpdates();
-            _UI_STATE.liveUpdateEnabled = true;
-            refreshUIData();
-        }
+
+    // FIX (group tabs blank until app refresh): this used to gate the whole
+    // render pipeline behind `_UI_STATE.skeletonRendered`, and if that was
+    // still false at this point (a real race — LifecycleState.subscribe can
+    // replay an already-ACTIVE state synchronously at subscribe time, i.e.
+    // before renderSkeletonUI() ever ran), the entire branch below was
+    // skipped — and because _uiInitializationCompleted is already true,
+    // nothing would ever run it again. renderSkeletonUI() is cheap and
+    // idempotent (bails immediately if already rendered), so just call it
+    // directly instead of hoping it already happened. Each stage below is
+    // also now checked individually against its own completion flag (instead
+    // of one flag gating all three), so no matter which stage(s) already ran
+    // via an earlier partial pass, whatever's left — cache render, tab-click
+    // listener setup, live-update wiring — always finishes exactly once.
+    renderSkeletonUI();
+
+    if (!_UI_STATE.initialRenderComplete) {
+        initialRenderFromCache();
+        _UI_STATE.initialRenderComplete = true;
     }
+    if (!_UI_STATE.progressiveEnhancementComplete) {
+        progressiveEnhancement();
+        _UI_STATE.progressiveEnhancementComplete = true;
+    }
+    if (!_UI_STATE.liveUpdateEnabled) {
+        setupLiveUpdates();
+        _UI_STATE.liveUpdateEnabled = true;
+    }
+
+    refreshUIData();
 }
 
 // =============================================
