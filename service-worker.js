@@ -62,8 +62,8 @@
 // Both files are now network-first, and the cache name is bumped for an
 // immediate one-time clean slate so this deploy reaches everyone right away
 // instead of waiting on staleness expiry.
-const SW_VERSION = '19.5.0';
-const CACHE_NAME = 'nexopa-static-v29'; // Bumped — group-os/group-os.js and group-os/group-os-integration.js added to NETWORK_FIRST_PATTERNS (SW-STALE-GROUP-OS-MODULE): they were only ever reachable via a plain <script src> tag in group.html, which routes through handleStaticAsset() (cache-first, up to 7-day staleness) since they were never in this list. Every fix to Group Tools — the media-lightbox/instant-open/modal-close fixes included — could silently sit uninstalled on an already-visited device for up to 7 days with zero error shown anywhere, identical to the failure mode already found and fixed for group-ui.js/group-core-*.js above. Bumping CACHE_NAME also forces a clean cache bucket for every client on next activation, so this exact deploy reaches everyone immediately instead of waiting out the old cache's TTL.
+const SW_VERSION = '19.6.0';
+const CACHE_NAME = 'nexopa-static-v29'; // Bumped — js/e2e-encryption.js added to NETWORK_FIRST_PATTERNS (SW-STALE-E2E-ENCRYPTION). Found by diffing the last 7 days of commits against NETWORK_FIRST_PATTERNS: this file was actively modified in that window but had no entry, so it sat cache-first for up to 7 days like every other file in this class of bug. Forces a fresh fetch of the current encryption code on next load instead of waiting on staleness expiry.
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
 
 // ---------------------------------------------------------------------------
@@ -273,17 +273,17 @@ const NETWORK_FIRST_PATTERNS = [
   /\/theme\.colors\.css/i,
   /\/pwa-manager\.js/i,
 
-  // ✅ NEW (SW-STALE-GROUP-OS-MODULE): group-os/group-os.js and
-  // group-os-integration.js were never in this list, so they fell through
-  // to the generic cache-first static-asset rule (up to 7-day staleness) —
-  // same failure mode as group-ui.js/group-core-bridge.js above, just missed
-  // for the Group Tools module specifically. This is the file with
-  // mount()/_modal()/the media-lightbox integration, i.e. exactly the kind
-  // of actively-patched, correctness-critical code this list exists for.
-  /\/group-os\/group-os\.js/i,
-  /\/group-os\.js/i,
-  /\/group-os\/group-os-integration\.js/i,
-  /\/group-os-integration\.js/i,
+  // ✅ NEW (SW-STALE-E2E-ENCRYPTION): js/e2e-encryption.js was modified in
+  // the last 7 days but had no entry here, so it fell through to the
+  // generic cache-first static-asset rule (up to 7 days stale) — the same
+  // failure mode already found and fixed for messages-core.bootstrap.js,
+  // group-ui.js, etc. above. Encryption/decryption code silently running a
+  // week-old version on some devices but not others is exactly the kind of
+  // "works for one user, not another" bug this list exists to prevent, and
+  // is higher-stakes here than most: a stale encrypt path on one device and
+  // a fresh decrypt path (or vice versa) on another is a plausible source
+  // of undecryptable/garbled messages that would look unrelated to caching.
+  /\/js\/e2e-encryption\.js/i,
 ];
 
 function isNetworkFirst(url) {
