@@ -548,46 +548,6 @@
     try { return _getRecipientPublicKey(userId).catch(() => null); } catch (_) { return null; }
   }
 
-  // FIX (BOOTSTRAP-KEY-NEVER-CACHED): POST /chats/bootstrap already returns
-  // the recipient's public key inline (publicKeys.theirs) specifically so
-  // the frontend never has to make a separate round trip before the first
-  // send — see messages-core.operations.js's bootstrapConversation(), which
-  // has been calling `window.KynectaE2E.cacheRecipientKey(...)` since that
-  // fix landed. That function was never actually defined here, so the call
-  // was always a silent no-op (optional chaining swallowed it) and every
-  // single chat — including ones opened from Chat History, where the key is
-  // usually already cached anyway — fell through to the `else if` branch
-  // and re-fetched the key over the network via prefetchRecipientKey/
-  // _getRecipientPublicKey instead of using the key bootstrap just handed
-  // it. For a genuinely first-time chat with someone who isn't a friend yet
-  // (e.g. opened from Search/Marketplace), that redundant fetch races the
-  // still-in-flight bootstrap call that is what actually creates the
-  // chat_participants row the key-fetch's authorization check depends on —
-  // occasionally 403'ing before self-healing on a later retry, adding
-  // several seconds of avoidable delay right on the send-hang critical
-  // path. Defining this function closes that gap: the key bootstrap already
-  // fetched (with its own, already-authorized request) is trusted and
-  // cached immediately, with no extra network round trip and no race.
-  async function cacheRecipientKey(userId, keyEntry) {
-    if (!userId || !keyEntry?.publicKey) return false;
-    try {
-      const key = await importPublicKey(keyEntry.publicKey);
-      const entry = { key, keyId: keyEntry.keyId };
-      PUB_CACHE.set(userId, entry);
-      const store = _loadPubKeyStore();
-      store[userId] = { pub: keyEntry.publicKey, keyId: keyEntry.keyId };
-      _savePubKeyStore(store);
-      // Resolve/clear any prefetch already in flight for this user so a
-      // slower, now-redundant network fetch doesn't overwrite this with a
-      // stale result later.
-      _inflightKeyFetch.delete(userId);
-      return true;
-    } catch (e) {
-      console.warn('[E2E] cacheRecipientKey: failed to import provided key, falling back to network fetch:', e?.message);
-      return false;
-    }
-  }
-
   // Distinct, catchable error types so callers (messages-core.operations.js)
   // can tell "this person has genuinely never set up encryption" apart from
   // "E2E isn't unlocked in this browser session yet" instead of both being
@@ -831,8 +791,6 @@
     decryptFromChat,
     // FIX (SEND-HANG-NON-HISTORY-OPEN): see prefetchRecipientKey definition above.
     prefetchRecipientKey,
-    // FIX (BOOTSTRAP-KEY-NEVER-CACHED): see cacheRecipientKey definition above.
-    cacheRecipientKey,
     // FIX-NO-PLAINTEXT-FALLBACK: catchable error constructors so callers can
     // distinguish "not unlocked yet" / "recipient has no key" from other
     // failures instead of guessing off error.message text.

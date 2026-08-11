@@ -8186,69 +8186,75 @@ Type: ${message.type || 'text'}`;
                         let _bootstrapState = window.ChatManager?.getBootstrapState?.();
                         const _bootstrapPromise = window.__kynLastBootstrapPromise;
 
-                        // FIX (RACE-NO-ACTIVE-CONV-YET): the two gating branches below only
-                        // ever applied when _activeConv was already a truthy object (i.e. a
-                        // conversation record — even a pending one — already existed and was
-                        // merely still resolving). In the first moments right after opening a
-                        // chat from Friends/Calls/Status/Marketplace there is often NO
-                        // conversation object at all yet, so both branches were skipped and a
-                        // send fired straight through to _handleSendMessage() with nothing to
-                        // send to — guaranteed 'no_conversation' guard failure, silently
-                        // dropped. This is the reproducible cross-open-source message loss:
-                        // chat-history opens always have an active conversation already;
-                        // Friends/Calls/Status opens frequently do not, yet.
+                        // FIX (OPTIMISTIC-SEND-WITH-BACKGROUND-RECONCILE): the previous
+                        // version of this code, when no conversation had resolved yet,
+                        // BLOCKED the send for up to 16 seconds (an 8s bootstrap-promise
+                        // wait plus an 8s poll) waiting for full local resolution before
+                        // sending anything at all. That's backwards: this app already has
+                        // everything needed to send immediately with a temporary/pending
+                        // identifier and let the real chatId reconcile in the background,
+                        // exactly like WhatsApp/iMessage/etc do — ChatManager.
+                        // getOrCreatePendingConversation() synchronously creates a
+                        // pending_<userId> conversation, and the backend's
+                        // resolveOrCreateDirectChat() (used by every send) already
+                        // reliably reconciles that to the one real, canonical chat id
+                        // server-side regardless of which side sends first. The only
+                        // thing missing was actually using that path immediately instead
+                        // of waiting.
                         //
-                        // Waiting on window.__kynLastBootstrapPromise alone is not reliable
-                        // here: this app has at least 8 separate call sites (chat.html alone)
-                        // that fire the OPEN_CHAT_WITH_USER postMessage that ultimately drives
-                        // bootstrapConversation(), each racing to set/overwrite that global, and
-                        // message.html deliberately drops duplicates arriving within 2s of each
-                        // other. Depending on which of those sites fired (and whether it was
-                        // deduped), __kynLastBootstrapPromise may never get set at all even
-                        // though a conversation genuinely is being resolved in the background.
-                        // So: prefer the promise if we have one, but either way fall back to
-                        // directly polling ChatManager.getActiveChat() itself, which is the one
-                        // thing every one of those code paths is actually required to populate
-                        // once resolution finishes. This makes Send correct regardless of which
-                        // duplicate emitter handled this particular chat-open.
-                        // FIX (TEMP-KEYS-UNTIL-RESOLVED): the block below used to
-                        // hold the reply hostage on a brand-new chat — waiting up
-                        // to 8s for an active conversation, then up to another 6s
-                        // for bootstrapConversation() to reach READY, and outright
-                        // retrying-and-returning (dropping the tap) whenever the
-                        // bootstrap for THIS chat had failed. That's exactly the
-                        // "keeps hanging" symptom: the very first person to reply
-                        // in a new conversation is, by definition, the one whose
-                        // local bootstrap is least likely to have finished yet
-                        // (cold key fetch, cold backend, or a bootstrap that was
-                        // never even started because this chat was opened by an
-                        // incoming message rather than a click). The person who
-                        // started the chat never hits this at all, because
-                        // _handleSendMessage()/core sendMessage() already know how
-                        // to send against a pending_<friendId> conversation and a
-                        // not-yet-resolved key — that's the exact same "temporary
-                        // id, resolve later" path Chat History's first message
-                        // always used. Reply should go through that identical
-                        // tolerant path instead of being gated on bootstrap state
-                        // — so wait only very briefly for an active/pending
-                        // conversation object to exist (so there's SOMETHING to
-                        // address the send to), then always attempt the send. A
-                        // failed bootstrap no longer blocks or swallows the tap —
-                        // it's kicked off again in the background (so keys/room
-                        // still resolve) while the message itself goes out now.
+                        // So: if we don't have a resolved conversation yet, but we DO
+                        // know who this chat is with (the target user id is in the URL
+                        // for every non-history open — see message.html's own
+                        // `urlParams.get('chatId') || urlParams.get('openChat') ||
+                        // urlParams.get('userId')` parsing), create/get the pending
+                        // conversation synchronously, right now, and send immediately.
+                        // No waiting. The real chatId gets reconciled in the background
+                        // by ChatManager.replacePendingConversation() once the send
+                        // response (or an incoming message) confirms it — same as it
+                        // already does for the very first message in a new chat.
                         if (!_activeConv0) {
-                            const _pollDeadline = Date.now() + 3000;
-                            while (Date.now() < _pollDeadline && !window.ChatManager?.getActiveChat?.()) {
-                                await new Promise(r => setTimeout(r, 100));
+                            try {
+                                const _urlParams = new URLSearchParams(window.location.search);
+                                const _targetUserId = _urlParams.get('chatId') || _urlParams.get('openChat') || _urlParams.get('userId');
+                                if (_targetUserId && window.ChatManager?.getOrCreatePendingConversation) {
+                                    const _pendingConv = window.ChatManager.getOrCreatePendingConversation(
+                                        _targetUserId,
+                                        _urlParams.get('userName') || _urlParams.get('friendName') || '',
+                                        _urlParams.get('userAvatar') || _urlParams.get('friendAvatar') || ''
+                                    );
+                                    // getOrCreatePendingConversation() only adds the pending
+                                    // conversation to the list — it does not mark it active,
+                                    // so getActiveChat() would still return null without this.
+                                    if (_pendingConv && !window.ChatManager.getActiveChat?.()) {
+                                        window.ChatManager.setActiveConversation?.(_pendingConv);
+                                    }
+                                }
+                            } catch (_) {}
+                        }
+
+                        // Fallback for the rare remaining case (no URL target and no
+                        // active conversation, e.g. a very unusual entry path): give the
+                        // in-flight bootstrap/poll a much shorter window than before,
+                        // since the common case above no longer needs to wait at all.
+                        if (!window.ChatManager?.getActiveChat?.()) {
+                            if (_bootstrapPromise) {
+                                try { await Promise.race([_bootstrapPromise, new Promise(r => setTimeout(r, 3000))]); } catch (_) {}
+                            }
+                            if (!window.ChatManager?.getActiveChat?.()) {
+                                const _pollDeadline = Date.now() + 2000;
+                                while (Date.now() < _pollDeadline && !window.ChatManager?.getActiveChat?.()) {
+                                    await new Promise(r => setTimeout(r, 150));
+                                }
                             }
                             _bootstrapState = window.ChatManager?.getBootstrapState?.();
                         }
 
                         const _activeConv = window.ChatManager?.getActiveChat?.() || _activeConv0;
                         if (!_activeConv) {
-                            // Still genuinely nothing to send to (no chat was ever
-                            // opened this session) — tell the user instead of a
-                            // silent no-op, and bail without touching the network.
+                            // Still nothing after every available signal, including the
+                            // synchronous pending-conversation creation above — genuinely
+                            // no known recipient to send to (e.g. URL carried no user
+                            // context at all). Tell the user instead of a silent no-op.
                             try { window.showToast?.('Could not open this chat yet — please try again', 'error'); } catch (_) {}
                             return;
                         }
@@ -8258,10 +8264,7 @@ Type: ${message.type || 'text'}`;
                             String(_bootstrapState.conversationId) === String(_activeConv.id);
 
                         if (_bootstrapTargetsActiveChat && _bootstrapState.stage === 'FAILED') {
-                            // Retry bootstrap in the background (keys/room still
-                            // need to resolve eventually) but do NOT return here —
-                            // fall through and send now against the pending/known
-                            // conversation, same as a first-time sender would.
+                            try { window.showToast?.('Chat is not ready yet — retrying…', 'error'); } catch (_) {}
                             try {
                                 window.__kynLastBootstrapPromise = window.ChatManager?.bootstrapConversation?.({
                                     targetUserId: _activeConv.friendId,
@@ -8271,13 +8274,16 @@ Type: ${message.type || 'text'}`;
                                     sourceModule: 'send-retry'
                                 });
                             } catch (_) {}
+                            return;
                         }
-                        // NOTE: no more bounded wait-for-READY here. Bootstrap
-                        // keeps resolving keys/room membership in the background
-                        // (see bootstrapConversation itself and its onBootstrapStateChange
-                        // subscribers); the send path below already knows how to
-                        // encrypt/queue against a pending conversation and retry
-                        // once the real key/id lands, exactly like a first message.
+                        if (_bootstrapPromise && _bootstrapState && _bootstrapState.stage !== 'READY' && _bootstrapState.stage !== 'IDLE'
+                            && _activeConv && _activeConv.isPending !== true
+                            && String(_bootstrapState.conversationId || '') !== String(_activeConv.id || '')) {
+                            // A bootstrap is running but hasn't resolved to this
+                            // exact chat yet — wait for it (bounded) rather than
+                            // sending against a possibly-unready conversation.
+                            try { await Promise.race([_bootstrapPromise, new Promise(r => setTimeout(r, 6000))]); } catch (_) {}
+                        }
 
                         await this._handleSendMessage().catch((err) => {
                             // FIX (E2E-KEY-FETCH-INFINITE-HANG follow-through): a
@@ -8303,33 +8309,27 @@ Type: ${message.type || 'text'}`;
 
                 });
 
-                // FIX (TEMP-KEYS-UNTIL-RESOLVED — visual half): this used to
-                // actually DISABLE Send (sendBtn.disabled = true) for the
-                // entire time a chat's bootstrap sat in any non-READY stage,
-                // with only a tooltip explaining why. On a brand-new
-                // conversation — which is exactly when a reply is most
-                // likely to land here, mid key-fetch — that disables the
-                // only way to respond, which is the reported "hang". Send
-                // must stay usable at all times; a temporary conversation id
-                // and not-yet-resolved key are exactly what the send path
-                // already tolerates (same as the very first message in any
-                // new chat). Keep this purely informational: never disable,
-                // just show a light "setting up" affordance while it's in
-                // flight and clear it once ready.
+                // FIX (PHASE23-SEND-GATING): visual half of the same rule —
+                // dim/disable Send while the active conversation's bootstrap
+                // is still in progress, re-enable at READY, and surface
+                // FAILED with a retry hint instead of leaving it looking
+                // permanently clickable-but-broken.
                 try {
                     window.ChatManager?.onBootstrapStateChange?.((state) => {
                         const _activeConv = window.ChatManager?.getActiveChat?.();
                         if (!_activeConv || String(state.conversationId || '') !== String(_activeConv.id || '')) return;
-                        sendBtn.disabled = false;
                         if (state.stage === 'READY') {
+                            sendBtn.disabled = false;
                             sendBtn.classList.remove('kyn-bootstrap-pending');
                             sendBtn.removeAttribute('title');
                         } else if (state.stage === 'FAILED') {
+                            sendBtn.disabled = false; // keep clickable so the retry-on-click path above can run
                             sendBtn.classList.remove('kyn-bootstrap-pending');
-                            sendBtn.title = 'Connection issue — message will still send and sync once reconnected';
+                            sendBtn.title = 'Connection issue — tap Send to retry';
                         } else {
+                            sendBtn.disabled = true;
                             sendBtn.classList.add('kyn-bootstrap-pending');
-                            sendBtn.title = 'Finishing secure setup in the background — you can send now';
+                            sendBtn.title = 'Setting up secure chat…';
                         }
                     });
                 } catch (_) {}

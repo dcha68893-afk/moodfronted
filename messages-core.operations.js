@@ -971,25 +971,6 @@ const ChatManager = {
             let requestBody = {};
             let _recipientUserIdForEncryption = null;
             
-            // ── REPLY-TO TARGET RESOLUTION ──────────────────────────────────
-            // FIX (reply-first-time-fails / lacking-of-id-and-keys): two bugs
-            // lived here together. (1) `options.replyToId || options.replyTo`
-            // could assign the entire replyTo *object* to replyToId when only
-            // the object was passed — not a usable ID at all. (2) When the
-            // reply target is a message this client only just sent
-            // optimistically (still has a local 'msg_...' id, not yet
-            // confirmed by the server), sending that string as replyToId
-            // meant the backend's numeric parse always failed and silently
-            // dropped the reply link. Resolve to a real id when we have one;
-            // otherwise send it as replyToLocalId so the backend can
-            // reconcile it server-side (see messages.js) instead of losing
-            // it. Either way the send proceeds immediately — nothing here
-            // blocks or waits.
-            const _replyTargetRaw = options.replyToId || (options.replyTo && options.replyTo.id) || null;
-            const _replyTargetIsNumeric = _replyTargetRaw != null && /^\d+$/.test(String(_replyTargetRaw));
-            const _replyToIdForRequest      = _replyTargetIsNumeric ? _replyTargetRaw : null;
-            const _replyToLocalIdForRequest = (_replyTargetRaw != null && !_replyTargetIsNumeric) ? String(_replyTargetRaw) : null;
-
             if (isPending) {
                 let pendingConv = this._conversationsMap.get(conversationId);
                 // FIX-ROOT-CAUSE-MISSING-RECEIVERID (defense in depth): this
@@ -1020,8 +1001,7 @@ const ChatManager = {
                     content: content,
                     type: options.type || 'text',
                     attachment: options.attachment,
-                    replyToId: _replyToIdForRequest,
-                    replyToLocalId: _replyToLocalIdForRequest,
+                    replyToId: options.replyToId || options.replyTo,
                     mentions: options.mentions,
                     metadata: options.metadata || window.__pendingMsgMeta || undefined,
                 };
@@ -1047,8 +1027,7 @@ const ChatManager = {
                     content: content,
                     type: options.type || 'text',
                     attachment: options.attachment,
-                    replyToId: _replyToIdForRequest,
-                    replyToLocalId: _replyToLocalIdForRequest,
+                    replyToId: options.replyToId || options.replyTo,
                     mentions: options.mentions,
                     // FIX: pass metadata so gif/poll/sticker data reaches the backend
                     metadata: options.metadata || window.__pendingMsgMeta || undefined,
@@ -1909,6 +1888,39 @@ const ChatManager = {
         },
         
         setActiveConversation: function(conversation) {
+            // FIX (FRIENDID-NEVER-BACKFILLED): __kynResolveIsThisChat() (used by
+            // every incoming-message render path) needs conversation.friendId
+            // (or otherUserId / otherParticipant.id) to match a message against
+            // the currently-open chat when the message's own chatId doesn't
+            // exactly match yet (a pending id, or a not-yet-reconciled real id).
+            // Some conversation objects reach this point with none of those
+            // fields set — e.g. a raw server chat object whose participant info
+            // is nested under `participants` rather than flattened — silently
+            // breaking that fallback match for exactly this conversation. This
+            // is a defensive backfill at the one choke point every "set active"
+            // call goes through, regardless of which upstream loader built the
+            // object, so the fallback match always has something to work with.
+            if (conversation && !conversation.friendId && !conversation.otherUserId && !conversation.otherParticipant) {
+                try {
+                    const _myId = (typeof SessionManager !== 'undefined' && SessionManager.getUserId) ? String(SessionManager.getUserId()) : null;
+                    const _participants = conversation.participants || conversation.chatParticipants || conversation.members;
+                    if (Array.isArray(_participants) && _participants.length) {
+                        const _other = _participants.find(p => {
+                            const pid = String((p && (p.userId ?? p.id ?? p.user?.id)) ?? '');
+                            return pid && pid !== _myId;
+                        });
+                        if (_other) {
+                            const _otherId = (_other.userId ?? _other.id ?? _other.user?.id);
+                            if (_otherId != null) conversation.friendId = String(_otherId);
+                            const _otherUser = _other.user || _other;
+                            if (_otherUser) {
+                                conversation.friendName = conversation.friendName || _otherUser.displayName || _otherUser.username || _otherUser.name;
+                                conversation.friendAvatar = conversation.friendAvatar || _otherUser.avatar;
+                            }
+                        }
+                    }
+                } catch (_) {}
+            }
             this._activeConversation = conversation;
             this._notifySubscribers();
             
