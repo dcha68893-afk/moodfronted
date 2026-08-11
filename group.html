@@ -3067,12 +3067,55 @@ function setupMenu(){
 }
 
 /* ─── Sub-panel ───────────────────────────────────────────────── */
+// FIX-GROUP-MEDIA-NEW-WINDOW: shared in-page lightbox for group media taps —
+// see buildSub('media', ...) below, where taps used to be plain
+// `<a target="_blank">` links that navigated away into a new tab/window.
+function openGroupMediaLightbox(url,type){
+    if(!url)return;
+    var existing=document.getElementById('gcMediaLightbox');
+    if(existing)existing.remove();
+    var box=document.createElement('div');
+    box.id='gcMediaLightbox';
+    box.style.cssText='position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.92);display:flex;align-items:center;justify-content:center;padding:20px;';
+    var inner = type==='video'
+        ? '<video src="'+esc(url)+'" controls autoplay playsinline style="max-width:100%;max-height:100%;border-radius:8px;"></video>'
+        : '<img src="'+esc(url)+'" style="max-width:100%;max-height:100%;border-radius:8px;object-fit:contain;" alt="">';
+    box.innerHTML=inner+'<button type="button" aria-label="Close" style="position:absolute;top:16px;right:16px;width:38px;height:38px;border-radius:50%;border:none;background:rgba(255,255,255,.15);color:#fff;font-size:20px;cursor:pointer;line-height:1;">\u2715</button>';
+    box.querySelector('button').addEventListener('click',function(){box.remove();});
+    box.addEventListener('click',function(e){if(e.target===box)box.remove();});
+    document.addEventListener('keydown',function _esc(e){if(e.key==='Escape'){box.remove();document.removeEventListener('keydown',_esc);}});
+    document.body.appendChild(box);
+}
+// FIX-NO-LOADING-SPINNER: small localStorage-backed cache so the Members
+// and Group Media sub-panels paint instantly from last-known data instead
+// of always showing a spinner while the network call is in flight. Data
+// still refreshes in the background every time the panel opens; the cache
+// is just what's shown while that refresh is happening.
+function _subCacheKey(type,groupId){return 'kyn_gcSub_'+type+'_'+groupId;}
+function _subCacheGet(type,groupId){
+    try{var raw=localStorage.getItem(_subCacheKey(type,groupId));if(!raw)return null;return JSON.parse(raw);}catch(e){return null;}
+}
+function _subCacheSet(type,groupId,data){
+    try{localStorage.setItem(_subCacheKey(type,groupId),JSON.stringify(data));}catch(e){}
+}
 function openSub(type){
     var sp=document.getElementById('gcSubPanel'),ti=document.getElementById('gcSubTitle'),ct=document.getElementById('gcSubContent'),g=window.__gcCurGroup;
     if(!sp||!ti||!ct||!g)return;
     ti.textContent={members:'Members',settings:'Settings',theme:'Theme',purpose:'Purpose',info:'Group Info',search:'Search',media:'Group Media',disappearing:'Disappearing Messages'}[type]||type;
-    ct.innerHTML='<div style="text-align:center;padding:30px"><i class="fas fa-spinner fa-spin"></i></div>';
-    sp.style.display='flex';sp.classList.add('open');setTimeout(function(){buildSub(type,g,ct);},60);
+    sp.style.display='flex';sp.classList.add('open');
+    // Cacheable panels (members/media do an async fetch): paint the last-known
+    // result instantly — no spinner — while buildSub() refreshes it silently
+    // underneath. Everything else (info/settings/theme/purpose/disappearing)
+    // already renders synchronously from the in-memory group object, so it
+    // never needed a spinner in the first place — call it immediately.
+    if(type==='members'||type==='media'){
+        var cached=_subCacheGet(type,g.id);
+        if(cached&&cached.html){ct.innerHTML=cached.html;}
+        else{ct.innerHTML='<div style="text-align:center;padding:30px"><i class="fas fa-spinner fa-spin"></i></div>';}
+        buildSub(type,g,ct);
+        return;
+    }
+    buildSub(type,g,ct);
 }
 function buildSub(type,g,el){
     if(type==='info'){
@@ -3082,7 +3125,9 @@ function buildSub(type,g,el){
         return;
     }
     if(type==='members'){
-        el.innerHTML='<div style="text-align:center;padding:20px"><i class="fas fa-spinner fa-spin"></i></div>';
+        // FIX-NO-LOADING-SPINNER: openSub() already painted cached members
+        // (if any) before calling buildSub() — nothing to do here but fetch
+        // and silently replace once fresh data arrives.
         api('/groups/'+g.id+'/members?limit=100').then(function(d){
             var list=(d.data&&d.data.members)||(d.data&&Array.isArray(d.data)?d.data:null)||d.members||[];
             if(!list.length){el.innerHTML='<p style="text-align:center;padding:20px;color:var(--text-secondary)">No members found</p>';return;}
@@ -3105,6 +3150,10 @@ function buildSub(type,g,el){
                     actions='<div style="display:flex;gap:6px;flex-shrink:0">'+promoteBtn+'<button data-mact="remove" data-uid="'+uid+'" style="font-size:11px;padding:4px 8px;border-radius:6px;border:1px solid #ef444455;background:transparent;color:#ef4444;cursor:pointer;">Remove</button></div>';
                 }
                 return'<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border-color)"><div style="width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#0084ff,#0055cc);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:12px;flex-shrink:0;">'+esc(n.slice(0,2).toUpperCase())+'</div><div style="flex:1"><div style="font-size:14px;font-weight:500">'+esc(n)+'</div><span style="font-size:11px;padding:2px 7px;border-radius:8px;background:'+rc+'22;color:'+rc+'">'+esc(rl)+'</span></div>'+actions+'</div>';}).join('')+'</div>';
+            // FIX-NO-LOADING-SPINNER: cache this render so the next time this
+            // panel opens for this group, it paints instantly from here while
+            // a fresh copy loads silently underneath.
+            _subCacheSet('members',g.id,{html:el.innerHTML});
             el.querySelectorAll('[data-mact]').forEach(function(btn){
                 btn.addEventListener('click',function(){
                     var act=btn.getAttribute('data-mact'),uid=btn.getAttribute('data-uid');
@@ -3149,7 +3198,12 @@ function buildSub(type,g,el){
                     });
                 }).catch(function(){picker.innerHTML='<p style="text-align:center;padding:12px;color:var(--text-secondary);font-size:13px">Could not load friends list</p>';});
             });
-        }).catch(function(){el.innerHTML='<p style="text-align:center;padding:20px;color:var(--text-secondary)">Could not load</p>';});
+        }).catch(function(){
+            // FIX-NO-LOADING-SPINNER: don't blow away a cached member list on
+            // a failed refresh — only show the error state if we were still
+            // showing the spinner (i.e. nothing cached existed to fall back to).
+            if(el.querySelector('.fa-spinner'))el.innerHTML='<p style="text-align:center;padding:20px;color:var(--text-secondary)">Could not load</p>';
+        });
         return;
     }
     if(type==='settings'){
@@ -3217,7 +3271,9 @@ function buildSub(type,g,el){
         return;
     }
     if(type==='media'){
-        el.innerHTML='<div style="text-align:center;padding:20px"><i class="fas fa-spinner fa-spin"></i></div>';
+        // FIX-NO-LOADING-SPINNER: openSub() already painted the cached media
+        // grid (if any) before calling buildSub() — don't overwrite it with a
+        // spinner. Just fetch and silently replace once fresh data arrives.
         var cid2=g.chatId||g.id;
         api('/groups/'+g.id+'/messages?limit=100').then(function(d){
             var list=(d.data&&d.data.messages)||d.data||[];
@@ -3227,15 +3283,33 @@ function buildSub(type,g,el){
                 return (t==='image'||t==='photo'||t==='video'||t==='file'||t==='document')&&(m.mediaUrl||m.media_url||(m.metadata&&m.metadata.attachment));
             });
             if(!media.length){el.innerHTML='<p style="text-align:center;padding:20px;color:var(--text-secondary)">No media, links, or docs yet</p>';return;}
-            el.innerHTML='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;padding:0 4px">'+media.map(function(m){
+            // FIX-GROUP-MEDIA-NEW-WINDOW: these tiles were plain `<a target="_blank">`
+            // links, so tapping any image/video/file navigated away into a brand-new
+            // browser tab/window instead of showing it in-app. They're now buttons
+            // that open an in-page lightbox (images/video play inline; files still
+            // open in a new tab since browsers can't preview arbitrary file types).
+            el.innerHTML='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;padding:0 4px">'+media.map(function(m,idx){
                 var t=m.type||m.messageType;
                 var url=m.mediaUrl||m.media_url||(m.metadata&&m.metadata.attachment&&m.metadata.attachment.url)||'';
-                if(t==='image'||t==='photo')return '<a href="'+esc(url)+'" target="_blank" style="display:block;aspect-ratio:1;border-radius:8px;overflow:hidden;background:var(--secondary-color)"><img src="'+esc(url)+'" style="width:100%;height:100%;object-fit:cover" alt=""></a>';
-                if(t==='video')return '<a href="'+esc(url)+'" target="_blank" style="display:flex;align-items:center;justify-content:center;aspect-ratio:1;border-radius:8px;background:var(--secondary-color)"><i class="fas fa-play-circle" style="font-size:22px"></i></a>';
+                if(t==='image'||t==='photo')return '<button type="button" data-media-idx="'+idx+'" data-media-type="image" data-media-url="'+esc(url)+'" style="display:block;aspect-ratio:1;border-radius:8px;overflow:hidden;background:var(--secondary-color);border:none;padding:0;cursor:pointer"><img src="'+esc(url)+'" style="width:100%;height:100%;object-fit:cover" alt=""></button>';
+                if(t==='video')return '<button type="button" data-media-idx="'+idx+'" data-media-type="video" data-media-url="'+esc(url)+'" style="display:flex;align-items:center;justify-content:center;aspect-ratio:1;border-radius:8px;background:var(--secondary-color);border:none;padding:0;cursor:pointer"><i class="fas fa-play-circle" style="font-size:22px"></i></button>';
                 var fname=m.fileName||m.file_name||(m.metadata&&m.metadata.attachment&&m.metadata.attachment.name)||'File';
-                return '<a href="'+esc(url)+'" target="_blank" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;aspect-ratio:1;border-radius:8px;background:var(--secondary-color);padding:4px;text-align:center"><i class="fas fa-file" style="font-size:18px"></i><span style="font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%">'+esc(fname)+'</span></a>';
+                return '<a href="'+esc(url)+'" target="_blank" rel="noopener" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;aspect-ratio:1;border-radius:8px;background:var(--secondary-color);padding:4px;text-align:center"><i class="fas fa-file" style="font-size:18px"></i><span style="font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%">'+esc(fname)+'</span></a>';
             }).join('')+'</div>';
-        }).catch(function(){el.innerHTML='<p style="text-align:center;padding:20px;color:var(--text-secondary)">Could not load media</p>';});
+            // FIX-NO-LOADING-SPINNER: cache this render so the next time this
+            // panel opens for this group, it paints instantly from here while
+            // a fresh copy loads silently underneath.
+            _subCacheSet('media',g.id,{html:el.innerHTML});
+            el.querySelectorAll('[data-media-url]').forEach(function(btn){
+                btn.addEventListener('click',function(){
+                    openGroupMediaLightbox(btn.getAttribute('data-media-url'),btn.getAttribute('data-media-type'));
+                });
+            });
+        }).catch(function(){
+            // FIX-NO-LOADING-SPINNER: keep showing cached media on a failed
+            // refresh; only show the error state if nothing was cached.
+            if(el.querySelector('.fa-spinner'))el.innerHTML='<p style="text-align:center;padding:20px;color:var(--text-secondary)">Could not load media</p>';
+        });
         return;
     }
     el.innerHTML='<p style="text-align:center;padding:20px;color:var(--text-secondary)">Coming soon</p>';

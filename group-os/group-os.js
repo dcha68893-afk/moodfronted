@@ -680,7 +680,33 @@
           </div>
         </div>`;
         m.classList.add('gos-modal');
-        m.querySelector('#gosModalOk').onclick = () => { const r = onOk(m); if (r !== false) m.remove(); };
+        // FIX-MODAL-VALIDATION-CLOSE: onOk is always an `async (m) => {...}` callback.
+        // Calling it synchronously and comparing the return value to `false`
+        // (`const r = onOk(m); if (r !== false) ...`) never worked: an async
+        // function ALWAYS returns a Promise, never the literal value `false`,
+        // even when the function body does `return false;` on a validation
+        // failure. So `r` was always a (truthy) Promise object, `r !== false`
+        // was always true, and the modal closed immediately on every click —
+        // including when required fields (e.g. task title, event title/start
+        // time) were missing. The person would see the "Title and start time
+        // required" toast, but the modal vanished anyway and nothing was
+        // created, since the underlying await never happened before close.
+        // Fix: await the callback's result, and keep the modal open (so the
+        // person can fix the field and retry) whenever it resolves to `false`.
+        const _okBtn = m.querySelector('#gosModalOk');
+        _okBtn.onclick = async () => {
+            _okBtn.disabled = true;
+            const _prevLabel = _okBtn.textContent;
+            _okBtn.textContent = 'Saving…';
+            try {
+                const r = await onOk(m);
+                if (r !== false) { m.remove(); return; }
+            } catch (err) {
+                _showToast(err?.message || 'Something went wrong', 'error');
+            }
+            _okBtn.disabled = false;
+            _okBtn.textContent = _prevLabel;
+        };
         m.addEventListener('click', e => { if(e.target===m) m.remove(); });
         document.body.appendChild(m);
         return m;
@@ -910,16 +936,50 @@
         _container = typeof containerId === 'string' ? document.getElementById(containerId) : containerId;
         if (!_container) return console.error('[GroupOS] Container not found');
         _groupId = groupId; _userId = userId; _role = role || 'member';
-        // Load enabled modules
-        try { _modules = await _api('GET', `/${groupId}/modules`) || _modules; } catch(_) {}
-        // Always show analytics + AI for admins
+
+        // FIX-GROUPOS-SLOW-OPEN: mount() used to `await _api('GET', '/modules')`
+        // BEFORE ever calling _buildShell(), so the whole Group Tools panel sat
+        // on a blank "Loading Group Tools…" screen until that network request
+        // resolved — and that same /modules endpoint is one of the routes hit
+        // by the Groups.enabledModules DB bug, so it could hang or error for
+        // seconds. There's no reason to block the very first paint on a network
+        // round-trip: we already have a sensible default module list, and the
+        // last-known list for this exact group cached locally.
+        // Fix: paint the shell INSTANTLY using cached/default modules, then
+        // fetch the real list in the background and only re-render if it
+        // actually changed.
+        let _cachedModules = null;
+        try {
+            const raw = localStorage.getItem('gos_modules_' + groupId);
+            if (raw) _cachedModules = JSON.parse(raw);
+        } catch (_) {}
+        if (Array.isArray(_cachedModules) && _cachedModules.length) _modules = _cachedModules;
+
         if (['admin','owner'].includes(_role)) {
             if (!_modules.includes('analytics')) _modules.push('analytics');
             if (!_modules.includes('ai')) _modules.push('ai');
         }
+
+        // Paint immediately — do not wait on the network.
         _buildShell();
         _flushOfflineQueue();
-        console.log('[GroupOS] ✅ Mounted for group', groupId);
+        console.log('[GroupOS] ✅ Mounted for group', groupId, '(instant, modules pending refresh)');
+
+        // Refresh the real module list in the background; only rebuild the
+        // shell if it actually differs from what we just painted with.
+        _api('GET', `/${groupId}/modules`).then(fresh => {
+            if (!Array.isArray(fresh) || !fresh.length) return;
+            const freshSet = fresh.slice();
+            if (['admin','owner'].includes(_role)) {
+                if (!freshSet.includes('analytics')) freshSet.push('analytics');
+                if (!freshSet.includes('ai')) freshSet.push('ai');
+            }
+            try { localStorage.setItem('gos_modules_' + groupId, JSON.stringify(fresh)); } catch (_) {}
+            const changed = freshSet.length !== _modules.length ||
+                freshSet.some(m => !_modules.includes(m));
+            _modules = freshSet;
+            if (changed && _groupId === groupId) _buildShell();
+        }).catch(() => { /* keep showing what we already painted */ });
     }
 
     // ── P3 FIX: Kanban drag-drop ───────────────────────────────────────────

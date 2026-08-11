@@ -1,6 +1,36 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <script>
+    // FIX (session-expiry login page rendering INSIDE a child iframe instead of
+    // replacing the whole app): index.html is the ONLY login page in this app —
+    // every module iframe (friend.html, settings.html, Tools.html, etc.) has its
+    // own fallback path that can end up pointing a *self* window.location.href
+    // at 'index.html' (e.g. a race where the parent-handshake flag hasn't been
+    // set yet when a 401 fires right at boot, or any future code that forgets
+    // this rule). When that happens inside an iframe, the browser loads this
+    // whole page — including its own full-screen layout — squeezed into that
+    // iframe's small content box, on top of/alongside whatever the parent shell
+    // (chat.html) and its OTHER still-open iframes are still showing. That's
+    // the "duplicate screens" / "login page overlapping the iframe" bug.
+    // This is a hard, unconditional guard: if this document is ever loaded
+    // anywhere other than the true top-level browsing context, immediately
+    // force the REAL top window to navigate here instead of rendering inline.
+    // This makes it architecturally impossible for the login screen to render
+    // nested inside another page, no matter which of the many child-module
+    // code paths triggered the navigation.
+    (function () {
+        try {
+            if (window.top !== window.self) {
+                window.top.location.replace(window.location.href);
+                // Hide this framed copy immediately so nothing paints inside
+                // the iframe box while the real top-level redirect lands.
+                document.documentElement.style.display = 'none';
+                window.__KYN_FRAME_BUSTING__ = true;
+            }
+        } catch (_e) {}
+    })();
+    </script>
     <script>window.API_BASE_URL = "https://noxopa.onrender.com"; window.__kynAPI = window.__kynAPI || {}; window.__kynAPI.baseUrl = "https://noxopa.onrender.com/api";
     // FIX (theme-engine generic-accent opt-out): index.html's dashboard keeps its
     // own intentional purple/blue brand look (see THEME_FIX_CHANGELOG.md) instead

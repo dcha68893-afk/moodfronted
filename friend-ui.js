@@ -6313,6 +6313,16 @@ if (domElements.closeCameraBtn) {
                     source: 'friend.html',
                     timestamp: Date.now()
                 });
+            } else if (window.top !== window.self) {
+                // FIX: parentDetected can still be false here if the
+                // handshake ack simply hasn't landed yet even though this
+                // IS embedded in chat.html — falling back to a plain
+                // window.location.href in that case loads the full login
+                // page squeezed inside this iframe's box instead of
+                // replacing the whole app (the "login page overlapping"
+                // bug). If we're framed at all, always navigate the real
+                // top window, never this iframe's own window.
+                window.top.location.replace('/index.html');
             } else {
                 window.location.href = '/index.html';
             }

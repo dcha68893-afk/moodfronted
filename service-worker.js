@@ -63,7 +63,7 @@
 // immediate one-time clean slate so this deploy reaches everyone right away
 // instead of waiting on staleness expiry.
 const SW_VERSION = '19.5.0';
-const CACHE_NAME = 'nexopa-static-v28'; // Bumped — group-ui.js/group-core-bootstrap.js/group-core-operations.js and status-ui.js/status-core.part[1-3].js/status-core-transport.js/status-core-state.js added to NETWORK_FIRST_PATTERNS (SW-STALE-GROUP-STATUS-MODULES); forces fresh fetch of the group-tabs-blank-until-refresh fix and any status Recently-Viewed fixes on next load
+const CACHE_NAME = 'nexopa-static-v29'; // Bumped — group-os/group-os.js and group-os/group-os-integration.js added to NETWORK_FIRST_PATTERNS (SW-STALE-GROUP-OS-MODULE): they were only ever reachable via a plain <script src> tag in group.html, which routes through handleStaticAsset() (cache-first, up to 7-day staleness) since they were never in this list. Every fix to Group Tools — the media-lightbox/instant-open/modal-close fixes included — could silently sit uninstalled on an already-visited device for up to 7 days with zero error shown anywhere, identical to the failure mode already found and fixed for group-ui.js/group-core-*.js above. Bumping CACHE_NAME also forces a clean cache bucket for every client on next activation, so this exact deploy reaches everyone immediately instead of waiting out the old cache's TTL.
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
 
 // ---------------------------------------------------------------------------
@@ -272,6 +272,18 @@ const NETWORK_FIRST_PATTERNS = [
   // patched.
   /\/theme\.colors\.css/i,
   /\/pwa-manager\.js/i,
+
+  // ✅ NEW (SW-STALE-GROUP-OS-MODULE): group-os/group-os.js and
+  // group-os-integration.js were never in this list, so they fell through
+  // to the generic cache-first static-asset rule (up to 7-day staleness) —
+  // same failure mode as group-ui.js/group-core-bridge.js above, just missed
+  // for the Group Tools module specifically. This is the file with
+  // mount()/_modal()/the media-lightbox integration, i.e. exactly the kind
+  // of actively-patched, correctness-critical code this list exists for.
+  /\/group-os\/group-os\.js/i,
+  /\/group-os\.js/i,
+  /\/group-os\/group-os-integration\.js/i,
+  /\/group-os-integration\.js/i,
 ];
 
 function isNetworkFirst(url) {

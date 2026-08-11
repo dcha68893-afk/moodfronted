@@ -3236,9 +3236,73 @@
         // with no explanation shown to the user. This is the single handler
         // that makes both paths (explicit logout and detected-invalid
         // session) actually take the user back to the login page.
+        // FIX (session-expiry "duplicate/overlapping screens" bug): every
+        // module iframe detects auth failure independently and reports it
+        // upward, but each one uses a DIFFERENT postMessage `type` —
+        // messages/api.auth.js sends 'AUTH_SESSION_EXPIRED', friend.html
+        // sends 'TOKEN_EXPIRED' or 'AUTH_ERROR', Tools sends 'AUTH_ERROR'
+        // (with payload.error === 'UNAUTHORIZED_API_CALL') or 'LOGOUT',
+        // calls sends 'LOGOUT', friend.html's manual fallback button sends
+        // 'REDIRECT_TO_LOGIN'. This shell only ever listened for
+        // 'SESSION_INVALIDATED' / 'userLoggedOut', so every one of those
+        // other real, auto-detected expirations was silently dropped: the
+        // shell never redirected, so the iframe that detected it just sat
+        // there frozen/broken (the "duplicate screen still displaying but
+        // not working"), while a completely separate stale visual could
+        // still be showing elsewhere. Recognizing every real signal here
+        // is what actually makes the redirect fire for session expiry in
+        // normal use, not just for the two paths that happened to already
+        // use the right name.
+        function _isFatalAuthMessage(d) {
+            if (!d || typeof d !== 'object' || !d.type) return false;
+            switch (d.type) {
+                case 'SESSION_INVALIDATED':
+                case 'userLoggedOut':
+                case 'AUTH_SESSION_EXPIRED':
+                case 'TOKEN_EXPIRED':
+                case 'REDIRECT_TO_LOGIN':
+                case 'LOGOUT':
+                    return true;
+                case 'AUTH_ERROR': {
+                    // Tools posts AUTH_ERROR for every failed API call, not just
+                    // auth failures (payload.error === 'API_CALL_FAILED' covers
+                    // network/5xx errors too) — only its confirmed-401/403 code
+                    // means the session actually died. friend.html's AUTH_ERROR
+                    // is already dedicated to real auth failures, so it's always
+                    // fatal.
+                    const src = d.payload && d.payload.source;
+                    const errCode = d.payload && d.payload.error;
+                    if (src === 'friends') return true;
+                    if (errCode === 'UNAUTHORIZED_API_CALL') return true;
+                    return errCode === undefined && src === undefined; // unknown-shape AUTH_ERROR: treat as fatal rather than silently drop
+                }
+                default:
+                    return false;
+            }
+        }
+
+        // FIX (part of the same bug): even once the redirect fires, a
+        // sibling iframe forced fully visible via CSS (e.g. the calls
+        // iframe's "!important" full-screen-during-a-call override) can
+        // stay painted for a moment, or — if the redirect had previously
+        // been silently dropped — indefinitely. Explicitly hide every
+        // panel and strip the active-panel body classes BEFORE navigating,
+        // so "session expired" always means "close all screens, show only
+        // the login page," never an overlap of old and new screens.
+        function _teardownAllPanelsForLogout() {
+            try {
+                document.body.classList.remove('chat-panel-active', 'group-panel-active', 'status-panel-active', 'call-screen-active');
+                document.querySelectorAll('.iframe-container').forEach(function (el) {
+                    el.classList.add('hidden');
+                    el.style.setProperty('display', 'none', 'important');
+                });
+            } catch (_) {}
+        }
+
         function _performFullLogoutRedirect(reason) {
-            if (window.__loggingOut) return; // avoid double-fire from both SESSION_INVALIDATED and SESSION_EXPIRED
+            if (window.__loggingOut) return; // avoid double-fire from multiple signals arriving together
             window.__loggingOut = true;
+            _teardownAllPanelsForLogout();
             try {
                 if (window.AppRuntimeAuthority && typeof window.AppRuntimeAuthority.clearSession === 'function') {
                     window.AppRuntimeAuthority.clearSession({ emit: false, reason: reason || 'logout' });
@@ -3246,7 +3310,7 @@
                     window.AuthStorage.clearAuth();
                 }
             } catch (_) {}
-            window.location.href = 'index.html';
+            window.location.replace('index.html');
         }
         window.addEventListener('SESSION_EXPIRED', (e) => {
             _performFullLogoutRedirect(e && e.detail && e.detail.reason);
@@ -3254,8 +3318,8 @@
         window.addEventListener('message', (event) => {
             if (!isTrustedOrigin(event.origin)) return;
             const _d = event.data || {};
-            if (_d.type === 'SESSION_INVALIDATED' || _d.type === 'userLoggedOut') {
-                _performFullLogoutRedirect('module-initiated-logout');
+            if (_isFatalAuthMessage(_d)) {
+                _performFullLogoutRedirect(_d.type);
             }
         });
 
