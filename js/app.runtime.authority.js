@@ -28,7 +28,8 @@
         refreshingPromise: null,
         lastRealtimeToken: null,
         bootstrapped: false,
-        postRenderTasksScheduled: false
+        postRenderTasksScheduled: false,
+        lastRefreshDefinitive: false
     };
 
     function currentPath() {
@@ -420,7 +421,24 @@
         }
     }
 
+    // FIX ("keeps popping up ... redirecting continues" on reopen): several
+    // independent triggers can call this within the same boot cycle —
+    // validateSessionInBackground() running from bootstrap() AND from the
+    // 'online' listener, plus individual module iframes each detecting their
+    // own 401 and posting SESSION_INVALIDATED up to chat.html, which also
+    // routes back into a clearSession+redirect. Previously each one ran the
+    // full clear+redirect independently, which — since redirectToLogin uses
+    // location.replace and the page is still finishing rendering — could
+    // fire more than once before the navigation actually took effect,
+    // showing more than one "session expired" transition instead of a single
+    // clean check-then-redirect. This flag makes the real logout a one-shot
+    // per page load, regardless of how many places ask for it.
+    let expiryHandled = false;
+
     function schedulePostRenderLogout(reason) {
+        if (expiryHandled) return;
+        expiryHandled = true;
+
         const performLogout = function () {
             clearSession({ emit: true, reason: reason || 'session-invalid' });
             redirectToLogin(reason || 'session-invalid');
@@ -474,32 +492,98 @@
         return { response, data };
     }
 
+    // FIX (premature logout on refresh): this used to bail out instantly with
+    // `if (!auth?.refreshToken) return null` — but the normalized `auth` object
+    // here only carries a refreshToken if it happened to already be on the
+    // `kynecta_auth` blob. auth.session.manager.js (the module actually
+    // responsible for the "remember me" / 30-day session) stores/consults a
+    // wider set of locations (REFRESH_TOKEN, refreshToken, kynecta_auth.refreshToken).
+    // Any login path that left the refresh token in one of those other spots —
+    // without it also being copied onto `auth.refreshToken` — caused this
+    // function to give up with zero network attempt, which the caller
+    // (validateSessionInBackground) then treated as "refresh failed" on the
+    // very next backend hiccup and immediately logged the user out, no matter
+    // what "Session Timeout" they'd configured in Settings.
+    function findStoredRefreshToken(auth) {
+        if (auth && auth.refreshToken) return auth.refreshToken;
+        const tryKeys = ['REFRESH_TOKEN', 'refreshToken'];
+        for (const key of tryKeys) {
+            const val = localStorage.getItem(key);
+            if (val) return val;
+        }
+        try {
+            const raw = localStorage.getItem('kynecta_auth');
+            const parsed = raw ? JSON.parse(raw) : null;
+            if (parsed && parsed.refreshToken) return parsed.refreshToken;
+        } catch (_error) { /* ignore */ }
+        return null;
+    }
+
     async function refreshSession(auth) {
-        if (!auth?.refreshToken) return null;
+        const refreshToken = findStoredRefreshToken(auth);
+        if (!refreshToken) {
+            // No refresh token anywhere — there is genuinely no way to keep
+            // this session alive, so this (unlike a network hiccup below) IS
+            // a definitive failure.
+            runtimeState.lastRefreshDefinitive = true;
+            return null;
+        }
         if (runtimeState.refreshingPromise) return runtimeState.refreshingPromise;
 
         runtimeState.refreshingPromise = (async function () {
-            try {
-                const { response, data } = await fetchJson('/api/auth/refresh', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ refreshToken: auth.refreshToken })
-                });
+            // FIX (premature logout on refresh, Render cold-start): a single
+            // failed /auth/refresh call used to end the session immediately.
+            // The backend is on a free-tier host that can take several seconds
+            // to wake from a cold start, during which requests fail or time
+            // out even though the local session is still perfectly valid per
+            // the user's configured Session Timeout. Retry once after a short
+            // delay before treating this as a genuine refresh failure — this
+            // only ever adds latency to a real logout, it never prevents one.
+            const attempt = async () => {
+                try {
+                    const { response, data } = await fetchJson('/api/auth/refresh', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ refreshToken })
+                    });
 
-                if (!response.ok || !data) return null;
+                    if (!response.ok || !data) {
+                        // Distinguish "server explicitly rejected this refresh
+                        // token" (definitely expired/revoked — safe to give up)
+                        // from "server errored/unreachable" (cold start, 5xx,
+                        // etc — NOT evidence the session is actually invalid).
+                        return { ok: false, definitive: response.status === 401 || response.status === 403 };
+                    }
+
+                    return { ok: true, data };
+                } catch (_error) {
+                    return { ok: false, definitive: false };
+                }
+            };
+
+            try {
+                let result = await attempt();
+                if (!result.ok && !result.definitive) {
+                    await new Promise((resolve) => setTimeout(resolve, 2500));
+                    result = await attempt();
+                }
+
+                if (!result.ok) {
+                    runtimeState.lastRefreshDefinitive = result.definitive;
+                    return null;
+                }
+                runtimeState.lastRefreshDefinitive = true;
 
                 const refreshed = persistSession({
-                    token: data.token || data.accessToken,
-                    refreshToken: data.refreshToken || auth.refreshToken,
-                    user: auth.user || data.user || null,
-                    expiresAt: data.expiresAt || null
+                    token: result.data.token || result.data.accessToken,
+                    refreshToken: result.data.refreshToken || refreshToken,
+                    user: auth.user || result.data.user || null,
+                    expiresAt: result.data.expiresAt || null
                 }, { eventName: SESSION_EVENTS.refreshed });
 
                 return refreshed;
-            } catch (_error) {
-                return null;
             } finally {
                 runtimeState.refreshingPromise = null;
             }
@@ -535,7 +619,18 @@
                         return validateSessionInBackground(refreshed);
                     }
 
-                    schedulePostRenderLogout('session-expired');
+                    // FIX (premature logout on refresh): only actually clear the
+                    // session + redirect once refreshSession() has confirmed the
+                    // session is genuinely unrecoverable (no refresh token at
+                    // all, or the backend explicitly rejected the refresh token
+                    // with 401/403). A failed refresh caused by a backend hiccup
+                    // (cold start, 5xx, network blip) is NOT evidence the
+                    // session actually expired — treating it as such was
+                    // silently overriding the user's configured Session Timeout
+                    // on ordinary page refreshes.
+                    if (runtimeState.lastRefreshDefinitive) {
+                        schedulePostRenderLogout('session-expired');
+                    }
                     return null;
                 }
 
