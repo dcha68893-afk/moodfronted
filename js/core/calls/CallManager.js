@@ -47,6 +47,8 @@
     constructor() {
       this._ready = true;
       this._listeners = new Set();
+      this._terminalCallId = null;
+      this._terminalPromise = null;
       this._readyPromise = waitForCore().catch(() => null);
       console.log('[CallManager] Canonical facade loaded — calls-core is the sole lifecycle owner');
     }
@@ -54,37 +56,64 @@
     async startOutgoingCall(_callId, callType, targetUserId, peerInfo = {}) {
       const c = await waitForCore();
       if (typeof c.startCall !== 'function') throw new Error('callCore.startCall is unavailable');
+      // A new outgoing call clears the facade's terminal guard. The canonical
+      // core remains the sole owner of the actual call state.
+      this._terminalCallId = null;
+      this._terminalPromise = null;
       return c.startCall(targetUserId, callType || 'audio', peerInfo || {});
     }
 
     handleIncomingCall(_data) {
-      // Incoming-call delivery is already owned by calls-core. Do not process it
-      // a second time here; returning the canonical state keeps legacy callers safe.
       return state();
     }
 
     async acceptCall() {
       const c = await waitForCore();
       if (typeof c.acceptCall !== 'function') throw new Error('callCore.acceptCall is unavailable');
+      this._terminalCallId = null;
+      this._terminalPromise = null;
       return c.acceptCall();
     }
 
     async rejectCall() {
       const c = await waitForCore();
-      if (typeof c.rejectCall === 'function') return c.rejectCall();
-      if (typeof c.declineCall === 'function') return c.declineCall();
+      const id = activeCallId();
+      if (id && this._terminalCallId === id && this._terminalPromise) return this._terminalPromise;
+      const fn = typeof c.rejectCall === 'function' ? c.rejectCall : c.declineCall;
+      if (typeof fn !== 'function') return;
+      this._terminalCallId = id || '__no_call__';
+      this._terminalPromise = Promise.resolve(fn.call(c)).finally(() => {
+        this._terminalPromise = null;
+      });
+      return this._terminalPromise;
     }
 
     async cancelCall() {
-      const c = await waitForCore();
-      if (typeof c.endCall !== 'function') throw new Error('callCore.endCall is unavailable');
-      return c.endCall();
+      return this._endOnce();
     }
 
     async endCall() {
+      return this._endOnce();
+    }
+
+    async _endOnce() {
       const c = await waitForCore();
+      const id = activeCallId();
+      // UI/button/socket paths can converge on endCall more than once. Do not
+      // send a second terminal command for the same active call: the first
+      // command is authoritative and the canonical core will clear state.
+      if (id && this._terminalCallId === id && this._terminalPromise) return this._terminalPromise;
+      if (!id && this._terminalCallId === '__no_call__' && this._terminalPromise) return this._terminalPromise;
       if (typeof c.endCall !== 'function') throw new Error('callCore.endCall is unavailable');
-      return c.endCall();
+
+      this._terminalCallId = id || '__no_call__';
+      this._terminalPromise = Promise.resolve(c.endCall()).finally(() => {
+        // Keep the call id long enough to absorb duplicate terminal events,
+        // but release the promise itself so a later genuinely new call can
+        // start normally.
+        this._terminalPromise = null;
+      });
+      return this._terminalPromise;
     }
 
     onRemoteEnded(callId, data) {
@@ -164,6 +193,8 @@
     }
 
     getPeerStream() {
+      const c = core();
+      if (c && typeof c.getRemoteStream === 'function') return c.getRemoteStream();
       const s = state();
       return s.remoteStream || null;
     }
