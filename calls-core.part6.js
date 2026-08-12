@@ -3512,6 +3512,33 @@ endCall: async function(callId, options = {}) {
 
 
 
+        // FIX-ROOT-CAUSE-STALE-ROOM: this function only ever ended the call via
+        // the REST /calls/:id/end route and a postMessage to chat.html. Most
+        // real-time 1:1 calls are started over the socket 'call:initiate' path
+        // (CallSignalingService, in-memory only) and use a local, non-UUID id
+        // like "call_1780799144203_x021is" — the REST route explicitly no-ops
+        // for anything that isn't a UUID (see routes/calls.js's _looksLikeUUID
+        // check), which its own comment says is intentional because "that path
+        // is now ended over its own socket 'call:end' event instead." That
+        // socket emit was never actually added here, so for the common case
+        // the server-side call room in CallSignalingService._rooms was NEVER
+        // closed on a normal hangup — it just sat there marked active forever
+        // (or until the socket disconnected). The practical symptom: calling
+        // the same person again shortly after hanging up hits the stale room's
+        // busy/participant bookkeeping and can reopen or re-ring the "ended"
+        // call instead of starting a clean new one. Emit call:end directly so
+        // the server room is actually torn down every time, regardless of
+        // which id format is in play — CallSignalingService keys its rooms by
+        // this exact local callId, so this always matches.
+        try {
+            var _endSock = window.__socket || window.__io || (window.KynectaRealtime && window.KynectaRealtime._socket);
+            if (_endSock && typeof _endSock.emit === 'function' && callId) {
+                _endSock.emit('call:end', { callId: callId, reason: options.status || 'ended' });
+            }
+        } catch (_endSockErr) {}
+
+
+
         // Use server UUID (real DB id) if available; fall back to passed callId
 
 
