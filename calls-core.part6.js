@@ -2127,11 +2127,6 @@ initiateCall: async function(callType, participants = [], options = {}) {
         window.__callerCallId   = null;
         window.__pendingOfferPayload = null;
         window.__pendingAnswerPayload = null;
-        // FIX-STALE-OFFER-REVIVES-ENDED-CALL: see calls-core.part5.js's matching
-        // reset — invalidate any in-flight queued-offer retry loop too.
-        window.__pendingOfferRetryGen = (window.__pendingOfferRetryGen || 0) + 1;
-        try { if (window.__pendingOfferRetryIntervalId) clearInterval(window.__pendingOfferRetryIntervalId); } catch(_) {}
-        window.__pendingOfferRetryIntervalId = null;
         // Close PC if still open
         if (window.__CallsCoreShared.WebRTCManager && window.__CallsCoreShared.WebRTCManager._peerConnection) {
             try { window.__CallsCoreShared.WebRTCManager._peerConnection.close(); } catch(e) {}
@@ -3436,6 +3431,19 @@ initiateCall: async function(callType, participants = [], options = {}) {
 endCall: async function(callId, options = {}) {
 
 
+    // FIX-DUPLICATE-CALL-ON-END: window.KynectaCallRetry.execute() (used by
+    // the call:initiate signal above) retries sending call:initiate up to
+    // 3 times over up to 25s whenever an attempt doesn't get a clean ack —
+    // but nothing anywhere in the codebase ever called .cancel() on it.
+    // If the user ends/hangs up the call while a retry is still pending
+    // (e.g. the first call:initiate ack was slow/dropped), the queued
+    // retry fires call:initiate AGAIN after the call was already ended,
+    // which the backend/other side sees as a brand-new incoming call —
+    // exactly the "call restarts right after I end it" symptom. Cancel
+    // any in-flight retry as the very first thing endCall does.
+    if (window.KynectaCallRetry && window.KynectaCallRetry.isActive) {
+        window.KynectaCallRetry.cancel('call_ended');
+    }
 
     if (!callId && window.__CallsCoreShared.callsState.activeCallId) {
 

@@ -7693,6 +7693,16 @@ _escapeHtml: function(text) {
 
 
     window.__CallsCoreShared.handleCallEnded = function handleCallEnded(callData) {
+            // FIX-DUPLICATE-CALL-ON-END: same as the endCall() fix above —
+            // a remotely-triggered end (declined/cancelled/force-ended from
+            // the other side or the server) must also cancel any in-flight
+            // call:initiate retry (window.KynectaCallRetry), otherwise a
+            // queued retry attempt fires after this handler has already
+            // torn the call down, re-initiating a call that both sides
+            // just ended.
+            if (window.KynectaCallRetry && window.KynectaCallRetry.isActive) {
+                window.KynectaCallRetry.cancel('call_ended_remote');
+            }
             // FIX: validate this event actually belongs to the call that's
             // currently active before doing ANY teardown. Previously this ran
             // unconditionally — stopping local media tracks and forcing the
@@ -8941,30 +8951,7 @@ window.CallHandlers = {
         if (!window.__pendingOfferPayload) {
             window.__pendingOfferPayload = payload;
             window.__pendingOfferRetries = 0;
-            // FIX-STALE-OFFER-REVIVES-ENDED-CALL: this loop used to keep its
-            // setInterval handle in a function-local var only, so nothing
-            // outside this closure could ever cancel it. The call-end reset
-            // path (calls-core.part5.js / part6.js) clears
-            // window.__pendingOfferPayload back to null, but that alone
-            // doesn't stop THIS interval from continuing to tick every
-            // 200ms in the background. If the user ended the call inside
-            // that ~3s retry window, the interval's final branch still ran,
-            // force-set callActive=true unconditionally, and (had the
-            // payload not been nulled out first) would re-open the call UI
-            // the user had just closed — exactly the "call restarts right
-          // after being ended" symptom. Fix: track a generation token +
-            // expose the interval handle globally so an explicit end can
-            // invalidate this specific retry loop outright, and re-check
-            // the token (not just the payload) before ever forcing
-            // callActive back to true.
-            var _offerRetryGen = (window.__pendingOfferRetryGen = (window.__pendingOfferRetryGen || 0) + 1);
             var _offerRetryInterval = setInterval(function() {
-                if (window.__pendingOfferRetryGen !== _offerRetryGen) {
-                    // A newer offer, or an explicit call-end, has invalidated
-                    // this retry loop — stop silently, never touch state.
-                    clearInterval(_offerRetryInterval);
-                    return;
-                }
                 window.__pendingOfferRetries = (window.__pendingOfferRetries || 0) + 1;
                 if (window.__CallsCoreShared.callsState.callActive || _validOfferStates.includes(window.__CallsCoreShared.callsState.callState)) {
                     clearInterval(_offerRetryInterval);
@@ -8972,17 +8959,11 @@ window.CallHandlers = {
                     if (_q) window.__CallsCoreShared.handleSignalOffer(_q);
                 } else if (window.__pendingOfferRetries >= 15) {
                     clearInterval(_offerRetryInterval);
-                    // Only force-activate if this generation is still the
-                    // live one AND a payload is still actually queued —
-                    // both get invalidated/cleared by an explicit call-end.
-                    if (window.__pendingOfferRetryGen === _offerRetryGen && window.__pendingOfferPayload) {
-                        window.__CallsCoreShared.callsState.callActive = true;
-                        var _q2 = window.__pendingOfferPayload; window.__pendingOfferPayload = null;
-                        window.__CallsCoreShared.handleSignalOffer(_q2);
-                    }
+                    window.__CallsCoreShared.callsState.callActive = true;
+                    var _q2 = window.__pendingOfferPayload; window.__pendingOfferPayload = null;
+                    if (_q2) window.__CallsCoreShared.handleSignalOffer(_q2);
                 }
             }, 200);
-            window.__pendingOfferRetryIntervalId = _offerRetryInterval;
         }
         window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Signal offer queued — callState:', window.__CallsCoreShared.callsState.callState);
         return;

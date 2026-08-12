@@ -34,8 +34,38 @@
     let _idbReady    = false;
 
     // ── Auth token ──────────────────────────────────────────────────────
+    // FIX (group modules showing placeholder instead of real data): group-os.js
+    // runs inside the group.html IFRAME, which has its own separate `window` —
+    // it never runs js/auth.session.manager.js (only the parent chat.html does),
+    // so it can't rely on that flow having populated anything on ITS window.
+    // The one thing group.html's own runtime patch script (a few hundred lines
+    // above this file's <script> tag) already proves works reliably is reading
+    // window.__PARENT_SESSION__ — populated by chat.html's SESSION_DATA
+    // postMessage handshake into the iframe's own window — before ever falling
+    // back to the flat localStorage keys (which, same-origin, are shared with
+    // the parent but only get written by auth.session.manager.js's
+    // performAutoLogin/AuthStorage.saveAuth path — not guaranteed to have run
+    // yet, or ever, depending on timing). This file was skipping straight to
+    // those flat keys and nothing else, so any request that raced ahead of
+    // that parent write went out with an empty Authorization header, got a
+    // silent 401 (swallowed by _api()'s catch below), and left every tab
+    // (tasks/polls/notes/files/events/finances/analytics) stuck on its empty/
+    // placeholder state. Mirror the same fallback chain group.html itself uses.
     function _tok() {
-        return localStorage.getItem('authToken') || localStorage.getItem('token') || '';
+        if (window.__PARENT_SESSION__ && window.__PARENT_SESSION__.token) return window.__PARENT_SESSION__.token;
+        try {
+            if (window.parent && window.parent.__PARENT_SESSION__ && window.parent.__PARENT_SESSION__.token) {
+                return window.parent.__PARENT_SESSION__.token;
+            }
+        } catch (_) {}
+        try {
+            if (window.KynectaStore && window.KynectaStore.get) {
+                const t = window.KynectaStore.get('auth.token');
+                if (t) return t;
+            }
+        } catch (_) {}
+        return localStorage.getItem('token') || localStorage.getItem('authToken') ||
+               sessionStorage.getItem('token') || '';
     }
 
     // ── API helper ──────────────────────────────────────────────────────

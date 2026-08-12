@@ -3690,7 +3690,18 @@
                 return;
             }
             if (d.type !== 'kyn:incomingMessage') return;
-            const msg = d.detail || d.payload || d;
+            // FIX (notification always generic/empty): messages-core.ui-bridge.js posts
+            // { type:'kyn:incomingMessage', detail: { message: normalizedMessage, chatId } } —
+            // a WRAPPED object. This listener was reading msg.sender/msg.content directly
+            // off d.detail, which only has `message`/`chatId` keys, so msg.sender and
+            // msg.content were always undefined. That's why the OS notification always
+            // fell back to the generic "New message" / "You have a new message" text with
+            // no sender name or actual content, no matter what was actually sent. Unwrap
+            // the nested `message` object first (mirrors messages-ui.js's own
+            // `detail.message || detail` handling of this same event).
+            const _detail = d.detail || d.payload || d;
+            const msg = (_detail && _detail.message) ? _detail.message : _detail;
+            if (msg && _detail && _detail.chatId && msg.chatId == null) msg.chatId = _detail.chatId;
             if (!msg) return;
             if (!_kynNotificationsAllowed(!!(d.detail && d.detail.isGroup))) return;
 
@@ -6847,24 +6858,18 @@
                                 // all). Also emit call:webrtc_offer / call:webrtc_answer for
                                 // CallSignalingService, using the event name (and field name) that
                                 // actually matches what's being sent.
-                                // FIX-DUP-SIGNAL-DELIVERY (parent bridge): this used to emit the SAME
-                                // offer/answer over BOTH 'call:webrtc_offer'/'call:webrtc_answer' AND
-                                // 'webrtc:signal' — the backend (CallSignalingService) relays each of
-                                // those event names to the target independently, so the receiving
-                                // side's calls iframe received every offer/answer TWICE. The existing
-                                // callId+sdp-length dedup in handleSignalOffer/handleSignalAnswer
-                                // absorbs an exact duplicate most of the time, but a renegotiation
-                                // offer (e.g. mid-call video upgrade) racing against this doubling —
-                                // or a network reorder that lets the second copy land first — is
-                                // exactly the corrupted-negotiation-state pattern documented in
-                                // calls-core.part7.js as the root cause of "remote video never shows".
-                                // Deliver via exactly ONE channel, same principle as the other
-                                // FIX-DUP-SIGNAL-DELIVERY fixes already applied in calls-core.part7.js.
                                 _rtSocket.emit(signalType === 'offer' ? 'call:webrtc_offer' : 'call:webrtc_answer', {
                                     callId: resolvedCallId,
                                     targetUserId: payload.targetUserId || payload.toUserId || null,
                                     [signalType]: sdpPayload,
                                     type: signalType,
+                                    timestamp: Date.now()
+                                });
+                                _rtSocket.emit('webrtc:signal', {
+                                    callId: resolvedCallId,
+                                    type: signalType,
+                                    sdp: typeof sdpPayload === 'string' ? sdpPayload : JSON.stringify(sdpPayload),
+                                    targetUserId: payload.targetUserId || payload.toUserId || null,
                                     timestamp: Date.now()
                                 });
                             }
