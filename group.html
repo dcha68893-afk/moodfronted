@@ -69,45 +69,12 @@
     <script src="js/double-ratchet.js" defer></script>
     <script src="js/safety-numbers.js" defer></script>
     <script src="js/sealed-groups.js" defer></script>
-    <script>
-        // FIX-E2E-WIRING: same as message.html's identical block — this is
-        // a SEPARATE iframe/window, so KynectaE2E must be independently
-        // init()'d here too, reading the same persistent (not single-use)
-        // session key index.html wrote on login.
-        (function () {
-            function tryInitE2E() {
-                if (!window.KynectaE2E) {
-                    return setTimeout(tryInitE2E, 150);
-                }
-                if (window.KynectaE2E.enabled) return;
-
-                let pw = null;
-                try { pw = sessionStorage.getItem('kyn_e2e_pw_session'); } catch (_) {}
-                if (!pw) {
-                    // FIX-NO-PERMANENT-GIVEUP: see message.html's identical fix.
-                    return setTimeout(tryInitE2E, 500);
-                }
-                // FIX (KEY-REGEN-REGRESSION migration support): see message.html's
-                // identical comment — same fallback for this module.
-                let legacyPw = null;
-                try { legacyPw = sessionStorage.getItem('kyn_e2e_pw_legacy_session'); } catch (_) {}
-
-                window.KynectaE2E.init(pw, legacyPw).then(function (ok) {
-                    if (ok) {
-                        console.log('[group.html] ✅ E2E encryption initialized');
-                    } else {
-                        console.warn('[group.html] E2E init did not unlock existing keys — will retry');
-                        setTimeout(tryInitE2E, 2000);
-                    }
-                }).catch(function (e) {
-                    console.warn('[group.html] E2E init failed, will retry:', e && e.message);
-                    setTimeout(tryInitE2E, 2000);
-                });
-            }
-            tryInitE2E();
-            document.addEventListener('kyn:e2eUnlockRetry', tryInitE2E);
-        })();
-    </script>
+    <!-- FIX (DUPLICATE-E2E-INIT): this used to be ~35 lines of inline script
+         duplicated (and already slightly out of sync) from message.html.
+         Consolidated into one shared, single-maintained implementation —
+         see js/e2e-session-init.js for the full explanation and behavior.
+         Must load AFTER e2e-encryption.js (loaded just above). -->
+    <script src="js/e2e-session-init.js" defer></script>
     <link rel="manifest" href="../manifest.json">
     <!-- theme-color is now set dynamically by theme.engine.js to match the saved theme -->
     <link rel="icon" href="../icons/nexopa-192.png">

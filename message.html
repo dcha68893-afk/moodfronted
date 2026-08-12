@@ -1739,81 +1739,11 @@
          the same relative execution order as the sibling core scripts. -->
     <script defer src="messages-ui.js?v=5"></script>
     <script src="js/e2e-encryption.js" defer></script>
-    <script defer>
-        // FIX-E2E-WIRING: js/e2e-encryption.js only activates via a
-        // 'kyn:loggedIn' window event that nothing in this codebase actually
-        // dispatches — and even if something did, this iframe is a
-        // different window than index.html where login happens, so a
-        // same-window CustomEvent could never reach it anyway. Call
-        // KynectaE2E.init() directly using the password index.html stashed
-        // in sessionStorage under 'kyn_e2e_pw_session' for exactly this
-        // purpose. Unlike an earlier version of this fix, the key is NOT
-        // deleted after reading here — group.html (and potentially other
-        // iframes) independently need to read the same key whenever THEY
-        // load, which may be long after this iframe already consumed it
-        // once. It's cleared on explicit logout instead (js/api.auth.js
-        // _performLogout).
-        (function () {
-            function tryInitE2E() {
-                if (!window.KynectaE2E) {
-                    return setTimeout(tryInitE2E, 150);
-                }
-                if (window.KynectaE2E.enabled) return; // already initialized this session
-
-                let pw = null;
-                try { pw = sessionStorage.getItem('kyn_e2e_pw_session'); } catch (_) {}
-                if (!pw) {
-                    // FIX-NO-PERMANENT-GIVEUP: this used to just `return` here
-                    // forever, so E2E silently never initialized for the rest
-                    // of this page load whenever the password write hadn't
-                    // landed in sessionStorage yet at the moment this ran —
-                    // e.g. a "quick login" / auto-login from a persisted
-                    // session (no password typed this tab at all, so
-                    // kyn_e2e_pw_session is never set until the unlock prompt
-                    // — see index.html — completes), or a plain load-order
-                    // race against index.html/chat.html's own write. Keep
-                    // polling with backoff instead of giving up — the moment
-                    // something sets the password (fresh login in another
-                    // frame, or the unlock modal), this picks it up and
-                    // initializes without needing a page reload.
-                    return setTimeout(tryInitE2E, 500);
-                }
-                // FIX (KEY-REGEN-REGRESSION migration support): pass the raw
-                // legacy password too, if this session stashed one, so init()
-                // can recover and migrate a pre-existing key instead of
-                // silently generating a new one on primary-password mismatch.
-                let legacyPw = null;
-                try { legacyPw = sessionStorage.getItem('kyn_e2e_pw_legacy_session'); } catch (_) {}
-
-                window.KynectaE2E.init(pw, legacyPw).then(function (ok) {
-                    if (ok) {
-                        console.log('[message.html] ✅ E2E encryption initialized');
-                    } else {
-                        // init() returned false without throwing: a stored key
-                        // exists but didn't decrypt with any password we have
-                        // (see e2e-encryption.js's FIX-KEY-REGEN-REGRESSION
-                        // part 2 — it deliberately does NOT regenerate/orphan
-                        // the identity in this case). Keep retrying in case a
-                        // more correct password shows up later (e.g. the
-                        // person re-enters it via an unlock prompt after a
-                        // 'kyn:e2eUnlockFailed' event) instead of leaving E2E
-                        // permanently off for this tab.
-                        console.warn('[message.html] E2E init did not unlock existing keys — will retry');
-                        setTimeout(tryInitE2E, 2000);
-                    }
-                }).catch(function (e) {
-                    console.warn('[message.html] E2E init failed, will retry:', e && e.message);
-                    setTimeout(tryInitE2E, 2000);
-                });
-            }
-            tryInitE2E();
-            // If index.html's unlock prompt (or any other frame) stores a
-            // working password after this already gave up waiting on this
-            // exact poll cycle, re-check immediately rather than waiting out
-            // the rest of the backoff interval.
-            document.addEventListener('kyn:e2eUnlockRetry', tryInitE2E);
-        })();
-    </script>
+    <!-- FIX (DUPLICATE-E2E-INIT): this used to be ~70 lines of inline script
+         duplicated verbatim in group.html. Consolidated into one shared,
+         shared-maintained implementation — see js/e2e-session-init.js for
+         the full explanation and behavior. Must load AFTER e2e-encryption.js. -->
+    <script src="js/e2e-session-init.js" defer></script>
     <script src="js/voice-recorder.js" defer></script>
     <script src="js/link-preview.js" defer></script>
     <script src="js/chat-sync.js" defer></script>

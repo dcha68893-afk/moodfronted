@@ -291,7 +291,30 @@
         _myPrivKey    = await importPrivateKey(pkcs8);
         _myPubKeyB64  = obj.pubKey;
         _myKeyId      = obj.keyId;
+
+        // FIX-REGISTRATION-CONFIRMATION-GATE (item #3): a stored key that
+        // was never actually confirmed registered by the server (e.g. the
+        // very first init() this identity ever went through hit the
+        // network-failure branch below and got persisted with
+        // registered:false) must NOT flip E2E_READY on just because it
+        // decrypts fine locally — the private/public key pair existing
+        // locally is only 2 of the 3 required conditions. Keep retrying
+        // registration in the background exactly like the brand-new-key
+        // path does, and only mark enabled once the server actually has it.
+        // `registered` is absent on keys stored before this fix shipped —
+        // treat that as already-confirmed (best available assumption; the
+        // old code always attempted registration synchronously before ever
+        // reaching this branch on a prior run).
+        if (obj.registered === false) {
+          console.warn('[E2E] Stored key was never confirmed registered — retrying in background before enabling E2E.');
+          _retryRegistrationInBackground(_myPubKeyB64, _myKeyId);
+          return false;
+        }
+
         _markEnabled();
+        // Opportunistic, non-blocking re-sync: keeps the server's record in
+        // sync with this device's key without gating readiness on it.
+        _postRegisterKey(_myPubKeyB64, _myKeyId).catch(() => {});
         console.log('[E2E] ✅ Keys loaded from storage');
         return true;
       } catch (e) {
@@ -359,7 +382,60 @@
     const encPrivKey  = await _encryptPrivateKey(privKeyB64, password);
     const keyId       = b64(global.crypto.getRandomValues(new Uint8Array(16)));
 
-    // Upload public key to server
+    // FIX-REGISTRATION-CONFIRMATION-GATE (item #3, "server confirms
+    // registration"): this used to swallow a failed upload, keep the
+    // locally-generated keyId anyway, and mark E2E enabled regardless —
+    // so the Send path could merrily encrypt against a "key" the server
+    // never actually stored, and anyone messaging THIS account got a 404
+    // for its public key. _registerPublicKeyWithRetry() below retries with
+    // capped backoff for a few seconds before this init() call gives up and
+    // returns; only a real 2xx from the server counts as confirmed.
+    const registered = await _registerPublicKeyWithRetry(pubKeyB64, keyId);
+
+    // Store encrypted private key locally regardless of registration
+    // outcome — the identity itself is real and must not be regenerated on
+    // the next attempt just because the network hiccuped. `registered` is
+    // persisted alongside it so a later init() (see the "load from storage"
+    // branch above) knows whether it still owes the server a confirmation.
+    localStorage.setItem(STORE_KEY, JSON.stringify({ encPrivKey, pubKey: pubKeyB64, keyId, registered }));
+
+    _myPrivKey   = kp.privateKey;
+    _myPubKeyB64 = pubKeyB64;
+    _myKeyId     = keyId;
+
+    if (registered) {
+      _markEnabled();
+      console.log('[E2E] ✅ New key pair generated and registered — server confirmed');
+      return true;
+    }
+
+    // Server never confirmed within the retry window. Do NOT mark E2E
+    // enabled (item #9: no silent downgrade against an unconfirmed
+    // identity) — keep retrying in the background instead. _markEnabled()
+    // fires the moment a later background attempt succeeds, which
+    // unblocks any caller already parked in _waitForEnabled()/
+    // encryptForChat() automatically.
+    console.warn('[E2E] Key registration did not reach the server within the retry window — E2E stays unready and will keep retrying in the background.');
+    _retryRegistrationInBackground(pubKeyB64, keyId);
+    return false;
+  }
+
+  // Bounded retry burst for registration: a handful of attempts over a few
+  // seconds (mirrors the recipient-key-fetch backoff pattern already used
+  // elsewhere in this file), so login/session-init doesn't hang
+  // indefinitely on a slow/cold backend — see _retryRegistrationInBackground
+  // for what happens if even this gives up.
+  const _REG_RETRY_DELAYS_MS = [0, 500, 1000, 1500];
+  async function _registerPublicKeyWithRetry(pubKeyB64, keyId) {
+    for (let i = 0; i < _REG_RETRY_DELAYS_MS.length; i++) {
+      if (_REG_RETRY_DELAYS_MS[i] > 0) await _sleep(_REG_RETRY_DELAYS_MS[i]);
+      const ok = await _postRegisterKey(pubKeyB64, keyId);
+      if (ok) return true;
+    }
+    return false;
+  }
+
+  async function _postRegisterKey(pubKeyB64, keyId) {
     try {
       const _regController = new AbortController();
       const _regTimeout = setTimeout(() => _regController.abort(), 8000);
@@ -375,22 +451,39 @@
       } finally {
         clearTimeout(_regTimeout);
       }
-      if (!resp.ok) throw new Error(`Upload failed: ${resp.status}`);
-      const data = await resp.json();
-      _myKeyId = data.data?.keyId || keyId;
+      return !!resp.ok;
     } catch (e) {
-      console.warn('[E2E] Key upload failed (will retry on next init):', e.message);
-      _myKeyId = keyId;
+      console.warn('[E2E] Key registration attempt failed:', e?.message);
+      return false;
     }
+  }
 
-    // Store encrypted private key locally
-    localStorage.setItem(STORE_KEY, JSON.stringify({ encPrivKey, pubKey: pubKeyB64, keyId: _myKeyId }));
-
-    _myPrivKey   = kp.privateKey;
-    _myPubKeyB64 = pubKeyB64;
-    _markEnabled();
-    console.log('[E2E] ✅ New key pair generated and registered');
-    return true;
+  // Keeps retrying (slower, capped interval — not the tight initial burst)
+  // until the server finally confirms, then marks the SAME in-memory key
+  // pair enabled. Nothing needs to re-generate or re-init when this
+  // succeeds; every caller already waiting on _waitForEnabled() just
+  // resolves at that point.
+  let _bgRegistrationTimer = null;
+  function _retryRegistrationInBackground(pubKeyB64, keyId) {
+    if (_bgRegistrationTimer) return; // already retrying
+    let attempt = 0;
+    const tick = async () => {
+      attempt++;
+      const ok = await _postRegisterKey(pubKeyB64, keyId);
+      if (ok) {
+        _bgRegistrationTimer = null;
+        try {
+          const stored = JSON.parse(localStorage.getItem(STORE_KEY) || '{}');
+          stored.registered = true;
+          localStorage.setItem(STORE_KEY, JSON.stringify(stored));
+        } catch (_) {}
+        _markEnabled();
+        console.log('[E2E] ✅ Background key registration succeeded — E2E now ready');
+        return;
+      }
+      _bgRegistrationTimer = setTimeout(tick, Math.min(5000 * attempt, 30000));
+    };
+    _bgRegistrationTimer = setTimeout(tick, 5000);
   }
 
   // FIX-STALE-RECIPIENT-KEY: public keys were cached (in-memory PUB_CACHE and
@@ -432,19 +525,18 @@
   // callers surface as an error rather than a silent plaintext downgrade.
   const _inflightKeyFetch = new Map(); // userId → Promise<entry|null>
 
-  // FIX-PLAINTEXT-FALLBACK (2026-08-12, explicit user directive — supersedes
-  // the earlier FIX-NO-PLAINTEXT-FALLBACK decision referenced throughout this
-  // file): the indefinite/45s-capped retry loop below was the actual cause of
-  // the reply/send "hanging" complaint — a slow or unreachable key fetch left
-  // the Send button spinning with no way out. Per explicit instruction, this
-  // now gives up quickly (a few seconds, one or two attempts) instead of
-  // retrying for up to 45s, and the caller (encryptForChat, below) sends the
-  // message as plaintext rather than blocking or throwing when a key can't be
-  // resolved in that window. This is a real security trade-off — a message
-  // can now go out unencrypted when the recipient's key is slow to resolve —
-  // so keep this in mind if E2E guarantees matter more than responsiveness
-  // for this app; it was a deliberate ask, not an oversight.
-  const _KEY_FETCH_GIVEUP_MS = 6000;
+  // FIX-NO-PLAINTEXT-FALLBACK (2026-08-11, explicit user directive —
+  // reverses the 2026-08-12 FIX-PLAINTEXT-FALLBACK change referenced in
+  // older comments throughout this file): sending a real message
+  // unencrypted just because a key fetch was slow is a security regression,
+  // not an acceptable trade-off for a responsive Send button. Per the
+  // requested protocol, this window bounds each attempt loop (fetch, then
+  // capped-backoff retries) to a few seconds — long enough to ride out a
+  // cold Render backend without freezing the UI — after which
+  // _getRecipientPublicKey resolves to null and the CALLER (encryptForChat)
+  // fails the send with a clear, catchable, retryable error instead of
+  // ever downgrading to plaintext. See E2ESecureFailureError below.
+  const _KEY_FETCH_GIVEUP_MS = 4000;
 
   async function _getRecipientPublicKey(userId, forceRefresh, signal) {
     if (!forceRefresh && PUB_CACHE.has(userId)) return PUB_CACHE.get(userId);
@@ -513,20 +605,18 @@
           try {
             document.dispatchEvent(new CustomEvent('kyn:e2eWaitingForKey', { detail: { userId, attempt } }));
           } catch (_) {}
-          // FIX-PLAINTEXT-FALLBACK: give up after a short window (see
-          // _KEY_FETCH_GIVEUP_MS above) instead of retrying for up to 45s.
-          // Returning null here — rather than throwing — lets encryptForChat
-          // treat "key fetch timed out" exactly like "recipient has no key
-          // yet" and fall back to plaintext instead of hanging the Send
-          // button. Nothing further up the chain needs an
-          // E2EKeyFetchTimeoutError catch block anymore, since this no
-          // longer throws for the timeout case.
+          // Bounded window (see _KEY_FETCH_GIVEUP_MS above): after this,
+          // stop retrying and resolve to null. Returning null — rather than
+          // throwing — lets the CALLER (encryptForChat) decide what a
+          // definitive "couldn't resolve in time" means for it; today that
+          // means failing the send with E2ESecureFailureError rather than
+          // ever sending unencrypted.
           if (Date.now() - _startedAt > _KEY_FETCH_GIVEUP_MS) {
-            console.warn(`[E2E] Giving up on recipient ${userId}'s key after ${attempt} attempt(s) — falling back to plaintext for this send.`);
+            console.warn(`[E2E] Giving up on recipient ${userId}'s key after ${attempt} attempt(s) within the ${_KEY_FETCH_GIVEUP_MS}ms window.`);
             return null;
           }
-          // Short, capped backoff within the shrunk window: 400ms, 800ms, then holds at 1.5s.
-          await _sleep(Math.min(400 * Math.pow(2, attempt - 1), 1500));
+          // Short, capped backoff within the bounded window: 500ms, 1000ms, then holds at 1.5s.
+          await _sleep(Math.min(500 * Math.pow(2, attempt - 1), 1500));
         }
       }
     })().finally(() => _inflightKeyFetch.delete(userId));
@@ -599,45 +689,112 @@
     }
   }
 
-  // Kept for backwards compatibility (still exported below in case any other
-  // caller references them by name/instanceof), but as of the
-  // FIX-PLAINTEXT-FALLBACK change above, encryptForChat() no longer throws
-  // either of these — it falls back to plaintext instead. E2ENotUnlockedError
-  // is also currently unused by this module; nothing in the send path throws
-  // it today.
-  function E2ENotUnlockedError(message) { this.name = 'E2ENotUnlockedError'; this.message = message || 'Secure messaging is not unlocked in this session'; }
-  E2ENotUnlockedError.prototype = Object.create(Error.prototype);
-  function E2ENoRecipientKeyError(message) { this.name = 'E2ENoRecipientKeyError'; this.message = message || 'Recipient has not set up encryption'; }
-  E2ENoRecipientKeyError.prototype = Object.create(Error.prototype);
-  function E2EKeyFetchTimeoutError(message) { this.name = 'E2EKeyFetchTimeoutError'; this.message = message || 'Timed out waiting for recipient encryption key'; }
-  E2EKeyFetchTimeoutError.prototype = Object.create(Error.prototype);
+  // ── FIX (KEY-ANNOUNCEMENT / ITEM 5,6,7 — live WebSocket key push) ─────────
+  // Previously the only way this module ever learned about a public key was
+  // a REST fetch triggered by prefetchRecipientKey()/encryptForChat() — a
+  // friend who had just registered their very first key (e.g. logging in
+  // for the first time) stayed invisible until something on this side
+  // happened to fetch them again, and a friend who rotated their key (new
+  // device, cleared storage, reinstall) left this side silently encrypting
+  // against a now-stale cached key until a decrypt failure forced a
+  // re-fetch (see _purgeCachedRecipientKey/FIX-STALE-RECIPIENT-KEY above).
+  // The backend now pushes 'e2e:key_available' (first registration) and
+  // 'e2e:key_rotated' (replacing a previously-active key) over the socket
+  // to everyone authorized to see that key — see moodchat
+  // src/routes/encryption.js's _broadcastKeyEvent. Two delivery paths are
+  // listened for here because this module runs inside iframes that don't
+  // all own a socket connection themselves (see js/app.realtime.socket.js —
+  // message.html/chat.html have a live socket, group.html only receives
+  // events relayed via postMessage from the parent frame):
+  //   1. Same-frame: app.realtime.socket.js dispatches a
+  //      'kyn:e2e:key_available' / 'kyn:e2e:key_rotated' CustomEvent on
+  //      window the moment its own socket.on() fires.
+  //   2. Cross-frame: the parent frame's socket relay also postMessage()s a
+  //      { type: 'SOCKET_EVENT', event, payload } envelope to every iframe
+  //      it owns, matching the existing identity-update relay pattern.
+  // Both paths converge on the same handler, and cacheRecipientKey()
+  // (above) already overwrites both the in-memory and persisted cache for
+  // this userId — so a rotation is picked up instantly with no separate
+  // purge step needed.
+  function _handleKeyAnnouncement(payload) {
+    if (!payload || !payload.userId || !payload.publicKey) return;
+    cacheRecipientKey(payload.userId, { publicKey: payload.publicKey, keyId: payload.keyId })
+      .then((ok) => { if (ok) console.log(`[E2E] 🔑 Live key update applied for user ${payload.userId}`); });
+  }
+
+  try {
+    window.addEventListener('kyn:e2e:key_available', (e) => _handleKeyAnnouncement(e.detail));
+    window.addEventListener('kyn:e2e:key_rotated', (e) => _handleKeyAnnouncement(e.detail));
+    window.addEventListener('message', (e) => {
+      const data = e && e.data;
+      if (!data || data.type !== 'SOCKET_EVENT') return;
+      if (data.event === 'e2e:key_available' || data.event === 'e2e:key_rotated') {
+        _handleKeyAnnouncement(data.payload);
+      }
+    });
+  } catch (_) {}
+
+  // FIX-NO-PLAINTEXT-FALLBACK (item #9): callers distinguish "couldn't
+  // secure this send in time" from other failures via this error's name
+  // (or instanceof), rather than guessing off error.message text. Kept as
+  // the single catchable failure type for the whole encrypt path —
+  // E2ENotUnlockedError/E2ENoRecipientKeyError/E2EKeyFetchTimeoutError from
+  // older revisions of this file are gone; nothing in this module
+  // distinguishes those cases from one another anymore, since the caller's
+  // handling (fail the send, let the person retry) is identical either way.
+  function E2ESecureFailureError(message) {
+    this.name = 'E2ESecureFailureError';
+    this.message = message || '🔒 Secure connection is being established. Please retry.';
+  }
+  E2ESecureFailureError.prototype = Object.create(Error.prototype);
+
+  // Bounded wait for E2E itself to become ready (item #10: "await
+  // ensureRecipientKey() ... temporary failure → retry ... definitive
+  // failure → stop" — applied here to the enabled-gate as well as to the
+  // recipient-key fetch inside encryptForChat below). Resolves `true` the
+  // moment _markEnabled() fires, or `false` once `ms` elapses without that
+  // happening — it does NOT reject, so callers always get a definite
+  // answer within the budget instead of hanging.
+  function _waitForEnabledBounded(ms) {
+    if (_enabled) return Promise.resolve(true);
+    return Promise.race([
+      _enabledGate.then(() => true),
+      _sleep(ms).then(() => _enabled),
+    ]);
+  }
+  const _SEND_READY_GIVEUP_MS = 4000;
 
   // ── Encrypt a message for a chat ──────────────────────────────────────────
-  // FIX-PLAINTEXT-FALLBACK (2026-08-12, explicit user directive — replaces
-  // the old FIX-NO-PLAINTEXT-FALLBACK behavior): this used to wait
-  // indefinitely (then, after an earlier fix, up to 45s) and throw rather
-  // than ever send unencrypted. That's what caused the reply/send "hanging"
-  // complaint. Now: if E2E itself isn't unlocked yet, or the recipient's key
-  // can't be resolved within a few seconds (see _KEY_FETCH_GIVEUP_MS), this
-  // sends the message as PLAIN TEXT instead of blocking or throwing. The
-  // message still sends immediately either way — callers no longer need to
-  // handle an E2ENoRecipientKeyError/E2EKeyFetchTimeoutError rejection from
-  // this function for the "no key yet" case.
+  // FIX-NO-PLAINTEXT-FALLBACK (2026-08-11, explicit user directive —
+  // reverses the 2026-08-12 FIX-PLAINTEXT-FALLBACK change referenced in
+  // older comments throughout this file): sending a real message
+  // unencrypted whenever E2E or a key fetch is merely slow is a security
+  // regression, not an acceptable trade-off for a responsive Send button.
+  // Per the requested protocol: wait for readiness for a bounded window
+  // (a few seconds, with capped-backoff retries — see _SEND_READY_GIVEUP_MS
+  // and _KEY_FETCH_GIVEUP_MS), and if it still can't resolve, FAIL the send
+  // with a clear, catchable, retryable error instead of silently
+  // downgrading to plaintext or hanging forever. The caller
+  // (sendMessageToBackend in messages-core.operations.js) surfaces this as
+  // a normal failed-message state with a retry affordance — exactly like a
+  // network failure — and the message is never sent unencrypted.
   //
-  // A 'kyn:e2ePlaintextFallback' event is dispatched whenever this happens,
-  // so the UI can optionally surface it (e.g. an "unencrypted" badge on the
-  // bubble) without this module needing to know about any specific UI.
+  // A 'kyn:e2eSecureFailure' event is also dispatched whenever this
+  // happens, so the UI can optionally surface a live "waiting to secure…"
+  // indicator without this module needing to know about any specific UI.
   async function encryptForChat(plaintext, chatId, recipientUserId, opts) {
-    await _waitForEnabled();
+    const readyInTime = await _waitForEnabledBounded(_SEND_READY_GIVEUP_MS);
+    if (!readyInTime) {
+      console.warn('[E2E] Not unlocked/ready within the wait window — refusing to send unencrypted.');
+      try { document.dispatchEvent(new CustomEvent('kyn:e2eSecureFailure', { detail: { userId: recipientUserId, chatId, reason: 'not_ready' } })); } catch (_) {}
+      throw new E2ESecureFailureError();
+    }
+
     const recipient = await _getRecipientPublicKey(recipientUserId, false, opts?.signal);
     if (!recipient) {
-      console.warn(`[E2E] No usable key for user ${recipientUserId} — sending this message as plaintext.`);
-      try {
-        document.dispatchEvent(new CustomEvent('kyn:e2ePlaintextFallback', {
-          detail: { userId: recipientUserId, chatId }
-        }));
-      } catch (_) {}
-      return plaintext;
+      console.warn(`[E2E] No usable key for user ${recipientUserId} within the wait window — refusing to send unencrypted.`);
+      try { document.dispatchEvent(new CustomEvent('kyn:e2eSecureFailure', { detail: { userId: recipientUserId, chatId, reason: 'no_recipient_key' } })); } catch (_) {}
+      throw new E2ESecureFailureError();
     }
 
     const sharedBits = await _computeSharedBits(_myPrivKey, recipient.key);
@@ -855,13 +1012,13 @@
     prefetchRecipientKey,
     // FIX (BOOTSTRAP-KEY-NEVER-CACHED): see cacheRecipientKey definition above.
     cacheRecipientKey,
-    // FIX-NO-PLAINTEXT-FALLBACK: catchable error constructors so callers can
-    // distinguish "not unlocked yet" / "recipient has no key" from other
-    // failures instead of guessing off error.message text.
-    E2ENotUnlockedError,
-    E2ENoRecipientKeyError,
-    E2EKeyFetchTimeoutError,
+    // FIX-NO-PLAINTEXT-FALLBACK: single catchable error constructor so
+    // callers can distinguish "couldn't secure this send in time" (retry
+    // is the right move) from other failures instead of guessing off
+    // error.message text.
+    E2ESecureFailureError,
     waitForEnabled: _waitForEnabled,
+    waitForEnabledBounded: _waitForEnabledBounded,
     encryptAttachment,
     decryptAttachment,
     getSafetyNumbers,

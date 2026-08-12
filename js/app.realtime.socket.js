@@ -2009,6 +2009,52 @@
                 });
                 // ── end identity relay fix ─────────────────────────────────────────
 
+                // ── FIX (KEY-ANNOUNCEMENT / item #5,6,7): e2e key push relay ───────
+                // Root cause: the server now emits 'e2e:key_available' (first
+                // registration) / 'e2e:key_rotated' (replacing a previously-active
+                // key) — see moodchat src/routes/encryption.js's _broadcastKeyEvent —
+                // but nothing here ever listened for them, so js/e2e-encryption.js
+                // (loaded in message.html/chat.html/group.html) had no way to learn
+                // about a friend's key without triggering its own REST fetch first.
+                // Relay exactly like the identity events above: this page's own
+                // socket.on() fires once here (wherever THIS copy of
+                // app.realtime.socket.js happens to own the live connection — see
+                // chat.html/message.html), then the payload is (1) postMessage'd to
+                // the parent frame, (2) fanned out to every iframe on this page
+                // (covers group.html, which owns no socket of its own), and (3)
+                // dispatched as a same-frame 'kyn:e2e:key_available' /
+                // 'kyn:e2e:key_rotated' CustomEvent, which is exactly what
+                // js/e2e-encryption.js listens for (see its _handleKeyAnnouncement).
+                const e2eKeyEventNames = ['e2e:key_available', 'e2e:key_rotated'];
+
+                e2eKeyEventNames.forEach(eventType => {
+                    if (this._registeredSocketListeners.has(eventType)) return;
+                    this._registeredSocketListeners.add(eventType);
+
+                    this._socket.on(eventType, (payload) => {
+                        const outbound = {
+                            type: 'SOCKET_EVENT',
+                            event: eventType,
+                            payload,
+                            source: 'realtime-socket',
+                            timestamp: Date.now()
+                        };
+                        try { window.parent.postMessage(outbound, '*'); } catch (_) {}
+                        try {
+                            document.querySelectorAll('iframe').forEach((f) => {
+                                try { f.contentWindow.postMessage(outbound, '*'); } catch (_) {}
+                            });
+                        } catch (_) {}
+                        try { window.dispatchEvent(new CustomEvent('kyn:' + eventType, { detail: payload })); } catch (_) {}
+
+                        this._routeMessage({ type: eventType, payload });
+                        if (window.KynectaEventBus) {
+                            window.KynectaEventBus.emit('REALTIME_' + eventType, payload, { async: true });
+                        }
+                    });
+                });
+                // ── end key-announcement relay fix ──────────────────────────────────
+
                 console.log('[Realtime] ✅ Message bridge listeners registered');
             }
         }

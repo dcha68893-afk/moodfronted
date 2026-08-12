@@ -8300,16 +8300,24 @@ Type: ${message.type || 'text'}`;
                         // block THIS specific case and not the others — removed so first
                         // sends behave the same (instant) as every other send.
                         await this._handleSendMessage().catch((err) => {
-                            // FIX-PLAINTEXT-FALLBACK follow-through: encryptForChat()
-                            // no longer throws E2EKeyFetchTimeoutError/
-                            // E2ENoRecipientKeyError — it falls back to sending
-                            // plaintext instead (see e2e-encryption.js and
-                            // messages-core.operations.js). Anything that still
-                            // reaches this catch is a genuine send failure
-                            // (network/server error), not an E2E-specific one, so
-                            // there's no longer a special-cased message for those
-                            // two error names.
-                            try { window.showToast?.('Message could not be sent — please try again.', 'error'); } catch (_) {}
+                            // FIX-NO-PLAINTEXT-FALLBACK follow-through: encryptForChat()
+                            // now throws window.KynectaE2E.E2ESecureFailureError instead
+                            // of ever falling back to plaintext (see e2e-encryption.js
+                            // and messages-core.operations.js) when E2E isn't ready or
+                            // the recipient's key can't be resolved within the bounded
+                            // wait window. Surface that specific, actionable message
+                            // ("🔒 Secure connection is being established. Please
+                            // retry.") instead of the generic one so the person knows
+                            // this is a transient "still setting up encryption" state,
+                            // not a dead server — sendMessageToBackend's own catch
+                            // already marks the message 'failed' with a retry
+                            // affordance either way.
+                            const isSecureFailure = err && (err.name === 'E2ESecureFailureError' ||
+                                (window.KynectaE2E?.E2ESecureFailureError && err instanceof window.KynectaE2E.E2ESecureFailureError));
+                            const toastMsg = isSecureFailure
+                                ? (err.message || '🔒 Secure connection is being established. Please retry.')
+                                : 'Message could not be sent — please try again.';
+                            try { window.showToast?.(toastMsg, 'error'); } catch (_) {}
                             console.warn('[Send] failed:', err);
                         });
 

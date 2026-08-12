@@ -1069,20 +1069,21 @@ const ChatManager = {
             }
 
             // ── FIX-E2E-WIRING: encrypt before transport when possible ──────────
-            // FIX-PLAINTEXT-FALLBACK (2026-08-12, explicit user directive —
-            // supersedes the earlier FIX-NO-PLAINTEXT-FALLBACK decision): the
-            // previous behavior waited (up to 45s) for E2E/key resolution and
-            // threw rather than ever send unencrypted — that's what caused the
-            // reply/send "hanging" complaint. encryptForChat() now gives up
-            // quickly (a few seconds — see _KEY_FETCH_GIVEUP_MS in
-            // e2e-encryption.js) and returns the PLAINTEXT content instead of
-            // blocking or throwing when E2E isn't ready or the recipient's key
-            // can't be resolved in time. This call no longer needs a
-            // try/catch here for the "no key" case — it always resolves, never
-            // rejects for that reason. Listen for the
-            // 'kyn:e2ePlaintextFallback' DOM event (dispatched by
-            // e2e-encryption.js) if you want to surface an "unencrypted"
-            // indicator in the UI later.
+            // FIX-NO-PLAINTEXT-FALLBACK (2026-08-11, explicit user directive —
+            // reverses the 2026-08-12 FIX-PLAINTEXT-FALLBACK decision referenced
+            // in older comments/history here): encryptForChat() now waits for
+            // E2E/key resolution for a bounded window (a few seconds — see
+            // _SEND_READY_GIVEUP_MS / _KEY_FETCH_GIVEUP_MS in e2e-encryption.js)
+            // and THROWS window.KynectaE2E.E2ESecureFailureError rather than
+            // ever sending the message as plaintext when it can't resolve in
+            // time. Deliberately NOT caught here — letting it propagate up to
+            // this function's own try/catch (see the `catch (error)` block
+            // around the call site in sendMessage()) means a secure-failure is
+            // handled exactly like any other send failure: the optimistic
+            // message is marked 'failed' with error.message as the reason
+            // (the friendly "🔒 Secure connection is being established. Please
+            // retry." text) and a normal retry affordance, with no separate
+            // code path required. The message is never transmitted unencrypted.
             if (requestBody.type === 'text' && typeof content === 'string' && _recipientUserIdForEncryption && window.KynectaE2E) {
                 requestBody.content = await window.KynectaE2E.encryptForChat(content, conversationId, _recipientUserIdForEncryption);
             }

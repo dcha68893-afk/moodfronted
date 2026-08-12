@@ -3798,6 +3798,25 @@
     <script src="js/phase15.delivery.patch.js"></script>
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
     <script src="js/app.realtime.socket.js"></script>
+    <!-- FIX (E2E-AT-LOGIN / item #1): js/e2e-encryption.js used to only ever
+         load inside message.html/group.html — the two chat/group MODULE
+         iframes — so key generation and server registration never happened
+         until a person actually opened a specific chat, not at login or
+         session start like the rest of the app's session-init sequence
+         (auth, presence, offline queue, etc., all wired up above/below on
+         THIS page). chat.html is the shell every login redirects to before
+         any module iframe is opened (see index.html's login handler), so
+         loading it here — and initializing it immediately via
+         js/e2e-session-init.js — means a person's identity key is generated
+         and its registration confirmed with the server well before they
+         ever tap into a conversation, exactly like the rest of session
+         bootstrap. message.html/group.html still independently init() their
+         own KynectaE2E instance (each iframe is a separate window — see
+         js/e2e-session-init.js), but by the time either of those loads,
+         this page's init() has almost always already finished, so theirs
+         resolves instantly instead of doing real work. -->
+    <script src="js/e2e-encryption.js"></script>
+    <script src="js/e2e-session-init.js" defer></script>
     <!-- FIX (REAL-PRESENCE): PresenceEngineFoundation.js was already fully built
          (heartbeats, idle detection, multi-tab coordination, matching backend
          listener at webSocketService.js socket.on('presence:heartbeat')) but was
