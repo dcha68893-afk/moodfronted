@@ -3930,6 +3930,12 @@
     window.__callerCallId = null;
     window.__pendingOfferPayload = null;
     window.__pendingAnswerPayload = null;
+    // FIX-STALE-OFFER-REVIVES-ENDED-CALL: invalidate any in-flight queued-offer
+    // retry loop (calls-core.part7.js's handleSignalOffer) so it can't force
+    // callActive back to true a moment after this explicit end/reset.
+    window.__pendingOfferRetryGen = (window.__pendingOfferRetryGen || 0) + 1;
+    try { if (window.__pendingOfferRetryIntervalId) clearInterval(window.__pendingOfferRetryIntervalId); } catch(_) {}
+    window.__pendingOfferRetryIntervalId = null;
 
 
 

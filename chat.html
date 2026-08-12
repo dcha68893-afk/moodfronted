@@ -6847,18 +6847,24 @@
                                 // all). Also emit call:webrtc_offer / call:webrtc_answer for
                                 // CallSignalingService, using the event name (and field name) that
                                 // actually matches what's being sent.
+                                // FIX-DUP-SIGNAL-DELIVERY (parent bridge): this used to emit the SAME
+                                // offer/answer over BOTH 'call:webrtc_offer'/'call:webrtc_answer' AND
+                                // 'webrtc:signal' — the backend (CallSignalingService) relays each of
+                                // those event names to the target independently, so the receiving
+                                // side's calls iframe received every offer/answer TWICE. The existing
+                                // callId+sdp-length dedup in handleSignalOffer/handleSignalAnswer
+                                // absorbs an exact duplicate most of the time, but a renegotiation
+                                // offer (e.g. mid-call video upgrade) racing against this doubling —
+                                // or a network reorder that lets the second copy land first — is
+                                // exactly the corrupted-negotiation-state pattern documented in
+                                // calls-core.part7.js as the root cause of "remote video never shows".
+                                // Deliver via exactly ONE channel, same principle as the other
+                                // FIX-DUP-SIGNAL-DELIVERY fixes already applied in calls-core.part7.js.
                                 _rtSocket.emit(signalType === 'offer' ? 'call:webrtc_offer' : 'call:webrtc_answer', {
                                     callId: resolvedCallId,
                                     targetUserId: payload.targetUserId || payload.toUserId || null,
                                     [signalType]: sdpPayload,
                                     type: signalType,
-                                    timestamp: Date.now()
-                                });
-                                _rtSocket.emit('webrtc:signal', {
-                                    callId: resolvedCallId,
-                                    type: signalType,
-                                    sdp: typeof sdpPayload === 'string' ? sdpPayload : JSON.stringify(sdpPayload),
-                                    targetUserId: payload.targetUserId || payload.toUserId || null,
                                     timestamp: Date.now()
                                 });
                             }
