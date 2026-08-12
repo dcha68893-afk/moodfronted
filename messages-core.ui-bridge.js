@@ -1667,63 +1667,22 @@ const UIStateManager = {
                     // Fall through and add it normally so it appears in the current session.
                 }
 
-                // FIX-DM-DECRYPT-AT-WRITE (mirrors FIX-GROUP-ENCRYPTION in group-core.js):
-                // decrypt now, once, and store the plaintext — don't leave the ciphertext
-                // as the message-of-record and re-derive the plaintext on every render.
-                // That render-time-only approach means a message becomes unreadable forever
-                // the moment the E2E session isn't available (e.g. right after an app
-                // restart, before KynectaE2E.init() has a chance to run again) even though
-                // nothing about the message itself changed. Decrypting here means the
-                // stored copy is readable regardless of session state on any later load.
-                if (window.KynectaE2E && window.KynectaE2E.enabled &&
+                // FIX-RECEIVE-DECRYPT-DECOUPLE (replaces the old FIX-DM-DECRYPT-AT-WRITE
+                // block, which awaited decryptFromChat — bounded by an 8s race — BEFORE
+                // normalizedMessage was ever built or rendered. That meant "message
+                // appears on screen" was gated on a network round trip (sender key
+                // fetch) that could legitimately take several seconds, and a
+                // slow/stuck fetch delayed the message up to the full 8s even though
+                // the socket had already delivered it. Per the messaging-lifecycle
+                // rebuild ("separate message receipt from decryption"), this now only
+                // detects whether decryption is needed here; the actual decrypt call
+                // happens AFTER render/persist/ack, below, so the bubble appears
+                // immediately (as the ciphertext envelope if that's all we have yet)
+                // and is patched in place once plaintext resolves. Failure/timeout
+                // degrades to the same ciphertext placeholder as before.
+                const _needsDecrypt = !!(window.KynectaE2E && window.KynectaE2E.enabled &&
                     typeof message.content === 'string' &&
-                    message.content.charAt(0) === '{' && message.content.indexOf('"v"') !== -1) {
-                    const _claimKey = message.id || message.localId;
-                    if (!window.__kynClaimDecrypt || window.__kynClaimDecrypt(_claimKey)) {
-                    try {
-                        // FIX-ROOT-CAUSE-DECRYPT-OWN-REPLY: decryptFromChat's third
-                        // argument must always be "the OTHER participant", because
-                        // encryptForChat always derived the AES key using the
-                        // recipient's public key — never our own. The branch above
-                        // that reaches this point specifically handles messages WE
-                        // sent, arriving via another device/tab (_realtimeSenderId
-                        // === _realtimeCurrentUserId), so message.senderId here is
-                        // our own id — passing it straight through made us derive a
-                        // shared secret with ourselves and fail to decrypt our own
-                        // just-sent reply the moment it echoed back. Use the
-                        // recipient id instead whenever the sender is us.
-                        const _isOwnEchoedMessage = _realtimeSenderId && _realtimeCurrentUserId &&
-                            String(_realtimeSenderId) === String(_realtimeCurrentUserId);
-                        const _senderIdForDecrypt = _isOwnEchoedMessage
-                            ? (message.receiverId || message.recipientId ||
-                               (message.receiver && message.receiver.id) || (message.recipient && message.recipient.id) ||
-                               message.senderId)
-                            : message.senderId;
-                        // FIX-ROOT-CAUSE-RECEIVE-HANG: this await used to be able to hang
-                        // indefinitely if the sender's public-key fetch inside
-                        // decryptFromChat stalled (see e2e-encryption.js) — the socket
-                        // had already delivered message:new (so anything driven off the
-                        // raw socket event, like a notification/unread badge, still
-                        // fired), but this function never returned, so the message never
-                        // got appended to the chat panel. Race against a timeout so a
-                        // slow/stuck key fetch degrades to showing the ciphertext
-                        // placeholder (retried later by messages-ui.js's render-time
-                        // decrypt) instead of blocking the message from appearing at all.
-                        const _plaintext = await Promise.race([
-                            window.KynectaE2E.decryptFromChat(message.content, chatId, _senderIdForDecrypt),
-                            new Promise((_, reject) => setTimeout(() => reject(new Error('E2E decrypt timeout')), 8000))
-                        ]);
-                        if (_plaintext && _plaintext !== message.content &&
-                            _plaintext.indexOf('[Decryption failed') !== 0) {
-                            message.content = _plaintext;
-                            message.encrypted = false;
-                        }
-                        // On failure, leave message.content as the ciphertext envelope —
-                        // messages-ui.js's render-time decrypt still gets a chance to
-                        // retry later (e.g. once the ratchet session catches up).
-                    } catch (_) {}
-                    }
-                }
+                    message.content.charAt(0) === '{' && message.content.indexOf('"v"') !== -1);
 
                 // FIX: always numeric ms — ISO strings compare as NaN in sort
                 const _sca = message.createdAt
@@ -1757,7 +1716,7 @@ const UIStateManager = {
                     mediaUrl: message.mediaUrl || message.fileUrl || null,
                     fileUrl: message.fileUrl || message.mediaUrl || null,
                     fileName: message.fileName || message.attachment?.name || null,
-                    encrypted: !!message.encrypted,
+                    encrypted: !!message.encrypted || _needsDecrypt,
                     originalMimeType: message.originalMimeType || null
                 };
 
@@ -1794,6 +1753,62 @@ const UIStateManager = {
                 }
                 renderRealtimeUpdate(chatId, normalizedMessage);
                 ackMessageDelivered(normalizedMessage).catch(() => {});
+
+                // FIX-RECEIVE-DECRYPT-DECOUPLE (part 2): the message is already on
+                // screen and already acked — decrypt now, in the background, and
+                // patch the bubble in place once plaintext is ready. Same claim-key
+                // guard and 8s bound as the old inline block, but nothing above this
+                // point ever waits on it.
+                if (_needsDecrypt) {
+                    const _claimKey = message.id || message.localId;
+                    if (!window.__kynClaimDecrypt || window.__kynClaimDecrypt(_claimKey)) {
+                        (async () => {
+                            try {
+                                // FIX-ROOT-CAUSE-DECRYPT-OWN-REPLY: decryptFromChat's third
+                                // argument must always be "the OTHER participant", because
+                                // encryptForChat always derived the AES key using the
+                                // recipient's public key — never our own. The branch above
+                                // (own-echo handling) specifically covers messages WE sent,
+                                // arriving via another device/tab (_realtimeSenderId ===
+                                // _realtimeCurrentUserId), so message.senderId here would be
+                                // our own id — passing it straight through would make us
+                                // derive a shared secret with ourselves. Use the recipient id
+                                // instead whenever the sender is us.
+                                const _isOwnEchoedMessage = _realtimeSenderId && _realtimeCurrentUserId &&
+                                    String(_realtimeSenderId) === String(_realtimeCurrentUserId);
+                                const _senderIdForDecrypt = _isOwnEchoedMessage
+                                    ? (message.receiverId || message.recipientId ||
+                                       (message.receiver && message.receiver.id) || (message.recipient && message.recipient.id) ||
+                                       message.senderId)
+                                    : message.senderId;
+                                const _plaintext = await Promise.race([
+                                    window.KynectaE2E.decryptFromChat(message.content, chatId, _senderIdForDecrypt),
+                                    new Promise((_, reject) => setTimeout(() => reject(new Error('E2E decrypt timeout')), 8000))
+                                ]);
+                                if (_plaintext && _plaintext !== message.content &&
+                                    _plaintext.indexOf('[Decryption failed') !== 0) {
+                                    const _patched = { ...normalizedMessage, content: _plaintext, encrypted: false };
+                                    if (ChatManager && ChatManager.addMessage) ChatManager.addMessage(_patched);
+                                    renderRealtimeUpdate(chatId, _patched);
+                                    if (window.KynectaLocalStore?.saveMessage) {
+                                        window.KynectaLocalStore.saveMessage({
+                                            localId:  _patched.localId || undefined,
+                                            serverId: String(_patched.serverId || _patched.id || ''),
+                                            chatId:   String(chatId),
+                                            conversationId: String(chatId),
+                                            content:  _plaintext,
+                                            isLocalOnly: false,
+                                        }).catch(function(){});
+                                    }
+                                }
+                                // On failure/timeout, leave the ciphertext envelope on
+                                // screen — messages-ui.js's render-time decrypt still
+                                // gets a chance to retry later (e.g. once the ratchet
+                                // session catches up), same as before this change.
+                            } catch (_) {}
+                        })();
+                    }
+                }
                 // FIX-MSG-DELIVERY-ACK: Phase 2 — tell server we received this message
                 // so the sender gets 'message:delivered' and delivery timeout is cleared.
                 try {
