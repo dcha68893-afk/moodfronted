@@ -1068,27 +1068,21 @@ const ChatManager = {
                 if (window.__pendingMsgMeta) delete window.__pendingMsgMeta;
             }
 
-            // ── FIX-E2E-WIRING: encrypt before transport, never store plaintext ──
-            // FIX-NO-PLAINTEXT-FALLBACK (user directive): there used to be an
-            // outer timeout race here that, on expiry, sent the message body
-            // through UNENCRYPTED. That is a real security downgrade a person
-            // can't see happening — the bubble looks exactly like a normal
-            // sent message. Per explicit product decision this never happens
-            // again: we simply await encryptForChat(), which itself now waits
-            // (with its own internal, capped-backoff retry against the
-            // network — see e2e-encryption.js) for as long as it takes for
-            // E2E to be unlocked and the recipient's key to be discovered,
-            // instead of giving up. The optimistic message bubble added
-            // above already shows a "sending" state for exactly this
-            // duration — same UX as waiting on a slow network request, no
-            // separate spinner/timeout needed here.
-            //
-            // The only way this throws is a genuine, current business state
-            // (E2ENoRecipientKeyError — the recipient has never registered
-            // an encryption key at all) rather than a transient hiccup; that
-            // propagates up to the caller's catch block below, which queues
-            // for retry / surfaces a real error instead of silently sending
-            // plaintext.
+            // ── FIX-E2E-WIRING: encrypt before transport when possible ──────────
+            // FIX-PLAINTEXT-FALLBACK (2026-08-12, explicit user directive —
+            // supersedes the earlier FIX-NO-PLAINTEXT-FALLBACK decision): the
+            // previous behavior waited (up to 45s) for E2E/key resolution and
+            // threw rather than ever send unencrypted — that's what caused the
+            // reply/send "hanging" complaint. encryptForChat() now gives up
+            // quickly (a few seconds — see _KEY_FETCH_GIVEUP_MS in
+            // e2e-encryption.js) and returns the PLAINTEXT content instead of
+            // blocking or throwing when E2E isn't ready or the recipient's key
+            // can't be resolved in time. This call no longer needs a
+            // try/catch here for the "no key" case — it always resolves, never
+            // rejects for that reason. Listen for the
+            // 'kyn:e2ePlaintextFallback' DOM event (dispatched by
+            // e2e-encryption.js) if you want to surface an "unencrypted"
+            // indicator in the UI later.
             if (requestBody.type === 'text' && typeof content === 'string' && _recipientUserIdForEncryption && window.KynectaE2E) {
                 requestBody.content = await window.KynectaE2E.encryptForChat(content, conversationId, _recipientUserIdForEncryption);
             }

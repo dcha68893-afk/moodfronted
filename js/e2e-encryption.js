@@ -432,6 +432,20 @@
   // callers surface as an error rather than a silent plaintext downgrade.
   const _inflightKeyFetch = new Map(); // userId → Promise<entry|null>
 
+  // FIX-PLAINTEXT-FALLBACK (2026-08-12, explicit user directive — supersedes
+  // the earlier FIX-NO-PLAINTEXT-FALLBACK decision referenced throughout this
+  // file): the indefinite/45s-capped retry loop below was the actual cause of
+  // the reply/send "hanging" complaint — a slow or unreachable key fetch left
+  // the Send button spinning with no way out. Per explicit instruction, this
+  // now gives up quickly (a few seconds, one or two attempts) instead of
+  // retrying for up to 45s, and the caller (encryptForChat, below) sends the
+  // message as plaintext rather than blocking or throwing when a key can't be
+  // resolved in that window. This is a real security trade-off — a message
+  // can now go out unencrypted when the recipient's key is slow to resolve —
+  // so keep this in mind if E2E guarantees matter more than responsiveness
+  // for this app; it was a deliberate ask, not an oversight.
+  const _KEY_FETCH_GIVEUP_MS = 6000;
+
   async function _getRecipientPublicKey(userId, forceRefresh, signal) {
     if (!forceRefresh && PUB_CACHE.has(userId)) return PUB_CACHE.get(userId);
 
@@ -495,27 +509,24 @@
           _savePubKeyStore(store);
           return entry;
         } catch (e) {
-          console.warn(`[E2E] Recipient key fetch attempt ${attempt} for user ${userId} did not succeed yet, still waiting:`, e?.message);
+          console.warn(`[E2E] Recipient key fetch attempt ${attempt} for user ${userId} did not succeed yet:`, e?.message);
           try {
             document.dispatchEvent(new CustomEvent('kyn:e2eWaitingForKey', { detail: { userId, attempt } }));
           } catch (_) {}
-          // FIX (E2E-KEY-FETCH-INFINITE-HANG): this used to have no upper
-          // bound at all -- by design, to avoid ever silently downgrading to
-          // plaintext. In practice that means any sustained failure (backend
-          // hiccup, rate limiting, an auth-check gap for a brand new chat
-          // between users who aren't confirmed friends yet) leaves the Send
-          // button spinning forever with zero feedback and no way to
-          // recover short of reloading the page. Keep the same
-          // never-downgrade-to-plaintext posture (still no automatic
-          // plaintext fallback), but stop hanging silently: after ~45s of
-          // real retrying, throw a distinct, catchable error so the caller
-          // (messages-ui.js's Send handler) can show the user an actual
-          // message and let them retry, instead of an infinite silent spin.
-          if (Date.now() - _startedAt > 45000) {
-            throw new E2EKeyFetchTimeoutError(`Could not reach recipient's encryption key after ${attempt} attempts`);
+          // FIX-PLAINTEXT-FALLBACK: give up after a short window (see
+          // _KEY_FETCH_GIVEUP_MS above) instead of retrying for up to 45s.
+          // Returning null here — rather than throwing — lets encryptForChat
+          // treat "key fetch timed out" exactly like "recipient has no key
+          // yet" and fall back to plaintext instead of hanging the Send
+          // button. Nothing further up the chain needs an
+          // E2EKeyFetchTimeoutError catch block anymore, since this no
+          // longer throws for the timeout case.
+          if (Date.now() - _startedAt > _KEY_FETCH_GIVEUP_MS) {
+            console.warn(`[E2E] Giving up on recipient ${userId}'s key after ${attempt} attempt(s) — falling back to plaintext for this send.`);
+            return null;
           }
-          // Capped exponential backoff: 500ms, 1s, 2s, 4s, then holds at 8s.
-          await _sleep(Math.min(500 * Math.pow(2, attempt - 1), 8000));
+          // Short, capped backoff within the shrunk window: 400ms, 800ms, then holds at 1.5s.
+          await _sleep(Math.min(400 * Math.pow(2, attempt - 1), 1500));
         }
       }
     })().finally(() => _inflightKeyFetch.delete(userId));
@@ -588,35 +599,46 @@
     }
   }
 
-  // Distinct, catchable error types so callers (messages-core.operations.js)
-  // can tell "this person has genuinely never set up encryption" apart from
-  // "E2E isn't unlocked in this browser session yet" instead of both being
-  // silently swallowed into a plaintext send.
+  // Kept for backwards compatibility (still exported below in case any other
+  // caller references them by name/instanceof), but as of the
+  // FIX-PLAINTEXT-FALLBACK change above, encryptForChat() no longer throws
+  // either of these — it falls back to plaintext instead. E2ENotUnlockedError
+  // is also currently unused by this module; nothing in the send path throws
+  // it today.
   function E2ENotUnlockedError(message) { this.name = 'E2ENotUnlockedError'; this.message = message || 'Secure messaging is not unlocked in this session'; }
   E2ENotUnlockedError.prototype = Object.create(Error.prototype);
   function E2ENoRecipientKeyError(message) { this.name = 'E2ENoRecipientKeyError'; this.message = message || 'Recipient has not set up encryption'; }
   E2ENoRecipientKeyError.prototype = Object.create(Error.prototype);
-
-  // FIX (E2E-KEY-FETCH-INFINITE-HANG): distinct, catchable error for "we
-  // kept retrying and it still never resolved" so callers can tell this
-  // apart from E2ENoRecipientKeyError (a definitive, real "no key exists")
-  // and show an appropriate retry-able message instead of either failing
-  // silently or treating it as a permanent state.
   function E2EKeyFetchTimeoutError(message) { this.name = 'E2EKeyFetchTimeoutError'; this.message = message || 'Timed out waiting for recipient encryption key'; }
   E2EKeyFetchTimeoutError.prototype = Object.create(Error.prototype);
 
   // ── Encrypt a message for a chat ──────────────────────────────────────────
-  // FIX-NO-PLAINTEXT-FALLBACK: this never returns plaintext. If E2E isn't
-  // unlocked yet, or the recipient's key hasn't been discovered yet, this
-  // simply waits (see _waitForEnabled / _getRecipientPublicKey above) —
-  // callers (the Send button) are expected to stay in "sending…" for that
-  // duration, exactly as they already do for a slow network request. The
-  // returned promise only rejects for a genuine, current business state
-  // (recipient has no registered key at all — E2ENoRecipientKeyError).
+  // FIX-PLAINTEXT-FALLBACK (2026-08-12, explicit user directive — replaces
+  // the old FIX-NO-PLAINTEXT-FALLBACK behavior): this used to wait
+  // indefinitely (then, after an earlier fix, up to 45s) and throw rather
+  // than ever send unencrypted. That's what caused the reply/send "hanging"
+  // complaint. Now: if E2E itself isn't unlocked yet, or the recipient's key
+  // can't be resolved within a few seconds (see _KEY_FETCH_GIVEUP_MS), this
+  // sends the message as PLAIN TEXT instead of blocking or throwing. The
+  // message still sends immediately either way — callers no longer need to
+  // handle an E2ENoRecipientKeyError/E2EKeyFetchTimeoutError rejection from
+  // this function for the "no key yet" case.
+  //
+  // A 'kyn:e2ePlaintextFallback' event is dispatched whenever this happens,
+  // so the UI can optionally surface it (e.g. an "unencrypted" badge on the
+  // bubble) without this module needing to know about any specific UI.
   async function encryptForChat(plaintext, chatId, recipientUserId, opts) {
     await _waitForEnabled();
     const recipient = await _getRecipientPublicKey(recipientUserId, false, opts?.signal);
-    if (!recipient) throw new E2ENoRecipientKeyError(`User ${recipientUserId} has not registered an encryption key`);
+    if (!recipient) {
+      console.warn(`[E2E] No usable key for user ${recipientUserId} — sending this message as plaintext.`);
+      try {
+        document.dispatchEvent(new CustomEvent('kyn:e2ePlaintextFallback', {
+          detail: { userId: recipientUserId, chatId }
+        }));
+      } catch (_) {}
+      return plaintext;
+    }
 
     const sharedBits = await _computeSharedBits(_myPrivKey, recipient.key);
     const aesKey     = await _hkdf(sharedBits, _chatContext(chatId, recipientUserId));

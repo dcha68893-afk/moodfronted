@@ -8300,22 +8300,16 @@ Type: ${message.type || 'text'}`;
                         // block THIS specific case and not the others — removed so first
                         // sends behave the same (instant) as every other send.
                         await this._handleSendMessage().catch((err) => {
-                            // FIX (E2E-KEY-FETCH-INFINITE-HANG follow-through): a
-                            // thrown error here was an unhandled rejection before
-                            // (queueAction's try/catch only catches synchronous
-                            // throws, not async rejections), so even once the E2E
-                            // retry loop stopped hanging forever and started
-                            // throwing after ~45s, the user still saw nothing —
-                            // just a button that quietly re-enabled itself with no
-                            // explanation. Surface it.
-                            const name = err?.name || '';
-                            if (name === 'E2EKeyFetchTimeoutError') {
-                                try { window.showToast?.('Could not reach the recipient\'s encryption key. Check your connection and try sending again.', 'error'); } catch (_) {}
-                            } else if (name === 'E2ENoRecipientKeyError') {
-                                try { window.showToast?.('This person has not set up encryption yet — message not sent.', 'error'); } catch (_) {}
-                            } else {
-                                try { window.showToast?.('Message could not be sent — please try again.', 'error'); } catch (_) {}
-                            }
+                            // FIX-PLAINTEXT-FALLBACK follow-through: encryptForChat()
+                            // no longer throws E2EKeyFetchTimeoutError/
+                            // E2ENoRecipientKeyError — it falls back to sending
+                            // plaintext instead (see e2e-encryption.js and
+                            // messages-core.operations.js). Anything that still
+                            // reaches this catch is a genuine send failure
+                            // (network/server error), not an E2E-specific one, so
+                            // there's no longer a special-cased message for those
+                            // two error names.
+                            try { window.showToast?.('Message could not be sent — please try again.', 'error'); } catch (_) {}
                             console.warn('[Send] failed:', err);
                         });
 
