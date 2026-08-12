@@ -186,6 +186,15 @@ class PWAManager {
     };
     
     // Store auth data
+    // FIX-DUPLICATE-TOKEN-STORAGE (consolidation): route through the
+    // canonical AuthStorage module first (when loaded) so this write also
+    // updates 'kynecta_auth' and runs account-switch detection — see the
+    // matching fix in js/api.auth.js / js/app.ui.auth.js for the full
+    // rationale. The legacy keys below are kept for any code that still
+    // reads them directly.
+    if (window.AuthStorage && typeof window.AuthStorage.saveAuth === 'function' && userData.token) {
+      window.AuthStorage.saveAuth({ token: userData.token, user: userData.user || null });
+    }
     localStorage.setItem('authToken', userData.token);
     localStorage.setItem('auth_token', userData.token);
     localStorage.setItem('user', JSON.stringify(userData.user));

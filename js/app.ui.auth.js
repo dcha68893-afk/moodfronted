@@ -2289,6 +2289,22 @@ try {
                     // FIX #3: Added issuedAt (required by SESSION_SCHEMA in app_core_session.js).
                     // Without issuedAt, validateSession() returns isValid:false → getToken() returns
                     // null → socket connects with no token → server rejects with auth/token-missing.
+                    //
+                    // FIX-DUPLICATE-TOKEN-STORAGE / MANUAL-LOGIN-ACCOUNT-SWITCH
+                    // (consolidation): this used to write 'kynecta_auth' directly via
+                    // localStorage.setItem(), bypassing js/authStorage.js's saveAuth()
+                    // entirely. saveAuth() is where account-switch detection lives —
+                    // it compares the incoming user id against whichever account's
+                    // data is currently on this device and, on a genuine switch, wipes
+                    // the previous account's cached message history / IndexedDB data
+                    // before writing the new session. Because password/manual login
+                    // wrote straight to localStorage instead of calling saveAuth(),
+                    // that check never ran for this login path — a manual login on a
+                    // device that last held a different (e.g. Google-signed-in)
+                    // account could leave the previous account's message history
+                    // mixed in. Routing through AuthStorage.saveAuth() here closes
+                    // that gap; the manual write below only runs as a fallback if
+                    // authStorage.js somehow hasn't loaded.
                     try {
                         const now = Date.now();
                         const unifiedAuth = {
@@ -2302,7 +2318,16 @@ try {
                             validated: true,
                             version: '4.1.2'
                         };
-                        localStorage.setItem('kynecta_auth', JSON.stringify(unifiedAuth));
+                        if (window.AuthStorage && typeof window.AuthStorage.saveAuth === 'function') {
+                            window.AuthStorage.saveAuth({
+                                token, user,
+                                refreshToken: unifiedAuth.refreshToken,
+                                expiresAt: unifiedAuth.expiresAt,
+                                issuedAt: unifiedAuth.issuedAt,
+                            });
+                        } else {
+                            localStorage.setItem('kynecta_auth', JSON.stringify(unifiedAuth));
+                        }
 
                         // Propagate immediately so socket can use it without a storage read cycle
                         window.__kynToken = token;
@@ -2477,7 +2502,14 @@ if (window.SessionManager && token && user) {
                         expiresAt: _retryNow + (24 * 60 * 60 * 1000), // 24h to match JWT expiry
                         validated: true
                     };
-                    localStorage.setItem('kynecta_auth', JSON.stringify(retryUnified));
+                    // FIX-DUPLICATE-TOKEN-STORAGE: route through AuthStorage.saveAuth()
+                    // (see the matching fix above) instead of writing 'kynecta_auth'
+                    // directly, so account-switch detection still runs on this retry path.
+                    if (window.AuthStorage && typeof window.AuthStorage.saveAuth === 'function') {
+                        window.AuthStorage.saveAuth({ token, user, expiresAt: retryUnified.expiresAt, issuedAt: retryUnified.issuedAt });
+                    } else {
+                        localStorage.setItem('kynecta_auth', JSON.stringify(retryUnified));
+                    }
                     
                     // Verify again
                     const retryVerify = localStorage.getItem('token');
@@ -2778,15 +2810,23 @@ if (window.SessionManager && token && user) {
                         localStorage.setItem('nexopa_token', token);
                         localStorage.setItem('USER_TOKEN', token);
                         const _authNow = Date.now();
-                        localStorage.setItem('kynecta_auth', JSON.stringify({
-                            token,
-                            user,
-                            userId: user?.id || user?.userId,
-                            timestamp: _authNow,
-                            issuedAt: _authNow,                           // ← FIX: required by SESSION_SCHEMA
-                            expiresAt: _authNow + (24 * 60 * 60 * 1000), // 24h to match JWT expiry
-                            refreshToken: null
-                        }));
+                        // FIX-DUPLICATE-TOKEN-STORAGE: route through AuthStorage.saveAuth()
+                        // (see the matching fix above) instead of writing 'kynecta_auth'
+                        // directly, so account-switch detection still runs on this
+                        // registration path too.
+                        if (window.AuthStorage && typeof window.AuthStorage.saveAuth === 'function') {
+                            window.AuthStorage.saveAuth({ token, user, refreshToken: null, expiresAt: _authNow + (24 * 60 * 60 * 1000), issuedAt: _authNow });
+                        } else {
+                            localStorage.setItem('kynecta_auth', JSON.stringify({
+                                token,
+                                user,
+                                userId: user?.id || user?.userId,
+                                timestamp: _authNow,
+                                issuedAt: _authNow,                           // ← FIX: required by SESSION_SCHEMA
+                                expiresAt: _authNow + (24 * 60 * 60 * 1000), // 24h to match JWT expiry
+                                refreshToken: null
+                            }));
+                        }
                         window.__kynToken = token; // immediate propagation
                         if (window.KynectaRealtime) window.KynectaRealtime._sessionToken = token;
                         window.token = token;

@@ -3295,11 +3295,34 @@
             if (token) {
                 // Store token in multiple locations
                 try {
+                    // FIX-DUPLICATE-TOKEN-STORAGE (consolidation): this used to write
+                    // its own hand-rolled 'kynecta_auth' object here
+                    // (`{ token, user, timestamp }`) directly via localStorage,
+                    // completely bypassing js/authStorage.js's saveAuth() — the
+                    // single module every other read path (AuthStorage.getAuth/
+                    // getSession/getToken) treats as authoritative. Two concrete
+                    // problems that caused: (1) the shape didn't match what
+                    // AuthStorage writes (no refreshToken/expiresAt/issuedAt/
+                    // _version), so any code relying on those fields after a
+                    // registration-flow login silently got undefined; (2) the
+                    // account-switch detection in saveAuth() — which wipes the
+                    // previous account's local message history/IndexedDB data
+                    // when a different user id logs in on the same device — never
+                    // ran for this path, since it lives inside saveAuth() and this
+                    // wrote straight to localStorage instead of calling it. Route
+                    // through AuthStorage.saveAuth() (falling back to the old raw
+                    // write only if that module hasn't loaded) so registration
+                    // goes through the exact same single source of truth as every
+                    // other login path.
+                    if (window.AuthStorage && typeof window.AuthStorage.saveAuth === 'function') {
+                        window.AuthStorage.saveAuth({ token, user, expiresAt: Date.now() + (typeof CONFIG !== 'undefined' && CONFIG.DEFAULT_TOKEN_EXPIRY ? CONFIG.DEFAULT_TOKEN_EXPIRY : 24 * 60 * 60 * 1000) });
+                    } else {
+                        localStorage.setItem('kynecta_auth', JSON.stringify({ token, user, timestamp: Date.now() }));
+                    }
                     localStorage.setItem('token', token);
                     localStorage.setItem('accessToken', token);
                     localStorage.setItem('USER_TOKEN', token);
                     localStorage.setItem('nexopa_token', token);
-                    localStorage.setItem('kynecta_auth', JSON.stringify({ token, user, timestamp: Date.now() }));
                     window.token = token;
                     window.accessToken = token;
                     if (user) window.currentUser = user;

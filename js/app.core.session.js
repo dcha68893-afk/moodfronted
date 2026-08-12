@@ -1292,6 +1292,19 @@
           
           _saveToStorage: function() {
             try {
+              // FIX-DUPLICATE-TOKEN-STORAGE (consolidation): route through the
+              // canonical AuthStorage module first (when loaded) so this write
+              // also updates 'kynecta_auth' and runs account-switch detection —
+              // see the matching fix in js/api.auth.js for the full rationale.
+              // The prefixed/legacy keys below are kept as-is for any code
+              // that still reads them directly.
+              if (this._token && window.AuthStorage && typeof window.AuthStorage.saveAuth === 'function') {
+                window.AuthStorage.saveAuth({
+                  token: this._token,
+                  refreshToken: this._refreshToken || null,
+                  user: this._user || null,
+                });
+              }
               if (this._token) {
                 localStorage.setItem(this._storageKeyPrefix + 'accessToken', this._token);
                 localStorage.setItem('accessToken', this._token);
