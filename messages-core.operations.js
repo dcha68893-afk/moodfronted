@@ -265,13 +265,31 @@ const ChatManager = {
         async startOrGetDirectConversation(userId, name, avatar, _attempt = 0, _skipCache = false) {
             if (!userId) throw new Error('startOrGetDirectConversation: missing userId');
 
+            // FIX (SEND-HANG-NON-HISTORY-OPEN, missing branch): prefetchRecipientKey()
+            // was only ever fired from the `_local` (already-cached-conversation)
+            // branch below. The very first time two people open a chat from
+            // Friend/Calls/Status — no cached conversation yet, so execution never
+            // enters that branch — fell straight through to the POST /chats/start
+            // network call with the recipient's E2E public key not even requested
+            // yet. encryptForChat() then had to do that fetch (plus retries on a
+            // cold backend) synchronously inside the Send path, which is the
+            // multi-second "Send button hangs" delay reported on first-contact
+            // chats opened from a non-history source. Firing this here,
+            // unconditionally, means the key fetch runs in parallel with the
+            // /chats/start round trip below instead of starting only after the
+            // user has already opened the chat and started typing — by the time
+            // they hit Send, the key is very likely already cached.
+            // Safe to fire even when the cached-branch call below also runs for
+            // the same userId: _getRecipientPublicKey dedupes in-flight fetches
+            // per userId (see e2e-encryption.js), so this is never a double fetch.
+            try { window.KynectaE2E?.prefetchRecipientKey?.(userId); } catch (_) {}
+
             if (!_skipCache) {
                 const _local = this.findExistingConversation(userId);
                 if (_local) {
                     // Background refresh, fire-and-forget — keeps cached
                     // fields from drifting without making the caller wait.
                     this.startOrGetDirectConversation(userId, name, avatar, 0, true).catch(() => {});
-                    try { window.KynectaE2E?.prefetchRecipientKey?.(userId); } catch (_) {}
                     return _local;
                 }
             }

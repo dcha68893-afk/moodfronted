@@ -4891,20 +4891,42 @@ handleContactItemClick: function(e) {
         },
         
         addRemoteVideo: function(streamId, stream, participantName) {
-            if (!elements.videoGrid) return;
-            
-            // Remove existing container for this stream if any
+            // FIX (DUPLICATE-REMOTE-RENDERER / NO-REMOTE-VIDEO): this function built a
+            // brand-new <video>/<audio> UI and appended it into #videoGrid — but
+            // #videoGrid is hardcoded `display:none` in calls.html and is never
+            // toggled visible anywhere in the app. The actual on-screen remote video
+            // is built directly by calls-core.part5.js's pc.ontrack handler, which
+            // creates and manages its own #remoteVideo element inside the visible
+            // #inCallScreen container, and its own #remoteAudio element for sound.
+            // Every call into this function was therefore pure dead weight: it kept
+            // a hidden <video> decoding the remote stream in the background (wasted
+            // CPU/battery) and, on audio-only calls, created a SECOND, independent
+            // <audio id="remoteAudio_<streamId>"> element with its own play()/volume
+            // state alongside calls-core's own #remoteAudio — two separate audio
+            // elements playing the same remote audio track is a real source of
+            // doubled/echoing audio. Only the stale-node cleanup below (removing any
+            // previous container/audio for this streamId) still serves a purpose,
+            // so that's kept; the rest is now a no-op. Remote video/audio rendering
+            // is the sole responsibility of calls-core.part5.js's ontrack handler.
             const existingContainer = document.querySelector(`.video-container[data-stream-id="${streamId}"]`);
             if (existingContainer) existingContainer.remove();
 
-            // Also remove any stale dedicated audio element for this stream
             const existingAudio = document.getElementById('remoteAudio_' + streamId);
             if (existingAudio) existingAudio.remove();
-            
-            // Hide placeholder
+
+            // Still clear the "offline" placeholder and flip the status text below —
+            // both are cheap, harmless, and other code may depend on them having run
+            // whenever a remote stream arrives.
             const placeholder = document.getElementById('offlineCallPlaceholder');
             if (placeholder) placeholder.style.display = 'none';
-            
+            if (elements.callStatusText) {
+                elements.callStatusText.textContent = 'Connected';
+            }
+            return;
+
+            // eslint-disable-next-line no-unreachable
+            if (!elements.videoGrid) return;
+
             const container = document.createElement('div');
             container.className = 'video-container remote-video-container';
             container.dataset.streamId = streamId;
