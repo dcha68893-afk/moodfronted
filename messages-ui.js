@@ -8276,15 +8276,29 @@ Type: ${message.type || 'text'}`;
                             } catch (_) {}
                             return;
                         }
-                        if (_bootstrapPromise && _bootstrapState && _bootstrapState.stage !== 'READY' && _bootstrapState.stage !== 'IDLE'
-                            && _activeConv && _activeConv.isPending !== true
-                            && String(_bootstrapState.conversationId || '') !== String(_activeConv.id || '')) {
-                            // A bootstrap is running but hasn't resolved to this
-                            // exact chat yet — wait for it (bounded) rather than
-                            // sending against a possibly-unready conversation.
-                            try { await Promise.race([_bootstrapPromise, new Promise(r => setTimeout(r, 6000))]); } catch (_) {}
-                        }
-
+                        // REMOVED (still-hanging-on-first-message fix): this used to
+                        // await Promise.race([_bootstrapPromise, timeout(6000)]) whenever
+                        // the in-flight bootstrap hadn't yet resolved to the active
+                        // chat's real id. For a BRAND-NEW conversation (the exact "first
+                        // time" case — Friends/Calls/Status, or a receiver's first reply
+                        // to a chat they've never opened this session) bootstrapConversation()
+                        // starts with conversationId=null and only gets the real chatId at
+                        // its LOADING_MESSAGES/READY stage — so this condition was true on
+                        // essentially every first send, and actually blocked for up to 6s
+                        // (or however long the round trip took, e.g. a cold Render
+                        // backend) before falling through anyway. That's a real, reliably
+                        // reproducible send-button hang, not a rare edge case.
+                        //
+                        // This directly contradicts the OPTIMISTIC-SEND-WITH-BACKGROUND-
+                        // RECONCILE design already established two blocks above (line
+                        // ~8189): sending immediately with whatever identifier is known
+                        // (receiverId / pending conversation) and letting the server-side
+                        // resolveOrCreateDirectChat() + this client's own
+                        // replacePendingConversation() reconcile the real chatId in the
+                        // background is already correct and already how every other send
+                        // path in this handler behaves. There is no correctness reason to
+                        // block THIS specific case and not the others — removed so first
+                        // sends behave the same (instant) as every other send.
                         await this._handleSendMessage().catch((err) => {
                             // FIX (E2E-KEY-FETCH-INFINITE-HANG follow-through): a
                             // thrown error here was an unhandled rejection before

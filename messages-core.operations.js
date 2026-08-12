@@ -457,12 +457,44 @@ const ChatManager = {
                 unreadCount: ctx.unreadCount ?? (existing && existing.unreadCount) ?? 0,
                 isPending: false
             };
-            if (existing) {
+
+            // FIX-PENDING-LIFECYCLE (point 3 of the messaging-architecture
+            // cleanup): this used to write `conversation` straight into
+            // `_conversationsMap` under `realId` and stop — it never looked
+            // for (or reconciled with) a `pending_<targetUserId>` entry that
+            // openChatWithUserInUI's synchronous fallback may have already
+            // created and activated moments earlier. That left TWO conversation
+            // objects for the same person: the active one (`pending_<id>`,
+            // still what the UI/read-receipts/send path pointed at) and this
+            // orphaned real one (`realId`, correct but unreferenced) — the
+            // exact "open B -> pending_B -> send -> server resolves ->
+            // realChatId" race the messaging rebuild is meant to close.
+            // Reconciliation only ever happened later, opportunistically, from
+            // the send path or the first inbound message — i.e. exactly the
+            // window where "B doesn't see it / replying hangs" was reported.
+            //
+            // Fix: reuse the SAME reconciliation function the send path and
+            // the inbound-message path already use successfully
+            // (replacePendingConversation, see messages-core.bootstrap.js and
+            // sendMessage() below) instead of a second hand-rolled merge here.
+            // This makes bootstrapConversation's own resolution — which now
+            // runs BEFORE the user can send anything, not after — the thing
+            // that activates the real chat, closing the race at its source
+            // instead of patching around it downstream.
+            const pendingMatch = (targetUserId != null)
+                ? this.getPendingConversationByReceiverId(targetUserId)
+                : null;
+
+            if (pendingMatch && typeof this.replacePendingConversation === 'function') {
+                const reconciled = this.replacePendingConversation(pendingMatch.id, conversation) || conversation;
+                this._conversationsMap.set(realId, reconciled);
+            } else if (existing) {
                 Object.assign(existing, conversation);
             } else {
                 this._conversations.unshift(conversation);
                 this._conversationsMap.set(realId, conversation);
             }
+
             this._saveToCache();
             this._notifySubscribers();
 
