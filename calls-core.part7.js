@@ -34,7 +34,7 @@
 
 
 
-        _maxRetries: 1,
+        _maxRetries: 3,
 
 
 
@@ -158,7 +158,17 @@
 
 
 
-            return false;
+            const breaker = this.getCircuitBreaker(key);
+
+            if (!breaker.canExecute()) {
+
+                return false;
+
+            }
+
+            const count = this._retryCounters.get(key) || 0;
+
+            return count < this._maxRetries;
 
 
 
@@ -174,7 +184,11 @@
 
 
 
-            return 1;
+            const count = (this._retryCounters.get(key) || 0) + 1;
+
+            this._retryCounters.set(key, count);
+
+            return count;
 
 
 
@@ -191,6 +205,10 @@
 
 
             this._retryCounters.delete(key);
+
+            const breaker = this.getCircuitBreaker(key);
+
+            breaker.success();
 
 
 
@@ -226,7 +244,13 @@
 
 
 
-            return 0;
+            const count = this._retryCounters.get(key) || 0;
+
+            const delay = this._backoffBase * Math.pow(2, count);
+
+            const jitter = Math.random() * 0.3 * delay;
+
+            return Math.min(delay + jitter, 15000);
 
 
 
@@ -242,27 +266,73 @@
 
 
 
-            try {
+            const maxRetries = (options && typeof options.maxRetries === 'number')
+
+                ? options.maxRetries
+
+                : this._maxRetries;
 
 
 
-                return await fn();
+            let attempt = 0;
+
+            let lastError = null;
 
 
 
-            } catch (error) {
+            while (attempt <= maxRetries) {
+
+                const breaker = this.getCircuitBreaker(key);
+
+                if (!breaker.canExecute()) {
+
+                    throw lastError || new Error('Circuit breaker open for "' + key + '"');
+
+                }
+
+                try {
+
+                    const result = await fn();
+
+                    this.resetRetry(key);
+
+                    return result;
+
+                } catch (error) {
+
+                    lastError = error;
+
+                    this.recordFailure(key);
 
 
 
-                this.recordFailure(key);
+                    if (attempt >= maxRetries) {
+
+                        throw error;
+
+                    }
 
 
 
-                throw error;
+                    this.incrementRetry(key);
 
+                    const delay = this.getBackoffDelay(key);
 
+                    if (delay > 0) {
+
+                        await new Promise(resolve => setTimeout(resolve, delay));
+
+                    }
+
+                    attempt++;
+
+                }
 
             }
+
+
+
+            throw lastError;
 
 
 
@@ -498,7 +568,7 @@
 
 
 
-            this.failureThreshold = 1;
+            this.failureThreshold = 3;
 
 
 
@@ -6423,28 +6493,20 @@ _escapeHtml: function(text) {
 
 
         // If stale state from a previous call, reset it first
-
-
-
         if (window.__CallsCoreShared.callsState.callActive && window.__CallsCoreShared.callsState.callState !== 'in-call') {
-
-
 
             window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Resetting stale call state before incoming call');
 
-
-
-            window.__CallsCoreShared.callsState.callActive = false;
-
-
-
-            window.__CallsCoreShared.callsState.callState = 'idle';
-
-
-
-            window.__CallsCoreShared.callsState.activeCallId = null;
-
-
+            // FIX-5-STALE-RESET-PARTIAL-CLEANUP: this used to only null
+            // callActive/callState/activeCallId directly, leaving any
+            // leftover peer connection, local/remote media tracks, or
+            // pending invitation timer from the previous call still alive
+            // right as a brand-new incoming call is about to be set up —
+            // exactly the risk flagged under "single-active-call protection
+            // needs full lifecycle verification". Route through the same
+            // full resetCallState() used by endCall()/force-end so this
+            // path tears down every layer too, not just the three fields.
+            window.__CallsCoreShared.resetCallState();
 
         }
 

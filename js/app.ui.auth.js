@@ -2277,7 +2277,10 @@ try {
                         localStorage.setItem('accessToken', token);
                         localStorage.setItem('USER_TOKEN', token);
                         localStorage.setItem('nexopa_token', token);
-                        localStorage.setItem('jwt', token);
+                        // REMOVED: localStorage.setItem('jwt', token) — traced every
+                        // localStorage.getItem() call across the whole frontend;
+                        // nothing anywhere reads the 'jwt' key. Confirmed dead write,
+                        // not a guess.
                         localStorage.setItem('authToken', token);
                         
                         console.log('✅ Token stored in all localStorage locations');

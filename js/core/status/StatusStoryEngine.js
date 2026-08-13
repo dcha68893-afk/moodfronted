@@ -119,7 +119,15 @@
     async pruneExpired() {
       const db  = await this.open();
       const now = Date.now();
-      const all = await this.getAll();
+      // BUGFIX: this used to call this.getAll(), but getAll() already filters
+      // out everything with expiresAt <= now || deleted before returning —
+      // so `expired` below was always empty and nothing was ever actually
+      // deleted from IndexedDB. Read the raw, unfiltered records instead.
+      const all = await new Promise((resolve, reject) => {
+        const req = db.transaction('stories', 'readonly').objectStore('stories').getAll();
+        req.onsuccess = e => resolve(e.target.result || []);
+        req.onerror   = e => reject(e.target.error);
+      });
       const expired = all.filter(s => s.expiresAt <= now || s.deleted);
       const tx  = db.transaction('stories', 'readwrite');
       const store = tx.objectStore('stories');
@@ -156,6 +164,7 @@
       this._store     = store;
       this._onExpired = onExpired;
       this._timers    = new Map(); // storyId → timeoutId
+      this._timerStories = new Map(); // storyId → story object (needed so pauseAll can reschedule on resume)
     }
 
     scheduleExpiry(story) {
@@ -176,9 +185,11 @@
 
       const tid = setTimeout(() => {
         this._timers.delete(story.id);
+        this._timerStories.delete(story.id);
         this._onExpired(story.id, story.userId);
       }, Math.min(remaining, 2147483647));
       this._timers.set(story.id, tid);
+      this._timerStories.set(story.id, story);
     }
 
     // FIX #9 — Pause all auto-dismiss/progress timers during user interaction
@@ -188,12 +199,19 @@
       this._pausedRemaining = this._pausedRemaining || new Map();
       for (const [storyId, tid] of this._timers) {
         clearTimeout(tid);
+        // BUGFIX: previously stored { remaining: 0, pausedAt } with no story
+        // reference, so resumeAll()'s `if (meta.story) this.scheduleExpiry(...)`
+        // guard was never true for anything paused from a running timer —
+        // those stories silently never got a new expiry timer on resume.
+        // Carry the story object through so resumeAll can actually reschedule it.
+        const story = this._timerStories.get(storyId);
         this._pausedRemaining.set(storyId, {
-          remaining: 0,  // will be rescheduled on resume with full remaining
+          story,
           pausedAt: Date.now()
         });
       }
       this._timers.clear();
+      this._timerStories.clear();
     }
 
     // FIX #9 — Resume all timers after interaction closes
@@ -211,6 +229,7 @@
     cancelExpiry(storyId) {
       const tid = this._timers.get(storyId);
       if (tid) { clearTimeout(tid); this._timers.delete(storyId); }
+      this._timerStories.delete(storyId);
       if (this._pausedRemaining) this._pausedRemaining.delete(storyId);
     }
 

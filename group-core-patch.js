@@ -902,12 +902,12 @@ function _patchSendGroupMessage(GC) {
     const _orig = GC.sendGroupMessage?.bind(GC);
     if (!_orig) return;
 
-    GC.sendGroupMessage = async function (groupId, content, topic = null, anonymous = false) {
+    GC.sendGroupMessage = async function (groupId, content, topic = null, anonymous = false, clientMessageId = null) {
         if (!groupId || !content?.trim()) return { success: false, error: 'Missing groupId or content' };
         // (log suppressed)
 
         try {
-            const res = await _orig.call(this, groupId, content, topic, anonymous);
+            const res = await _orig.call(this, groupId, content, topic, anonymous, clientMessageId);
 
             // _orig already calls apiRequest → parent pipeline.
             // If it succeeded with data, it already called addGroupMessage.
@@ -929,12 +929,22 @@ function _patchSendGroupMessage(GC) {
     // that uses the correct production URL and persists messages locally
     if (window.GroupCore) {
         const GCref = window.GroupCore;
-        GCref.sendGroupMessage = async function (groupId, content, topic, anonymous) {
+        GCref.sendGroupMessage = async function (groupId, content, topic, anonymous, clientMessageId) {
             if (!groupId || !content?.trim()) return { success: false, error: 'Missing groupId or content' };
+            // FIX (offline-queue idempotency): thread a stable clientMessageId
+            // through to the server so a retried/duplicate send (offline
+            // queue retry, flaky reconnect) resolves to the SAME message
+            // instead of creating a second row — mirrors the same
+            // (senderId, clientMessageId) contract POST /messages already
+            // uses for direct chat. Generate one if a caller doesn't supply
+            // it, so this stays backward compatible with any other call site.
+            const cid = clientMessageId || ((window.crypto && typeof window.crypto.randomUUID === 'function')
+                ? window.crypto.randomUUID()
+                : `cid_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
             try {
                 // Always use _rawFetch — bypasses the parent bridge which may route to localhost
                 const response = await _rawFetch(`/groups/${groupId}/messages`, 'POST', {
-                    content, topic, anonymous
+                    content, topic, anonymous, clientMessageId: cid
                 });
                 const messageData = response?.data?.message
                                  || response?.data?.data?.message

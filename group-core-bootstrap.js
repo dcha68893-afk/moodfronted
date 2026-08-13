@@ -236,6 +236,26 @@ const LifecycleState = function () {
     }
     return true;
   }
+
+  // FIX (lifecycle recovery): the state machine intentionally forbids
+  // backward transitions in general (that invariant is what keeps the
+  // handshake deterministic), but that also meant there was no way to
+  // recover if the parent frame became unavailable after we'd already
+  // reached ACTIVE (e.g. the parent tab reloaded/renavigated and re-sent
+  // PARENT_READY). This is a single, explicit, narrowly-scoped exception
+  // for exactly that case — it does not weaken setState()'s guard for
+  // anything else.
+  function reenterWaitParent(reason) {
+    if (_state !== STATES.ACTIVE) return false;
+    const oldState = _state;
+    _state = STATES.WAIT_PARENT;
+    console.warn(`[${MODULE_NAME}] Lifecycle recovery: ACTIVE → WAIT_PARENT (${reason || 'parent re-handshake'})`);
+    _listeners.forEach(listener => {
+      try { listener(_state, oldState); } catch (e) {}
+    });
+    return true;
+  }
+
   return {
     STATES,
     getState,
@@ -251,7 +271,8 @@ const LifecycleState = function () {
     reset,
     isInitialized,
     setInitialized,
-    ensureActive
+    ensureActive,
+    reenterWaitParent
   };
 }();
 
@@ -570,17 +591,37 @@ function sendChildReady() {
             LifecycleState.setState(LifecycleState.STATES.WAIT_PARENT);
             /* lifecycle log suppressed */
 
-            // FIX (stuck-loading-spinner): there was previously no recovery
-            // path at all if the parent frame never sent PARENT_READY (or
-            // sent a session that failed __isValidSession) — the module
-            // stayed in WAIT_PARENT forever and every group list stayed on
-            // its static "Loading groups..." placeholder with no retry and
-            // no error shown. If we're still waiting after a few seconds,
-            // fall back to whatever session SafeStorage has cached locally
-            // instead of hanging indefinitely.
+            // FIX (stuck-loading-spinner + no-retry hard wait): there was
+            // previously no recovery path at all if the parent frame never
+            // sent PARENT_READY (or sent a session that failed
+            // __isValidSession) — WAIT_PARENT was a true hard wait with zero
+            // retries, and every group list stayed on its static "Loading
+            // groups..." placeholder. Before falling back to a cached
+            // session or a manual reload, actually retry the handshake a
+            // couple of times — a missed CHILD_READY (timing/navigation
+            // race) is often recoverable without either fallback.
+            const _resendChildReady = () => {
+                if (!LifecycleState.isWaitingForParent()) return false;
+                try {
+                    const retryMsg = {
+                        type: 'CHILD_READY', module: MODULE_NAME, version: MODULE_VERSION,
+                        capabilities: MODULE_CAPABILITIES, timestamp: Date.now(),
+                        id: generateId(), requestId: generateId(),
+                        source: MODULE_NAME, target: 'parent'
+                    };
+                    const r = sendMessage(retryMsg);
+                    if (r && r.success) {
+                        console.warn(`[${MODULE_NAME}] Retrying handshake — resent CHILD_READY`);
+                        return true;
+                    }
+                } catch (_) {}
+                return false;
+            };
+            setTimeout(_resendChildReady, 3000);
+            setTimeout(_resendChildReady, 6000);
             setTimeout(() => {
                 if (!LifecycleState.isWaitingForParent()) return; // already progressed normally
-                console.warn(`[${MODULE_NAME}] No PARENT_READY after timeout — attempting cached-session fallback`);
+                console.warn(`[${MODULE_NAME}] No PARENT_READY after retries — attempting cached-session fallback`);
                 try {
                     // Same-origin with chat.html, so read the same keys
                     // app.core.session.js writes on login rather than
@@ -612,7 +653,7 @@ function sendChildReady() {
                         }
                     });
                 } catch (_uiErr) {}
-            }, 6000);
+            }, 10000);
 
             return true;
         } else {
@@ -1043,6 +1084,18 @@ const MessageRouter = {
   // =========================================
 
   handleParentReady(message) {
+    // FIX (lifecycle recovery): a fresh PARENT_READY while we're already
+    // ACTIVE means the parent frame itself came back (reload/renavigation) —
+    // previously this was silently ignored and the module was left ACTIVE
+    // against a parent session that may no longer be valid, with no way to
+    // recover short of the user manually reloading. Re-run the same
+    // WAIT_PARENT → ACTIVE validation this message normally drives.
+    if (LifecycleState.isActive()) {
+      parentReadyReceived = false;
+      _parentReadyProcessedFlag = false;
+      LifecycleState.reenterWaitParent('fresh PARENT_READY while ACTIVE');
+    }
+
     // STRICT: Only process if waiting for parent
     if (!LifecycleState.isWaitingForParent()) {
       /* lifecycle log suppressed */

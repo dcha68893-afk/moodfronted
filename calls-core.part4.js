@@ -92,7 +92,7 @@
 
 
 
-        CALL_INVITATION_TIMEOUT: 180000,  // 3 minutes ring timeout
+        CALL_INVITATION_TIMEOUT: 60000,  // 1 minute ring timeout
 
 
 

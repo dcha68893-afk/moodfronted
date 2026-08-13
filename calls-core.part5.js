@@ -3912,6 +3912,23 @@
             window.__CallsCoreShared._cmTimerDelegated = true;
         }
     } catch(_crErr) {}
+    // FIX: clear any ReliabilityEngine retry counter / circuit breaker left
+    // over from this call, keyed by callId. Without this, a call that
+    // failed and tripped the breaker (or accumulated retry attempts) could
+    // leave that key OPEN/counted, so the very next call — a different
+    // callId, but the module didn't used to clear per-call keys at all —
+    // was fine, but any code that keys by a fixed operation name (e.g.
+    // 'call:initiate') rather than callId would otherwise inherit a stale
+    // breaker state across calls. Reset defensively either way.
+    try {
+        var _reReset = window.__CallsCoreShared.ReliabilityEngine;
+        var _reResetId = window.__CallsCoreShared.callsState.activeCallId || window.__CallsCoreShared.callsState.serverCallId;
+        if (_reReset && typeof _reReset.resetRetry === 'function') {
+            if (_reResetId) _reReset.resetRetry(_reResetId);
+            _reReset.resetRetry('call:initiate');
+            _reReset.resetRetry('call:signaling');
+        }
+    } catch(_reErr) {}
     // FIX-ROOT-CAUSE-45S-FORCE-END: reset the accepted flag here too, or it
     // would stay stuck true for every subsequent call, permanently disabling
     // the no-answer timeout guard's second layer of protection.

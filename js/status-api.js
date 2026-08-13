@@ -112,6 +112,30 @@ class StatusAPI {
         }
     }
 
+    // BUGFIX #10: many methods below called _parseJSON(r) directly without
+    // checking r.ok first. A server error response (403/404/500 etc.) that
+    // happens to have a valid JSON error body (e.g. {message: "..."}) was
+    // silently returned to the caller as if it were a normal, successful
+    // result — callers doing a loose truthy check on the returned object
+    // (rather than explicitly checking `.success`) could treat a failed
+    // mute/pin/vote/bookmark/etc. as having succeeded. This wraps _parseJSON
+    // with an HTTP-status check so failure responses always throw (and are
+    // caught by each method's existing try/catch, matching createStatus's
+    // existing !response.ok pattern above).
+    async _parseJSONChecked(response) {
+        if (!response.ok) {
+            let message = `HTTP ${response.status}`;
+            try {
+                const data = await this._parseJSON(response);
+                message = (data && (data.message || data.error)) || message;
+            } catch (_) {
+                // no body or invalid JSON on the error response — keep the status message
+            }
+            throw new Error(message);
+        }
+        return this._parseJSON(response);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // CREATE STATUS
     // FIX: validate result.data.status.id exists — reject undefined as failure
@@ -125,12 +149,25 @@ class StatusAPI {
             const isPublicVal = (resolvedPrivacy === 'public' || resolvedPrivacy === 'everyone');
 
             // Resolve expiresAt from duration if not already provided
+            // BUGFIX: status-ui.js uses duration===0/'0' as the sentinel for
+            // "Permanent" (see its duration map: '0' -> 'Permanent'). The old
+            // `!resolvedExpiresAt && statusData.duration` check treated 0 as
+            // falsy, so it never even looked at duration and fell straight to
+            // the 24h default below — Permanent could never actually be saved.
+            // Mirrors the equivalent fix in the backend's statusController.js /
+            // statusService.js, which now honor an explicit `expiresAt: null` as
+            // "Permanent, never expires" rather than "not provided".
             let resolvedExpiresAt = statusData.expiresAt;
-            if (!resolvedExpiresAt && statusData.duration) {
+            let isPermanent = false;
+            if (!resolvedExpiresAt && statusData.duration !== undefined && statusData.duration !== null && statusData.duration !== '') {
                 const secs = parseInt(statusData.duration, 10);
-                if (secs > 0) resolvedExpiresAt = new Date(Date.now() + secs * 1000).toISOString();
+                if (secs === 0) {
+                    isPermanent = true;
+                } else if (secs > 0) {
+                    resolvedExpiresAt = new Date(Date.now() + secs * 1000).toISOString();
+                }
             }
-            if (!resolvedExpiresAt) {
+            if (!resolvedExpiresAt && !isPermanent) {
                 resolvedExpiresAt = new Date(Date.now() + 86400 * 1000).toISOString(); // 24h default
             }
 
@@ -141,8 +178,15 @@ class StatusAPI {
                 mediaType:  statusData.mediaType  || undefined,
                 isPublic:   isPublicVal,
                 privacy:    resolvedPrivacy,
-                duration:   statusData.duration   || undefined,
-                expiresAt:  resolvedExpiresAt,
+                // BUGFIX: `statusData.duration || undefined` collapsed a real
+                // duration:0 (Permanent) to undefined, which is dropped entirely
+                // by JSON.stringify — the backend then never saw duration:0 either.
+                duration:   (statusData.duration !== undefined && statusData.duration !== null && statusData.duration !== '') ? statusData.duration : undefined,
+                // Send an explicit null (not just "omit the key") for Permanent so
+                // the backend's `if (expiresAt)` truthy check reliably falls
+                // through to its duration:0 handling instead of depending on the
+                // key being absent from the JSON body at all.
+                expiresAt:  isPermanent ? null : resolvedExpiresAt,
                 moodType:   statusData.mood || statusData.moodType || undefined,
                 location:   statusData.location   || undefined,
                 background: statusData.background || undefined,
@@ -622,7 +666,7 @@ class StatusAPI {
             const r = await this._fetch(this.resolveUrl(`${this.baseURL}/mute/${userId}`), {
                 method: 'POST', headers: this.getAuthHeaders(),
             });
-            return this._parseJSON(r);
+            return this._parseJSONChecked(r);
         } catch (e) { return { success: false, error: e.message }; }
     }
 
@@ -631,7 +675,7 @@ class StatusAPI {
             const r = await this._fetch(this.resolveUrl(`${this.baseURL}/mute/${userId}`), {
                 method: 'DELETE', headers: this.getAuthHeaders(),
             });
-            return this._parseJSON(r);
+            return this._parseJSONChecked(r);
         } catch (e) { return { success: false, error: e.message }; }
     }
 
@@ -640,7 +684,7 @@ class StatusAPI {
             const r = await this._fetch(this.resolveUrl(`${this.baseURL}/muted`), {
                 headers: this.getAuthHeaders(),
             });
-            return this._parseJSON(r);
+            return this._parseJSONChecked(r);
         } catch (e) { return { success: false, mutedUserIds: [] }; }
     }
 
@@ -654,7 +698,7 @@ class StatusAPI {
                 headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
                 body: JSON.stringify({ caption, privacy }),
             });
-            return this._parseJSON(r);
+            return this._parseJSONChecked(r);
         } catch (e) { return { success: false, error: e.message }; }
     }
 
@@ -665,7 +709,7 @@ class StatusAPI {
                 headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
                 body: JSON.stringify({ reason, description }),
             });
-            return this._parseJSON(r);
+            return this._parseJSONChecked(r);
         } catch (e) { return { success: false, error: e.message }; }
     }
 
@@ -674,7 +718,7 @@ class StatusAPI {
             const r = await this._fetch(this.resolveUrl(`${this.baseURL}/${statusId}/pin`), {
                 method: 'POST', headers: this.getAuthHeaders(),
             });
-            return this._parseJSON(r);
+            return this._parseJSONChecked(r);
         } catch (e) { return { success: false, error: e.message }; }
     }
 
@@ -683,7 +727,7 @@ class StatusAPI {
             const r = await this._fetch(this.resolveUrl(`${this.baseURL}/${statusId}/pin`), {
                 method: 'DELETE', headers: this.getAuthHeaders(),
             });
-            return this._parseJSON(r);
+            return this._parseJSONChecked(r);
         } catch (e) { return { success: false, error: e.message }; }
     }
 
@@ -697,7 +741,7 @@ class StatusAPI {
                 headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
                 body: JSON.stringify({ optionId }),
             });
-            return this._parseJSON(r);
+            return this._parseJSONChecked(r);
         } catch (e) { return { success: false, error: e.message }; }
     }
 
@@ -711,7 +755,7 @@ class StatusAPI {
                 headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
                 body: JSON.stringify({ text }),
             });
-            return this._parseJSON(r);
+            return this._parseJSONChecked(r);
         } catch (e) { return { success: false, error: e.message }; }
     }
 
@@ -723,7 +767,7 @@ class StatusAPI {
             const r = await this._fetch(this.resolveUrl(`${this.baseURL}/${statusId}/bookmark`), {
                 method: 'POST', headers: this.getAuthHeaders(),
             });
-            return this._parseJSON(r);
+            return this._parseJSONChecked(r);
         } catch (e) { return { success: false, error: e.message }; }
     }
 
@@ -732,7 +776,7 @@ class StatusAPI {
             const r = await this._fetch(this.resolveUrl(`${this.baseURL}/${statusId}/bookmark`), {
                 method: 'DELETE', headers: this.getAuthHeaders(),
             });
-            return this._parseJSON(r);
+            return this._parseJSONChecked(r);
         } catch (e) { return { success: false, error: e.message }; }
     }
 
@@ -741,7 +785,7 @@ class StatusAPI {
             const r = await this._fetch(this.resolveUrl(`${this.baseURL}/bookmarks`), {
                 headers: this.getAuthHeaders(),
             });
-            return this._parseJSON(r);
+            return this._parseJSONChecked(r);
         } catch (e) { return { success: false, statuses: [] }; }
     }
 
@@ -755,7 +799,7 @@ class StatusAPI {
                 headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
                 body: JSON.stringify({ name, coverImage }),
             });
-            return this._parseJSON(r);
+            return this._parseJSONChecked(r);
         } catch (e) { return { success: false, error: e.message }; }
     }
 
@@ -764,7 +808,7 @@ class StatusAPI {
             const r = await this._fetch(this.resolveUrl(`${this.baseURL}/highlights/albums`), {
                 headers: this.getAuthHeaders(),
             });
-            return this._parseJSON(r);
+            return this._parseJSONChecked(r);
         } catch (e) { return { success: false, albums: [] }; }
     }
 
@@ -775,7 +819,7 @@ class StatusAPI {
                 headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
                 body: JSON.stringify({ statusId }),
             });
-            return this._parseJSON(r);
+            return this._parseJSONChecked(r);
         } catch (e) { return { success: false, error: e.message }; }
     }
 
@@ -801,7 +845,7 @@ class StatusAPI {
             const r = await this._fetch(this.resolveUrl(`${this.baseURL}/hashtag/${encodeURIComponent(tag)}`), {
                 headers: this.getAuthHeaders(),
             });
-            return this._parseJSON(r);
+            return this._parseJSONChecked(r);
         } catch (e) { return { success: false, statuses: [] }; }
     }
 
@@ -830,7 +874,7 @@ class StatusAPI {
                 headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
                 body: JSON.stringify(payload),
             });
-            return this._parseJSON(r);
+            return this._parseJSONChecked(r);
         } catch (e) { return { success: false, error: e.message }; }
     }
 
@@ -839,7 +883,7 @@ class StatusAPI {
             const r = await this._fetch(this.resolveUrl(`${this.baseURL}/drafts`), {
                 headers: this.getAuthHeaders(),
             });
-            return this._parseJSON(r);
+            return this._parseJSONChecked(r);
         } catch (e) { return { success: false, drafts: [] }; }
     }
 
@@ -848,7 +892,7 @@ class StatusAPI {
             const r = await this._fetch(this.resolveUrl(`${this.baseURL}/drafts/${draftId}`), {
                 method: 'DELETE', headers: this.getAuthHeaders(),
             });
-            return this._parseJSON(r);
+            return this._parseJSONChecked(r);
         } catch (e) { return { success: false, error: e.message }; }
     }
 
@@ -857,7 +901,7 @@ class StatusAPI {
             const r = await this._fetch(this.resolveUrl(`${this.baseURL}/drafts/${draftId}/publish`), {
                 method: 'POST', headers: this.getAuthHeaders(),
             });
-            return this._parseJSON(r);
+            return this._parseJSONChecked(r);
         } catch (e) { return { success: false, error: e.message }; }
     }
 
@@ -868,7 +912,7 @@ class StatusAPI {
         try {
             const url = tag ? `${this.baseURL}/templates?tag=${encodeURIComponent(tag)}` : `${this.baseURL}/templates`;
             const r = await this._fetch(this.resolveUrl(url));
-            return this._parseJSON(r);
+            return this._parseJSONChecked(r);
         } catch (e) { return { success: false, templates: [] }; }
     }
 
@@ -880,7 +924,7 @@ class StatusAPI {
             const r = await this._fetch(this.resolveUrl(`${this.baseURL}/${statusId}/countdown`), {
                 headers: this.getAuthHeaders(),
             });
-            return this._parseJSON(r);
+            return this._parseJSONChecked(r);
         } catch (e) { return { success: false, finished: true }; }
     }
 
@@ -893,7 +937,7 @@ class StatusAPI {
                 this.resolveUrl(`${this.baseURL}/public?ranked=1&limit=${limit}&offset=${offset}`),
                 { headers: this.getAuthHeaders() }
             );
-            return this._parseJSON(r);
+            return this._parseJSONChecked(r);
         } catch (e) { return { success: false, statuses: [] }; }
     }
 
@@ -905,7 +949,7 @@ class StatusAPI {
             const r = await this._fetch(this.resolveUrl(`${this.baseURL}/${statusId}/viewers/profiles`), {
                 headers: this.getAuthHeaders(),
             });
-            return this._parseJSON(r);
+            return this._parseJSONChecked(r);
         } catch (e) { return { success: false, viewers: [] }; }
     }
 
@@ -924,7 +968,7 @@ class StatusAPI {
                 this.resolveUrl(`${this.baseURL}/my?month=${month}&day=${day}&limit=10`),
                 { headers: this.getAuthHeaders() }
             );
-            const result = await this._parseJSON(r);
+            const result = await this._parseJSONChecked(r);
             // Filter to only statuses from previous years
             const statuses = (result.data?.statuses || []).filter(s => {
                 const created = new Date(s.createdAt);
@@ -943,7 +987,7 @@ class StatusAPI {
             const r = await this._fetch(this.resolveUrl(`${this.baseURL}/stats/${statusId}`), {
                 headers: this.getAuthHeaders(),
             });
-            return this._parseJSON(r);
+            return this._parseJSONChecked(r);
         } catch (e) { return { success: false }; }
     }
 
@@ -955,7 +999,7 @@ class StatusAPI {
             const r = await this._fetch(this.resolveUrl(`${this.baseURL}/analytics/dashboard?period=${period}`), {
                 headers: this.getAuthHeaders(),
             });
-            return this._parseJSON(r);
+            return this._parseJSONChecked(r);
         } catch (e) { return { success: false }; }
     }
 

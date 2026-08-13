@@ -228,13 +228,99 @@ const groupActionQueue = [];
 
 let isProcessingQueue = false;
 
+// FIX (idempotency): every queued mutation gets one stable id that survives
+// re-queue/retry, so the same tap can never be sent to the server twice even
+// if processGroupActionQueue() runs again before the first attempt settles
+// (e.g. offline -> reconnect -> immediate retry).
+let _groupOpSeq = 0;
+function _makeOpId() {
+    try {
+        if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+            return window.crypto.randomUUID();
+        }
+    } catch (_) {}
+    return `gop_${Date.now()}_${++_groupOpSeq}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// FIX: ids of actions that have already been sent to GroupCore, so a
+// duplicate queueGroupAction() call (or a re-entrant flush) can't fire the
+// same mutation twice — closes the "Hello / Hello" duplicate-send case.
+const _dispatchedGroupOpIds = new Set();
+
 function queueGroupAction(action) {
+    if (action && typeof action === 'object' && !action.opId) {
+        action.opId = _makeOpId();
+    }
+    if (action && typeof action === 'object') {
+        action._retries = action._retries || 0;
+    }
     groupActionQueue.push(action);
     
     if (!isProcessingQueue && LifecycleState.isActive() && sessionReady) {
         processGroupActionQueue();
     }
 }
+
+// FIX: run a queued action's actual network call, returning the promise so
+// the caller can react to success/failure instead of the failure vanishing.
+function _dispatchGroupAction(action) {
+    switch (action.type) {
+        case 'createGroup':
+            return GroupCore.createGroup(action.data);
+        case 'updateGroup':
+            return GroupCore.updateGroup(action.groupId, action.data);
+        case 'deleteGroup':
+            return GroupCore.deleteGroup(action.groupId);
+        case 'addMember':
+            return GroupCore.addMember(action.groupId, action.userId, action.role);
+        case 'removeMember':
+            return GroupCore.removeMember(action.groupId, action.userId);
+        case 'leaveGroup':
+            return GroupCore.leaveGroup(action.groupId);
+        case 'promoteToAdmin':
+            return GroupCore.promoteToAdmin(action.groupId, action.userId);
+        case 'demoteFromAdmin':
+            return GroupCore.demoteFromAdmin(action.groupId, action.userId);
+        case 'sendJoinRequest':
+            return GroupCore.sendJoinRequest(action.groupId, action.message);
+        case 'approveJoinRequest':
+            return GroupCore.approveJoinRequest(action.groupId, action.requestId, action.userId);
+        case 'rejectJoinRequest':
+            return GroupCore.rejectJoinRequest(action.groupId, action.requestId, action.userId);
+        case 'sendMessage':
+            if (action.groupId && action.content) {
+                return GroupCore.sendGroupMessage(action.groupId, action.content, action.topic, action.anonymous, action.clientMessageId || action.opId);
+            }
+            if (action.fn && typeof action.fn === 'function') {
+                return Promise.resolve(action.fn());
+            }
+            return Promise.resolve();
+        case 'joinGroup':
+            if (action.groupId) {
+                return GroupCore.sendJoinRequest(action.groupId, '');
+            }
+            return Promise.resolve();
+        case 'changeMemberRole':
+            if (action.groupId && action.userId && action.role === 'admin') {
+                return GroupCore.promoteToAdmin(action.groupId, action.userId);
+            } else if (action.groupId && action.userId) {
+                return GroupCore.demoteFromAdmin(action.groupId, action.userId);
+            }
+            return Promise.resolve();
+        default:
+            return Promise.resolve();
+    }
+}
+
+const GROUP_ACTION_LABELS = {
+    createGroup: 'Create group', updateGroup: 'Update group', deleteGroup: 'Delete group',
+    addMember: 'Add member', removeMember: 'Remove member', leaveGroup: 'Leave group',
+    promoteToAdmin: 'Promote to admin', demoteFromAdmin: 'Remove admin',
+    sendJoinRequest: 'Join request', approveJoinRequest: 'Approve request',
+    rejectJoinRequest: 'Reject request', sendMessage: 'Send message', joinGroup: 'Join group',
+    changeMemberRole: 'Change role'
+};
+const GROUP_ACTION_MAX_RETRIES = 2;
 
 function processGroupActionQueue() {
     if (isProcessingQueue) return;
@@ -249,66 +335,43 @@ function processGroupActionQueue() {
     const actions = [...groupActionQueue];
     groupActionQueue.length = 0;
     
-    // Process synchronously without setTimeout
     actions.forEach(action => {
         try {
             if (typeof action === 'function') {
                 action();
-            } else if (action && action.type) {
-                switch (action.type) {
-                    case 'createGroup':
-                        GroupCore.createGroup(action.data).catch(() => {});
-                        break;
-                    case 'updateGroup':
-                        GroupCore.updateGroup(action.groupId, action.data).catch(() => {});
-                        break;
-                    case 'deleteGroup':
-                        GroupCore.deleteGroup(action.groupId).catch(() => {});
-                        break;
-                    case 'addMember':
-                        GroupCore.addMember(action.groupId, action.userId, action.role).catch(() => {});
-                        break;
-                    case 'removeMember':
-                        GroupCore.removeMember(action.groupId, action.userId).catch(() => {});
-                        break;
-                    case 'leaveGroup':
-                        GroupCore.leaveGroup(action.groupId).catch(() => {});
-                        break;
-                    case 'promoteToAdmin':
-                        GroupCore.promoteToAdmin(action.groupId, action.userId).catch(() => {});
-                        break;
-                    case 'demoteFromAdmin':
-                        GroupCore.demoteFromAdmin(action.groupId, action.userId).catch(() => {});
-                        break;
-                    case 'sendJoinRequest':
-                        GroupCore.sendJoinRequest(action.groupId, action.message).catch(() => {});
-                        break;
-                    case 'approveJoinRequest':
-                        GroupCore.approveJoinRequest(action.groupId, action.requestId, action.userId).catch(() => {});
-                        break;
-                    case 'rejectJoinRequest':
-                        GroupCore.rejectJoinRequest(action.groupId, action.requestId, action.userId).catch(() => {});
-                        break;
-                    case 'sendMessage':
-                        if (action.groupId && action.content) {
-                            GroupCore.sendGroupMessage(action.groupId, action.content, action.topic, action.anonymous).catch(() => {});
-                        } else if (action.fn && typeof action.fn === 'function') {
-                            action.fn();
+                return;
+            }
+            if (!action || !action.type) return;
+
+            // FIX (idempotency): skip an action id we've already dispatched
+            // instead of sending the same mutation to the server again.
+            if (action.opId && _dispatchedGroupOpIds.has(action.opId)) {
+                return;
+            }
+            if (action.opId) _dispatchedGroupOpIds.add(action.opId);
+
+            const result = _dispatchGroupAction(action);
+            if (result && typeof result.catch === 'function') {
+                result.catch(() => {
+                    // FIX: a failed queued mutation used to vanish silently.
+                    // Retry a bounded number of times, then surface it.
+                    if (action.opId) _dispatchedGroupOpIds.delete(action.opId);
+                    action._retries = (action._retries || 0) + 1;
+                    if (action._retries <= GROUP_ACTION_MAX_RETRIES) {
+                        groupActionQueue.push(action);
+                        if (!isProcessingQueue && LifecycleState.isActive() && sessionReady) {
+                            setTimeout(() => processGroupActionQueue(), 1000 * action._retries);
                         }
-                        break;
-                    case 'joinGroup':
-                        if (action.groupId) {
-                            GroupCore.sendJoinRequest(action.groupId, '').catch(() => {});
+                    } else {
+                        const label = GROUP_ACTION_LABELS[action.type] || 'Group action';
+                        if (typeof reportGroupActionFailure === 'function') {
+                            reportGroupActionFailure(label, () => {
+                                action._retries = 0;
+                                queueGroupAction(action);
+                            });
                         }
-                        break;
-                    case 'changeMemberRole':
-                        if (action.groupId && action.userId && action.role === 'admin') {
-                            GroupCore.promoteToAdmin(action.groupId, action.userId).catch(() => {});
-                        } else if (action.groupId && action.userId) {
-                            GroupCore.demoteFromAdmin(action.groupId, action.userId).catch(() => {});
-                        }
-                        break;
-                }
+                    }
+                });
             }
         } catch (e) {}
     });
@@ -1204,13 +1267,31 @@ function updateGroupInAllLists(updatedGroup) {
     }
 }
 
+// FIX: report failure to the user instead of swallowing it silently, and
+// give them a one-tap retry that re-enters the same online/offline path.
+function reportGroupActionFailure(actionLabel, retryFn) {
+    try {
+        showNotification(`${actionLabel} failed. Tap to retry.`, 'error');
+        const notification = safeGetElement('#notification');
+        if (notification && typeof retryFn === 'function') {
+            const retryOnce = () => {
+                notification.removeEventListener('click', retryOnce);
+                try { retryFn(); } catch (_) {}
+            };
+            notification.addEventListener('click', retryOnce, { once: true });
+        }
+    } catch (_) {}
+}
+
 const addMemberOnline = async function(groupId, userId, role = 'member') {
     if (!isGroupOperationReady()) {
         queueGroupAction({ type: 'addMember', groupId, userId, role });
         return;
     }
     
-    GroupCore.addMember(groupId, userId, role).catch(() => {});
+    GroupCore.addMember(groupId, userId, role).catch(() => {
+        reportGroupActionFailure('Add member', () => addMemberOnline(groupId, userId, role));
+    });
 };
 
 const removeMemberOnline = async function(groupId, userId) {
@@ -1219,7 +1300,9 @@ const removeMemberOnline = async function(groupId, userId) {
         return;
     }
     
-    GroupCore.removeMember(groupId, userId).catch(() => {});
+    GroupCore.removeMember(groupId, userId).catch(() => {
+        reportGroupActionFailure('Remove member', () => removeMemberOnline(groupId, userId));
+    });
 };
 
 const changeMemberRoleOnline = async function(groupId, userId, role) {
@@ -1229,9 +1312,13 @@ const changeMemberRoleOnline = async function(groupId, userId, role) {
     }
     
     if (role === 'admin') {
-        GroupCore.promoteToAdmin(groupId, userId).catch(() => {});
+        GroupCore.promoteToAdmin(groupId, userId).catch(() => {
+            reportGroupActionFailure('Promote to admin', () => changeMemberRoleOnline(groupId, userId, role));
+        });
     } else {
-        GroupCore.demoteFromAdmin(groupId, userId).catch(() => {});
+        GroupCore.demoteFromAdmin(groupId, userId).catch(() => {
+            reportGroupActionFailure('Remove admin', () => changeMemberRoleOnline(groupId, userId, role));
+        });
     }
 };
 
@@ -1241,7 +1328,9 @@ const deleteGroupOnline = async function(groupId) {
         return;
     }
     
-    GroupCore.deleteGroup(groupId).catch(() => {});
+    GroupCore.deleteGroup(groupId).catch(() => {
+        reportGroupActionFailure('Delete group', () => deleteGroupOnline(groupId));
+    });
 };
 
 function escapeGroupChatHTML(value) {
@@ -2489,15 +2578,27 @@ const sendGroupMessage = async function() {
             anonymous: isAnonymousMode
         };
         
+        // FIX (offline-queue idempotency): this id is generated once, used
+        // as both the optimistic temp element's id AND the clientMessageId
+        // sent to the server. If the send fails and gets queued, and/or the
+        // queue itself retries it, the SAME id travels with every attempt —
+        // the server (POST /groups/:id/messages) now dedupes on
+        // (senderId, clientMessageId), so no attempt can create a second
+        // "Hello" even if it's sent more than once.
+        const clientMessageId = (window.crypto && typeof window.crypto.randomUUID === 'function')
+            ? window.crypto.randomUUID()
+            : `cid_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
         const tempMessage = {
             ...message,
-            id: 'temp_' + Date.now()
+            id: clientMessageId,
+            clientMessageId
         };
         
         addMessageToChat(tempMessage, true);
         
         try {
-            const response = await GroupCore.sendGroupMessage(currentChatGroup.id, messageContent, selectedTopic, isAnonymousMode);
+            const response = await GroupCore.sendGroupMessage(currentChatGroup.id, messageContent, selectedTopic, isAnonymousMode, clientMessageId);
             
             if (response && response.success) {
                 const confirmedId = response.data?.id || tempMessage.id;
@@ -2521,7 +2622,9 @@ const sendGroupMessage = async function() {
                 groupId: currentChatGroup.id,
                 content: messageContent,
                 topic: selectedTopic,
-                anonymous: isAnonymousMode
+                anonymous: isAnonymousMode,
+                clientMessageId,
+                opId: clientMessageId
             });
         }
         
@@ -2900,28 +3003,44 @@ async function handleMemberAction(action, memberId, groupData) {
         
         switch(action) {
             case 'promote':
+                // FIX (duplicate network call): GroupCore.promoteToAdmin already
+                // sends PUT /groups/:id/members/:userId/role — the extra
+                // POST .../promote below hit a route that doesn't exist on the
+                // backend (only PUT .../role is registered), so it silently
+                // 404'd on every single click via the .catch(() => {}). Removed.
                 success = (await GroupCore.promoteToAdmin(groupData.id, memberId)).success;
-                await secureApiCall(`/groups/${groupData.id}/members/${memberId}/promote`, { method: 'POST' }).catch(() => {});
-                logTransparencyAction(groupData.id, 'Promoted member to admin', memberId);
+                if (success) logTransparencyAction(groupData.id, 'Promoted member to admin', memberId);
                 break;
             case 'demote':
+                // FIX (duplicate network call): same as 'promote' above —
+                // GroupCore.demoteFromAdmin already sends the real request;
+                // the extra POST .../demote hit a nonexistent route.
                 success = (await GroupCore.demoteFromAdmin(groupData.id, memberId)).success;
-                await secureApiCall(`/groups/${groupData.id}/members/${memberId}/demote`, { method: 'POST' }).catch(() => {});
-                logTransparencyAction(groupData.id, 'Demoted admin to member', memberId);
+                if (success) logTransparencyAction(groupData.id, 'Demoted admin to member', memberId);
                 break;
             case 'remove':
                 if (confirm('Are you sure you want to remove this member from the group?')) {
+                    // FIX (duplicate network call): GroupCore.removeMember already
+                    // sends DELETE /groups/:id/members/:userId — the extra DELETE
+                    // call below hit the exact same endpoint a second time on
+                    // every tap. Removed.
                     success = (await GroupCore.removeMember(groupData.id, memberId)).success;
-                    await secureApiCall(`/groups/${groupData.id}/members/${memberId}`, { method: 'DELETE' }).catch(() => {});
-                    logTransparencyAction(groupData.id, 'Removed member from group', memberId);
+                    if (success) logTransparencyAction(groupData.id, 'Removed member from group', memberId);
                 }
                 break;
         }
         
         if (success) {
             loadGroupMembersForManagement(groupData);
+        } else {
+            reportGroupActionFailure(
+                action === 'promote' ? 'Promote to admin' : action === 'demote' ? 'Remove admin' : 'Remove member',
+                () => handleMemberAction(action, memberId, groupData)
+            );
         }
-    } catch (error) {}
+    } catch (error) {
+        reportGroupActionFailure('Member action', () => handleMemberAction(action, memberId, groupData));
+    }
 }
 
 async function logTransparencyAction(groupId, action, targetId = null) {
@@ -3143,7 +3262,9 @@ const saveGroupSettings = async function(groupData) {
         } else {
             throw new Error(response?.error || 'Failed to save settings');
         }
-    } catch (error) {}
+    } catch (error) {
+        reportGroupActionFailure('Save group settings', () => saveGroupSettings(groupData));
+    }
 };
 
 async function showFriendSelection() {
@@ -3546,6 +3667,7 @@ const joinGroupOnline = async function (groupId) {
     }
     const response = await GroupCore.sendJoinRequest(groupId);
     if (!response || !response.success) {
+      reportGroupActionFailure('Join group', () => joinGroupOnline(groupId));
       return;
     }
     const detailsResponse = await GroupCore.getGroupDetails(groupId).catch(() => null);
@@ -3577,7 +3699,9 @@ const joinGroupOnline = async function (groupId) {
       },
       timestamp: Date.now()
     });
-  } catch (error) {}
+  } catch (error) {
+    reportGroupActionFailure('Join group', () => joinGroupOnline(groupId));
+  }
 };
 
 const leaveGroupOnline = async function (groupId) {
@@ -3595,6 +3719,7 @@ const leaveGroupOnline = async function (groupId) {
     }
     const response = await GroupCore.leaveGroup(groupId);
     if (!response || !response.success) {
+      reportGroupActionFailure('Leave group', () => leaveGroupOnline(groupId));
       return;
     }
     setGroups(groups.filter(g => g.id !== groupId));
@@ -3621,7 +3746,9 @@ const leaveGroupOnline = async function (groupId) {
       userId: session.user?.uid || session.user?.id,
       timestamp: Date.now()
     });
-  } catch (error) {}
+  } catch (error) {
+    reportGroupActionFailure('Leave group', () => leaveGroupOnline(groupId));
+  }
 };
 
 async function acceptGroupInvite(inviteData) {
@@ -3642,6 +3769,7 @@ async function acceptGroupInvite(inviteData) {
       method: 'POST'
     });
     if (!response || !response.success) {
+      reportGroupActionFailure('Accept invite', () => acceptGroupInvite(inviteData));
       return;
     }
 
@@ -3662,7 +3790,9 @@ async function acceptGroupInvite(inviteData) {
     updateCurrentSection();
     const groupInviteModal = safeGetElement('#groupInviteModal');
     if (groupInviteModal) groupInviteModal.classList.remove('active');
-  } catch (error) {}
+  } catch (error) {
+    reportGroupActionFailure('Accept invite', () => acceptGroupInvite(inviteData));
+  }
 }
 
 async function declineGroupInvite(inviteData) {
@@ -3682,6 +3812,7 @@ async function declineGroupInvite(inviteData) {
       method: 'POST'
     });
     if (!response || !response.success) {
+      reportGroupActionFailure('Decline invite', () => declineGroupInvite(inviteData));
       return;
     }
     setGroupInvites(groupInvites.filter(invite => (invite.id || invite.inviteId) !== inviteId));
@@ -3690,7 +3821,9 @@ async function declineGroupInvite(inviteData) {
     updateCurrentSection();
     const groupInviteModal = safeGetElement('#groupInviteModal');
     if (groupInviteModal) groupInviteModal.classList.remove('active');
-  } catch (error) {}
+  } catch (error) {
+    reportGroupActionFailure('Decline invite', () => declineGroupInvite(inviteData));
+  }
 }
 
 function leaveGroupConfirm(groupData) {

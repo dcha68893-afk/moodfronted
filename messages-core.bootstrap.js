@@ -2796,24 +2796,23 @@ try {
     }
 
     // =========================================================================
-    // MESSAGE LIFECYCLE REBUILD (messages-only scope, added 2026-07-26)
-    // -------------------------------------------------------------------------
-    // Purely additive. Initializes the new reliable send/receive pipeline
-    // (js/core/message/MessageLifecycleClient.js) alongside everything else
-    // already running in this file — it does not replace or disable any
-    // existing render/relay logic. See that file's header comment for the
-    // full rationale and the two concrete gaps it closes.
+    // REMOVED (consolidation pass): auto-init of MessageLifecycleClient.js.
+    // Verified by tracing actual call sites, not by trusting the "purely
+    // additive" comment that used to sit here:
+    //   - MessageLifecycleClient.sendMessage() and .markRead() are never
+    //     called anywhere in the codebase — the send/read-receipt half of
+    //     that module was dead code.
+    //   - .init() (called here) WAS live, and bound its own socket listeners
+    //     for msg:new / msg:delivered / msg:read / msg:sync:result. Since the
+    //     server (routes/messages.js) emits both 'msg:new' and 'message:new'
+    //     for every message, every incoming message was being independently
+    //     received, stored in its own IndexedDB store, and separately
+    //     ACKed (msg:delivered_ack) by this module IN ADDITION to the real,
+    //     already-rendering legacy pipeline (messages-core.ui-bridge.js's
+    //     'message:new' handling + its own message:delivery_ack). That's a
+    //     second full delivery-ack round trip and a second DB write for
+    //     every single message, for a send path nothing used.
+    // Removed the init call; js/core/message/MessageLifecycleClient.js is no
+    // longer loaded (see message.html) so this is fully inert now, not just
+    // disabled here.
     // =========================================================================
-    (function initMessageLifecycleClient(attempt) {
-        attempt = attempt || 0;
-        if (!window.MessageLifecycleClient) {
-            if (attempt < 50) setTimeout(() => initMessageLifecycleClient(attempt + 1), 200);
-            return;
-        }
-        const uid = getCurrentUserId();
-        if (!uid) {
-            if (attempt < 50) setTimeout(() => initMessageLifecycleClient(attempt + 1), 200);
-            return;
-        }
-        window.MessageLifecycleClient.init({ currentUserId: uid });
-    })();

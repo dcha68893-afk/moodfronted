@@ -19,6 +19,11 @@ class StatusWebSocket {
         this.isConnected         = false;
         this._initAttempted      = false;
         this._checkTimer         = null;
+        // BUGFIX (lifecycle): unsubscribe functions returned by manager.on() for
+        // every listener this instance attached — lets a later instance cleanly
+        // tear this instance's listeners off the shared manager instead of the
+        // old approach of just refusing to attach new ones (see init() below).
+        this._unsubscribers      = [];
     }
 
     // ── INIT ──────────────────────────────────────────────────────────────────
@@ -70,26 +75,33 @@ class StatusWebSocket {
 
         if (this.socket === manager) return true; // already wired
 
-        // FIX (postMessage storm / duplicate reply notifications): `manager`
-        // (window.KynectaRealtime / window.parent.KynectaRealtime) is a single
-        // shared, long-lived object — it is NOT recreated when this iframe
-        // reloads. But `this.socket === manager` above only guards re-registration
-        // within the lifetime of ONE StatusWebSocket instance. Every time the
-        // status iframe reloads (switching tabs and back, a re-render, etc.) a
-        // brand-new StatusWebSocket is constructed with `this.socket = null`, so
-        // the check above always fails to catch that listeners were already
-        // attached to the SAME shared manager by a previous instance — each
-        // reload silently stacked another full set of `s.on('status:reply', ...)`
-        // etc. listeners onto it, forever. A single incoming status:reply event
-        // then fired the handler once per stacked listener, which is exactly
-        // what the "postMessage storm detected" console warning was catching.
-        // Guard on the manager itself instead of on `this`.
-        if (manager.__statusWsListenersAttached) {
-            this.socket = manager;
-            this.isConnected = manager.isConnected ? manager.isConnected() : true;
-            return true;
+        // FIX (postMessage storm / duplicate reply notifications), UPDATED:
+        // `manager` (window.KynectaRealtime / window.parent.KynectaRealtime) is a
+        // single shared, long-lived object — it is NOT recreated when this iframe
+        // reloads. Every time the status iframe reloads (switching tabs and back,
+        // a re-render, etc.) a brand-new StatusWebSocket instance is constructed.
+        //
+        // BUGFIX (lifecycle bug — status stopped updating after reopening Status):
+        // the previous fix used a one-way boolean guard (`manager.__statusWsListenersAttached`)
+        // that, once set by the FIRST instance, permanently skipped
+        // `_setupSocketListeners()` for every instance after it — including the
+        // current, live instance created when the iframe was reopened. That
+        // instance believed it was "wired" (isConnected=true) but had never
+        // actually registered its own event handlers, so incoming status events
+        // silently went nowhere.
+        //
+        // Fix: track which INSTANCE currently owns the listeners on the shared
+        // manager (`manager.__statusWsActiveInstance`). If a different instance
+        // previously attached, precisely unsubscribe just its listeners (each
+        // manager.on() call returns an unsubscribe function — see
+        // _setupSocketListeners) before this instance attaches its own. This
+        // still prevents the original stacking/duplicate-firing problem, but
+        // never leaves a live instance permanently unwired.
+        const previousInstance = manager.__statusWsActiveInstance;
+        if (previousInstance && previousInstance !== this && typeof previousInstance._teardownSocketListeners === 'function') {
+            previousInstance._teardownSocketListeners();
         }
-        manager.__statusWsListenersAttached = true;
+        manager.__statusWsActiveInstance = this;
 
         // KynectaRealtime.on() has identical signature to socket.on() so assign directly
         this.socket = manager;
@@ -141,33 +153,42 @@ class StatusWebSocket {
         const s = this.socket;
         if (!s) return;
 
+        // BUGFIX (lifecycle): manager.on() returns an unsubscribe function —
+        // collect every one so _teardownSocketListeners() can precisely remove
+        // exactly this instance's listeners (and no one else's) later.
+        this._unsubscribers = [];
+        const on = (evt, handler) => {
+            const unsub = s.on(evt, handler);
+            if (typeof unsub === 'function') this._unsubscribers.push(unsub);
+        };
+
         // FIX: listen to ALL three event-name aliases the backend emits
-        s.on('status:created',  (data) => this._handleStatusCreated(data));
-        s.on('new_status',      (data) => this._handleStatusCreated(data));
-        s.on('status_created',  (data) => this._handleStatusCreated(data));
+        on('status:created',  (data) => this._handleStatusCreated(data));
+        on('new_status',      (data) => this._handleStatusCreated(data));
+        on('status_created',  (data) => this._handleStatusCreated(data));
 
         // P1 FIX: status:new is emitted by backend on creation AND scheduled publish
-        s.on('status:new',          (data) => this._handleStatusNew(data));
+        on('status:new',          (data) => this._handleStatusNew(data));
 
-        s.on('status:viewed',       (data) => this._handleStatusViewed(data));
-        s.on('status:viewer_update',(data) => this._handleViewerUpdate(data));
-        s.on('status:expired',      (data) => this._handleStatusExpired(data));
-        s.on('status:updated',      (data) => this._handleStatusUpdated(data));
-        s.on('status:deleted',      (data) => this._handleStatusDeleted(data));
-        s.on('status_deleted',      (data) => this._handleStatusDeleted(data)); // legacy alias
+        on('status:viewed',       (data) => this._handleStatusViewed(data));
+        on('status:viewer_update',(data) => this._handleViewerUpdate(data));
+        on('status:expired',      (data) => this._handleStatusExpired(data));
+        on('status:updated',      (data) => this._handleStatusUpdated(data));
+        on('status:deleted',      (data) => this._handleStatusDeleted(data));
+        on('status_deleted',      (data) => this._handleStatusDeleted(data)); // legacy alias
 
         // P2 FIX: poll and question real-time events
-        s.on('status:poll_update',    (data) => this._handlePollUpdate(data));
-        s.on('status:question_answer',(data) => this._handleQuestionAnswer(data));
+        on('status:poll_update',    (data) => this._handlePollUpdate(data));
+        on('status:question_answer',(data) => this._handleQuestionAnswer(data));
 
         // Real-time reaction & reply events
-        s.on('status:reaction',     (data) => this._handleStatusReaction(data));
-        s.on('status:reply',        (data) => this._handleStatusReply(data));
+        on('status:reaction',     (data) => this._handleStatusReaction(data));
+        on('status:reply',        (data) => this._handleStatusReply(data));
 
         // Connection state — KynectaRealtime exposes these via .on() too.
         // FIX (offline console spam): only log a transition once, not every
         // time the underlying manager re-emits the same state.
-        s.on('connect', () => {
+        on('connect', () => {
             this.isConnected      = true;
             this.reconnectAttempts = 0;
             if (this._lastLoggedState !== 'connected') {
@@ -176,7 +197,7 @@ class StatusWebSocket {
             }
         });
 
-        s.on('disconnect', () => {
+        on('disconnect', () => {
             this.isConnected = false;
             if (this._lastLoggedState !== 'offline') {
                 this._lastLoggedState = 'offline';
@@ -185,10 +206,19 @@ class StatusWebSocket {
             this._scheduleReconnect();
         });
 
-        s.on('connect_error', (err) => {
+        on('connect_error', (err) => {
             console.error('[StatusWebSocket] ❌ connect_error:', err && err.message ? err.message : err);
             this._scheduleReconnect();
         });
+    }
+
+    // BUGFIX (lifecycle): precisely remove this instance's listeners from the
+    // shared manager (used when a newer instance is taking over — see init()).
+    _teardownSocketListeners() {
+        for (const unsub of this._unsubscribers) {
+            try { unsub(); } catch (_) {}
+        }
+        this._unsubscribers = [];
     }
 
     // ── STATUS CREATED ────────────────────────────────────────────────────────
@@ -640,16 +670,14 @@ class StatusWebSocket {
     }
 
     disconnect() {
-        // FIX: KynectaRealtime doesn't have removeAllListeners — use .off() if available,
-        // otherwise just null the reference. The manager manages its own lifecycle.
-        if (this.socket) {
-            try {
-                if (typeof this.socket.removeAllListeners === 'function') {
-                    this.socket.removeAllListeners();
-                }
-            } catch (_) {}
-            this.socket = null;
+        // BUGFIX (lifecycle): use the precise per-instance unsubscribe list
+        // instead of removeAllListeners(), which would also strip listeners
+        // belonging to unrelated subsystems sharing the same manager.
+        this._teardownSocketListeners();
+        if (this.socket && this.socket.__statusWsActiveInstance === this) {
+            this.socket.__statusWsActiveInstance = null;
         }
+        this.socket = null;
         this.isConnected = false;
         this.eventListeners.clear();
     }

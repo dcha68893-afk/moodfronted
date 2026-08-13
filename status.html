@@ -1832,22 +1832,25 @@
     <script src="/js/status-cache.js" defer onerror="console.warn('[Status] status-cache.js not found')"></script>
     <script src="/js/status-websocket.js" defer onerror="console.warn('[Status] status-websocket.js not found')"></script>
 
-    <!-- CRITICAL: NOT type="module" — regular scripts share window scope so     -->
-    <!-- status-core-*.js can call window.renderStatusListInstantlyUI from       -->
-    <!-- status-ui.js, and status-ui.js can access window.StatusCore from core.  -->
-    <!-- status-core.js was split into 3 files. They must load in this exact    -->
-    <!-- order (state -> transport -> runtime) as plain classic scripts, since  -->
-    <!-- later files reference top-level consts/functions declared in earlier   -->
-    <!-- ones via shared global scope. None of them use ES `export`/`import`,   -->
-    <!-- so no type="module" is needed (or wanted — modules do NOT share scope  -->
-    <!-- across separate <script> tags the way classic scripts do). -->
-    <script src="status-core-state.js" defer onerror="console.warn('[Status] status-core-state.js not found')"></script>
-    <script src="status-core-transport.js" defer onerror="console.warn('[Status] status-core-transport.js not found')"></script>
-    <script src="status-core-runtime.js" defer onerror="console.warn('[Status] status-core-runtime.js not found')"></script>
+    <!-- BUGFIX (dead weight / architecture confusion): status-core-state.js,
+    status-core-transport.js, and status-core-runtime.js were loaded here but
+    are actually the SETTINGS module's code (MODULE_NAME='settings', /api/settings
+    endpoints, SettingsState, etc.), not a real Status engine. window.StatusCore /
+    window.__STATUS_CORE__ — which status-ui.js's getCore() checks for on every
+    call — are never assigned anywhere in this repo, so getCore() has always
+    returned null and status-ui.js has always run entirely on its own fallback
+    paths (local arrays + direct StatusAPI/StatusWebSocket calls). Verified the
+    one piece of these files that looked Status-related (a kyn:status:* ->
+    statusReceived/statusFeedUpdated event bridge at the bottom of
+    status-core-runtime.js) is also dead: nothing in the live app listens for
+    those event names either. Removed the three script tags — 7,852 lines that
+    did nothing for this page. The files themselves are left in the repo
+    untouched in case anything else is later found to depend on them. -->
     <script src="status-ui.js" defer onerror="console.warn('[Status] status-ui.js not found')"></script>
     <script>
         // =============================================
         // DEBUGGING: Verify Status System Components
+
         // FIX: Run AFTER DOMContentLoaded so dynamic scripts have had a chance to
         //      execute. Previously this ran synchronously and always showed false
         //      because the scripts were only being injected at that exact moment.

@@ -3314,15 +3314,23 @@
                     // write only if that module hasn't loaded) so registration
                     // goes through the exact same single source of truth as every
                     // other login path.
-                    if (window.AuthStorage && typeof window.AuthStorage.saveAuth === 'function') {
+                    const _authStorageHandled = !!(window.AuthStorage && typeof window.AuthStorage.saveAuth === 'function');
+                    if (_authStorageHandled) {
+                        // AuthStorage.saveAuth() already writes token/accessToken/
+                        // USER_TOKEN/nexopa_token (see LEGACY_TOKEN_KEYS in
+                        // authStorage.js) — the 4 lines below were re-writing the
+                        // exact same keys with the exact same value a second time
+                        // on this path. Removed as dead-weight duplication; kept
+                        // only for the fallback branch where AuthStorage isn't
+                        // loaded and nothing else has written these keys yet.
                         window.AuthStorage.saveAuth({ token, user, expiresAt: Date.now() + (typeof CONFIG !== 'undefined' && CONFIG.DEFAULT_TOKEN_EXPIRY ? CONFIG.DEFAULT_TOKEN_EXPIRY : 24 * 60 * 60 * 1000) });
                     } else {
                         localStorage.setItem('kynecta_auth', JSON.stringify({ token, user, timestamp: Date.now() }));
+                        localStorage.setItem('token', token);
+                        localStorage.setItem('accessToken', token);
+                        localStorage.setItem('USER_TOKEN', token);
+                        localStorage.setItem('nexopa_token', token);
                     }
-                    localStorage.setItem('token', token);
-                    localStorage.setItem('accessToken', token);
-                    localStorage.setItem('USER_TOKEN', token);
-                    localStorage.setItem('nexopa_token', token);
                     window.token = token;
                     window.accessToken = token;
                     if (user) window.currentUser = user;

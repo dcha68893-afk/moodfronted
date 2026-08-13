@@ -1756,8 +1756,15 @@
     <!-- Phase 2 features -->
     <script src="js/sticker-picker.js" defer></script>
     <script src="js/message-select.js" defer></script>
-    <!-- MESSAGE LIFECYCLE REBUILD (messages-only scope, added 2026-07-26): additive, see file header -->
-    <script src="js/core/message/MessageLifecycleClient.js" defer></script>
+    <!-- REMOVED (consolidation pass): js/core/message/MessageLifecycleClient.js.
+         Verified dead/duplicate, not just disabled: its send API
+         (sendMessage/markRead) was never called anywhere, and its receive
+         path duplicated the delivery-ack + render work messages-core.ui-bridge.js
+         already does for every incoming message (server emits both 'msg:new'
+         and 'message:new' for each message; this file's listener processed
+         and ACKed the 'msg:new' copy a second time, on top of the ACK the
+         legacy pipeline already sends for 'message:new'). See
+         messages-core.bootstrap.js for the full note. -->
     <!-- Phase 3: Security -->
     <!-- FIX-E2E-DUPLICATE-LOAD: js/e2e-encryption.js was loaded a second time
          here (on top of the load + tryInitE2E() init above). Re-executing

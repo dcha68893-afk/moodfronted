@@ -217,11 +217,24 @@ async function _dispatchAction(item) {
         case QUEUE_ACTIONS.DELETE_GROUP:
             return _apiCall(`/groups/${groupId}`, 'DELETE', null);
 
-        case QUEUE_ACTIONS.ADD_MEMBER:
-            return _apiCall(`/group-members/${groupId}/invitations`, 'POST', {
+        case QUEUE_ACTIONS.ADD_MEMBER: {
+            const res = await _apiCall(`/group-members/${groupId}/invitations`, 'POST', {
                 inviteeId: userId,
                 role: payload.role || 'member',
             });
+            // FIX (idempotency): if the invite from an earlier attempt of this
+            // same retried queue item actually succeeded server-side but the
+            // client never got the response (dropped connection, etc.), a
+            // retry hits inviteToGroup's own dedup guard and gets back an
+            // "already invited"/"already a member" error. That's not a real
+            // failure — without this, the item exhausts MAX_RETRY and is
+            // reported to the user as a permanently failed add, even though
+            // the invite/add already went through.
+            if (!res.success && /already invited|already a member|already_member/i.test(res.error || '')) {
+                return { success: true, data: res.data || null, alreadyDone: true };
+            }
+            return res;
+        }
 
         case QUEUE_ACTIONS.REMOVE_MEMBER:
             return _apiCall(`/groups/${groupId}/members/${userId}`, 'DELETE', null);
