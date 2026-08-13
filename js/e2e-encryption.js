@@ -21,6 +21,14 @@
   const subtle    = global.crypto && global.crypto.subtle;
   const STORE_KEY = 'kyn_e2e_keypair_v1';   // localStorage key for encrypted private key
   const PUB_CACHE = new Map();               // userId → CryptoKey (public key cache, this page load only)
+  // FIX (403-treated-as-transient): tracks WHY the last key fetch for a
+  // userId came back empty, so encryptForChat() below can tell a
+  // permanent, un-retryable "you're not authorized to see this key yet"
+  // (403 — no shared chat/accepted friendship) apart from a genuinely
+  // transient failure (timeout/5xx), instead of showing the same generic
+  // "please retry" message for both. See the 403 handling in
+  // _getRecipientPublicKey and its use in encryptForChat.
+  const _lastKeyFetchFailureReason = new Map(); // userId → 'not_authorized' | undefined
   // FIX-ROOT-CAUSE-DM-DECRYPT-FRAGILE: this is the actual reason DM send/receive
   // failed far more often than group messages. Group sender keys, once fetched,
   // are cached to localStorage forever (see groupEncryption.client.js) — a single
@@ -589,9 +597,23 @@
             // A definitive "no key" (404) is a real state, not a transient
             // failure — this person genuinely has not registered a key yet.
             // Don't spin on that forever.
-            if (resp.status === 404) return null;
+            if (resp.status === 404) { _lastKeyFetchFailureReason.delete(userId); return null; }
+            // FIX (403-treated-as-transient): a 403 here means the backend's
+            // _canSeeEncryptionKey() check found no shared chat AND no
+            // accepted friendship between these two users — see
+            // src/routes/encryption.js. That is exactly as permanent and
+            // un-retryable as a 404: retrying with backoff for the full
+            // _KEY_FETCH_GIVEUP_MS window (previously the same path as a
+            // network timeout/5xx) can never succeed until the actual
+            // authorization gap (no friendship) is resolved by the people
+            // involved, not by retrying a fetch. Stop immediately instead of
+            // burning the whole retry window on something that will never
+            // change on its own, and record why so encryptForChat() can show
+            // an accurate message instead of "please retry".
+            if (resp.status === 403) { _lastKeyFetchFailureReason.set(userId, 'not_authorized'); return null; }
             throw new Error(`Key fetch failed: ${resp.status}`);
           }
+          _lastKeyFetchFailureReason.delete(userId);
           const data = await resp.json();
           if (!data.data?.publicKey) return null;
           const key = await importPublicKey(data.data.publicKey);
@@ -792,9 +814,21 @@
 
     const recipient = await _getRecipientPublicKey(recipientUserId, false, opts?.signal);
     if (!recipient) {
-      console.warn(`[E2E] No usable key for user ${recipientUserId} within the wait window — refusing to send unencrypted.`);
-      try { document.dispatchEvent(new CustomEvent('kyn:e2eSecureFailure', { detail: { userId: recipientUserId, chatId, reason: 'no_recipient_key' } })); } catch (_) {}
-      throw new E2ESecureFailureError();
+      // FIX (403-treated-as-transient, cont'd): "not_authorized" (backend
+      // 403 — no shared chat and no accepted friendship yet) is a different,
+      // permanent condition from a plain timed-out key fetch, and telling
+      // the user to "please retry" for it is actively wrong — retrying
+      // changes nothing until they're actually friends. Give the accurate
+      // reason in both the event detail and the thrown error's message.
+      const _reason = _lastKeyFetchFailureReason.get(recipientUserId) === 'not_authorized'
+        ? 'not_authorized'
+        : 'no_recipient_key';
+      const _message = _reason === 'not_authorized'
+        ? "🔒 You need to be friends with this person before you can message them securely."
+        : undefined; // keep E2ESecureFailureError's existing default message for the other case
+      console.warn(`[E2E] No usable key for user ${recipientUserId} within the wait window (${_reason}) — refusing to send unencrypted.`);
+      try { document.dispatchEvent(new CustomEvent('kyn:e2eSecureFailure', { detail: { userId: recipientUserId, chatId, reason: _reason } })); } catch (_) {}
+      throw new E2ESecureFailureError(_message);
     }
 
     const sharedBits = await _computeSharedBits(_myPrivKey, recipient.key);
