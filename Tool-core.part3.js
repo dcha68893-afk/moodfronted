@@ -38,6 +38,18 @@ export {
     sessionClient, heartbeatResponder, diagnostics, messageHandler, resourceManager, uiBridge
 } from './Tool-core.part2.js';
 
+// FIX (Audit #16 - BroadcastChannel account scoping): shared helper used to tag every
+// 'marketplace_sync' BroadcastChannel message with the currently logged-in user, and to
+// filter incoming messages against it, so cross-tab sync events from a different account
+// (e.g. a shared/kiosk device, or a fast logout+login in another tab) never get applied to
+// this tab's state. Exposed on window so Tool-ui.js and other senders can reuse it.
+window.__marketplaceSyncUserId = function() {
+    try {
+        return (currentUser && (currentUser.id || currentUser._id)) ||
+            (window.currentUser && (window.currentUser.id || window.currentUser._id)) || null;
+    } catch (_) { return null; }
+};
+
 class MarketplaceCoreImpl {
     constructor() {
         this.listings = [];
@@ -73,6 +85,16 @@ class MarketplaceCoreImpl {
             this.syncChannel = new BroadcastChannel('marketplace_sync');
             this.syncChannel.onmessage = (event) => {
                 if (!assertActive('syncChannel message')) return;
+                // FIX (Audit #16 - BroadcastChannel account scoping): this channel is shared
+                // by every tab on the origin regardless of which account is logged into each
+                // one. A message tagged with a different userId than the one active in THIS
+                // tab is dropped, so User A's tabs never apply sync events that were posted
+                // by a tab logged in as User B (e.g. after a fast account switch/logout).
+                // Messages with no userId (older senders, or pre-login) are still accepted.
+                if (event.data && event.data.userId && typeof window.__marketplaceSyncUserId === 'function') {
+                    const mine = window.__marketplaceSyncUserId();
+                    if (mine && event.data.userId !== mine) return;
+                }
                 if (event.data && event.data.type && isActive()) {
                     this.handleSyncMessage(event.data);
                 }
@@ -527,7 +549,7 @@ class MarketplaceCoreImpl {
             // Broadcast to other tabs with real server ID
             try {
                 const ch = new BroadcastChannel('marketplace_sync');
-                ch.postMessage({ type: 'LISTING_CREATED', listing: committed });
+                ch.postMessage({ type: 'LISTING_CREATED', listing: committed, userId: window.__marketplaceSyncUserId?.() });
                 ch.close();
             } catch (_) {}
 
@@ -3998,7 +4020,7 @@ export async function createServiceListing(title, description, options = {}) {
         window.dispatchEvent(new CustomEvent('marketplace:data-updated', { detail: { listings: allListings } }));
 
         // Broadcast to other tabs
-        try { const ch = new BroadcastChannel('marketplace_sync'); ch.postMessage({ type: 'LISTING_CREATED', listing: committed }); ch.close(); } catch (_) {}
+        try { const ch = new BroadcastChannel('marketplace_sync'); ch.postMessage({ type: 'LISTING_CREATED', listing: committed, userId: window.__marketplaceSyncUserId?.() }); ch.close(); } catch (_) {}
 
         if (window.__TOOLS_DEBUG__) console.log('[TOOLS FLOW] Step 4: UI updated — listing committed to DB', { id: committed.id });
         updateListingStreak();
@@ -4130,7 +4152,7 @@ export async function createDigitalListing(title, description, fileData, options
         window.dispatchEvent(new CustomEvent('marketplace:data-updated', { detail: { listings: allListings } }));
 
         // Broadcast to other tabs
-        try { const ch = new BroadcastChannel('marketplace_sync'); ch.postMessage({ type: 'LISTING_CREATED', listing: committed }); ch.close(); } catch (_) {}
+        try { const ch = new BroadcastChannel('marketplace_sync'); ch.postMessage({ type: 'LISTING_CREATED', listing: committed, userId: window.__marketplaceSyncUserId?.() }); ch.close(); } catch (_) {}
 
         if (window.__TOOLS_DEBUG__) console.log('[TOOLS FLOW] Step 4: UI updated — digital listing committed to DB', { id: committed.id });
         updateListingStreak();
@@ -5322,7 +5344,18 @@ window.addEventListener('message', function(evt) {
                     method: method.toUpperCase(),
                     ...(body && method !== 'GET' ? { body: JSON.stringify(body) } : {})
                 });
-            } catch(e) { return null; }
+            } catch(e) {
+                // FIX (Audit #18 - silent error handling): this used to swallow every
+                // network/auth failure as `return null`, which is indistinguishable from
+                // "the endpoint returned no data". Callers on payment/checkout/order paths
+                // could not tell "nothing to show" apart from "the request failed", so a
+                // failed payment call could silently look like success. Return a structured
+                // error the caller can branch on instead.
+                console.error('[_ecomApiCall] request failed:', method, endpoint, e);
+                return { ok: false, success: false, error: true, errorCode: 'NETWORK_ERROR',
+                          message: e?.message || 'Request failed. Please check your connection and try again.',
+                          retryable: true };
+            }
         };
     }
 

@@ -48,11 +48,38 @@ const _toast = (msg,type='info',icon='ℹ️') => {
 async function _api(method, endpoint, body=null) {
     try {
         const token = window.__kynToken||window.__accessToken||localStorage.getItem('authToken')||localStorage.getItem('token')||localStorage.getItem('nexopa_token')||localStorage.getItem('accessToken')||'';
-        const _mh=window.location?.hostname||'';const _mIsLocal=_mh==='localhost'||_mh==='127.0.0.1'||_mh.startsWith('192.168.');const base=(window.API_BASE_URL||window.BACKEND_URL||'').replace(/\/api$|\/$/,'')||(window.__kynAPI?.baseUrl||'').replace(/\/api$|\/$/,'')||(typeof window.__getApiBase==='function'?window.__getApiBase().replace(/\/api$/,''):'')||(typeof window.__getApiOrigin==='function'?window.__getApiOrigin():'')||(_mIsLocal?'http://localhost:4000':'https://noxopa.onrender.com');
-        const res   = await fetch(base+'/api'+endpoint, { method:method.toUpperCase(), headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})}, ...(body&&method!=='GET'?{body:JSON.stringify(body)}:{}) });
-        if (!res.ok) return null;
-        return await res.json();
-    } catch(e) { return null; }
+        // FIX (Audit #19 - one source of truth for API config): this used to fall back to a
+        // hardcoded 'http://localhost:4000', decided independently by this file instead of
+        // by the single window.API_BASE_URL every HTML entry point already sets. If that
+        // global was ever unset/mistimed, requests would silently go to localhost instead
+        // of failing loudly. Use the central config only, and fail clearly if it's missing.
+        const base = (window.API_BASE_URL||window.BACKEND_URL||'').replace(/\/api$|\/$/,'')
+            || (window.__kynAPI?.baseUrl||'').replace(/\/api$|\/$/,'')
+            || (typeof window.__getApiBase==='function'?window.__getApiBase().replace(/\/api$/,''):'')
+            || (typeof window.__getApiOrigin==='function'?window.__getApiOrigin():'');
+        if (!base) {
+            console.error('[marketplace-advanced] API base URL is not configured (window.API_BASE_URL missing).');
+            return { ok:false, success:false, error:true, errorCode:'CONFIG_ERROR', message:'App is not configured correctly. Please reload the page.', retryable:false };
+        }
+        const res = await fetch(base+'/api'+endpoint, { method:method.toUpperCase(), headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})}, ...(body&&method!=='GET'?{body:JSON.stringify(body)}:{}) });
+        // FIX (Audit #18 - silent error handling): this used to `return null` on any non-2xx
+        // response, discarding the server's actual error message (e.g. "Insufficient wallet
+        // balance", "Out of stock") and making a failed payment/order call indistinguishable
+        // from an empty success. Surface the real status/message instead.
+        let payload = null;
+        try { payload = await res.json(); } catch(_) {}
+        if (!res.ok) {
+            console.error('[marketplace-advanced] API error:', method, endpoint, res.status, payload);
+            return { ok:false, success:false, error:true, errorCode: payload?.code || `HTTP_${res.status}`,
+                      message: payload?.message || `Request failed (${res.status}). Please try again.`,
+                      status: res.status, retryable: res.status >= 500 };
+        }
+        return payload;
+    } catch(e) {
+        console.error('[marketplace-advanced] API request failed:', method, endpoint, e);
+        return { ok:false, success:false, error:true, errorCode:'NETWORK_ERROR',
+                  message: e?.message || 'Request failed. Please check your connection and try again.', retryable:true };
+    }
 }
 
 // ─── Inject CSS ───────────────────────────────────────────────────────────────

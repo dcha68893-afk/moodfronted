@@ -116,17 +116,36 @@ async function _api(method, endpoint, body = null) {
             localStorage.getItem('authToken') || localStorage.getItem('token') ||
             localStorage.getItem('nexopa_token') || localStorage.getItem('accessToken') || '';
         if (!token) return null; // No token — skip, don't error
-        const baseUrl = window.__kynAPI?.baseUrl?.replace(/\/api$/, '').replace(/\/$/, '') ||
-            (typeof window.__getApiBase === 'function' ? window.__getApiBase().replace(/\/api$/, '') : '') ||
-            'http://localhost:4000';
+        // FIX (Audit #19): removed hardcoded 'http://localhost:4000' fallback — this file
+        // must use the single centralized window.API_BASE_URL, not decide its own backend.
+        const baseUrl = window.API_BASE_URL?.replace(/\/api$/, '').replace(/\/$/, '') ||
+            window.__kynAPI?.baseUrl?.replace(/\/api$/, '').replace(/\/$/, '') ||
+            (typeof window.__getApiBase === 'function' ? window.__getApiBase().replace(/\/api$/, '') : '');
+        if (!baseUrl) {
+            console.error('[marketplace-ecommerce] API base URL is not configured.');
+            return null;
+        }
         const res = await fetch(baseUrl + '/api' + endpoint, {
             method: method.toUpperCase(),
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
             ...(body && method !== 'GET' ? { body: JSON.stringify(body) } : {})
         });
-        if (!res.ok) return null;
+        // NOTE (Audit #18): this function's contract of "return null on any failure" is kept
+        // as-is here rather than switched to a structured-error object like the sibling
+        // helpers in marketplace-checkout.js / marketplace-advanced.js, because ProductEngine
+        // calls this in dozens of places with plain `if (!r)`/`r ||` fallback-to-cache checks
+        // that depend on that exact falsy contract for offline behavior. Changing it here
+        // without auditing every call site risked new bugs. What's fixed: the error is no
+        // longer swallowed silently — it's now logged with the real status/body so a
+        // developer can tell "offline" apart from "the server rejected the request".
+        if (!res.ok) {
+            let body_ = null; try { body_ = await res.json(); } catch(_) {}
+            console.error('[marketplace-ecommerce] API error:', method, endpoint, res.status, body_?.message || '');
+            return null;
+        }
         return await res.json();
     } catch(e) {
+        console.error('[marketplace-ecommerce] API request failed (offline?):', method, endpoint, e.message);
         return null; // Silent fail — marketplace works offline
     }
 }

@@ -34,17 +34,42 @@ async function _api(method, endpoint, body=null) {
             window.__PARENT_SESSION__?.token||
             localStorage.getItem('authToken')||localStorage.getItem('token')||
             localStorage.getItem('nexopa_token')||localStorage.getItem('accessToken')||'';
-        const base = (window.__kynAPI?.baseUrl||'').replace(/\/api$/,'').replace(/\/$/,'') ||
-            (typeof window.__getApiBase==='function'?window.__getApiBase().replace(/\/api$/,''):'') ||
-            'http://localhost:4000';
+        // FIX (Audit #19 - one source of truth for API config): removed the hardcoded
+        // 'http://localhost:4000' fallback. This is the checkout/payment module — silently
+        // pointing payment calls at localhost instead of failing loudly is the worst place
+        // for that bug to hide. Use the central window.API_BASE_URL / __kynAPI config only.
+        const base = (window.API_BASE_URL||'').replace(/\/api$/,'').replace(/\/$/,'') ||
+            (window.__kynAPI?.baseUrl||'').replace(/\/api$/,'').replace(/\/$/,'') ||
+            (typeof window.__getApiBase==='function'?window.__getApiBase().replace(/\/api$/,''):'');
+        if (!base) {
+            console.error('[marketplace-checkout] API base URL is not configured.');
+            return { ok:false, success:false, error:true, _error:true, errorCode:'CONFIG_ERROR',
+                      message:'App is not configured correctly. Please reload the page.', retryable:false };
+        }
         const res = await fetch(base+'/api'+endpoint, {
             method: method.toUpperCase(),
             headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})},
             ...(body&&method!=='GET'?{body:JSON.stringify(body)}:{})
         });
-        if(!res.ok) return null;
-        return await res.json();
-    } catch(e) { return null; }
+        // FIX (Audit #18 - silent error handling): this is the checkout/payment module —
+        // it used to `return null` on any non-2xx response (declined payment, insufficient
+        // stock, invalid coupon, etc.), discarding the server's actual reason. Callers here
+        // already guard with `if (!r)` and `r?.data?.x`, so this stays backward compatible
+        // while giving the real message a path through for callers that want it.
+        let payload = null;
+        try { payload = await res.json(); } catch(_) {}
+        if (!res.ok) {
+            console.error('[marketplace-checkout] API error:', method, endpoint, res.status, payload);
+            return { ok:false, success:false, error:true, _error:true, errorCode: payload?.code || `HTTP_${res.status}`,
+                      message: payload?.message || `Request failed (${res.status}). Please try again.`,
+                      status: res.status, retryable: res.status >= 500 };
+        }
+        return payload;
+    } catch(e) {
+        console.error('[marketplace-checkout] API request failed:', method, endpoint, e);
+        return { ok:false, success:false, error:true, _error:true, errorCode:'NETWORK_ERROR',
+                  message: e?.message || 'Request failed. Please check your connection and try again.', retryable:true };
+    }
 }
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
@@ -711,13 +736,17 @@ window._jmPlaceOrder = async function() {
     if (r && !r._error) sessionStorage.removeItem('_checkout_idem_key');
     _state.loading = false;
 
-    if (!r) {
+    // FIX: _api now returns a structured {ok:false,_error:true,message} object on
+    // failure instead of null (see Audit #18), so this must check r._error, not
+    // just falsiness of r, or a real failure would fall through as if it were an
+    // order object. Uses the server's actual message when available.
+    if (!r || r._error) {
         // AUDIT FIX: previously created a fake local "order" here and
         // treated it as if checkout succeeded — there is no mechanism
         // anywhere that reconciles these into real orders, so a genuine
         // failure (network issue, server rejection) was silently shown to
         // the buyer as a successful purchase. Show the real failure instead.
-        _toast('Could not place your order — please check your connection and try again.', 'error', '❌');
+        _toast(r?.message || 'Could not place your order — please check your connection and try again.', 'error', '❌');
         _renderConfirmStep();
         return;
     }
@@ -1209,7 +1238,9 @@ const _origRenderOrders = window._renderOrdersOriginal;
         origNav(page, subpage);
         if (page === 'orders') {
             _api('GET','/marketplace/orders').then(r=>{
-                if (!r) return;
+                // FIX: _api returns a {_error:true} object on failure now instead of
+                // null (see Audit #18) — check for that too, not just falsiness.
+                if (!r || r._error) return;
                 const orders = r.data?.orders || r.orders || [];
                 if (orders.length) {
                     _ls.save('jm_orders_v1', orders);

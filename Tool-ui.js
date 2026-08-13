@@ -210,7 +210,19 @@ function syncWithCoreState() {
     if (window.userGroups) userGroups = window.userGroups;
     if (window.currentUser) currentUser = window.currentUser;
 }
-setInterval(syncWithCoreState, 1000);
+// FIX (Audit #17 - UI too dependent on polling): was `setInterval(syncWithCoreState, 1000)`,
+// copying the entire core state every second regardless of whether anything changed.
+// Tool-core already dispatches specific events whenever listings/session state actually
+// change ('marketplace:data-updated', 'marketplaceSessionReady', 'session:updated'), so
+// sync on those instead. A long-interval fallback poll is kept (30s, not 1s) purely as a
+// safety net for any state-mutating path that doesn't yet dispatch an event — this should
+// be removed once all core mutation paths are confirmed to dispatch their event.
+window.addEventListener('marketplace:data-updated', syncWithCoreState);
+window.addEventListener('marketplace:spotlight-updated', syncWithCoreState);
+window.addEventListener('marketplaceSessionReady', syncWithCoreState);
+window.addEventListener('session:updated', syncWithCoreState);
+syncWithCoreState(); // initial sync on load
+setInterval(syncWithCoreState, 30000); // safety-net fallback, was 1000ms
 
 // ----------------------------------------------------------------------
 // 2. DOM CACHE – RESILIENT ELEMENT REFERENCES
@@ -927,6 +939,12 @@ const UIPipeline = {
                     _syncChannel.addEventListener('message', function(e) {
                         const msg = e.data;
                         if (!msg) return;
+                        // FIX (Audit #16 - BroadcastChannel account scoping): ignore cross-tab
+                        // sync messages posted by a tab logged into a different account.
+                        if (msg.userId && typeof window.__marketplaceSyncUserId === 'function') {
+                            const mine = window.__marketplaceSyncUserId();
+                            if (mine && msg.userId !== mine) return;
+                        }
                         if (msg.type === 'LISTING_CREATED' && msg.listing && msg.listing.id) {
                             const alreadyPresent = (window.allListings || []).some(function(l) { return l.id === msg.listing.id; });
                             if (!alreadyPresent) {
