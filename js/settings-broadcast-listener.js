@@ -216,6 +216,34 @@
         if (mo.autoMoodDetection !== undefined) window.__autoMoodDetection = mo.autoMoodDetection;
         if (mo.shareMoodStatus !== undefined)   window.__shareMoodStatus   = mo.shareMoodStatus;
 
+        // — groups —
+        // FIX (missing section — Groups had no working propagation path at all):
+        // every other section here (privacy, notifications, chat, calls, status)
+        // exposes window.__ globals that the corresponding module actually reads
+        // (confirmed by grepping friend-core.ui-bridge.js, status-ui.js, calls-ui.js,
+        // etc. for these exact variable names). The "groups" section of AppSettings
+        // had no equivalent here, and group-core-bootstrap.js / group-core-operations.js /
+        // group-core-bridge.js / group-ui.js / group-ui-patch.js / group-core-patch.js
+        // don't reference data-groups-* attributes or any groups-settings event either
+        // — so groupInvitations/groupPrivacy/messageApproval/etc. from the Settings page
+        // reached this iframe's DOM (via settings-global-propagation.js /
+        // settings-module-subscriptions.js's data-groups-* attributes) but were never
+        // actually usable by group feature code in any form. This block brings Groups
+        // up to parity with every other module by exposing the same values as window.__
+        // globals, following the exact naming/shape convention already used below for
+        // status. Actually gating group-creation defaults / invite UI / message-approval
+        // enforcement on these is a product decision for the group module itself to make
+        // (not guessed at here) — this only makes the settings values available to read.
+        var gr = settings.groups || {};
+        if (gr.groupInvitations !== undefined)    window.__groupInvitations = gr.groupInvitations;
+        if (gr.groupPrivacy !== undefined)        window.__groupPrivacyDefault = gr.groupPrivacy;
+        if (gr.groupAnnouncements !== undefined)  window.__groupAnnouncementsEnabled = gr.groupAnnouncements;
+        if (gr.messageApproval !== undefined)     window.__groupMessageApprovalDefault = gr.messageApproval;
+        if (gr.groupSpamDetection !== undefined)  window.__groupSpamDetectionEnabled = gr.groupSpamDetection;
+        if (gr.memberWarnings !== undefined)      window.__groupMemberWarningsEnabled = gr.memberWarnings;
+        if (gr.keywordFiltering !== undefined)    window.__groupKeywordFilteringEnabled = gr.keywordFiltering;
+        if (gr.groupMediaDownload !== undefined)  window.__groupMediaAutoDownload = gr.groupMediaDownload;
+
         // — status —
         var st = settings.status || {};
         if (st.whoCanViewMyStatus !== undefined) window.__whoCanViewMyStatus = st.whoCanViewMyStatus;

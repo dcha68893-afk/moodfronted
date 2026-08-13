@@ -396,6 +396,21 @@
         if (d.type === 'LANGUAGE_CHANGED' && d.language) {
             global.AppSettings && global.AppSettings.set('appearance.language', d.language);
         }
+
+        // FIX: PRIVACY_UPDATED was previously only handled by the separate
+        // listener in settings-module-subscriptions.js. That file's listener
+        // has been removed (it duplicated every case here and the two
+        // handlers racing to call AppSettings.merge()/set() for the same
+        // incoming message was itself a bug — see settings-module-subscriptions.js
+        // for details). This case is added here so PRIVACY_UPDATED keeps working
+        // now that this is the single message listener for every page.
+        if (d.type === 'PRIVACY_UPDATED' && d.privacy) {
+            global.AppSettings && global.AppSettings.merge({ privacy: d.privacy }, {
+                silent: false,
+                skipBroadcast: true,
+                source: 'parent-socket-relay'
+            });
+        }
     });
 
     // ─── Subscribe AppSettings — react to all changes ─────────────────────────

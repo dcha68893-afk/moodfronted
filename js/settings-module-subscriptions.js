@@ -93,12 +93,20 @@
     // ─── Auto-subscribe known module globals ──────────────────────────────────
     // We poll briefly after page load so modules have time to define their functions.
 
+    // FIX: removed the 'settingsUI' entry that used to be here
+    // (fn: () => global.applySettingsToUI). settings.html loads settings-core.js
+    // and settings-ui.js as <script type="module">, and applySettingsToUI is a
+    // plain top-level `function applySettingsToUI(...)` inside settings-core.js —
+    // module scripts don't leak top-level declarations onto window, so
+    // global.applySettingsToUI was always undefined and this entry could never
+    // register. It wasn't needed anyway: settings-ui.js subscribes to
+    // window.AppSettings directly itself (see its own initializeUI()), which is
+    // how the settings page actually stays in sync — this entry was dead code.
     const AUTO_MODULES = [
         { name: 'friends',  fn: () => global.applyFriendsSettings },
         { name: 'calls',    fn: () => global.applyCallsSettings    },
         { name: 'groups',   fn: () => global.applyGroupsSettings   },
         { name: 'status',   fn: () => global.applyStatusSettings   },
-        { name: 'settingsUI', fn: () => global.applySettingsToUI   },
     ];
 
     function _autoAttach() {
@@ -121,6 +129,17 @@
         if (moduleName) setTimeout(_autoAttach, 100);
     });
 
+    // FIX: friend-core.ui-bridge.js actually dispatches 'friendModuleReady'
+    // (singular "friend"), not 'friendsModuleReady' — this listener's name
+    // never matched what's actually fired, so it never ran. Listening for
+    // both now. (In practice this path is a redundant safety net either way:
+    // applyFriendsSettings is defined synchronously as a fallback further
+    // down this file, so the very first auto-attach poll at t=0 already
+    // registers it — but fixing the name mismatch costs nothing and makes
+    // this listener do what its comment always claimed it did.)
+    global.addEventListener('friendModuleReady', () => {
+        if (global.applyFriendsSettings) register('friends', global.applyFriendsSettings);
+    });
     global.addEventListener('friendsModuleReady', () => {
         if (global.applyFriendsSettings) register('friends', global.applyFriendsSettings);
     });
@@ -134,28 +153,25 @@
         if (global.applyStatusSettings) register('status', global.applyStatusSettings);
     });
 
-    // ─── postMessage bridge: when this file runs inside an iframe ─────────────
-    // Receiving SETTINGS_GLOBAL_UPDATE or THEME_CHANGED from parent → push to AppSettings
-    global.addEventListener('message', (evt) => {
-        const d = evt.data || {};
-        if (!global.AppSettings) return;
-
-        if (d.type === 'SETTINGS_UPDATED' && d.settings) {
-            global.AppSettings.merge(d.settings);
-        }
-        if (d.type === 'SETTINGS_GLOBAL_UPDATE' && d.section && d.key !== undefined) {
-            global.AppSettings.set(d.section + '.' + d.key, d.value);
-        }
-        if (d.type === 'THEME_CHANGED' && d.theme) {
-            global.AppSettings.set('appearance.theme', d.theme);
-        }
-        if (d.type === 'LANGUAGE_CHANGED' && d.language) {
-            global.AppSettings.set('appearance.language', d.language);
-        }
-        if (d.type === 'PRIVACY_UPDATED' && d.privacy) {
-            global.AppSettings.merge({ privacy: d.privacy });
-        }
-    });
+    // ─── postMessage bridge ─────────────────────────────────────────────────
+    // FIX (duplicate listener / race): this file used to register its own
+    // 'message' listener here, handling SETTINGS_UPDATED / SETTINGS_GLOBAL_UPDATE /
+    // THEME_CHANGED / LANGUAGE_CHANGED / PRIVACY_UPDATED by calling
+    // AppSettings.merge()/set() directly with no options.
+    //
+    // settings-global-propagation.js is loaded on every page this file is
+    // loaded on (chat.html and every module iframe) and already has its own
+    // listener for the exact same message types, calling merge()/set() with
+    // { silent: false, skipBroadcast: true } so the change also re-notifies
+    // this page's own subscribers and re-broadcasts to sibling iframes.
+    // With both listeners active, a single incoming postMessage triggered
+    // AppSettings.merge()/set() TWICE — once via each listener — which is
+    // wasteful and, worse, meant whichever listener's subscriber-notification
+    // ran second could clobber DOM state written by the first pass (see the
+    // applyCallsSettings fix below for a concrete case this caused). Rather
+    // than keep two competing bridges in sync, this file now defers entirely
+    // to the listener in settings-global-propagation.js (which also handles
+    // PRIVACY_UPDATED — added there as part of this fix).
 
     // ─── Public API ───────────────────────────────────────────────────────────
     global.SettingsModuleSubscriptions = {
@@ -226,10 +242,15 @@ window.applyCallsSettings = window.applyCallsSettings || function applyCallsSett
         const c = settings.calls || {};
         const p = settings.privacy || {};
 
-        root.setAttribute('data-calls-who-can-call', c.whoCanCallMe || 'friendsOnly');
+        root.setAttribute('data-calls-who-can-call', c.whoCanCallMe || 'friends');
         root.setAttribute('data-calls-auto-reject',   String(!!c.autoReject));
         root.setAttribute('data-calls-auto-answer',   String(!!c.autoAnswer));
-        root.setAttribute('data-calls-ringtone',      c.callRingtone || 'default');
+        // FIX (wrong key name): AppSettings' canonical schema (js/AppSettings.js)
+        // stores this as calls.ringtone, not calls.callRingtone — that key is
+        // never populated by AppSettings, so this always fell back to 'default'
+        // regardless of what the user actually chose in Settings. Confirmed by
+        // tracing js/AppSettings.js's default schema and its normalize/merge path.
+        root.setAttribute('data-calls-ringtone',      c.ringtone || 'default');
         // FIX (RINGTONE-FILES-NOT-SUPPORTED): stashed as window globals rather
         // than DOM attributes since these can be multi-hundred-KB data URLs —
         // calls-ui.js's incoming-ringtone player reads these when
@@ -237,8 +258,15 @@ window.applyCallsSettings = window.applyCallsSettings || function applyCallsSett
         // set (independent of the audio choice).
         window.__customRingtoneAudio = c.customRingtoneAudio || null;
         window.__customRingtoneVideo = c.customRingtoneVideo || null;
-        root.setAttribute('data-calls-vibration',     String(c.vibrateOnCall !== false));
-        root.setAttribute('data-calls-speaker-default', String(c.speakerDefault !== false));
+        // FIX (wrong key name): canonical key is calls.callVibration, not
+        // calls.vibrateOnCall — same class of bug as ringtone above.
+        root.setAttribute('data-calls-vibration',     String(c.callVibration !== false));
+        // FIX (inverted default): AppSettings' canonical default for
+        // calls.speakerDefault is false (see js/AppSettings.js), but this used
+        // `!== false`, which defaults an unset value to true — the opposite of
+        // the real default. Speakerphone would appear "on by default" here
+        // even though the rest of the app defaults it to off.
+        root.setAttribute('data-calls-speaker-default', String(c.speakerDefault === true));
         root.setAttribute('data-calls-microphone-default', c.microphoneDefault || 'default');
         root.setAttribute('data-calls-video-quality', c.videoQuality || 'auto');
         root.setAttribute('data-calls-noise-cancel',  String(c.noiseCancellation !== false));
