@@ -92,7 +92,7 @@
 
 
 
-        CALL_INVITATION_TIMEOUT: 60000,  // 1 minute ring timeout
+        CALL_INVITATION_TIMEOUT: 180000,  // 3 minutes ring timeout
 
 
 
@@ -3357,6 +3357,19 @@ if (message.type === window.__CallsCoreShared.MESSAGE_TYPES.CALL_FAILED) {
 
 
                 if (message.type === 'CALL_FORCE_ENDED' || message.type === window.__CallsCoreShared.MESSAGE_TYPES.CALL_FORCE_ENDED) {
+
+
+
+                    // FIX-CALL-ENDED-STORM: this postMessage-driven CALL_FORCE_ENDED
+                    // handler had no dedup at all — every delivery unconditionally reset
+                    // state and re-fired notifyListeners, no matter how many times this
+                    // exact call had already been torn down. See calls-core.part1.js for
+                    // the full explanation of _markCallEndedOnce.
+                    var __p4fId = (message.payload && (message.payload.callId || message.payload.id)) || window.__CallsCoreShared.callsState.activeCallId;
+                    if (__p4fId && !window.__CallsCoreShared._markCallEndedOnce(__p4fId)) {
+                        window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'CALL_FORCE_ENDED: already ended, ignoring duplicate', __p4fId);
+                        return;
+                    }
 
 
 

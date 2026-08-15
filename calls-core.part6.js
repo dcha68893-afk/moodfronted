@@ -1841,45 +1841,65 @@ _clearStaleCallState: function() {
 
 
     // Clean up incoming call data that's been waiting too long
+
+
+
     if (window.__CallsCoreShared.callsState.callData && window.__CallsCoreShared.callsState.callState === 'incoming') {
+
+
 
         const incomingCallAge = Date.now() - (window.__CallsCoreShared.callsState.callData.timestamp || window.__CallsCoreShared.callsState.callData.createdAt || Date.now());
 
+
+
         if (incomingCallAge > 40000) {
 
-            var _staleIncomingCallId = window.__CallsCoreShared.callsState.callData.callId;
+
 
             window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Cleaning up stale incoming call data', {
-                callId: _staleIncomingCallId,
+
+
+
+                callId: window.__CallsCoreShared.callsState.callData.callId,
+
+
+
                 age: incomingCallAge
+
+
+
             });
 
-            // FIX-5-STALE-INCOMING-PARTIAL-CLEANUP: this block used to only
-            // null callData/callState/activeCallId directly, unlike the
-            // sibling "stale initiating" block right above it, which
-            // correctly routes through resetCallState() (clears the
-            // invitation timer, WebRTCManager/MediaManager, session flags,
-            // ReliabilityEngine retry state, etc.) and tells the parent to
-            // navigate back via POST_CALL_RESTORE. An unanswered incoming
-            // call rarely has a live peer connection yet, but it can still
-            // hold a pending callInvitationTimer and other session state
-            // that this partial cleanup silently left behind. Also, the old
-            // code compared activeCallId against callData?.callId AFTER
-            // already nulling callData on the previous line, so that check
-            // could never match — capture the id first instead.
-            var _staleIncomingReturnTarget = (window.__CallsCoreShared.callsState && (window.__CallsCoreShared.callsState.pendingCallReturnTo || window.__CallsCoreShared.callsState.pendingCallSource)) || 'conversations';
 
-            window.__CallsCoreShared.resetCallState();
 
-            try {
-                if (window.parent && window.parent !== window) {
-                    window.parent.postMessage({ type: 'POST_CALL_RESTORE', returnTo: _staleIncomingReturnTarget, chatUserId: window.__CallsCoreShared.callsState.pendingCallReturnChatUserId || null, chatUserName: window.__CallsCoreShared.callsState.pendingCallReturnChatName || null, timestamp: Date.now() }, '*');
-                }
-            } catch (_e) {}
+            window.__CallsCoreShared.callsState.callData = null;
+
+
+
+            window.__CallsCoreShared.callsState.callState = 'idle';
+
+
+
+            if (window.__CallsCoreShared.callsState.activeCallId === window.__CallsCoreShared.callsState.callData?.callId) {
+
+
+
+                window.__CallsCoreShared.callsState.activeCallId = null;
+
+
+
+            }
+
+
 
         }
 
+
+
     }
+
+
+
 },
 
 
@@ -3453,6 +3473,20 @@ endCall: async function(callId, options = {}) {
 
 
 
+    }
+
+
+
+    // FIX-CALL-ENDED-STORM: see the full explanation in calls-core.part1.js
+    // next to _markCallEndedOnce's definition. This is the local "user
+    // clicked hang up / cancel / reject" path — the very first place a call
+    // can be marked ended. Claiming the guard here means every other
+    // termination path below (remote force-end, socket 'call:ended'
+    // broadcast bouncing back to the ender's own client, etc.) will see this
+    // callId as already-handled and no-op instead of re-running teardown.
+    if (!window.__CallsCoreShared._markCallEndedOnce(callId)) {
+        window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'endCall: already ended, ignoring duplicate', callId);
+        return { success: false, reason: 'already_ended' };
     }
 
 

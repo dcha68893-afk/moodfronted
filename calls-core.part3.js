@@ -1717,12 +1717,44 @@
     // Uses BroadcastChannel so only ONE tab handles calls at a time.
     // When another tab becomes the active call handler (leader), this tab
     // suppresses incoming call UI and defers all call operations.
+    //
+    // FIX-INCOMING-CALL-NOT-SHOWN: this is one confirmed real cause of
+    // "receiver's incoming screen never appears even though the backend
+    // confirms the receiver's socket was reached" — this exact session's own
+    // service-worker log shows "10 client(s) notified", i.e. 10 open
+    // tabs/windows of this PWA at once. Leadership here only changes hands
+    // on 'beforeunload', which reliably fires for an actual tab close/
+    // navigation but is NOT reliable for every way a background/minimized
+    // tab can stop being useful (backgrounded, frozen, bfcache) — so a
+    // background tab can sit there as "leader" (still heartbeating every
+    // 1.5s, resetting the 3s staleness window every time) while the tab the
+    // user is actually looking at defers to it and shows nothing. The
+    // person sees the outgoing screen from the caller's side, and silence
+    // on the receiver's side, exactly as reported.
+    // Fix, in two parts:
+    //  1. A tab releases leadership the moment it becomes hidden (not just
+    //     on unload), and a hidden tab never claims leadership in the first
+    //     place — so backgrounded tabs can't win or keep the race.
+    //  2. A VISIBLE tab is never blocked from showing an incoming call by
+    //     the leader-election result. Leader election still exists (so
+    //     TWO simultaneously visible windows don't both fully double-ring
+    //     with duplicate WebRTC negotiation), but "some other tab is
+    //     leader" is only honored when that fact can't cost the user a
+    //     call they're actively looking at the screen for.
     // ─────────────────────────────────────────────────────────────────────────
     window.__CallsCoreShared._tabId = 'tab_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
     var _isCallLeader = false;
     window.__CallsCoreShared._callBroadcast = null;
     var _callLeaderHeartbeatTimer = null;
     var _leaderTimestamp = 0;
+
+    function _releaseLeadershipIfHeld(reason) {
+        if (_isCallLeader && window.__CallsCoreShared._callBroadcast) {
+            try { window.__CallsCoreShared._callBroadcast.postMessage({ type: 'CALL_LEADER_RELEASE', tabId: window.__CallsCoreShared._tabId, reason: reason }); } catch(_) {}
+        }
+        _isCallLeader = false;
+        clearInterval(_callLeaderHeartbeatTimer);
+    }
 
     (function _initTabLeader() {
         try {
@@ -1753,13 +1785,23 @@
             };
 
             function _tryClaimLeader() {
+                // FIX-INCOMING-CALL-NOT-SHOWN (part 1): a hidden/backgrounded tab must
+                // never claim leadership — it can't show the incoming-call UI to anyone.
+                if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
                 setTimeout(function() {
                     var now = Date.now();
+                    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return; // re-check after jitter delay
                     if (now - _leaderTimestamp > 3000) { // No heartbeat for 3s → claim
                         _isCallLeader = true;
                         window.__CallsCoreShared._callBroadcast.postMessage({ type: 'CALL_LEADER_CLAIM', tabId: window.__CallsCoreShared._tabId, ts: now });
                         clearInterval(_callLeaderHeartbeatTimer);
                         _callLeaderHeartbeatTimer = setInterval(function() {
+                            // A leader that has since gone hidden stops heartbeating and
+                            // releases, instead of holding the lock from the background.
+                            if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+                                _releaseLeadershipIfHeld('went_hidden');
+                                return;
+                            }
                             if (_isCallLeader && window.__CallsCoreShared._callBroadcast) {
                                 try {
                                     window.__CallsCoreShared._callBroadcast.postMessage({ type: 'CALL_LEADER_HEARTBEAT', tabId: window.__CallsCoreShared._tabId, ts: Date.now() });
@@ -1783,23 +1825,39 @@
                 }
             }, 500);
 
+            // FIX-INCOMING-CALL-NOT-SHOWN (part 1, cont'd): release leadership the
+            // instant this tab is backgrounded — don't wait for beforeunload, which
+            // doesn't fire for "tab switched away from"/minimized and isn't reliable
+            // for bfcache or in-app iframe teardown either. Also try to claim
+            // leadership the instant this tab becomes visible again and nothing else
+            // has heartbeated recently, instead of passively waiting.
+            if (typeof document !== 'undefined') {
+                document.addEventListener('visibilitychange', function() {
+                    if (document.visibilityState === 'hidden') {
+                        _releaseLeadershipIfHeld('tab_hidden');
+                    } else if (document.visibilityState === 'visible' && !_isCallLeader) {
+                        if (Date.now() - _leaderTimestamp > 3000) _tryClaimLeader();
+                    }
+                });
+            }
+
             // Release leader on tab close
             window.addEventListener('beforeunload', function() {
-                if (_isCallLeader && window.__CallsCoreShared._callBroadcast) {
-                    try { window.__CallsCoreShared._callBroadcast.postMessage({ type: 'CALL_LEADER_RELEASE', tabId: window.__CallsCoreShared._tabId }); } catch(_) {}
-                }
-                // FIX-UNCAUGHT-CLOSED-CHANNEL: this used to close the channel here
-                // without ever clearing _callLeaderHeartbeatTimer. If this tab was
-                // the leader, that 1.5s setInterval keeps running and calls
-                // postMessage() on the now-closed BroadcastChannel the next time it
-                // fires — which throws synchronously (InvalidStateError) with no
-                // try/catch around it, surfacing as an uncaught exception right
-                // here. beforeunload doesn't guarantee the page actually unloads
-                // immediately (bfcache, some browsers/extensions, or an iframe
-                // being swapped/reloaded rather than the whole tab closing), so
-                // this timer can easily outlive the channel it depends on.
+                _releaseLeadershipIfHeld('beforeunload');
+                // Only close the channel here, on genuine unload — pagehide and
+                // visibilitychange('hidden') above can both be temporary (bfcache,
+                // backgrounding the tab), and closing the channel there would leave
+                // this tab permanently deaf to future leader messages if the user
+                // comes back to it. beforeunload is the one signal that means "this
+                // page context is really going away."
                 clearInterval(_callLeaderHeartbeatTimer);
                 if (window.__CallsCoreShared._callBroadcast) { try { window.__CallsCoreShared._callBroadcast.close(); } catch(_) {} }
+            });
+            // FIX-INCOMING-CALL-NOT-SHOWN: pagehide fires in more teardown cases than
+            // beforeunload (bfcache navigation, some in-app iframe removal paths) —
+            // belt-and-suspenders release so a torn-down instance can't hold the lock.
+            window.addEventListener('pagehide', function() {
+                _releaseLeadershipIfHeld('pagehide');
             });
 
         } catch(err) {
@@ -1808,6 +1866,17 @@
     })();
 
     // Helper: should this tab handle a call event?
-    window.__CallsCoreShared._isActiveCallTab = function _isActiveCallTab() { return _isCallLeader; };
+    // FIX-INCOMING-CALL-NOT-SHOWN (part 2): being the elected leader is no longer a
+    // hard requirement for showing an incoming call — it's only used to prevent
+    // duplicate WebRTC negotiation between two SIMULTANEOUSLY VISIBLE tabs. A visible
+    // tab always gets to handle the incoming call regardless of the election result,
+    // because "some other, possibly backgrounded tab technically owns this" is a much
+    // worse outcome than the user seeing the call on the tab they're actually looking
+    // at. See the detailed root-cause comment above _initTabLeader.
+    window.__CallsCoreShared._isActiveCallTab = function _isActiveCallTab() {
+        if (_isCallLeader) return true;
+        if (typeof document !== 'undefined' && document.visibilityState === 'visible') return true;
+        return false;
+    };
 
 })();

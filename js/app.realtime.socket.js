@@ -1263,23 +1263,58 @@
 
                 if (evType === 'message:new' || evType === 'new_message' || evType === 'chat:message') {
                     try {
-                        // FIX (MESSAGE-RELAY-CONSOLIDATION): this broadcasts to
-                        // every iframe under two different event names AND
-                        // dispatches kyn:message:new below (which chat.html's
-                        // own relay listener also acts on) — confirmed to
-                        // triple-deliver the same message alongside chat.html's
-                        // two relay paths. Only proceed if the shared gate says
-                        // nothing has claimed this message yet.
-                        var _claimedFirst = !window.__kynRelayMessageOnce || window.__kynRelayMessageOnce(null, 'message:new', payload);
-                        if (_claimedFirst) {
-                            var _msgFrames = document.querySelectorAll('iframe');
-                            _msgFrames.forEach(function(f) {
-                                try {
-                                    f.contentWindow.postMessage({ type: 'message:new', payload: payload }, '*');
-                                    f.contentWindow.postMessage({ type: 'new_message',  payload: payload }, '*');
-                                } catch(_) {}
-                            });
+                        // FIX (MESSAGE-RELAY-CLAIM-BEFORE-DELIVERY): this used to call
+                        // __kynRelayMessageOnce(null, ...) — claiming the dedup key —
+                        // BEFORE attempting delivery below, and unconditionally, based
+                        // only on whether an iframe.postMessage() call THREW, not on
+                        // whether it actually reached a real, loaded iframe. Right after
+                        // navigating between modules (e.g. starting a chat from Friend,
+                        // which mounts/replaces the messages iframe), that iframe's
+                        // contentWindow can briefly be null/not-yet-ready, or
+                        // querySelectorAll('iframe') can simply not find it yet if it's
+                        // still being inserted into the DOM. In that exact window,
+                        // f.contentWindow.postMessage() either throws (caught, silently
+                        // swallowed) or querySelectorAll finds zero relevant frames —
+                        // either way nothing gets delivered, but the key is already
+                        // marked "claimed" in __kynRelayedMsgIds. The whole point of
+                        // having 5 redundant delivery paths is that when one fails
+                        // silently, another catches it — but claiming the key BEFORE
+                        // delivery succeeds turns those redundant paths into mutually
+                        // exclusive ones: the other 4 see "already delivered" and skip
+                        // too, and the message is gone for good on this device. This is
+                        // exactly the mechanism that can produce "message never reaches
+                        // the receiver" specifically around navigating into/out of the
+                        // Messages module. Fix: attempt delivery FIRST, verify it
+                        // actually reached at least one real, loaded iframe, and only
+                        // claim the dedup key if it did — so a failed attempt here still
+                        // leaves the key open for chat.html's or phase15's fallback
+                        // paths to pick up.
+                        // Skip entirely if another path has already successfully
+                        // delivered this exact message (peek, don't claim yet).
+                        if (window.__kynRelayMessageAlreadyClaimed && window.__kynRelayMessageAlreadyClaimed('message:new', payload)) {
+                            // already handled by another of the 5 relay paths
+                        } else {
+                        var _msgFrames = document.querySelectorAll('iframe');
+                        var _deliveredToAny = false;
+                        _msgFrames.forEach(function(f) {
+                            try {
+                                if (!f.contentWindow) return; // not loaded yet — don't count as delivered
+                                f.contentWindow.postMessage({ type: 'message:new', payload: payload }, '*');
+                                f.contentWindow.postMessage({ type: 'new_message',  payload: payload }, '*');
+                                _deliveredToAny = true;
+                            } catch(_) { /* this one frame failed — others may still succeed */ }
+                        });
+                        if (_deliveredToAny) {
+                            // Claim the key now that delivery actually happened, so the
+                            // other 4 redundant paths correctly treat this as handled.
+                            if (window.__kynRelayMessageOnce) window.__kynRelayMessageOnce(null, 'message:new', payload);
                         }
+                        // If _deliveredToAny is false, deliberately do NOT claim the key —
+                        // leave it open so chat.html's own relay listener or
+                        // phase15.delivery.patch.js's path (which may run moments later,
+                        // by which point the iframe has finished mounting) can still
+                        // deliver it instead of finding a false "already delivered" claim.
+                        } // end else (not already claimed by another path)
                         // PHASE15 FIX: Also fire on parent window so chat.html catches it
                         // even when messages-core runs in the same frame (no iframe).
                         try { window.dispatchEvent(new CustomEvent('kyn:message:new', { detail: payload })); } catch(_) {}

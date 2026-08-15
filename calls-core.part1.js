@@ -39,6 +39,52 @@
         window.__CallsCoreShared.notifyListeners = function notifyListeners() {};
     }
 
+    // FIX-CALL-ENDED-STORM: this is the single missing piece behind the
+    // repeated "CALL_ENDED_RETURN"/"POST_CALL_RESTORE"/"SWITCH_MODULE"
+    // postMessage bursts seen when a call ends (10+ of the same message in
+    // under 2 seconds, per RealtimeStabilizationLayer's storm detector logs).
+    // Root cause: there are SIX independent places across calls-core.part4-7
+    // that call notifyListeners('call_ended'/'call_force_ended', ...) — one
+    // for the local "I clicked hang up" path (part6 CallsStateGovernor.endCall),
+    // and five more for remote/forced termination paths (part4, part5, part7
+    // handleCallForceEnd, handleCallEnded). NONE of them checked whether this
+    // exact call had already been torn down. So: user clicks End → local path
+    // fires call_ended → UI closes, chat.html is notified → chat.html's own
+    // socket listener for the SAME call's 'call:ended'/'call:force_ended'
+    // (broadcast to every participant, including the one who just ended it)
+    // arrives a moment later → handleCallForceEnd fires AGAIN for the same
+    // (by now already-idle) call → its only guard, _isStaleCallEvent, returns
+    // false once activeCallId has already been reset to null (nothing left to
+    // compare against) → it proceeds anyway → notifyListeners fires again →
+    // every listener (calls-ui.js, calls.html) reacts again → each reaction
+    // posts messages across the iframe boundary → those postMessages get
+    // handled again → and so on. That is the storm, and it is exactly the
+    // mechanism the user asked to have fixed for real: "once cancel/reject/
+    // end is clicked, it must clear the call from the lines" — this makes
+    // that literal. A callId that has been fully ended is recorded here
+    // ONCE and permanently (not cleared by resetCallState, so a duplicate/
+    // late-arriving termination event for the same call — from any of the
+    // six call sites above, in any order — is dropped before it can do any
+    // work: no state reset, no notifyListeners fan-out, no postMessage).
+    // A small ring buffer bounds memory; call ids are short-lived per session.
+    var __endedCallIds = [];
+    var __endedCallIdSet = new Set();
+    window.__CallsCoreShared._markCallEndedOnce = function _markCallEndedOnce(callId) {
+        if (!callId) return true; // no id to dedup on — let the caller proceed as before
+        var resolve = (window.__CallsCoreShared.resolveCallId && typeof window.__CallsCoreShared.resolveCallId === 'function')
+            ? window.__CallsCoreShared.resolveCallId : function (x) { return x; };
+        var key;
+        try { key = String(resolve(callId)); } catch (_) { key = String(callId); }
+        if (__endedCallIdSet.has(key)) return false; // already ended — every caller must no-op
+        __endedCallIdSet.add(key);
+        __endedCallIds.push(key);
+        if (__endedCallIds.length > 200) {
+            var stale = __endedCallIds.shift();
+            __endedCallIdSet.delete(stale);
+        }
+        return true; // first time — caller should proceed with teardown/notify
+    };
+
     // FIX (calls-core split): applySettingToCallsModule was a bare top-level
     // function in the pre-split monolithic calls-core.js, callable from every
     // closure in that single file. The 8-way split wraps each part in its own

@@ -1667,6 +1667,29 @@ const UIStateManager = {
                     // Fall through and add it normally so it appears in the current session.
                 }
 
+                // FIX (SEND-HANG-ON-FIRST-REPLY, receiver side): prefetchRecipientKey()
+                // is already called on the OPENER's side in 3 places (starting a direct
+                // conversation, opening a chat from Friend/Calls/Status, and the reply
+                // path in messages-core.operations.js) — all for exactly one reason: so
+                // that by the time that person hits Send, the other participant's E2E
+                // public key is already warm in cache instead of encryptForChat() having
+                // to fetch it synchronously inside the Send path (the multi-second "Send
+                // hangs" delay). The person who did NOT initiate — i.e. whoever's very
+                // first contact with this sender is receiving this incoming message right
+                // now, having never called startOrGetDirectConversation() themselves —
+                // never got that same prefetch. So: sender A opens a brand-new chat with
+                // B (A's key fetch is prefetched, A's send is fast), the message is
+                // delivered to B fine, but the FIRST time B types a reply, B's client has
+                // never fetched A's public key at all — encryptForChat() has to do it for
+                // the first time synchronously, hanging B's send exactly the way A's send
+                // used to hang before the original fix, just on the other side of the
+                // same conversation. Prefetch here too, the moment a genuine (non-echo)
+                // incoming message from this sender is confirmed, so B's reply is warm
+                // by the time B hits Send.
+                if (_realtimeSenderId && window.KynectaE2E?.prefetchRecipientKey) {
+                    try { window.KynectaE2E.prefetchRecipientKey(_realtimeSenderId); } catch (_) {}
+                }
+
                 // FIX-RECEIVE-DECRYPT-DECOUPLE (replaces the old FIX-DM-DECRYPT-AT-WRITE
                 // block, which awaited decryptFromChat — bounded by an 8s race — BEFORE
                 // normalizedMessage was ever built or rendered. That meant "message

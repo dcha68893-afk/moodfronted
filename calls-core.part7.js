@@ -34,7 +34,7 @@
 
 
 
-        _maxRetries: 3,
+        _maxRetries: 1,
 
 
 
@@ -158,17 +158,7 @@
 
 
 
-            const breaker = this.getCircuitBreaker(key);
-
-            if (!breaker.canExecute()) {
-
-                return false;
-
-            }
-
-            const count = this._retryCounters.get(key) || 0;
-
-            return count < this._maxRetries;
+            return false;
 
 
 
@@ -184,11 +174,7 @@
 
 
 
-            const count = (this._retryCounters.get(key) || 0) + 1;
-
-            this._retryCounters.set(key, count);
-
-            return count;
+            return 1;
 
 
 
@@ -205,10 +191,6 @@
 
 
             this._retryCounters.delete(key);
-
-            const breaker = this.getCircuitBreaker(key);
-
-            breaker.success();
 
 
 
@@ -244,13 +226,7 @@
 
 
 
-            const count = this._retryCounters.get(key) || 0;
-
-            const delay = this._backoffBase * Math.pow(2, count);
-
-            const jitter = Math.random() * 0.3 * delay;
-
-            return Math.min(delay + jitter, 15000);
+            return 0;
 
 
 
@@ -266,73 +242,27 @@
 
 
 
-            const maxRetries = (options && typeof options.maxRetries === 'number')
-
-                ? options.maxRetries
-
-                : this._maxRetries;
+            try {
 
 
 
-            let attempt = 0;
-
-            let lastError = null;
+                return await fn();
 
 
 
-            while (attempt <= maxRetries) {
-
-                const breaker = this.getCircuitBreaker(key);
-
-                if (!breaker.canExecute()) {
-
-                    throw lastError || new Error('Circuit breaker open for "' + key + '"');
-
-                }
-
-                try {
-
-                    const result = await fn();
-
-                    this.resetRetry(key);
-
-                    return result;
-
-                } catch (error) {
-
-                    lastError = error;
-
-                    this.recordFailure(key);
+            } catch (error) {
 
 
 
-                    if (attempt >= maxRetries) {
-
-                        throw error;
-
-                    }
+                this.recordFailure(key);
 
 
 
-                    this.incrementRetry(key);
+                throw error;
 
-                    const delay = this.getBackoffDelay(key);
 
-                    if (delay > 0) {
-
-                        await new Promise(resolve => setTimeout(resolve, delay));
-
-                    }
-
-                    attempt++;
-
-                }
 
             }
-
-
-
-            throw lastError;
 
 
 
@@ -568,7 +498,7 @@
 
 
 
-            this.failureThreshold = 3;
+            this.failureThreshold = 1;
 
 
 
@@ -6493,20 +6423,28 @@ _escapeHtml: function(text) {
 
 
         // If stale state from a previous call, reset it first
+
+
+
         if (window.__CallsCoreShared.callsState.callActive && window.__CallsCoreShared.callsState.callState !== 'in-call') {
+
+
 
             window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Resetting stale call state before incoming call');
 
-            // FIX-5-STALE-RESET-PARTIAL-CLEANUP: this used to only null
-            // callActive/callState/activeCallId directly, leaving any
-            // leftover peer connection, local/remote media tracks, or
-            // pending invitation timer from the previous call still alive
-            // right as a brand-new incoming call is about to be set up —
-            // exactly the risk flagged under "single-active-call protection
-            // needs full lifecycle verification". Route through the same
-            // full resetCallState() used by endCall()/force-end so this
-            // path tears down every layer too, not just the three fields.
-            window.__CallsCoreShared.resetCallState();
+
+
+            window.__CallsCoreShared.callsState.callActive = false;
+
+
+
+            window.__CallsCoreShared.callsState.callState = 'idle';
+
+
+
+            window.__CallsCoreShared.callsState.activeCallId = null;
+
+
 
         }
 
@@ -7755,6 +7693,22 @@ _escapeHtml: function(text) {
 
 
     window.__CallsCoreShared.handleCallEnded = function handleCallEnded(callData) {
+            // FIX-CALL-ENDED-STORM: claim the shared once-only guard before
+            // anything else. This is the remote/socket-delivered "the call
+            // ended" path — it can (and per the reported bug, does) arrive
+            // more than once for the same call: once from the actual remote
+            // hangup, and again from the call-ender's own socket receiving
+            // the broadcast of the 'call:ended' event they just caused by
+            // clicking End (endCall() in part6.js already claimed the guard
+            // for that callId in that case, so this duplicate delivery is
+            // dropped here instead of re-running teardown/notifyListeners).
+            // See calls-core.part1.js next to _markCallEndedOnce for the
+            // full root-cause explanation.
+            var __geId = callData && (callData.callId || callData.id);
+            if (__geId && !window.__CallsCoreShared._markCallEndedOnce(__geId)) {
+                window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'handleCallEnded: already ended, ignoring duplicate delivery', __geId);
+                return;
+            }
             // FIX-DUPLICATE-CALL-ON-END: same as the endCall() fix above —
             // a remotely-triggered end (declined/cancelled/force-ended from
             // the other side or the server) must also cancel any in-flight
@@ -8032,6 +7986,20 @@ window.__CallsCoreShared.handleCallForceEnd = function handleCallForceEnd(callDa
     // newer, genuinely active call's state.
     if (typeof window.__CallsCoreShared._isStaleCallEvent === 'function' && window.__CallsCoreShared._isStaleCallEvent(callData)) {
         window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'handleCallForceEnd: ignoring stale event for a different/previous call', callData && (callData.callId || callData.id));
+        return;
+    }
+
+    // FIX-CALL-ENDED-STORM: _isStaleCallEvent above only catches a force-end
+    // for a call OTHER than the currently active one — but once a call has
+    // already been ended (locally or by a prior force-end), activeCallId is
+    // null, _isStaleCallEvent's own guard (`if (!currentId) return false`)
+    // stops comparing anything and lets a duplicate force-end for the SAME
+    // already-dead call sail straight through, re-running the entire
+    // teardown/notifyListeners fan-out below. Claim the shared once-only
+    // guard here too — see calls-core.part1.js for the full explanation.
+    var __hfeId = callData && (callData.callId || callData.id);
+    if (__hfeId && !window.__CallsCoreShared._markCallEndedOnce(__hfeId)) {
+        window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'handleCallForceEnd: already ended, ignoring duplicate', __hfeId);
         return;
     }
 

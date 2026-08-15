@@ -10431,6 +10431,32 @@ Type: ${message.type || 'text'}`;
                         // times with increasing backoff (500ms/1000ms/1500ms)
                         // via a small recursive helper before actually giving
                         // up and returning the text to the user.
+                        //
+                        // FIX (E2E-SECURE-FAILURE-NEVER-RETRIED): the E2E key/
+                        // readiness failure (thrown as E2ESecureFailureError,
+                        // surfaced here as response.error === its message text,
+                        // "🔒 Secure connection is being established...") was
+                        // never in this retryable whitelist at all — it went
+                        // straight to the generic "Failed to send" dead-end
+                        // even though it is, by definition, the single most
+                        // retryable failure this app has: the key fetch that
+                        // just timed out at 4-8s may well have finished a
+                        // moment later. There was also a SEPARATE, nicely
+                        // worded handler for exactly this error
+                        // ("🔒 Secure connection is being established. Please
+                        // retry.") sitting in an outer .catch() a few hundred
+                        // lines up (search E2ESecureFailureError) — but it can
+                        // never actually run, because this inner layer already
+                        // catches the error and resolves {success:false}
+                        // instead of letting it propagate as a rejection. That
+                        // outer handler is unreachable dead code. Fixed by
+                        // recognizing this failure here, where it's actually
+                        // reachable, giving it the same retry-with-backoff
+                        // treatment as the other transient failures, and using
+                        // its own message (not the generic one) if retries are
+                        // exhausted.
+                        const _isE2EFailure = (resp) => !!(resp && resp.error && typeof resp.error === 'string' &&
+                            (resp.error.indexOf('Secure connection') !== -1 || resp.error.indexOf('🔒') !== -1));
                         const _attemptResend = (attempt) => {
                             const _core2 = getMessagesCore();
                             const _r = _core2?.sendMessage(content, {
@@ -10446,12 +10472,12 @@ Type: ${message.type || 'text'}`;
                                     // messages-core.bootstrap.js for the primary fix; this is
                                     // defense-in-depth for the narrow window where session itself
                                     // hasn't arrived from the parent yet.
-                                    const _retryable = resp.error === 'no_conversation' || resp.error === 'invalid_conversation' || resp.error === 'module_not_active';
+                                    const _retryable = resp.error === 'no_conversation' || resp.error === 'invalid_conversation' || resp.error === 'module_not_active' || _isE2EFailure(resp);
                                     if (_retryable && attempt < 3) {
                                         setTimeout(() => _attemptResend(attempt + 1), 500 * (attempt + 1));
                                     } else {
                                         input.value = content;
-                                        UIRenderer.showNotification('Failed to send — try again', 'error');
+                                        UIRenderer.showNotification(_isE2EFailure(resp) ? resp.error : 'Failed to send — try again', 'error');
                                     }
                                 } else {
                                     setTimeout(_renderNow, 0);
@@ -10462,7 +10488,7 @@ Type: ${message.type || 'text'}`;
                             });
                         };
 
-                        const _retryable = response.error === 'no_conversation' || response.error === 'invalid_conversation' || response.error === 'module_not_active';
+                        const _retryable = response.error === 'no_conversation' || response.error === 'invalid_conversation' || response.error === 'module_not_active' || _isE2EFailure(response);
                         if (_retryable) {
                             setTimeout(() => _attemptResend(1), 500);
                         } else {
