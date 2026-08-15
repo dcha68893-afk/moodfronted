@@ -437,6 +437,14 @@
             pointer-events: none;
             opacity: 0;
         }
+        /* FIX (theme flash / "sparking of light" — same root cause as chat.html's
+           #loadingScreen): hardcoded near-white regardless of dark mode. Uses the
+           same --kyn-bg-panel variable theme.engine.js already sets synchronously
+           at the top of <head>, so this takes effect immediately with no load-order
+           dependency, same pattern as the header fix a few lines above this. */
+        html[data-theme="dark"] .loading-overlay {
+            background: rgba(15,23,42,0.95);
+        }
         
         .loading-overlay.visible {
             display: flex;

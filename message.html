@@ -278,6 +278,17 @@
             display: none;
             min-width: 200px;
         }
+        /* FIX (theme flash / "sparking of light" — same class of bug as
+           chat.html's #loadingScreen and group.html's .loading-overlay):
+           these three panels/modals were hardcoded to white regardless of
+           dark mode. theme.engine.js already sets --kyn-bg-panel/
+           --kyn-text-primary synchronously before this <style> block
+           parses (it's loaded first, at the very top of <head>), so this
+           takes effect immediately with no load-order dependency. */
+        html[data-theme="dark"] .search-results {
+            background: var(--kyn-bg-panel, #1e293b);
+            color: var(--kyn-text-primary, #e2e8f0);
+        }
         
         .search-results.active {
             display: block;
@@ -1756,15 +1767,8 @@
     <!-- Phase 2 features -->
     <script src="js/sticker-picker.js" defer></script>
     <script src="js/message-select.js" defer></script>
-    <!-- REMOVED (consolidation pass): js/core/message/MessageLifecycleClient.js.
-         Verified dead/duplicate, not just disabled: its send API
-         (sendMessage/markRead) was never called anywhere, and its receive
-         path duplicated the delivery-ack + render work messages-core.ui-bridge.js
-         already does for every incoming message (server emits both 'msg:new'
-         and 'message:new' for each message; this file's listener processed
-         and ACKed the 'msg:new' copy a second time, on top of the ACK the
-         legacy pipeline already sends for 'message:new'). See
-         messages-core.bootstrap.js for the full note. -->
+    <!-- MESSAGE LIFECYCLE REBUILD (messages-only scope, added 2026-07-26): additive, see file header -->
+    <script src="js/core/message/MessageLifecycleClient.js" defer></script>
     <!-- Phase 3: Security -->
     <!-- FIX-E2E-DUPLICATE-LOAD: js/e2e-encryption.js was loaded a second time
          here (on top of the load + tryInitE2E() init above). Re-executing

@@ -56,6 +56,42 @@
             --app-text-secondary: #64748b;
         }
 
+        /* FIX (theme flash / "sparking of light" on dark mode reload): this
+           whole <style> block predates js/theme.engine.js and was never
+           updated when dark mode was added — every variable above, plus
+           `body`, `#loadingScreen`, and `#globalHeader` below, are hardcoded
+           to light colors (#f8fafc, white, near-white gradients) with zero
+           awareness of data-theme. theme.engine.js (loaded first, at the top
+           of <head>) sets `data-theme="dark"` on <html> before this block
+           even parses, and theme.colors.css (loaded much later, near the
+           bottom of <head>) DOES correctly theme everything it covers — but
+           these specific hardcoded values aren't part of that file, so
+           nothing ever overrides them for dark mode. That's not actually a
+           timing race (waiting for theme.colors.css to catch up) — it's a
+           permanent gap: these elements stay light-colored in dark mode
+           forever, at every reload, which is exactly "sparking of light"
+           happening consistently rather than a one-frame flash. Fixed by
+           overriding the same variables/selectors immediately whenever
+           data-theme="dark" is already set, in this same early block, so
+           there's no dependency on theme.colors.css's load order at all.
+           Values match theme.colors.css's own dark palette (--kyn-bg-root /
+           --kyn-bg-panel) so this stays visually consistent with it. */
+        html[data-theme="dark"] {
+            --app-secondary-surface: #0f172a;
+            --app-secondary-muted: #1e293b;
+            --app-text-color: #e2e8f0;
+            --app-text-secondary: #94a3b8;
+        }
+        html[data-theme="dark"] #loadingScreen {
+            background: #0f172a;
+        }
+        html[data-theme="dark"] #globalHeader {
+            background:
+                linear-gradient(135deg, rgba(15,23,42,0.97), rgba(30,41,59,0.94)),
+                linear-gradient(90deg, rgba(15,23,42,0.03), rgba(14,165,233,0.04));
+            border-bottom-color: rgba(226,232,240,0.08);
+        }
+
         * {
             margin: 0;
             padding: 0;

@@ -10415,49 +10415,31 @@ Type: ${message.type || 'text'}`;
                     // and hand the text back to the user if the retry also
                     // fails.
                     if (response && response.success === false) {
-                        // FIX-SEND-RETRY-BUDGET-TOO-SHORT: this used to allow
-                        // exactly ONE 500ms retry before giving up and dumping
-                        // the text back into the input box. That budget was
-                        // sized for the common case (conversation finishes
-                        // wiring up within a few hundred ms), but chats opened
-                        // from Friend/Calls/Status/Marketplace/notifications
-                        // can also be doing a cold E2E key fetch and/or a
-                        // first-ever fetchConversations() round trip at the
-                        // same time (see FIX-COLD-CACHE-PENDING-DUPLICATE in
-                        // openChatWithUserInUI) — on a slow connection that can
-                        // genuinely take longer than 500ms, and the send was
-                        // reported as failed even though the conversation
-                        // would have been ready moments later. Retry up to 3
-                        // times with increasing backoff (500ms/1000ms/1500ms)
-                        // via a small recursive helper before actually giving
-                        // up and returning the text to the user.
-                        //
-                        // FIX (E2E-SECURE-FAILURE-NEVER-RETRIED): the E2E key/
-                        // readiness failure (thrown as E2ESecureFailureError,
-                        // surfaced here as response.error === its message text,
-                        // "🔒 Secure connection is being established...") was
-                        // never in this retryable whitelist at all — it went
-                        // straight to the generic "Failed to send" dead-end
-                        // even though it is, by definition, the single most
-                        // retryable failure this app has: the key fetch that
-                        // just timed out at 4-8s may well have finished a
-                        // moment later. There was also a SEPARATE, nicely
-                        // worded handler for exactly this error
-                        // ("🔒 Secure connection is being established. Please
-                        // retry.") sitting in an outer .catch() a few hundred
-                        // lines up (search E2ESecureFailureError) — but it can
-                        // never actually run, because this inner layer already
-                        // catches the error and resolves {success:false}
-                        // instead of letting it propagate as a rejection. That
-                        // outer handler is unreachable dead code. Fixed by
-                        // recognizing this failure here, where it's actually
-                        // reachable, giving it the same retry-with-backoff
-                        // treatment as the other transient failures, and using
-                        // its own message (not the generic one) if retries are
-                        // exhausted.
-                        const _isE2EFailure = (resp) => !!(resp && resp.error && typeof resp.error === 'string' &&
-                            (resp.error.indexOf('Secure connection') !== -1 || resp.error.indexOf('🔒') !== -1));
-                        const _attemptResend = (attempt) => {
+                        // SIMPLIFIED (per explicit request: fail fast with a real reason,
+                        // not endless retries): this used to be a recursive backoff retry
+                        // (500ms/1000ms/1500ms, up to 3 attempts) with no overall time
+                        // limit, and gave up with a generic "Failed to send — try again"
+                        // that hid whatever the actual cause was. Replaced with a single
+                        // hard deadline: retry every 1s while the failure is one of the
+                        // known-transient kinds (conversation still wiring up, E2E key
+                        // still fetching), but stop and show the real, specific reason
+                        // the moment either the deadline passes or the failure turns out
+                        // to be non-transient. No open-ended retrying.
+                        const _SEND_FAIL_DEADLINE_MS = 8000;
+                        const _sendFailStartedAt = Date.now();
+                        const _isTransient = (resp) => resp && (
+                            resp.error === 'no_conversation' || resp.error === 'invalid_conversation' || resp.error === 'module_not_active' ||
+                            (typeof resp.error === 'string' && (resp.error.indexOf('Secure connection') !== -1 || resp.error.indexOf('🔒') !== -1))
+                        );
+                        const _giveUp = (resp) => {
+                            input.value = content;
+                            // Show the SPECIFIC reason the send actually failed for,
+                            // not a generic message — this is the real cause from
+                            // sendMessage()'s own catch block (error.message).
+                            const reason = (resp && resp.error) ? resp.error : 'Unknown error';
+                            UIRenderer.showNotification(`Message could not be sent: ${reason}`, 'error');
+                        };
+                        const _attemptResend = () => {
                             const _core2 = getMessagesCore();
                             const _r = _core2?.sendMessage(content, {
                                 type: attachment?.type || 'text',
@@ -10465,35 +10447,24 @@ Type: ${message.type || 'text'}`;
                             });
                             Promise.resolve(_r).then((resp) => {
                                 if (resp && resp.success === false) {
-                                    // FIX: 'module_not_active' added alongside the existing two —
-                                    // same timing race (module lifecycle/session handshake still
-                                    // settling right after opening from Friend/Calls/Status/
-                                    // Marketplace), see canSendUserMessages() fix in
-                                    // messages-core.bootstrap.js for the primary fix; this is
-                                    // defense-in-depth for the narrow window where session itself
-                                    // hasn't arrived from the parent yet.
-                                    const _retryable = resp.error === 'no_conversation' || resp.error === 'invalid_conversation' || resp.error === 'module_not_active' || _isE2EFailure(resp);
-                                    if (_retryable && attempt < 3) {
-                                        setTimeout(() => _attemptResend(attempt + 1), 500 * (attempt + 1));
+                                    const _elapsed = Date.now() - _sendFailStartedAt;
+                                    if (_isTransient(resp) && _elapsed < _SEND_FAIL_DEADLINE_MS) {
+                                        setTimeout(_attemptResend, 1000);
                                     } else {
-                                        input.value = content;
-                                        UIRenderer.showNotification(_isE2EFailure(resp) ? resp.error : 'Failed to send — try again', 'error');
+                                        _giveUp(resp);
                                     }
                                 } else {
                                     setTimeout(_renderNow, 0);
                                 }
-                            }).catch(() => {
-                                input.value = content;
-                                UIRenderer.showNotification('Failed to send — try again', 'error');
+                            }).catch((err) => {
+                                _giveUp({ error: err?.message || 'Network error' });
                             });
                         };
 
-                        const _retryable = response.error === 'no_conversation' || response.error === 'invalid_conversation' || response.error === 'module_not_active' || _isE2EFailure(response);
-                        if (_retryable) {
-                            setTimeout(() => _attemptResend(1), 500);
+                        if (_isTransient(response)) {
+                            setTimeout(_attemptResend, 1000);
                         } else {
-                            input.value = content;
-                            UIRenderer.showNotification('Failed to send — try again', 'error');
+                            _giveUp(response);
                         }
                         return;
                     }

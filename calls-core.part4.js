@@ -3252,17 +3252,26 @@
 
 
 
+                    // FIX-CALL-ENDED-STORM (cont'd — found via live testing after the
+                    // first round of fixes): this is a 7th independent entry point that
+                    // fires the terminal notifyListeners fan-out, missed before because
+                    // it uses a THIRD distinct event name ('call_cancelled') never
+                    // covered by the 'call_ended'/'call_force_ended' guards. It called
+                    // handleCallForceEnd() (which DOES have the guard) and then, right
+                    // after, ALSO called notifyListeners('call_cancelled', ...) directly
+                    // and unconditionally — completely bypassing any guard, every time.
+                    // Same fix: claim the shared once-only guard before doing anything.
+                    var __ccId = (message.payload || message.data) && ((message.payload || message.data).callId || (message.payload || message.data).id);
+                    if (__ccId && !window.__CallsCoreShared._markCallEndedOnce(__ccId)) {
+                        window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'CALL_CANCELLED: already ended, ignoring duplicate', __ccId);
+                        return;
+                    }
+
                     window.__CallsCoreShared.handleCallForceEnd(message.payload || message.data || {});
-
-
 
                     window.__CallsCoreShared.notifyListeners('call_cancelled', message.payload || message.data || {});
 
-
-
                     return;
-
-
 
                 }
 

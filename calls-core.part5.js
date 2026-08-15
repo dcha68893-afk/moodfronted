@@ -3395,13 +3395,14 @@
 
                     window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Connection timeout reached');
 
+                    // FIX-CALL-ENDED-STORM (cont'd): same terminal-event guard as the
+                    // other call_ended/call_cancelled/call_rejected/call_failed sites.
+                    var __p5toId = this._currentCallId;
+                    if (!__p5toId || window.__CallsCoreShared._markCallEndedOnce(__p5toId)) {
+                        this._notifyListeners('call_timeout', {});
 
-
-                    this._notifyListeners('call_timeout', {});
-
-
-
-                    window.__CallsCoreShared.notifyListeners('call_timeout', { callId: this._currentCallId });
+                        window.__CallsCoreShared.notifyListeners('call_timeout', { callId: this._currentCallId });
+                    }
 
 
 

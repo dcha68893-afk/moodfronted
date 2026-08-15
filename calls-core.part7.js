@@ -7680,6 +7680,17 @@ _escapeHtml: function(text) {
             return;
         }
 
+        // FIX-CALL-ENDED-STORM (cont'd): same class of bug as call_ended/
+        // call_force_ended/call_cancelled — this is a terminal event for the
+        // call and can arrive more than once for the same callId. Share the
+        // same guard namespace: a call already ended/cancelled another way
+        // should also suppress a later, redundant "rejected" for that id.
+        var __crId = callData && (callData.callId || callData.id);
+        if (__crId && !window.__CallsCoreShared._markCallEndedOnce(__crId)) {
+            window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'handleCallRejected: already ended, ignoring duplicate', __crId);
+            return;
+        }
+
         window.__CallsCoreShared.resetCallState();
 
         window.__CallsCoreShared.notifyListeners('call_rejected', callData);
@@ -8196,6 +8207,14 @@ window.__CallsCoreShared.handleCallFailed = function handleCallFailed(callData) 
         return;
     }
 
+    // FIX-CALL-ENDED-STORM (cont'd): same terminal-event guard as
+    // call_ended/call_force_ended/call_cancelled/call_rejected.
+    var __cfId = callData && (callData.callId || callData.id);
+    if (__cfId && !window.__CallsCoreShared._markCallEndedOnce(__cfId)) {
+        window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'handleCallFailed: already ended, ignoring duplicate', __cfId);
+        return;
+    }
+
     window.__CallsCoreShared.resetCallState();
 
     window.__CallsCoreShared.notifyListeners('call_failed', callData);
@@ -8213,6 +8232,13 @@ window.__CallsCoreShared.handleCallTimeout = function handleCallTimeout(callData
 
     if (window.__CallsCoreShared._isStaleCallEvent(callData)) {
         window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'handleCallTimeout: ignoring stale event for a different/previous call', callData && (callData.callId || callData.id));
+        return;
+    }
+
+    // FIX-CALL-ENDED-STORM (cont'd): same terminal-event guard.
+    var __ctId = callData && (callData.callId || callData.id);
+    if (__ctId && !window.__CallsCoreShared._markCallEndedOnce(__ctId)) {
+        window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'handleCallTimeout: already ended, ignoring duplicate', __ctId);
         return;
     }
 
