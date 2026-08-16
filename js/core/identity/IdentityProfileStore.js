@@ -261,6 +261,22 @@
 
   _loadCache();
 
+  // Called on 'kyn:accountSwitchWipe' (see authStorage.js), fired right
+  // before that module wipes localStorage/IndexedDB for a login from a
+  // different account on this device. authStorage's wipe clears the
+  // STORAGE_KEY/CURRENT_USER_KEY entries this module persisted under, but
+  // does nothing about the `cache` Map already loaded into memory in this
+  // frame — without this reset, the previous account's identities (names,
+  // avatars, cover photos) kept resolving from memory for the rest of the
+  // page session, and the next _persistCache() call would have written
+  // them straight back into the freshly-wiped localStorage.
+  function resetForAccountSwitch() {
+    cache.clear();
+  }
+  if (typeof window.addEventListener === 'function') {
+    window.addEventListener('kyn:accountSwitchWipe', resetForAccountSwitch);
+  }
+
   window.Identity = {
     resolveAvatar,
     resolveCover,
@@ -271,6 +287,7 @@
     get,
     setCurrentUser,
     applyUpdate,
+    resetForAccountSwitch,
     DEFAULT_AVATAR,
   };
 

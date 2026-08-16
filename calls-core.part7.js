@@ -6181,6 +6181,22 @@ _escapeHtml: function(text) {
 
     window.__CallsCoreShared.handleIncomingCall = function handleIncomingCall(callData) {
 
+        // FIX-DUPLICATE-CALL-ON-END (callee side): a duplicate or out-of-order
+        // call:incoming for a call this device already rejected/ended/missed
+        // locally would otherwise fall straight through to showing the
+        // incoming-call UI again below — the same call ringing again right
+        // after it was dismissed. _markCallEndedOnce's registry already
+        // records every call this client has finished handling; check it
+        // read-only here and drop the event if it's a call we're already done
+        // with.
+        try {
+            var _incId = callData && (callData.callId || callData.id);
+            if (_incId && window.__CallsCoreShared._isCallEndedAlready(_incId)) {
+                window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'handleIncomingCall: call already ended locally, ignoring duplicate', _incId);
+                return;
+            }
+        } catch (_e) {}
+
 
         // ── FIX: Capture the receiver's origin page (tagged by chat.html as
         // _receiverReturnTo) so that after this call ends, POST_CALL_RESTORE
@@ -8902,6 +8918,21 @@ window.CallHandlers = {
         const localCallId = window.__CallsCoreShared.callsState.activeCallId || window.__CallsCoreShared.callsState.localCallId;
         window.__CallsCoreShared.logCall(window.__CallsCoreShared.MODULE, 'handleCallInitiatedAck', { serverCallId, localCallId });
         if (!serverCallId) return;
+
+        // FIX-DUPLICATE-CALL-ON-END (caller side): the retry engine cancel in
+        // endCall() only stops FUTURE retry attempts — it can't un-send an
+        // attempt that already went out over the wire. If the user hangs up/
+        // cancels between that attempt being sent and its ack coming back, the
+        // ack still arrives here after teardown already ran, and previously
+        // this unconditionally re-set callsState.activeCallId/serverCallId —
+        // reviving a call the user already ended, which is exactly the "same
+        // call starts again right after I cancel/end it" symptom. Drop any
+        // ack for a call already recorded as locally ended.
+        if ((localCallId && window.__CallsCoreShared._isCallEndedAlready(localCallId)) ||
+            window.__CallsCoreShared._isCallEndedAlready(serverCallId)) {
+            window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'handleCallInitiatedAck: call already ended locally, ignoring late ack', { serverCallId, localCallId });
+            return;
+        }
 
         if (!window.__CallsCoreShared.callsState._callIdAliases) window.__CallsCoreShared.callsState._callIdAliases = new Map();
         if (localCallId && localCallId !== serverCallId) {

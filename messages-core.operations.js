@@ -134,11 +134,43 @@ const ChatManager = {
         // conversationId instead of one flag for the whole module.
         _loadingMessagesByChat: new Set(),
         _pendingConversations: new Map(),
-        
+        _unknownConvFetchDebounce: null,
+
         init: function() {
             this._loadFromCache();
             this._loadDemoDataIfNeeded();
             return this;
+        },
+
+        // Called on 'kyn:accountSwitchWipe' (dispatched by authStorage.js
+        // right before it wipes localStorage/IndexedDB for a login from a
+        // different account on this device). authStorage's wipe only clears
+        // storage — it does nothing about the in-memory state already sitting
+        // in this module, so without this reset the previous account's
+        // conversations/messages kept being served from _conversations /
+        // _conversationsMap / _messages / _messagesMap / _historyCache for the
+        // rest of the page session, and _saveToCache()/_rebuildMap() calls
+        // would just write that stale data straight back into the
+        // freshly-wiped localStorage/IndexedDB. This is also why chats from
+        // the previous account (e.g. chatId 2) kept being requested after
+        // switching accounts, which the backend correctly rejected with a
+        // 403 "Access denied to this chat" since the new user isn't a
+        // participant — the fetch itself wasn't broken, the chat id being
+        // requested was stale.
+        resetForAccountSwitch: function() {
+            if (this._unknownConvFetchDebounce) { clearTimeout(this._unknownConvFetchDebounce); this._unknownConvFetchDebounce = null; }
+            this._conversations = [];
+            this._conversationsMap = new Map();
+            this._activeConversation = null;
+            this._messages = [];
+            this._messagesMap = new Map();
+            this._historyCache = new Map();
+            this._lastMessagesFetchAt = new Map();
+            this._loadingChats = false;
+            this._loadingMessagesByChat = new Set();
+            this._pendingConversations = new Map();
+            this._loaded = false;
+            try { this._notifySubscribers(); } catch (_) {}
         },
         
         _loadDemoDataIfNeeded: function() {
@@ -1814,6 +1846,29 @@ const ChatManager = {
                         conversation.unreadCount = (conversation.unreadCount || 0) + 1;
                     }
                     this._conversations.sort((a, b) => (b.lastMessageAt || 0) - (a.lastMessageAt || 0));
+                } else {
+                    // FIX (MSG-SILENT-WHEN-OPENED-FROM-OTHER-SOURCE): a chat opened
+                    // via friend-list/status/group/marketplace "Message" buttons is
+                    // often only resolved to its real server conversationId AFTER
+                    // this recipient's ChatManager was last populated (e.g. the very
+                    // first message in a brand-new conversation, or a conversation
+                    // opened by the sender through a path that created the real
+                    // conversationId on the fly). Previously this branch silently did
+                    // nothing when conversationId wasn't yet in _conversationsMap: the
+                    // message was still pushed into _messages/_messagesMap above, but
+                    // the conversation *list* entry (lastMessage/unreadCount, sort
+                    // order) never got created or updated, so the recipient saw
+                    // nothing change unless they manually refreshed/reopened. Debounce
+                    // a conversations refetch so the list — and this message's
+                    // conversation entry — catches up.
+                    if (!this._unknownConvFetchDebounce) {
+                        this._unknownConvFetchDebounce = setTimeout(() => {
+                            this._unknownConvFetchDebounce = null;
+                            if (typeof this.fetchConversations === 'function') {
+                                this.fetchConversations().catch(() => {});
+                            }
+                        }, 400);
+                    }
                 }
             }
             
@@ -2197,6 +2252,15 @@ const ChatManager = {
     // never actually waited for anything). Exposing the real object here
     // fixes all of those call sites at once.
     window.ChatManager = ChatManager;
+
+    // Reset ChatManager's in-memory conversation/message state when
+    // authStorage.js detects a login from a different account on this
+    // device (see resetForAccountSwitch above for why this is needed).
+    if (typeof window.addEventListener === 'function') {
+        window.addEventListener('kyn:accountSwitchWipe', function () {
+            try { ChatManager.resetForAccountSwitch(); } catch (_) {}
+        });
+    }
 
     // =============================================
     // FRIEND MANAGER (REAL DATA ONLY)

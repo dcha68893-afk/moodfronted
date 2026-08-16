@@ -2941,6 +2941,28 @@ const FriendCacheManager = {
     _listeners: new Map(),
     _searchCache: null,
     
+    // Called on 'kyn:accountSwitchWipe' (see authStorage.js), fired right
+    // before that module wipes localStorage/IndexedDB for a login from a
+    // different account on this device. Storage being wiped doesn't clear
+    // this module's in-memory Maps, so without this reset the previous
+    // account's friends/requests/users kept living in _cache for the rest
+    // of the page session — and were the actual data behind the
+    // "Server returned 0 — keeping N cached friends" safety branch in
+    // loadFriendsFromBackend(), which re-persisted that stale in-memory
+    // list straight back into the freshly-wiped localStorage the moment the
+    // new account's genuinely-empty (or different) friend list came back.
+    resetForAccountSwitch() {
+        this._cache.friends.clear();
+        this._cache.requests.clear();
+        this._cache.sentRequests.clear();
+        this._cache.pinnedFriends.clear();
+        this._cache.mutedFriends.clear();
+        this._cache.users.clear();
+        this._cache.searchIndex.clear();
+        this._timestamps.clear();
+        this._searchCache = null;
+    },
+
     init() {
         this._loadFromStorage();
         this._setupAutoCleanup();
@@ -3417,6 +3439,12 @@ const FriendCacheManager = {
 };
 
 FriendCacheManager.init();
+
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('kyn:accountSwitchWipe', function () {
+        try { FriendCacheManager.resetForAccountSwitch(); } catch (_) {}
+    });
+}
 
 const OfflineFirstFriends = {
     _initialized: false,

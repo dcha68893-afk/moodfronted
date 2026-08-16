@@ -85,6 +85,24 @@
         return true; // first time — caller should proceed with teardown/notify
     };
 
+    // Read-only companion to _markCallEndedOnce, for event handlers that need
+    // to check "has this call already been ended locally?" WITHOUT marking it
+    // ended themselves (that's endCall()'s/the termination paths' job). Used
+    // to guard late-arriving events for a call the user already cancelled/
+    // ended/rejected — e.g. a slow call:initiated_ack or a duplicate/
+    // out-of-order call:incoming that lands after local teardown already ran —
+    // which otherwise resurrect call state (activeCallId, incoming-call UI)
+    // for a call that's already over, showing as "the same call starts again"
+    // right after hanging up.
+    window.__CallsCoreShared._isCallEndedAlready = function _isCallEndedAlready(callId) {
+        if (!callId) return false;
+        var resolve = (window.__CallsCoreShared.resolveCallId && typeof window.__CallsCoreShared.resolveCallId === 'function')
+            ? window.__CallsCoreShared.resolveCallId : function (x) { return x; };
+        var key;
+        try { key = String(resolve(callId)); } catch (_) { key = String(callId); }
+        return __endedCallIdSet.has(key);
+    };
+
     // FIX (calls-core split): applySettingToCallsModule was a bare top-level
     // function in the pre-split monolithic calls-core.js, callable from every
     // closure in that single file. The 8-way split wraps each part in its own
