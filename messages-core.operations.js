@@ -545,6 +545,31 @@ const ChatManager = {
                 this._conversationsMap.set(realId, conversation);
             }
 
+            // FIX-ROOT-CAUSE-BOOTSTRAP-NEVER-LOADS-MESSAGES: this stage is named
+            // LOADING_MESSAGES but, until now, never actually loaded any —
+            // /chats/bootstrap's whole point (per its own backend comment: "one
+            // round trip: chat resolution + participants + both public keys +
+            // recent messages") is to hand back the conversation's recent
+            // history in the SAME response so a brand-new chat is immediately
+            // populated, with no separate fetch and no dependency on a live
+            // socket event having already arrived. That field (ctx.latestMessages)
+            // was being silently discarded here — this function reached READY
+            // having only merged conversation metadata (name/avatar/unread
+            // count), leaving the message list empty for exactly the "first
+            // time chatting" case: a receiver opening this conversation for the
+            // first time via a notification/Friends/Status/etc, whose only
+            // route to seeing the sender's message was a live socket event
+            // landing in a perfectly-timed window, or some other, later fetch
+            // happening to run. Populate the same canonical message store
+            // (setMessages) every other loading path already uses, so this
+            // works identically regardless of entry point — the same
+            // guarantee this bootstrap service exists to provide.
+            try {
+                if (Array.isArray(ctx.latestMessages) && ctx.latestMessages.length > 0 && typeof this.setMessages === 'function') {
+                    this.setMessages(ctx.latestMessages, realId);
+                }
+            } catch (_) {}
+
             this._saveToCache();
             this._notifySubscribers();
 
