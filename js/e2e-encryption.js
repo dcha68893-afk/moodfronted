@@ -582,7 +582,18 @@
           // hanging (old behaviour) or silently giving up into plaintext
           // (older behaviour still).
           const _keyFetchController = new AbortController();
-          const _keyFetchTimeout = setTimeout(() => _keyFetchController.abort(), 8000);
+          // FIX-ROOT-CAUSE-SEND-RECEIVE-HANG (timing correction): this
+          // per-attempt abort was hardcoded to 8000ms — twice the outer
+          // _KEY_FETCH_GIVEUP_MS budget (4000ms) that's supposed to bound the
+          // whole retry loop. The outer giveup check only runs in the catch
+          // block AFTER an attempt finishes, so on a genuinely stalled
+          // network the first attempt alone could run the full 8s before
+          // that check ever got a chance to apply — meaning the real
+          // worst-case wait for a reply/send was ~8-12s, not the intended
+          // ~4s, and felt like a hang. Bound each attempt to the same
+          // _KEY_FETCH_GIVEUP_MS window so the outer giveup logic can
+          // actually enforce what its own constant promises.
+          const _keyFetchTimeout = setTimeout(() => _keyFetchController.abort(), _KEY_FETCH_GIVEUP_MS);
           let resp;
           try {
             resp = await fetch(`${await _apiBase()}/api/encryption/keys/${userId}`, {

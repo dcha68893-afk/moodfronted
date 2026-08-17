@@ -1304,6 +1304,25 @@
                                 _deliveredToAny = true;
                             } catch(_) { /* this one frame failed — others may still succeed */ }
                         });
+                        // FIX-ROOT-CAUSE-MESSAGE-DELIVERY-BYPASSES-READY-QUEUE: the raw
+                        // fan-out above marks _deliveredToAny=true purely because
+                        // f.contentWindow existed and postMessage() didn't throw — NOT
+                        // because the messages iframe had actually finished loading and
+                        // attached its listener. A postMessage sent to an iframe whose
+                        // page hasn't registered a 'message' listener yet is silently
+                        // discarded by the browser with no error, so this could report
+                        // "delivered" for a message that never reached anything. Route
+                        // through _postToModule too — it checks readiness and queues for
+                        // flush-on-CHILD_READY when the messages iframe isn't ready yet,
+                        // which is a delivery guarantee the raw fan-out above can't make.
+                        // Treat a successful queue/send here as real delivery even if the
+                        // raw fan-out above found no live frame yet.
+                        try {
+                            if (window.__kynPostToModule) {
+                                window.__kynPostToModule('messages', 'messagesIframe', { type: 'message:new', payload: payload, source: 'ws-bridge' });
+                                _deliveredToAny = true;
+                            }
+                        } catch(_) {}
                         if (_deliveredToAny) {
                             // Claim the key now that delivery actually happened, so the
                             // other 4 redundant paths correctly treat this as handled.

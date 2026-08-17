@@ -1999,6 +1999,26 @@
             _iframeQueue.delete(moduleName);
         }
 
+        // FIX-ROOT-CAUSE-MESSAGE-DELIVERY-BYPASSES-READY-QUEUE: _postToModule (above)
+        // is the ONLY delivery path in this codebase that actually checks _iframeReady
+        // and queues-for-later via _iframeQueue/_flushIframeQueue when a target iframe
+        // hasn't finished loading yet. Every message-delivery path that exists — the 5
+        // documented "redundant" message:new relays (2 here, 2 in app.realtime.socket.js,
+        // 1 in phase15.delivery.patch.js), including __kynRelayMessageOnce, the single
+        // gate all 5 are supposed to route through — does a raw
+        // `iframe.contentWindow.postMessage(...)` instead, which the browser silently
+        // discards if the Messages iframe hasn't attached its listener yet (e.g. it's
+        // mid-navigation/reload, which is exactly when a real-time message is most
+        // likely to arrive, right after the user opens/returns to the app). Since a raw
+        // postMessage never throws either way, every one of those 5 paths then reports
+        // "delivered" and claims the shared dedup key (__kynRelayedMsgIds), so nothing
+        // ever retries — this is a real, confirmed path for "message shows sent but
+        // never displayed to the receiver". Exposing _postToModule here lets those paths
+        // (patched below and in app.realtime.socket.js) route messages-iframe delivery
+        // through the same ready-check + queue-and-flush-on-CHILD_READY mechanism that
+        // already works correctly for every OTHER event type in this app.
+        window.__kynPostToModule = _postToModule;
+
         // ======================================================================
         // PROFILE & COVER PICTURE MANAGEMENT
         // ======================================================================
@@ -7546,6 +7566,19 @@
                     if (!_enriched.chatId && _enriched.roomId)         _enriched.chatId = _enriched.roomId;
 
                     msgIframe.contentWindow.postMessage({ type: 'message:new', payload: _enriched, source: 'ws-bridge' }, '*');
+                    // FIX-ROOT-CAUSE-MESSAGE-DELIVERY-BYPASSES-READY-QUEUE: the raw
+                    // postMessage above is left in place as one of the redundant
+                    // paths, but it silently does nothing if messagesIframe hasn't
+                    // attached its listener yet (mid-load/navigation). Route the
+                    // same payload through _postToModule as well, which checks
+                    // _iframeReady and queues-for-flush-on-CHILD_READY when it's
+                    // not — so a message arriving during that window is delivered
+                    // once the iframe finishes loading instead of being lost.
+                    try {
+                        if (window.__kynPostToModule) {
+                            window.__kynPostToModule('messages', 'messagesIframe', { type: 'message:new', payload: _enriched, source: 'ws-bridge' });
+                        }
+                    } catch (_) {}
                     // Mark this delivery in the shared gate too, so the other
                     // 4 relay paths (2 in app.realtime.socket.js, 1 in
                     // phase15.delivery.patch.js, plus this file's own second
@@ -8345,6 +8378,16 @@
                         const _isFirstClaim = !window.__kynRelayMessageOnce || window.__kynRelayMessageOnce(null, 'message:new', p);
                         if (!_isFirstClaim) return;
                         _post('messagesIframe', 'message:new', p);
+                        // FIX-ROOT-CAUSE-MESSAGE-DELIVERY-BYPASSES-READY-QUEUE: same gap
+                        // as the other call-site above — _post() is a raw postMessage
+                        // with no readiness check, so a message claimed here while
+                        // messagesIframe is mid-load is otherwise lost for good. Also
+                        // route through _postToModule's ready-check + queue.
+                        try {
+                            if (window.__kynPostToModule) {
+                                window.__kynPostToModule('messages', 'messagesIframe', { type: 'message:new', payload: p, source: 'kyn-global-bridge' });
+                            }
+                        } catch (_) {}
                         if (p.chatId) _post('messagesIframe', 'CONVERSATION_UPDATED', { chatId: p.chatId, lastMessage: p.content, lastMessageAt: p.createdAt || Date.now() });
                     });
                 });

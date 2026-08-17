@@ -2517,26 +2517,58 @@ function cacheCallHistory(calls) {
             showNotification('You are already in a call. End current call to start a new one.', 'warning');
             return;
         }
-        
-        // Store pending call
-        pendingCall.userId = userId;
-        pendingCall.userName = userName;
-        pendingCall.callType = callType;
-        pendingCall.groupId = data.groupId || data.group_id || null;
-        pendingCall.isGroupCall = !!(data.isGroupCall || data.isGroup || pendingCall.groupId);
-        pendingCall.initiated = false;
-        pendingCall.retryCount = 0;
-        
-        // Clear any existing retry timer
-        if (pendingCall.retryTimer) {
-            clearTimeout(pendingCall.retryTimer);
-            pendingCall.retryTimer = null;
+
+        // FIX-DUPLICATE-CALL-ON-END (root cause): isExternalSource must be known
+        // BEFORE deciding whether to populate `pendingCall` — computed early here
+        // instead of further down, where it used to live after this block already
+        // unconditionally wrote to `pendingCall`. See the isExternalSource check
+        // below for why: for calls started from messages/friends/group (the
+        // normal case), dialing is handled entirely by the OTHER pipeline
+        // (processPendingCall/startCallWithUser, wired to this same
+        // OPEN_CALL_WITH_USER event above) — this function is meant to no-op for
+        // those. But it was writing `pendingCall.userId = userId` etc.
+        // unconditionally BEFORE that no-op check, so for every external-source
+        // call, `pendingCall` was left holding that user with `initiated: false`
+        // and nothing ever cleared it (clearPendingCall() is only called from
+        // the confirmation-modal dial path this function skips for external
+        // sources, and from attemptPendingCall() itself once IT dials — which
+        // hadn't happened yet). Any later unrelated SESSION_SYNC/PARENT_READY
+        // message (e.g. the routine session-sync postMessage sent while
+        // navigating back after a call ends) calls attemptPendingCall()
+        // unconditionally, found that stale non-null pendingCall.userId, and
+        // dialed the same user again — the literal "call restarts right after
+        // it ends" symptom, confirmed in production logs: CallSignaling shows a
+        // brand-new call:initiate to the same target within ~1s of the previous
+        // call's "Call ended" log line. Now `pendingCall` is only ever
+        // populated for the in-module confirmation-dial path that actually
+        // consumes it.
+        const _earlyCallSource = data.source || data.origin || data.from || 'calls';
+        let _earlyReturnTo = data.returnTo || _earlyCallSource;
+        const _isExternalSource = (_earlyCallSource === 'messages-module' || _earlyCallSource === 'friends-module' || _earlyCallSource === 'group-module'
+                                || _earlyReturnTo === 'messages' || _earlyReturnTo === 'friends' || _earlyReturnTo === 'group');
+
+        if (!_isExternalSource) {
+            // Store pending call — only for the in-module dial-pad/confirmation
+            // path below (openCallModalForUser + attemptPendingCall).
+            pendingCall.userId = userId;
+            pendingCall.userName = userName;
+            pendingCall.callType = callType;
+            pendingCall.groupId = data.groupId || data.group_id || null;
+            pendingCall.isGroupCall = !!(data.isGroupCall || data.isGroup || pendingCall.groupId);
+            pendingCall.initiated = false;
+            pendingCall.retryCount = 0;
+
+            // Clear any existing retry timer
+            if (pendingCall.retryTimer) {
+                clearTimeout(pendingCall.retryTimer);
+                pendingCall.retryTimer = null;
+            }
         }
         
         // Update call panel header with source context
         // (shows the user where this call originated from)
-        const callSource = data.source || data.origin || data.from || 'calls';
-        const returnTo = data.returnTo || callSource;
+        const callSource = _earlyCallSource;
+        const returnTo = _earlyReturnTo;
         const callSourceCtxEl = document.getElementById('callSourceCtx');
         if (callSourceCtxEl) {
             let sourceLabel = '';
@@ -2556,8 +2588,7 @@ function cacheCallHistory(calls) {
 
         // Pre-fill UI only when call comes from within the calls module
         // (no need to pre-fill when user already chose someone in messages/friends)
-        const isExternalSource = (callSource === 'messages-module' || callSource === 'friends-module' || callSource === 'group-module'
-                                || returnTo === 'messages' || returnTo === 'friends' || returnTo === 'group');
+        const isExternalSource = _isExternalSource;
 
         // If the "New Call" contacts picker is open from a previous action, close it —
         // external calls skip that screen entirely and go straight to dialling.
@@ -10692,40 +10723,18 @@ function escapeHtmlForCall(str) {
         .replace(/'/g, '&#39;');
 }
 
-function handleCallActionClick(e) {
-    if (e) {
-        e.stopPropagation();
-        e.preventDefault();
-    }
-    var btn = this;
-    var userId = btn.dataset && btn.dataset.userId;
-    var userName = (btn.dataset && btn.dataset.userName) || 'User';
-    var callType = (btn.dataset && btn.dataset.callType) || 'voice';
-
-    if (!userId) {
-        console.warn('[Calls UI] handleCallActionClick: missing data-user-id on button', btn);
-        return;
-    }
-
-    console.log('[Calls UI] Call-back triggered:', { userId: userId, userName: userName, callType: callType });
-
-    if (typeof startCallWithUser === 'function') {
-        startCallWithUser(userId, userName, callType);
-    } else if (window.callCore && typeof window.callCore.startCall === 'function') {
-        window.callCore.startCall(userId, callType);
-    } else {
-        try {
-            window.parent.postMessage({
-                type: 'INITIATE_CALL',
-                payload: { userId: userId, userName: userName, callType: callType },
-                source: 'calls-iframe',
-                timestamp: Date.now()
-            }, '*');
-        } catch (err) {
-            console.error('[Calls UI] handleCallActionClick: could not initiate call', err);
-        }
-    }
-}
+// FIX-DUPLICATE-FUNCTION-DEFINITION: this file had TWO top-level
+// `function handleCallActionClick(e) {...}` declarations (the other lives
+// earlier in this file, ~line 1405). JS function declarations at the same
+// scope don't coexist — whichever one appears LAST in source order silently
+// wins the binding, discarding the other entirely. That meant a fix applied
+// to the first copy (falling back to `window.startCallWithUser` when the
+// local `startCallWithUser` closure binding wasn't in scope) was completely
+// inert in production, because this later, unfixed duplicate always won.
+// This exact class of bug — a real fix landing in one copy while an old,
+// unfixed duplicate elsewhere in the file silently wins at runtime — is
+// likely why previous patches here kept not sticking. Removed the duplicate;
+// the single surviving definition (~line 1405) is used everywhere.
 
 // ==================== EXPORTS ====================
 const safeBind = (fn, context) => {
