@@ -47,21 +47,12 @@
         }
 
         window.KynPanel = {
-            // Call when a modal/overlay/sub-screen becomes visible.
             opened: function (panelId) { send('PanelOpened', panelId); },
-            // Call when that panel/modal/overlay is dismissed.
             closed: function (panelId) { send('PanelClosed', panelId); },
-            // Call when this module becomes the active/foreground one.
             focused: function () { send('PanelFocused', null); },
-            // Call when this module is backgrounded (not necessarily closed).
             hidden: function () { send('PanelHidden', null); }
         };
 
-        // Best-effort auto-detection for the common case: any element with
-        // [data-panel] that toggles a visible/active/open class. Modules
-        // that already call window.KynPanel directly don't need this —
-        // it only helps ones that haven't been retrofitted yet, via a
-        // lightweight MutationObserver (no polling).
         try {
             var observedRoot = document.body;
             if (observedRoot && 'MutationObserver' in window) {
@@ -99,9 +90,6 @@
     // PARENT SIDE — the top-level shell (chat.html)
     // ------------------------------------------------------------------
     if (window.parent === window) {
-        // Tracks which panel (if any) is currently open per module, so the
-        // parent is always the single source of truth for child panel
-        // state (item 6), without needing every existing feature rewired.
         window.__kynPanelState = window.__kynPanelState || {};
 
         window.addEventListener('message', function (event) {
@@ -124,14 +112,165 @@
                 window.__kynPanelState[mod].focused = false;
             }
 
-            // Single place other parent-shell code (header/sidebar/overlay/
-            // bottom-nav icon logic) can react to, without each of those
-            // needing its own postMessage listener for every module.
             try {
                 document.dispatchEvent(new CustomEvent('kyn:panelstate', {
                     detail: { module: mod, type: type, panel: data.panel, state: window.__kynPanelState[mod] }
                 }));
             } catch (_) {}
         });
+
+        // ================================================================
+        // MESSAGE NOTIFICATION + PRESENCE HARDENING
+        // ================================================================
+        // The screenshot bug was not an encryption failure. The message was
+        // already delivered/decrypted by the receiver, but the shell banner
+        // was receiving the transport envelope and rendering it verbatim.
+        // Never display an E2E envelope as notification text.
+
+        var _presenceRequests = new Map();
+        var PRESENCE_REQUEST_TTL = 4000;
+
+        function _looksEncrypted(value) {
+            if (value && typeof value === 'object') return true;
+            if (typeof value !== 'string') return false;
+            var text = value.trim();
+            if (!text || text.charAt(0) !== '{') return false;
+            try {
+                var obj = JSON.parse(text);
+                return !!obj && typeof obj === 'object' &&
+                    (('v' in obj) || ('kid' in obj) || ('ct' in obj) ||
+                     ('iv' in obj) || ('eph' in obj) || ('sid' in obj) || ('n' in obj));
+            } catch (_) { return false; }
+        }
+
+        function _safePreview(value) {
+            if (typeof value !== 'string' || !value.trim() || _looksEncrypted(value)) {
+                return 'You have a new message';
+            }
+            return value.trim().slice(0, 240);
+        }
+
+        function _requestAuthoritativePresence(userId) {
+            var uid = String(userId || '');
+            if (!uid) return;
+            var now = Date.now();
+            var previous = _presenceRequests.get(uid) || 0;
+            if (now - previous < PRESENCE_REQUEST_TTL) return;
+            _presenceRequests.set(uid, now);
+
+            try {
+                var rt = window.KynectaRealtime;
+                if (rt && typeof rt.emit === 'function') {
+                    var result = rt.emit('check_user_online', { targetUserId: uid }, { retry: false });
+                    if (result && typeof result.catch === 'function') result.catch(function () {});
+                }
+            } catch (_) {}
+        }
+
+        function _broadcastPresence(payload) {
+            if (!payload || payload.userId == null) return;
+            var normalized = {
+                userId: String(payload.userId),
+                online: payload.online === true,
+                timestamp: payload.timestamp || Date.now(),
+                source: 'server-authoritative'
+            };
+
+            // PresenceEngineFoundation already listens to window.postMessage.
+            try {
+                window.dispatchEvent(new CustomEvent('kyn:authoritativePresence', { detail: normalized }));
+            } catch (_) {}
+
+            try {
+                document.querySelectorAll('iframe').forEach(function (frame) {
+                    try { frame.contentWindow.postMessage({ type: 'user_online_status', ...normalized }, '*'); } catch (_) {}
+                });
+            } catch (_) {}
+
+            // Also update generic parent-shell presence elements if a module
+            // exposes data-user-id/data-peer-id. Do not touch arbitrary text.
+            try {
+                var selector = '[data-user-id="' + CSS.escape(normalized.userId) + '"], [data-peer-id="' + CSS.escape(normalized.userId) + '"]';
+                document.querySelectorAll(selector).forEach(function (node) {
+                    var role = (node.getAttribute('data-presence-role') || '').toLowerCase();
+                    if (role && role !== 'status' && role !== 'presence') return;
+                    if (node.classList.contains('chat-status') ||
+                        node.classList.contains('presence-status') ||
+                        node.classList.contains('chat-status-text') ||
+                        node.classList.contains('online-status')) {
+                        node.textContent = normalized.online ? 'online' : 'offline';
+                        node.classList.toggle('online', normalized.online);
+                        node.classList.toggle('offline', !normalized.online);
+                    }
+                });
+            } catch (_) {}
+        }
+
+        function _showIncomingMessageBanner(data) {
+            var detail = data && (data.detail || data);
+            var message = detail && (detail.message || detail);
+            if (!message) return;
+
+            var senderId = message.senderId || message.userId;
+            var myId = window.cachedUserId || window.SessionManager?.getUserId?.() || window.SessionManager?.getCurrentUserId?.();
+            if (myId && senderId && String(myId) === String(senderId)) return;
+
+            var chatId = detail.chatId || message.chatId || message.conversationId;
+            if (senderId) _requestAuthoritativePresence(senderId);
+
+            var body = _safePreview(message.content);
+            var title = message.senderName || message.sender || message.username || 'New message';
+
+            // If the child already decrypted the message, its content is used.
+            // If it did not, the shell deliberately shows a generic preview —
+            // raw ciphertext must never be exposed in a notification.
+            try {
+                if (window.NotifStab && typeof window.NotifStab.notifyApp === 'function') {
+                    window.NotifStab.notifyApp(title, body, {
+                        module: 'dm',
+                        contextId: chatId || senderId || 'message',
+                        icon: '💬'
+                    });
+                }
+            } catch (_) {}
+        }
+
+        window.addEventListener('message', function (event) {
+            var data = event && event.data;
+            if (!data || typeof data !== 'object') return;
+
+            if (data.type === 'kyn:incomingMessage') {
+                _showIncomingMessageBanner(data);
+                return;
+            }
+
+            if (data.type === 'user_online_status' || data.type === 'presence:user_online_status') {
+                _broadcastPresence(data);
+            }
+        });
+
+        function _bindPresenceBus() {
+            var bus = window.KynectaEventBus || window.appEvents;
+            if (!bus || typeof bus.on !== 'function') return false;
+            if (window.__kynPanelPresenceBusBound) return true;
+            window.__kynPanelPresenceBusBound = true;
+            bus.on('SOCKET_EVENT', function (payload) {
+                if (!payload) return;
+                if (payload.type === 'user_online_status') _broadcastPresence(payload);
+                if (payload.type === 'user:online' || payload.type === 'presence:online') {
+                    _broadcastPresence({ userId: payload.userId || payload.user?.id, online: true, timestamp: payload.timestamp });
+                }
+                if (payload.type === 'user:offline' || payload.type === 'presence:offline') {
+                    _broadcastPresence({ userId: payload.userId || payload.user?.id, online: false, timestamp: payload.timestamp });
+                }
+            });
+            return true;
+        }
+
+        _bindPresenceBus();
+        var _presenceBusTimer = setInterval(function () {
+            if (_bindPresenceBus()) clearInterval(_presenceBusTimer);
+        }, 500);
+        setTimeout(function () { clearInterval(_presenceBusTimer); }, 15000);
     }
 })();
