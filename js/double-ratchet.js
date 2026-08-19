@@ -349,7 +349,7 @@
 
     // Bootstrap session if first message
     if (!state?.initialized) {
-      const result = await initRecv(chatId, myIdentityPrivKey, envelope.eph, senderIdentityPubB64);
+      const result = await _initRecvImpl(chatId, myIdentityPrivKey, envelope.eph, senderIdentityPubB64);
       state = result.state;
     }
 

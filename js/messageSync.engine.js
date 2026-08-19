@@ -60,7 +60,11 @@
 
         const otherPartyId = rawMessage.receiverId || rawMessage.recipientId ||
             (rawMessage.receiver && rawMessage.receiver.id) || (rawMessage.recipient && rawMessage.recipient.id);
-        return otherPartyId || rawSenderId; // fall back rather than block decryption entirely
+
+        // Never use our own user ID as the peer for decrypting our own message.
+        // If the recipient/peer is unavailable, return null so callers can
+        // avoid deriving a Double-Ratchet context against ourselves.
+        return otherPartyId || null;
     }
 
     class MessageSyncEngine {
