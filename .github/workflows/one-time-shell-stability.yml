@@ -1,0 +1,49 @@
+name: One-time authenticated shell stability wiring
+
+on:
+  push:
+    paths:
+      - '.github/workflows/one-time-shell-stability.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  wire:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Wire session and theme guards into chat shell
+        shell: python
+        run: |
+          from pathlib import Path
+
+          p = Path('chat.html')
+          text = p.read_text(encoding='utf-8-sig')
+
+          theme_tag = '    <script src="/js/theme.surface.guard.js"></script>\n'
+          session_tag = '    <script src="/js/session-stability.patch.js"></script>\n'
+
+          if '/js/theme.surface.guard.js' not in text:
+              marker = '    <script src="/js/theme.engine.js"></script>\n'
+              if marker not in text:
+                  raise SystemExit('theme.engine.js marker not found in chat.html')
+              text = text.replace(marker, marker + theme_tag, 1)
+
+          if '/js/session-stability.patch.js' not in text:
+              marker = '    <script src="/js/panel-state-bridge.js"></script>\n'
+              if marker not in text:
+                  raise SystemExit('panel-state-bridge.js marker not found in chat.html')
+              text = text.replace(marker, marker + session_tag, 1)
+
+          p.write_text(text, encoding='utf-8')
+
+      - name: Commit shell wiring and remove one-time workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add chat.html
+          git rm .github/workflows/one-time-shell-stability.yml
+          git commit -m 'Wire session stability and theme surface guards into chat shell' || exit 0
+          git push
