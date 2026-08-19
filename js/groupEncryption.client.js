@@ -28,7 +28,18 @@
 (function (global) {
     const E2E = () => global.KynectaE2E;
 
-    function storageKey(groupId) { return `kyn_group_e2e_${groupId}`; }
+    // FIX-ROOT-CAUSE-SHARED-BROWSER-IDENTITY-COLLISION (group version): same
+    // class of bug as e2e-encryption.js's _storeKey() and double-ratchet.js's
+    // _stateKey() — this cache holds `myKey`, this ACCOUNT's own current
+    // sender key, plus everyone else's imported keys. Keyed only by groupId,
+    // two different accounts sharing a browser (same origin -> same
+    // localStorage) and both members of the same group would overwrite each
+    // other's `myKey`/`received` cache under the identical key. Namespacing
+    // by the current user id gives each account its own slot.
+    function storageKey(groupId) {
+        const uid = E2E()?.getMyUserId ? E2E().getMyUserId() : null;
+        return uid ? `kyn_group_e2e_${uid}_${groupId}` : `kyn_group_e2e_${groupId}`;
+    }
 
     function _loadCache(groupId) {
         try {

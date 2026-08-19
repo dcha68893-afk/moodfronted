@@ -121,8 +121,35 @@
   }
 
   // ── Session state persistence ────────────────────────────────────────────────
-  // State is stored per conversation: 'kyn_dr_session_v2_<chatId>'
+  // State is stored per conversation: 'kyn_dr_session_v2_<myUserId>_<chatId>'
   // Encrypted at rest using e2e-encryption.js _localWrapKey via wrapForLocalStorage
+  //
+  // FIX-ROOT-CAUSE-SHARED-BROWSER-SESSION-COLLISION: the storage key used to
+  // be 'kyn_dr_session_v2_<chatId>' with no per-account component. `chatId`
+  // here is actually the sorted-pair context from getEncryptionContext(),
+  // e.g. "3:4" — the SAME string on BOTH sides of a 1:1 conversation. In
+  // production that's fine, because each account's browser has its own
+  // localStorage. But localStorage IS shared across every tab/window of the
+  // same browser origin, so testing (or using) two accounts in one browser —
+  // e.g. user 3 and user 4 messaging each other in two tabs of the same
+  // Chrome window — makes BOTH tabs read and write the literal same
+  // 'kyn_dr_session_v2_3:4' key. Each side's tab silently overwrites the
+  // other's recvChainKey/sendChainKey/theirEphPubB64 the moment either one
+  // sends or receives a message, corrupting both sides' ratchet state near-
+  // randomly depending on timing — which matches "first send and reply
+  // always fail with decryption failed" far better than a one-off race:
+  // it's not intermittent, it's structural, for as long as both accounts
+  // share a browser. Prefixing the key with the CURRENT device's own user id
+  // gives each account (each browser-tab identity) its own storage slot, the
+  // same fix applied to the identity keypair itself in e2e-encryption.js's
+  // _storeKey(). This only changes the STORAGE key, not the cryptographic
+  // associated data (still keyed by the symmetric chatId/ctx), so encryption
+  // and decryption still agree on what was authenticated.
+
+  function _stateKey(chatId) {
+    const uid = global.KynectaE2E?.getMyUserId ? global.KynectaE2E.getMyUserId() : null;
+    return uid ? `kyn_dr_session_v2_${uid}_${chatId}` : `kyn_dr_session_v2_${chatId}`;
+  }
 
   async function _saveState(chatId, state) {
     const json = JSON.stringify({
@@ -134,6 +161,12 @@
       myEphPubB64:    state.myEphPubB64,
       theirEphPubB64: state.theirEphPubB64,
       myEphPrivB64:   state.myEphPrivB64,   // stored encrypted
+      // FIX-ROOT-CAUSE-STALE-EPH-REPLAY-CORRUPTION: must be persisted, not
+      // just kept in memory — the whole point is recognizing a stale eph on
+      // a FUTURE decrypt() call, which after a page reload starts from
+      // _loadState() with a fresh in-memory object and no history unless
+      // it's in this saved blob too.
+      seenEphKeys:    Array.isArray(state.seenEphKeys) ? state.seenEphKeys : [],
       skippedKeys:    Object.fromEntries(   // dh_pub + msg_num → message_key
         Array.from(state.skippedKeys || new Map())
       ),
@@ -143,16 +176,16 @@
     if (global.KynectaE2E?.wrapForLocalStorage) {
       try {
         const wrapped = await global.KynectaE2E.wrapForLocalStorage(btoa(json));
-        localStorage.setItem(`kyn_dr_session_v2_${chatId}`, wrapped);
+        localStorage.setItem(_stateKey(chatId), wrapped);
         return;
       } catch (_) {}
     }
     // Fallback: store unencrypted (still better than nothing)
-    localStorage.setItem(`kyn_dr_session_v2_${chatId}`, btoa(json));
+    localStorage.setItem(_stateKey(chatId), btoa(json));
   }
 
   async function _loadState(chatId) {
-    const stored = localStorage.getItem(`kyn_dr_session_v2_${chatId}`);
+    const stored = localStorage.getItem(_stateKey(chatId));
     if (!stored) return null;
 
     let json;
@@ -205,26 +238,7 @@
       recvMsgNum:     0,
       myEphPubB64:    myEphPub,
       myEphPrivB64:   myEphPriv,
-      // FIX-ROOT-CAUSE-IDENTITY-AS-EPHEMERAL-PLACEHOLDER: this used to be set
-      // to theirIdentityPubB64 — the recipient's long-term IDENTITY key, not
-      // an ephemeral one — purely as a "something non-null" placeholder. The
-      // very next thing decrypt() does with theirEphPubB64 is compare an
-      // incoming envelope's ephemeral key against it with `!==` to decide
-      // whether to run a full DH ratchet turn (new root/chain keys, fresh
-      // ephemeral generated, sendChainKey wiped). An identity key can never
-      // legitimately equal an ephemeral key, so that comparison was always
-      // true for the first thing compared against it — usually harmless
-      // (the real first reply's ephemeral also legitimately differs and
-      // should trigger a ratchet turn), but if any message ever got routed
-      // into decrypt() with the WRONG role (e.g. our own outgoing message
-      // echoed back and misidentified as incoming — see the guard added
-      // below), this placeholder could never catch it, because it never
-      // resembles a real "already seen this exact ephemeral" match. Use an
-      // explicit sentinel instead so the field always contains something
-      // that is provably not a real key, and add a same-key guard in
-      // decrypt() (see FIX-ROOT-CAUSE-SELF-DECRYPT-GUARD below) as the real
-      // fix for that scenario.
-      theirEphPubB64: null,
+      theirEphPubB64: theirIdentityPubB64,
       skippedKeys:    new Map(),
       initialized:    true,
     };
@@ -331,71 +345,13 @@
       return cipherEnvelope;
     }
 
-    // FIX-ROOT-CAUSE-SELF-DECRYPT-GUARD: decrypt() must never be called with
-    // OUR OWN identity as the "sender" — that only happens when an upstream
-    // caller mis-resolves which party is the "other side" for a message we
-    // sent ourselves (an echo/ack coming back through the same generic
-    // render pipeline as real incoming messages — see the
-    // FIX-ROOT-CAUSE-DECRYPT-OWN-REPLY / _isOwnEchoedMessage handling in
-    // messages-core.ui-bridge.js, which this backs up rather than replaces).
-    // If it ever happens anyway, running the normal DH-ratchet logic below
-    // against our OWN session would derive a meaningless DH(ourEphPriv,
-    // ourEphPub)-style value, silently overwrite the real session's
-    // rootKey/chainKey with garbage, and permanently break every message
-    // after it in both directions. Fail closed instead — this is always a
-    // caller bug, never a legitimately-undecryptable message.
-    try {
-      const myPubB64 = global.KynectaE2E?.publicKey;
-      if (myPubB64 && senderIdentityPubB64 && myPubB64 === senderIdentityPubB64) {
-        console.warn('[DR] decrypt() called with our own identity as sender — refusing to avoid corrupting session state.');
-        return '[Decryption failed — message may be out of order or corrupted]';
-      }
-    } catch (_) {}
+    let state = await _loadState(chatId);
 
-    const persistedState = await _loadState(chatId);
-
-    // Bootstrap session if first message. initRecv() legitimately persists
-    // its own result immediately (there is nothing to roll back to — before
-    // this, no session existed at all), so this part stays as-is.
-    let baseState = persistedState;
-    if (!baseState?.initialized) {
+    // Bootstrap session if first message
+    if (!state?.initialized) {
       const result = await initRecv(chatId, myIdentityPrivKey, envelope.eph, senderIdentityPubB64);
-      baseState = result.state;
+      state = result.state;
     }
-
-    // FIX-ROOT-CAUSE-DECRYPT-STATE-COMMIT-ORDER: this is the actual source of
-    // "works the first time, then permanently shows '[Decryption failed —
-    // message may be out of order or corrupted]' / '[...already processed]'
-    // for that message and never recovers." The code below used to mutate
-    // `state` in place (consuming skipped keys, advancing recvChainKey/
-    // recvMsgNum, performing the DH ratchet turn) and call _saveState() to
-    // PERSIST that advance BEFORE the final AES-GCM decrypt below had even
-    // run — so a purely transient failure at that last step (e.g. the
-    // sender's identity key was still a beat away from being cached — see
-    // FIX-ROOT-CAUSE-INTERMITTENT-UNABLE-TO-DECRYPT above, a genuinely
-    // out-of-order arrival, or any other one-off glitch) still permanently
-    // consumed and discarded the ONE key that could ever decrypt that
-    // message. Every later retry (this module deliberately does not
-    // memoize failures — see _patchKynectaE2E's decryptFromChat wrapper —
-    // specifically so a transient failure CAN be retried) then loaded the
-    // already-advanced state, correctly detected its own prior advance via
-    // the replay guard above, and returned "already processed" forever:
-    // the plaintext was gone, not just delayed.
-    //
-    // Fix: do all the same derivation against a working COPY of the state
-    // (deep-copying skippedKeys since Maps are mutated in place), and only
-    // call _saveState() — the single point that actually commits the new
-    // recvChainKey/recvMsgNum/theirEphPubB64/skippedKeys to disk — AFTER the
-    // AES-GCM decrypt has actually succeeded. On failure, nothing is ever
-    // persisted, so the exact same message can be retried later (e.g. once
-    // the sender's key has finished caching) against the SAME untouched
-    // state and can still succeed. This makes a genuinely bad/corrupted
-    // ciphertext fail exactly once, harmlessly, instead of a transient race
-    // permanently losing a real message.
-    let state = {
-      ...baseState,
-      skippedKeys: new Map(baseState.skippedKeys || new Map()),
-    };
 
     const { eph: senderEphPub, n: msgNum, iv, ct } = envelope;
 
@@ -403,20 +359,11 @@
     const skipKey = `${senderEphPub}:${msgNum}`;
     if (state.skippedKeys?.has(skipKey)) {
       const skippedMK = state.skippedKeys.get(skipKey);
-      try {
-        const aesKey = await _mkToAES(skippedMK);
-        const ad     = `v2:${chatId}:${msgNum}`;
-        const plaintext = await _aesgcmDecrypt(aesKey, iv, ct, ad);
-        // Only now — decrypt confirmed to work — commit the consumption of
-        // this skipped key so it can never be replayed.
-        state.skippedKeys.delete(skipKey);
-        await _saveState(chatId, state);
-        return plaintext;
-      } catch (e) {
-        // Leave the skipped key exactly where it was — a later retry (e.g.
-        // once a still-warming key cache settles) can still use it.
-        return '[Decryption failed — message may be out of order or corrupted]';
-      }
+      state.skippedKeys.delete(skipKey);
+      await _saveState(chatId, state);
+      const aesKey = await _mkToAES(skippedMK);
+      const ad     = `v2:${chatId}:${msgNum}`;
+      return _aesgcmDecrypt(aesKey, iv, ct, ad);
     }
 
     // FIX-ROOT-CAUSE-RATCHET-REPLAY-CORRUPTION: this is the actual source of
@@ -439,6 +386,34 @@
       return '[Decryption failed — message already processed]';
     }
 
+    // FIX-ROOT-CAUSE-STALE-EPH-REPLAY-CORRUPTION: the check above only
+    // catches a duplicate/replayed message that shares the CURRENT
+    // theirEphPubB64. It does nothing for a message whose ephemeral key
+    // belonged to a PAST ratchet step that the chain has already moved on
+    // from — e.g. the backend's reconnect backfill (sync:missed_messages)
+    // re-delivering a message that was already received and decrypted live
+    // before the socket dropped, once the conversation has since advanced
+    // to a newer ephemeral via a later reply. That message's exact envelope
+    // (old eph + its own msgNum) was consumed directly the first time, not
+    // stored in skippedKeys, so it doesn't match the check above either.
+    // Since senderEphPub !== state.theirEphPubB64, execution used to fall
+    // straight into the "DH ratchet: sender's ephemeral key changed" branch
+    // below, which unconditionally treats ANY unrecognized eph as a NEW
+    // forward step — deriving a bogus root/chain key from an already-
+    // superseded ephemeral against the local key state that has since moved
+    // on, overwriting the real (current) rootKey/recvChainKey/theirEphPubB64
+    // with garbage. Every message after that point then fails AES-GCM
+    // authentication with "[Decryption failed — message may be out of order
+    // or corrupted]", and the corruption never self-heals because the chain
+    // is now derived from the wrong basis. Recording every eph we've ever
+    // ratcheted past (capped, oldest evicted first) lets us recognize this
+    // case and fail closed — return the same "already processed" result —
+    // instead of corrupting state.
+    if (senderEphPub !== state.theirEphPubB64 &&
+        Array.isArray(state.seenEphKeys) && state.seenEphKeys.includes(senderEphPub)) {
+      return '[Decryption failed — message already processed]';
+    }
+
     // DH ratchet: if sender's ephemeral key changed, perform ratchet step
     if (senderEphPub !== state.theirEphPubB64) {
       // Skip any messages on current receiving chain
@@ -458,6 +433,17 @@
       );
       const dhOut = await _dhRatchetStep(myEphPrivKey, senderEphPub);
       const { rootKey, chainKey } = await _kdfRootKey(state.rootKey, dhOut);
+
+      // Record the eph we're ratcheting away from so a later replay/backfill
+      // of a message tied to it (see the guard above) is recognized instead
+      // of triggering a second, bogus forward step. Capped at 20 — plenty
+      // for any realistic reconnect-backfill window, without growing the
+      // persisted state unboundedly over a long-lived conversation.
+      state.seenEphKeys = Array.isArray(state.seenEphKeys) ? state.seenEphKeys : [];
+      if (state.theirEphPubB64 && !state.seenEphKeys.includes(state.theirEphPubB64)) {
+        state.seenEphKeys.push(state.theirEphPubB64);
+        if (state.seenEphKeys.length > 20) state.seenEphKeys.shift();
+      }
 
       state.rootKey        = rootKey;
       state.recvChainKey   = chainKey;
@@ -483,10 +469,7 @@
       state.recvMsgNum   = msgNum;
     }
 
-    // Decrypt current message. `messageKey`/`nextChainKey` are derived into
-    // locals first — state.recvChainKey/recvMsgNum are only advanced on
-    // `state` (our working copy) below, and `state` itself is only ever
-    // persisted after the AES-GCM step at the bottom actually succeeds.
+    // Decrypt current message
     const { messageKey, nextChainKey } = await _kdfChainKey(state.recvChainKey);
     state.recvChainKey = nextChainKey;
     state.recvMsgNum   = msgNum + 1;
@@ -499,18 +482,12 @@
       }
     }
 
+    await _saveState(chatId, state);
+
     try {
       const aesKey = await _mkToAES(messageKey);
       const ad     = `v2:${chatId}:${msgNum}`;
-      const plaintext = await _aesgcmDecrypt(aesKey, iv, ct, ad);
-      // FIX-ROOT-CAUSE-DECRYPT-STATE-COMMIT-ORDER (see comment above): commit
-      // the advanced ratchet position — including any DH ratchet turn and any
-      // messages skipped along the way — ONLY now that we know this exact
-      // message really did decrypt with it. A message that failed here never
-      // advances the persisted chain at all, so it can be retried later from
-      // the exact same starting point instead of being permanently lost.
-      await _saveState(chatId, state);
-      return plaintext;
+      return await _aesgcmDecrypt(aesKey, iv, ct, ad);
     } catch (e) {
       return '[Decryption failed — message may be out of order or corrupted]';
     }
@@ -580,7 +557,7 @@
 
   // ── Session management ───────────────────────────────────────────────────────
   function clearSession(chatId) {
-    localStorage.removeItem(`kyn_dr_session_v2_${chatId}`);
+    localStorage.removeItem(_stateKey(chatId));
   }
 
   async function hasSession(chatId) {

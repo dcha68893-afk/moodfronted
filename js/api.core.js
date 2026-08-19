@@ -2998,28 +2998,32 @@ refreshTokenIfNeeded = async function() {
             return { success: false, error: 'No token to refresh' };
         }
         
-        // FIX-ROOT-CAUSE-REFRESH-NEVER-FIRES: this used to check
-        // validateToken(currentToken) here and bail out immediately with
-        // requiresReauth:true the moment it came back invalid — but "the
-        // access token is expired" (validateToken's JWT exp check) is
-        // EXACTLY the situation this function exists to fix by calling
-        // POST /api/auth/refresh with the separate, longer-lived refresh
-        // token. Refusing to refresh because the access token expired meant
-        // the refresh endpoint was never actually called once expiry hit:
-        // every API call for the rest of the session failed with "Token
-        // expired and requires reauthentication" (see the repeated
-        // [TOKEN] Token validation failed: Token expired / Authentication
-        // failed pairs in the browser console — refresh was never even
-        // attempted between them) until the person manually logged out and
-        // back in. Only a token that's malformed/unparseable is a reason to
-        // skip straight to reauth — "expired" is not; both the working
-        // shouldRefreshToken() early-return below and the actual refresh
-        // attempt already handle "not currently expired, don't bother" and
-        // "refresh token also invalid" correctly on their own, so the ONLY
-        // thing this earlier check needs to filter out is a token that
-        // can't be parsed at all (validateToken's other error cases).
+        // Enhanced token validation
+        //
+        // FIX-ROOT-CAUSE-TOKEN-REFRESH-NEVER-HAPPENS: an *expired* access
+        // token is exactly the normal case this function exists to handle —
+        // the refresh token below is what's supposed to exchange it for a
+        // new one. The old code treated "Token expired (JWT exp claim)" as
+        // a hard validation failure and returned immediately with
+        // requiresReauth:true, so the refresh endpoint further down was
+        // NEVER actually called once the access token passed its exp claim.
+        // Every caller (message send, conversation fetch, friend sync, key
+        // fetch for E2E) kept re-discovering the same expired token forever
+        // — this is the "[TOKEN] Token validation failed: Token expired"
+        // loop repeating every few seconds in the logs — until a full
+        // manual re-login. It also explains encrypted messages failing:
+        // GET /api/encryption/keys/:userId needs a valid access token, and
+        // with refresh permanently short-circuited that call 401s forever,
+        // so the identity key never arrives and decryptFromChat gives up
+        // with "[Decryption failed — identity key unavailable]".
+        // Only a token that's missing or structurally malformed (not just
+        // expired) should skip straight to reauth; an expired-but-well-
+        // formed token should fall through to the refresh-token exchange
+        // below like any other case that needs a refresh.
         const validationResult = validateToken(currentToken);
-        if (!validationResult.valid && validationResult.error !== 'Token expired (JWT exp claim)') {
+        const isExpiredOnly = !validationResult.valid &&
+            validationResult.error === 'Token expired (JWT exp claim)';
+        if (!validationResult.valid && !isExpiredOnly) {
             console.warn('[TOKEN] Token validation failed:', validationResult.error);
             return { 
                 success: false, 

@@ -19,7 +19,29 @@
   'use strict';
 
   const subtle    = global.crypto && global.crypto.subtle;
-  const STORE_KEY = 'kyn_e2e_keypair_v1';   // localStorage key for encrypted private key
+  const STORE_KEY_PREFIX = 'kyn_e2e_keypair_v1';   // localStorage key for encrypted private key
+  // FIX-ROOT-CAUSE-SHARED-BROWSER-IDENTITY-COLLISION: this used to be a
+  // single fixed string with no per-user component. localStorage is shared
+  // across every tab/window for the same browser origin — it is NOT scoped
+  // per logged-in account. Testing (or simply using) two different accounts
+  // in the same browser (two tabs, or switching accounts in one tab) means
+  // whichever account calls init() SECOND finds the FIRST account's
+  // encrypted identity-key blob already sitting under this key, tries to
+  // decrypt it with its own password, fails (it's not their key), and per
+  // the anti-orphaning fix elsewhere in this function refuses to generate a
+  // replacement — so that account's E2E never reaches `enabled`. Depending
+  // on timing this manifests as messages failing to encrypt at all, OR (if
+  // the FIRST account's leftover in-memory key state is still active when a
+  // message for the SECOND account gets encrypted/decrypted) as a genuine
+  // wrong-key mismatch — exactly "first send and reply always fail with
+  // decryption failed," independent of login method (manual vs Google),
+  // because both methods write through this same function. Scoping the
+  // storage key by the current user's id, so each account gets its own slot
+  // in the same browser's localStorage, is the fix.
+  function _storeKey() {
+    const uid = _myUserId();
+    return uid ? `${STORE_KEY_PREFIX}_${uid}` : STORE_KEY_PREFIX;
+  }
   const PUB_CACHE = new Map();               // userId → CryptoKey (public key cache, this page load only)
   // FIX (403-treated-as-transient): tracks WHY the last key fetch for a
   // userId came back empty, so encryptForChat() below can tell a
@@ -161,45 +183,7 @@
   // identical on both ends for every message in the conversation, including
   // the first one. The original chatId is kept ONLY as a last-resort fallback
   // (so this never throws) and as a legacy fallback on decrypt (see below).
-  // FIX-ROOT-CAUSE-CHATID-CONTEXT-FALLBACK: _chatContext() below derives the
-  // encryption context from [myId, otherId] sorted — deliberately NOT from
-  // chatId, because a brand-new chat's first message is encrypted before the
-  // real (server-assigned) chatId exists on the sender's side, while the
-  // receiver always gets the real one. That only works if _myUserId() below
-  // actually resolves on BOTH sides; if it returns null on either side (a
-  // startup race — SessionManager/MessagesCore/window.currentUserId not
-  // populated yet, which is most likely to happen at the exact moment
-  // someone sends/receives their very FIRST message right after a fresh
-  // login or a redirect from Friends/Search into a new chat), _chatContext()
-  // falls back to the raw chatId — the original placeholder-vs-real-id
-  // mismatch this whole function exists to avoid. That produces two
-  // DIFFERENT contexts (and therefore different derived keys / different
-  // ratchet session storage) for sender and receiver, and every message in
-  // that session fails to decrypt from the very first one.
-  //
-  // A decoded JWT's payload always contains the account's own id and is
-  // available the instant a token exists in storage — no dependency on any
-  // other module having finished initializing — so check it FIRST, before
-  // the more fragile module-lookup paths that used to run first (kept below
-  // as fallbacks for token shapes that don't carry a plain id/sub claim).
-  function _userIdFromToken() {
-    try {
-      const t = window.authToken || sessionStorage.getItem('kynecta_auth_token')
-              || localStorage.getItem('kynecta_auth_token') || localStorage.getItem('authToken')
-              || localStorage.getItem('token') || localStorage.getItem('accessToken')
-              || localStorage.getItem('nexopa_token') || localStorage.getItem('USER_TOKEN') || '';
-      if (!t || t.split('.').length !== 3) return null;
-      const payloadB64 = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-      const padded = payloadB64 + '='.repeat((4 - (payloadB64.length % 4)) % 4);
-      const payload = JSON.parse(atob(padded));
-      const id = payload?.id || payload?.userId || payload?.sub || payload?.uid;
-      return id ? String(id) : null;
-    } catch (_) { return null; }
-  }
-
   function _myUserId() {
-    const fromToken = _userIdFromToken();
-    if (fromToken) return fromToken;
     try {
       if (window.SessionManager?.getCurrentUserId) {
         const id = window.SessionManager.getCurrentUserId();
@@ -329,7 +313,7 @@
     // password is available, regardless of which branch below runs.
     await _getOrCreateLocalWrapKey(password).catch(e => console.warn('[E2E] Local wrap key derivation failed:', e.message));
 
-    const stored = localStorage.getItem(STORE_KEY);
+    const stored = localStorage.getItem(_storeKey());
     if (stored) {
       try {
         const obj     = JSON.parse(stored);
@@ -393,7 +377,7 @@
             console.log('[E2E] ✅ Keys recovered via legacy password — migrating storage to new wrap secret.');
             try {
               const reEncPrivKey = await _encryptPrivateKey(pkcs8, password);
-              localStorage.setItem(STORE_KEY, JSON.stringify({ encPrivKey: reEncPrivKey, pubKey: _myPubKeyB64, keyId: _myKeyId }));
+              localStorage.setItem(_storeKey(), JSON.stringify({ encPrivKey: reEncPrivKey, pubKey: _myPubKeyB64, keyId: _myKeyId }));
               console.log('[E2E] ✅ Stored key migrated to new wrap secret — identity preserved.');
             } catch (migrateErr) {
               console.warn('[E2E] Key recovered but re-wrap/migration failed (will retry next login):', migrateErr.message);
@@ -443,7 +427,7 @@
     // the next attempt just because the network hiccuped. `registered` is
     // persisted alongside it so a later init() (see the "load from storage"
     // branch above) knows whether it still owes the server a confirmation.
-    localStorage.setItem(STORE_KEY, JSON.stringify({ encPrivKey, pubKey: pubKeyB64, keyId, registered }));
+    localStorage.setItem(_storeKey(), JSON.stringify({ encPrivKey, pubKey: pubKeyB64, keyId, registered }));
 
     _myPrivKey   = kp.privateKey;
     _myPubKeyB64 = pubKeyB64;
@@ -519,9 +503,9 @@
       if (ok) {
         _bgRegistrationTimer = null;
         try {
-          const stored = JSON.parse(localStorage.getItem(STORE_KEY) || '{}');
+          const stored = JSON.parse(localStorage.getItem(_storeKey()) || '{}');
           stored.registered = true;
-          localStorage.setItem(STORE_KEY, JSON.stringify(stored));
+          localStorage.setItem(_storeKey(), JSON.stringify(stored));
         } catch (_) {}
         _markEnabled();
         console.log('[E2E] ✅ Background key registration succeeded — E2E now ready');
@@ -1121,11 +1105,15 @@
       return _getRecipientPublicKey(userId).then(r => r?.key ? exportPublicKey({ publicKey: r.key }) : null);
     },
     getEncryptionContext: _chatContext,
+    // Exposed so js/double-ratchet.js can namespace its own localStorage
+    // session-state keys per logged-in account (see _storeKey() above for
+    // why this matters — same-browser multi-account collisions).
+    getMyUserId: _myUserId,
     get enabled() { return _enabled; },
     get publicKey() { return _myPubKeyB64; },
     get keyId() { return _myKeyId; },
     clearKeys() {
-      localStorage.removeItem(STORE_KEY);
+      localStorage.removeItem(_storeKey());
       _myPrivKey = null; _myPubKeyB64 = null; _myKeyId = null; _enabled = false;
       PUB_CACHE.clear();
       _newEnabledGate(); // future callers should wait again, not see a stale "ready" gate
