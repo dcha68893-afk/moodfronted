@@ -1,0 +1,148 @@
+name: One-time global theme CSS stabilization
+
+on:
+  push:
+    paths:
+      - '.github/workflows/one-time-theme-css-stabilization.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Append unified authenticated-surface rules
+        shell: python
+        run: |
+          from pathlib import Path
+
+          p = Path('theme.colors.css')
+          text = p.read_text(encoding='utf-8-sig')
+
+          marker = '/* KYN-AUTHENTICATED-SURFACE-STABILIZATION v1 */'
+          if marker not in text:
+              text += r'''
+
+/* KYN-AUTHENTICATED-SURFACE-STABILIZATION v1 */
+/*
+   This is deliberately variable-driven. ThemeManager remains the only owner
+   of the palette; this final layer prevents legacy module CSS from painting a
+   different root/header/footer surface after the synchronous theme paint.
+*/
+html, body {
+  background: var(--kyn-bg-root) !important;
+  color: var(--kyn-text-primary) !important;
+  border-color: var(--kyn-border) !important;
+}
+
+#loadingScreen,
+#globalHeader,
+header,
+.header,
+.top-bar,
+.toolbar,
+.app-header,
+.chat-header,
+.module-header {
+  background: var(--kyn-bg-header) !important;
+  background-image: none !important;
+  color: var(--kyn-text-primary) !important;
+  border-color: var(--kyn-border) !important;
+}
+
+.header-module-title,
+.header-module-copy,
+.header-actions,
+.header-context {
+  color: var(--kyn-text-primary) !important;
+}
+
+.header-module-subtitle,
+.profile-status {
+  color: var(--kyn-text-secondary) !important;
+}
+
+footer,
+.footer,
+.app-footer,
+.mobile-nav-bar,
+.bottom-nav,
+.bottom-nav-bar,
+.mobile-footer,
+.sub-body {
+  background: var(--kyn-bg-panel) !important;
+  background-image: none !important;
+  color: var(--kyn-text-primary) !important;
+  border-color: var(--kyn-border) !important;
+}
+
+input,
+textarea,
+select {
+  background: var(--kyn-bg-input) !important;
+  color: var(--kyn-text-primary) !important;
+  border-color: var(--kyn-border) !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--kyn-text-placeholder) !important;
+}
+
+/* First authenticated paint must be atomic; normal interaction transitions
+   resume after the shell/module has reached its resolved theme. */
+html.kyn-theme-boot,
+html.kyn-theme-boot * {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* Remove common legacy hardcoded light top/bottom surfaces in dark mode. */
+html[data-theme="dark"] body,
+html[data-theme="dark"] #app,
+html[data-theme="dark"] #root,
+html[data-theme="dark"] #app-root,
+html[data-theme="dark"] .app-container,
+html[data-theme="dark"] .page-wrapper,
+html[data-theme="dark"] .content-area,
+html[data-theme="dark"] .main-content {
+  background: var(--kyn-bg-root) !important;
+  color: var(--kyn-text-primary) !important;
+}
+
+html[data-theme="dark"] #loadingScreen,
+html[data-theme="dark"] #globalHeader,
+html[data-theme="dark"] header,
+html[data-theme="dark"] .header,
+html[data-theme="dark"] .top-bar,
+html[data-theme="dark"] .toolbar,
+html[data-theme="dark"] .app-header,
+html[data-theme="dark"] .chat-header,
+html[data-theme="dark"] .module-header,
+html[data-theme="dark"] footer,
+html[data-theme="dark"] .footer,
+html[data-theme="dark"] .app-footer,
+html[data-theme="dark"] .mobile-nav-bar,
+html[data-theme="dark"] .bottom-nav,
+html[data-theme="dark"] .bottom-nav-bar,
+html[data-theme="dark"] .mobile-footer,
+html[data-theme="dark"] .sub-body {
+  background: var(--kyn-bg-header) !important;
+  background-image: none !important;
+  color: var(--kyn-text-primary) !important;
+  border-color: var(--kyn-border) !important;
+}
+'''
+              p.write_text(text, encoding='utf-8')
+
+      - name: Commit and remove one-time workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add theme.colors.css
+          git rm .github/workflows/one-time-theme-css-stabilization.yml
+          git commit -m 'Stabilize global authenticated theme surfaces' || exit 0
+          git push
