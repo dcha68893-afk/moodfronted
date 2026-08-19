@@ -34,13 +34,7 @@
   };
 
   function readSessionTimeout() {
-    var keys = [
-      'knecta_settings_cache',
-      'app_settings_global',
-      'nexopa_settings',
-      'nexopa_settings_global'
-    ];
-
+    var keys = ['knecta_settings_cache', 'app_settings_global', 'nexopa_settings', 'nexopa_settings_global'];
     for (var i = 0; i < keys.length; i += 1) {
       try {
         var raw = localStorage.getItem(keys[i]);
@@ -57,35 +51,22 @@
         }
       } catch (_) {}
     }
-
     return TIMEOUTS['30min'];
   }
 
   function topLoginRedirect(reason) {
     if (redirecting) return;
     redirecting = true;
-
     try { if (refreshTimer) clearTimeout(refreshTimer); } catch (_) {}
     try { if (inactivityTimer) clearTimeout(inactivityTimer); } catch (_) {}
     try { if (inactivityWarningTimer) clearTimeout(inactivityWarningTimer); } catch (_) {}
-
     try {
-      window.postMessage({
-        type: 'nexopa-session-pause',
-        reason: reason || 'session_expired',
-        timestamp: new Date().toISOString()
-      }, '*');
+      window.postMessage({ type: 'nexopa-session-pause', reason: reason || 'session_expired', timestamp: new Date().toISOString() }, '*');
     } catch (_) {}
-
-    // No toast, modal, loading screen or intermediate authenticated screen.
-    // replace() also prevents Back from returning to the dead session.
     try {
       var target = '/index.html?session=expired';
-      if (window.top && window.top !== window) {
-        window.top.location.replace(target);
-      } else {
-        window.location.replace(target);
-      }
+      if (window.top && window.top !== window) window.top.location.replace(target);
+      else window.location.replace(target);
     } catch (_) {
       try { window.location.href = '/index.html?session=expired'; } catch (__) {}
     }
@@ -93,9 +74,7 @@
 
   function clearAuthForRedirect() {
     try {
-      if (window.AUTH_STATE && typeof window.AUTH_STATE.clearAuthState === 'function') {
-        window.AUTH_STATE.clearAuthState();
-      }
+      if (window.AUTH_STATE && typeof window.AUTH_STATE.clearAuthState === 'function') window.AUTH_STATE.clearAuthState();
     } catch (_) {}
     try {
       if (window.Session) {
@@ -109,7 +88,6 @@
 
   function refreshImmediately(reason) {
     if (refreshPromise) return refreshPromise;
-
     var auth = window.AUTH_STATE;
     if (!auth || typeof auth.refreshTokenSafely !== 'function') {
       topLoginRedirect(reason || 'refresh_unavailable');
@@ -129,9 +107,7 @@
       })
       .catch(function (error) {
         refreshFailures += 1;
-        if (!navigator.onLine) {
-          return { success: false, transient: true, error: error };
-        }
+        if (!navigator.onLine) return { success: false, transient: true, error: error };
         if (refreshFailures < 3) {
           setTimeout(function () { refreshImmediately('refresh_retry'); }, 1500);
           return { success: false, transient: true, error: error };
@@ -148,18 +124,13 @@
   function scheduleImmediateRefresh() {
     if (refreshTimer) clearTimeout(refreshTimer);
     refreshTimer = null;
-
     var auth = window.AUTH_STATE;
     if (!auth || typeof auth.getTimeToExpiry !== 'function' || !auth.isAuthenticated || !auth.isAuthenticated()) return;
-
     var ttl = auth.getTimeToExpiry();
     if (ttl === null || ttl === undefined || !Number.isFinite(ttl)) return;
-
-    // Refresh one minute before expiry. If already expired, refresh now.
     var delay = ttl <= 0 ? 0 : Math.max(1000, ttl - 60000);
     refreshTimer = setTimeout(function () {
-      var current = window.AUTH_STATE && typeof window.AUTH_STATE.getTimeToExpiry === 'function'
-        ? window.AUTH_STATE.getTimeToExpiry() : null;
+      var current = window.AUTH_STATE && typeof window.AUTH_STATE.getTimeToExpiry === 'function' ? window.AUTH_STATE.getTimeToExpiry() : null;
       refreshImmediately(current !== null && current <= 0 ? 'token_expired' : 'token_near_expiry');
     }, delay);
   }
@@ -168,14 +139,10 @@
     var coordinator = window.SESSION_COORDINATOR;
     if (!coordinator || !coordinator._config) return;
     if (!window.AUTH_STATE || !window.AUTH_STATE.isAuthenticated || !window.AUTH_STATE.isAuthenticated()) return;
-
     var timeout = readSessionTimeout();
     coordinator._config.inactivityTimeout = timeout;
-
     if (inactivityTimer) clearTimeout(inactivityTimer);
     if (inactivityWarningTimer) clearTimeout(inactivityWarningTimer);
-
-    // No warning popup: one clean logout transition at the configured timeout.
     inactivityWarningTimer = null;
     inactivityTimer = setTimeout(function () {
       clearAuthForRedirect();
@@ -210,37 +177,33 @@
     var coordinator = window.SESSION_COORDINATOR;
     if (!coordinator || coordinator.__kynSessionPatched) return !!coordinator;
     coordinator.__kynSessionPatched = true;
-
     coordinator.handleSessionInvalid = function (detail) {
       clearAuthForRedirect();
       topLoginRedirect((detail && detail.reason) || 'session_invalid');
     };
-
-    // Suppress all re-auth/expiry popups; the redirect/refresh path is authoritative.
     coordinator.showReauthenticationWarning = function () {};
     coordinator.showSessionExpiryWarning = function () {};
-
-    coordinator.handleTokenExpired = function () {
-      refreshImmediately('token_expired_event');
-    };
-
-    coordinator.scheduleTokenRefresh = function () {
-      scheduleImmediateRefresh();
-    };
-
+    coordinator.handleTokenExpired = function () { refreshImmediately('token_expired_event'); };
+    coordinator.scheduleTokenRefresh = function () { scheduleImmediateRefresh(); };
     coordinator._getConfiguredInactivityTimeoutMs = readSessionTimeout;
     coordinator.handleUserInactivity = function () {};
     coordinator.handleInactivityLogout = function () {
       clearAuthForRedirect();
       topLoginRedirect('inactivity_timeout');
     };
-
     bindActivity();
     bindTimeoutChanges();
     scheduleImmediateRefresh();
     resetInactivityTimer();
     return true;
   }
+
+  // Catch expiry/invalid events even when the coordinator is created later.
+  window.addEventListener('nexopa-session-invalid', function (event) {
+    clearAuthForRedirect();
+    topLoginRedirect((event && event.detail && event.detail.reason) || 'session_invalid');
+  });
+  window.addEventListener('nexopa-token-expired', function () { refreshImmediately('token_expired_event'); });
 
   function boot() {
     if (patchCoordinator()) return;
