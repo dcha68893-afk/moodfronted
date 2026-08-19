@@ -7,6 +7,9 @@
  *  - VAPID subscription creation and upload to backend
  *  - Badge count management
  *  - Notification preference sync
+ *  - Message-module presence reconciliation
+ *  - Plaintext foreground notification preview
+ *  - Message date separator visual normalization
  */
 
 (function (global) {
@@ -35,6 +38,222 @@
     return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
   }
 
+  // ── Message-module UI hardening ───────────────────────────────────────────
+  // There are several historical date-divider selectors in the Messages
+  // module. Some old rules still give .date-divider a dark rectangular/pill
+  // surface even though the current renderer uses .message-date-separator.
+  // Normalize every known selector here so the visible day label is always
+  // just centered text: Today / Yesterday / 19/08/2026.
+  function _normalizeMessageDateSeparators() {
+    if (document.getElementById('__kynMessageDateSeparatorFix')) return;
+    const style = document.createElement('style');
+    style.id = '__kynMessageDateSeparatorFix';
+    style.textContent = `
+      .date-divider,
+      .date-divider span,
+      .message-date-separator,
+      .message-date-separator span,
+      .date-separator,
+      .date-separator span,
+      .chat-date-separator,
+      .chat-date-separator span {
+        background: transparent !important;
+        background-color: transparent !important;
+        border: 0 !important;
+        box-shadow: none !important;
+        outline: 0 !important;
+      }
+      .date-divider,
+      .message-date-separator,
+      .date-separator,
+      .chat-date-separator {
+        display: block !important;
+        width: 100% !important;
+        text-align: center !important;
+        margin: 12px 0 !important;
+        padding: 0 !important;
+      }
+      .date-divider span,
+      .message-date-separator span,
+      .date-separator span,
+      .chat-date-separator span {
+        display: inline !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        border-radius: 0 !important;
+        font-size: 12px !important;
+        font-weight: 500 !important;
+        color: var(--kyn-text-secondary, #8696a0) !important;
+      }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+  }
+
+  // ── Presence accuracy for the Messages module ──────────────────────────────
+  // The backend's check_user_online event is authoritative: it checks the
+  // actual live Socket.IO room/socket state rather than trusting a stale
+  // client-side cache. Refresh the peer status when Messages asks for it and
+  // treat IDLE/TYPING as online because the user is still connected.
+  function _installPresenceReconciliation() {
+    if (window.__kynMessagePresenceFixInstalled) return;
+    window.__kynMessagePresenceFixInstalled = true;
+
+    const lastChecks = new Map();
+    const CHECK_TTL = 5000;
+
+    function requestAuthoritativeStatus(userId) {
+      const uid = String(userId || '');
+      if (!uid) return;
+      const now = Date.now();
+      const last = lastChecks.get(uid) || 0;
+      if (now - last < CHECK_TTL) return;
+      lastChecks.set(uid, now);
+      try {
+        const rt = window.KynectaRealtime;
+        if (rt && typeof rt.emit === 'function') {
+          const p = rt.emit('check_user_online', { targetUserId: uid }, { retry: false });
+          if (p && typeof p.catch === 'function') p.catch(() => {});
+        }
+      } catch (_) {}
+    }
+
+    function applyAuthoritativeStatus(payload) {
+      if (!payload || !payload.userId) return;
+      const uid = String(payload.userId);
+      const online = payload.online === true;
+      const engine = window.PresenceEngine;
+      if (engine) {
+        try {
+          if (online && typeof engine._markOnline === 'function') {
+            engine._markOnline(uid, { source: 'server_authoritative', timestamp: payload.timestamp || Date.now() });
+          } else if (!online && typeof engine._markOffline === 'function') {
+            engine._markOffline(uid, { source: 'server_authoritative', timestamp: payload.timestamp || Date.now() });
+          }
+        } catch (_) {}
+      }
+      try {
+        window.dispatchEvent(new CustomEvent('kyn:authoritativePresence', {
+          detail: { userId: uid, online, timestamp: payload.timestamp || Date.now() }
+        }));
+      } catch (_) {}
+    }
+
+    function bindBus() {
+      const bus = window.KynectaEventBus || window.appEvents;
+      if (!bus || typeof bus.on !== 'function') return false;
+      if (window.__kynMessagePresenceBusBound) return true;
+      window.__kynMessagePresenceBusBound = true;
+      bus.on('SOCKET_EVENT', (payload) => {
+        if (!payload) return;
+        if (payload.type === 'user_online_status') applyAuthoritativeStatus(payload);
+      });
+      return true;
+    }
+
+    // Patch the public status reader once the foundation has initialized.
+    // This is deliberately limited to the Messages iframe and does not change
+    // the presence engine's behavior for other modules.
+    const patchEngine = () => {
+      const engine = window.PresenceEngine;
+      if (!engine || engine.__kynMessageStatusPatched || typeof engine.getStatus !== 'function') return;
+      const originalGetStatus = engine.getStatus.bind(engine);
+      engine.getStatus = function (userId) {
+        const status = originalGetStatus(userId);
+        if (userId && String(userId) !== String(this._myUserId || '')) {
+          requestAuthoritativeStatus(userId);
+        }
+        if (status === 'online' || status === 'idle' || status === 'typing' || status === 'backgrounded') {
+          return 'online';
+        }
+        return status;
+      };
+      engine.__kynMessageStatusPatched = true;
+    };
+
+    bindBus();
+    patchEngine();
+    const timer = setInterval(() => {
+      bindBus();
+      patchEngine();
+      if (window.PresenceEngine?.__kynMessageStatusPatched && window.__kynMessagePresenceBusBound) {
+        clearInterval(timer);
+      }
+    }, 500);
+    setTimeout(() => clearInterval(timer), 15000);
+
+    // Also reconcile the currently open chat peer whenever Messages tells us
+    // which conversation is active. This prevents a stale "offline" label
+    // from surviving a navigation from Friend/Status/Call into Messages.
+    window.addEventListener('kyn:activeChatChanged', (event) => {
+      const peer = event.detail?.peerId || event.detail?.userId;
+      if (peer) requestAuthoritativeStatus(peer);
+    });
+  }
+
+  // ── Foreground message notification preview ───────────────────────────────
+  // The server/service worker must NEVER receive plaintext merely to make a
+  // notification preview readable. When Messages has the E2E keys locally,
+  // decrypt the already-received envelope in this page and use that plaintext
+  // for a foreground notification. If decryption is not available, show a
+  // safe generic preview rather than leaking ciphertext JSON.
+  function _looksEncryptedEnvelope(value) {
+    if (value && typeof value === 'object') return true;
+    if (typeof value !== 'string') return false;
+    const text = value.trim();
+    if (!text || text[0] !== '{') return false;
+    try {
+      const obj = JSON.parse(text);
+      if (!obj || typeof obj !== 'object') return false;
+      return ('v' in obj) || ('kid' in obj) || ('ct' in obj) || ('iv' in obj) || ('eph' in obj) || ('sid' in obj) || ('n' in obj);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function _safeNotificationText(value) {
+    if (value === null || value === undefined) return 'You have a new message';
+    const text = typeof value === 'string' ? value : '';
+    if (!text || _looksEncryptedEnvelope(text)) return 'You have a new message';
+    return text.slice(0, 240);
+  }
+
+  function _installForegroundMessagePreview() {
+    if (window.__kynPlaintextNotificationFixInstalled) return;
+    window.__kynPlaintextNotificationFixInstalled = true;
+
+    window.addEventListener('kyn:incomingMessage', async (event) => {
+      try {
+        const detail = event.detail || {};
+        const message = detail.message || detail;
+        if (!message || !message.senderId) return;
+        const myId = window.SessionManager?.getUserId?.() || window.SessionManager?.getCurrentUserId?.();
+        if (myId && String(message.senderId) === String(myId)) return;
+        if (document.visibilityState === 'visible') return; // native push handles background delivery
+
+        let text = message.content;
+        if (_looksEncryptedEnvelope(text) && window.KynectaE2E?.decryptFromChat) {
+          const chatId = detail.chatId || message.chatId || message.conversationId;
+          if (chatId) {
+            try {
+              const plain = await window.KynectaE2E.decryptFromChat(String(text), chatId, String(message.senderId));
+              if (plain && plain !== text) text = plain;
+            } catch (_) {}
+          }
+        }
+
+        const body = _safeNotificationText(text);
+        if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+        // The browser notification is only a convenience while the app page is
+        // hidden; it never sends plaintext to the backend or service worker.
+        new Notification(message.senderName || message.sender || 'New message', {
+          body,
+          tag: `kynecta-message-${message.id || message.localId || detail.chatId || 'new'}`,
+          icon: '/icons/nexopa-192.png',
+        });
+      } catch (_) {}
+    });
+  }
+
   // ── Register service worker ────────────────────────────────────────────────
   async function registerSW() {
     if (!('serviceWorker' in navigator)) {
@@ -43,28 +262,14 @@
     }
 
     try {
-      // FIX-SW-SCOPE-CONFLICT: This used to register '/sw.js' — a second,
-      // different service worker script — at the same scope ('/') that every
-      // other page (chat.html, calls.html, friend.html, upload.html) registers
-      // '/service-worker.js' at. Two different scripts competing for the same
-      // scope causes the browser to flip which one is in control of the page,
-      // firing 'controllerchange' — which chat.html's own PWA-update listener
-      // treats as a signal to possibly window.location.reload() (when
-      // sessionStorage 'pwa_update_ack' is set), causing surprise reloads that
-      // have nothing to do with an actual app update, just this second SW
-      // fighting for control. service-worker.js already has its own complete
-      // push / notificationclick / sync handlers (verified equivalent), so
-      // share that single registration instead of creating a competing one.
+      // FIX-SW-SCOPE-CONFLICT: share the single service worker at '/'.
       _swRegistration = await navigator.serviceWorker.register('/service-worker.js', { scope: '/' });
       console.log('[PushManager] ✅ Service Worker registered');
 
-      // Listen for controller change (SW update)
       navigator.serviceWorker.addEventListener('controllerchange', () => {
         console.log('[PushManager] SW updated — reloading');
-        // Don't auto-reload — just log. User refreshes when ready.
       });
 
-      // Listen for messages from SW
       navigator.serviceWorker.addEventListener('message', (event) => {
         if (event.data?.type === 'FLUSH_OFFLINE_QUEUE') {
           window.KynectaOfflineQueue?.flush?.();
@@ -88,7 +293,6 @@
       return false;
     }
 
-    // Check permission
     const permission = await Notification.requestPermission();
     if (permission !== 'granted') {
       console.warn('[PushManager] Notification permission denied');
@@ -96,7 +300,6 @@
     }
 
     try {
-      // Fetch VAPID public key from server
       const resp = await fetch(`${_apiBase()}/api/push/vapid-public-key`, {
         headers: _headers(),
         credentials: 'include',
@@ -105,15 +308,12 @@
       const { data } = await resp.json();
       const applicationServerKey = _urlBase64ToUint8Array(data.publicKey);
 
-      // Create push subscription
       const sub = await _swRegistration.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey,
       });
 
       const subJSON = sub.toJSON();
-
-      // Upload subscription to backend
       const uploadResp = await fetch(`${_apiBase()}/api/push/subscribe`, {
         method: 'POST',
         headers: _headers(),
@@ -157,11 +357,9 @@
 
   // ── Update app badge (unread count) ───────────────────────────────────────
   function setBadge(count) {
-    // Via SW for lock screen badge
     navigator.serviceWorker.ready.then(sw => {
       sw.active?.postMessage({ type: count > 0 ? 'SET_BADGE' : 'CLEAR_BADGE', count });
     }).catch(() => {});
-    // Direct API (Chrome 81+)
     if (count > 0 && 'setAppBadge' in navigator) {
       navigator.setAppBadge(count).catch(() => {});
     } else if ('clearAppBadge' in navigator) {
@@ -169,26 +367,27 @@
     }
   }
 
-  // ── Auto-init ─────────────────────────────────────────────────────────────
+  // ── Auto-init ──────────────────────────────────────────────────────────────
   async function init() {
+    _normalizeMessageDateSeparators();
+    _installPresenceReconciliation();
+    _installForegroundMessagePreview();
+
     const swOk = await registerSW();
     if (!swOk) return;
 
-    // Auto-subscribe if user previously granted permission
     if (localStorage.getItem('kyn_push_subscribed') === '1' &&
         Notification.permission === 'granted') {
       await subscribe();
     }
   }
 
-  // Run after DOM ready
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
     init();
   }
 
-  // ── Public API ────────────────────────────────────────────────────────────
   global.KynectaPushManager = {
     init,
     subscribe,
