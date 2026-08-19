@@ -2998,9 +2998,28 @@ refreshTokenIfNeeded = async function() {
             return { success: false, error: 'No token to refresh' };
         }
         
-        // Enhanced token validation
+        // FIX-ROOT-CAUSE-REFRESH-NEVER-FIRES: this used to check
+        // validateToken(currentToken) here and bail out immediately with
+        // requiresReauth:true the moment it came back invalid — but "the
+        // access token is expired" (validateToken's JWT exp check) is
+        // EXACTLY the situation this function exists to fix by calling
+        // POST /api/auth/refresh with the separate, longer-lived refresh
+        // token. Refusing to refresh because the access token expired meant
+        // the refresh endpoint was never actually called once expiry hit:
+        // every API call for the rest of the session failed with "Token
+        // expired and requires reauthentication" (see the repeated
+        // [TOKEN] Token validation failed: Token expired / Authentication
+        // failed pairs in the browser console — refresh was never even
+        // attempted between them) until the person manually logged out and
+        // back in. Only a token that's malformed/unparseable is a reason to
+        // skip straight to reauth — "expired" is not; both the working
+        // shouldRefreshToken() early-return below and the actual refresh
+        // attempt already handle "not currently expired, don't bother" and
+        // "refresh token also invalid" correctly on their own, so the ONLY
+        // thing this earlier check needs to filter out is a token that
+        // can't be parsed at all (validateToken's other error cases).
         const validationResult = validateToken(currentToken);
-        if (!validationResult.valid) {
+        if (!validationResult.valid && validationResult.error !== 'Token expired (JWT exp claim)') {
             console.warn('[TOKEN] Token validation failed:', validationResult.error);
             return { 
                 success: false, 
@@ -3010,7 +3029,7 @@ refreshTokenIfNeeded = async function() {
             };
         }
         
-        if (!TokenManager.shouldRefreshToken()) {
+        if (validationResult.valid && !TokenManager.shouldRefreshToken()) {
             return { 
                 success: true, 
                 token: currentToken,

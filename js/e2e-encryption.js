@@ -161,7 +161,45 @@
   // identical on both ends for every message in the conversation, including
   // the first one. The original chatId is kept ONLY as a last-resort fallback
   // (so this never throws) and as a legacy fallback on decrypt (see below).
+  // FIX-ROOT-CAUSE-CHATID-CONTEXT-FALLBACK: _chatContext() below derives the
+  // encryption context from [myId, otherId] sorted — deliberately NOT from
+  // chatId, because a brand-new chat's first message is encrypted before the
+  // real (server-assigned) chatId exists on the sender's side, while the
+  // receiver always gets the real one. That only works if _myUserId() below
+  // actually resolves on BOTH sides; if it returns null on either side (a
+  // startup race — SessionManager/MessagesCore/window.currentUserId not
+  // populated yet, which is most likely to happen at the exact moment
+  // someone sends/receives their very FIRST message right after a fresh
+  // login or a redirect from Friends/Search into a new chat), _chatContext()
+  // falls back to the raw chatId — the original placeholder-vs-real-id
+  // mismatch this whole function exists to avoid. That produces two
+  // DIFFERENT contexts (and therefore different derived keys / different
+  // ratchet session storage) for sender and receiver, and every message in
+  // that session fails to decrypt from the very first one.
+  //
+  // A decoded JWT's payload always contains the account's own id and is
+  // available the instant a token exists in storage — no dependency on any
+  // other module having finished initializing — so check it FIRST, before
+  // the more fragile module-lookup paths that used to run first (kept below
+  // as fallbacks for token shapes that don't carry a plain id/sub claim).
+  function _userIdFromToken() {
+    try {
+      const t = window.authToken || sessionStorage.getItem('kynecta_auth_token')
+              || localStorage.getItem('kynecta_auth_token') || localStorage.getItem('authToken')
+              || localStorage.getItem('token') || localStorage.getItem('accessToken')
+              || localStorage.getItem('nexopa_token') || localStorage.getItem('USER_TOKEN') || '';
+      if (!t || t.split('.').length !== 3) return null;
+      const payloadB64 = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+      const padded = payloadB64 + '='.repeat((4 - (payloadB64.length % 4)) % 4);
+      const payload = JSON.parse(atob(padded));
+      const id = payload?.id || payload?.userId || payload?.sub || payload?.uid;
+      return id ? String(id) : null;
+    } catch (_) { return null; }
+  }
+
   function _myUserId() {
+    const fromToken = _userIdFromToken();
+    if (fromToken) return fromToken;
     try {
       if (window.SessionManager?.getCurrentUserId) {
         const id = window.SessionManager.getCurrentUserId();
