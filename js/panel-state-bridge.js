@@ -28,6 +28,28 @@
         return value.trim().slice(0, 240);
     }
 
+    // Patch the presence engine's known offline-event bug without replacing
+    // the engine. The original _markOffline mutates prev.status before testing
+    // whether it changed, so the offline transition can be silently swallowed.
+    // This wrapper emits the missing transition after the original bookkeeping.
+    function installPresenceEnginePatch() {
+        var engine = window.PresenceEngine;
+        if (!engine || engine.__kynPresenceBridgePatched) return !!engine;
+        engine.__kynPresenceBridgePatched = true;
+        if (typeof engine._markOffline === 'function') {
+            var originalOffline = engine._markOffline.bind(engine);
+            engine._markOffline = function (userId, meta) {
+                var before = this._onlineUsers && this._onlineUsers.get(String(userId));
+                var wasOnline = !!before && before.status !== 'offline';
+                originalOffline(userId, meta || {});
+                if (wasOnline && typeof this._emit === 'function') {
+                    try { this._emit({ event: 'presence:change', userId: String(userId), status: 'offline' }); } catch (_) {}
+                }
+            };
+        }
+        return true;
+    }
+
     // ------------------------------------------------------------------
     // CHILD SIDE
     // ------------------------------------------------------------------
@@ -50,10 +72,6 @@
             hidden: function () { send('PanelHidden', null); }
         };
 
-        // The original incoming-message event is emitted before the UI's E2E
-        // decrypt finishes. Never call decryptFromChat a second time here.
-        // Instead, observe the SAME message object until the normal UI path
-        // replaces its ciphertext with plaintext, then relay only that text.
         if (!window.__kynNotificationPreviewBridge) {
             window.__kynNotificationPreviewBridge = true;
             window.addEventListener('kyn:incomingMessage', function (event) {
@@ -110,6 +128,11 @@
         document.addEventListener('visibilitychange', function () {
             send(document.hidden ? 'PanelHidden' : 'PanelFocused', null);
         });
+
+        var childPresenceTimer = setInterval(function () {
+            if (installPresenceEnginePatch()) clearInterval(childPresenceTimer);
+        }, 300);
+        setTimeout(function () { clearInterval(childPresenceTimer); }, 15000);
     }
 
     // ------------------------------------------------------------------
@@ -144,18 +167,30 @@
                 timestamp: payload.timestamp || Date.now(),
                 source: 'server-authoritative'
             };
+            try { installPresenceEnginePatch(); } catch (_) {}
+            try {
+                var engine = window.PresenceEngine;
+                if (engine) {
+                    if (normalized.online && typeof engine._markOnline === 'function') engine._markOnline(normalized.userId, normalized);
+                    else if (!normalized.online && typeof engine._markOffline === 'function') engine._markOffline(normalized.userId, normalized);
+                }
+            } catch (_) {}
             try { window.dispatchEvent(new CustomEvent('kyn:authoritativePresence', { detail: normalized })); } catch (_) {}
             try {
                 document.querySelectorAll('iframe').forEach(function (frame) {
-                    try { frame.contentWindow.postMessage({ type: 'user_online_status', ...normalized }, '*'); } catch (_) {}
+                    try {
+                        frame.contentWindow.postMessage({
+                            type: normalized.online ? 'user:online' : 'user:offline',
+                            userId: normalized.userId,
+                            online: normalized.online,
+                            timestamp: normalized.timestamp,
+                            source: normalized.source
+                        }, '*');
+                    } catch (_) {}
                 });
             } catch (_) {}
         }
 
-        // Browser Notification() is synchronous. If the old parent message
-        // listener tries to display the raw E2E envelope, suppress it briefly
-        // and wait for the Messages iframe to return plaintext from its normal
-        // decryption path. If no plaintext arrives, show a safe generic preview.
         if (!window.__kynEncryptedNotificationGuard) {
             window.__kynEncryptedNotificationGuard = true;
             try {
@@ -172,9 +207,7 @@
                             if (!entry) return;
                             pending.delete(key);
                             try {
-                                new OriginalNotification(entry.title, Object.assign({}, entry.options, {
-                                    body: 'You have a new message'
-                                }));
+                                new OriginalNotification(entry.title, Object.assign({}, entry.options, { body: 'You have a new message' }));
                             } catch (_) {}
                         }, 3800);
                         pending.set(key, { title: title || 'New message', options: options, timer: timer });
@@ -225,9 +258,7 @@
                         map.delete(matched);
                         clearTimeout(entry.timer);
                         try {
-                            new window.__kynOriginalNotification(preview.senderName || entry.title || 'New message', Object.assign({}, entry.options, {
-                                body: safePreview(preview.content)
-                            }));
+                            new window.__kynOriginalNotification(preview.senderName || entry.title || 'New message', Object.assign({}, entry.options, { body: safePreview(preview.content) }));
                         } catch (_) {}
                     }
                 }
@@ -251,11 +282,7 @@
             else if (type === 'PanelClosed') window.__kynPanelState[mod].panel = null;
             else if (type === 'PanelFocused') window.__kynPanelState[mod].focused = true;
             else if (type === 'PanelHidden') window.__kynPanelState[mod].focused = false;
-            try {
-                document.dispatchEvent(new CustomEvent('kyn:panelstate', {
-                    detail: { module: mod, type: type, panel: data.panel, state: window.__kynPanelState[mod] }
-                }));
-            } catch (_) {}
+            try { document.dispatchEvent(new CustomEvent('kyn:panelstate', { detail: { module: mod, type: type, panel: data.panel, state: window.__kynPanelState[mod] } })); } catch (_) {}
         });
 
         function bindPresenceBus() {
@@ -270,8 +297,12 @@
             });
             return true;
         }
+        installPresenceEnginePatch();
         bindPresenceBus();
-        var presenceTimer = setInterval(function () { if (bindPresenceBus()) clearInterval(presenceTimer); }, 500);
+        var presenceTimer = setInterval(function () {
+            installPresenceEnginePatch();
+            if (bindPresenceBus()) clearInterval(presenceTimer);
+        }, 500);
         setTimeout(function () { clearInterval(presenceTimer); }, 15000);
     }
 })();
