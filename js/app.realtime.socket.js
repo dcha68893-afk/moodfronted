@@ -1352,19 +1352,31 @@
                             if (_senderId && String(_senderId) !== String(_myId)) {
                                 var _senderName = (payload && (payload.senderName || payload.fromName)) || 'New message';
                                 var _preview = (payload && (payload.content || payload.text)) || '';
-                                // FIX (ciphertext leaking into the notification toast): this
-                                // fires straight off the raw socket payload, before the
-                                // message ever reaches the decrypt pipeline in messages-ui.js
-                                // — for an E2E-encrypted DM, payload.content IS the still-
-                                // encrypted envelope (a JSON blob like {"v":2,"eph":"...",...}),
-                                // so it was being shown verbatim as the notification preview.
-                                // There's no safe way to decrypt it here (no chat context,
-                                // no guarantee KynectaE2E/ratchet state is even loaded in this
-                                // realtime layer), so just detect the envelope shape and show
-                                // a generic placeholder instead of the ciphertext.
-                                var _looksEncrypted = typeof _preview === 'string' && _preview.charAt(0) === '{' && _preview.indexOf('"v"') !== -1 && _preview.indexOf('"eph"') !== -1;
+                                // FIX (ciphertext STILL leaking into the notification toast):
+                                // the previous version of this check required BOTH `"v"` AND
+                                // `"eph"` substrings to treat something as an encrypted
+                                // envelope. `"eph"` was only ever present in one now-superseded
+                                // envelope shape — the CURRENT X3DH envelope (js/e2e-session-
+                                // init.js, `{v:3, kid, sid, n, iv, ct, ...}`) has no `eph` field
+                                // at all, so the AND condition was always false for it and the
+                                // raw envelope JSON was shown verbatim as the notification body
+                                // (confirmed live: a toast showing the literal
+                                // {"v":3,"kid":"...","sid":"3:4","n":1,...} payload).
+                                // Detect ANY of the envelope-shape keys actually in use across
+                                // every version this app has ever produced (v1 kid/iv/ct, v2
+                                // Double Ratchet, v3 X3DH) with OR, not AND, matching the same
+                                // detector already used correctly in js/panel-state-bridge.js —
+                                // one shared shape check instead of two different, drifting ones.
+                                var _looksEncrypted = typeof _preview === 'string' && _preview.trim().charAt(0) === '{' &&
+                                    (function () {
+                                        try {
+                                            var o = JSON.parse(_preview);
+                                            return !!o && typeof o === 'object' &&
+                                                ('v' in o || 'kid' in o || 'ct' in o || 'iv' in o || 'eph' in o || 'sid' in o || 'n' in o);
+                                        } catch (_e) { return false; }
+                                    })();
                                 if (_looksEncrypted) {
-                                    _preview = '🔒 New message';
+                                    _preview = 'New message received';
                                 } else if (_preview.length > 60) {
                                     _preview = _preview.slice(0, 60) + '…';
                                 }

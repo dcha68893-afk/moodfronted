@@ -3773,24 +3773,46 @@
 
             // Show a native notification when the tab is not focused
             if (document.hidden && window.Notification && Notification.permission === 'granted' && _kynDesktopNotificationsAllowed()) {
-                try {
-                    const senderName = (msg.sender && (msg.sender.displayName || msg.sender.username)) || 'New message';
-                    // FIX (ciphertext-in-notification, path #2): this is a SEPARATE
-                    // notification path from service-worker.js's push handler — an
-                    // in-page `new Notification()` built directly from the socket
-                    // payload's msg.content. If decryption hasn't completed yet (or
-                    // this message belongs to a chat whose keys aren't loaded), that
-                    // content is still the raw E2E envelope ({"v":2,"eph":"...")
-                    // and was being shown verbatim. Same sanitization as the SW path.
-                    const _rawContent = msg.content || '';
-                    const _looksEncrypted = typeof _rawContent === 'string' && _rawContent.trim().charAt(0) === '{' &&
-                        (_rawContent.indexOf('"v"') !== -1 || _rawContent.indexOf('"eph"') !== -1 || _rawContent.indexOf('"ct"') !== -1);
-                    new Notification(senderName, {
-                        body: _looksEncrypted ? 'You have a new message' : (_rawContent || 'You have a new message'),
-                        icon: '/favicon.ico',
-                        tag: 'kyn-msg-' + (msg.chatId || msg.conversationId || Date.now())
-                    });
-                } catch (_e) {}
+                (async () => {
+                    try {
+                        const senderName = (msg.sender && (msg.sender.displayName || msg.sender.username)) || 'New message';
+                        // CRYPTO-PIPELINE (dedup, path #2): this used to carry its own
+                        // second, independent "does this look like ciphertext" regex —
+                        // a duplicate of the SAME heuristic living in service-worker.js's
+                        // push handler AND (previously) in messages-ui.js's sidebar/
+                        // search/unread-counter surfaces. A duplicate detector can only
+                        // ever fall back to a generic string; it can never show the real
+                        // text even when this exact page already has KynectaE2E loaded
+                        // and unlocked (see js/e2e-encryption.js + js/e2e-session-init.js
+                        // script tags above — chat.html deliberately boots its own E2E
+                        // session at shell-load for this reason). This now routes through
+                        // the ONE canonical decrypt-for-display service everything else
+                        // (chat panel, sidebar, unread counter, search, status previews)
+                        // uses, so this notification shows real plaintext whenever keys
+                        // are ready, and — per the "never show ciphertext" rule — falls
+                        // back to a neutral "New message received" (never the raw
+                        // envelope) if they are not, with the shared pending-decrypt
+                        // queue retrying automatically once keys become available.
+                        let body = 'New message received';
+                        const chatId = msg.chatId || msg.conversationId || (d.detail && d.detail.chatId) || null;
+                        if (window.KynectaE2E && typeof window.KynectaE2E.decryptMessageForDisplay === 'function' && chatId) {
+                            const myId = window.KynectaE2E.getMyUserId ? window.KynectaE2E.getMyUserId() : null;
+                            window.KynectaE2E.log('MESSAGE_RECEIVED', { surface: 'shellNotification', chatId, messageId: msg.id });
+                            body = await window.KynectaE2E.decryptMessageForDisplay(msg, chatId, myId, {
+                                fallbackText: 'New message received'
+                            });
+                        } else if (typeof msg.content === 'string' && msg.content.trim().charAt(0) !== '{') {
+                            // Not an E2E envelope at all (legacy/plaintext row) — safe as-is.
+                            body = msg.content || body;
+                        }
+                        new Notification(senderName, {
+                            body,
+                            icon: '/favicon.ico',
+                            tag: 'kyn-msg-' + (msg.chatId || msg.conversationId || Date.now())
+                        });
+                        window.KynectaE2E?.log?.('UI_RENDER_COMPLETE', { surface: 'shellNotification', chatId, messageId: msg.id });
+                    } catch (_e) {}
+                })();
             }
         });
 

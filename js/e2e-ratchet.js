@@ -1,4 +1,35 @@
 /**
+ * ⚠️ DEPRECATED / NOT WIRED IN — DO NOT LOAD THIS FILE.
+ *
+ * AUDIT (duplicate-conflicting-decrypt-implementation, receiver decrypt
+ * pipeline fix): this module (`KynectaRatchet`) is not referenced by any
+ * <script> tag or any other file in this repo — confirmed by searching for
+ * "KynectaRatchet." across the whole frontend, which returns zero hits
+ * outside this file. It was superseded by js/double-ratchet.js, which IS
+ * wired into KynectaE2E (message.html/group.html load it and it monkey-
+ * patches KynectaE2E.encryptForChat/decryptFromChat).
+ *
+ * Both modules tag their envelope with the SAME version number, `v: 2`
+ * (see DR_VERSION in js/double-ratchet.js and the literal `v: 2` in
+ * encrypt() below), but with mutually-incompatible payload shapes. If this
+ * file were ever added to a page's script tags — e.g. by copy-pasting a
+ * <script src="js/e2e-ratchet.js"> tag alongside double-ratchet.js the way
+ * e2e-encryption.js's other companions are loaded — whichever one patches
+ * KynectaE2E last would win for encryption, while the receiving side could
+ * easily be running the other, and every "v:2" envelope from that point on
+ * would fail to decrypt (both files ultimately just fall back to raw
+ * decryptFromChat() on shape mismatch, which returns the ciphertext
+ * unchanged — see decryptFromChat's `envelope.v !== 1` early-return — and
+ * the canonical decryptMessageForDisplay() pipeline in e2e-encryption.js
+ * correctly treats that as a permanent, non-retryable decrypt failure).
+ *
+ * Left in the repo only for reference; kept out of every page's script
+ * tags. If per-message ratchet behavior from this file is ever wanted,
+ * retire js/double-ratchet.js first and renumber this file's envelope
+ * version so the two can never collide.
+ */
+
+/**
  * e2e-ratchet.js — Per-message forward secrecy for KynectaE2E
  *
  * Implements a symmetric-key ratchet on top of the existing ECDH shared

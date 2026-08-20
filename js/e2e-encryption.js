@@ -1065,11 +1065,27 @@
     }
     const looksLikePlaceholder = typeof plaintext === 'string' && plaintext.indexOf('[') === 0;
     if (!plaintext || plaintext === content || looksLikePlaceholder) {
-      // decryptFromChat already exhausted its own stale-key retry-once
-      // internally; a placeholder here means it genuinely could not decrypt
-      // against the freshest key it could find — not "not ready yet".
-      _pipelineLog('DECRYPT_FAILED_REASON', { messageId, reason: plaintext || 'empty_result' });
-      return { ok: false, reason: plaintext || 'empty_result', retryable: false };
+      // FIX (chat panel permanently stuck on "Encrypted message"): this used
+      // to treat EVERY placeholder starting with '[' as a genuine, exhausted,
+      // non-retryable failure — true of decryptFromChat's OWN v1 path (it
+      // retries once internally against a freshly-fetched key before ever
+      // returning a placeholder). It is NOT true of the X3DH transport
+      // installed by js/e2e-session-init.js (envelope v3): secureDecrypt()
+      // there returns '[Encrypted message — secure session unavailable]' the
+      // FIRST time it's called if the session state simply hasn't finished
+      // loading from storage yet, or the X3DH handshake hasn't completed —
+      // both ordinary "not ready yet" conditions, not permanent failures.
+      // Marking that non-retryable is exactly why a bubble could sit on the
+      // fallback text forever even though the sender/receiver, keys, and
+      // transport were all fine. Only a message-sequence violation (out-of-
+      // window / already-consumed counter — a genuine, non-recoverable
+      // desync/replay signal) is treated as permanent now; every other
+      // placeholder — including an unrecognized envelope shape, which
+      // resolves itself once the matching crypto module finishes loading —
+      // is retried via the existing bounded-backoff queue below.
+      const isPermanent = typeof plaintext === 'string' && plaintext.indexOf('invalid message sequence') !== -1;
+      _pipelineLog('DECRYPT_FAILED_REASON', { messageId, reason: plaintext || 'empty_result', retryable: !isPermanent });
+      return { ok: false, reason: plaintext || 'empty_result', retryable: !isPermanent };
     }
     _pipelineLog('DECRYPT_SUCCESS', { messageId, chatId, peerUserId });
     return { ok: true, plaintext };
