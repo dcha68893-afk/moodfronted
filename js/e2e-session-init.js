@@ -95,12 +95,6 @@
     return false;
   }
 
-  // ──────────────────────────────────────────────────────────────────────────
-  // X3DH + persistent symmetric message ratchet for first-contact DMs.
-  // This is deliberately kept in this existing bootstrap file so no second
-  // cryptographic transport can accidentally be selected by different chat
-  // entry points. All paths call the same KynectaE2E public API.
-  // ──────────────────────────────────────────────────────────────────────────
   const PATCH_FLAG = '__kynectaX3DHTransportV2';
   const MAX_SKEW = 100;
 
@@ -200,7 +194,6 @@
     const root = b64(await hkdf(material.buffer, 'Kynecta-X3DH-v1-root', 32));
     const initSend = b64(await hkdf(unb64(root), 'Kynecta-X3DH-v1-init-send', 32));
     const initRecv = b64(await hkdf(unb64(root), 'Kynecta-X3DH-v1-init-recv', 32));
-    // Reverse the directional chains on the responder: A's send is B's receive.
     const state = { v: 2, root, initiator: String(senderId), sendChain: initRecv, recvChain: initSend, sendN: 0, recvN: 0, peerId: String(senderId), signedPreKeyId: signed.keyId, oneTimePreKeyId: bootstrap.oneTimePreKeyId || null, establishedAt: Date.now() };
     await saveState(chatId, senderId, state);
     if (one) { bundle.oneTimePreKeys = (bundle.oneTimePreKeys || []).filter(k => k.keyId !== one.keyId); saveBundle(bundle); }
@@ -242,6 +235,7 @@
     if (!window.KynectaE2E || window.KynectaE2E[PATCH_FLAG]) return;
     const originalEncrypt = window.KynectaE2E.encryptForChat;
     const originalDecrypt = window.KynectaE2E.decryptFromChat;
+    const originalDisplay = window.KynectaE2E.decryptMessageForDisplay;
     if (typeof originalEncrypt !== 'function' || typeof originalDecrypt !== 'function') return;
     const wrapped = async function (plaintext, chatId, recipientId, opts) {
       try { return await secureEncrypt(originalEncrypt, plaintext, chatId, recipientId, opts); }
@@ -250,6 +244,49 @@
     const decrypt = async function (enc, chatId, senderId) { return secureDecrypt(originalDecrypt, enc, chatId, senderId); };
     window.KynectaE2E.encryptForChat = wrapped;
     window.KynectaE2E.decryptFromChat = decrypt;
+
+    // IMPORTANT: decryptMessageForDisplay() is implemented inside
+    // e2e-encryption.js and its lexical call to decryptFromChat() does not
+    // observe a later replacement of window.KynectaE2E.decryptFromChat.
+    // The X3DH transport therefore used to work for direct decrypt callers,
+    // while the canonical UI/notification display service still invoked the
+    // old v1 decrypt function. v3 envelopes were consequently returned as
+    // ciphertext and rendered as "Encrypted message".
+    // Keep the existing public display API, but route v3 envelopes through
+    // the active X3DH decryptor before falling back to the original display
+    // service for v1/plaintext messages.
+    if (typeof originalDisplay === 'function') {
+      window.KynectaE2E.decryptMessageForDisplay = async function (message, chatId, currentUserId, opts = {}) {
+        const content = message?.content;
+        let envelope = null;
+        try { envelope = typeof content === 'string' ? JSON.parse(content) : null; } catch (_) {}
+        if (!envelope || envelope.v !== 3) {
+          return originalDisplay(message, chatId, currentUserId, opts);
+        }
+
+        const resolved = typeof window.KynectaE2E.resolveMessageCryptoPeer === 'function'
+          ? window.KynectaE2E.resolveMessageCryptoPeer(message, currentUserId, opts.activeConversation)
+          : null;
+        const peerUserId = resolved?.peerUserId || message?.senderId || message?.sender?.id;
+        if (!peerUserId) return opts.fallbackText || '🔒 Encrypted message';
+
+        const fallback = opts.fallbackText || '🔒 Encrypted message';
+        try {
+          const text = await secureDecrypt(originalDecrypt, content, chatId, String(peerUserId));
+          if (typeof text === 'string' && text.startsWith('[')) {
+            // The X3DH session can legitimately be unavailable for a short
+            // period during first-contact bootstrap. Never expose ciphertext;
+            // the caller's existing display fallback remains safe.
+            return fallback;
+          }
+          return text;
+        } catch (e) {
+          console.warn('[E2E/X3DH] Display decrypt failed:', e?.message || e);
+          return fallback;
+        }
+      };
+    }
+
     Object.defineProperty(window.KynectaE2E, PATCH_FLAG, { value: true, enumerable: false });
     console.log('[E2E/X3DH] ✅ First-contact X3DH + persistent message-chain transport installed');
   }
