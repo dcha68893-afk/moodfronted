@@ -194,27 +194,20 @@
   // The server/service worker must NEVER receive plaintext merely to make a
   // notification preview readable. When Messages has the E2E keys locally,
   // decrypt the already-received envelope in this page and use that plaintext
-  // for a foreground notification. If decryption is not available, show a
-  // safe generic preview rather than leaking ciphertext JSON.
-  function _looksEncryptedEnvelope(value) {
-    if (value && typeof value === 'object') return true;
-    if (typeof value !== 'string') return false;
-    const text = value.trim();
-    if (!text || text[0] !== '{') return false;
-    try {
-      const obj = JSON.parse(text);
-      if (!obj || typeof obj !== 'object') return false;
-      return ('v' in obj) || ('kid' in obj) || ('ct' in obj) || ('iv' in obj) || ('eph' in obj) || ('sid' in obj) || ('n' in obj);
-    } catch (_) {
-      return false;
-    }
-  }
-
+  // for a foreground notification. If decryption is not (yet) available, show
+  // exactly "New message received" — never ciphertext, and never a partial/
+  // stale preview.
+  //
+  // CRYPTO-PIPELINE: this used to carry its own copy of "does this look
+  // encrypted" detection and call decryptFromChat() directly with senderId as
+  // the peer. That is now the single canonical decryptMessageForDisplay() in
+  // e2e-encryption.js — same envelope detection, same peer resolution, same
+  // cache (so if the chat panel already decrypted this message, this shows
+  // instantly with no second decrypt), same automatic retry if keys aren't
+  // ready yet.
   function _safeNotificationText(value) {
-    if (value === null || value === undefined) return 'You have a new message';
-    const text = typeof value === 'string' ? value : '';
-    if (!text || _looksEncryptedEnvelope(text)) return 'You have a new message';
-    return text.slice(0, 240);
+    if (value === null || value === undefined || value === '') return 'New message received';
+    return typeof value === 'string' ? value.slice(0, 240) : 'New message received';
   }
 
   function _installForegroundMessagePreview() {
@@ -230,15 +223,17 @@
         if (myId && String(message.senderId) === String(myId)) return;
         if (document.visibilityState === 'visible') return; // native push handles background delivery
 
+        const chatId = detail.chatId || message.chatId || message.conversationId;
         let text = message.content;
-        if (_looksEncryptedEnvelope(text) && window.KynectaE2E?.decryptFromChat) {
-          const chatId = detail.chatId || message.chatId || message.conversationId;
-          if (chatId) {
-            try {
-              const plain = await window.KynectaE2E.decryptFromChat(String(text), chatId, String(message.senderId));
-              if (plain && plain !== text) text = plain;
-            } catch (_) {}
-          }
+        if (window.KynectaE2E?.decryptMessageForDisplay && chatId) {
+          try {
+            // fallbackText is exactly "New message received" per the
+            // never-show-ciphertext rule — if this is still queued (keys not
+            // ready), that's what shows now; if a later retry succeeds, the
+            // shared cache means the chat panel (already open or opened next)
+            // will show the real text immediately without decrypting again.
+            text = await window.KynectaE2E.decryptMessageForDisplay(message, chatId, myId, { fallbackText: 'New message received' });
+          } catch (_) { text = 'New message received'; }
         }
 
         const body = _safeNotificationText(text);

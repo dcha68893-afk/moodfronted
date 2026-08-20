@@ -268,7 +268,15 @@
     _enabledGate.resolve = _resolve;
   }
   _newEnabledGate();
-  function _markEnabled() { _enabled = true; _enabledGate.resolve(); }
+  function _markEnabled() {
+    _enabled = true;
+    _enabledGate.resolve();
+    // CRYPTO-PIPELINE: tell the pending-decrypt retry queue (defined below)
+    // that keys just became usable, so anything queued while E2E was still
+    // unlocking gets retried immediately instead of waiting for its own
+    // backoff timer.
+    try { document.dispatchEvent(new CustomEvent('kyn:e2eUnlocked')); } catch (_) {}
+  }
   function _waitForEnabled() { return _enabled ? Promise.resolve() : _enabledGate; }
   // GROUP ENCRYPTION: a CryptoKey derived once per session (during init,
   // from the same password) and cached in memory, used to encrypt Sender
@@ -582,6 +590,7 @@
         const key = await importPublicKey(cached.pub);
         const entry = { key, keyId: cached.keyId };
         PUB_CACHE.set(userId, entry);
+        try { document.dispatchEvent(new CustomEvent('kyn:e2eKeyAvailable', { detail: { userId } })); } catch (_) {}
         return entry;
       } catch (_) { /* corrupted entry — fall through to re-fetch */ }
     }
@@ -654,6 +663,7 @@
           PUB_CACHE.set(userId, entry);
           store[userId] = { pub: data.data.publicKey, keyId: data.data.keyId };
           _savePubKeyStore(store);
+          try { document.dispatchEvent(new CustomEvent('kyn:e2eKeyAvailable', { detail: { userId } })); } catch (_) {}
           return entry;
         } catch (e) {
           console.warn(`[E2E] Recipient key fetch attempt ${attempt} for user ${userId} did not succeed yet:`, e?.message);
@@ -737,6 +747,7 @@
       // slower, now-redundant network fetch doesn't overwrite this with a
       // stale result later.
       _inflightKeyFetch.delete(userId);
+      try { document.dispatchEvent(new CustomEvent('kyn:e2eKeyAvailable', { detail: { userId } })); } catch (_) {}
       return true;
     } catch (e) {
       console.warn('[E2E] cacheRecipientKey: failed to import provided key, falling back to network fetch:', e?.message);
@@ -869,6 +880,260 @@
     const env        = await _aesEncrypt(plaintext, aesKey);
 
     return JSON.stringify({ v: 1, kid: _myKeyId, iv: env.iv, ct: env.ct });
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // CRYPTO-PIPELINE (single canonical decrypt-for-display service)
+  // ══════════════════════════════════════════════════════════════════════
+  // Every surface that shows message content derived from an E2E envelope —
+  // the chat panel bubbles, the sidebar/recent-chats preview, the multi-send
+  // picker, the hidden-vault modal, search, the unread counter, and
+  // notification previews — used to each carry their own copy of "does this
+  // look like ciphertext" detection and/or their own ad-hoc sender/peer
+  // resolution before calling decryptFromChat(). That duplication is exactly
+  // how the sidebar ended up permanently stuck on a static "🔒 Encrypted
+  // message" placeholder (three separate copies of the same regex, in
+  // messages-ui.js, none of which ever actually attempted a decrypt) while
+  // the chat panel decrypted correctly right next to it.
+  //
+  // decryptMessageForDisplay() below is the ONE place any UI surface should
+  // call to turn a message's raw `.content` into safe display text. It:
+  //   1. Detects whether content is an E2E envelope at all (plaintext passes
+  //      straight through, untouched).
+  //   2. Resolves the correct peer via resolveMessageCryptoPeer() — the same
+  //      canonical sender/receiver inversion logic every caller needs, in
+  //      one place instead of scattered per call site.
+  //   3. Decrypts through the existing decryptFromChat() — no second crypto
+  //      implementation.
+  //   4. Caches the plaintext per message id, so every surface showing the
+  //      same message (bubble + sidebar preview + search) decrypts it AT
+  //      MOST ONCE and thereafter reads the shared cache.
+  //   5. If keys aren't ready yet (not unlocked, or the peer's public key
+  //      hasn't arrived), NEVER shows raw ciphertext and NEVER reports the
+  //      message as corrupted/failed — it queues the message and retries
+  //      automatically the moment 'kyn:e2eUnlocked' or 'kyn:e2eKeyAvailable'
+  //      fires, then broadcasts 'kyn:messageDecrypted' so every subscribed
+  //      surface can patch itself in place.
+  //   6. Logs each stage (MESSAGE_RECEIVED, KEY_LOOKUP_START, KEY_FOUND,
+  //      DECRYPT_START, DECRYPT_SUCCESS, DECRYPT_FAILED_REASON) so the whole
+  //      receive→decrypt path can be traced from the console.
+
+  function _pipelineLog(stage, meta) {
+    try { console.log(`[E2E-PIPELINE] ${stage}`, meta || ''); } catch (_) {}
+  }
+
+  // messageId → plaintext. Populated the first time ANY surface successfully
+  // decrypts a given message; every other surface then reads this instead of
+  // re-decrypting. Cleared only by clearKeys() (account switch/logout).
+  const _decryptCache = new Map();
+
+  // messageId → { content, chatId, peerUserId, currentUserId, subscribers }
+  // "subscribers" are resolve functions from decryptMessageForDisplay() calls
+  // that are currently waiting on this exact message; a retry that succeeds
+  // resolves all of them and fires 'kyn:messageDecrypted' for anyone that
+  // isn't directly awaiting the promise (e.g. an already-rendered bubble).
+  const _pendingDecryptQueue = new Map();
+  const _PENDING_RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 15000]; // capped backoff, then holds at 15s
+
+  function _envelopeShape(content) {
+    if (!content || typeof content !== 'string') return null;
+    const v = content.trim();
+    if (v.charAt(0) !== '{') return null;
+    try {
+      const obj = JSON.parse(v);
+      if (!obj || typeof obj !== 'object') return null;
+      if (!('v' in obj) && !('ct' in obj) && !('iv' in obj)) return null;
+      return obj;
+    } catch (_) { return null; }
+  }
+
+  // ── Canonical peer resolution ──────────────────────────────────────────
+  // Resolves { senderId, receiverId, peerUserId, conversationId } for a
+  // message from AUTHORITATIVE state only — message.senderId/receiverId as
+  // delivered by the server, never a UI-local/pending/temporary chat id, and
+  // never the currently-open conversation's id used as a stand-in for the
+  // sender. currentUserId + activeConversation are only consulted as a last
+  // resort when the message itself is missing a receiverId (e.g. some legacy
+  // rows) — matching the documented "for an incoming message myUserId =
+  // receiver, peerUserId = sender; for an outgoing echo, myUserId = sender,
+  // peerUserId = receiver" rule in exactly one place.
+  function resolveMessageCryptoPeer(message, currentUserId, activeConversation) {
+    const msg = message || {};
+    const me = currentUserId != null ? String(currentUserId) : (_myUserId() || null);
+    const senderId = msg.senderId != null ? String(msg.senderId)
+      : (msg.sender && msg.sender.id != null ? String(msg.sender.id) : null);
+    const receiverId = msg.receiverId != null ? String(msg.receiverId)
+      : (msg.recipientId != null ? String(msg.recipientId)
+        : (msg.receiver && msg.receiver.id != null ? String(msg.receiver.id)
+          : (msg.recipient && msg.recipient.id != null ? String(msg.recipient.id) : null)));
+    const conversationId = msg.chatId || msg.conversationId || (activeConversation && activeConversation.id) || null;
+
+    const isOwnMessage = !!(me && senderId && senderId === me);
+    let peerUserId;
+    if (isOwnMessage) {
+      // Outgoing echo (own message coming back via socket/history/sync):
+      // the peer we encrypted FOR is the receiver, never ourselves.
+      peerUserId = receiverId ||
+        (activeConversation && String(
+          activeConversation.friendId || activeConversation.otherUserId ||
+          (activeConversation.otherParticipant && activeConversation.otherParticipant.id) || ''
+        )) || null;
+    } else {
+      // Incoming message: the peer is whoever actually sent it — authoritative,
+      // never swapped for the currently-open conversation's id.
+      peerUserId = senderId;
+    }
+    if (peerUserId === '') peerUserId = null;
+    return { senderId, receiverId, peerUserId, conversationId };
+  }
+
+  function _scheduleRetry(messageId) {
+    const entry = _pendingDecryptQueue.get(messageId);
+    if (!entry || entry.timer) return;
+    const delay = _PENDING_RETRY_DELAYS_MS[Math.min(entry.attempts, _PENDING_RETRY_DELAYS_MS.length - 1)];
+    entry.timer = setTimeout(() => { entry.timer = null; _attemptQueuedDecrypt(messageId); }, delay);
+  }
+
+  async function _attemptQueuedDecrypt(messageId) {
+    const entry = _pendingDecryptQueue.get(messageId);
+    if (!entry) return;
+    entry.attempts++;
+    const result = await _decryptCore(entry.content, entry.chatId, entry.peerUserId, messageId);
+    if (result.ok) {
+      _pendingDecryptQueue.delete(messageId);
+      _decryptCache.set(messageId, result.plaintext);
+      entry.subscribers.forEach(fn => { try { fn(result.plaintext); } catch (_) {} });
+      try {
+        document.dispatchEvent(new CustomEvent('kyn:messageDecrypted', {
+          detail: { messageId, chatId: entry.chatId, plaintext: result.plaintext }
+        }));
+      } catch (_) {}
+    } else {
+      // Still not ready (keys not available yet) — keep waiting for the next
+      // 'kyn:e2eUnlocked'/'kyn:e2eKeyAvailable' event or the backoff timer,
+      // whichever comes first. A message is only ever reported as a genuine
+      // decrypt FAILURE (as opposed to "not ready yet") once decryptFromChat
+      // itself returns its own bounded failure placeholder — see _decryptCore.
+      _scheduleRetry(messageId);
+    }
+  }
+
+  function _retryAllPending() {
+    for (const messageId of Array.from(_pendingDecryptQueue.keys())) {
+      const entry = _pendingDecryptQueue.get(messageId);
+      if (entry && entry.timer) { clearTimeout(entry.timer); entry.timer = null; }
+      _attemptQueuedDecrypt(messageId);
+    }
+  }
+  document.addEventListener('kyn:e2eUnlocked', _retryAllPending);
+  document.addEventListener('kyn:e2eKeyAvailable', (e) => {
+    const uid = e?.detail?.userId != null ? String(e.detail.userId) : null;
+    if (!uid) return _retryAllPending();
+    for (const [messageId, entry] of _pendingDecryptQueue.entries()) {
+      if (String(entry.peerUserId) === uid) {
+        if (entry.timer) { clearTimeout(entry.timer); entry.timer = null; }
+        _attemptQueuedDecrypt(messageId);
+      }
+    }
+  });
+
+  // Does the actual decrypt + logging for one attempt. Returns
+  // { ok:true, plaintext } or { ok:false, reason, retryable }.
+  async function _decryptCore(content, chatId, peerUserId, messageId) {
+    if (!peerUserId) {
+      _pipelineLog('DECRYPT_FAILED_REASON', { messageId, reason: 'no_peer_id' });
+      return { ok: false, reason: 'no_peer_id', retryable: false };
+    }
+    _pipelineLog('KEY_LOOKUP_START', { messageId, peerUserId });
+    if (!_enabled || !_myPrivKey) {
+      _pipelineLog('DECRYPT_FAILED_REASON', { messageId, reason: 'not_unlocked' });
+      return { ok: false, reason: 'not_unlocked', retryable: true };
+    }
+    const keyEntry = await _getRecipientPublicKey(peerUserId, false, undefined);
+    if (!keyEntry) {
+      _pipelineLog('DECRYPT_FAILED_REASON', { messageId, reason: 'key_not_found' });
+      return { ok: false, reason: 'key_not_found', retryable: true };
+    }
+    _pipelineLog('KEY_FOUND', { messageId, peerUserId, keyId: keyEntry.keyId });
+    _pipelineLog('DECRYPT_START', { messageId, chatId, peerUserId });
+    let plaintext;
+    try {
+      plaintext = await decryptFromChat(content, chatId, peerUserId);
+    } catch (e) {
+      _pipelineLog('DECRYPT_FAILED_REASON', { messageId, reason: e?.message || 'exception' });
+      return { ok: false, reason: e?.message || 'exception', retryable: true };
+    }
+    const looksLikePlaceholder = typeof plaintext === 'string' && plaintext.indexOf('[') === 0;
+    if (!plaintext || plaintext === content || looksLikePlaceholder) {
+      // decryptFromChat already exhausted its own stale-key retry-once
+      // internally; a placeholder here means it genuinely could not decrypt
+      // against the freshest key it could find — not "not ready yet".
+      _pipelineLog('DECRYPT_FAILED_REASON', { messageId, reason: plaintext || 'empty_result' });
+      return { ok: false, reason: plaintext || 'empty_result', retryable: false };
+    }
+    _pipelineLog('DECRYPT_SUCCESS', { messageId, chatId, peerUserId });
+    return { ok: true, plaintext };
+  }
+
+  // ── The single public entry point every UI surface should call ─────────
+  // message: the raw message object (needs .id/.localId, .content, .senderId
+  //          at minimum; .receiverId helps for own-echo resolution)
+  // chatId: authoritative chat/conversation id for this message
+  // currentUserId: the logged-in user's id
+  // opts.activeConversation: optional, only used as a last-resort fallback
+  //          when the message itself doesn't carry a receiverId
+  // opts.fallbackText: text to return immediately while a message is queued
+  //          for retry or has permanently failed — defaults to a neutral
+  //          lock icon for in-app surfaces; notification callers should pass
+  //          'New message received' per the "never show ciphertext" rule.
+  // opts.onResolved(plaintext): optional callback invoked later (possibly
+  //          seconds afterward) if the message was queued and a retry then
+  //          succeeds — lets a caller that can't easily subscribe to
+  //          'kyn:messageDecrypted' still patch itself.
+  // Synchronous cache peek — lets a render loop that can't await (e.g.
+  // building a big HTML string in one pass) show an already-known plaintext
+  // immediately instead of always starting from the fallback text, without
+  // needing to restructure the caller into async/await.
+  function peekDecryptedText(message) {
+    const messageId = String((message && (message.id || message.localId || message.serverId)) || '');
+    if (!messageId) return null;
+    return _decryptCache.has(messageId) ? _decryptCache.get(messageId) : null;
+  }
+
+  async function decryptMessageForDisplay(message, chatId, currentUserId, opts) {
+    opts = opts || {};
+    const fallbackText = opts.fallbackText || '🔒 Encrypted message';
+    const content = message && message.content;
+    const messageId = String((message && (message.id || message.localId || message.serverId)) || `${chatId}:${content}`);
+
+    if (!_envelopeShape(content)) {
+      // Not an E2E envelope at all — already plaintext (or empty/non-text).
+      return typeof content === 'string' ? content : (content || '');
+    }
+
+    if (_decryptCache.has(messageId)) return _decryptCache.get(messageId);
+
+    _pipelineLog('MESSAGE_RECEIVED', { messageId, chatId });
+
+    const { peerUserId } = resolveMessageCryptoPeer(message, currentUserId, opts.activeConversation);
+    const result = await _decryptCore(content, chatId, peerUserId, messageId);
+
+    if (result.ok) {
+      _decryptCache.set(messageId, result.plaintext);
+      return result.plaintext;
+    }
+
+    if (result.retryable) {
+      let entry = _pendingDecryptQueue.get(messageId);
+      if (!entry) {
+        entry = { content, chatId, peerUserId, attempts: 0, timer: null, subscribers: new Set() };
+        _pendingDecryptQueue.set(messageId, entry);
+      }
+      if (typeof opts.onResolved === 'function') entry.subscribers.add(opts.onResolved);
+      _scheduleRetry(messageId);
+    }
+    // Permanent or not-yet-ready failure: never leak ciphertext, either way.
+    return fallbackText;
   }
 
   // ── Decrypt a received message ────────────────────────────────────────────
@@ -1075,6 +1340,16 @@
     init,
     encryptForChat,
     decryptFromChat,
+    // CRYPTO-PIPELINE: the single canonical decrypt-for-display service and
+    // its peer-resolution helper — see the block above decryptFromChat.
+    // Every UI surface (chat panel, sidebar/recent-chats, search, multi-send
+    // picker, hidden vault, unread counter, notifications) should call
+    // decryptMessageForDisplay() instead of hand-rolling its own envelope
+    // detection + decrypt call.
+    decryptMessageForDisplay,
+    resolveMessageCryptoPeer,
+    peekDecryptedText,
+    log: _pipelineLog,
     // FIX (SEND-HANG-NON-HISTORY-OPEN): see prefetchRecipientKey definition above.
     prefetchRecipientKey,
     // FIX (BOOTSTRAP-KEY-NEVER-CACHED): see cacheRecipientKey definition above.
@@ -1116,6 +1391,18 @@
       localStorage.removeItem(_storeKey());
       _myPrivKey = null; _myPubKeyB64 = null; _myKeyId = null; _enabled = false;
       PUB_CACHE.clear();
+      // CRYPTO-PIPELINE: a decrypted-text cache or a retry queue surviving a
+      // logout/account-switch would either leak the previous account's
+      // plaintext into the next account's UI, or sit forever retrying
+      // against keys that no longer apply. Reset both here so relogin starts
+      // clean — this is also what "restore keys, restore session, decrypt
+      // existing messages, don't show decryption failed" after a
+      // refresh/relogin depends on: a fresh session must re-attempt every
+      // message from scratch against the newly-restored keys, not reuse a
+      // stale failure/success from before.
+      _decryptCache.clear();
+      for (const entry of _pendingDecryptQueue.values()) { if (entry.timer) clearTimeout(entry.timer); }
+      _pendingDecryptQueue.clear();
       _newEnabledGate(); // future callers should wait again, not see a stale "ready" gate
     },
   };

@@ -1456,11 +1456,24 @@ const ChatManager = {
                 
                 let lastMessageText = chat.lastMessage?.content || chat.lastMessageContent || '';
                 let lastMessageTime = chat.lastMessage?.createdAt || chat.lastMessageAt || chat.updatedAt;
-                
+                // CRYPTO-PIPELINE: the sidebar preview decrypts through the same
+                // canonical decryptMessageForDisplay() the chat panel uses, which
+                // needs the message's real id/senderId/receiverId to resolve the
+                // correct peer and to cache/dedupe per-message — not just the raw
+                // content string. Carry those through onto the conversation object
+                // (lastMessageId/lastMessageSenderId/lastMessageReceiverId) instead
+                // of only ever keeping the bare text.
+                let lastMessageId = chat.lastMessage?.id || chat.lastMessageId || null;
+                let lastMessageSenderId = chat.lastMessage?.senderId || chat.lastMessageSenderId || null;
+                let lastMessageReceiverId = chat.lastMessage?.receiverId || chat.lastMessageReceiverId || null;
+
                 if (!lastMessageText && chat.messages && chat.messages.length > 0) {
                     const lastMsg = chat.messages[chat.messages.length - 1];
                     lastMessageText = lastMsg.content || '';
                     lastMessageTime = lastMsg.createdAt || lastMsg.timestamp;
+                    lastMessageId = lastMsg.id || lastMessageId;
+                    lastMessageSenderId = lastMsg.senderId || lastMessageSenderId;
+                    lastMessageReceiverId = lastMsg.receiverId || lastMessageReceiverId;
                 }
                 
                 // FIX: Resolve online status from FriendManager if available (it has realtime updates),
@@ -1478,6 +1491,9 @@ const ChatManager = {
                     friendAvatar: friendAvatar,
                     lastMessage: lastMessageText || '',
                     lastMessageAt: lastMessageTime || Date.now(),
+                    lastMessageId: lastMessageId,
+                    lastMessageSenderId: lastMessageSenderId,
+                    lastMessageReceiverId: lastMessageReceiverId,
                     unreadCount: chat.unreadCount || 0,
                     online: _convOnline,
                     type: chat.type || 'direct',
@@ -1867,6 +1883,14 @@ const ChatManager = {
                 if (conversation) {
                     conversation.lastMessage = message.content;
                     conversation.lastMessageAt = message.timestamp;
+                    // CRYPTO-PIPELINE: keep id/senderId/receiverId in sync with the
+                    // content so the sidebar's decryptMessageForDisplay() call can
+                    // resolve the correct peer for this new lastMessage — see
+                    // ConversationManager.fetchConversations() above for the same
+                    // fields on initial load.
+                    conversation.lastMessageId = message.id || message.localId || conversation.lastMessageId;
+                    conversation.lastMessageSenderId = message.senderId;
+                    conversation.lastMessageReceiverId = message.receiverId || conversation.lastMessageReceiverId;
                     if (message.senderId !== SessionManager.getUserId()) {
                         conversation.unreadCount = (conversation.unreadCount || 0) + 1;
                     }

@@ -3059,6 +3059,31 @@
         } catch (_) { /* best-effort only */ }
     };
 
+    // CRYPTO-PIPELINE: global catch-all for the canonical decrypt service's
+    // completion event. Most call sites already patch themselves via their
+    // own onResolved callback, but this covers any bubble/row that rendered
+    // the safe fallback text and then navigated away from the code path that
+    // was holding its own reference (e.g. a re-render replaced the DOM node
+    // between queueing and the retry succeeding). One listener, one place,
+    // instead of every surface needing to remember to resubscribe.
+    if (!window.__kynMessageDecryptedListenerInstalled) {
+        window.__kynMessageDecryptedListenerInstalled = true;
+        document.addEventListener('kyn:messageDecrypted', function (e) {
+            const detail = e.detail || {};
+            const messageId = detail.messageId;
+            if (!messageId) return;
+            try {
+                const bubble = document.querySelector('[data-message-id="' + messageId + '"] .message-content');
+                if (bubble && bubble.textContent.indexOf('🔒') !== -1) {
+                    const core = getMessagesCore();
+                    bubble.innerHTML = core?.formatMessageText ? core.formatMessageText(detail.plaintext) : _safeEscapeHtml(detail.plaintext);
+                }
+                if (window.__kynCommitDecrypt) window.__kynCommitDecrypt(messageId, null, detail.plaintext);
+                window.KynectaE2E?.log?.('UI_RENDER_COMPLETE', { surface: 'globalCatchAll', messageId });
+            } catch (_) {}
+        });
+    }
+
     // =============================================
 
     // UI RENDERER (ENHANCED WITH DETERMINISTIC LIFECYCLE & REAL DATA)
@@ -3753,43 +3778,49 @@
             }
 
             const currentUserId = currentUser?.id || currentUser?.userId;
-            // FIX-DECRYPT-OTHERPARTY-RESOLUTION-2: resolve otherPartyId once per
-            // attempt so a retry (below) can pick up a conversation object that
-            // has since finished populating.
-            const resolveOtherPartyId = () => currentChat?.friendId || currentChat?.otherUserId ||
-                (window.__kynGetConversationPeerId ? window.__kynGetConversationPeerId(currentChat, currentUserId) : null) ||
-                currentChat?.id;
             const chatId = currentChat?.id;
+            // CRYPTO-PIPELINE: peer resolution and the actual decrypt both now go
+            // through the single canonical service in e2e-encryption.js — no more
+            // locally-duplicated isSent/otherPartyId logic here. That service also
+            // owns the "keys not ready yet, retry automatically" behavior (see
+            // decryptMessageForDisplay's pending-retry queue), so this function no
+            // longer needs its own polling loop for that case; it only retries the
+            // STRUCTURAL case of chatId/peer not being resolvable yet (e.g. a
+            // conversation opened from Friend/Calls/Status whose friendId hasn't
+            // populated on currentChat at the exact instant this render fired).
             const attemptDecrypt = (message, attemptsLeft) => {
-                const raw = message.content;
-                const isSent = (message.local === true || message.optimistic === true || message.isOwn === true)
-                || String(message.senderId) === String(currentUserId);
-                const otherPartyId = resolveOtherPartyId();
-                const senderForDecrypt = isSent ? otherPartyId : message.senderId;
-                if (!senderForDecrypt || !chatId) {
-                    // FIX-DECRYPT-OTHERPARTY-RESOLUTION-2: a shallow friendId/otherUserId/
-                    // id chain (and even the robust resolver above) isn't always
-                    // populated yet on a conversation opened straight from the friend/
-                    // call/message module. Retry a few times before giving up, instead
-                    // of the old behavior of failing on the very first pass. Retries
-                    // call decryptFromChat directly (not back through the outer
-                    // pending/__kynClaimDecrypt filter above), since this message was
-                    // already claimed on entry and must keep its exclusive claim.
+                const peer = window.KynectaE2E?.resolveMessageCryptoPeer
+                    ? window.KynectaE2E.resolveMessageCryptoPeer(message, currentUserId, currentChat)
+                    : { peerUserId: null };
+                if (!peer.peerUserId || !chatId) {
                     if (attemptsLeft > 0) {
                         message._decryptInFlight = true;
                         setTimeout(() => attemptDecrypt(message, attemptsLeft - 1), 300);
                         return;
                     }
+                    window.KynectaE2E?.log?.('DECRYPT_FAILED_REASON', { messageId: message.id, reason: 'no_peer_or_chat' });
                     this._revealDecryptedBubble(message, '[Unable to decrypt message]', true);
                     return;
                 }
                 message._decryptInFlight = true;
-                window.KynectaE2E.decryptFromChat(raw, chatId, senderForDecrypt).then(plaintext => {
-                    if (!plaintext || plaintext === raw) {
-                        this._revealDecryptedBubble(message, '[Unable to decrypt message]', true);
-                        return;
+                window.KynectaE2E.decryptMessageForDisplay(message, chatId, currentUserId, {
+                    activeConversation: currentChat,
+                    fallbackText: '🔒 Encrypted message',
+                    // Fires later (possibly seconds afterward) if this message had
+                    // to be queued because keys weren't ready yet, and a retry then
+                    // succeeds — patches the bubble in place without a re-render.
+                    onResolved: (plaintext) => {
+                        this._revealDecryptedBubble(message, plaintext, false);
+                        window.KynectaE2E?.log?.('UI_RENDER_COMPLETE', { surface: 'chatPanel', messageId: message.id, retried: true });
                     }
-                    this._revealDecryptedBubble(message, plaintext, false);
+                }).then(plaintext => {
+                    // A queued/failed attempt still resolves (with the safe
+                    // fallback text) rather than rejecting — only mark it a real
+                    // failure in the UI when the pipeline didn't queue it for
+                    // retry (i.e. it's genuinely done trying).
+                    const isFallback = plaintext === '🔒 Encrypted message';
+                    this._revealDecryptedBubble(message, plaintext, isFallback);
+                    if (!isFallback) window.KynectaE2E?.log?.('UI_RENDER_COMPLETE', { surface: 'chatPanel', messageId: message.id });
                 }).catch(() => {
                     this._revealDecryptedBubble(message, '[Unable to decrypt message]', true);
                 });
@@ -5068,11 +5099,36 @@
 
                 
 
+                // CRYPTO-PIPELINE: route through the single canonical decrypt
+                // service instead of a local "looks encrypted" regex that only
+                // ever showed a static placeholder forever. peekDecryptedText()
+                // returns synchronously from the shared cache (instant if this
+                // message was already decrypted anywhere else — chat panel,
+                // another list, search, etc.); if not cached yet, kick off the
+                // real async decrypt (auto-retries once keys are ready) and
+                // patch this row's .last-message-text in place when it
+                // resolves — no full re-render, no flicker.
+                const _lastMessageObj = { id: chat.lastMessageId || (chat.id + ':last'), content: chat.lastMessage, senderId: chat.lastMessageSenderId, receiverId: chat.lastMessageReceiverId };
                 const _rawLast = (function() {
                     const v = (chat.lastMessage || '').trim();
-                    // FIX: same root cause as the message-bubble decrypt issue —
-                    // don't ever show the raw encrypted envelope as literal text.
-                    if (v.charAt(0) === '{' && v.indexOf('"v"') !== -1 && v.indexOf('"ct"') !== -1) return '🔒 Encrypted message';
+                    if (!v) return '';
+                    const cached = window.KynectaE2E?.peekDecryptedText?.(_lastMessageObj);
+                    if (cached != null) return cached;
+                    if (window.KynectaE2E?.decryptMessageForDisplay) {
+                        const _chatIdForDecrypt = String(chat.id || '');
+                        window.KynectaE2E.decryptMessageForDisplay(_lastMessageObj, _chatIdForDecrypt, core?.getCurrentUserId?.(), {
+                            activeConversation: chat,
+                            fallbackText: '🔒 Encrypted message'
+                        }).then(function(plaintext) {
+                            try {
+                                const row = document.querySelector(`.chat-item[data-chat-id="${CSS.escape(String(chat.id))}"] .last-message-text`);
+                                if (row) row.textContent = plaintext;
+                                window.KynectaE2E?.log?.('UI_RENDER_COMPLETE', { surface: 'sidebar', chatId: chat.id });
+                            } catch (_) {}
+                        }).catch(function(){});
+                    }
+                    // Ciphertext must never appear even on this first synchronous pass.
+                    if (v.charAt(0) === '{' && v.indexOf('"v"') !== -1) return '🔒 Encrypted message';
                     return v;
                 })();
 
@@ -6117,9 +6173,29 @@
 
                 const name = chat.friendName || chat.name || 'Chat';
 
+                // CRYPTO-PIPELINE: same canonical decrypt-for-display service as
+                // the main sidebar list — see renderChatsList() above. Instant if
+                // already cached, otherwise decrypts (with retry) and patches this
+                // row's .last-message-text once resolved.
+                const _multiSendLastMsgObj = { id: chat.lastMessageId || (chat.id + ':last'), content: chat.lastMessage, senderId: chat.lastMessageSenderId, receiverId: chat.lastMessageReceiverId };
                 const lastMsg = (function() {
                     const v = chat.lastMessage || '';
-                    if (v.charAt(0) === '{' && v.indexOf('"v"') !== -1 && v.indexOf('"ct"') !== -1) return '🔒 Encrypted message';
+                    if (!v) return '';
+                    const cached = window.KynectaE2E?.peekDecryptedText?.(_multiSendLastMsgObj);
+                    if (cached != null) return cached;
+                    if (window.KynectaE2E?.decryptMessageForDisplay) {
+                        window.KynectaE2E.decryptMessageForDisplay(_multiSendLastMsgObj, String(chat.id || ''), core?.getCurrentUserId?.(), {
+                            activeConversation: chat,
+                            fallbackText: '🔒 Encrypted message'
+                        }).then(function(plaintext) {
+                            try {
+                                const row = container.querySelector(`.chat-item[data-chat-id="${CSS.escape(String(chat.id))}"] .last-message-text`);
+                                if (row) row.textContent = plaintext;
+                                window.KynectaE2E?.log?.('UI_RENDER_COMPLETE', { surface: 'multiSendPicker', chatId: chat.id });
+                            } catch (_) {}
+                        }).catch(function(){});
+                    }
+                    if (v.charAt(0) === '{' && v.indexOf('"v"') !== -1) return '🔒 Encrypted message';
                     return v;
                 })();
 
@@ -6161,7 +6237,7 @@
 
                             <div class="chat-name" style="font-weight:600;font-size:13px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${name}</div>
 
-                            ${lastMsg ? `<div style="font-size:12px;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${lastMsg}</div>` : ''}
+                            ${lastMsg ? `<div class="last-message-text" style="font-size:12px;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${lastMsg}</div>` : ''}
 
                         </div>
 
@@ -14173,15 +14249,31 @@ Type: ${message.type || 'text'}`;
                 row.style.cssText = 'display:flex;align-items:center;gap:12px;padding:12px;border-radius:12px;cursor:pointer;transition:background .15s;';
                 row.onmouseenter = function(){ this.style.background='rgba(255,255,255,0.06)'; };
                 row.onmouseleave = function(){ this.style.background=''; };
+                // CRYPTO-PIPELINE: same canonical decrypt-for-display service as
+                // the sidebar/multi-send lists — see renderChatsList() above.
+                const _hcMsgObj = { id: c.lastMessageId || (c.id + ':last'), content: c.lastMessage, senderId: c.lastMessageSenderId, receiverId: c.lastMessageReceiverId };
                 const _hcLast = (function() {
                     const v = c.lastMessage || '';
-                    if (v.charAt(0) === '{' && v.indexOf('"v"') !== -1 && v.indexOf('"ct"') !== -1) return '🔒 Encrypted message';
-                    return v || 'No messages';
+                    if (!v) return 'No messages';
+                    const cached = window.KynectaE2E?.peekDecryptedText?.(_hcMsgObj);
+                    if (cached != null) return cached;
+                    if (v.charAt(0) === '{' && v.indexOf('"v"') !== -1) return '🔒 Encrypted message';
+                    return v;
                 })();
                 row.innerHTML = '<div style="width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#2563eb,#06b6d4);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px;">' +
                     (c.friendName||'?').charAt(0).toUpperCase() + '</div>' +
                     '<div><div style="color:#e5e7eb;font-weight:600;font-size:14px;">' + (c.friendName||'Unknown') + '</div>' +
-                    '<div style="color:#64748b;font-size:12px;">' + _hcLast + '</div></div>';
+                    '<div class="last-message-text" style="color:#64748b;font-size:12px;">' + _hcLast + '</div></div>';
+                if (window.KynectaE2E?.decryptMessageForDisplay && (c.lastMessage || '').charAt(0) === '{' && !window.KynectaE2E.peekDecryptedText?.(_hcMsgObj)) {
+                    const _textEl = row.querySelector('.last-message-text');
+                    window.KynectaE2E.decryptMessageForDisplay(_hcMsgObj, String(c.id || ''), window.KynectaE2E.getMyUserId?.(), {
+                        activeConversation: c,
+                        fallbackText: '🔒 Encrypted message'
+                    }).then(function(plaintext) {
+                        if (_textEl) _textEl.textContent = plaintext;
+                        window.KynectaE2E?.log?.('UI_RENDER_COMPLETE', { surface: 'hiddenVault', chatId: c.id });
+                    }).catch(function(){});
+                }
                 row.onclick = function() {
                     modal.remove();
                     window.messagesUI?.openChat(c);
@@ -14663,57 +14755,65 @@ Type: ${message.type || 'text'}`;
         if (looksEncrypted && window.KynectaE2E) {
             // FIX-DOUBLE-DECRYPT-RACE-2: claim this message id before decrypting.
             // If the normal render pipeline already claimed it (racing on the same
-            // incoming message), don't decrypt it again here — that would corrupt
-            // the ratchet for every message after it. Just skip; the pipeline's
-            // own render is the one that will actually show this message.
-            const claimKey = msgId || (payload && (payload.id || payload.localId));
+            // incoming message), don't decrypt it again here — the pipeline's own
+            // render is the one that will actually show this message.
+            const claimKey = msgId || msg.id || msg.localId;
             if (window.__kynClaimDecrypt && !window.__kynClaimDecrypt(claimKey)) {
                 return;
             }
-            // FIX-DECRYPT-OTHERPARTY-RESOLUTION-2: resolve otherPartyId with the
-            // same robust fallback chain the send path uses, and retry a few
-            // times instead of immediately falling through to appending the raw
-            // (still-encrypted) msg below when a conversation opened straight
-            // from the friend/call/message module hasn't had friendId/
-            // otherParticipant.id populated on _activeConversation yet.
-            const resolveOtherPartyId = () =>
-                window.ChatManager?._activeConversation?.friendId ||
-                window.ChatManager?._activeConversation?.otherUserId ||
-                (window.__kynGetConversationPeerId ?
-                    window.__kynGetConversationPeerId(window.ChatManager?._activeConversation, myId) : null) ||
-                null;
+            // CRYPTO-PIPELINE: peer resolution and the decrypt itself both go
+            // through the single canonical service in e2e-encryption.js — same
+            // resolver, same retry-on-keys-not-ready queue, same cache as the
+            // chat panel's own render path and the sidebar preview. No second,
+            // locally-duplicated otherPartyId/decrypt implementation here.
+            const chatId = String(
+                msg.chatId || msg.conversationId ||
+                window.ChatManager?._activeConversation?.id ||
+                window.__activeChatId || ''
+            );
             const attemptBypassDecrypt = function (attemptsLeft) {
-                const chatId = String(
-                    msg.chatId || msg.conversationId ||
-                    window.ChatManager?._activeConversation?.id ||
-                    window.__activeChatId || ''
-                );
-                const otherPartyId = resolveOtherPartyId();
-                const senderForDecrypt = isOwn ? otherPartyId : senderId;
-                if (chatId && senderForDecrypt) {
-                    window.KynectaE2E.decryptFromChat(content, chatId, senderForDecrypt).then(function (plaintext) {
-                        const finalText = (plaintext && plaintext !== content) ? plaintext : '[Unable to decrypt message]';
-                        const finalMsg = Object.assign({}, msg, {
-                            content: finalText,
-                            _decrypted: true
-                        });
-                        if (plaintext && plaintext !== content && window.__kynCommitDecrypt) {
-                            window.__kynCommitDecrypt(msg.id, msg.localId, finalText);
+                const peer = window.KynectaE2E.resolveMessageCryptoPeer
+                    ? window.KynectaE2E.resolveMessageCryptoPeer(msg, myId, window.ChatManager?._activeConversation)
+                    : { peerUserId: null };
+                if (chatId && peer.peerUserId) {
+                    window.KynectaE2E.decryptMessageForDisplay(msg, chatId, myId, {
+                        activeConversation: window.ChatManager?._activeConversation,
+                        fallbackText: '🔒 Encrypted message',
+                        // If keys weren't ready yet, this fires later once the
+                        // pipeline's own retry queue succeeds — patch the bubble
+                        // that already rendered with the fallback text.
+                        onResolved: function (plaintext) {
+                            const bubbleEl = document.querySelector('[data-message-id="' + msgId + '"] .message-content');
+                            if (bubbleEl) {
+                                const core = getMessagesCore();
+                                bubbleEl.innerHTML = core?.formatMessageText ? core.formatMessageText(plaintext) : _safeEscapeHtml(plaintext);
+                            }
+                            if (window.__kynCommitDecrypt) window.__kynCommitDecrypt(msg.id, msg.localId, plaintext);
+                            window.KynectaE2E?.log?.('UI_RENDER_COMPLETE', { surface: 'directAppend', messageId: msg.id, retried: true });
+                        }
+                    }).then(function (plaintext) {
+                        const finalMsg = Object.assign({}, msg, { content: plaintext, _decrypted: plaintext !== '🔒 Encrypted message' });
+                        if (finalMsg._decrypted && window.__kynCommitDecrypt) {
+                            window.__kynCommitDecrypt(msg.id, msg.localId, plaintext);
                         }
                         _buildAndAppendBubble(finalMsg, msgId, isOwn, timeStr, senderName);
+                        window.KynectaE2E?.log?.('UI_RENDER_COMPLETE', { surface: 'directAppend', messageId: msg.id });
                     }).catch(function () {
-                        const finalMsg = Object.assign({}, msg, { content: '[Unable to decrypt message]', _decrypted: true });
+                        const finalMsg = Object.assign({}, msg, { content: '🔒 Encrypted message', _decrypted: false });
                         _buildAndAppendBubble(finalMsg, msgId, isOwn, timeStr, senderName);
                     });
                     return;
                 }
                 if (attemptsLeft > 0) {
+                    // Structural gap only (chatId/peer not resolvable yet on the
+                    // active conversation) — the crypto pipeline's own queue
+                    // handles "keys not ready", so this retry is solely for that.
                     setTimeout(function () { attemptBypassDecrypt(attemptsLeft - 1); }, 300);
                     return;
                 }
                 // Resolution never completed — never append the raw ciphertext,
                 // fall back to the neutral placeholder instead.
-                const finalMsg = Object.assign({}, msg, { content: '[Unable to decrypt message]', _decrypted: true });
+                const finalMsg = Object.assign({}, msg, { content: '🔒 Encrypted message', _decrypted: false });
                 _buildAndAppendBubble(finalMsg, msgId, isOwn, timeStr, senderName);
             };
             attemptBypassDecrypt(6);

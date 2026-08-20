@@ -96,47 +96,26 @@
         } catch (_) {}
     }
 
-    function looksEncrypted(value) {
-        if (value && typeof value === 'object') return true;
-        if (typeof value !== 'string') return false;
-        const text = value.trim();
-        if (!text || text[0] !== '{') return false;
-        try {
-            const obj = JSON.parse(text);
-            return !!obj && typeof obj === 'object' &&
-                (('v' in obj) || ('kid' in obj) || ('ct' in obj) ||
-                 ('iv' in obj) || ('eph' in obj) || ('sid' in obj) || ('n' in obj));
-        } catch (_) {
-            return false;
-        }
-    }
-
+    // CRYPTO-PIPELINE: envelope detection + decrypt now both go through the
+    // single canonical decryptMessageForDisplay() in e2e-encryption.js —
+    // same peer resolution, same shared plaintext cache (instant if the chat
+    // panel already decrypted this message), same automatic retry queue if
+    // keys aren't ready yet. This used to carry its own separate copy of
+    // envelope detection and a direct decryptFromChat() call with senderId
+    // used unconditionally as the peer.
     async function getNotificationText(message, chatId) {
-        let value = message && message.content;
-        if (!looksEncrypted(value)) {
-            return typeof value === 'string' && value.trim()
-                ? value.trim().slice(0, 240)
-                : 'You have a new message';
+        const value = message && message.content;
+        if (window.KynectaE2E && typeof window.KynectaE2E.decryptMessageForDisplay === 'function' && chatId) {
+            try {
+                const myId = window.cachedUserId || window.SessionManager?.getUserId?.();
+                // fallbackText is exactly "New message received" per the
+                // never-show-ciphertext rule for notifications.
+                return await window.KynectaE2E.decryptMessageForDisplay(message, chatId, myId, { fallbackText: 'New message received' });
+            } catch (_) { /* fall through to the plain-content path below */ }
         }
-
-        // The parent shell has its own KynectaE2E instance. If its keys/session
-        // are ready, decrypt locally. Never send the plaintext anywhere else.
-        try {
-            if (window.KynectaE2E && typeof window.KynectaE2E.decryptFromChat === 'function') {
-                const senderId = message.senderId || message.userId;
-                if (senderId && chatId) {
-                    const plain = await window.KynectaE2E.decryptFromChat(
-                        String(value), String(chatId), String(senderId)
-                    );
-                    if (plain && plain !== value && !looksEncrypted(plain)) {
-                        return String(plain).slice(0, 240);
-                    }
-                }
-            }
-        } catch (_) {}
-
-        // Critical privacy rule: never expose ciphertext JSON as UI text.
-        return 'You have a new message';
+        return typeof value === 'string' && value.trim() && value.trim()[0] !== '{'
+            ? value.trim().slice(0, 240)
+            : 'New message received';
     }
 
     async function showIncomingMessageNotification(detail) {

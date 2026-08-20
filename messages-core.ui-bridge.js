@@ -1247,6 +1247,14 @@ const UIStateManager = {
                 if (conversation && normalizedMessage) {
                     conversation.lastMessage = normalizedMessage.content;
                     conversation.lastMessageAt = _tsMs3(normalizedMessage.createdAt || normalizedMessage.timestamp) || Date.now();
+                    // CRYPTO-PIPELINE: same reason as ChatManager's own realtime
+                    // handler in messages-core.operations.js — the sidebar preview
+                    // decrypts via decryptMessageForDisplay(), which needs the
+                    // message's real id/senderId/receiverId, not just its content,
+                    // to resolve the correct peer and cache the result correctly.
+                    conversation.lastMessageId = normalizedMessage.id || normalizedMessage.localId || conversation.lastMessageId;
+                    conversation.lastMessageSenderId = normalizedMessage.senderId;
+                    conversation.lastMessageReceiverId = normalizedMessage.receiverId || conversation.lastMessageReceiverId;
                     if (!isThisChat) {
                         const myId = SessionManager && SessionManager.getUserId && SessionManager.getUserId();
                         if (!normalizedMessage.senderId || String(normalizedMessage.senderId) !== String(myId)) {
@@ -1526,6 +1534,29 @@ const UIStateManager = {
             }
         };
 
+        // CRYPTO-PIPELINE: shared by both the immediate-decrypt attempt and the
+        // pipeline's own later retry (onResolved), so a message that had to be
+        // queued because keys weren't ready at receive time gets the exact same
+        // treatment once it finally resolves — patched into ChatManager, re-
+        // rendered, and persisted with real plaintext — as one that decrypted
+        // immediately.
+        const _patchDecryptedRealtimeMessage = function(chatId, normalizedMessage, plaintext) {
+            const _patched = { ...normalizedMessage, content: plaintext, encrypted: false };
+            if (ChatManager && ChatManager.addMessage) ChatManager.addMessage(_patched);
+            renderRealtimeUpdate(chatId, _patched);
+            if (window.KynectaLocalStore?.saveMessage) {
+                window.KynectaLocalStore.saveMessage({
+                    localId:  _patched.localId || undefined,
+                    serverId: String(_patched.serverId || _patched.id || ''),
+                    chatId:   String(chatId),
+                    conversationId: String(chatId),
+                    content:  plaintext,
+                    isLocalOnly: false,
+                }).catch(function(){});
+            }
+            window.KynectaE2E?.log?.('UI_RENDER_COMPLETE', { surface: 'realtime', chatId, messageId: normalizedMessage?.id });
+        };
+
         const handleRealtimePayload = async function(type, payload) {
             const normalizedType = String(type || '').toLowerCase();
             // FIX: 'data' was never declared — use 'payload' (the actual parameter name).
@@ -1779,55 +1810,39 @@ const UIStateManager = {
 
                 // FIX-RECEIVE-DECRYPT-DECOUPLE (part 2): the message is already on
                 // screen and already acked — decrypt now, in the background, and
-                // patch the bubble in place once plaintext is ready. Same claim-key
-                // guard and 8s bound as the old inline block, but nothing above this
-                // point ever waits on it.
+                // patch the bubble in place once plaintext is ready. Nothing above
+                // this point ever waits on it.
+                //
+                // CRYPTO-PIPELINE: this is the MESSAGE_RECEIVED entry point for
+                // realtime delivery. Peer resolution (including the own-echo
+                // sender/receiver inversion previously duplicated here) and the
+                // decrypt itself both now go through the single canonical
+                // resolveMessageCryptoPeer()/decryptMessageForDisplay() pair in
+                // e2e-encryption.js — same cache, same automatic retry queue if
+                // keys aren't ready yet, same DECRYPT_* logging.
                 if (_needsDecrypt) {
                     const _claimKey = message.id || message.localId;
                     if (!window.__kynClaimDecrypt || window.__kynClaimDecrypt(_claimKey)) {
                         (async () => {
                             try {
-                                // FIX-ROOT-CAUSE-DECRYPT-OWN-REPLY: decryptFromChat's third
-                                // argument must always be "the OTHER participant", because
-                                // encryptForChat always derived the AES key using the
-                                // recipient's public key — never our own. The branch above
-                                // (own-echo handling) specifically covers messages WE sent,
-                                // arriving via another device/tab (_realtimeSenderId ===
-                                // _realtimeCurrentUserId), so message.senderId here would be
-                                // our own id — passing it straight through would make us
-                                // derive a shared secret with ourselves. Use the recipient id
-                                // instead whenever the sender is us.
-                                const _isOwnEchoedMessage = _realtimeSenderId && _realtimeCurrentUserId &&
-                                    String(_realtimeSenderId) === String(_realtimeCurrentUserId);
-                                const _senderIdForDecrypt = _isOwnEchoedMessage
-                                    ? (message.receiverId || message.recipientId ||
-                                       (message.receiver && message.receiver.id) || (message.recipient && message.recipient.id) ||
-                                       message.senderId)
-                                    : message.senderId;
-                                const _plaintext = await Promise.race([
-                                    window.KynectaE2E.decryptFromChat(message.content, chatId, _senderIdForDecrypt),
-                                    new Promise((_, reject) => setTimeout(() => reject(new Error('E2E decrypt timeout')), 8000))
-                                ]);
-                                if (_plaintext && _plaintext !== message.content &&
-                                    _plaintext.indexOf('[Decryption failed') !== 0) {
-                                    const _patched = { ...normalizedMessage, content: _plaintext, encrypted: false };
-                                    if (ChatManager && ChatManager.addMessage) ChatManager.addMessage(_patched);
-                                    renderRealtimeUpdate(chatId, _patched);
-                                    if (window.KynectaLocalStore?.saveMessage) {
-                                        window.KynectaLocalStore.saveMessage({
-                                            localId:  _patched.localId || undefined,
-                                            serverId: String(_patched.serverId || _patched.id || ''),
-                                            chatId:   String(chatId),
-                                            conversationId: String(chatId),
-                                            content:  _plaintext,
-                                            isLocalOnly: false,
-                                        }).catch(function(){});
+                                const _plaintext = await window.KynectaE2E.decryptMessageForDisplay(message, chatId, _realtimeCurrentUserId, {
+                                    fallbackText: '🔒 Encrypted message',
+                                    // Fires later if this message had to be queued
+                                    // because keys weren't ready at receive time —
+                                    // patch the bubble/local store once a retry
+                                    // succeeds instead of leaving it stuck.
+                                    onResolved: (retriedPlaintext) => {
+                                        _patchDecryptedRealtimeMessage(chatId, normalizedMessage, retriedPlaintext);
                                     }
+                                });
+                                const _isFallback = _plaintext === '🔒 Encrypted message';
+                                if (!_isFallback) {
+                                    _patchDecryptedRealtimeMessage(chatId, normalizedMessage, _plaintext);
                                 }
-                                // On failure/timeout, leave the ciphertext envelope on
-                                // screen — messages-ui.js's render-time decrypt still
-                                // gets a chance to retry later (e.g. once the ratchet
-                                // session catches up), same as before this change.
+                                // On a queued/failed attempt, leave the ciphertext
+                                // envelope on screen — the pipeline's own retry queue
+                                // (and messages-ui.js's render-time decrypt) still get
+                                // a chance to resolve it later via onResolved above.
                             } catch (_) {}
                         })();
                     }

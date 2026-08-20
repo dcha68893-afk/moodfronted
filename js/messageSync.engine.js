@@ -13,59 +13,12 @@
     const MAX_RETRIES          = 3;
     const RETRY_DELAY          = 5000;
 
-    // FIX-ROOT-CAUSE-DECRYPT-OWN-REPLY: decryptFromChat(content, chatId, X)
-    // always needs X = "the OTHER participant in the 1:1 chat", because
-    // encryptForChat() on the sending side always derived its AES key using
-    // recipientUserId (the other party) — never "whoever happens to be the
-    // sender of this particular message". messages-ui.js already applies
-    // this correction (isSent ? otherPartyId : message.senderId) in its own
-    // render path, but this sync engine's two ingestion paths
-    // (ingestIncomingMessage, and the bulk-history loop in syncChat) were
-    // still passing rawMessage.senderId unconditionally.
-    //
-    // That's harmless for a message someone else sent (senderId IS the
-    // other party already) — but the moment a user's OWN message comes back
-    // through either of these paths (a socket echo/confirmation of a
-    // message you just sent, or that message being re-fetched on the next
-    // periodic/bulk history sync), senderId equals your OWN user id. Passed
-    // straight through, decryptFromChat fetches YOUR OWN public key as the
-    // "other party" and derives a shared secret with yourself — which is
-    // not the key the message was actually encrypted with, so decryption
-    // fails and the message renders as garbled/"[Decryption failed]" in
-    // your own chat panel. This is exactly what shows up as "the receiver's
-    // reply fails to decrypt" — it's the receiver's OWN client failing to
-    // re-read the reply IT just sent, once it round-trips back through sync.
-    function _resolveSenderIdForDecrypt(rawMessage) {
-        const rawSenderId = rawMessage.senderId || (rawMessage.sender && rawMessage.sender.id);
-        let myId = null;
-        try {
-            if (window.SessionManager && typeof window.SessionManager.getCurrentUserId === 'function') {
-                myId = window.SessionManager.getCurrentUserId();
-            }
-        } catch (_) {}
-        if (!myId) {
-            try {
-                if (window.MessagesCore && typeof window.MessagesCore.getCurrentUserId === 'function') {
-                    myId = window.MessagesCore.getCurrentUserId();
-                }
-            } catch (_) {}
-        }
-        if (!myId && window.currentUserId) myId = window.currentUserId;
-        if (!myId && window.__PARENT_SESSION__ && window.__PARENT_SESSION__.userId) {
-            myId = window.__PARENT_SESSION__.userId;
-        }
-
-        const isOwnMessage = myId != null && rawSenderId != null && String(rawSenderId) === String(myId);
-        if (!isOwnMessage) return rawSenderId;
-
-        const otherPartyId = rawMessage.receiverId || rawMessage.recipientId ||
-            (rawMessage.receiver && rawMessage.receiver.id) || (rawMessage.recipient && rawMessage.recipient.id);
-
-        // Never use our own user ID as the peer for decrypting our own message.
-        // If the recipient/peer is unavailable, return null so callers can
-        // avoid deriving a Double-Ratchet context against ourselves.
-        return otherPartyId || null;
-    }
+    // CRYPTO-PIPELINE: sender/receiver inversion for own-echoed messages, and
+    // the decrypt itself, are now both owned by the single canonical
+    // decryptMessageForDisplay()/resolveMessageCryptoPeer() pair in
+    // e2e-encryption.js — this file no longer needs its own copy of that
+    // resolution logic at all; the two call sites below pass the raw message
+    // straight through and let the pipeline resolve the peer.
 
     class MessageSyncEngine {
         constructor() {
@@ -135,6 +88,7 @@
                 // writing raw ciphertext envelopes straight into IndexedDB
                 // untouched.
                 if (window.KynectaE2E) {
+                    const _myId = window.KynectaE2E.getMyUserId ? window.KynectaE2E.getMyUserId() : null;
                     for (const m of serverMessages) {
                         if (m && m.type === 'text' && m.content && (m.senderId || (m.sender && m.sender.id))) {
                             // FIX-DOUBLE-DECRYPT-RACE-3: this bulk/background REST sync path
@@ -142,21 +96,17 @@
                             // messages-ui.js's two decrypt paths already coordinate through
                             // (window.__kynClaimDecrypt). A message decrypted once via the
                             // real-time socket path still gets re-fetched by this periodic
-                            // sync later — without claiming it first, this path would
-                            // decrypt the SAME envelope a second time, irreversibly
-                            // advancing the ratchet receive chain again and corrupting
-                            // every message after it in that chat.
+                            // sync later — without claiming it first, this path used to
+                            // decrypt the SAME envelope a second time. decryptMessageForDisplay
+                            // now caches by message id anyway (safe to call twice), but the
+                            // claim guard still avoids wasted duplicate work.
                             const _claimKey = m.id || m.localId;
                             if (window.__kynClaimDecrypt && !window.__kynClaimDecrypt(_claimKey)) {
                                 continue; // another path already claimed/decrypted this message
                             }
                             try {
-                                m.content = await window.KynectaE2E.decryptFromChat(
-                                    m.content,
-                                    chatId,
-                                    _resolveSenderIdForDecrypt(m)
-                                );
-                            } catch (_) { /* leave as-is; decryptFromChat already returns a safe placeholder on failure */ }
+                                m.content = await window.KynectaE2E.decryptMessageForDisplay(m, chatId, _myId, { fallbackText: '🔒 Encrypted message' });
+                            } catch (_) { /* leave as-is; decryptMessageForDisplay already returns a safe placeholder on failure */ }
                         }
                     }
                 }
@@ -281,13 +231,38 @@
             // reload, once it's read back from local storage instead.
             let _content = rawMessage.content || rawMessage.text || '';
             const _rawSenderId = rawMessage.senderId || (rawMessage.sender && rawMessage.sender.id);
-            const _senderIdForDecrypt = _resolveSenderIdForDecrypt(rawMessage);
-            if ((rawMessage.type || 'text') === 'text' && _content && _senderIdForDecrypt && window.KynectaE2E) {
+            if ((rawMessage.type || 'text') === 'text' && _content && window.KynectaE2E) {
                 const _claimKey = rawMessage.id || rawMessage.localId;
                 if (!window.__kynClaimDecrypt || window.__kynClaimDecrypt(_claimKey)) {
                     try {
-                        _content = await window.KynectaE2E.decryptFromChat(_content, _chatIdStr, _senderIdForDecrypt);
-                    } catch (_) { /* leave as-is; decryptFromChat already returns a safe placeholder on failure */ }
+                        const _myId = window.KynectaE2E.getMyUserId ? window.KynectaE2E.getMyUserId() : null;
+                        const _plaintext = await window.KynectaE2E.decryptMessageForDisplay(rawMessage, _chatIdStr, _myId, {
+                            fallbackText: '🔒 Encrypted message',
+                            // If keys weren't ready at persist time, the pipeline
+                            // queues this message and retries once they are —
+                            // patch the already-saved row with the real plaintext
+                            // when that eventually succeeds, instead of leaving it
+                            // stuck on ciphertext until the next full re-sync.
+                            onResolved: function (plaintext) {
+                                localStore.getMessageByServerId(String(rawMessage.id)).then(function (existingRow) {
+                                    if (existingRow) return localStore.updateMessage(existingRow.id, { content: plaintext });
+                                }).catch(function () {});
+                            }
+                        });
+                        // FIX (never persist a transient failure over real
+                        // ciphertext): only replace the stored content when
+                        // decryption genuinely succeeded right now. A "queued,
+                        // retrying" or "keys not ready" fallback must never
+                        // overwrite the ciphertext in IndexedDB — doing so would
+                        // permanently destroy the only copy of the encrypted
+                        // envelope, so a later retry (or restoring keys after a
+                        // relogin, per the "decrypt existing messages, don't show
+                        // decryption failed" requirement) would have nothing left
+                        // to decrypt.
+                        if (_plaintext && _plaintext !== _content && _plaintext !== '🔒 Encrypted message') {
+                            _content = _plaintext;
+                        }
+                    } catch (_) { /* leave as ciphertext; a later pass can still recover it */ }
                 }
             }
 
