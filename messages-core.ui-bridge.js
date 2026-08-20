@@ -1,3 +1,4 @@
+
 // =============================================
 // MESSAGES CORE :: UI BRIDGE & PUBLIC API
 // One of 3 companion files (messages-core.bootstrap.js,
@@ -1806,13 +1807,48 @@ const UIStateManager = {
                     console.log(`[FORENSIC][${normalizedMessage.traceId}] STAGE11_RENDER_DECISION | chatId=${chatId} | activeChatMatches=${_isActiveChat} | messageId=${normalizedMessage.id || 'n/a'} | ts=${Date.now()}`);
                 }
                 renderRealtimeUpdate(chatId, normalizedMessage);
-                ackMessageDelivered(normalizedMessage).catch(() => {});
 
-                // FIX-RECEIVE-DECRYPT-DECOUPLE (part 2): the message is already on
-                // screen and already acked — decrypt now, in the background, and
-                // patch the bubble in place once plaintext is ready. Nothing above
-                // this point ever waits on it.
-                //
+                // FIX-ACK-AFTER-DECRYPT (replaces FIX-RECEIVE-DECRYPT-DECOUPLE): the
+                // previous version rendered the ciphertext bubble, ACKed delivery
+                // immediately, and only THEN attempted decryption in the background.
+                // That is the exact "receive -> immediately ACK -> decrypt later"
+                // ordering the messaging-lifecycle spec forbids: the sender sees
+                // "delivered" while the receiver may still be looking at a permanent
+                // "🔒 Encrypted message" bubble, because nothing here ever revisited
+                // the ACK if decryption ultimately failed. A message must only be
+                // ACKed once it has actually been decrypted/validated and made
+                // available to the chat UI — for a plaintext (non-encrypted) message
+                // that happens immediately below; for an encrypted one it happens
+                // inside the decrypt success path (and its onResolved retry path),
+                // never on failure/timeout.
+                const _sendDeliveryAck = function() {
+                    // FIX-MSG-DELIVERY-ACK: tell the server we received (and could
+                    // actually show) this message so the sender gets
+                    // 'message:delivered' and its delivery timeout is cleared.
+                    ackMessageDelivered(normalizedMessage).catch(() => {});
+                    try {
+                        var _ackPayload = {
+                            messageId: normalizedMessage.serverId || normalizedMessage.id,
+                            chatId:    normalizedMessage.chatId || normalizedMessage.conversationId,
+                            senderId:  normalizedMessage.senderId || normalizedMessage.userId,
+                        };
+                        // FIX-ACK-SILENT-FAIL: this iframe keeps its own independent socket
+                        // connection, which can be momentarily disconnected/reconnecting or
+                        // simply not yet initialized when a message arrives, causing a bare
+                        // emit here to silently no-op — the message still renders correctly,
+                        // but the sender's 10s delivery-timeout fires anyway because the
+                        // server never heard back. _attemptAckDelivery tries both the direct
+                        // socket and the chat.html relay; if NEITHER is available right now
+                        // (both momentarily down), queue it instead of dropping it — it will
+                        // be retried automatically on the next reconnect and on the periodic
+                        // sweep (see _flushPendingAcks above). The server-side handler is
+                        // idempotent (it just clears a timer), so retrying is always safe.
+                        if (!_attemptAckDelivery(_ackPayload)) {
+                            _queuePendingAck(_ackPayload);
+                        }
+                    } catch(_dErr) { /* silent — delivery ack is best-effort */ }
+                };
+
                 // CRYPTO-PIPELINE: this is the MESSAGE_RECEIVED entry point for
                 // realtime delivery. Peer resolution (including the own-echo
                 // sender/receiver inversion previously duplicated here) and the
@@ -1830,46 +1866,35 @@ const UIStateManager = {
                                     // Fires later if this message had to be queued
                                     // because keys weren't ready at receive time —
                                     // patch the bubble/local store once a retry
-                                    // succeeds instead of leaving it stuck.
+                                    // succeeds instead of leaving it stuck, and ONLY
+                                    // ACK once it actually succeeds this way.
                                     onResolved: (retriedPlaintext) => {
                                         _patchDecryptedRealtimeMessage(chatId, normalizedMessage, retriedPlaintext);
+                                        _sendDeliveryAck();
                                     }
                                 });
                                 const _isFallback = _plaintext === '🔒 Encrypted message';
                                 if (!_isFallback) {
                                     _patchDecryptedRealtimeMessage(chatId, normalizedMessage, _plaintext);
+                                    _sendDeliveryAck();
                                 }
-                                // On a queued/failed attempt, leave the ciphertext
-                                // envelope on screen — the pipeline's own retry queue
-                                // (and messages-ui.js's render-time decrypt) still get
-                                // a chance to resolve it later via onResolved above.
-                            } catch (_) {}
+                                // On a queued/failed attempt: leave the ciphertext
+                                // envelope on screen AND do not ACK yet. The
+                                // pipeline's own retry queue (onResolved above) or
+                                // messages-ui.js's render-time decrypt still get a
+                                // chance to resolve it later — whichever succeeds
+                                // first is what triggers the ACK.
+                            } catch (_) {
+                                // Decryption threw outright — definitely do not ACK;
+                                // the message has not actually been made available.
+                            }
                         })();
                     }
+                } else {
+                    // Not an encrypted envelope at all (e.g. system/plain message) —
+                    // nothing to wait on, ACK immediately as before.
+                    _sendDeliveryAck();
                 }
-                // FIX-MSG-DELIVERY-ACK: Phase 2 — tell server we received this message
-                // so the sender gets 'message:delivered' and delivery timeout is cleared.
-                try {
-                    var _ackPayload = {
-                        messageId: normalizedMessage.serverId || normalizedMessage.id,
-                        chatId:    normalizedMessage.chatId || normalizedMessage.conversationId,
-                        senderId:  normalizedMessage.senderId || normalizedMessage.userId,
-                    };
-                    // FIX-ACK-SILENT-FAIL: this iframe keeps its own independent socket
-                    // connection, which can be momentarily disconnected/reconnecting or
-                    // simply not yet initialized when a message arrives, causing a bare
-                    // emit here to silently no-op — the message still renders correctly,
-                    // but the sender's 10s delivery-timeout fires anyway because the
-                    // server never heard back. _attemptAckDelivery tries both the direct
-                    // socket and the chat.html relay; if NEITHER is available right now
-                    // (both momentarily down), queue it instead of dropping it — it will
-                    // be retried automatically on the next reconnect and on the periodic
-                    // sweep (see _flushPendingAcks above). The server-side handler is
-                    // idempotent (it just clears a timer), so retrying is always safe.
-                    if (!_attemptAckDelivery(_ackPayload)) {
-                        _queuePendingAck(_ackPayload);
-                    }
-                } catch(_dErr) { /* silent — delivery ack is best-effort */ }
                 EventBus.emit('message:received', normalizedMessage);
                 try { window.dispatchEvent(new CustomEvent('newMessage', { detail: { message: normalizedMessage } })); } catch (_e) {}
                 return;
