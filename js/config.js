@@ -144,6 +144,48 @@ if (!window.__KYNECTA_API_XHR_PATCHED__ && typeof XMLHttpRequest !== 'undefined'
     };
 }
 
+// Canonical live auth-token bridge for modules that perform direct authenticated
+// fetches (including the E2E/X3DH bootstrap). The old E2E transport only checked
+// window.authToken and a few legacy storage keys, while the hardened realtime/auth
+// stack uses __kynToken / AuthSessionManager / refreshed session tokens. That meant
+// first-contact prekey requests could be unauthenticated even though the user was
+// already logged in. Resolve the token dynamically instead of copying a stale token
+// at page-load time.
+if (!Object.getOwnPropertyDescriptor(window, 'authToken') || Object.getOwnPropertyDescriptor(window, 'authToken').configurable) {
+    let __legacyAuthToken = null;
+    try {
+        const current = Object.getOwnPropertyDescriptor(window, 'authToken');
+        if (current && 'value' in current) __legacyAuthToken = current.value;
+    } catch (_) {}
+    try {
+        Object.defineProperty(window, 'authToken', {
+            configurable: true,
+            enumerable: true,
+            get: function() {
+                try { if (window.__kynToken && String(window.__kynToken).length > 10) return window.__kynToken; } catch (_) {}
+                try { if (window.__accessToken && String(window.__accessToken).length > 10) return window.__accessToken; } catch (_) {}
+                try { if (window.AuthSessionManager && typeof window.AuthSessionManager.getToken === 'function') { const t = window.AuthSessionManager.getToken(); if (t && String(t).length > 10) return t; } } catch (_) {}
+                const keys = ['nexopa_token','kynecta_token','kyn_access_token','kynecta_access_token','access_token','accessToken','auth_token','authToken','token','jwt','USER_TOKEN'];
+                for (const key of keys) {
+                    try { const t = localStorage.getItem(key) || sessionStorage.getItem(key); if (t && t.length > 10 && !t.startsWith('{')) return t; } catch (_) {}
+                }
+                try { if (__legacyAuthToken && String(__legacyAuthToken).length > 10) return __legacyAuthToken; } catch (_) {}
+                return '';
+            },
+            set: function(value) { __legacyAuthToken = value || null; }
+        });
+    } catch (_) {}
+}
+
+// Keep direct-auth consumers informed immediately after token refresh without
+// creating another socket or another authentication flow.
+window.addEventListener('auth:token:refreshed', function(evt) {
+    try {
+        const token = evt?.detail?.token;
+        if (token && typeof window.authToken !== 'undefined') window.authToken = token;
+    } catch (_) {}
+});
+
 // Helper function
 window.apiCall = async function(endpoint, options = {}) {
     const baseUrl = window.BACKEND_URL || (typeof window.__getApiBase === 'function' ? window.__getApiBase() : 'https://noxopa.onrender.com/api');
