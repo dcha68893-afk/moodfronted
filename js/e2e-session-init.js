@@ -5,7 +5,7 @@
 (function () {
   'use strict';
   const PREKEY_TARGET=50, PREKEY_MINIMUM=10;
-  const PREKEY_STORAGE='kyn_x3dh_prekeys_v1', SESSION_STORAGE='kyn_x3dh_sessions_v3';
+  const PREKEY_STORAGE='kyn_x3dh_prekeys_v1', SESSION_STORAGE='kyn_x3dh_sessions_v4';
   const RETRY_DELAYS=[1000,2500,5000,10000,30000], MAX_SKEW=100;
   let provisioningPromise=null;
   const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -17,12 +17,9 @@
     try{const p=JSON.parse(localStorage.getItem('kynecta_auth')||'null');return p?.user?.id||p?.userId?String(p.user?.id||p.userId):null}catch(_){return null}
   }
   function storageKey(){const id=userId();return id?`${PREKEY_STORAGE}_${id}`:PREKEY_STORAGE}
-  // Conversation IDs are not cryptographic identities. A chat can be created
-  // after first contact, opened from Friend/Status/Call/etc., or represented
-  // by a temporary id. The E2E session therefore belongs only to the local
-  // authenticated user + peer pair.
   function pairKey(otherId){const me=userId();const pair=[String(me||''),String(otherId||'')].sort().join(':');return `${SESSION_STORAGE}_${me}_${pair}`}
-  function legacyPairKey(chatId,otherId){const me=userId();const pair=[String(me||''),String(otherId||'')].sort().join(':');return `kyn_x3dh_sessions_v2_${me}_${pair}`}
+  function legacyPairKey(otherId){const me=userId();const pair=[String(me||''),String(otherId||'')].sort().join(':');return `kyn_x3dh_sessions_v3_${me}_${pair}`}
+  function legacyPairKeyV2(otherId){const me=userId();const pair=[String(me||''),String(otherId||'')].sort().join(':');return `kyn_x3dh_sessions_v2_${me}_${pair}`}
   async function apiBase(){return window.API_BASE_URL||window.BACKEND_URL||''}
   async function authHeaders(){const t=window.authToken||sessionStorage.getItem('kynecta_auth_token')||localStorage.getItem('kynecta_auth_token')||localStorage.getItem('authToken')||'';return t?{Authorization:`Bearer ${t}`,'Content-Type':'application/json'}:{'Content-Type':'application/json'}}
   async function request(path,options={}){const c=new AbortController(),to=setTimeout(()=>c.abort(),options.timeout||12000);try{return await fetch(`${await apiBase()}${path}`,{credentials:'include',...options,headers:{...(await authHeaders()),...(options.headers||{})},signal:c.signal})}finally{clearTimeout(to)}}
@@ -37,7 +34,7 @@
     const signing=await genSigning(),signed=await genPrekey(),one=[];
     for(let i=0;i<PREKEY_TARGET;i++){const kp=await genPrekey();one.push({keyId:crypto.randomUUID(),publicKey:await exportPublic(kp.publicKey),privateKey:await exportPrivate(kp.privateKey)})}
     const signingPublicKey=await exportPublic(signing.publicKey),signedPublicKey=await exportPublic(signed.publicKey);
-    return {version:3,userId:userId(),signingPublicKey,signingPrivateKey:await exportPrivate(signing.privateKey),signedPreKey:{keyId:crypto.randomUUID(),publicKey:signedPublicKey,privateKey:await exportPrivate(signed.privateKey),signature:await signPrekey(signing.privateKey,signedPublicKey)},oneTimePreKeys:one,createdAt:Date.now()}
+    return {version:4,userId:userId(),signingPublicKey,signingPrivateKey:await exportPrivate(signing.privateKey),signedPreKey:{keyId:crypto.randomUUID(),publicKey:signedPublicKey,privateKey:await exportPrivate(signed.privateKey),signature:await signPrekey(signing.privateKey,signedPublicKey)},oneTimePreKeys:one,createdAt:Date.now()}
   }
   function loadBundle(){try{const r=localStorage.getItem(storageKey());return r?JSON.parse(r):null}catch(_){return null}}
   function saveBundle(b){localStorage.setItem(storageKey(),JSON.stringify(b))}
@@ -51,8 +48,6 @@
   async function provisionPrekeys(){
     if(!crypto?.subtle||!userId())return false;
     let b=loadBundle();if(!b||String(b.userId)!==String(userId())||!b.signingPrivateKey||!b.signedPreKey)b=await createInitialBundle();
-    // Always publish the current signed prekey on authenticated startup. This
-    // repairs servers that have an identity row but no X3DH signed prekey.
     let count=await serverPrekeyCount();
     if(count!==null&&count<PREKEY_MINIMUM)b=await replenish(b,count);
     await publishBundle(b);
@@ -72,13 +67,13 @@
   async function readState(key){const raw=localStorage.getItem(key);if(!raw)return null;try{let enc=raw;if(window.KynectaE2E?.unwrapFromLocalStorage&&raw.startsWith('{')){try{enc=await window.KynectaE2E.unwrapFromLocalStorage(raw)}catch(_){}}return JSON.parse(atob(enc))}catch(_){return null}}
   async function loadState(chatId,otherId){
     const canonical=await readState(pairKey(otherId));if(canonical)return canonical;
-    const legacy=await readState(legacyPairKey(chatId,otherId));
-    if(legacy){await saveState(chatId,otherId,legacy);return legacy}
+    for(const key of [legacyPairKey(otherId),legacyPairKeyV2(otherId)]){const legacy=await readState(key);if(legacy){await saveState(chatId,otherId,legacy);return legacy}}
     return null
   }
   async function saveState(chatId,otherId,state){
     const enc=btoa(JSON.stringify(state));
-    if(window.KynectaE2E?.wrapForLocalStorage){try{const wrapped=await window.KynectaE2E.wrapForLocalStorage(enc);if(wrapped){localStorage.setItem(pairKey(otherId),wrapped);return}}catch(_){}}
+    if(window.KynectaE2E?.wrapForLocalStorage){try{const wrapped=await window.KynectaE2E.wrapForLocalStorage(enc);if(wrapped){localStorage.setItem(pairKey(otherId),wrapped);return}}catch(_){}
+    }
     localStorage.setItem(pairKey(otherId),enc)
   }
   async function x3dhInitiate(chatId,recipientId){
@@ -90,7 +85,7 @@
     const material=new Uint8Array(parts.reduce((n,p)=>n+p.byteLength,0));let off=0;for(const p of parts){material.set(new Uint8Array(p),off);off+=p.byteLength}
     const root=b64(await hkdf(material.buffer,'Kynecta-X3DH-v1-root',32));
     const initSend=b64(await hkdf(unb64(root),'Kynecta-X3DH-v1-init-send',32)),initRecv=b64(await hkdf(unb64(root),'Kynecta-X3DH-v1-init-recv',32));
-    const state={v:3,root,initiator:String(userId()),sendChain:initSend,recvChain:initRecv,sendN:0,recvN:0,peerId:String(recipientId),signedPreKeyId:b.signedPreKey.keyId,oneTimePreKeyId:b.oneTimePreKey?.keyId||null,establishedAt:Date.now()};
+    const state={v:4,root,initiator:String(userId()),sendChain:initSend,recvChain:initRecv,sendN:0,recvN:0,peerId:String(recipientId),signedPreKeyId:b.signedPreKey.keyId,oneTimePreKeyId:b.oneTimePreKey?.keyId||null,recvCache:{},establishedAt:Date.now()};
     await saveState(chatId,recipientId,state);
     return{state,bootstrap:{x3dh:1,initiatorId:String(userId()),identityPublicKey:window.KynectaE2E.publicKey,ephemeralPublicKey:ekaPub,signedPreKeyId:b.signedPreKey.keyId,oneTimePreKeyId:b.oneTimePreKey?.keyId||null}}
   }
@@ -103,23 +98,21 @@
     const material=new Uint8Array(parts.reduce((n,p)=>n+p.byteLength,0));let off=0;for(const p of parts){material.set(new Uint8Array(p),off);off+=p.byteLength}
     const root=b64(await hkdf(material.buffer,'Kynecta-X3DH-v1-root',32));
     const initSend=b64(await hkdf(unb64(root),'Kynecta-X3DH-v1-init-send',32)),initRecv=b64(await hkdf(unb64(root),'Kynecta-X3DH-v1-init-recv',32));
-    const state={v:3,root,initiator:String(senderId),sendChain:initRecv,recvChain:initSend,sendN:0,recvN:0,peerId:String(senderId),signedPreKeyId:signed.keyId,oneTimePreKeyId:bootstrap.oneTimePreKeyId||null,establishedAt:Date.now()};
+    const state={v:4,root,initiator:String(senderId),sendChain:initRecv,recvChain:initSend,sendN:0,recvN:0,peerId:String(senderId),signedPreKeyId:signed.keyId,oneTimePreKeyId:bootstrap.oneTimePreKeyId||null,recvCache:{},establishedAt:Date.now()};
     await saveState(chatId,senderId,state);if(one){b.oneTimePreKeys=(b.oneTimePreKeys||[]).filter(k=>k.keyId!==one.keyId);saveBundle(b)}return state
   }
   async function deriveMessageKey(chain){const mk=await hmac(unb64(chain),'msg'),next=await hmac(unb64(chain),'next');return{mk,next:b64(next)}}
-  // Serialize crypto operations per peer. Two rapid sends must not read the
-  // same sendN/chain and overwrite each other's persisted state.
   const locks=new Map();
-  function withPeerLock(peer,fn){const key=String(peer);const prev=locks.get(key)||Promise.resolve();const next=prev.catch(()=>{}).then(fn);locks.set(key,next.finally(()=>{if(locks.get(key)===next)locks.delete(key)}));return next}
-  async function secureEncrypt(original,plaintext,chatId,recipientId,opts){return withPeerLock(`send:${recipientId}`,async()=>{let state=await loadState(chatId,recipientId),bootstrap=null;if(!state){const init=await x3dhInitiate(chatId,recipientId);state=init.state;bootstrap=init.bootstrap}const step=await deriveMessageKey(state.sendChain),key=await aesKey(step.mk),n=state.sendN++;state.sendChain=step.next;await saveState(chatId,recipientId,state);const env=await aesEncrypt(key,plaintext,`${pairContext(recipientId)}|${n}`);return JSON.stringify({v:3,kid:window.KynectaE2E.keyId,sid:`${state.initiator}:${state.peerId}`,n,iv:env.iv,ct:env.ct,...(bootstrap?{x3dh:bootstrap}:{})})})}
-  async function secureDecrypt(original,enc,chatId,senderId){return withPeerLock(`recv:${senderId}`,async()=>{let env;try{env=JSON.parse(enc)}catch(_){return original(enc,chatId,senderId)}if(!env||env.v!==3)return original(enc,chatId,senderId);let state=await loadState(chatId,senderId);if(!state&&env.x3dh)state=await x3dhAccept(chatId,senderId,env.x3dh);if(!state)return'[Encrypted message — secure session unavailable]';if(env.n<state.recvN||env.n>state.recvN+MAX_SKEW)return'[Encrypted message — invalid message sequence]';while(state.recvN<env.n){const s=await deriveMessageKey(state.recvChain);state.recvChain=s.next;state.recvN++}const step=await deriveMessageKey(state.recvChain),key=await aesKey(step.mk);try{const text=await aesDecrypt(key,env,`${pairContext(senderId)}|${env.n}`);state.recvChain=step.next;state.recvN++;await saveState(chatId,senderId,state);return text}catch(_){return'[Decryption failed]'}})}
+  function withPeerLock(key,fn){const previous=locks.get(key)||Promise.resolve();const running=previous.catch(()=>{}).then(fn);const tracked=running.finally(()=>{if(locks.get(key)===tracked)locks.delete(key)});locks.set(key,tracked);return tracked}
+  async function secureEncrypt(original,plaintext,chatId,recipientId,opts){return withPeerLock(`send:${recipientId}`,async()=>{let state=await loadState(chatId,recipientId),bootstrap=null;if(!state){const init=await x3dhInitiate(chatId,recipientId);state=init.state;bootstrap=init.bootstrap}const step=await deriveMessageKey(state.sendChain),key=await aesKey(step.mk),n=state.sendN++;state.sendChain=step.next;await saveState(chatId,recipientId,state);const env=await aesEncrypt(key,plaintext,`${pairContext(recipientId)}|${n}`);return JSON.stringify({v:4,kid:window.KynectaE2E.keyId,sid:`${state.initiator}:${state.peerId}`,n,iv:env.iv,ct:env.ct,...(bootstrap?{x3dh:bootstrap}:{})})})}
+  async function secureDecrypt(original,enc,chatId,senderId){return withPeerLock(`recv:${senderId}`,async()=>{let env;try{env=JSON.parse(enc)}catch(_){return original(enc,chatId,senderId)}if(!env||env.v!==4)return original(enc,chatId,senderId);let state=await loadState(chatId,senderId);if(!state&&env.x3dh)state=await x3dhAccept(chatId,senderId,env.x3dh);if(!state)return'[Encrypted message — secure session unavailable]';state.recvCache=state.recvCache||{};const cacheKey=`${env.sid||senderId}:${env.n}`;if(Object.prototype.hasOwnProperty.call(state.recvCache,cacheKey))return state.recvCache[cacheKey];if(env.n<state.recvN||env.n>state.recvN+MAX_SKEW)return'[Encrypted message — invalid message sequence]';while(state.recvN<env.n){const skipped=await deriveMessageKey(state.recvChain);state.recvChain=skipped.next;state.recvN++}const step=await deriveMessageKey(state.recvChain),key=await aesKey(step.mk);try{const text=await aesDecrypt(key,env,`${pairContext(senderId)}|${env.n}`);state.recvChain=step.next;state.recvN++;state.recvCache[cacheKey]=text;const cacheKeys=Object.keys(state.recvCache);if(cacheKeys.length>100)delete state.recvCache[cacheKeys[0]];await saveState(chatId,senderId,state);return text}catch(_){return'[Decryption failed]'}})}
   function installSecureTransport(){
-    if(!window.KynectaE2E||window.KynectaE2E.__kynectaX3DHTransportV3)return;
+    if(!window.KynectaE2E||window.KynectaE2E.__kynectaX3DHTransportV4)return;
     const originalEncrypt=window.KynectaE2E.encryptForChat,originalDecrypt=window.KynectaE2E.decryptFromChat,originalDisplay=window.KynectaE2E.decryptMessageForDisplay;if(typeof originalEncrypt!=='function'||typeof originalDecrypt!=='function')return;
     window.KynectaE2E.encryptForChat=(plaintext,chatId,recipientId,opts)=>secureEncrypt(originalEncrypt,plaintext,chatId,recipientId,opts);
     window.KynectaE2E.decryptFromChat=(enc,chatId,senderId)=>secureDecrypt(originalDecrypt,enc,chatId,senderId);
-    if(typeof originalDisplay==='function')window.KynectaE2E.decryptMessageForDisplay=async function(message,chatId,currentUserId,opts={}){const content=message?.content;let env=null;try{env=typeof content==='string'?JSON.parse(content):null}catch(_){}if(!env||env.v!==3)return originalDisplay(message,chatId,currentUserId,opts);const resolved=window.KynectaE2E.resolveMessageCryptoPeer?.(message,currentUserId,opts.activeConversation);const peer=resolved?.peerUserId||message?.senderId||message?.sender?.id;if(!peer)return opts.fallbackText||'🔒 Encrypted message';try{const text=await secureDecrypt(originalDecrypt,content,chatId,String(peer));return typeof text==='string'&&!text.startsWith('[')?text:(opts.fallbackText||'🔒 Encrypted message')}catch(e){console.warn('[E2E/X3DH] Display decrypt failed:',e?.message||e);return opts.fallbackText||'🔒 Encrypted message'}};
-    Object.defineProperty(window.KynectaE2E,'__kynectaX3DHTransportV3',{value:true,enumerable:false});console.log('[E2E/X3DH] persistent pair-keyed first-contact transport installed')
+    if(typeof originalDisplay==='function')window.KynectaE2E.decryptMessageForDisplay=async function(message,chatId,currentUserId,opts={}){const content=message?.content;let env=null;try{env=typeof content==='string'?JSON.parse(content):null}catch(_){}if(!env||env.v!==4)return originalDisplay(message,chatId,currentUserId,opts);const resolved=window.KynectaE2E.resolveMessageCryptoPeer?.(message,currentUserId,opts.activeConversation);const peer=resolved?.peerUserId||message?.senderId||message?.sender?.id;if(!peer)return opts.fallbackText||'🔒 Encrypted message';try{const text=await secureDecrypt(originalDecrypt,content,chatId,String(peer));return typeof text==='string'&&!text.startsWith('[')?text:(opts.fallbackText||'🔒 Encrypted message')}catch(e){console.warn('[E2E/X3DH] Display decrypt failed:',e?.message||e);return opts.fallbackText||'🔒 Encrypted message'}};
+    Object.defineProperty(window.KynectaE2E,'__kynectaX3DHTransportV4',{value:true,enumerable:false});console.log('[E2E/X3DH] persistent pair-keyed first-contact transport with idempotent decrypt installed')
   }
   async function bootstrapE2E(){if(!window.KynectaE2E)return false;let pw=null,legacy=null;try{pw=sessionStorage.getItem('kyn_e2e_pw_session');legacy=sessionStorage.getItem('kyn_e2e_pw_legacy_session')}catch(_){}if(!pw)return false;const ready=await window.KynectaE2E.init(pw,legacy);if(!ready&&!window.KynectaE2E.enabled)return false;const prekeys=await provisionWithRetry();installSecureTransport();try{document.dispatchEvent(new CustomEvent('kyn:e2eProvisioned',{detail:{userId:userId(),identityReady:!!window.KynectaE2E.enabled,prekeysReady:prekeys}}))}catch(_){}return!!window.KynectaE2E.enabled}
   function tryInitE2E(){if(!window.KynectaE2E)return setTimeout(tryInitE2E,150);if(window.KynectaE2E.enabled&&!provisioningPromise){provisioningPromise=provisionWithRetry().catch(()=>false);installSecureTransport();return}let pw=null;try{pw=sessionStorage.getItem('kyn_e2e_pw_session')}catch(_){}if(!pw)return setTimeout(tryInitE2E,500);if(!provisioningPromise){provisioningPromise=bootstrapE2E().catch(e=>{console.warn('[E2E] bootstrap failed:',e?.message||e);provisioningPromise=null;return false});provisioningPromise.then(ok=>{if(!ok)setTimeout(tryInitE2E,2000)})}}
