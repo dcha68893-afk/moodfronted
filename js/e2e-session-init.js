@@ -134,16 +134,52 @@
     window.KynectaE2E.encryptForChat = (plaintext, chatId, recipientId, opts) => secureEncrypt(originalEncrypt, plaintext, chatId, recipientId, opts);
     window.KynectaE2E.decryptFromChat = (enc, chatId, senderId) => secureDecrypt(originalDecrypt, enc, chatId, senderId);
     if (typeof originalDisplay === 'function') {
+      // FIX (X3DH-QUEUE-BYPASS): this override used to run its own fixed
+      // ~5s/6-attempt retry loop and then permanently return fallbackText —
+      // completely bypassing e2e-encryption.js's shared _pendingDecryptQueue/
+      // isMessageQueued()/onResolved machinery that messages-ui.js's render
+      // paths depend on to tell "still queued, don't show a stuck
+      // placeholder" apart from "genuinely, permanently failed" (see
+      // PLACEHOLDER-STICKS-ON-FIRST-MESSAGE in e2e-encryption.js). Because
+      // secureEncrypt() above is what every real send actually produces
+      // (v:3 envelopes) once this transport is installed, EVERY live
+      // message went through this bypassed path — so isMessageQueued()
+      // always reported false for it, and any decrypt that didn't finish
+      // inside that fixed ~5s window (the ordinary case for first contact,
+      // where x3dhAccept has to fetch the sender's prekey bundle over the
+      // network — see the "cold Render backend" wake-up handling elsewhere
+      // in this codebase for why that can plausibly take longer) was shown
+      // as a PERMANENT failure the instant the window closed, even though
+      // the session would have completed and decrypted correctly moments
+      // later. Registering into the shared queue instead gives this path
+      // the same bounded-but-persistent backoff (holds at 15s, never gives
+      // up), the same event-driven retry on 'kyn:e2eUnlocked'/
+      // 'kyn:e2eKeyAvailable' (the X3DH handshake completing is exactly
+      // such an event), and the same onResolved/isMessageQueued contract
+      // every other caller already relies on.
       window.KynectaE2E.decryptMessageForDisplay = async function (message, chatId, currentUserId, opts = {}) {
         const content = message?.content; let env = null; try { env = typeof content === 'string' ? JSON.parse(content) : null; } catch (_) {}
         if (!env || ![3,4].includes(Number(env.v))) return originalDisplay(message, chatId, currentUserId, opts);
         const resolved = window.KynectaE2E.resolveMessageCryptoPeer?.(message, currentUserId, opts.activeConversation); const peer = resolved?.peerUserId || message?.senderId || message?.sender?.id;
-        if (!peer) return opts.fallbackText || 'New message received';
+        const fallbackText = opts.fallbackText || 'New message received';
+        if (!peer) return fallbackText;
+        const messageId = String((message && (message.id || message.localId || message.serverId)) || `${chatId}:${content}`);
+        if (typeof window.KynectaE2E.registerPendingDecrypt === 'function') {
+          const result = await window.KynectaE2E.registerPendingDecrypt(
+            messageId,
+            () => secureDecrypt(originalDecrypt, content, chatId, String(peer)),
+            opts.onResolved
+          );
+          return result.ok ? result.plaintext : fallbackText;
+        }
+        // Fallback if an older e2e-encryption.js without registerPendingDecrypt
+        // is somehow loaded — preserve the original bounded loop rather than
+        // fail outright, instead of assuming the new export is always present.
         for (let attempt = 0; attempt < 6; attempt++) {
           try { const text = await secureDecrypt(originalDecrypt, content, chatId, String(peer)); if (typeof text === 'string' && !text.startsWith('[')) return text; } catch (e) { console.warn('[E2E/X3DH] display decrypt retry failed:', e?.message || e); }
           if (attempt < 5) await sleep([100,250,500,1000,2000][attempt]);
         }
-        return opts.fallbackText || 'New message received';
+        return fallbackText;
       };
     }
     Object.defineProperty(window.KynectaE2E, '__kynectaX3DHTransportV7', { value: true, enumerable: false }); console.log('[E2E/X3DH] pair-keyed X3DH transport installed');

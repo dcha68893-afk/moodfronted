@@ -994,11 +994,28 @@
     entry.timer = setTimeout(() => { entry.timer = null; _attemptQueuedDecrypt(messageId); }, delay);
   }
 
+  // FIX (X3DH-QUEUE-BYPASS): entries created by decryptMessageForDisplay's
+  // ECDH v1 path (below) carry .content/.chatId/.peerUserId and are retried
+  // via _decryptCore. Entries created by registerPendingDecrypt() (used by
+  // js/e2e-session-init.js's X3DH v3/v4 transport override — see that
+  // file's installSecureTransport()) instead carry a self-contained
+  // .attemptFn and are retried by calling it directly. Both share this one
+  // retry loop, backoff schedule, subscriber/onResolved fan-out, and
+  // isMessageQueued() visibility — there must be exactly one pending-decrypt
+  // queue, not a second one duplicated per crypto transport.
   async function _attemptQueuedDecrypt(messageId) {
     const entry = _pendingDecryptQueue.get(messageId);
     if (!entry) return;
     entry.attempts++;
-    const result = await _decryptCore(entry.content, entry.chatId, entry.peerUserId, messageId);
+    let result;
+    if (entry.attemptFn) {
+      let text = null;
+      try { text = await entry.attemptFn(); } catch (_) { text = null; }
+      const looksLikeFailure = !text || (typeof text === 'string' && text.charAt(0) === '[');
+      result = looksLikeFailure ? { ok: false } : { ok: true, plaintext: text };
+    } else {
+      result = await _decryptCore(entry.content, entry.chatId, entry.peerUserId, messageId);
+    }
     if (result.ok) {
       _pendingDecryptQueue.delete(messageId);
       _decryptCache.set(messageId, result.plaintext);
@@ -1133,6 +1150,56 @@
   function isMessageQueued(message) {
     const messageId = String((message && (message.id || message.localId || message.serverId)) || message || '');
     return !!messageId && _pendingDecryptQueue.has(messageId);
+  }
+
+  // FIX (X3DH-QUEUE-BYPASS): generic entry point so a DIFFERENT transport
+  // (currently js/e2e-session-init.js's X3DH v3/v4 override of
+  // decryptMessageForDisplay) can share this exact queue/backoff/
+  // isMessageQueued/onResolved machinery instead of re-implementing its
+  // own, incompatible, short-bounded retry that gives up permanently and is
+  // invisible to isMessageQueued(). attemptFn is called with no arguments
+  // and must resolve to either the decrypted plaintext, or a falsy/
+  // '['-prefixed placeholder string to signal "not ready yet, keep
+  // retrying" (the same convention decryptFromChat's own placeholders
+  // already use). Returns { ok:true, plaintext } if it decrypted
+  // immediately (cached or first attempt succeeded), or
+  // { ok:false, queued:true } if it's now waiting in the shared queue —
+  // callers should show fallbackText and rely on onResolved/
+  // 'kyn:messageDecrypted' for the eventual real text, exactly like the
+  // ECDH v1 path below already works.
+  async function registerPendingDecrypt(messageId, attemptFn, onResolved) {
+    messageId = String(messageId || '');
+    if (!messageId || typeof attemptFn !== 'function') return { ok: false };
+
+    if (_decryptCache.has(messageId)) {
+      const cached = _decryptCache.get(messageId);
+      if (typeof onResolved === 'function') { try { onResolved(cached); } catch (_) {} }
+      return { ok: true, plaintext: cached };
+    }
+
+    let entry = _pendingDecryptQueue.get(messageId);
+    if (entry) {
+      if (typeof onResolved === 'function') entry.subscribers.add(onResolved);
+      return { ok: false, queued: true };
+    }
+
+    // First attempt runs immediately (matches decryptMessageForDisplay's own
+    // "try once, queue only on failure" behavior) so a message that's
+    // already decryptable never waits for the backoff timer unnecessarily.
+    let text = null;
+    try { text = await attemptFn(); } catch (_) { text = null; }
+    const looksLikeFailure = !text || (typeof text === 'string' && text.charAt(0) === '[');
+    if (!looksLikeFailure) {
+      _decryptCache.set(messageId, text);
+      if (typeof onResolved === 'function') { try { onResolved(text); } catch (_) {} }
+      return { ok: true, plaintext: text };
+    }
+
+    entry = { attemptFn, attempts: 0, timer: null, subscribers: new Set() };
+    if (typeof onResolved === 'function') entry.subscribers.add(onResolved);
+    _pendingDecryptQueue.set(messageId, entry);
+    _scheduleRetry(messageId);
+    return { ok: false, queued: true };
   }
 
   async function decryptMessageForDisplay(message, chatId, currentUserId, opts) {
@@ -1386,6 +1453,8 @@
     peekDecryptedText,
     // FIX (PLACEHOLDER-STICKS-ON-FIRST-MESSAGE): see definition above.
     isMessageQueued,
+    // FIX (X3DH-QUEUE-BYPASS): see definition above.
+    registerPendingDecrypt,
     log: _pipelineLog,
     // FIX (SEND-HANG-NON-HISTORY-OPEN): see prefetchRecipientKey definition above.
     prefetchRecipientKey,
