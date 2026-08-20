@@ -29,26 +29,107 @@
     // overwrites this one there — but in any window where nothing else ever
     // defines it (every iframe), this fallback is what actually runs instead
     // of silently no-op'ing.
-    if (!window.__kynRelayMessageOnce) {
-        window.__kynRelayedMsgIds = window.__kynRelayedMsgIds || new Set();
-        window.__kynRelayMessageOnce = function (iframeWindow, type, payload) {
+    //
+    // FIX-ROOT-CAUSE-CROSS-CONTEXT-CLAIM (dual-socket receive race): even
+    // with the definition above present in every window, the claim itself —
+    // `window.__kynRelayedMsgIds` — was an in-memory Set, which is PER
+    // WINDOW. chat.html (the parent shell) and message.html (its iframe)
+    // each open their OWN independent Socket.IO connection to the backend
+    // (both join the same `user:{uid}` room), so the backend's single
+    // broadcast for one message is delivered to BOTH sockets. chat.html's
+    // in-memory claim registry has no way to see that message.html's own
+    // socket already (or is about to) process the exact same message, and
+    // vice versa — so "only one delivery reaches the iframe" was never
+    // actually true across the parent/iframe boundary, only within a single
+    // window's own multiple relay code paths. That is what let the same
+    // message reach message.html's decrypt/persist pipeline twice — once via
+    // chat.html's relay, once via message.html's own socket — racing two
+    // independent decrypt attempts and, separately, two independent
+    // IndexedDB inserts for the same server message id (duplicate bubbles /
+    // "sometimes the message doesn't appear" depending on which write won).
+    // Back the registry with localStorage — genuinely shared across every
+    // same-origin window/iframe — instead of an in-memory Set, keeping the
+    // exact same key algorithm and the same 15s validity window so every
+    // existing call site keeps working unmodified.
+    (function () {
+        var CLAIM_PREFIX  = 'kyn_relay_claim_';
+        var CLAIM_TTL_MS  = 15000;
+        var _sweepCounter = 0;
+
+        function _claimKeyFor(type, payload) {
+            var p = (payload && payload.payload) ? payload.payload : payload;
+            var chatId = String((p && (p.chatId || p.conversationId)) || '');
+            var msgId  = String((p && (p.id || p.serverId || p.localId || p._broadcastId)) || '');
+            return (type || 'message:new') + ':' + chatId + ':' + (msgId || (p && p.content) || '');
+        }
+
+        // Occasional light sweep so the localStorage keys don't accumulate
+        // forever — cheap, only runs every ~20th claim attempt.
+        function _sweepExpired() {
             try {
-                var p = (payload && payload.payload) ? payload.payload : payload;
-                var chatId = String((p && (p.chatId || p.conversationId)) || '');
-                var msgId  = String((p && (p.id || p.serverId || p.localId || p._broadcastId)) || '');
-                var key = (type || 'message:new') + ':' + chatId + ':' + (msgId || (p && p.content) || Date.now());
-                if (window.__kynRelayedMsgIds.has(key)) return false; // already delivered by another path in THIS window
-                window.__kynRelayedMsgIds.add(key);
-                setTimeout(function () { window.__kynRelayedMsgIds.delete(key); }, 15000);
-                if (!iframeWindow) return true; // registration-only call — caller already posted directly
-                iframeWindow.postMessage(
-                    (payload && payload.type) ? payload : { type: type || 'message:new', payload: p, source: 'ws-bridge' },
-                    '*'
-                );
+                var now = Date.now();
+                var toRemove = [];
+                for (var i = 0; i < localStorage.length; i++) {
+                    var k = localStorage.key(i);
+                    if (!k || k.indexOf(CLAIM_PREFIX) !== 0) continue;
+                    try {
+                        var rec = JSON.parse(localStorage.getItem(k) || 'null');
+                        if (!rec || (now - rec.ts) > CLAIM_TTL_MS) toRemove.push(k);
+                    } catch (_) { toRemove.push(k); }
+                }
+                toRemove.forEach(function (k) { try { localStorage.removeItem(k); } catch (_) {} });
+            } catch (_) {}
+        }
+
+        // true = this call is the first to claim the key (proceed with real
+        // delivery); false = another window already claimed it recently.
+        function _crossContextClaim(key) {
+            try {
+                if ((++_sweepCounter % 20) === 0) _sweepExpired();
+                var storageKey = CLAIM_PREFIX + key;
+                var now = Date.now();
+                var raw = localStorage.getItem(storageKey);
+                if (raw) {
+                    var parsed = JSON.parse(raw);
+                    if (parsed && (now - parsed.ts) < CLAIM_TTL_MS) return false;
+                }
+                localStorage.setItem(storageKey, JSON.stringify({ ts: now }));
                 return true;
+            } catch (_) {
+                return true; // fail-open — never let a storage error block real delivery
+            }
+        }
+
+        window.__kynRelayMessageKey = window.__kynRelayMessageKey || _claimKeyFor;
+        window.__kynRelayMessageAlreadyClaimed = window.__kynRelayMessageAlreadyClaimed || function (type, payload) {
+            try {
+                var storageKey = CLAIM_PREFIX + _claimKeyFor(type, payload);
+                var raw = localStorage.getItem(storageKey);
+                if (!raw) return false;
+                var parsed = JSON.parse(raw);
+                return !!(parsed && (Date.now() - parsed.ts) < CLAIM_TTL_MS);
             } catch (_) { return false; }
         };
-    }
+        if (!window.__kynRelayMessageOnce) {
+            window.__kynRelayMessageOnce = function (iframeWindow, type, payload) {
+                try {
+                    var p = (payload && payload.payload) ? payload.payload : payload;
+                    var key = _claimKeyFor(type, payload);
+                    if (!_crossContextClaim(key)) return false; // already delivered by another path/window
+                    if (!iframeWindow) return true; // registration-only call — caller already posted directly
+                    iframeWindow.postMessage(
+                        (payload && payload.type) ? payload : { type: type || 'message:new', payload: p, source: 'ws-bridge' },
+                        '*'
+                    );
+                    return true;
+                } catch (_) { return false; }
+            };
+        }
+        // Expose the cross-context primitive so other files (e.g.
+        // messageSync.engine.js's decrypt/persist pipeline) can gate on the
+        // exact same shared claim without duplicating the localStorage logic.
+        window.__kynCrossContextClaim = window.__kynCrossContextClaim || _crossContextClaim;
+    })();
 
     // ── 1. Message delivery to iframes ───────────────────────────────────────
     function _ensureMessageDelivery(payload) {

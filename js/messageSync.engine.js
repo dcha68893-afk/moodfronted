@@ -219,6 +219,39 @@
                 return existing;
             }
 
+            // FIX-ROOT-CAUSE-DUAL-CONTEXT-INGEST-RACE: chat.html (the parent
+            // shell) and message.html (its iframe) each open their OWN
+            // independent Socket.IO connection and both join the backend's
+            // `user:{uid}` room, so a single incoming message is delivered
+            // to BOTH sockets — and both windows load this exact file, so
+            // both independently reach this point for the same message at
+            // roughly the same time. The `existing` check right above reads
+            // from IndexedDB via a per-window AppCache handle; two windows
+            // that both check "does this server id exist yet?" within the
+            // same few milliseconds can both see nothing and both proceed to
+            // decrypt (a real, stateful X3DH ratchet step — see
+            // e2e-session-init.js) and both insert a new row for the same
+            // server message id. Claim the exact server message id via the
+            // shared cross-context registry (window.__kynCrossContextClaim,
+            // defined in chat.html / js/phase15.delivery.patch.js — the same
+            // primitive that already dedupes the postMessage relay for this
+            // exact dual-context problem) BEFORE decrypting or persisting.
+            // The window that loses the claim waits briefly for the winner
+            // to finish and then reads back what it actually persisted,
+            // instead of independently decrypting the same envelope a
+            // second time. If the winner never finishes in time (tab
+            // closed, reloaded, crashed mid-decrypt), fall through and
+            // process the message here anyway — a message must never be
+            // silently dropped just because another context claimed it.
+            const _ingestClaimId = rawMessage.id != null ? String(rawMessage.id) : null;
+            if (_ingestClaimId && window.__kynCrossContextClaim &&
+                !window.__kynCrossContextClaim('message:ingest:' + _ingestClaimId)) {
+                await new Promise(resolve => setTimeout(resolve, 700));
+                const claimedByOther = await localStore.getMessageByServerId(_ingestClaimId);
+                if (claimedByOther) return claimedByOther;
+                // Fall through — the other context didn't finish; process it ourselves.
+            }
+
             // New message from server — store locally
             const _chatIdStr = String(chatId || rawMessage.chatId || rawMessage.conversationId || '');
 
@@ -296,6 +329,44 @@
             await localStore.updateConversationLastMessage(saved.chatId, saved);
 
             this._emitChatUpdated(saved.chatId);
+
+            // FIX-ROOT-CAUSE-MISSING-RECEIVER-ACK: the backend's
+            // ReliableDeliveryService.deliverToUser() (src/services/phase2/
+            // ReliableDeliveryService.js) schedules a timer after delivering
+            // a message to the receiver's socket, and only clears it when
+            // that receiver's client emits 'message:ack' with the exact
+            // backend messageId — otherwise, after ACK_TIMEOUT_MS, it logs
+            // "Message X undelivered ... expected ack from uid=Y" and retries
+            // up to MAX_ACK_RETRIES times. No code anywhere in this frontend
+            // ever emitted that event: the only client-side 'message:ack'
+            // references are in ReliableDeliveryEngine.js/RealtimeSyncEngine.js,
+            // and both only LISTEN for it coming from the server — neither
+            // sends it. The nearest actual emit, 'msg:delivered_ack' in
+            // MessageLifecycleClient.js, is a different, unrelated event name
+            // the backend's webSocketService.js no longer listens for (see the
+            // "consolidation pass" comment there), so it silently went
+            // nowhere on both ends. Emit the exact event/shape the backend
+            // expects, with the exact originalMessageId, right here at the
+            // one point in the receive pipeline that has just finished
+            // decrypting (or safely queuing for retry — see above),
+            // validating, and durably persisting the message per PHASE 5's
+            // required order: receive -> decrypt -> validate -> persist ->
+            // UI update -> ACK. Both chat.html and message.html can reach
+            // this call for the same message (the claim above makes that the
+            // rare fall-through case, not the common one) — that's fine: the
+            // backend's processAck() is idempotent, it just clears an
+            // already-cleared timer on a duplicate ack.
+            try {
+                const rt = window.KynectaRealtime;
+                if (rt && typeof rt.emit === 'function' && rawMessage.id != null) {
+                    rt.emit('message:ack', {
+                        messageId: String(rawMessage.id),
+                        chatId:    saved.chatId,
+                        status:    'delivered'
+                    }, { retry: true });
+                }
+            } catch (_) { /* best-effort — a missed ack here still gets retried server-side */ }
+
             return saved;
         }
 

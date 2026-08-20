@@ -3969,44 +3969,109 @@
         // preserves every path as a fallback (none were deleted, since I
         // can't verify live which one is safe to remove) while guaranteeing
         // only one delivery actually reaches the iframe.
-        window.__kynRelayedMsgIds = window.__kynRelayedMsgIds || new Set();
-        // FIX (MESSAGE-RELAY-CLAIM-BEFORE-DELIVERY, companion piece): exposes the
-        // exact same key computation __kynRelayMessageOnce uses, as a read-only
-        // check — "has someone already delivered this?" — without claiming it.
-        // A delivery path that does its own manual multi-target send (like
-        // app.realtime.socket.js's iframe broadcast) needs to check this BEFORE
-        // attempting delivery (so it doesn't duplicate a delivery another path
-        // already made) and only claim the key AFTER its own delivery actually
-        // succeeds (so a failed attempt doesn't block the other fallback paths).
-        // The single check-and-set __kynRelayMessageOnce(iframeWindow, ...) call
-        // can't express that two-step "peek, attempt, then claim" sequence.
-        window.__kynRelayMessageKey = function (type, payload) {
-            const p = (payload && payload.payload) ? payload.payload : payload;
-            const chatId = String((p && (p.chatId || p.conversationId)) || '');
-            const msgId  = String((p && (p.id || p.serverId || p.localId || p._broadcastId)) || '');
-            return (type || 'message:new') + ':' + chatId + ':' + (msgId || (p && p.content) || '');
-        };
-        window.__kynRelayMessageAlreadyClaimed = function (type, payload) {
-            try { return window.__kynRelayedMsgIds.has(window.__kynRelayMessageKey(type, payload)); }
-            catch (_) { return false; }
-        };
-        window.__kynRelayMessageOnce = function (iframeWindow, type, payload) {
-            try {
-                const p = (payload && payload.payload) ? payload.payload : payload; // tolerate either shape
+        // FIX-ROOT-CAUSE-CROSS-CONTEXT-CLAIM (dual-socket receive race): this
+        // registry used to be an in-memory `Set` (window.__kynRelayedMsgIds),
+        // which only ever deduped delivery attempts made from WITHIN this one
+        // window (chat.html's own several internal relay code paths). It
+        // could never see that message.html — which opens its OWN independent
+        // Socket.IO connection and joins the same `user:{uid}` room — was
+        // independently receiving and processing the exact same server
+        // broadcast at the same time. Two separate windows, two separate
+        // in-memory Sets, zero actual coordination: "only one delivery
+        // reaches the iframe" was never true across the parent/iframe
+        // boundary, which is exactly where the real duplication happens
+        // (duplicate decrypt attempts, duplicate IndexedDB inserts for the
+        // same server message id). Back this with localStorage — genuinely
+        // shared across every same-origin window/iframe — instead of an
+        // in-memory Set. Same key algorithm, same 15s validity window, so
+        // every existing call site (5+ of them) keeps working unmodified.
+        // See the matching fix in js/phase15.delivery.patch.js, which defines
+        // this identically as a fallback for windows that load it standalone
+        // (message.html, group.html, calls.html, status.html) — this inline
+        // definition simply takes precedence in chat.html's own window.
+        (function () {
+            const CLAIM_PREFIX = 'kyn_relay_claim_';
+            const CLAIM_TTL_MS = 15000;
+            let _sweepCounter = 0;
+
+            function _claimKeyFor(type, payload) {
+                const p = (payload && payload.payload) ? payload.payload : payload;
                 const chatId = String((p && (p.chatId || p.conversationId)) || '');
                 const msgId  = String((p && (p.id || p.serverId || p.localId || p._broadcastId)) || '');
-                const key = (type || 'message:new') + ':' + chatId + ':' + (msgId || (p && p.content) || Date.now());
-                if (window.__kynRelayedMsgIds.has(key)) return false; // already delivered by another path
-                window.__kynRelayedMsgIds.add(key);
-                setTimeout(function () { window.__kynRelayedMsgIds.delete(key); }, 15000);
-                if (!iframeWindow) return true; // registration-only call — caller already posted directly
-                iframeWindow.postMessage(
-                    (payload && payload.type) ? payload : { type: type || 'message:new', payload: p, source: 'ws-bridge' },
-                    '*'
-                );
-                return true;
-            } catch (_) { return false; }
-        };
+                return (type || 'message:new') + ':' + chatId + ':' + (msgId || (p && p.content) || '');
+            }
+
+            function _sweepExpired() {
+                try {
+                    const now = Date.now();
+                    const toRemove = [];
+                    for (let i = 0; i < localStorage.length; i++) {
+                        const k = localStorage.key(i);
+                        if (!k || k.indexOf(CLAIM_PREFIX) !== 0) continue;
+                        try {
+                            const rec = JSON.parse(localStorage.getItem(k) || 'null');
+                            if (!rec || (now - rec.ts) > CLAIM_TTL_MS) toRemove.push(k);
+                        } catch (_) { toRemove.push(k); }
+                    }
+                    toRemove.forEach(k => { try { localStorage.removeItem(k); } catch (_) {} });
+                } catch (_) {}
+            }
+
+            function _crossContextClaim(key) {
+                try {
+                    if ((++_sweepCounter % 20) === 0) _sweepExpired();
+                    const storageKey = CLAIM_PREFIX + key;
+                    const now = Date.now();
+                    const raw = localStorage.getItem(storageKey);
+                    if (raw) {
+                        const parsed = JSON.parse(raw);
+                        if (parsed && (now - parsed.ts) < CLAIM_TTL_MS) return false;
+                    }
+                    localStorage.setItem(storageKey, JSON.stringify({ ts: now }));
+                    return true;
+                } catch (_) {
+                    return true; // fail-open — never let a storage error block real delivery
+                }
+            }
+
+            // FIX (MESSAGE-RELAY-CLAIM-BEFORE-DELIVERY, companion piece): exposes the
+            // exact same key computation __kynRelayMessageOnce uses, as a read-only
+            // check — "has someone already delivered this?" — without claiming it.
+            // A delivery path that does its own manual multi-target send (like
+            // app.realtime.socket.js's iframe broadcast) needs to check this BEFORE
+            // attempting delivery (so it doesn't duplicate a delivery another path
+            // already made) and only claim the key AFTER its own delivery actually
+            // succeeds (so a failed attempt doesn't block the other fallback paths).
+            // The single check-and-set __kynRelayMessageOnce(iframeWindow, ...) call
+            // can't express that two-step "peek, attempt, then claim" sequence.
+            window.__kynRelayMessageKey = _claimKeyFor;
+            window.__kynRelayMessageAlreadyClaimed = function (type, payload) {
+                try {
+                    const storageKey = CLAIM_PREFIX + _claimKeyFor(type, payload);
+                    const raw = localStorage.getItem(storageKey);
+                    if (!raw) return false;
+                    const parsed = JSON.parse(raw);
+                    return !!(parsed && (Date.now() - parsed.ts) < CLAIM_TTL_MS);
+                } catch (_) { return false; }
+            };
+            window.__kynRelayMessageOnce = function (iframeWindow, type, payload) {
+                try {
+                    const p = (payload && payload.payload) ? payload.payload : payload; // tolerate either shape
+                    const key = _claimKeyFor(type, payload);
+                    if (!_crossContextClaim(key)) return false; // already delivered by another path/window
+                    if (!iframeWindow) return true; // registration-only call — caller already posted directly
+                    iframeWindow.postMessage(
+                        (payload && payload.type) ? payload : { type: type || 'message:new', payload: p, source: 'ws-bridge' },
+                        '*'
+                    );
+                    return true;
+                } catch (_) { return false; }
+            };
+            // Expose the cross-context primitive so other files (e.g.
+            // messageSync.engine.js's decrypt/persist pipeline) can gate on
+            // the exact same shared claim without duplicating this logic.
+            window.__kynCrossContextClaim = _crossContextClaim;
+        })();
 
         // ── FIX (CALL-EVENT-RELAY-CONSOLIDATION): same class of bug as the
         // message:new relay above, but for call lifecycle events. THREE
