@@ -3819,6 +3819,37 @@
                     // failure in the UI when the pipeline didn't queue it for
                     // retry (i.e. it's genuinely done trying).
                     const isFallback = plaintext === '🔒 Encrypted message';
+                    // FIX (PLACEHOLDER-STICKS-ON-FIRST-MESSAGE): this used to
+                    // treat ANY fallback as final — revealing the bubble with
+                    // the placeholder text AND (via _revealDecryptedBubble)
+                    // permanently marking this message "_decryptAttempted",
+                    // even when decryptMessageForDisplay had only just QUEUED
+                    // a retry (the normal state for a first-contact message
+                    // still completing its X3DH handshake). That's exactly
+                    // backwards for that case: the bubble popped into view
+                    // showing "Encrypted message" and then could never be
+                    // reconsidered by a later render pass even though a
+                    // background retry — the only thing that was ever going
+                    // to fix it — was still running. Check whether a retry is
+                    // actually still pending for THIS message before treating
+                    // the fallback as final; if it's queued, leave the bubble
+                    // hidden (pending-decrypt stays on) and don't touch either
+                    // flag — the onResolved callback above already owns
+                    // patching it in place the moment the queued retry lands.
+                    const isQueued = isFallback && window.KynectaE2E?.isMessageQueued && window.KynectaE2E.isMessageQueued(message);
+                    if (isFallback && isQueued) {
+                        // Bounded safety net: if the queued retry never calls
+                        // onResolved for any reason (e.g. the queue got
+                        // cleared by a logout/key-rotation elsewhere), this
+                        // message must still not stay invisible forever —
+                        // reveal the neutral placeholder after giving the
+                        // retry queue's own capped 15s backoff a real chance.
+                        setTimeout(() => {
+                            if (message._decrypted || message._decryptAttempted) return;
+                            this._revealDecryptedBubble(message, '🔒 Encrypted message', true);
+                        }, 20000);
+                        return;
+                    }
                     this._revealDecryptedBubble(message, plaintext, isFallback);
                     if (!isFallback) window.KynectaE2E?.log?.('UI_RENDER_COMPLETE', { surface: 'chatPanel', messageId: message.id });
                 }).catch(() => {
@@ -14776,29 +14807,68 @@ Type: ${message.type || 'text'}`;
                     ? window.KynectaE2E.resolveMessageCryptoPeer(msg, myId, window.ChatManager?._activeConversation)
                     : { peerUserId: null };
                 if (chatId && peer.peerUserId) {
-                    window.KynectaE2E.decryptMessageForDisplay(msg, chatId, myId, {
-                        activeConversation: window.ChatManager?._activeConversation,
-                        fallbackText: '🔒 Encrypted message',
-                        // If keys weren't ready yet, this fires later once the
-                        // pipeline's own retry queue succeeds — patch the bubble
-                        // that already rendered with the fallback text.
-                        onResolved: function (plaintext) {
+                    // FIX (PLACEHOLDER-STICKS-ON-FIRST-MESSAGE): a bubble built
+                    // via this path either shows real content or nothing yet —
+                    // it must never be built with the ciphertext OR the visible
+                    // placeholder while a retry for this exact message is still
+                    // queued in the background (the ordinary state for a
+                    // first-contact message still completing its handshake).
+                    // Track whether onResolved already built/patched the bubble
+                    // so the bounded last-resort fallback below doesn't append a
+                    // second, stale one on top of it.
+                    let _appended = false;
+                    const onResolved = function (plaintext) {
+                        if (_appended) {
                             const bubbleEl = document.querySelector('[data-message-id="' + msgId + '"] .message-content');
                             if (bubbleEl) {
                                 const core = getMessagesCore();
                                 bubbleEl.innerHTML = core?.formatMessageText ? core.formatMessageText(plaintext) : _safeEscapeHtml(plaintext);
                             }
-                            if (window.__kynCommitDecrypt) window.__kynCommitDecrypt(msg.id, msg.localId, plaintext);
-                            window.KynectaE2E?.log?.('UI_RENDER_COMPLETE', { surface: 'directAppend', messageId: msg.id, retried: true });
+                        } else if (!document.querySelector('[data-message-id="' + msgId + '"]')) {
+                            _appended = true;
+                            const finalMsg = Object.assign({}, msg, { content: plaintext, _decrypted: true });
+                            _buildAndAppendBubble(finalMsg, msgId, isOwn, timeStr, senderName);
                         }
+                        if (window.__kynCommitDecrypt) window.__kynCommitDecrypt(msg.id, msg.localId, plaintext);
+                        window.KynectaE2E?.log?.('UI_RENDER_COMPLETE', { surface: 'directAppend', messageId: msg.id, retried: true });
+                    };
+                    window.KynectaE2E.decryptMessageForDisplay(msg, chatId, myId, {
+                        activeConversation: window.ChatManager?._activeConversation,
+                        fallbackText: '🔒 Encrypted message',
+                        // If keys weren't ready yet, this fires later once the
+                        // pipeline's own retry queue succeeds — builds/patches
+                        // the bubble with the real content.
+                        onResolved: onResolved
                     }).then(function (plaintext) {
-                        const finalMsg = Object.assign({}, msg, { content: plaintext, _decrypted: plaintext !== '🔒 Encrypted message' });
+                        const isFallback = plaintext === '🔒 Encrypted message';
+                        const isQueued = isFallback && window.KynectaE2E?.isMessageQueued && window.KynectaE2E.isMessageQueued(msg);
+                        if (isFallback && isQueued) {
+                            // Still retrying in the background — don't append
+                            // anything yet; onResolved above will build the
+                            // bubble the moment it lands. Guarantee the message
+                            // still eventually appears even if that retry never
+                            // succeeds, by falling back to the placeholder after
+                            // giving the queue a real chance (matches its own
+                            // capped 15s backoff hold).
+                            setTimeout(function () {
+                                if (_appended || document.querySelector('[data-message-id="' + msgId + '"]')) return;
+                                _appended = true;
+                                const finalMsg = Object.assign({}, msg, { content: '🔒 Encrypted message', _decrypted: false });
+                                _buildAndAppendBubble(finalMsg, msgId, isOwn, timeStr, senderName);
+                            }, 20000);
+                            return;
+                        }
+                        if (_appended) return;
+                        _appended = true;
+                        const finalMsg = Object.assign({}, msg, { content: plaintext, _decrypted: !isFallback });
                         if (finalMsg._decrypted && window.__kynCommitDecrypt) {
                             window.__kynCommitDecrypt(msg.id, msg.localId, plaintext);
                         }
                         _buildAndAppendBubble(finalMsg, msgId, isOwn, timeStr, senderName);
                         window.KynectaE2E?.log?.('UI_RENDER_COMPLETE', { surface: 'directAppend', messageId: msg.id });
                     }).catch(function () {
+                        if (_appended) return;
+                        _appended = true;
                         const finalMsg = Object.assign({}, msg, { content: '🔒 Encrypted message', _decrypted: false });
                         _buildAndAppendBubble(finalMsg, msgId, isOwn, timeStr, senderName);
                     });

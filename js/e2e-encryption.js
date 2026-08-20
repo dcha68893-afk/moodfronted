@@ -1116,6 +1116,25 @@
     return _decryptCache.has(messageId) ? _decryptCache.get(messageId) : null;
   }
 
+  // FIX (PLACEHOLDER-STICKS-ON-FIRST-MESSAGE): decryptMessageForDisplay()
+  // resolves immediately with fallbackText both when a message has
+  // genuinely, permanently failed AND when it has simply been queued for
+  // an automatic retry (keys not ready yet, X3DH session mid-handshake,
+  // etc — the ordinary state for the very first message exchanged with a
+  // new contact). Every UI caller only ever saw that one string back and
+  // had no way to tell those two cases apart, so several call sites ended
+  // up revealing/appending a visible "Encrypted message" bubble — and, in
+  // messages-ui.js's case, permanently marking the message as
+  // "already attempted" — the instant the FIRST attempt merely got
+  // queued, instead of waiting for the queue to actually finish (or
+  // truly exhaust). This lets a caller check, right after getting the
+  // fallback text back, whether a retry is genuinely still pending for
+  // this exact message before deciding to show anything permanent.
+  function isMessageQueued(message) {
+    const messageId = String((message && (message.id || message.localId || message.serverId)) || message || '');
+    return !!messageId && _pendingDecryptQueue.has(messageId);
+  }
+
   async function decryptMessageForDisplay(message, chatId, currentUserId, opts) {
     opts = opts || {};
     const fallbackText = opts.fallbackText || '🔒 Encrypted message';
@@ -1365,6 +1384,8 @@
     decryptMessageForDisplay,
     resolveMessageCryptoPeer,
     peekDecryptedText,
+    // FIX (PLACEHOLDER-STICKS-ON-FIRST-MESSAGE): see definition above.
+    isMessageQueued,
     log: _pipelineLog,
     // FIX (SEND-HANG-NON-HISTORY-OPEN): see prefetchRecipientKey definition above.
     prefetchRecipientKey,
