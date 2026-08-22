@@ -145,11 +145,17 @@
     setTimeout(installCryptoBootstrapRepair, 3000);
   }
 
+  // Every encrypted envelope must enter the same decrypt/retry pipeline.
+  // v2 is still present in persisted/legacy traffic (`eph`, `iv`, `ct`) and
+  // must never be mistaken for plaintext. v3/v4 use the newer session envelope.
   function isEnvelope(content) {
     if (typeof content !== 'string') return false;
     try {
       const e = JSON.parse(content);
-      return !!e && (Number(e.v) === 3 || Number(e.v) === 4) && !!e.iv && !!e.ct;
+      if (!e || !e.iv || !e.ct) return false;
+      const version = Number(e.v);
+      if (version === 2) return !!e.eph;
+      return (version === 3 || version === 4);
     } catch (_) { return false; }
   }
 
