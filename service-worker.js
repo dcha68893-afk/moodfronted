@@ -1,10 +1,18 @@
-// Kynecta service worker — v19.7.0
+// Kynecta service worker — v19.8.0
 // Critical runtime/theme/encryption assets are network-first so an installed
 // PWA cannot silently execute week-old code after a deploy.
 'use strict';
 
-const SW_VERSION = '19.7.0';
-const CACHE_NAME = 'nexopa-static-v30';
+// FIX (STALE-CACHE-AFTER-E2E-FIX): CACHE_NAME must be bumped every session
+// that touches JS/CSS/HTML, or an already-installed service worker keeps
+// serving the old cached copy of a just-fixed file (stale-while-revalidate
+// shows the OLD version immediately, the fixed one only lands on the NEXT
+// load) — this exact class of "fix isn't showing live" has bitten this app
+// before. Bumped here because this session's js/e2e-encryption.js and
+// js/e2e-session-init.js changes (registerPendingDecrypt / X3DH queue fix)
+// would otherwise keep being served stale.
+const SW_VERSION = '19.8.0';
+const CACHE_NAME = 'nexopa-static-v31';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [

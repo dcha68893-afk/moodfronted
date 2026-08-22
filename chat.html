@@ -1340,18 +1340,33 @@
     <!-- ✅ GLOBAL DARK THEME SYSTEM -->
     <link rel="stylesheet" href="theme.colors.css">
     <style>
-        /* ── PARENT SHELL: Dark theme overrides ───────────────── */
-        :root {
-            --app-primary-gradient: linear-gradient(135deg, #2563eb 0%, #1d4ed8 62%, #06b6d4 100%);
-            --app-primary-color: #2563eb;
-            --app-primary-dark: #1d4ed8;
+        /* FIX (COMPETING-THEME-AUTHORITY): this block used to be a second,
+           UNGATED ":root { ... }" rule — not "[data-theme="dark"] :root",
+           just ":root" — so it applied unconditionally, in light mode too,
+           regardless of the actual saved theme. --app-primary-color and
+           --app-primary-dark happened to hold the same value in both this
+           block and the real light defaults near the top of <head>, so
+           those two never visibly diverged. But --app-primary-light and
+           --app-accent-soft do NOT match: the light defaults declare them
+           as #dbeafe / #cffafe (light blue/cyan), while this block forced
+           them to #1e3a8a / #1e293b (dark navy/slate) permanently, with no
+           light-mode path back and no dependence on data-theme at all —
+           a second, competing, always-on theme authority, exactly what
+           this app must not have. (--app-secondary-surface,
+           --app-secondary-muted, --app-text-color, --app-text-secondary,
+           --app-primary-gradient were separately shielded from this same
+           bug only because js/theme.engine.js's paintNow() also sets those
+           five as an INLINE style on <html>, which always wins over any
+           stylesheet rule regardless of order — but --app-primary-light
+           and --app-accent-soft are NOT in its palette, so they had no such
+           protection.) Correctly gated below: dark values only apply when
+           [data-theme="dark"] is actually set on <html> (which, per
+           js/theme.engine.js, is guaranteed true before this block even
+           parses), and the light defaults declared near the top of <head>
+           remain authoritative otherwise — one theme authority, not two. */
+        [data-theme="dark"] {
             --app-primary-light: #1e3a8a;
-            --app-secondary-surface: #0f172a;
-            --app-secondary-muted: #374151;
-            --app-accent-color: #8b5cf6;
             --app-accent-soft: #1e293b;
-            --app-text-color: #e5e7eb;
-            --app-text-secondary: #9ca3af;
         }
 
         /* FIX (theme audit): every rule in this block used to apply

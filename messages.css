@@ -35,14 +35,28 @@
     --chat-bubble-received: #202c33;
     --chat-background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Ccircle cx='20' cy='20' r='7' fill='%23ffffff' opacity='0.03'/%3E%3Crect x='48' y='10' width='14' height='14' rx='3' fill='%23ffffff' opacity='0.03'/%3E%3Cpath d='M10 52 Q20 42 30 52 Q40 62 50 52' stroke='%23ffffff' stroke-width='1.5' fill='none' opacity='0.03'/%3E%3Ccircle cx='62' cy='62' r='5' fill='%23ffffff' opacity='0.03'/%3E%3C/svg%3E");
     --chat-font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    --bubble-sent-bg: #005c4b;
-    --bubble-sent-text: #e9edef;
-    --bubble-received-bg: #202c33;
-    --bubble-received-text: #e9edef;
+    /* FIX (BUBBLES-ALWAYS-DARK): these 4 used to be bare hardcoded hex
+       (#005c4b/#202c33/#e9edef) with NO light-mode counterpart anywhere in
+       this file — every rule below that referenced them, plus every rule
+       that hardcoded the same hex directly instead of going through a
+       variable, painted chat bubbles WhatsApp-dark-green/gray regardless of
+       the user's actual saved theme. theme.colors.css (the app's real,
+       already-correctly-light/dark-split theme authority, loaded right
+       after this file) already defines the exact variables meant for this:
+       --kyn-bubble-sent/--kyn-bubble-recv/--kyn-bubble-sent-text/
+       --kyn-bubble-recv-text. Aliasing to those here — instead of
+       hardcoding a second, competing, always-dark palette — makes this
+       file follow the one real theme authority instead of fighting it.
+       The literal hex after the comma is only a defensive fallback for the
+       (currently never-true) case theme.colors.css fails to load. */
+    --bubble-sent-bg: var(--kyn-bubble-sent, #005c4b);
+    --bubble-sent-text: var(--kyn-bubble-sent-text, #e9edef);
+    --bubble-received-bg: var(--kyn-bubble-recv, #202c33);
+    --bubble-received-text: var(--kyn-bubble-recv-text, #e9edef);
 }
 
 body {
-    background-color: #0b141a;
+    background-color: #0b141a; /* dead: theme.colors.css's html,body rule (!important) always wins */
     color: var(--text-primary);
     height: 100vh;
     overflow: hidden;
@@ -109,7 +123,7 @@ body {
     flex: 1;
     display: flex;
     flex-direction: column;
-    background-color: #0b141a;
+    background-color: var(--kyn-bg-panel, #0b141a);
     position: relative;
     overflow: hidden;
 }
@@ -160,7 +174,7 @@ body {
 /* Chat Header */
 .chat-header {
     padding: 10px 16px;
-    background-color: #202c33;
+    background-color: var(--kyn-bg-header, #202c33);
     border-bottom: 1px solid var(--border-color);
     display: flex;
     align-items: center;
@@ -266,7 +280,7 @@ body {
     flex: 1;
     overflow-y: auto;
     padding: 20px;
-    background-color: #0b141a;
+    background-color: var(--kyn-bg-chat, #0b141a);
     background-image: var(--chat-background, none);
     background-size: var(--chat-background-size, 80px 80px);
     background-position: center;
@@ -559,7 +573,7 @@ body {
 }
 
 .message-bubble.sent {
-    background-color: #005c4b;
+    background-color: var(--bubble-sent-bg);
     color: var(--kyn-border);
     border-radius: 7.5px 0 7.5px 7.5px;
 }
@@ -571,11 +585,11 @@ body {
     right: -8px;
     border-width: 0 0 9px 9px;
     border-style: solid;
-    border-color: transparent transparent transparent #005c4b;
+    border-color: transparent transparent transparent var(--bubble-sent-bg);
 }
 
 .message-bubble.received {
-    background-color: #202c33;
+    background-color: var(--bubble-received-bg);
     color: var(--kyn-border);
     border-radius: 0 7.5px 7.5px 7.5px;
 }
@@ -622,9 +636,9 @@ body {
     display: none;
 }
 
-/* SENT: right side, dark green bubble */
+/* SENT: right side, bubble follows the active theme (--bubble-sent-bg) */
 .message.sent .message-bubble {
-    background: #005c4b;
+    background: var(--bubble-sent-bg);
     color: var(--kyn-border);
     border-radius: 7.5px 0 7.5px 7.5px;
     max-width: 75%;
@@ -644,12 +658,12 @@ body {
     right: -8px;
     border-width: 0 0 9px 9px;
     border-style: solid;
-    border-color: transparent transparent transparent #005c4b;
+    border-color: transparent transparent transparent var(--bubble-sent-bg);
 }
 
-/* RECEIVED: left side, dark grey bubble */
+/* RECEIVED: left side, bubble follows the active theme (--bubble-received-bg) */
 .message.received .message-bubble {
-    background: #202c33;
+    background: var(--bubble-received-bg);
     color: var(--kyn-border);
     border-radius: 0 7.5px 7.5px 7.5px;
     max-width: 75%;
@@ -2868,24 +2882,22 @@ body {
 }
 
 [data-theme="dark"] body,
-[data-theme="dark"] .app-container,
-[data-theme="dark"] .sidebar,
-[data-theme="dark"] .chat-panel,
-[data-theme="dark"] .messages-container {
-    background-color: #1a1a1a;
-}
-
+/* FIX (BUBBLES-ALWAYS-DARK / SCREEN-STAYS-DARK): .app-container/.sidebar/
+   .chat-panel/.messages-container previously got a THIRD hardcoded dark
+   shade (#1a1a1a) here, specific to dark mode — higher specificity than
+   their own base rules (fixed earlier in this file to use var(--kyn-bg-
+   panel)/var(--kyn-bg-chat)), so it silently won in dark mode and
+   reintroduced a color the real theme authority never chose. .message-
+   bubble.received got yet another (4th) always-#2d2d2d/#ffffff hardcoded
+   attempt, non-!important, so it was already dead against the fixed base
+   rule's !important — removed as dead weight rather than leaving another
+   copy of the bug lying around for someone to "fix" again later. */
 [data-theme="dark"] .chat-item:hover {
     background-color: #2d2d2d;
 }
 
 [data-theme="dark"] .chat-item.active {
     background-color: rgba(0, 132, 255, 0.15);
-}
-
-[data-theme="dark"] .message-bubble.received {
-    background-color: #2d2d2d;
-    color: #ffffff;
 }
 
 [data-theme="dark"] .chat-header,
@@ -3257,33 +3269,30 @@ body {
     font-weight: 600;
 }
 
-/* ── Message bubbles: strong sent / received distinction ── */
+/* ── Message bubbles: strong sent / received distinction ──
+   FIX (BUBBLES-ALWAYS-DARK): this rule and the "Dark theme overrides"
+   block that used to follow it both hardcoded the SAME two hex colors
+   (#005c4b/#202c33) — the "override" only ever changed the text color,
+   never the background, so bubbles were WhatsApp-dark-green/gray in
+   EVERY theme, not just dark. Now that --bubble-sent-bg/--bubble-
+   received-bg/--bubble-sent-text/--bubble-received-text (declared in
+   this file's own :root, near the top) resolve through theme.colors.css's
+   already-correct --kyn-bubble-* variables, one ungated rule is
+   sufficient — it now genuinely differs by theme, so the separate
+   [data-theme="dark"] duplicate is gone, not just consolidated. */
 .message.sent  .message-bubble,
 .message-bubble.sent {
-    background: #005c4b !important;
-    color: var(--kyn-border) !important;
+    background: var(--bubble-sent-bg) !important;
+    color: var(--bubble-sent-text) !important;
     border-radius: 7.5px 0 7.5px 7.5px !important;
     box-shadow: 0 1px 1px rgba(0,0,0,0.3);
 }
 
 .message.received .message-bubble,
 .message-bubble.received {
-    background: #202c33 !important;
-    color: var(--kyn-border) !important;
+    background: var(--bubble-received-bg) !important;
+    color: var(--bubble-received-text) !important;
     border-radius: 0 7.5px 7.5px 7.5px !important;
-}
-
-/* ── Dark theme overrides ── */
-[data-theme="dark"] .message.sent .message-bubble,
-[data-theme="dark"] .message-bubble.sent {
-    background: #005c4b !important;
-    color: #e9edef !important;
-}
-
-[data-theme="dark"] .message.received .message-bubble,
-[data-theme="dark"] .message-bubble.received {
-    background: #202c33 !important;
-    color: #e9edef !important;
 }
 
 [data-theme="dark"] .msg-ctx-menu {
@@ -3872,25 +3881,19 @@ body[data-module="friends"] .friend-item:hover {
    DARK MODE OVERRIDES
    ================================================================ */
 
+/* FIX (BUBBLES-ALWAYS-DARK): the --bubble-sent-bg/--bubble-received-bg/
+   --bubble-received-text redeclarations that used to be here, and the two
+   .message-bubble rule blocks below them, were fully redundant with the
+   "Message bubbles: strong sent / received distinction" rule earlier in
+   this file — both hardcoded the identical #005c4b/#202c33/#e9edef values.
+   Now that the base rule resolves through theme.colors.css's --kyn-bubble-*
+   variables (which are already correctly split by [data-theme="dark"] over
+   there — the one real theme authority), a second dark-only copy here isn't
+   needed and would only be one more place to forget to update. */
 [data-theme="dark"] {
-  --bubble-sent-bg: #005c4b;
-  --bubble-received-bg: #202c33;
-  --bubble-received-text: #e9edef;
   --color-friend-bg: #1f2937;
   --color-friend-card: #111827;
   --color-friend-border: #374151;
-}
-
-[data-theme="dark"] .message-bubble.sent,
-[data-theme="dark"] .message.sent .message-bubble {
-  background-color: #005c4b !important;
-  color: #e9edef !important;
-}
-
-[data-theme="dark"] .message-bubble.received,
-[data-theme="dark"] .message.received .message-bubble {
-  background-color: #202c33 !important;
-  color: #e9edef !important;
 }
 
 /* ================================================================
@@ -3911,12 +3914,11 @@ body[data-module="friends"] .friend-item:hover {
     border-bottom-color: var(--color-secondary) !important;
   }
 
-  /* Chat bubbles stay green on mobile */
-  .message-bubble.sent,
-  .message.sent .message-bubble {
-    background-color: #005c4b !important;
-    color: var(--kyn-border) !important;
-  }
+  /* FIX (BUBBLES-ALWAYS-DARK): "stay green on mobile" hardcoded the same
+     always-dark color the base rule used to have — now that the base rule
+     (earlier in this file) is theme-aware via --bubble-sent-bg, there's no
+     reason bubbles need a separate, redundant, mobile-only color; removing
+     this also stops it from re-forcing dark green on mobile in light theme. */
 
   /* Story rings stay gradient on mobile */
   .my-status-avatar-ring:not(.viewed),
@@ -3950,7 +3952,12 @@ body[data-module="friends"] .friend-item:hover {
    ================================================================ */
 
 /* Legacy variable bridge */
-.message-bubble.sent { background-color: #005c4b !important; color: var(--kyn-border) !important; }
+/* FIX (BUBBLES-ALWAYS-DARK): this was the actual last word in the whole
+   file for the sent bubble's color in light mode (latest matching rule,
+   equal specificity+importance beats every earlier attempt above) — it
+   alone was enough to keep re-forcing dark green even after every other
+   copy of this bug elsewhere in this file got fixed. Now theme-aware. */
+.message-bubble.sent { background-color: var(--bubble-sent-bg) !important; color: var(--bubble-sent-text) !important; }
 .chat-input-btn.send  { background-color: #00a884 !important; }
 .quick-action-icon    { color: #00a884 !important; }
 .friend-status.online { background-color: #00a884 !important; }

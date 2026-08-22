@@ -2956,10 +2956,27 @@ body[data-module="friends"] .add-friend-btn {
   color: var(--bubble-received-text) !important;
 }
 
-/* Group chat inline messages */
+/* FIX (RECEIVED-BUBBLE-WHITE-HALO): this section covered .message.sent's
+   OUTER wrapper (not just the inner .message-bubble) but had no equivalent
+   rule for .message.received — so the received wrapper kept resolving via
+   the earlier, ungated ".message.received { background-color: var(--message-
+   bg); }" rule near the top of this file (--message-bg: #ffffff, no dark
+   counterpart, no !important). The actual DOM is a wrapper div containing a
+   nested .message-bubble (see appendBubble() in group.html) — the bubble
+   itself was already correctly themed via --bubble-received-bg above, but
+   since the wrapper's own padding is larger than the bubble, its ungated
+   white background showed through as a halo around every received message,
+   in every theme, worst in dark mode where a white edge around a dark
+   bubble is exactly the "light surface competing with the dark screen"
+   problem this app must not have. */
 .message.sent {
   background-color: var(--bubble-sent-bg) !important;
   color: var(--bubble-sent-text) !important;
+}
+
+.message.received {
+  background-color: var(--bubble-received-bg) !important;
+  color: var(--bubble-received-text) !important;
 }
 
 /* ================================================================
