@@ -10,6 +10,9 @@
  *   the encrypted envelope has been durably accepted.
  * - The E2E service may live in the parent chat shell; same-origin parent access
  *   is therefore part of the receive path.
+ * - X3DH bootstrap metadata is repaired onto v3/v4 outgoing envelopes when the
+ *   existing pair session contains it. This prevents a sender-side cached
+ *   session from producing a ciphertext that the receiver cannot bootstrap.
  */
 (function (global) {
   'use strict';
@@ -25,6 +28,7 @@
   let db = null;
   let userId = null;
   let boundSocket = null;
+  let cryptoRepairTarget = null;
 
   function openDB() {
     return new Promise(resolve => {
@@ -71,6 +75,74 @@
     try { if (global.parent && global.parent.KynectaRealtime && global.parent.KynectaRealtime._socket) return global.parent.KynectaRealtime._socket; } catch (_) {}
     try { if (global.top && global.top.KynectaRealtime && global.top.KynectaRealtime._socket) return global.top.KynectaRealtime._socket; } catch (_) {}
     return null;
+  }
+
+  function currentUserId() {
+    if (userId != null) return String(userId);
+    const e2e = getE2E();
+    try { const id = e2e?.getMyUserId?.(); if (id != null) return String(id); } catch (_) {}
+    try { const id = global.SessionManager?.getCurrentUserId?.(); if (id != null) return String(id); } catch (_) {}
+    try { const raw = localStorage.getItem('kynecta_auth'); const p = raw ? JSON.parse(raw) : null; const id = p?.user?.id || p?.userId; if (id != null) return String(id); } catch (_) {}
+    return null;
+  }
+
+  async function readPairBootstrap(peerId) {
+    const me = currentUserId();
+    if (!me || peerId == null) return null;
+    const pair = [String(me), String(peerId)].sort().join(':');
+    const key = `kyn_x3dh_sessions_v7_${me}_${pair}`;
+    try {
+      let raw = localStorage.getItem(key);
+      if (!raw) return null;
+      const e2e = getE2E();
+      if (e2e?.unwrapFromLocalStorage && raw.startsWith('{')) {
+        try { raw = await e2e.unwrapFromLocalStorage(raw); } catch (_) {}
+      }
+      if (typeof raw !== 'string') return null;
+      let json = raw;
+      try { json = atob(raw); } catch (_) {}
+      const state = JSON.parse(json);
+      return state?.bootstrap?.x3dh ? state.bootstrap : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function installCryptoBootstrapRepair() {
+    const e2e = getE2E();
+    if (!e2e || typeof e2e.encryptForChat !== 'function') return;
+    if (cryptoRepairTarget === e2e && e2e.encryptForChat.__kynectaBootstrapRepair) return;
+    const original = e2e.encryptForChat;
+    const wrapped = async function (plaintext, chatId, recipientId, opts) {
+      const result = await original.call(this, plaintext, chatId, recipientId, opts);
+      try {
+        if (typeof result !== 'string') return result;
+        const env = JSON.parse(result);
+        if (!env || ![3, 4].includes(Number(env.v)) || env.x3dh) return result;
+        const bootstrap = await readPairBootstrap(recipientId);
+        if (!bootstrap) return result;
+        env.x3dh = bootstrap;
+        console.info('[E2E/X3DH] OUTGOING_BOOTSTRAP_REPAIRED', {
+          chatId: String(chatId),
+          recipientId: String(recipientId),
+          sid: env.sid,
+          n: env.n
+        });
+        return JSON.stringify(env);
+      } catch (_) {
+        return result;
+      }
+    };
+    Object.defineProperty(wrapped, '__kynectaBootstrapRepair', { value: true, enumerable: false });
+    e2e.encryptForChat = wrapped;
+    cryptoRepairTarget = e2e;
+  }
+
+  function scheduleCryptoRepair() {
+    installCryptoBootstrapRepair();
+    setTimeout(installCryptoBootstrapRepair, 100);
+    setTimeout(installCryptoBootstrapRepair, 1000);
+    setTimeout(installCryptoBootstrapRepair, 3000);
   }
 
   function isEnvelope(content) {
@@ -124,7 +196,7 @@
             const plain = await e2e.decryptMessageForDisplay(
               message,
               String(message.chatId),
-              String(userId || ''),
+              String(userId || currentUserId() || ''),
               {
                 fallbackText: '🔒 Encrypted message',
                 onResolved: text => {
@@ -142,9 +214,6 @@
               await persistPlaintext(message, plain);
               return true;
             }
-            // A placeholder means the canonical E2E retry queue owns the next
-            // attempt. We still retry here so a cold first-contact session cannot
-            // remain permanently stuck if no E2E event fires.
           } catch (_) {}
         }
         if (attempt < RETRIES.length - 1) await new Promise(r => setTimeout(r, RETRIES[attempt]));
@@ -206,8 +275,6 @@
       status: 'delivered'
     };
 
-    // Persist the encrypted envelope before ACK. Delivery therefore means the
-    // receiver accepted the message, never that the user opened/read it.
     await put(STORE_MESSAGES, {
       clientMessageId: `srv_${serverId}`,
       ...normalized,
@@ -219,8 +286,6 @@
       }
     } catch (_) {}
 
-    // ACK immediately after durable acceptance. This is the server's canonical
-    // msg:delivered_ack path and clears WSService's delivery timer.
     ack(normalized);
 
     if (!isEnvelope(normalized.content)) {
@@ -228,9 +293,6 @@
       return;
     }
 
-    // Never emit the ciphertext as UI content. Decrypt through the same E2E
-    // implementation that created the v3/v4 envelope, including the parent
-    // chat-shell instance when this iframe has no local E2E singleton.
     await decryptAndRender(normalized);
   }
 
@@ -242,10 +304,6 @@
     }
     if (boundSocket === socket) return;
     boundSocket = socket;
-
-    // Canonical server event. This was the missing first-contact receive path:
-    // the previous bootstrap explicitly removed MessageLifecycleClient.init(),
-    // so this listener was never installed even though the file was loaded.
     socket.on('msg:new', handleIncoming);
     socket.on('msg:sync:result', data => {
       if (Array.isArray(data?.messages)) data.messages.forEach(handleIncoming);
@@ -254,7 +312,6 @@
       if (Array.isArray(data?.messages)) data.messages.forEach(handleIncoming);
     });
     socket.on('connect', () => {
-      // Rebind only if another socket instance replaced the singleton.
       if (boundSocket !== getSocket()) { boundSocket = null; bind(); }
     });
   }
@@ -263,15 +320,16 @@
     seen.clear();
     decrypting.clear();
     userId = null;
+    cryptoRepairTarget = null;
   }
 
   async function init(opts = {}) {
     userId = opts.currentUserId || userId || global.__PARENT_SESSION__?.userId || global.parent?.__PARENT_SESSION__?.userId || null;
     if (!db) await openDB();
+    scheduleCryptoRepair();
     bind();
   }
 
-  // Preserve the public surface used by the existing application.
   async function sendMessage(chatId, content, type = 'text', extra = {}) {
     throw new Error('MessageLifecycleClient.sendMessage is not the active send authority; use messages-core/messages-ui send path');
   }
@@ -312,9 +370,13 @@
     _internal: { getSocket, handleIncoming }
   };
 
-  // The old bootstrap intentionally removed this init call, leaving the file
-  // loaded but inert. The receive authority must be live for the entire
-  // Messages iframe lifetime, not only after a chat-history navigation.
+  global.addEventListener?.('kyn:e2eProvisioned', scheduleCryptoRepair);
+  global.addEventListener?.('kyn:e2eUnlocked', scheduleCryptoRepair);
+  global.addEventListener?.('kyn:loggedIn', scheduleCryptoRepair);
+  try { global.document?.addEventListener('kyn:e2eProvisioned', scheduleCryptoRepair); } catch (_) {}
+  try { global.document?.addEventListener('kyn:e2eUnlocked', scheduleCryptoRepair); } catch (_) {}
+  try { global.document?.addEventListener('kyn:loggedIn', scheduleCryptoRepair); } catch (_) {}
+
   init({
     currentUserId: global.__PARENT_SESSION__?.userId || global.parent?.__PARENT_SESSION__?.userId || null
   }).catch(() => bind());
