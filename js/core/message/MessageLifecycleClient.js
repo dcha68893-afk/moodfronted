@@ -1,63 +1,9 @@
 /**
  * MessageLifecycleClient.js
- * -----------------------------------------------------------------------
- * MESSAGE LIFECYCLE REBUILD (messages-only scope, added 2026-07-26).
- *
- * A new, additive, self-contained module implementing the full Signal-style
- * message lifecycle end to end:
- *
- *   type -> save locally (PENDING) -> render optimistically -> queue
- *   -> send (socket, REST fallback) -> SENT (server id assigned)
- *   -> DELIVERED (recipient ack)   -> READ (chat opened)
- *
- * and, symmetrically on the receiving side:
- *
- *   msg:new -> dedupe by serverId -> store locally -> render -> ack delivery
- *
- * WHAT THIS DOES *NOT* TOUCH
- * ---------------------------
- * Per agreed scope, this does not remove, disable, or rewrite the existing
- * iframe relay / dedup-claim system (app.realtime.socket.js,
- * messages-core.ui-bridge.js, mesh-messages-bridge.js, phase15.delivery.patch.js).
- * That system is shared with calls/groups/games and is left exactly as-is.
- *
- * WHY THIS FIXES "MESSAGE SOMETIMES DOESN'T APPEAR"
- * ---------------------------------------------------
- * Two concrete, verified gaps in the previous pipeline:
- *
- *  1. Every existing delivery path funnels through a single shared
- *     "claim once" flag (__kynRelayMessageOnce). Whichever path claims an
- *     incoming message first is the ONLY one that renders it — if that path
- *     fails partway (iframe not ready yet, listener not rebound after a
- *     reconnect), the message is dropped, because every other path already
- *     stood down. This module listens directly on the socket for a brand
- *     new, separate event name (`msg:new`) that none of those relay layers
- *     even look at — so it never enters that race, and simply always
- *     renders what it receives (after its own dedupe-by-serverId check).
- *
- *  2. The existing reconnect flow (ReconnectOrchestrator.js) already emits
- *     `sync:missed_messages` on reconnect, and the server already replies
- *     with `sync:missed_messages_result` — but nothing in the whole
- *     frontend was listening for that reply. Messages correctly held for an
- *     offline client were fetched and then silently discarded. This module
- *     listens for both that legacy result AND the new `msg:sync:result`,
- *     and actually renders what comes back.
- *
- * INTEGRATION
- * -----------
- * Include this script wherever the message UI lives (message.html), then:
- *
- *     MessageLifecycleClient.init({ currentUserId: <id> });
- *     MessageLifecycleClient.sendMessage(chatId, content, type);
- *     MessageLifecycleClient.markRead(chatId, [messageId, ...]);
- *
- * Rendering re-uses the EXISTING, already-working render pipeline: incoming
- * messages are dispatched as a standard `message:new` document CustomEvent,
- * the exact same shape messages-core.js already knows how to render (see
- * its `document.addEventListener('message:new', ...)` handler). Its
- * existing dedupe-by-messageId logic means if the legacy relay *also*
- * manages to deliver the same message, it's simply dropped as a duplicate —
- * no regression, pure safety net.
+ * Canonical message transport/persistence bridge.
+ * Existing-file repair: incoming encrypted envelopes are never rendered as
+ * plaintext UI content; they are decrypted through the existing E2E transport
+ * before render, while delivery ACK remains independent from read receipts.
  */
 (function (global) {
   'use strict';
@@ -66,476 +12,336 @@
   const DB_VERSION = 1;
   const STORE_OUTGOING = 'outgoing_queue';
   const STORE_MESSAGES = 'messages';
-  const STORE_SYNC_STATE = 'sync_state'; // last known serverId per chatId
-
-  const RETRY_BACKOFF_MS = [1000, 2000, 5000, 10000, 20000, 30000]; // caps at 30s
-  const MAX_RETRY_ATTEMPTS = 50; // ~ keeps retrying for a long time, never silently gives up
+  const STORE_SYNC_STATE = 'sync_state';
+  const RETRY_BACKOFF_MS = [500, 1000, 2000, 5000, 10000, 20000, 30000];
+  const MAX_RETRY_ATTEMPTS = 50;
 
   let db = null;
   let currentUserId = null;
   let socketBindAttempts = 0;
-  let retryTimer = null;
+  const mem = { outgoing: new Map(), messages: new Map(), sync: new Map() };
+  const seenServerIds = new Set();
+  const decryptInFlight = new Map();
 
-  // ---------------------------------------------------------------------
-  // Tiny IndexedDB helper (falls back to an in-memory store if IndexedDB
-  // is unavailable, e.g. some webview/iframe sandboxes) — this is what
-  // makes "user does not have to press Send again" actually survive a
-  // page reload, not just a network blip.
-  // ---------------------------------------------------------------------
+  function mapFor(store) {
+    return store === STORE_OUTGOING ? mem.outgoing : store === STORE_MESSAGES ? mem.messages : mem.sync;
+  }
+
   function openDB() {
-    return new Promise((resolve) => {
-      if (!global.indexedDB) { resolve(null); return; }
+    return new Promise(resolve => {
+      if (!global.indexedDB) return resolve(null);
       const req = global.indexedDB.open(DB_NAME, DB_VERSION);
-      req.onupgradeneeded = (evt) => {
-        const _db = evt.target.result;
-        if (!_db.objectStoreNames.contains(STORE_OUTGOING)) {
-          _db.createObjectStore(STORE_OUTGOING, { keyPath: 'clientMessageId' });
+      req.onupgradeneeded = e => {
+        const d = e.target.result;
+        if (!d.objectStoreNames.contains(STORE_OUTGOING)) d.createObjectStore(STORE_OUTGOING, { keyPath: 'clientMessageId' });
+        if (!d.objectStoreNames.contains(STORE_MESSAGES)) {
+          const s = d.createObjectStore(STORE_MESSAGES, { keyPath: 'clientMessageId' });
+          s.createIndex('chatId', 'chatId', { unique: false });
+          s.createIndex('serverId', 'serverId', { unique: false });
         }
-        if (!_db.objectStoreNames.contains(STORE_MESSAGES)) {
-          const store = _db.createObjectStore(STORE_MESSAGES, { keyPath: 'clientMessageId' });
-          store.createIndex('chatId', 'chatId', { unique: false });
-          store.createIndex('serverId', 'serverId', { unique: false });
-        }
-        if (!_db.objectStoreNames.contains(STORE_SYNC_STATE)) {
-          _db.createObjectStore(STORE_SYNC_STATE, { keyPath: 'chatId' });
-        }
+        if (!d.objectStoreNames.contains(STORE_SYNC_STATE)) d.createObjectStore(STORE_SYNC_STATE, { keyPath: 'chatId' });
       };
-      req.onsuccess = (evt) => {
-        const _db = evt.target.result;
-        // Account-switch isolation: release this connection the moment
-        // authStorage.js's wipePreviousAccountData() tries to delete this DB
-        // (nexopa_message_lifecycle_v1), otherwise deleteDatabase() blocks
-        // forever while this connection is open and the previous account's
-        // full message history survives the switch — this was the concrete
-        // root cause of manual-login history appearing under a Google
-        // account (and vice versa) on the same device.
-        _db.onversionchange = () => { try { _db.close(); } catch (_) {} db = null; };
-        resolve(_db);
+      req.onsuccess = e => {
+        const d = e.target.result;
+        d.onversionchange = () => { try { d.close(); } catch (_) {} if (db === d) db = null; };
+        resolve(d);
       };
       req.onerror = () => resolve(null);
     });
   }
 
-  // Fallback in-memory maps used only if IndexedDB truly isn't available.
-  // Also cleared on account switch (see resetForAccountSwitch below) since
-  // these live for the lifetime of the page and would otherwise leak the
-  // previous account's messages into the new session without a reload.
-  const memFallback = { outgoing: new Map(), messages: new Map(), syncState: new Map() };
-
-  // Called by authStorage.js right before it wipes IndexedDB for an account
-  // switch, so this module drops its open connection and any in-memory
-  // fallback state instead of continuing to serve the previous account's
-  // cached messages for the rest of the page session.
-  function resetForAccountSwitch() {
-    try { if (db) db.close(); } catch (_) { /* ignore */ }
-    db = null;
-    currentUserId = null;
-    memFallback.outgoing.clear();
-    memFallback.messages.clear();
-    memFallback.syncState.clear();
-  }
-  if (typeof global.addEventListener === 'function') {
-    global.addEventListener('kyn:accountSwitchWipe', resetForAccountSwitch);
-  }
-
-  function idbPut(storeName, value) {
-    return new Promise((resolve) => {
-      if (!db) {
-        const key = storeName === STORE_SYNC_STATE ? value.chatId : value.clientMessageId;
-        ({ [STORE_OUTGOING]: memFallback.outgoing, [STORE_MESSAGES]: memFallback.messages, [STORE_SYNC_STATE]: memFallback.syncState }[storeName]).set(key, value);
-        resolve(true);
-        return;
-      }
+  function put(store, value) {
+    return new Promise(resolve => {
+      if (!db) { mapFor(store).set(store === STORE_SYNC_STATE ? value.chatId : value.clientMessageId, value); return resolve(true); }
       try {
-        const tx = db.transaction(storeName, 'readwrite');
-        tx.objectStore(storeName).put(value);
+        const tx = db.transaction(store, 'readwrite');
+        tx.objectStore(store).put(value);
         tx.oncomplete = () => resolve(true);
         tx.onerror = () => resolve(false);
       } catch (_) { resolve(false); }
     });
   }
 
-  function idbDelete(storeName, key) {
-    return new Promise((resolve) => {
-      if (!db) {
-        ({ [STORE_OUTGOING]: memFallback.outgoing, [STORE_MESSAGES]: memFallback.messages, [STORE_SYNC_STATE]: memFallback.syncState }[storeName]).delete(key);
-        resolve(true);
-        return;
-      }
+  function del(store, key) {
+    return new Promise(resolve => {
+      if (!db) { mapFor(store).delete(key); return resolve(true); }
       try {
-        const tx = db.transaction(storeName, 'readwrite');
-        tx.objectStore(storeName).delete(key);
+        const tx = db.transaction(store, 'readwrite');
+        tx.objectStore(store).delete(key);
         tx.oncomplete = () => resolve(true);
         tx.onerror = () => resolve(false);
       } catch (_) { resolve(false); }
     });
   }
 
-  function idbGetAll(storeName) {
-    return new Promise((resolve) => {
-      if (!db) {
-        resolve(Array.from(({ [STORE_OUTGOING]: memFallback.outgoing, [STORE_MESSAGES]: memFallback.messages, [STORE_SYNC_STATE]: memFallback.syncState }[storeName]).values()));
-        return;
-      }
+  function all(store) {
+    return new Promise(resolve => {
+      if (!db) return resolve(Array.from(mapFor(store).values()));
       try {
-        const tx = db.transaction(storeName, 'readonly');
-        const req = tx.objectStore(storeName).getAll();
+        const tx = db.transaction(store, 'readonly');
+        const req = tx.objectStore(store).getAll();
         req.onsuccess = () => resolve(req.result || []);
         req.onerror = () => resolve([]);
       } catch (_) { resolve([]); }
     });
   }
 
-  function idbGet(storeName, key) {
-    return new Promise((resolve) => {
-      if (!db) {
-        resolve(({ [STORE_OUTGOING]: memFallback.outgoing, [STORE_MESSAGES]: memFallback.messages, [STORE_SYNC_STATE]: memFallback.syncState }[storeName]).get(key) || null);
-        return;
-      }
+  function get(store, key) {
+    return new Promise(resolve => {
+      if (!db) return resolve(mapFor(store).get(key) || null);
       try {
-        const tx = db.transaction(storeName, 'readonly');
-        const req = tx.objectStore(storeName).get(key);
+        const tx = db.transaction(store, 'readonly');
+        const req = tx.objectStore(store).get(key);
         req.onsuccess = () => resolve(req.result || null);
         req.onerror = () => resolve(null);
       } catch (_) { resolve(null); }
     });
   }
 
-  // ---------------------------------------------------------------------
-  // Socket access — tries direct same-origin access to the existing
-  // KynectaRealtime socket instance wherever it lives (this window, or the
-  // parent, if the message UI runs inside a same-origin iframe). No new
-  // socket connection is created; this reuses the one connection the app
-  // already maintains.
-  // ---------------------------------------------------------------------
+  function resetForAccountSwitch() {
+    try { if (db) db.close(); } catch (_) {}
+    db = null;
+    currentUserId = null;
+    mem.outgoing.clear(); mem.messages.clear(); mem.sync.clear();
+    seenServerIds.clear(); decryptInFlight.clear();
+  }
+  global.addEventListener?.('kyn:accountSwitchWipe', resetForAccountSwitch);
+
   function getSocket() {
-    try { if (global.KynectaRealtime && global.KynectaRealtime._socket) return global.KynectaRealtime._socket; } catch (_) {}
-    try { if (global.parent && global.parent.KynectaRealtime && global.parent.KynectaRealtime._socket) return global.parent.KynectaRealtime._socket; } catch (_) {}
-    try { if (global.top && global.top.KynectaRealtime && global.top.KynectaRealtime._socket) return global.top.KynectaRealtime._socket; } catch (_) {}
+    try { if (global.KynectaRealtime?._socket) return global.KynectaRealtime._socket; } catch (_) {}
+    try { if (global.parent?.KynectaRealtime?._socket) return global.parent.KynectaRealtime._socket; } catch (_) {}
+    try { if (global.top?.KynectaRealtime?._socket) return global.top.KynectaRealtime._socket; } catch (_) {}
     return null;
   }
 
-  function genClientMessageId() {
-    if (global.crypto && global.crypto.randomUUID) return 'cm_' + global.crypto.randomUUID();
-    return 'cm_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+  function isEncryptedEnvelope(content) {
+    if (typeof content !== 'string') return false;
+    try { const e = JSON.parse(content); return !!e && [3, 4].includes(Number(e.v)) && !!e.iv && !!e.ct; } catch (_) { return false; }
   }
 
-  // ---------------------------------------------------------------------
-  // Rendering bridge: reuse the EXISTING, working render pipeline instead
-  // of re-implementing DOM rendering here. messages-core.js already listens
-  // for this exact event/shape and already dedupes by message id.
-  // ---------------------------------------------------------------------
-  function dispatchRender(message) {
-    try {
-      global.document.dispatchEvent(new CustomEvent('message:new', {
-        detail: {
-          id: message.serverId,
-          chatId: message.chatId,
-          conversationId: message.chatId,
-          senderId: message.senderId,
-          content: message.content,
-          type: message.type || 'text',
-          sender: message.sender || null,
-          replyToId: message.replyToId || null,
-          createdAt: message.createdAt,
-          sentAt: message.sentAt,
-          deliveredAt: message.deliveredAt || null,
-          _source: 'MessageLifecycleClient',
-        },
-      }));
-    } catch (_) { /* non-fatal — the message is already durably stored locally */ }
+  function isUsablePlaintext(text) {
+    if (typeof text !== 'string' || !text.length) return false;
+    return !/^\[(?:Decryption failed|Encrypted message|Encrypted message —|Decryption unavailable)/i.test(text);
   }
 
-  function dispatchStatusUpdate(clientMessageId, serverId, chatId, status) {
+  function emitRender(message, content) {
     try {
-      global.document.dispatchEvent(new CustomEvent('message:status', {
-        detail: { clientMessageId, serverId, chatId, status },
-      }));
+      global.document.dispatchEvent(new CustomEvent('message:new', { detail: {
+        id: message.serverId,
+        chatId: message.chatId,
+        conversationId: message.chatId,
+        senderId: message.senderId,
+        content,
+        type: message.type || 'text',
+        sender: message.sender || null,
+        replyToId: message.replyToId || null,
+        createdAt: message.createdAt,
+        sentAt: message.sentAt,
+        deliveredAt: message.deliveredAt || null,
+        _source: 'MessageLifecycleClient',
+      }}));
     } catch (_) {}
   }
 
-  // ---------------------------------------------------------------------
-  // Outgoing pipeline
-  // ---------------------------------------------------------------------
-  async function saveOutgoingLocal(item) {
-    await idbPut(STORE_MESSAGES, item);
-    await idbPut(STORE_OUTGOING, item);
+  function emitStatus(clientMessageId, serverId, chatId, status) {
+    try { global.document.dispatchEvent(new CustomEvent('message:status', { detail: { clientMessageId, serverId, chatId, status } })); } catch (_) {}
   }
 
-  // FIX-RECEIVERID-GAP: sendMessage() previously only accepted a chatId,
-  // which meant this pipeline had no way to start a brand-new conversation —
-  // every "message this person" entry point from Friends/Calls/Status
-  // starts with only a receiverId, before any chatId exists. Pass
-  // `extra.receiverId` in that case; chatId can be left null/undefined.
-  // Once the server resolves/creates the real chat, the ack's chatId is
-  // adopted below so every retry and the local record use the real id.
-  async function sendMessage(chatId, content, type = 'text', extra = {}) {
-    const clientMessageId = genClientMessageId();
-    const item = {
-      clientMessageId,
-      chatId: chatId || null,
-      receiverId: extra.receiverId || null,
-      senderId: currentUserId,
-      content,
-      type,
-      replyToId: extra.replyToId || null,
-      status: 'pending',
-      attempts: 0,
-      createdAt: new Date().toISOString(),
-      serverId: null,
-    };
+  async function decryptForRender(message) {
+    if (!isEncryptedEnvelope(message.content)) return message.content;
+    const key = `${message.serverId}:${message.chatId}:${message.senderId}`;
+    if (decryptInFlight.has(key)) return decryptInFlight.get(key);
 
-    if (!item.chatId && !item.receiverId) {
-      throw new Error('MessageLifecycleClient.sendMessage requires a chatId or a receiverId');
-    }
+    const work = (async () => {
+      const e2e = global.KynectaE2E;
+      if (!e2e) throw new Error('E2E transport unavailable');
 
-    await saveOutgoingLocal(item);
-    // Optimistic render — the whole point of "user doesn't have to press
-    // Send again": it's visible immediately, before the network round trip.
-    dispatchRender({ ...item, deliveredAt: null });
-
-    attemptSend(item);
-    return clientMessageId;
-  }
-
-  async function attemptSend(item) {
-    const socket = getSocket();
-    const payload = {
-      chatId: item.chatId || undefined,
-      receiverId: item.chatId ? undefined : item.receiverId,
-      content: item.content,
-      type: item.type,
-      clientMessageId: item.clientMessageId,
-      replyToId: item.replyToId,
-    };
-
-    const onResult = async (result) => {
-      if (result && result.ok) {
-        item.status = result.status || 'sent';
-        item.serverId = result.serverId;
-        // FIX-RECEIVERID-GAP: this was a receiverId-only pending send —
-        // adopt the real chatId the server just resolved/created so the
-        // stored record and the status-update event carry it, not null.
-        if (!item.chatId && result.chatId) item.chatId = result.chatId;
-        await idbDelete(STORE_OUTGOING, item.clientMessageId);
-        await idbPut(STORE_MESSAGES, item);
-        dispatchStatusUpdate(item.clientMessageId, item.serverId, item.chatId, item.status);
-      } else {
-        scheduleRetry(item);
+      // Prefer the canonical display API because it is wired to the existing
+      // pending-decrypt queue. If it returns a placeholder while keys/session
+      // are being prepared, fall through to direct decrypt retries instead of
+      // ever rendering the encrypted envelope.
+      if (typeof e2e.decryptFromChat === 'function') {
+        for (let i = 0; i < RETRY_BACKOFF_MS.length; i++) {
+          try {
+            const plain = await e2e.decryptFromChat(message.content, message.chatId, String(message.senderId));
+            if (isUsablePlaintext(plain)) return plain;
+          } catch (_) {}
+          if (i < RETRY_BACKOFF_MS.length - 1) await new Promise(r => setTimeout(r, RETRY_BACKOFF_MS[i]));
+        }
       }
-    };
 
-    if (socket && socket.connected) {
-      let answered = false;
-      const timeout = setTimeout(() => { if (!answered) { answered = true; scheduleRetry(item); } }, 8000);
-      try {
-        socket.emit('msg:send', payload, (ack) => {
-          if (answered) return;
-          answered = true;
-          clearTimeout(timeout);
-          onResult(ack);
-        });
-      } catch (_) {
-        clearTimeout(timeout);
-        answered = true;
-        await tryRestFallback(item, payload, onResult);
+      if (typeof e2e.decryptMessageForDisplay === 'function') {
+        try {
+          const plain = await e2e.decryptMessageForDisplay(message, message.chatId, String(currentUserId), {
+            activeConversation: { chatId: message.chatId, peerUserId: message.senderId },
+            fallbackText: 'New message received',
+            onResolved: text => { if (isUsablePlaintext(text)) emitRender(message, text); },
+          });
+          if (isUsablePlaintext(plain)) return plain;
+        } catch (_) {}
       }
-    } else {
-      await tryRestFallback(item, payload, onResult);
-    }
+      throw new Error('decryption pending');
+    })();
+
+    decryptInFlight.set(key, work);
+    try { return await work; } finally { decryptInFlight.delete(key); }
   }
 
-  // ---------------------------------------------------------------------
-  // FIX-SEND-CUTOVER: standalone, promise-based send used by the EXISTING
-  // send path (messages-core.operations.js ChatManager.sendMessageToBackend)
-  // as its preferred transport. Unlike sendMessage() above, this does NOT
-  // write its own optimistic-render copy (the existing pipeline already
-  // renders its own optimistic bubble) and does NOT enter the durable
-  // retry queue on failure — callers are expected to fall back to their
-  // own existing REST/offline-queue handling when this resolves
-  // { ok: false }. It exists purely so outgoing sends go out over the
-  // same msg:send socket path that the receiving side
-  // (bindSocketListeners' 'msg:new' handler) already listens for
-  // exclusively — see MESSAGE_LIFECYCLE_REBUILD.md: messages sent via
-  // the OLD message:new/REST path never reach this module's dedupe-safe
-  // render, because the backend only emits the new `msg:new` event from
-  // the `msg:send` socket handler. Routing sends through here is what
-  // actually closes that gap end-to-end.
-  function sendViaSocket(payload, timeoutMs = 6000) {
-    return new Promise((resolve) => {
-      const socket = getSocket();
-      if (!socket || !socket.connected) { resolve({ ok: false, reason: 'no_socket' }); return; }
-      let done = false;
-      const timer = setTimeout(() => {
-        if (!done) { done = true; resolve({ ok: false, reason: 'timeout' }); }
-      }, timeoutMs);
-      try {
-        socket.emit('msg:send', payload, (ack) => {
-          if (done) return;
-          done = true;
-          clearTimeout(timer);
-          resolve(ack || { ok: false, reason: 'empty_ack' });
-        });
-      } catch (e) {
-        if (!done) { done = true; clearTimeout(timer); resolve({ ok: false, reason: (e && e.message) || 'emit_failed' }); }
-      }
-    });
-  }
-
-  async function tryRestFallback(item, payload, onResult) {
+  async function renderIncoming(message) {
     try {
-      const base = (global.__kynAPI && global.__kynAPI.baseUrl) || global.BACKEND_URL || '';
-      const token = global.__kynToken || global.__accessToken || global.accessToken || '';
-      const resp = await fetch(base.replace(/\/$/, '') + '/api/messages/lifecycle/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
-        body: JSON.stringify(payload),
-      });
-      if (!resp.ok) { onResult({ ok: false }); return; }
-      const data = await resp.json();
-      onResult({ ok: true, serverId: data.serverId, status: data.status, chatId: data.chatId });
+      const plain = await decryptForRender(message);
+      emitRender(message, plain);
+      return true;
     } catch (_) {
-      onResult({ ok: false });
+      // Never expose ciphertext as message content. Keep the encrypted record
+      // persisted and retry when E2E keys/session become available.
+      const retryEvents = ['kyn:e2eUnlocked', 'kyn:e2eKeyAvailable'];
+      const retry = () => { renderIncoming(message).catch(() => {}); };
+      retryEvents.forEach(ev => global.addEventListener?.(ev, retry, { once: true }));
+      setTimeout(() => renderIncoming(message).catch(() => {}), 3000);
+      return false;
     }
   }
 
-  function scheduleRetry(item) {
-    item.attempts = (item.attempts || 0) + 1;
-    idbPut(STORE_OUTGOING, item);
-    if (item.attempts > MAX_RETRY_ATTEMPTS) return; // still stored locally; manual resend possible
-    const delay = RETRY_BACKOFF_MS[Math.min(item.attempts - 1, RETRY_BACKOFF_MS.length - 1)];
-    setTimeout(() => attemptSend(item), delay);
+  async function updateSyncState(chatId, serverId) {
+    if (chatId == null || serverId == null) return;
+    const old = await get(STORE_SYNC_STATE, chatId);
+    if (!old || Number(serverId) > Number(old.lastServerId || 0)) await put(STORE_SYNC_STATE, { chatId, lastServerId: serverId, updatedAt: Date.now() });
   }
-
-  // Called on socket reconnect: resume anything still pending, exactly as
-  // described in the lifecycle spec — "the user does not have to press
-  // Send again."
-  async function flushOutgoingQueue() {
-    const pending = await idbGetAll(STORE_OUTGOING);
-    pending.forEach((item) => attemptSend(item));
-  }
-
-  // ---------------------------------------------------------------------
-  // Incoming pipeline
-  // ---------------------------------------------------------------------
-  const seenServerIds = new Set();
 
   async function handleIncoming(payload) {
-    if (!payload || !payload.serverId) return;
-    if (seenServerIds.has(payload.serverId)) return; // dedupe
-    seenServerIds.add(payload.serverId);
+    if (!payload || payload.serverId == null) return;
+    const id = String(payload.serverId);
+    if (seenServerIds.has(id)) return;
+    seenServerIds.add(id);
 
-    const localRecord = {
-      clientMessageId: 'srv_' + payload.serverId,
+    const record = {
+      clientMessageId: 'srv_' + id,
       serverId: payload.serverId,
       chatId: payload.chatId,
       senderId: payload.senderId,
       content: payload.content,
-      type: payload.type,
+      type: payload.type || 'text',
       sender: payload.sender || null,
       replyToId: payload.replyToId || null,
       createdAt: payload.createdAt,
       sentAt: payload.sentAt,
       status: 'delivered',
     };
-    await idbPut(STORE_MESSAGES, localRecord);
-    await updateSyncState(payload.chatId, payload.serverId);
 
-    dispatchRender(localRecord);
+    await put(STORE_MESSAGES, record);
+    await updateSyncState(record.chatId, record.serverId);
 
-    // Confirm local storage back to the server -> sender sees ✓✓ delivered.
+    // Delivery means the receiver accepted/persisted the encrypted envelope.
+    // It does NOT mean the user read the message. Read is sent separately.
     const socket = getSocket();
-    if (socket && socket.connected) {
-      socket.emit('msg:delivered_ack', { serverId: payload.serverId, chatId: payload.chatId });
-    }
+    if (socket?.connected) socket.emit('msg:delivered_ack', { serverId: record.serverId, chatId: record.chatId });
+
+    await renderIncoming(record);
   }
 
-  async function updateSyncState(chatId, serverId) {
-    const existing = await idbGet(STORE_SYNC_STATE, chatId);
-    if (!existing || serverId > existing.lastServerId) {
-      await idbPut(STORE_SYNC_STATE, { chatId, lastServerId: serverId, updatedAt: Date.now() });
-    }
+  function genId() {
+    return global.crypto?.randomUUID ? 'cm_' + global.crypto.randomUUID() : 'cm_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2);
   }
 
-  // ---------------------------------------------------------------------
-  // Reconnect catch-up: the concrete fix for messages that were correctly
-  // held server-side while this client was offline/reconnecting.
-  // ---------------------------------------------------------------------
-  async function requestSync() {
+  async function encryptOutgoing(content, chatId, receiverId) {
+    if (!receiverId || !global.KynectaE2E?.encryptForChat) return content;
+    if (isEncryptedEnvelope(content)) return content;
+    // Never send plaintext merely because the E2E bootstrap is still loading.
+    // encryptForChat is the existing gate and throws/blocks until the secure
+    // transport is ready.
+    return global.KynectaE2E.encryptForChat(content, chatId, String(receiverId));
+  }
+
+  async function sendMessage(chatId, content, type = 'text', extra = {}) {
+    const clientMessageId = genId();
+    const receiverId = extra.receiverId || null;
+    const encrypted = await encryptOutgoing(content, chatId, receiverId);
+    const item = { clientMessageId, chatId: chatId || null, receiverId, senderId: currentUserId, content: encrypted, type, replyToId: extra.replyToId || null, status: 'pending', attempts: 0, createdAt: new Date().toISOString(), serverId: null };
+    if (!item.chatId && !item.receiverId) throw new Error('MessageLifecycleClient.sendMessage requires chatId or receiverId');
+    await put(STORE_MESSAGES, item); await put(STORE_OUTGOING, item);
+    attemptSend(item).catch(() => scheduleRetry(item));
+    return clientMessageId;
+  }
+
+  async function attemptSend(item) {
     const socket = getSocket();
-    if (!socket || !socket.connected) return;
-    const states = await idbGetAll(STORE_SYNC_STATE);
-    const chats = states.map((s) => ({ chatId: s.chatId, sinceId: s.lastServerId }));
-    if (chats.length === 0) return;
-    socket.emit('msg:sync', { chats });
-  }
-
-  function handleSyncResult({ chatId, messages } = {}) {
-    if (!Array.isArray(messages)) return;
-    messages.forEach((m) => {
-      handleIncoming({
-        serverId: m.id,
-        chatId: m.chatId,
-        senderId: m.senderId,
-        content: m.content,
-        type: m.type,
-        sender: m.senderUsername ? { username: m.senderUsername, avatar: m.senderAvatar } : null,
-        replyToId: m.replyToId,
-        createdAt: m.createdAt,
-        sentAt: m.sentAt,
+    const payload = { chatId: item.chatId || undefined, receiverId: item.chatId ? undefined : item.receiverId, content: item.content, type: item.type, clientMessageId: item.clientMessageId, replyToId: item.replyToId };
+    const finish = async result => {
+      if (!result?.ok) return scheduleRetry(item);
+      item.status = result.status || 'sent'; item.serverId = result.serverId;
+      if (!item.chatId && result.chatId) item.chatId = result.chatId;
+      await del(STORE_OUTGOING, item.clientMessageId); await put(STORE_MESSAGES, item);
+      emitStatus(item.clientMessageId, item.serverId, item.chatId, item.status);
+    };
+    if (socket?.connected) {
+      let done = false;
+      await new Promise(resolve => {
+        const timer = setTimeout(() => { if (!done) { done = true; resolve(finish({ ok: false, reason: 'timeout' })); } }, 8000);
+        try {
+          socket.emit('msg:send', payload, ack => { if (done) return; done = true; clearTimeout(timer); resolve(finish(ack)); });
+        } catch (_) { if (!done) { done = true; clearTimeout(timer); resolve(finish({ ok: false, reason: 'emit_failed' })); } }
       });
+    } else {
+      const base = (global.__kynAPI?.baseUrl || global.BACKEND_URL || '').replace(/\/$/, '');
+      const token = global.__kynToken || global.__accessToken || global.accessToken || '';
+      try {
+        const r = await fetch(base + '/api/messages/lifecycle/send', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) }, body: JSON.stringify(payload) });
+        if (!r.ok) return scheduleRetry(item);
+        const d = await r.json(); await finish({ ok: true, serverId: d.serverId, chatId: d.chatId, status: d.status });
+      } catch (_) { scheduleRetry(item); }
+    }
+  }
+
+  function scheduleRetry(item) {
+    item.attempts = (item.attempts || 0) + 1;
+    put(STORE_OUTGOING, item);
+    if (item.attempts > MAX_RETRY_ATTEMPTS) return;
+    const delay = RETRY_BACKOFF_MS[Math.min(item.attempts - 1, RETRY_BACKOFF_MS.length - 1)];
+    setTimeout(() => attemptSend(item).catch(() => scheduleRetry(item)), delay);
+  }
+
+  async function flushOutgoingQueue() { (await all(STORE_OUTGOING)).forEach(item => attemptSend(item).catch(() => scheduleRetry(item))); }
+
+  async function requestSync() {
+    const socket = getSocket(); if (!socket?.connected) return;
+    const chats = (await all(STORE_SYNC_STATE)).map(s => ({ chatId: s.chatId, sinceId: s.lastServerId }));
+    if (chats.length) socket.emit('msg:sync', { chats });
+  }
+
+  function handleSyncResult({ messages } = {}) {
+    if (!Array.isArray(messages)) return;
+    messages.forEach(m => handleIncoming({ serverId: m.id, chatId: m.chatId, senderId: m.senderId, content: m.content, type: m.type, sender: m.senderUsername ? { username: m.senderUsername, avatar: m.senderAvatar } : null, replyToId: m.replyToId, createdAt: m.createdAt, sentAt: m.sentAt }));
+  }
+
+  function sendViaSocket(payload, timeoutMs = 6000) {
+    return new Promise(resolve => {
+      const socket = getSocket();
+      if (!socket?.connected) return resolve({ ok: false, reason: 'no_socket' });
+      let done = false;
+      const timer = setTimeout(() => { if (!done) { done = true; resolve({ ok: false, reason: 'timeout' }); } }, timeoutMs);
+      try { socket.emit('msg:send', payload, ack => { if (done) return; done = true; clearTimeout(timer); resolve(ack || { ok: false, reason: 'empty_ack' }); }); }
+      catch (e) { if (!done) { done = true; clearTimeout(timer); resolve({ ok: false, reason: e?.message || 'emit_failed' }); } }
     });
   }
 
-  // ---------------------------------------------------------------------
-  // Public: mark messages read (chat opened) — drives ✓✓ blue on sender side.
-  // ---------------------------------------------------------------------
   function markRead(chatId, messageIds) {
     const socket = getSocket();
-    if (socket && socket.connected && Array.isArray(messageIds) && messageIds.length > 0) {
-      socket.emit('msg:read', { chatId, messageIds });
-    }
+    if (socket?.connected && Array.isArray(messageIds) && messageIds.length) socket.emit('msg:read', { chatId, messageIds });
   }
 
-  // ---------------------------------------------------------------------
-  // Binding: attach once per socket instance (survives reconnects because a
-  // fresh socket.io client instance only gets created on hard reconnect,
-  // and this guard flag lives on the socket object itself, matching the
-  // existing `__msgCoreBound` / `__callsCoreBound` convention already used
-  // elsewhere in this codebase).
-  // ---------------------------------------------------------------------
   function bindSocketListeners() {
     const socket = getSocket();
-    if (!socket) {
-      socketBindAttempts += 1;
-      if (socketBindAttempts < 100) setTimeout(bindSocketListeners, 300);
-      return;
-    }
+    if (!socket) { if (++socketBindAttempts < 100) setTimeout(bindSocketListeners, 300); return; }
     if (socket.__msgLifecycleClientBound) return;
     socket.__msgLifecycleClientBound = true;
-
     socket.on('msg:new', handleIncoming);
-    socket.on('msg:delivered', ({ serverId, chatId }) => dispatchStatusUpdate(null, serverId, chatId, 'delivered'));
-    socket.on('msg:read', ({ chatId, messageIds }) => {
-      (messageIds || []).forEach((id) => dispatchStatusUpdate(null, id, chatId, 'read'));
-    });
+    socket.on('msg:delivered', ({ serverId, chatId }) => emitStatus(null, serverId, chatId, 'delivered'));
+    socket.on('msg:read', ({ chatId, messageIds }) => (messageIds || []).forEach(id => emitStatus(null, id, chatId, 'read')));
     socket.on('msg:sync:result', handleSyncResult);
-
-    // Dead-letter fix: consume the pre-existing sync:missed_messages_result
-    // that nothing was listening for before.
-    socket.on('sync:missed_messages_result', ({ chatId, messages } = {}) => handleSyncResult({ chatId, messages }));
-
-    socket.on('connect', () => {
-      flushOutgoingQueue();
-      requestSync();
-    });
-
-    // If already connected by the time we bind (common — the app connects
-    // before the message UI finishes loading), run the connect-time work now.
-    if (socket.connected) {
-      flushOutgoingQueue();
-      requestSync();
-    }
+    socket.on('sync:missed_messages_result', handleSyncResult);
+    socket.on('connect', () => { flushOutgoingQueue(); requestSync(); });
+    if (socket.connected) { flushOutgoingQueue(); requestSync(); }
   }
 
   async function init(opts = {}) {
@@ -544,13 +350,5 @@
     bindSocketListeners();
   }
 
-  global.MessageLifecycleClient = {
-    init,
-    sendMessage,
-    sendViaSocket,
-    markRead,
-    requestSync,
-    resetForAccountSwitch,
-    _internal: { getSocket, flushOutgoingQueue }, // exposed for debugging only
-  };
+  global.MessageLifecycleClient = { init, sendMessage, sendViaSocket, markRead, requestSync, resetForAccountSwitch, _internal: { getSocket, flushOutgoingQueue } };
 })(typeof window !== 'undefined' ? window : this);
