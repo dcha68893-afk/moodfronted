@@ -172,9 +172,44 @@ a:hover {
 .chat-sidebar,
 .contacts-panel,
 .settings-panel,
-[class*="panel"],
-[class*="sidebar"],
-[class*="card"] {
+/* FIX (panel/sidebar/card patchwork — same bug class as the header fix
+   below): [class*="panel"]/[class*="sidebar"]/[class*="card"] matched ANY
+   element whose class merely CONTAINS that substring — not just real panel/
+   sidebar/card surfaces. Confirmed hitting: inner sub-pieces of a panel
+   (cl-panel-header, cl-panel-body, cl-panel-back, composer-panel-header/
+   body/back, discover-panel-header/body/back, groupc-panel-header/body/
+   back — each already themed correctly as part of its parent
+   *-fullscreen-panel surface, so forcing another flat !important background
+   directly onto them on top of that creates a visible seam/double-layer);
+   text/icon sub-pieces of a card (analytics-card-title/value/change,
+   cl-card-title/subtitle/text/icon, discover-card-title/subtitle/text/
+   icon/chevron — these should show the card's text, not become their own
+   colored box); a plain button (back-to-sidebar-btn); and even unrelated
+   Font Awesome icon classes that merely contain the substring by accident
+   (fa-credit-card, fa-vr-cardboard) getting a background/color/border
+   forced onto an icon glyph. Scoped to the real, standalone panel/sidebar/
+   card surfaces only — same fix pattern the header block below already
+   uses for the identical reason. */
+.sidebar,
+.settings-sidebar,
+.cl-fullscreen-panel,
+.composer-fullscreen-panel,
+.discover-fullscreen-panel,
+.groupc-fullscreen-panel,
+.friend-details-panel,
+.group-call-panel,
+.group-chat-panel,
+.group-details-panel,
+.marketplace-detail-panel,
+.multi-send-panel,
+.status-viewer-panel,
+.thread-panel,
+.vbs-panel,
+.profile-card,
+.mfa-modal-card,
+.premium-feature-card,
+.quick-call-card,
+.stat-card {
   background: var(--kyn-bg-panel) !important;
   border-color: var(--kyn-border) !important;
   color: var(--kyn-text-primary) !important;

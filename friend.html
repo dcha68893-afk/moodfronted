@@ -1451,7 +1451,16 @@
         }
 
         .friend-request-btn.decline {
-            background: #fff;
+            /* FIX: literal #fff/#fee only worked for light mode — this
+               pairs with .accept (already themed via var(--success-color)),
+               so decline needs the same treatment: a neutral surface that
+               isn't stuck light regardless of theme. --surface-color (this
+               file's own :root, a few lines up) already resolves through
+               --kyn-bg-panel for both themes. The hover uses a translucent
+               danger-color tint instead of a flat hex so it reads
+               correctly against either a light or dark surface, rather
+               than needing its own separate dark-mode value. */
+            background: var(--surface-color, #fff);
             color: var(--danger-color);
             border-right: 1px solid var(--border-color);
         }
@@ -1462,7 +1471,7 @@
         }
 
         .friend-request-btn.decline:hover {
-            background: #fee;
+            background: rgba(239, 68, 68, 0.12);
         }
 
         .friend-request-btn.accept:hover {

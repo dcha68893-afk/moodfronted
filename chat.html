@@ -56,35 +56,25 @@
             --app-text-secondary: #64748b;
         }
 
-        /* FIX (theme flash / "sparking of light" on dark mode reload): this
-           whole <style> block predates js/theme.engine.js and was never
-           updated when dark mode was added — every variable above, plus
-           `body`, `#loadingScreen`, and `#globalHeader` below, are hardcoded
-           to light colors (#f8fafc, white, near-white gradients) with zero
-           awareness of data-theme. theme.engine.js (loaded first, at the top
-           of <head>) sets `data-theme="dark"` on <html> before this block
-           even parses, and theme.colors.css (loaded much later, near the
-           bottom of <head>) DOES correctly theme everything it covers — but
-           these specific hardcoded values aren't part of that file, so
-           nothing ever overrides them for dark mode. That's not actually a
-           timing race (waiting for theme.colors.css to catch up) — it's a
-           permanent gap: these elements stay light-colored in dark mode
-           forever, at every reload, which is exactly "sparking of light"
-           happening consistently rather than a one-frame flash. Fixed by
-           overriding the same variables/selectors immediately whenever
-           data-theme="dark" is already set, in this same early block, so
-           there's no dependency on theme.colors.css's load order at all.
-           Values match theme.colors.css's own dark palette (--kyn-bg-root /
-           --kyn-bg-panel) so this stays visually consistent with it. */
-        html[data-theme="dark"] {
-            --app-secondary-surface: #0f172a;
-            --app-secondary-muted: #1e293b;
-            --app-text-color: #e2e8f0;
-            --app-text-secondary: #94a3b8;
-        }
-        html[data-theme="dark"] #loadingScreen {
-            background: #0f172a;
-        }
+        /* FIX (theme flash / "sparking of light" on dark mode reload,
+           consolidated): this block used to redeclare 4 --app-* variables
+           for dark mode (--app-secondary-surface/-muted/--app-text-color/
+           -secondary) — but theme.engine.js's paintNow() ALREADY sets all 4
+           of those as an inline style on <html> for both themes, which
+           always wins over any stylesheet rule regardless of order. So this
+           redeclaration was dead on arrival — never actually applied — and
+           two of its four values (--app-text-color: #e2e8f0, --app-text-
+           secondary: #94a3b8) didn't even match theme.engine.js's real
+           values (#e5e7eb / #9ca3af), which is exactly the kind of drift
+           duplicate theme authorities produce. Removed entirely rather than
+           left as inert-but-misleading code someone might "fix" later
+           thinking it does something. #loadingScreen's own dark override is
+           gone too, now that its base rule (below) resolves correctly on
+           its own via var(--kyn-bg-root). #globalHeader's override is kept
+           — its bespoke two-layer gradient + blur has no existing variable
+           that represents it without simplifying the actual design, so a
+           real override responding to the one true data-theme signal is
+           the right tool here, not a bug to remove. */
         html[data-theme="dark"] #globalHeader {
             background:
                 linear-gradient(135deg, rgba(15,23,42,0.97), rgba(30,41,59,0.94)),
@@ -112,7 +102,17 @@
         #loadingScreen {
             position: fixed;
             inset: 0;
-            background: white;
+            /* FIX (COMPETING-THEME-AUTHORITY, cont'd): was a literal
+               "white", requiring the separate html[data-theme="dark"]
+               #loadingScreen override further down to fix it for dark mode.
+               --kyn-bg-root is the exact same #fff in light mode (theme.
+               engine.js's inline write) and the exact same #0f172a dark
+               value the override used — so routing through it here makes
+               this a single, ungated rule that's already correct in both
+               themes on its own, and the separate override below is now
+               genuinely redundant rather than the only thing making dark
+               mode work. */
+            background: var(--kyn-bg-root, white);
             z-index: 9999;
             display: flex;
             align-items: center;
@@ -221,7 +221,14 @@
             height: 36px;
             border-radius: 12px;
             border: 1px solid rgba(148, 163, 184, 0.25);
-            background: rgba(255,255,255,0.70);
+            /* FIX: was a literal rgba(255,255,255,0.70), needing the
+               separate [data-theme="dark"] .header-action-btn override
+               below to fix it for dark mode. --kyn-header-action-bg is the
+               exact same value in light mode and the exact same dark value
+               that override used — theme.engine.js already writes this
+               variable inline for both themes, so this rule is correct on
+               its own now, no override needed for the background itself. */
+            background: var(--kyn-header-action-bg, rgba(255,255,255,0.70));
             color: #0f172a;
             display: inline-flex;
             align-items: center;
@@ -232,7 +239,7 @@
 
         .header-action-btn:hover {
             transform: translateY(-1px);
-            background: rgba(255,255,255,0.95);
+            background: var(--kyn-header-action-bg-hover, rgba(255,255,255,0.95));
         }
 
         .header-action-btn i {
@@ -1407,13 +1414,20 @@
         }
 
         [data-theme="dark"] .header-action-btn {
-            background: rgba(255,255,255,0.08) !important;
+            /* background removed: var(--kyn-header-action-bg) in the base
+               rule above already resolves correctly for dark mode on its
+               own now — no override needed for that property specifically.
+               border/color kept here since #0f172a/#e5e7eb don't exactly
+               match any single existing --kyn-* variable (close, not
+               identical), so forcing them through one would shift the
+               color slightly rather than genuinely consolidate anything. */
             border: 1px solid rgba(255,255,255,0.12) !important;
             color: #e5e7eb !important;
         }
 
         [data-theme="dark"] .header-action-btn:hover {
-            background: rgba(255,255,255,0.15) !important;
+            /* background removed: var(--kyn-header-action-bg-hover) in the
+               base :hover rule above is an exact match for both themes. */
             color: #ffffff !important;
         }
 
