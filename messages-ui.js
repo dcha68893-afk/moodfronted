@@ -12117,6 +12117,75 @@ Type: ${message.type || 'text'}`;
         _openViaUnifiedPipeline(0);
     }
 
+    // FIX (VERIFIED-DEAD-EVENT: notification/search deep-link never opened a
+    // chat): js/push-init.js parses ?chatId=/?messageId= off chat.html's own
+    // URL (the URL a push-notification click deep-links to — see
+    // moodchat/src/services/pushNotificationService.js's
+    // `url: /chat.html?chatId=${data.chatId}`) and dispatches
+    // window.dispatchEvent(new CustomEvent('kyn:openChat', {detail:{chatId,
+    // scrollToMessageId}})) on chat.html's own window. js/message-search.js
+    // (which runs inside THIS window, message.html) dispatches the exact
+    // same event locally for "jump to chat" from in-app search. Repo-wide
+    // grep confirmed neither ever had a listener anywhere — both were dead
+    // ends. A notification click therefore only ever opened the general
+    // chat.html shell, never the specific conversation (directive Test C).
+    // Only the chatId is available here (no peer userId in the push
+    // payload), so resolve the conversation via the already-loaded chat
+    // list and hand off to the single canonical opener, exactly like every
+    // other entry point in this file does.
+    function openChatByIdInUI(chatId, scrollToMessageId, attempt) {
+        attempt = attempt || 0;
+        if (!chatId) return;
+        const core = getMessagesCore();
+        const conversations = (core && core.getConversations && core.getConversations()) || [];
+        const conv = (core && core.getConversation && core.getConversation(chatId)) ||
+            conversations.find((c) => String(c.id) === String(chatId) || String(c.chatId) === String(chatId));
+
+        if (!conv) {
+            // Conversation list may not have loaded yet (e.g. cold start from
+            // a notification click before MessagesCore finishes syncing).
+            // Bounded retry, matching the pattern used elsewhere in this file
+            // (see _openViaUnifiedPipeline above) rather than failing silently.
+            if (attempt < 15) {
+                setTimeout(() => openChatByIdInUI(chatId, scrollToMessageId, attempt + 1), 500);
+            } else {
+                console.error('[MessageUI] openChatByIdInUI: could not resolve chatId', chatId, 'after retries');
+                try { UIRenderer.showNotification('Could not open that conversation', 'error'); } catch (_) {}
+            }
+            return;
+        }
+
+        const currentUserId = getCurrentUserId();
+        const peerId = getConversationPeerId(conv, currentUserId);
+        const peerName = conv.name || conv.friendName || conv.otherParticipant?.name ||
+            conv.otherParticipant?.displayName || 'User';
+        const peerAvatar = conv.avatar || conv.friendAvatar || conv.otherParticipant?.avatar || null;
+
+        if (!peerId) {
+            console.error('[MessageUI] openChatByIdInUI: resolved conversation but no peer id', { chatId, conv });
+            return;
+        }
+
+        openChatWithUserInUI(peerId, peerName, peerAvatar, { findExisting: true });
+
+        if (scrollToMessageId) {
+            // Best-effort scroll-to-message once the panel is likely open;
+            // mirrors the existing document-level event message-search.js
+            // itself listens for elsewhere in normal in-app search use.
+            setTimeout(() => {
+                try {
+                    document.dispatchEvent(new CustomEvent('kyn:scrollToMessage', {
+                        detail: { chatId, messageId: scrollToMessageId }
+                    }));
+                } catch (_) {}
+            }, 600);
+        }
+    }
+    window.openChatByIdInUI = openChatByIdInUI;
+    window.addEventListener('kyn:openChat', (e) => {
+        const d = e && e.detail || {};
+        if (d.chatId) openChatByIdInUI(d.chatId, d.scrollToMessageId || null);
+    });
 
 
     function showNotificationInMessages(message, type = 'info') {

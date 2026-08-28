@@ -2844,6 +2844,23 @@ function hookRT(){
             if(d.type==='PARENT_GROUP_ACTION'){var a=d.payload&&d.payload.action;if(a==='leave')doLeave();else if(a==='delete')doDelete();else if(a)openSub(a);return;}
             if(d.type==='PARENT_GROUP_CALL'){var ct=(d.payload&&d.payload.type)||'voice';var grp=window.__gcCurGroup;if(!grp)return;try{if(window.parent&&window.parent.__dispatchCallToIframe){window.parent.__dispatchCallToIframe(grp.id,grp.name,ct,'group',grp.id,'group-hdr');return;}}catch(e){}try{window.parent.postMessage({type:'INITIATE_CALL',payload:{userId:grp.id,userName:grp.name,callType:ct,isGroup:true,groupId:grp.id,returnTo:'group'}},'*');}catch(e){}return;}
             if(d.type==='PARENT_REFRESH_GROUPS'){var gc3=gc();if(gc3&&typeof gc3.requestGroupList==='function')gc3.requestGroupList().catch(function(){});return;}
+            // FIX (VERIFIED-MISSING-DEEP-LINK: group push notification never
+            // opened a group): counterpart to chat.html's 'kyn:openGroup'
+            // relay. Only a groupId is available here (from the push
+            // payload), so resolve it the same way hookClicks() below
+            // already does for a manual list click — check the already-
+            // loaded lists first, fall back to a direct API fetch — then
+            // hand off to openPanel(), the same function every other
+            // group-open path in this file converges on.
+            if(d.type==='OPEN_GROUP_BY_ID'){
+                var gid4=d.payload&&d.payload.groupId;if(!gid4)return;
+                var gco4=gc();
+                var all4=gco4?(gco4.groups||[]).concat(gco4.myGroups||[]).concat(gco4.joinedGroups||[]).concat(gco4.adminGroups||[]):[];
+                var found4=null;all4.forEach(function(g4){if(g4&&String(g4.id)===String(gid4))found4=g4;});
+                if(found4){openPanel(found4);}
+                else{api('/groups/'+gid4).then(function(d4){var gr4=d4.data||d4.group||d4;if(gr4&&gr4.id)openPanel(gr4);}).catch(function(){});}
+                return;
+            }
         });
     }
     if(window.KynectaRealtime&&typeof window.KynectaRealtime.on==='function'){

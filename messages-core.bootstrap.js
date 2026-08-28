@@ -2812,7 +2812,14 @@ try {
     //     'message:new' handling + its own message:delivery_ack). That's a
     //     second full delivery-ack round trip and a second DB write for
     //     every single message, for a send path nothing used.
-    // Removed the init call; js/core/message/MessageLifecycleClient.js is no
-    // longer loaded (see message.html) so this is fully inert now, not just
-    // disabled here.
+    // Removed the init call. NOTE (audit correction): the claim that used to
+    // sit here — that MessageLifecycleClient.js was therefore "no longer
+    // loaded" and "fully inert" — was FALSE and had never been verified
+    // against the actual <script> tag. message.html still loaded the file,
+    // and the file self-invokes init()->bind() unconditionally in its own
+    // closing IIFE, independent of this removed call site. That silently
+    // kept a second IndexedDB message store and a second socket receive
+    // pipeline running in production. The <script> tag has now been removed
+    // from message.html directly, which is what actually makes this file
+    // inert.
     // =========================================================================

@@ -120,6 +120,7 @@
     // SW passes data via URL params when notification is clicked
     const params = new URLSearchParams(location.search);
     const chatId  = params.get('chatId');
+    const groupId = params.get('groupId');
     const msgId   = params.get('messageId');
 
     if (chatId) {
@@ -130,6 +131,19 @@
           detail: { chatId, scrollToMessageId: msgId || null }
         }));
         // Clean URL
+        history.replaceState({}, '', location.pathname);
+      }, 800);
+    }
+
+    // FIX (VERIFIED-MISSING-DEEP-LINK, group message notifications): same
+    // pattern as chatId above. pushService.js's pushGroupMessage() now sets
+    // data.url = /chat.html?groupId=... (previously had no url at all).
+    if (groupId) {
+      console.log('[PushInit] Notification deep-link → groupId:', groupId);
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('kyn:openGroup', {
+          detail: { groupId, scrollToMessageId: msgId || null }
+        }));
         history.replaceState({}, '', location.pathname);
       }, 800);
     }

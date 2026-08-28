@@ -1768,7 +1768,26 @@
     <script src="js/sticker-picker.js" defer></script>
     <script src="js/message-select.js" defer></script>
     <!-- MESSAGE LIFECYCLE REBUILD (messages-only scope, added 2026-07-26): additive, see file header -->
-    <script src="js/core/message/MessageLifecycleClient.js" defer></script>
+    <!-- FIX (VERIFIED-DEAD-CODE-WAS-NOT-DEAD): MessageLifecycleClient.js was
+         previously believed disabled (see messages-core.bootstrap.js's
+         "REMOVED (consolidation pass)" comment, which claims this file is
+         "no longer loaded" and "fully inert"). That claim was FALSE: the
+         file self-invokes init()->bind() in its own closing IIFE, completely
+         independent of whatever messages-core.bootstrap.js does or doesn't
+         call. With this <script> tag present, every message.html load was
+         silently opening a second IndexedDB message store
+         (nexopa_message_lifecycle_v1), binding a second 'msg:new'/'message:new'
+         socket receive pipeline, and emitting 'msg:delivered_ack' to a server
+         endpoint that was deliberately disabled elsewhere (see
+         webSocketService.js's "REMOVED (consolidation pass):
+         messageLifecycleSocket.register()"). Nothing else in the codebase
+         calls window.MessageLifecycleClient at runtime, so removing the tag
+         (the only thing that actually makes a script "not loaded") has no
+         other callers to update. This is what the earlier fix intended but
+         did not actually do — verified by reading message.html and the
+         file's own bottom-of-file IIFE, not by trusting the removed-call
+         comment. -->
+    <!-- <script src="js/core/message/MessageLifecycleClient.js" defer></script> -->
     <!-- Phase 3: Security -->
     <!-- FIX-E2E-DUPLICATE-LOAD: js/e2e-encryption.js was loaded a second time
          here (on top of the load + tryInitE2E() init above). Re-executing
@@ -2258,6 +2277,25 @@
                     }
                 };
                 tryOpen(0);
+            }
+
+            // FIX (VERIFIED-DEAD-EVENT: notification deep-link never opened a
+            // chat): counterpart to chat.html's 'kyn:openChat' relay. Unlike
+            // OPEN_CHAT_WITH_USER above, a push notification only carries a
+            // chatId (see pushNotificationService.js), not a peer userId, so
+            // this can't reuse that handler directly. Delegates to
+            // messages-ui.js's openChatByIdInUI, which resolves the peer from
+            // the already-loaded conversation list and hands off to the same
+            // canonical openChatWithUserInUI pipeline every other entry point
+            // uses (findExisting:true, so it resolves to the SAME real
+            // conversation Chat History would open).
+            if (data.type === 'OPEN_CHAT_BY_ID') {
+                const _byId = data.payload || {};
+                if (_byId.chatId && typeof window.openChatByIdInUI === 'function') {
+                    window.openChatByIdInUI(_byId.chatId, _byId.scrollToMessageId || null);
+                } else if (_byId.chatId) {
+                    console.error('[Message HTML] OPEN_CHAT_BY_ID received but openChatByIdInUI is not yet available');
+                }
             }
         });
         

@@ -9236,6 +9236,75 @@ window.__groupHdrHide = hideGroupHeader;
     // independent systems racing each other on every update.
 })();
 </script>
+    <!-- FIX (VERIFIED-DEAD-EVENT: notification deep-link never opened a chat):
+         js/push-init.js parses ?chatId=/?messageId= off this page's own URL
+         (the URL a push-notification click deep-links to — see
+         pushNotificationService.js's `url: /chat.html?chatId=${data.chatId}`)
+         and dispatches window.dispatchEvent(new CustomEvent('kyn:openChat',
+         {detail:{chatId, scrollToMessageId}})) on THIS window. Repo-wide
+         grep confirmed nothing ever listened for it — the messagesIframe
+         never learned which chat to open, so a notification click only ever
+         showed the general chat list. Relay it into the iframe using the
+         same retry-until-ACK pattern already used by the DIRECT_CHAT_REQUEST
+         handler above. The matching consumer
+         (messages-ui.js's openChatByIdInUI, wired to 'OPEN_CHAT_BY_ID') is
+         fixed in the same pass. -->
+    <script>
+    (function () {
+        window.addEventListener('kyn:openChat', function (e) {
+            const d = (e && e.detail) || {};
+            if (!d.chatId) return;
+            try { navigateToPage('messages'); } catch (_) {}
+            try { document.body.classList.add('chat-panel-active'); } catch (_) {}
+            let _attempts = 0;
+            let _acked = false;
+            const _post = function () {
+                if (_acked) return;
+                const msgIframe = document.getElementById('messagesIframe');
+                if (msgIframe && msgIframe.contentWindow) {
+                    msgIframe.contentWindow.postMessage({
+                        type: 'OPEN_CHAT_BY_ID',
+                        payload: { chatId: d.chatId, scrollToMessageId: d.scrollToMessageId || null },
+                        source: 'parent-frame'
+                    }, '*');
+                }
+                if (_attempts++ < 12) setTimeout(_post, 600);
+            };
+            // Stop retrying once the iframe confirms (reuses the existing
+            // CHAT_OPENED ack every other open-chat path here already sends).
+            window.addEventListener('message', function (ackEvt) {
+                if (ackEvt.data && ackEvt.data.type === 'CHAT_OPENED' &&
+                    String(ackEvt.data.payload && ackEvt.data.payload.chatId) === String(d.chatId)) {
+                    _acked = true;
+                }
+            });
+            _post();
+        });
+    })();
+    </script>
+    <!-- FIX (VERIFIED-MISSING-DEEP-LINK: group message notifications never
+         opened a group): mirrors the 'kyn:openChat' relay above. Group
+         message push notifications previously carried no url/deep-link data
+         at all (see pushService.js's pushGroupMessage — fixed in this same
+         pass to set data.url = /chat.html?groupId=...). Relays into
+         groupIframe using postToGroup(), retrying a bounded number of times
+         since group.html has no existing ack event to key off (unlike
+         messagesIframe's CHAT_OPENED). -->
+    <script>
+    (function () {
+        window.addEventListener('kyn:openGroup', function (e) {
+            const d = (e && e.detail) || {};
+            if (!d.groupId) return;
+            try { navigateToPage('group'); } catch (_) {}
+            let _attempts = 0;
+            const _post = function () {
+                postToGroup('OPEN_GROUP_BY_ID', { groupId: d.groupId, scrollToMessageId: d.scrollToMessageId || null });
+                if (_attempts++ < 12) setTimeout(_post, 600);
+            };
+            _post();
+        });
+    })();
+    </script>
     <!-- Push notifications + multi-device sync (main shell) -->
     <script src="js/push-init.js" defer></script>
     <script src="js/multi-device-sync.js" defer></script>
