@@ -149,6 +149,13 @@
     } catch (_) { return false; }
   }
 
+  // Single consistently-tagged trace line per stage, keyed by serverId, so
+  // a specific message's path through this pipeline (or where it stops) is
+  // greppable directly from the console — e.g. `[MsgLifecycle][186]`.
+  function trace(serverId, stage, extra) {
+    try { console.log(`[MsgLifecycle][${serverId != null ? serverId : '?'}] ${stage}`, extra || ''); } catch (_) {}
+  }
+
   function plaintextOK(text) {
     return typeof text === 'string' && text.length > 0 &&
       !/^\s*(?:🔒\s*)?(?:Encrypted message|Decryption failed|Decryption unavailable)/i.test(text);
@@ -230,15 +237,39 @@
     const message = raw.payload && (raw.payload.chatId || raw.payload.id || raw.payload.serverId) ? raw.payload : raw;
     const chatId = message.chatId || message.conversationId;
     const serverId = message.serverId ?? message.id;
-    if (chatId == null || serverId == null) return;
+    if (chatId == null || serverId == null) {
+      trace(serverId, 'VALIDATION_FAILED', { reason: 'missing_chatId_or_serverId', hasChatId: chatId != null });
+      return;
+    }
+    trace(serverId, 'RECEIVED', { chatId, senderId: message.senderId || message.sender?.id });
 
     const dedup = `${chatId}:${serverId}`;
-    if (seen.has(dedup)) return;
+    if (seen.has(dedup)) { trace(serverId, 'DEDUPE_SKIP'); return; }
     seen.add(dedup);
     setTimeout(() => seen.delete(dedup), 60000);
 
+    // FIX (CANONICAL-CHATID): a `pending_<friendId>` chatId and the real,
+    // server-issued conversation id refer to the same logical conversation
+    // but are different strings — storing/rendering this message under
+    // whichever one the socket payload happened to carry, instead of the
+    // one real id the rest of the app (history cache, unread counts, "is
+    // this chat open" checks) already uses, silently fragments a single
+    // conversation into two. __kynCanonicalizeChatId lives in
+    // messages-core.operations.js (loaded before this file — see
+    // message.html) and resolves to the real id when one is already known
+    // locally, leaving the id unchanged otherwise (genuinely first message,
+    // nothing to resolve to yet).
+    let canonicalChatId = String(chatId);
+    if (typeof global.__kynCanonicalizeChatId === 'function') {
+      const resolved = global.__kynCanonicalizeChatId(chatId, message.senderId || message.sender?.id);
+      if (resolved && resolved !== canonicalChatId) {
+        trace(serverId, 'CHATID_CANONICALIZED', { from: canonicalChatId, to: resolved });
+        canonicalChatId = resolved;
+      }
+    }
+
     const normalized = {
-      id: serverId, serverId, chatId: String(chatId), conversationId: String(chatId),
+      id: serverId, serverId, chatId: canonicalChatId, conversationId: canonicalChatId,
       senderId: message.senderId || message.sender?.id, sender: message.sender || null,
       content: message.content ?? message.text ?? message.body ?? '', type: message.type || 'text',
       replyToId: message.replyToId || null, replyTo: message.replyTo || null,
@@ -246,19 +277,31 @@
       sentAt: message.sentAt || message.createdAt || null, status: 'delivered'
     };
 
-    await put(STORE_MESSAGES, { clientMessageId: `srv_${serverId}`, ...normalized, isLocalOnly: false });
+    const persisted = await put(STORE_MESSAGES, { clientMessageId: `srv_${serverId}`, ...normalized, isLocalOnly: false });
+    trace(serverId, persisted ? 'PERSISTED' : 'PERSIST_FAILED');
     try {
       if (global.KynectaLocalStore && typeof global.KynectaLocalStore.saveMessage === 'function') {
         await global.KynectaLocalStore.saveMessage({ ...normalized, serverId: String(serverId), isLocalOnly: false });
       }
     } catch (_) {}
 
-    ack(normalized);
+    const acked = ack(normalized);
+    trace(serverId, acked ? 'ACKED' : 'ACK_SKIPPED_NO_SOCKET');
+
     if (!isEnvelope(normalized.content)) {
+      trace(serverId, 'DECRYPT_SKIPPED', { reason: 'not_an_envelope' });
       emitUI(normalized, normalized.content);
+      trace(serverId, 'RENDERED');
       return;
     }
-    await decryptAndRender(normalized);
+    trace(serverId, 'DECRYPT_START');
+    const ok = await decryptAndRender(normalized);
+    // decryptAndRender() itself calls emitUI() (== render) on success, or
+    // via its onResolved callback if a later retry succeeds — "RENDERED"
+    // here just marks that decrypt's own attempt sequence has settled one
+    // way or the other, not that a plaintext bubble is necessarily on
+    // screen yet (a still-retrying decrypt can resolve after this).
+    trace(serverId, ok ? 'DECRYPT_OK' : 'DECRYPT_EXHAUSTED_RETRIES');
   }
 
   function bind() {

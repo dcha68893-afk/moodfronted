@@ -97,6 +97,71 @@ function __kynResolveIsThisChat(msgChatId, msgSenderId, activeChat) {
     return false;
 }
 
+// FIX (CANONICAL-CHATID-FOR-INCOMING-DECRYPT): __kynResolveIsThisChat above
+// only answers "does this message belong to the chat that's currently
+// open" — a yes/no check against whatever the active chat happens to be
+// right now. It does NOT give every other consumer (MessageLifecycleClient's
+// receiver pipeline, offline sync, notification badges, the conversations
+// list) a single real chatId to store/key the message under. Those callers
+// were each keying incoming messages under whatever raw chatId the socket
+// payload carried — which, for a genuinely new/pending conversation, is a
+// friendId-based `pending_<friendId>` placeholder on one side and the
+// server's real numeric conversation id on the other, for the exact same
+// logical chat. A message decrypted and rendered under one identity while
+// the rest of the app (history cache, unread counts, "is this chat open"
+// checks elsewhere) is keyed under the other silently fragments a single
+// conversation into two, and is a second, independent way for an incoming
+// message to look like it "didn't arrive" even after decryption succeeds.
+//
+// This resolves a raw incoming (chatId, senderId) pair to the one real,
+// canonical conversation id this app already knows about, if any:
+//   - a non-pending chatId that already matches a known conversation id is
+//     returned as-is (already canonical, nothing to do);
+//   - a `pending_<friendId>` chatId (or a missing/unresolvable chatId) is
+//     looked up by friend id against every REAL (non-pending) conversation
+//     already known locally, so a message arriving for a chat that already
+//     has a real id gets stamped with that real id instead of recreating a
+//     second, pending-prefixed copy of the same conversation;
+//   - if nothing matches yet (genuinely first message from this friend,
+//     conversation not created locally at all), the original chatId is
+//     returned unchanged — there's nothing more canonical to resolve to
+//     yet, and callers should still store/render under it rather than drop
+//     the message.
+function __kynCanonicalizeChatId(msgChatId, msgSenderId) {
+    const raw = String(msgChatId || '');
+    const senderIdStr = msgSenderId != null ? String(msgSenderId) : '';
+    const convs = (typeof ChatManager !== 'undefined' && Array.isArray(ChatManager._conversations)) ? ChatManager._conversations : [];
+
+    const isPending = raw.startsWith('pending_');
+    if (raw && !isPending) {
+        // Already looks like a real id. If it matches a known conversation,
+        // it's canonical; if it matches nothing yet (conversation not
+        // fetched/created locally yet), it's still the best id we have.
+        return raw;
+    }
+
+    const embeddedFriendId = isPending ? __kynStripPendingPrefix(raw) : '';
+    const targetFriendId = embeddedFriendId || senderIdStr;
+    if (!targetFriendId) return raw;
+
+    for (const conv of convs) {
+        if (!conv || conv.isPending) continue;
+        const cid = String(conv.id || '');
+        if (!cid || cid.startsWith('pending_')) continue;
+        const convFriendId = String(conv.friendId ?? conv.otherUserId ?? conv.otherParticipant?.id ?? '');
+        if (convFriendId && convFriendId === targetFriendId) {
+            return cid; // real conversation already exists for this friend — use it
+        }
+    }
+
+    // No real conversation known locally yet — nothing to canonicalize to.
+    return raw || (targetFriendId ? `pending_${targetFriendId}` : '');
+}
+
+if (typeof window !== 'undefined') {
+    window.__kynCanonicalizeChatId = __kynCanonicalizeChatId;
+}
+
 if (typeof window !== 'undefined') {
     window.__kynChatIdsMatch = __kynChatIdsMatch;
     window.__kynResolveIsThisChat = __kynResolveIsThisChat;

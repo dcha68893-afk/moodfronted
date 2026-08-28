@@ -19,6 +19,16 @@
   const b64 = b => btoa(String.fromCharCode(...new Uint8Array(b)));
   const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
 
+  // FIX (INSTRUMENT-IDENTIFIER-CONSISTENCY): single consistently-tagged
+  // trace line for every stage that touches senderId/receiverId/chatId/
+  // kid/sid/n/session-state so a permanent per-message failure (like the
+  // AAD mismatch fixed below) is diagnosable directly from the console
+  // instead of requiring a source read every time. Mirrors the
+  // [MsgLifecycle] tracing added to MessageLifecycleClient.js.
+  function _e2eTrace(stage, extra) {
+    try { console.log(`[E2E/X3DH][trace] ${stage}`, extra || ''); } catch (_) {}
+  }
+
   function userId() {
     try { const id = window.SessionManager?.getCurrentUserId?.(); if (id != null) return String(id); } catch (_) {}
     try { const id = window.KynectaE2E?.getMyUserId?.(); if (id != null) return String(id); } catch (_) {}
@@ -58,7 +68,37 @@
   async function aesKey(raw) { return crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt','decrypt']); }
   async function aesEncrypt(key, text, ad) { const iv = crypto.getRandomValues(new Uint8Array(12)); const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, tagLength: 128, additionalData: new TextEncoder().encode(ad) }, key, new TextEncoder().encode(text)); return { iv: b64(iv), ct: b64(ct) }; }
   async function aesDecrypt(key, env, ad) { const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(env.iv), tagLength: 128, additionalData: new TextEncoder().encode(ad) }, key, unb64(env.ct)); return new TextDecoder().decode(pt); }
-  function pairContextForState(state, fallbackPeerId) { const a = state?.initiator != null ? String(state.initiator) : null; const b = state?.peerId != null ? String(state.peerId) : (fallbackPeerId != null ? String(fallbackPeerId) : null); if (a && b) return [a, b].sort().join(':'); const me = userId(); return [String(me || ''), String(fallbackPeerId || '')].sort().join(':'); }
+  // FIX (AAD-CONTEXT-MISMATCH — root cause of permanent "[E2E/X3DH] decrypt
+  // attempt failed ... OperationError" on every single incoming message):
+  // this used to pair state.initiator with state.peerId as "the two parties"
+  // for the AES-GCM additionalData context. That's correct for a SENDER's
+  // state (x3dhInitiate sets initiator = self, peerId = recipient — two
+  // different ids), but wrong for a RECEIVER's state: x3dhAccept sets BOTH
+  // initiator and peerId to the sender's id (initiator = who initiated the
+  // handshake, peerId = "the other party relative to me" — both correctly
+  // evaluate to the sender from the receiver's point of view), so the
+  // receiver's own id never entered the pair at all. Concretely, for a
+  // conversation between A (sender) and B (receiver):
+  //   sender computes context   = sort(A, B)   (state.initiator=A, state.peerId=B)
+  //   receiver computed context = sort(A, A)   (state.initiator=A, state.peerId=A)
+  // Those two strings are never equal for A != B, so the AES-GCM
+  // additionalData never matched between encryptor and decryptor — the
+  // integrity check was guaranteed to fail on every message, for every
+  // receiver, unconditionally. state.peerId alone is *always* "the other
+  // party relative to whoever owns this state object" (true in both
+  // x3dhInitiate and x3dhAccept — verified above); pairing it with a fresh
+  // userId() (my own id) instead of state.initiator is what actually
+  // reconstructs the same two-party set on both ends.
+  function pairContextForState(state, fallbackPeerId) {
+    const me = userId();
+    const peer = state?.peerId != null ? String(state.peerId) : (fallbackPeerId != null ? String(fallbackPeerId) : null);
+    if (me && peer) return [String(me), peer].sort().join(':');
+    // Defensive fallback only — no state created by x3dhInitiate/x3dhAccept
+    // in this file should ever reach here, since both always set peerId.
+    const a = state?.initiator != null ? String(state.initiator) : null;
+    if (a && peer) return [a, peer].sort().join(':');
+    return [String(me || ''), String(fallbackPeerId || '')].sort().join(':');
+  }
   function pairContext(otherId) { return [String(userId() || ''), String(otherId || '')].sort().join(':'); }
 
   function normalizeBundle(json) { const x = json?.data || json?.prekeyBundle || json; const signed = x?.signedPreKey || x?.signedPrekey || x?.signed_prekey; const one = x?.oneTimePreKey || x?.oneTimePrekey || x?.one_time_prekey || (Array.isArray(x?.oneTimePreKeys) ? x.oneTimePreKeys[0] : null); return { identityPublicKey: x?.identityPublicKey || x?.identityPubKey || x?.publicKey || x?.identityKey || x?.identity?.publicKey, signingPubKey: x?.signingPubKey || x?.signingPublicKey || x?.signing_key, signedPreKey: signed, oneTimePreKey: one }; }
@@ -72,6 +112,7 @@
 
   async function x3dhInitiate(chatId, recipientId) {
     const existing = await loadState(chatId, recipientId); if (existing) return { state: existing, bootstrap: null };
+    _e2eTrace('X3DH_INITIATE_NEW_SESSION', { chatId, recipientId, me: userId() });
     const bundle = await fetchBundle(recipientId); await verifySignedPrekey(bundle); if (!bundle.identityPublicKey) throw Error('recipient identity public key missing from prekey bundle');
     const myIdentity = window.KynectaE2E.getMyIdentityPrivateKey(); if (!myIdentity) throw Error('local identity key is not ready');
     const recipientIdentity = await importPublic(bundle.identityPublicKey); const signedPreKey = await importPublic(bundle.signedPreKey.publicKey); const ephemeral = await genPrekey(); const ephemeralPublicKey = await exportPublic(ephemeral.publicKey);
@@ -79,20 +120,36 @@
     const material = new Uint8Array(parts.reduce((n, p) => n + p.byteLength, 0)); let offset = 0; for (const part of parts) { material.set(new Uint8Array(part), offset); offset += part.byteLength; }
     const root = b64(await hkdf(material.buffer, 'Kynecta-X3DH-v1-root', 32)); const initSend = b64(await hkdf(unb64(root), 'Kynecta-X3DH-v1-init-send', 32)); const initRecv = b64(await hkdf(unb64(root), 'Kynecta-X3DH-v1-init-recv', 32));
     const bootstrap = { x3dh: 1, initiatorId: String(userId()), identityPublicKey: window.KynectaE2E.publicKey, ephemeralPublicKey, signedPreKeyId: bundle.signedPreKey.keyId, oneTimePreKeyId: bundle.oneTimePreKey?.keyId || null };
+    // NOTE ON `initiator` vs `peerId`: initiator = whoever started this X3DH
+    // handshake (here, me); peerId = "the other party relative to whoever
+    // owns this state object" (here, recipientId). peerId is what
+    // pairContextForState() above relies on, and is set correctly and
+    // consistently in both this function and x3dhAccept below.
     const state = { v: 7, root, initiator: String(userId()), sendChain: initSend, recvChain: initRecv, sendN: 0, recvN: 0, peerId: String(recipientId), signedPreKeyId: bundle.signedPreKey.keyId, oneTimePreKeyId: bundle.oneTimePreKey?.keyId || null, bootstrap, recvCache: {}, establishedAt: Date.now() };
-    await saveState(chatId, recipientId, state); return { state, bootstrap };
+    await saveState(chatId, recipientId, state);
+    _e2eTrace('X3DH_INITIATE_SESSION_SAVED', { chatId, recipientId, initiator: state.initiator, peerId: state.peerId });
+    return { state, bootstrap };
   }
 
   async function x3dhAccept(chatId, senderId, bootstrap, forceReplace = false) {
     if (!bootstrap?.x3dh) throw Error('missing X3DH bootstrap'); const existing = await loadState(chatId, senderId); if (existing && !forceReplace && !isNewBootstrap(existing, bootstrap, senderId)) return existing;
+    _e2eTrace('X3DH_ACCEPT_NEW_SESSION', { chatId, senderId, me: userId(), forceReplace, hadExisting: !!existing });
     const bundle = loadBundle(); if (!bundle) throw Error('local X3DH private prekey bundle is unavailable'); const signed = bundle.signedPreKey?.keyId === bootstrap.signedPreKeyId ? bundle.signedPreKey : null; if (!signed) throw Error('signed prekey used by sender is no longer available');
     const one = bootstrap.oneTimePreKeyId ? (bundle.oneTimePreKeys || []).find(k => k.keyId === bootstrap.oneTimePreKeyId) : null; if (bootstrap.oneTimePreKeyId && !one) throw Error('one-time prekey already consumed or unavailable'); const myIdentity = window.KynectaE2E.getMyIdentityPrivateKey(); if (!myIdentity) throw Error('local identity key is not ready');
     const senderIdentity = await importPublic(bootstrap.identityPublicKey); const senderEphemeral = await importPublic(bootstrap.ephemeralPublicKey); const signedPrivate = await importPrivate(signed.privateKey);
     const parts = [await dh(signedPrivate, senderIdentity), await dh(myIdentity, senderEphemeral), await dh(signedPrivate, senderEphemeral)]; if (bootstrap.oneTimePreKeyId) parts.push(await dh(await importPrivate(one.privateKey), senderEphemeral));
     const material = new Uint8Array(parts.reduce((n, p) => n + p.byteLength, 0)); let offset = 0; for (const part of parts) { material.set(new Uint8Array(part), offset); offset += part.byteLength; }
     const root = b64(await hkdf(material.buffer, 'Kynecta-X3DH-v1-root', 32)); const initSend = b64(await hkdf(unb64(root), 'Kynecta-X3DH-v1-init-send', 32)); const initRecv = b64(await hkdf(unb64(root), 'Kynecta-X3DH-v1-init-recv', 32));
+    // Same note as x3dhInitiate: initiator = who started the handshake
+    // (the sender, senderId) — separate concept from peerId, which is
+    // *also* senderId here because that's correctly "the other party
+    // relative to me" from this (the receiver's) point of view. My own id
+    // is never stored on this object; pairContextForState() gets it fresh
+    // from userId() instead, so it doesn't need to be.
     const state = { v: 7, root, initiator: String(senderId), sendChain: initRecv, recvChain: initSend, sendN: 0, recvN: 0, peerId: String(senderId), signedPreKeyId: signed.keyId, oneTimePreKeyId: bootstrap.oneTimePreKeyId || null, bootstrap, recvCache: {}, establishedAt: Date.now() };
-    await saveState(chatId, senderId, state); if (one) { bundle.oneTimePreKeys = (bundle.oneTimePreKeys || []).filter(k => k.keyId !== one.keyId); saveBundle(bundle); } return state;
+    await saveState(chatId, senderId, state); if (one) { bundle.oneTimePreKeys = (bundle.oneTimePreKeys || []).filter(k => k.keyId !== one.keyId); saveBundle(bundle); }
+    _e2eTrace('X3DH_ACCEPT_SESSION_SAVED', { chatId, senderId, initiator: state.initiator, peerId: state.peerId, me: userId() });
+    return state;
   }
 
   async function deriveMessageKey(chain) { const mk = await hmac(unb64(chain), 'msg'); const next = await hmac(unb64(chain), 'next'); return { mk, next: b64(next) }; }
@@ -100,8 +157,11 @@
     return withCrossContextLock(`send-${recipientId}`, async () => {
       let state = await loadState(chatId, recipientId); let bootstrap = null; if (!state) { const init = await x3dhInitiate(chatId, recipientId); state = init.state; bootstrap = init.bootstrap; }
       if (!state?.sendChain) throw Error('secure session send chain unavailable'); const step = await deriveMessageKey(state.sendChain); const key = await aesKey(step.mk); const n = state.sendN++; state.sendChain = step.next; await saveState(chatId, recipientId, state);
-      const env = await aesEncrypt(key, plaintext, `${pairContextForState(state, recipientId)}|${n}`);
-      return JSON.stringify({ v: 3, kid: window.KynectaE2E.keyId, sid: `${state.initiator}:${state.peerId}`, n, iv: env.iv, ct: env.ct, ...(bootstrap ? { x3dh: bootstrap } : {}) });
+      const context = `${pairContextForState(state, recipientId)}|${n}`;
+      const env = await aesEncrypt(key, plaintext, context);
+      const sid = `${state.initiator}:${state.peerId}`;
+      _e2eTrace('ENCRYPT', { chatId, recipientId, me: userId(), sid, n, context, hasBootstrap: !!bootstrap });
+      return JSON.stringify({ v: 3, kid: window.KynectaE2E.keyId, sid, n, iv: env.iv, ct: env.ct, ...(bootstrap ? { x3dh: bootstrap } : {}) });
     });
   }
 
@@ -109,20 +169,60 @@
     return withCrossContextLock(`recv-${senderId}`, async () => {
       let env; try { env = JSON.parse(encrypted); } catch (_) { return original(encrypted, chatId, senderId); }
       if (!env || ![3,4].includes(Number(env.v))) return original(encrypted, chatId, senderId);
+      _e2eTrace('DECRYPT_ENTRY', { chatId, senderId, me: userId(), kid: env.kid, sid: env.sid, n: env.n, hasBootstrap: !!env.x3dh });
       let state = await loadState(chatId, senderId);
-      if (env.x3dh && isNewBootstrap(state, env.x3dh, senderId)) state = await x3dhAccept(chatId, senderId, env.x3dh, true); else if (!state && env.x3dh) state = await x3dhAccept(chatId, senderId, env.x3dh, false);
-      if (!state) return '[Encrypted message — secure session unavailable]';
-      state.recvCache = state.recvCache || {}; const cacheKey = `${env.sid || senderId}:${env.n}`; if (Object.prototype.hasOwnProperty.call(state.recvCache, cacheKey)) return state.recvCache[cacheKey];
+      // FIX (DEAD-BRANCH CLARITY — same behavior, clearer intent): the old
+      // `if (...) else if (!state && env.x3dh)` had a genuinely unreachable
+      // second branch — isNewBootstrap(null, bootstrap, senderId) already
+      // returns true whenever bootstrap.x3dh is set, so "no existing state
+      // but a bootstrap is present" was always caught by the first branch.
+      // Collapsed to a single condition with the same net effect, so the
+      // real logic (accept a fresh/updated bootstrap when offered; fall
+      // through to an already-established state otherwise) isn't obscured
+      // by a branch that could never run. This is what makes first-contact
+      // decrypt (no prior state at all) work without any dependency on
+      // Chat History or any other module having initialized the
+      // conversation first — this function establishes the session itself,
+      // purely from what's already inside the envelope.
+      if (env.x3dh && isNewBootstrap(state, env.x3dh, senderId)) {
+        state = await x3dhAccept(chatId, senderId, env.x3dh, true);
+      }
+      if (!state) { _e2eTrace('DECRYPT_NO_SESSION', { chatId, senderId }); return '[Encrypted message — secure session unavailable]'; }
+      if (String(state.peerId) !== String(senderId)) {
+        // Should never happen given loadState()/pairKey() are keyed on
+        // otherId already, but if it ever does, it's exactly the kind of
+        // identifier-consistency problem worth surfacing loudly rather
+        // than silently decrypting (or failing to decrypt) against the
+        // wrong peer's chain.
+        _e2eTrace('DECRYPT_PEER_ID_MISMATCH', { expected: senderId, stateHasPeerId: state.peerId });
+      }
+      state.recvCache = state.recvCache || {}; const cacheKey = `${env.sid || senderId}:${env.n}`; if (Object.prototype.hasOwnProperty.call(state.recvCache, cacheKey)) { _e2eTrace('DECRYPT_CACHE_HIT', { chatId, senderId, n: env.n }); return state.recvCache[cacheKey]; }
       if (env.n < state.recvN) return '[Encrypted message — message already processed]'; if (env.n > state.recvN + MAX_SKEW) return '[Encrypted message — invalid message sequence]';
       const context = `${pairContextForState(state, senderId)}|${env.n}`;
       for (let attempt = 0; attempt < 4; attempt++) {
         try {
-          let working = state; while (working.recvN < env.n) { const skipped = await deriveMessageKey(working.recvChain); working.recvChain = skipped.next; working.recvN++; }
+          // FIX (RATCHET-CORRUPTED-ON-FAILED-RETRY): `working` used to be a
+          // bare alias for `state` itself (`let working = state`), so the
+          // skip-ahead loop and the recvChain/recvN advance below mutated
+          // the shared `state` object in place *before* aesDecrypt() ran.
+          // If that decrypt then threw (as it reliably did under the
+          // AAD-mismatch bug above), the catch block below did not roll
+          // those mutations back — so attempts 2-4 of this same call were
+          // silently re-deriving from an already-advanced (wrong) chain
+          // position instead of retrying the same, correct one. It never
+          // escaped this single function call (saveState() only runs on
+          // success), but every retry after the first was guaranteed to
+          // fail differently-but-still-wrong instead of retrying cleanly.
+          // Cloning the two mutable fields per attempt and only writing
+          // them back to `state` on success fixes that.
+          let working = { ...state, recvChain: state.recvChain, recvN: state.recvN };
+          while (working.recvN < env.n) { const skipped = await deriveMessageKey(working.recvChain); working.recvChain = skipped.next; working.recvN++; }
           const step = await deriveMessageKey(working.recvChain); const key = await aesKey(step.mk); const text = await aesDecrypt(key, env, context);
-          working.recvChain = step.next; working.recvN++; working.recvCache[cacheKey] = text; const keys = Object.keys(working.recvCache); if (keys.length > 100) delete working.recvCache[keys[0]]; await saveState(chatId, senderId, working);
+          state.recvChain = step.next; state.recvN = working.recvN + 1; state.recvCache[cacheKey] = text; const keys = Object.keys(state.recvCache); if (keys.length > 100) delete state.recvCache[keys[0]]; await saveState(chatId, senderId, state);
           console.log('[E2E/X3DH] DECRYPT_SUCCESS', { chatId, senderId, n: env.n, attempt: attempt + 1 }); return text;
         } catch (e) { console.warn('[E2E/X3DH] decrypt attempt failed', { chatId, senderId, n: env.n, attempt: attempt + 1, error: e?.message || e }); if (attempt < 3) await sleep([100,300,800][attempt]); }
       }
+      _e2eTrace('DECRYPT_ALL_ATTEMPTS_FAILED', { chatId, senderId, n: env.n });
       return '[Decryption failed]';
     });
   }
