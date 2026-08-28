@@ -1423,6 +1423,21 @@ if (requiresAuth) {
                                             timestamp: new Date().toISOString()
                                         }
                                     }));
+                                    // FIX (auth-cascade): 'auth:expired' has no listeners anywhere
+                                    // in the frontend — app.realtime.socket.js only listens for
+                                    // 'user-logged-out' / 'auth:session:ended' to stop its reconnect
+                                    // loop. Without this, the socket kept reconnecting (and
+                                    // GroupOrchestrator/PollingManager kept re-polling) forever
+                                    // against a session that had already died here. Dispatch the
+                                    // event the socket manager actually listens for too.
+                                    window.dispatchEvent(new CustomEvent('auth:session:ended', {
+                                        detail: {
+                                            endpoint: endpointPath,
+                                            requestId,
+                                            reason: 'refresh_failed',
+                                            timestamp: new Date().toISOString()
+                                        }
+                                    }));
                                 }
                                 
                                 if (handleUnauthorizedAccess && !options._suppressAuthRedirect) {

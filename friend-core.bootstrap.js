@@ -1194,6 +1194,25 @@ async function authorizedRequest(endpoint, options = {}) {
                             }
                         });
                         
+                        // FIX (auth-cascade): PollingManager.startPollingIncomingRequests/
+                        // startPollingSentRequests run on their own setInterval, independent
+                        // of the socket. Previously a 401 here only notified the parent frame
+                        // and resolved this one call — the interval kept firing every
+                        // POLLING_CONFIG.INCOMING_REQUESTS_INTERVAL regardless, so every friend
+                        // poll hit the same dead session and logged the same error forever.
+                        // Stop the local polling loops as soon as we know the session is gone;
+                        // they already get restarted on the next successful auth handshake
+                        // (see startPollingIncomingRequests's waitForActive/authReadyReceived
+                        // gate above).
+                        try {
+                            if (typeof PollingManager !== 'undefined') {
+                                PollingManager.stopPollingIncomingRequests();
+                                PollingManager.stopPollingSentRequests();
+                            }
+                        } catch (stopErr) {
+                            Logger.warn('authorizedRequest', 'Failed to stop polling after auth failure', stopErr);
+                        }
+                        
                         resolve({ success: false, error: 'Authentication required', statusCode: 401 });
                         return;
                     }

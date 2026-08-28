@@ -4404,6 +4404,19 @@
                                 _chatLog('[Parent] Token refreshed successfully');
                             } else if (refreshResult.requiresReauth) {
                                 _chatLog('[Parent] Token refresh requires reauthentication');
+                                // FIX (auth-cascade): this used to return the 401 straight to the
+                                // iframe (friend-core.bootstrap.js / messages-core.bootstrap.js)
+                                // with no other side effect. Nothing in the app was ever told the
+                                // session had genuinely ended, so the realtime socket kept
+                                // reconnecting and GroupOrchestrator/PollingManager kept re-polling
+                                // every few seconds forever, each hitting this same dead end — the
+                                // repeating "Token expired and requires reauthentication" spam.
+                                // app.realtime.socket.js already listens for 'auth:session:ended'
+                                // and calls disconnect() (sets _manualDisconnect, stops the
+                                // reconnect loop) — dispatch it here so that actually fires.
+                                window.dispatchEvent(new CustomEvent('auth:session:ended', {
+                                    detail: { source: 'directApiRequest', endpoint, reason: 'refresh_failed', timestamp: new Date().toISOString() }
+                                }));
                                 return { success: false, error: 'Token expired and requires reauthentication', statusCode: 401, data: null };
                             }
                         }
@@ -4460,6 +4473,12 @@
                             else responseData = { message: await response.text() || 'Request completed' };
                         } else if (refreshResult.requiresReauth) {
                             _chatLog('[Parent] Token refresh requires reauthentication');
+                            // FIX (auth-cascade): see matching comment above — dispatch so the
+                            // socket manager's existing 'auth:session:ended' listener stops the
+                            // reconnect loop instead of retrying against a session that's dead.
+                            window.dispatchEvent(new CustomEvent('auth:session:ended', {
+                                detail: { source: 'directApiRequest', endpoint, reason: 'refresh_failed', timestamp: new Date().toISOString() }
+                            }));
                             return { success: false, error: 'Token expired and requires reauthentication', statusCode: 401, data: responseData };
                         }
                     } catch (refreshErr) {

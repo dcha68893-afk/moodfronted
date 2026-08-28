@@ -45,9 +45,24 @@ const _toast = (msg,type='info',icon='ℹ️') => {
     const t=document.createElement('div'); t.style.cssText=`background:${colors[type]||colors.info};color:#fff;padding:12px 18px;border-radius:12px;font-size:14px;font-weight:500;box-shadow:0 8px 24px rgba(0,0,0,.2);display:flex;align-items:center;gap:10px`; t.innerHTML=`<span>${icon}</span><span>${msg}</span>`; box.appendChild(t); setTimeout(()=>t.remove(),3500);
 };
 
-async function _api(method, endpoint, body=null) {
+function _mktToken() {
+    return window.__kynToken||window.__accessToken||localStorage.getItem('authToken')||localStorage.getItem('token')||localStorage.getItem('nexopa_token')||localStorage.getItem('accessToken')||'';
+}
+
+// FIX (auth-cascade): this used to grab whatever token was in storage once and
+// fire a raw fetch, with zero refresh attempt on a 401. Every other module in
+// the app (messages, the parent chat.html relay, api.core.js) routes 401s
+// through window.refreshTokenIfNeeded() and retries once before giving up —
+// this file was the one place that just logged 'Token expired' and stopped,
+// so marketplace calls never recovered even when a refresh would have
+// succeeded, and never told the rest of the app the session was dead when it
+// wasn't recoverable. Mirror the same refresh-then-retry-once pattern here,
+// and dispatch the same 'auth:session:ended' event the socket manager already
+// listens for (see app.realtime.socket.js) so a truly-dead session stops the
+// realtime reconnect loop too instead of hammering it forever.
+async function _api(method, endpoint, body=null, _isRetry=false) {
     try {
-        const token = window.__kynToken||window.__accessToken||localStorage.getItem('authToken')||localStorage.getItem('token')||localStorage.getItem('nexopa_token')||localStorage.getItem('accessToken')||'';
+        const token = _mktToken();
         // FIX (Audit #19 - one source of truth for API config): this used to fall back to a
         // hardcoded 'http://localhost:4000', decided independently by this file instead of
         // by the single window.API_BASE_URL every HTML entry point already sets. If that
@@ -69,6 +84,32 @@ async function _api(method, endpoint, body=null) {
         let payload = null;
         try { payload = await res.json(); } catch(_) {}
         if (!res.ok) {
+            if (res.status === 401 && !_isRetry) {
+                if (typeof window.refreshTokenIfNeeded === 'function') {
+                    console.warn('[marketplace-advanced] 401, attempting token refresh...');
+                    let refreshResult;
+                    try {
+                        refreshResult = await window.refreshTokenIfNeeded();
+                    } catch (refreshErr) {
+                        console.error('[marketplace-advanced] Token refresh threw:', refreshErr);
+                        refreshResult = { success:false, requiresReauth:true };
+                    }
+                    if (refreshResult && refreshResult.success) {
+                        console.log('[marketplace-advanced] Token refreshed, retrying request');
+                        return _api(method, endpoint, body, true);
+                    }
+                    if (refreshResult && refreshResult.requiresReauth) {
+                        console.error('[marketplace-advanced] Token refresh failed - requires reauthentication');
+                        if (typeof window.dispatchEvent === 'function') {
+                            window.dispatchEvent(new CustomEvent('auth:session:ended', {
+                                detail: { source: 'marketplace-advanced', endpoint, reason: 'refresh_failed', timestamp: new Date().toISOString() }
+                            }));
+                        }
+                    }
+                } else {
+                    console.error('[marketplace-advanced] 401 and window.refreshTokenIfNeeded is unavailable — cannot refresh.');
+                }
+            }
             console.error('[marketplace-advanced] API error:', method, endpoint, res.status, payload);
             return { ok:false, success:false, error:true, errorCode: payload?.code || `HTTP_${res.status}`,
                       message: payload?.message || `Request failed (${res.status}). Please try again.`,
