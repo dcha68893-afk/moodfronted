@@ -906,8 +906,27 @@ export const UIBoundaries = {
         return ErrorHandler.createBoundary(`Section:${sectionId}`, () => {
             const startTime = performance.now();
             try {
-                // If not active, show passive loading state
-                if (!isUIActive()) {
+                // FIX (STUCK-PASSIVE-LOADING-STATE, root cause): this used to
+                // check isUIActive() alone, so ANY render attempt made before
+                // the parent postMessage handshake reaches ACTIVE — which
+                // includes the very first paint on every load, and any
+                // load with a slow/offline parent connection — got the
+                // passive "Loading... Establishing connection..." spinner
+                // instead of the real renderFn, even when fully valid cached
+                // friends/requests/pinned/muted data already existed
+                // locally. canRenderCached() exists specifically for this
+                // ("returns true when we have local data to show even if
+                // the lifecycle hasn't reached ACTIVE yet" — its own doc
+                // comment), and renderProgressive() already assumes callers
+                // respect it, but this shared helper — used by every section
+                // render path, including the very first one on page load —
+                // never actually consulted it. Once the container had
+                // shown the spinner (children.length > 0), no other path
+                // reliably replaced it before the ACTIVE-transition fix
+                // added alongside this one, so cached data could sit fully
+                // loaded in memory while the visible tab looked stuck
+                // loading forever.
+                if (!isUIActive() && !canRenderCached()) {
                     const container = UIState.getElement(sectionId);
                     if (container && container.children.length === 0) {
                         container.innerHTML = this.createPassiveLoadingState(sectionId);
@@ -1066,6 +1085,33 @@ export const RenderPipeline = {
                 });
                 this.renderProgressive();
                 this.enableLiveUpdates();
+                // FIX (STUCK-PASSIVE-LOADING-STATE): renderProgressive() only
+                // targets 'allFriendsSection'. Every OTHER section
+                // (friendsSection, requestsSection, pinnedSection, etc.) that
+                // rendered via UIBoundaries.renderSection() while the
+                // lifecycle was still BOOT/WAIT_PARENT/READY got permanently
+                // stuck showing createPassiveLoadingState()'s "Loading... /
+                // Establishing connection..." spinner — that helper's inner
+                // isUIActive() gate skips calling the real renderFn entirely
+                // when not active, with no automatic re-render once it
+                // becomes active. Any friendsUpdated/CONTACTS_UPDATE event
+                // carrying the already-cached data that arrived BEFORE this
+                // point was also missed, since setupLiveUpdateListeners()
+                // (which owns those listeners) is itself gated behind
+                // isUIActive() and only just attached via enableLiveUpdates()
+                // above — it cannot retroactively see an event that already
+                // fired. Net effect: cached friends/requests/pinned/muted
+                // data existed the whole time but the visible tab never
+                // painted it, looking exactly like "keeps loading forever".
+                // refreshPassiveStates() (previously only ever invoked on the
+                // WAIT_PARENT transition, i.e. exactly the moment there is
+                // the LEAST chance of having new data to show) scans every
+                // section still stuck on the passive spinner and, if it's
+                // the currently visible tab, calls that section's real
+                // render function directly from already-cached data — no
+                // network call. Now also run here, on the ACTIVE transition,
+                // which is when it actually matters.
+                this.refreshPassiveStates();
             } else if (event.detail?.toState === LIFECYCLE_STATES.WAIT_PARENT) {
                 UIState.updateConnectionState('connecting', {
                     lifecycleState: LIFECYCLE_STATES.WAIT_PARENT

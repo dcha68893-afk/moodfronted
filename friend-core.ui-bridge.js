@@ -2698,34 +2698,33 @@ async function initialize() {
             
             if (authReadyReceived && __session.ready) {
                 startParallelDataLoading();
-                
-                setTimeout(() => {
-                    console.log('[Init] Loading all users for discovery...');
-                    fetchAllUsersFromBackend().then(result => {
-                        console.log(`[Init] All users loaded: ${result.count} discoverable users`);
-                        if (result.users && result.users.length > 0) {
-                            window.allUsersList = result.users;
-                            if (window.FriendCore) {
-                                window.FriendCore._allUsers = result.users;
-                                window.FriendCore.discoverableUsers = result.users;
-                            }
-                            
-                            window.dispatchEvent(new CustomEvent('allUsersReady', {
-                                detail: { users: result.users, count: result.users.length }
-                            }));
-                            
-                            if (window.currentSection === 'discovery' || window.location.hash === '#discovery') {
-                                renderAllUsersList();
-                            }
-                        }
-                    }).catch(error => {
-                        console.error('[Init] Failed to load all users:', error);
-                    });
-                }, 500);
+
+                // FIX (DUPLICATE-ALL-USERS-FETCH): This used to call
+                // fetchAllUsersFromBackend() a SECOND time here, 500ms after
+                // startParallelDataLoading() — which already fetches all-users
+                // as part of its secondary tier. fetchAllUsersFromBackend()
+                // has no in-flight dedup, so this fired a fully independent
+                // /api/friends/users/all request on every load, competing with
+                // (and jumping ahead of) the tiered/staggered request from
+                // startParallelDataLoading() and adding avoidable load on an
+                // already-strained backend for a Discovery tab most sessions
+                // never open. The event it dispatched afterwards
+                // ('allUsersReady') also had no listeners anywhere in the
+                // codebase — dead code. friend-ui.js already listens for the
+                // 'allUsersLoaded' event that fetchAllUsersFromBackend()
+                // dispatches on completion and re-renders the discovery tab
+                // if it's active, so the single fetch already in
+                // startParallelDataLoading() is sufficient — just mirror the
+                // one non-redundant side effect (window.allUsersList) here.
+                window.addEventListener('allUsersLoaded', (event) => {
+                    const users = event.detail?.users;
+                    if (Array.isArray(users) && users.length > 0) {
+                        window.allUsersList = users;
+                    }
+                }, { once: true });
             } else {
                 queueRequest(() => {
                     startParallelDataLoading();
-                    queueRequest(() => fetchAllUsersFromBackend());
                 });
             }
         });
