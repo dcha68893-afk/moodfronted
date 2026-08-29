@@ -519,7 +519,19 @@
             'CHILD_READY',
             'MESSAGE_ACK',
             'MESSAGE_RECEIVE',
-            'API_RESPONSE'
+            'API_RESPONSE',
+            // FIX (WAITING_AUTH deadlock): REQUEST_SESSION is this module's own
+            // recovery message for "I'm stuck in WAITING_AUTH with no session,
+            // please resend it" (see the safeSend(OUTGOING_ACTIONS.REQUEST_SESSION,
+            // ...) call below). canSendMessage()'s fallback rule requires the
+            // module to already be ACTIVE with a valid session before it can send
+            // anything not in this set — which made it impossible to ever send
+            // the one message whose entire purpose is to recover from *not*
+            // having a session. Without this, once a module landed in
+            // WAITING_AUTH it could only reach ACTIVE again via a fresh
+            // PARENT_READY/SESSION_DATA push from the parent; if that push was
+            // missed or invalid, the module was stuck until the page reloaded.
+            'REQUEST_SESSION'
         ]),
         
         USER_ACTIONS: new Set([

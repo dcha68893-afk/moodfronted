@@ -286,14 +286,29 @@ let session = {
     expiresAt: null
 };
 
-function __isValidSession(sessionObj) {
-    if (!sessionObj) return false;
+function __isValidSession(sessionObj, _debugLabel) {
+    if (!sessionObj) {
+        if (_debugLabel) console.warn(`[${MODULE_NAME}] __isValidSession(${_debugLabel}): rejected — no session object`);
+        return false;
+    }
 
-    if (!sessionObj.token || typeof sessionObj.token !== 'string') return false;
+    if (!sessionObj.token || typeof sessionObj.token !== 'string') {
+        if (_debugLabel) console.warn(`[${MODULE_NAME}] __isValidSession(${_debugLabel}): rejected — missing/non-string token`);
+        return false;
+    }
 
     const rawUserId = sessionObj.user?.id ?? sessionObj.user?.uid ?? sessionObj.userId;
     const userId = typeof rawUserId === 'string' ? Number(rawUserId) : rawUserId;
-    if (!Number.isFinite(userId) || userId === 0) return false;
+    if (!Number.isFinite(userId) || userId === 0) {
+        // DIAGNOSTIC: previously this just returned false with no way to tell,
+        // from the console, whether the rejection was because no userId was
+        // present at all vs. a non-numeric id (e.g. a UUID) that Number()
+        // turned into NaN. Surfacing rawUserId here is what you'd need to look
+        // at first if "applySession: Invalid session data, ignoring" shows up
+        // again for a session you know should be valid.
+        if (_debugLabel) console.warn(`[${MODULE_NAME}] __isValidSession(${_debugLabel}): rejected — bad userId (raw=${JSON.stringify(rawUserId)}, coerced=${userId})`);
+        return false;
+    }
 
     return true;
 }
@@ -2018,8 +2033,8 @@ function applySession(sessionData) {
   }
 
   // Validate session data before applying
-  if (!__isValidSession(sessionData)) {
-    console.warn('[MODULE] applySession: Invalid session data, ignoring');
+  if (!__isValidSession(sessionData, 'incoming')) {
+    console.warn('[MODULE] applySession: Invalid session data, ignoring', sessionData);
     return;
   }
 

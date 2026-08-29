@@ -361,7 +361,39 @@
         return getAuth()?.user || null;
     }
 
-    const AuthStorage = { saveAuth, saveSession, getAuth, getSession, clearAuth, hasValidAuth, updateAuthTokens, getToken, getUser };
+    // FIX (dead code): js/auth.session.manager.js's initialize() calls
+    // window.AuthStorage.isValidSession(rawSession) to decide whether to
+    // auto-clear all session keys on boot ("Corrupted/incomplete session
+    // detected — auto-clearing all keys"). No function of that name was ever
+    // defined on this object — only hasValidAuth() exists, which takes no
+    // arguments and reads from storage itself rather than validating a
+    // passed-in session object. Since `typeof window.AuthStorage.isValidSession
+    // === 'function'` was always false, that call silently always fell back to
+    // auth.session.manager.js's own inline check, and never checked
+    // expiresAt — so a session whose token had simply expired was treated as
+    // "valid" by the boot check right up until the first API call failed with
+    // a 401. Providing the real function here: (a) makes the intended
+    // canonical check actually run instead of silently no-op'ing to the
+    // fallback every time.
+    //
+    // Deliberately NOT checking expiresAt here even though hasValidAuth()
+    // does: an expired-but-otherwise-well-formed session should trigger a
+    // token *refresh* (see refreshAuthToken() in chat.html / the refresh flow
+    // in api.auth.js), not a full auto-clear-and-show-login on every page
+    // boot. Wiring expiry into this boot-time check without being able to
+    // verify live what expiresAt actually contains for real sessions risks
+    // turning a merely-stale token into a forced logout; kept the check
+    // identical in behavior to the pre-existing inline fallback in
+    // auth.session.manager.js so this change only fixes the broken wiring,
+    // not the validation rules.
+    function isValidSession(sessionObj) {
+        if (!sessionObj || typeof sessionObj !== 'object') return false;
+        if (!sessionObj.token || typeof sessionObj.token !== 'string' || sessionObj.token.length < 10) return false;
+        if (!sessionObj.user || typeof sessionObj.user !== 'object') return false;
+        return true;
+    }
+
+    const AuthStorage = { saveAuth, saveSession, getAuth, getSession, clearAuth, hasValidAuth, updateAuthTokens, getToken, getUser, isValidSession };
 
     window.AuthStorage = AuthStorage;
     window.api = window.api || {};

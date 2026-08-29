@@ -6044,6 +6044,42 @@
                     }
                 }
 
+                // REQUEST_SESSION HANDLER
+                // FIX (WAITING_AUTH deadlock): child modules (messages, group, etc.)
+                // send REQUEST_SESSION as their recovery path when they're stuck in
+                // WAITING_AUTH with no session — e.g. the initial CHILD_READY→
+                // SESSION_DATA handshake landed before the iframe's listener was
+                // mounted, or a later PARENT_READY re-fire ("fresh PARENT_READY
+                // while ACTIVE") got a session payload that failed validation.
+                // Previously nothing on the parent listened for this message at
+                // all, so a module that reached WAITING_AUTH had no way back to
+                // ACTIVE short of a full page reload — every friends/messages/
+                // groups/tools API call it tried in the meantime timed out.
+                // Handle it exactly like CHILD_READY: look up the requesting
+                // module's iframe and (re)send it the current session.
+                if (data.type === 'REQUEST_SESSION') {
+                    const targetModule = data.module || data.source || data.payload?.module || null;
+                    if (targetModule && moduleToIframeId[targetModule]) {
+                        const iframe = document.getElementById(moduleToIframeId[targetModule]);
+                        if (iframe && iframe.contentWindow) {
+                            if (!cachedToken || !cachedUserId) updateSessionCache();
+                            if (cachedToken && cachedUserId) {
+                                sendSessionToModule(iframe, targetModule);
+                            } else {
+                                // No session on the parent side either — try once more
+                                // shortly in case a login/refresh is in flight.
+                                setTimeout(() => {
+                                    updateSessionCache();
+                                    if (cachedToken && cachedUserId) {
+                                        sendSessionToModule(iframe, targetModule);
+                                    }
+                                }, 500);
+                            }
+                        }
+                    }
+                    return;
+                }
+
                 // FRIEND EVENTS
                 if (data.type === 'FRIEND_ACCEPTED' || data.type === 'FRIEND_REJECTED' || data.type === 'FRIEND_REMOVED') {
                     setTimeout(() => requestFriendsFromFriendIframe(), 500);
