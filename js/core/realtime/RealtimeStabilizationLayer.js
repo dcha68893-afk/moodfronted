@@ -433,7 +433,18 @@
         // warning even though each call was for a different endpoint and
         // nothing was actually wrong. Fold endpoint/requestId into the key
         // so only genuinely repeated identical requests count as a storm.
-        const key = e.data.type + '|' + (e.data.chatId || '') + '|' +
+        //
+        // FIX (POSTMESSAGE-STORM-FALSE-POSITIVE-2): panel-state-bridge.js's
+        // PanelHidden/PanelFocused messages carry none of chatId/id/
+        // requestId/endpoint either, AND every module iframe (calls/message/
+        // friend/group/Tools/status) sends its own copy of the same event
+        // type when the shared parent tab's visibility changes — so 5-6
+        // *different* frames each legitimately sending one PanelHidden/
+        // PanelFocused message inside the same tick collapsed onto the same
+        // "PanelHidden||" key and falsely tripped the storm warning, even
+        // though nothing was looping or duplicated. Fold e.data.module into
+        // the key too so distinct source frames don't get bucketed together.
+        const key = e.data.type + '|' + (e.data.module || '') + '|' + (e.data.chatId || '') + '|' +
           (e.data.id || e.data.requestId || e.data.endpoint || '');
         const now = Date.now();
 

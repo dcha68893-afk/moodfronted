@@ -2418,21 +2418,71 @@ function startParallelDataLoading() {
     // PRODUCTION FIX: Do NOT call KnectaAuth.showLoading(true) — it shows a
     // full-screen blocking spinner overlay. Data loads silently in background.
 
-    const loaders = [
-        loadFriendsFromBackend(),
-        loadFriendRequestsFromBackend(),
-        loadSentRequestsFromBackend(),
-        loadPinnedFriendsFromBackend(),
-        loadMutedFriendsFromBackend(),
-        loadContactsFromBackend(),
-        loadGroupsFromBackend(),
-        fetchAllUsersFromBackend()
+    // FIX (REQUEST-STAMPEDE): This used to fire all 8 backend loaders as one
+    // Promise.allSettled batch, i.e. 8 concurrent postMessage-bridged API
+    // calls launched in the same tick. Each one carries its own independent
+    // timeout (10-15s) and goes through the SAME parent-frame fetch queue, so
+    // on a slow/high-latency connection (or a cold backend) they all queue up
+    // behind each other, blow their timeouts together, and the console fills
+    // with a wall of simultaneous "API request timeout" warnings for
+    // endpoints that were never urgent in the first place (pinned/muted/
+    // contacts-sync/all-users are cosmetic, not needed to render the core
+    // friends list). This also wastes bandwidth/resources on connections that
+    // can't afford it. Fix: split into a CRITICAL tier (needed to render the
+    // main friends UI) fired immediately together, and a SECONDARY tier
+    // (nice-to-have, already cache-hydrated by loadCachedDataInstantly())
+    // fired with limited concurrency and a small stagger AFTER the critical
+    // tier settles — and skipped entirely on a detected slow/data-saver
+    // connection, where the cache from loadCachedDataInstantly() is left to
+    // stand until the user actively opens that section.
+    const CRITICAL_LOADERS = [
+        loadFriendsFromBackend,
+        loadFriendRequestsFromBackend,
+        loadSentRequestsFromBackend
     ];
-    
-    Promise.allSettled(loaders).then(() => {
+    const SECONDARY_LOADERS = [
+        loadPinnedFriendsFromBackend,
+        loadMutedFriendsFromBackend,
+        loadGroupsFromBackend,
+        loadContactsFromBackend,
+        fetchAllUsersFromBackend
+    ];
+    const SECONDARY_CONCURRENCY = 2;
+    const SECONDARY_STAGGER_MS = 250;
+
+    async function runWithConcurrency(fns, limit, staggerMs) {
+        let cursor = 0;
+        async function worker() {
+            while (cursor < fns.length) {
+                const fn = fns[cursor++];
+                try { await fn(); } catch (_) {}
+                if (staggerMs) await new Promise(r => setTimeout(r, staggerMs));
+            }
+        }
+        const workers = [];
+        for (let i = 0; i < Math.min(limit, fns.length); i++) workers.push(worker());
+        await Promise.allSettled(workers);
+    }
+
+    const isSlowConnection = !!(
+        IframeEnvironment?.features?.saveData ||
+        IframeEnvironment?.features?.effectiveType === 'slow-2g' ||
+        IframeEnvironment?.features?.effectiveType === '2g'
+    );
+
+    Promise.allSettled(CRITICAL_LOADERS.map(fn => fn())).then(() => {
         updateCurrentSection?.();
         showNotification?.('Friends data loaded', 'success');
         // PRODUCTION FIX: No showLoading(false) needed since we removed showLoading(true)
+
+        if (isSlowConnection) {
+            Logger.info('Data', 'Slow/data-saver connection detected — skipping secondary loaders, keeping cached data');
+            return;
+        }
+
+        runWithConcurrency(SECONDARY_LOADERS, SECONDARY_CONCURRENCY, SECONDARY_STAGGER_MS).then(() => {
+            updateCurrentSection?.();
+        });
     });
 }
 
