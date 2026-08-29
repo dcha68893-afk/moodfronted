@@ -218,17 +218,17 @@ function navigateToChatWithUser(userId, userName, additionalData = {}) {
     sessionStorage.setItem('pending_chat', JSON.stringify(chatPayload));
     sessionStorage.setItem('open_chat_on_load', JSON.stringify(chatPayload));
     
-    // Send OPEN_CHAT_WITH_USER event to parent
+    // REMOVED (verified dead, audit pass 7): this used to also send a bare
+    // OPEN_CHAT_WITH_USER postMessage here. chat.html's only handler for
+    // that event type reads data.payload.userId (nested), but this message
+    // sent userId flat with no .payload wrapper, so the handler's
+    // `if (_ocwuUserId)` check always failed silently — confirmed by
+    // reading that handler directly, not assumed. The SWITCH_MODULE
+    // postMessage below already handles this exact case correctly
+    // end-to-end (chat.html wraps payload.userId/userName into a properly
+    // nested OPEN_CHAT_WITH_USER before relaying to messagesIframe) and is
+    // unaffected by this removal.
     if (window.parent && window.parent !== window) {
-        window.parent.postMessage({
-            type: 'OPEN_CHAT_WITH_USER',
-            userId: safeUserId,
-            userName: displayName,
-            source: 'friends-ui',
-            timestamp: Date.now()
-        }, '*');
-        
-        // Also send SWITCH_MODULE to ensure navigation
         window.parent.postMessage({
             type: 'SWITCH_MODULE',
             module: 'messages',

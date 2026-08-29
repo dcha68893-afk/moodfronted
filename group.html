@@ -2854,11 +2854,33 @@ function hookRT(){
             // group-open path in this file converges on.
             if(d.type==='OPEN_GROUP_BY_ID'){
                 var gid4=d.payload&&d.payload.groupId;if(!gid4)return;
+                var smid4=d.payload&&d.payload.scrollToMessageId;
                 var gco4=gc();
                 var all4=gco4?(gco4.groups||[]).concat(gco4.myGroups||[]).concat(gco4.joinedGroups||[]).concat(gco4.adminGroups||[]):[];
                 var found4=null;all4.forEach(function(g4){if(g4&&String(g4.id)===String(gid4))found4=g4;});
                 if(found4){openPanel(found4);}
                 else{api('/groups/'+gid4).then(function(d4){var gr4=d4.data||d4.group||d4;if(gr4&&gr4.id)openPanel(gr4);}).catch(function(){});}
+                // FIX (was a dead parameter): scroll+highlight the target
+                // message once it renders, using the SAME selector and pulse
+                // style the existing in-panel message search feature already
+                // uses (see the '[data-mid], [data-message-id]' lookup a few
+                // hundred lines below), rather than leaving scrollToMessageId
+                // unused.
+                if(smid4){
+                    var _sAttempts4=0;
+                    var _tryScroll4=function(){
+                        var t4=document.querySelector('[data-mid="'+smid4+'"], [data-message-id="'+smid4+'"]');
+                        if(t4){
+                            t4.scrollIntoView({behavior:'smooth',block:'center'});
+                            t4.style.transition='background .3s';var _prevBg4=t4.style.background;
+                            t4.style.background='rgba(102,126,234,.18)';
+                            setTimeout(function(){t4.style.background=_prevBg4||'';},1200);
+                            return;
+                        }
+                        if(_sAttempts4++<15)setTimeout(_tryScroll4,400);
+                    };
+                    setTimeout(_tryScroll4,700);
+                }
                 return;
             }
         });

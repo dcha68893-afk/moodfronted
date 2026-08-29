@@ -5147,16 +5147,26 @@
                     if (cached != null) return cached;
                     if (window.KynectaE2E?.decryptMessageForDisplay) {
                         const _chatIdForDecrypt = String(chat.id || '');
-                        window.KynectaE2E.decryptMessageForDisplay(_lastMessageObj, _chatIdForDecrypt, core?.getCurrentUserId?.(), {
-                            activeConversation: chat,
-                            fallbackText: '🔒 Encrypted message'
-                        }).then(function(plaintext) {
+                        const _patchSidebarRow = function(plaintext) {
                             try {
                                 const row = document.querySelector(`.chat-item[data-chat-id="${CSS.escape(String(chat.id))}"] .last-message-text`);
                                 if (row) row.textContent = plaintext;
                                 window.KynectaE2E?.log?.('UI_RENDER_COMPLETE', { surface: 'sidebar', chatId: chat.id });
                             } catch (_) {}
-                        }).catch(function(){});
+                        };
+                        window.KynectaE2E.decryptMessageForDisplay(_lastMessageObj, _chatIdForDecrypt, core?.getCurrentUserId?.(), {
+                            activeConversation: chat,
+                            fallbackText: '🔒 Encrypted message',
+                            // FIX (SIDEBAR-PREVIEW-STICKS-ON-ENCRYPTED): without this,
+                            // a preview that rendered while the message was still
+                            // queued for retry (first contact / cold session — the
+                            // normal case, not an error) never got corrected once
+                            // the retry actually succeeded, since nothing else
+                            // watches this .last-message-text element for the
+                            // 'kyn:messageDecrypted' event the main chat panel relies
+                            // on. Mirrors the main chat panel's own onResolved wiring.
+                            onResolved: _patchSidebarRow
+                        }).then(_patchSidebarRow).catch(function(){});
                     }
                     // Ciphertext must never appear even on this first synchronous pass.
                     if (v.charAt(0) === '{' && v.indexOf('"v"') !== -1) return '🔒 Encrypted message';
@@ -6215,16 +6225,21 @@
                     const cached = window.KynectaE2E?.peekDecryptedText?.(_multiSendLastMsgObj);
                     if (cached != null) return cached;
                     if (window.KynectaE2E?.decryptMessageForDisplay) {
-                        window.KynectaE2E.decryptMessageForDisplay(_multiSendLastMsgObj, String(chat.id || ''), core?.getCurrentUserId?.(), {
-                            activeConversation: chat,
-                            fallbackText: '🔒 Encrypted message'
-                        }).then(function(plaintext) {
+                        const _patchMultiSendRow = function(plaintext) {
                             try {
                                 const row = container.querySelector(`.chat-item[data-chat-id="${CSS.escape(String(chat.id))}"] .last-message-text`);
                                 if (row) row.textContent = plaintext;
                                 window.KynectaE2E?.log?.('UI_RENDER_COMPLETE', { surface: 'multiSendPicker', chatId: chat.id });
                             } catch (_) {}
-                        }).catch(function(){});
+                        };
+                        // FIX (SIDEBAR-PREVIEW-STICKS-ON-ENCRYPTED, same gap as
+                        // renderChatsList() above): wire onResolved so a queued
+                        // retry that succeeds later still corrects this preview.
+                        window.KynectaE2E.decryptMessageForDisplay(_multiSendLastMsgObj, String(chat.id || ''), core?.getCurrentUserId?.(), {
+                            activeConversation: chat,
+                            fallbackText: '🔒 Encrypted message',
+                            onResolved: _patchMultiSendRow
+                        }).then(_patchMultiSendRow).catch(function(){});
                     }
                     if (v.charAt(0) === '{' && v.indexOf('"v"') !== -1) return '🔒 Encrypted message';
                     return v;
@@ -8277,135 +8292,19 @@ Type: ${message.type || 'text'}`;
 
                         if (!this._canPerformAction('sendMessage')) return;
 
-                        // FIX (PHASE23-SEND-GATING): "Send" used to only be
-                        // gated by the general session-readiness check above,
-                        // with nothing verifying the CONVERSATION itself —
-                        // key, receiver, socket join — was actually ready.
-                        // This is the acceptance-criteria requirement that
-                        // the Send button must stay disabled/blocked until
-                        // ConversationBootstrapService reaches READY. Only
-                        // blocks when a bootstrap is genuinely in flight for
-                        // the currently-open chat and hasn't finished — a
-                        // chat opened via the older cached/instant path (no
-                        // bootstrap promise at all) is left unaffected so
-                        // this can't regress the existing fast path.
-                        const _activeConv0 = window.ChatManager?.getActiveChat?.();
-                        let _bootstrapState = window.ChatManager?.getBootstrapState?.();
-                        const _bootstrapPromise = window.__kynLastBootstrapPromise;
+                        // FIX (ENTER-KEY-SEND-GATING-GAP): this logic used to live only
+                        // in this click handler's closure, so pressing Enter to send
+                        // (the default way most people send) skipped all of it and
+                        // went straight to _handleSendMessage(), which does NOT
+                        // independently create/activate a pending conversation or
+                        // check bootstrap state — it just reads
+                        // core.getActiveChat()/getCurrentConversation() and sends
+                        // against whatever that currently returns, including
+                        // undefined during the exact race window this block exists
+                        // to close. Extracted into a shared method so Enter gets the
+                        // identical protection instead of a second, incomplete copy.
+                        if (!(await this._ensureConversationReadyForSend())) return;
 
-                        // FIX (OPTIMISTIC-SEND-WITH-BACKGROUND-RECONCILE): the previous
-                        // version of this code, when no conversation had resolved yet,
-                        // BLOCKED the send for up to 16 seconds (an 8s bootstrap-promise
-                        // wait plus an 8s poll) waiting for full local resolution before
-                        // sending anything at all. That's backwards: this app already has
-                        // everything needed to send immediately with a temporary/pending
-                        // identifier and let the real chatId reconcile in the background,
-                        // exactly like WhatsApp/iMessage/etc do — ChatManager.
-                        // getOrCreatePendingConversation() synchronously creates a
-                        // pending_<userId> conversation, and the backend's
-                        // resolveOrCreateDirectChat() (used by every send) already
-                        // reliably reconciles that to the one real, canonical chat id
-                        // server-side regardless of which side sends first. The only
-                        // thing missing was actually using that path immediately instead
-                        // of waiting.
-                        //
-                        // So: if we don't have a resolved conversation yet, but we DO
-                        // know who this chat is with (the target user id is in the URL
-                        // for every non-history open — see message.html's own
-                        // `urlParams.get('chatId') || urlParams.get('openChat') ||
-                        // urlParams.get('userId')` parsing), create/get the pending
-                        // conversation synchronously, right now, and send immediately.
-                        // No waiting. The real chatId gets reconciled in the background
-                        // by ChatManager.replacePendingConversation() once the send
-                        // response (or an incoming message) confirms it — same as it
-                        // already does for the very first message in a new chat.
-                        if (!_activeConv0) {
-                            try {
-                                const _urlParams = new URLSearchParams(window.location.search);
-                                const _targetUserId = _urlParams.get('chatId') || _urlParams.get('openChat') || _urlParams.get('userId');
-                                if (_targetUserId && window.ChatManager?.getOrCreatePendingConversation) {
-                                    const _pendingConv = window.ChatManager.getOrCreatePendingConversation(
-                                        _targetUserId,
-                                        _urlParams.get('userName') || _urlParams.get('friendName') || '',
-                                        _urlParams.get('userAvatar') || _urlParams.get('friendAvatar') || ''
-                                    );
-                                    // getOrCreatePendingConversation() only adds the pending
-                                    // conversation to the list — it does not mark it active,
-                                    // so getActiveChat() would still return null without this.
-                                    if (_pendingConv && !window.ChatManager.getActiveChat?.()) {
-                                        window.ChatManager.setActiveConversation?.(_pendingConv);
-                                    }
-                                }
-                            } catch (_) {}
-                        }
-
-                        // Fallback for the rare remaining case (no URL target and no
-                        // active conversation, e.g. a very unusual entry path): give the
-                        // in-flight bootstrap/poll a much shorter window than before,
-                        // since the common case above no longer needs to wait at all.
-                        if (!window.ChatManager?.getActiveChat?.()) {
-                            if (_bootstrapPromise) {
-                                try { await Promise.race([_bootstrapPromise, new Promise(r => setTimeout(r, 3000))]); } catch (_) {}
-                            }
-                            if (!window.ChatManager?.getActiveChat?.()) {
-                                const _pollDeadline = Date.now() + 2000;
-                                while (Date.now() < _pollDeadline && !window.ChatManager?.getActiveChat?.()) {
-                                    await new Promise(r => setTimeout(r, 150));
-                                }
-                            }
-                            _bootstrapState = window.ChatManager?.getBootstrapState?.();
-                        }
-
-                        const _activeConv = window.ChatManager?.getActiveChat?.() || _activeConv0;
-                        if (!_activeConv) {
-                            // Still nothing after every available signal, including the
-                            // synchronous pending-conversation creation above — genuinely
-                            // no known recipient to send to (e.g. URL carried no user
-                            // context at all). Tell the user instead of a silent no-op.
-                            try { window.showToast?.('Could not open this chat yet — please try again', 'error'); } catch (_) {}
-                            return;
-                        }
-                        const _bootstrapTargetsActiveChat =
-                            _bootstrapPromise && _bootstrapState &&
-                            _activeConv && _bootstrapState.conversationId &&
-                            String(_bootstrapState.conversationId) === String(_activeConv.id);
-
-                        if (_bootstrapTargetsActiveChat && _bootstrapState.stage === 'FAILED') {
-                            try { window.showToast?.('Chat is not ready yet — retrying…', 'error'); } catch (_) {}
-                            try {
-                                window.__kynLastBootstrapPromise = window.ChatManager?.bootstrapConversation?.({
-                                    targetUserId: _activeConv.friendId,
-                                    conversationId: _activeConv.id,
-                                    name: _activeConv.friendName,
-                                    avatar: _activeConv.friendAvatar,
-                                    sourceModule: 'send-retry'
-                                });
-                            } catch (_) {}
-                            return;
-                        }
-                        // REMOVED (still-hanging-on-first-message fix): this used to
-                        // await Promise.race([_bootstrapPromise, timeout(6000)]) whenever
-                        // the in-flight bootstrap hadn't yet resolved to the active
-                        // chat's real id. For a BRAND-NEW conversation (the exact "first
-                        // time" case — Friends/Calls/Status, or a receiver's first reply
-                        // to a chat they've never opened this session) bootstrapConversation()
-                        // starts with conversationId=null and only gets the real chatId at
-                        // its LOADING_MESSAGES/READY stage — so this condition was true on
-                        // essentially every first send, and actually blocked for up to 6s
-                        // (or however long the round trip took, e.g. a cold Render
-                        // backend) before falling through anyway. That's a real, reliably
-                        // reproducible send-button hang, not a rare edge case.
-                        //
-                        // This directly contradicts the OPTIMISTIC-SEND-WITH-BACKGROUND-
-                        // RECONCILE design already established two blocks above (line
-                        // ~8189): sending immediately with whatever identifier is known
-                        // (receiverId / pending conversation) and letting the server-side
-                        // resolveOrCreateDirectChat() + this client's own
-                        // replacePendingConversation() reconcile the real chatId in the
-                        // background is already correct and already how every other send
-                        // path in this handler behaves. There is no correctness reason to
-                        // block THIS specific case and not the others — removed so first
-                        // sends behave the same (instant) as every other send.
                         await this._handleSendMessage().catch((err) => {
                             // FIX-NO-PLAINTEXT-FALLBACK follow-through: encryptForChat()
                             // now throws window.KynectaE2E.E2ESecureFailureError instead
@@ -9742,7 +9641,7 @@ Type: ${message.type || 'text'}`;
 
             messageInput.addEventListener('keydown', (e) => {
 
-                UIFailsafe.queueAction(() => {
+                UIFailsafe.queueAction(async () => {
 
                     // FIX-IME-SPLIT-SEND: mobile IME keyboards (Gboard and others,
                     // seen on Android Chrome) fire a synthetic keydown with
@@ -9777,6 +9676,14 @@ Type: ${message.type || 'text'}`;
 
                         if (!this._canPerformAction('sendMessage')) return;
 
+                        // FIX (ENTER-KEY-SEND-GATING-GAP): see
+                        // _ensureConversationReadyForSend()'s own comment —
+                        // this used to go straight to _handleSendMessage()
+                        // with none of the click handler's protection for a
+                        // chat opened from a non-history source where no
+                        // active conversation is set yet.
+                        if (!(await this._ensureConversationReadyForSend())) return;
+
                         this._handleSendMessage();
 
                     } else if (e.key === 'Enter' && e.shiftKey) {
@@ -9786,6 +9693,7 @@ Type: ${message.type || 'text'}`;
                             // explicit "send" chord instead of inserting a newline.
                             e.preventDefault();
                             if (!this._canPerformAction('sendMessage')) return;
+                            if (!(await this._ensureConversationReadyForSend())) return;
                             this._handleSendMessage();
                         }
                         // else: default behavior (newline) when enter-to-send is on.
@@ -10322,6 +10230,121 @@ Type: ${message.type || 'text'}`;
         },
 
 
+
+        // FIX (ENTER-KEY-SEND-GATING-GAP): shared by both the Send button
+        // click handler and the Enter-key handler (see call sites) so a
+        // chat opened from Friend/Calls/Status/Search/notification — where
+        // there can be a real, if usually brief, window where no active
+        // conversation is set yet — gets the exact same optimistic
+        // pending-conversation activation and bootstrap-failure retry
+        // whichever way the person actually sends. Returns true if it's
+        // safe to proceed to _handleSendMessage(), false if the caller
+        // should stop (a toast/retry has already been surfaced).
+        async _ensureConversationReadyForSend() {
+            // "Send" used to only be gated by the general session-readiness
+            // check above, with nothing verifying the CONVERSATION itself —
+            // key, receiver, socket join — was actually ready. Only blocks
+            // when a bootstrap is genuinely in flight for the currently-open
+            // chat and hasn't finished — a chat opened via the older
+            // cached/instant path (no bootstrap promise at all) is left
+            // unaffected so this can't regress the existing fast path.
+            const _activeConv0 = window.ChatManager?.getActiveChat?.();
+            let _bootstrapState = window.ChatManager?.getBootstrapState?.();
+            const _bootstrapPromise = window.__kynLastBootstrapPromise;
+
+            // OPTIMISTIC-SEND-WITH-BACKGROUND-RECONCILE: this app already has
+            // everything needed to send immediately with a temporary/pending
+            // identifier and let the real chatId reconcile in the background,
+            // exactly like WhatsApp/iMessage/etc do — ChatManager.
+            // getOrCreatePendingConversation() synchronously creates a
+            // pending_<userId> conversation, and the backend's
+            // resolveOrCreateDirectChat() (used by every send) already
+            // reliably reconciles that to the one real, canonical chat id
+            // server-side regardless of which side sends first.
+            //
+            // So: if we don't have a resolved conversation yet, but we DO
+            // know who this chat is with (the target user id is in the URL
+            // for every non-history open — see message.html's own
+            // `urlParams.get('chatId') || urlParams.get('openChat') ||
+            // urlParams.get('userId')` parsing), create/get the pending
+            // conversation synchronously, right now. The real chatId gets
+            // reconciled in the background by
+            // ChatManager.replacePendingConversation() once the send
+            // response (or an incoming message) confirms it.
+            if (!_activeConv0) {
+                try {
+                    const _urlParams = new URLSearchParams(window.location.search);
+                    const _targetUserId = _urlParams.get('chatId') || _urlParams.get('openChat') || _urlParams.get('userId');
+                    if (_targetUserId && window.ChatManager?.getOrCreatePendingConversation) {
+                        const _pendingConv = window.ChatManager.getOrCreatePendingConversation(
+                            _targetUserId,
+                            _urlParams.get('userName') || _urlParams.get('friendName') || '',
+                            _urlParams.get('userAvatar') || _urlParams.get('friendAvatar') || ''
+                        );
+                        // getOrCreatePendingConversation() only adds the pending
+                        // conversation to the list — it does not mark it active,
+                        // so getActiveChat() would still return null without this.
+                        if (_pendingConv && !window.ChatManager.getActiveChat?.()) {
+                            window.ChatManager.setActiveConversation?.(_pendingConv);
+                        }
+                    }
+                } catch (_) {}
+            }
+
+            // Fallback for the rare remaining case (no URL target and no
+            // active conversation, e.g. a very unusual entry path): give the
+            // in-flight bootstrap/poll a much shorter window than before,
+            // since the common case above no longer needs to wait at all.
+            if (!window.ChatManager?.getActiveChat?.()) {
+                if (_bootstrapPromise) {
+                    try { await Promise.race([_bootstrapPromise, new Promise(r => setTimeout(r, 3000))]); } catch (_) {}
+                }
+                if (!window.ChatManager?.getActiveChat?.()) {
+                    const _pollDeadline = Date.now() + 2000;
+                    while (Date.now() < _pollDeadline && !window.ChatManager?.getActiveChat?.()) {
+                        await new Promise(r => setTimeout(r, 150));
+                    }
+                }
+                _bootstrapState = window.ChatManager?.getBootstrapState?.();
+            }
+
+            const _activeConv = window.ChatManager?.getActiveChat?.() || _activeConv0;
+            if (!_activeConv) {
+                // Still nothing after every available signal, including the
+                // synchronous pending-conversation creation above — genuinely
+                // no known recipient to send to (e.g. URL carried no user
+                // context at all). Tell the user instead of a silent no-op.
+                try { window.showToast?.('Could not open this chat yet — please try again', 'error'); } catch (_) {}
+                return false;
+            }
+            const _bootstrapTargetsActiveChat =
+                _bootstrapPromise && _bootstrapState &&
+                _activeConv && _bootstrapState.conversationId &&
+                String(_bootstrapState.conversationId) === String(_activeConv.id);
+
+            if (_bootstrapTargetsActiveChat && _bootstrapState.stage === 'FAILED') {
+                try { window.showToast?.('Chat is not ready yet — retrying…', 'error'); } catch (_) {}
+                try {
+                    window.__kynLastBootstrapPromise = window.ChatManager?.bootstrapConversation?.({
+                        targetUserId: _activeConv.friendId,
+                        conversationId: _activeConv.id,
+                        name: _activeConv.friendName,
+                        avatar: _activeConv.friendAvatar,
+                        sourceModule: 'send-retry'
+                    });
+                } catch (_) {}
+                return false;
+            }
+            // Deliberately no wait/timeout beyond the above even if bootstrap
+            // is still in flight for THIS chat and hasn't reached READY/FAILED
+            // yet: sending immediately with whatever identifier is known
+            // (receiverId / pending conversation) and letting the server-side
+            // resolveOrCreateDirectChat() + this client's own
+            // replacePendingConversation() reconcile the real chatId in the
+            // background is the established, correct behavior for every send
+            // path here — see OPTIMISTIC-SEND-WITH-BACKGROUND-RECONCILE above.
+            return true;
+        },
 
         async _handleSendMessage() {
 
@@ -12169,16 +12192,28 @@ Type: ${message.type || 'text'}`;
         openChatWithUserInUI(peerId, peerName, peerAvatar, { findExisting: true });
 
         if (scrollToMessageId) {
-            // Best-effort scroll-to-message once the panel is likely open;
-            // mirrors the existing document-level event message-search.js
-            // itself listens for elsewhere in normal in-app search use.
-            setTimeout(() => {
-                try {
-                    document.dispatchEvent(new CustomEvent('kyn:scrollToMessage', {
-                        detail: { chatId, messageId: scrollToMessageId }
-                    }));
-                } catch (_) {}
-            }, 600);
+            // FIX (audit self-correction): the previous version of this code
+            // dispatched a 'kyn:scrollToMessage' CustomEvent on the unverified
+            // assumption that something listened for it — nothing did.
+            // The real, working scroll-to-message mechanism (confirmed by
+            // reading js/message-search.js directly) is a plain DOM lookup
+            // by [data-message-id] + scrollIntoView + the same
+            // '.kyn-search-highlight' pulse class it uses. Poll briefly
+            // since the message list needs time to render after
+            // openChatWithUserInUI() above.
+            let _scrollAttempts = 0;
+            const _tryScroll = () => {
+                const el = document.querySelector(`[data-message-id="${scrollToMessageId}"]`) ||
+                    document.querySelector(`.message-wrapper[data-msg-id="${scrollToMessageId}"]`);
+                if (el) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    el.classList.remove('kyn-search-highlight');
+                    setTimeout(() => el.classList.add('kyn-search-highlight'), 10);
+                    return;
+                }
+                if (_scrollAttempts++ < 15) setTimeout(_tryScroll, 400);
+            };
+            setTimeout(_tryScroll, 600);
         }
     }
     window.openChatByIdInUI = openChatByIdInUI;
@@ -14366,13 +14401,18 @@ Type: ${message.type || 'text'}`;
                     '<div class="last-message-text" style="color:#64748b;font-size:12px;">' + _hcLast + '</div></div>';
                 if (window.KynectaE2E?.decryptMessageForDisplay && (c.lastMessage || '').charAt(0) === '{' && !window.KynectaE2E.peekDecryptedText?.(_hcMsgObj)) {
                     const _textEl = row.querySelector('.last-message-text');
-                    window.KynectaE2E.decryptMessageForDisplay(_hcMsgObj, String(c.id || ''), window.KynectaE2E.getMyUserId?.(), {
-                        activeConversation: c,
-                        fallbackText: '🔒 Encrypted message'
-                    }).then(function(plaintext) {
+                    const _patchHiddenVaultRow = function(plaintext) {
                         if (_textEl) _textEl.textContent = plaintext;
                         window.KynectaE2E?.log?.('UI_RENDER_COMPLETE', { surface: 'hiddenVault', chatId: c.id });
-                    }).catch(function(){});
+                    };
+                    // FIX (SIDEBAR-PREVIEW-STICKS-ON-ENCRYPTED, same gap as the
+                    // two list previews above): wire onResolved so a queued
+                    // retry that succeeds later still corrects this preview.
+                    window.KynectaE2E.decryptMessageForDisplay(_hcMsgObj, String(c.id || ''), window.KynectaE2E.getMyUserId?.(), {
+                        activeConversation: c,
+                        fallbackText: '🔒 Encrypted message',
+                        onResolved: _patchHiddenVaultRow
+                    }).then(_patchHiddenVaultRow).catch(function(){});
                 }
                 row.onclick = function() {
                     modal.remove();
