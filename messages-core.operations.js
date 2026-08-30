@@ -2323,6 +2323,22 @@ const ChatManager = {
         
         subscribe: function(callback) {
             this._subscribers.add(callback);
+            // FIX (LIVE-CONFIRMED-RENDER-GAP): a subscriber that registers
+            // AFTER _notifySubscribers() already fired for the current state
+            // (the exact situation when messages-ui.js's render subscriber
+            // finishes construction moments after _openViaUnifiedPipeline's
+            // "direct-open bypass" already called openConversation() for a
+            // chat opened from a non-history source) used to just sit idle
+            // until some unrelated later state change happened to fire
+            // another notify. The conversation/messages this subscriber was
+            // added specifically to render were already fully fetched and
+            // decrypted — they just never got painted, because nothing
+            // replayed that already-current state to this new listener.
+            // Replay immediately, exactly like _notifySubscribers() itself
+            // calls subscribers, so a late-registering renderer catches up
+            // to whatever already happened instead of waiting for the next
+            // unrelated change.
+            try { callback(this._conversations, this._activeConversation, this._messages); } catch (e) {}
             return () => this._subscribers.delete(callback);
         },
         
