@@ -1853,19 +1853,37 @@ const UIStateManager = {
                 }
                 renderRealtimeUpdate(chatId, normalizedMessage);
 
-                // FIX-ACK-AFTER-DECRYPT (replaces FIX-RECEIVE-DECRYPT-DECOUPLE): the
-                // previous version rendered the ciphertext bubble, ACKed delivery
-                // immediately, and only THEN attempted decryption in the background.
-                // That is the exact "receive -> immediately ACK -> decrypt later"
-                // ordering the messaging-lifecycle spec forbids: the sender sees
-                // "delivered" while the receiver may still be looking at a permanent
-                // "🔒 Encrypted message" bubble, because nothing here ever revisited
-                // the ACK if decryption ultimately failed. A message must only be
-                // ACKed once it has actually been decrypted/validated and made
-                // available to the chat UI — for a plaintext (non-encrypted) message
-                // that happens immediately below; for an encrypted one it happens
-                // inside the decrypt success path (and its onResolved retry path),
-                // never on failure/timeout.
+                // FIX-ACK-TRANSPORT-VS-DECRYPT (replaces FIX-ACK-AFTER-DECRYPT): that
+                // prior fix gated the socket-level delivery ack on decryption actually
+                // succeeding, on the theory that ACKing before the receiver could show
+                // real content was itself the bug. It wasn't — it conflated two
+                // different states the lifecycle spec explicitly keeps separate:
+                // (1) transport receipt ("the receiver's client got this message"),
+                // which is what the backend's 10s scheduleMessageDeliveryTimeout /
+                // message:delivery_ack contract actually measures, and (4) E2EE
+                // decryption succeeding, which is a UI-content concern with its own
+                // separate pending/queued/resolved states already tracked via
+                // isMessageQueued()/onResolved elsewhere in this same handler. Gating
+                // (1) on (4) meant every first-contact message — where X3DH/prekey
+                // resolution routinely takes longer than 10s — NEVER sent a delivery
+                // ack in time, so the backend's timer fired for real, pushed
+                // 'message:delivery_failed' to the sender, and (per the backend logs
+                // this was traced against: "Message N undelivered after 10s") did so
+                // even though the message had genuinely arrived and was sitting in
+                // the receiver's pending-decrypt queue the whole time. Restoring the
+                // transport ack to fire immediately, right after the message is
+                // rendered/persisted here — independent of whether decryption has
+                // resolved yet — fixes that false-failure without reintroducing any
+                // plaintext/ciphertext confusion: the chat bubble itself still shows
+                // the neutral pending state (never raw ciphertext, per
+                // isMessageQueued()) until decryption genuinely completes; only the
+                // *transport* ack timing changes. ackMessageDelivered()/
+                // _attemptAckDelivery() below is itself idempotent (dedup on
+                // chatId:messageId, see _realtimeDeliveredAckIds), so the later calls
+                // to _sendDeliveryAck() still present in the decrypt-success and
+                // onResolved paths further down are now harmless no-ops, not the
+                // primary signal — kept only so nothing regresses if this early call
+                // is ever removed.
                 const _sendDeliveryAck = function() {
                     // FIX-MSG-DELIVERY-ACK: tell the server we received (and could
                     // actually show) this message so the sender gets
@@ -1894,6 +1912,15 @@ const UIStateManager = {
                     } catch(_dErr) { /* silent — delivery ack is best-effort */ }
                 };
 
+                // FIX-ACK-TRANSPORT-VS-DECRYPT: fire the transport-level ack now,
+                // unconditionally — the message has been received, normalized,
+                // rendered (even if only in its pending-decrypt state) and
+                // persisted above, which is exactly what "delivered" means at this
+                // layer. Do NOT wait on _needsDecrypt/decryptMessageForDisplay
+                // below; that's a separate concern with its own separate
+                // success/queued/failed states.
+                _sendDeliveryAck();
+
                 // CRYPTO-PIPELINE: this is the MESSAGE_RECEIVED entry point for
                 // realtime delivery. Peer resolution (including the own-echo
                 // sender/receiver inversion previously duplicated here) and the
@@ -1911,8 +1938,10 @@ const UIStateManager = {
                                     // Fires later if this message had to be queued
                                     // because keys weren't ready at receive time —
                                     // patch the bubble/local store once a retry
-                                    // succeeds instead of leaving it stuck, and ONLY
-                                    // ACK once it actually succeeds this way.
+                                    // succeeds instead of leaving it stuck. The
+                                    // transport ack already fired unconditionally
+                                    // above; this second call is just the existing
+                                    // idempotent no-op (dedup'd on chatId:messageId).
                                     onResolved: (retriedPlaintext) => {
                                         _patchDecryptedRealtimeMessage(chatId, normalizedMessage, retriedPlaintext);
                                         _sendDeliveryAck();
@@ -1923,8 +1952,9 @@ const UIStateManager = {
                                     _patchDecryptedRealtimeMessage(chatId, normalizedMessage, _plaintext);
                                     _sendDeliveryAck();
                                 }
-                                // On a queued/failed attempt: leave the ciphertext
-                                // envelope on screen AND do not ACK yet. The
+                                // On a queued/failed attempt: leave the neutral
+                                // pending state on screen (never raw ciphertext —
+                                // see isMessageQueued()/messages-ui.js). The
                                 // pipeline's own retry queue (onResolved above) or
                                 // messages-ui.js's render-time decrypt still get a
                                 // chance to resolve it later — whichever succeeds
