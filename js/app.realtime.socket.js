@@ -2502,12 +2502,43 @@
             function _broadcastParentReady() {
                 if (_parentReadySent) return;
                 _parentReadySent = true;
-                var iframes = document.querySelectorAll('iframe');
-                var tok = window.__kynToken
-                    || (window.AppStorage && (window.AppStorage.get('authToken') || window.AppStorage.get('token')))
-                    || (() => { try { var ks = ['authToken','token','kyn_token','accessToken']; for (var k of ks) { var v = localStorage.getItem(k); if (v && v.startsWith('eyJ')) return v; } } catch(_){} return ''; })();
-                var msg = { type: 'PARENT_READY', payload: { token: tok, timestamp: Date.now(), source: 'realtime-socket-fallback' } };
-                iframes.forEach(function(f) { try { f.contentWindow.postMessage(msg, '*'); } catch(_) {} });
+                // FIX (broken fallback session — root cause of groups getting
+                // stuck in WAIT_PARENT after already being ACTIVE): this used
+                // to hand-roll its own PARENT_READY payload containing only
+                // { token, timestamp, source } — no userId, no session
+                // object. group-core-bootstrap.js's __isValidSession() (and
+                // the equivalent in every other module) requires
+                // session.userId/user.id/user.uid directly on the payload —
+                // it never decodes the JWT itself — so this fallback's
+                // session was ALWAYS rejected as invalid, by construction.
+                // Worse: handleParentReady() unconditionally demotes an
+                // already-ACTIVE module back to WAIT_PARENT the instant any
+                // fresh PARENT_READY arrives, before even checking whether
+                // the new one is valid. Net effect: 8 seconds after load,
+                // this "safety net" — meant only to unblock iframes that
+                // never got a real session — was firing regardless and
+                // knocking already-correctly-initialized modules OUT of
+                // ACTIVE, then failing to reactivate them because its own
+                // payload could never pass validation. Call the real,
+                // authoritative sendSessionToModule() (window.__sendSessionToModule,
+                // already exposed for exactly this kind of cross-file call)
+                // for each iframe instead of maintaining a second,
+                // independently-broken reimplementation of it.
+                if (typeof window.__sendSessionToModule === 'function') {
+                    var iframes = document.querySelectorAll('iframe');
+                    iframes.forEach(function(f) {
+                        try {
+                            var modName = f.getAttribute('data-module') || f.id || '';
+                            window.__sendSessionToModule(f, modName);
+                        } catch (_) {}
+                    });
+                    return;
+                }
+                // Last-resort fallback only if sendSessionToModule itself
+                // isn't available yet (shouldn't normally happen, since both
+                // live in the parent shell) — still better than sending a
+                // guaranteed-invalid session: skip broadcasting rather than
+                // actively regressing an already-working module.
             }
             // Broadcast immediately when AppStorage signals ready
             window.addEventListener('AppStorageReady', _broadcastParentReady);

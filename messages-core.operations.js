@@ -1224,6 +1224,31 @@ const ChatManager = {
             // (the friendly "🔒 Secure connection is being established. Please
             // retry." text) and a normal retry affordance, with no separate
             // code path required. The message is never transmitted unencrypted.
+            // FIX (SILENT-PLAINTEXT-ON-UNRESOLVED-RECIPIENT — closes a gap in
+            // the FIX-NO-PLAINTEXT-FALLBACK guarantee below): that guarantee
+            // only holds INSIDE encryptForChat() — it throws rather than ever
+            // returning plaintext. But encryptForChat() is only called when
+            // _recipientUserIdForEncryption is truthy. If recipient-id
+            // resolution itself fails (the exact scenario the
+            // FIX-DECRYPT-OTHERPARTY-RESOLUTION comment above documents as a
+            // real, live possibility right after opening a chat from a
+            // non-history source), this condition was simply false —
+            // encryptForChat() was never called at all, and requestBody.content
+            // silently stayed as the original PLAINTEXT string, sent to the
+            // backend with no error, no warning, and no retry. The receiver
+            // then runs that plaintext through decryptMessageForDisplay(),
+            // which is not a valid ciphertext envelope, fails, and retries
+            // forever — permanently stuck on the "🔒 Encrypted message"
+            // fallback text, since plaintext can never successfully decrypt no
+            // matter how many attempts. Fail loudly instead, using the same
+            // E2ESecureFailureError class and handling path
+            // FIX-NO-PLAINTEXT-FALLBACK already established for the
+            // key-fetch-timeout case, so this reaches the user as the same
+            // "Secure connection is being established, please retry" failed-
+            // send state instead of a silent security bypass.
+            if (requestBody.type === 'text' && typeof content === 'string' && !_recipientUserIdForEncryption && window.KynectaE2E) {
+                throw new window.KynectaE2E.E2ESecureFailureError('Could not resolve recipient for encryption — message not sent.');
+            }
             if (requestBody.type === 'text' && typeof content === 'string' && _recipientUserIdForEncryption && window.KynectaE2E) {
                 requestBody.content = await window.KynectaE2E.encryptForChat(content, conversationId, _recipientUserIdForEncryption);
             }

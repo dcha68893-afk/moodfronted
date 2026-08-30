@@ -1354,6 +1354,7 @@ const UIStateManager = {
                             const _verifyId = normalizedMessage ? String(normalizedMessage.id || normalizedMessage.localId || '') : '';
                             if (_verifyId) {
                                 let _verifyAttempts = 0;
+                                let _verifyGaveUp = false;
                                 const _verifyRender = function() {
                                     _verifyAttempts++;
                                     try {
@@ -1368,10 +1369,54 @@ const UIStateManager = {
                                         // still mid-init) — keep polling for up to ~8s rather than
                                         // giving up after one look, since that's the observed real-world
                                         // range for how late this can complete on a congested load.
-                                        if (_verifyAttempts < 16) setTimeout(_verifyRender, 500);
+                                        if (_verifyAttempts < 16) { setTimeout(_verifyRender, 500); return; }
+                                        _verifyGaveUp = true;
                                     } catch (_) {}
                                 };
                                 setTimeout(_verifyRender, 350);
+                                // FIX (RENDER-FALLBACK-CEILING-TOO-SHORT): the ~8s bounded
+                                // poll above matches what this file's own earlier comment
+                                // called "the observed real-world range" — but
+                                // _openViaUnifiedPipeline in messages-ui.js (the chat-open
+                                // path for Friend/Calls/Status/Marketplace, i.e. every
+                                // non-history entry point) waits up to 20s for the exact
+                                // same 'messagesUIReady' event before giving up on opening
+                                // the chat at all. On a genuinely slow/cold multi-iframe
+                                // load, messagesUI/UIRenderer construction finishing between
+                                // 8s and 20s is something this codebase's own chat-open logic
+                                // already anticipates as normal — but this render fallback
+                                // gave up for good at 8s regardless, with nothing after that
+                                // ever attempting to paint the message again. A message that
+                                // decrypts via the onResolved retry queue (which backs off up
+                                // to 15s and holds) calls this same render path again through
+                                // _patchDecryptedRealtimeMessage — meaning the data was
+                                // correctly patched with real plaintext (verified: it goes
+                                // through ChatManager.addMessage + KynectaLocalStore.saveMessage
+                                // either way) but could still never get painted if
+                                // construction hadn't finished by then either. This is very
+                                // likely the actual mechanism behind messages staying frozen
+                                // on the "🔒 Encrypted message" placeholder indefinitely for
+                                // chats opened from a non-history source, since those are
+                                // exactly the entry points where messages-ui.js's own
+                                // construction has had the least time to complete before the
+                                // first message needs to render. Back the bounded poll with an
+                                // unbounded, one-time 'messagesUIReady' listener — the same
+                                // event and pattern _openViaUnifiedPipeline already uses
+                                // successfully — so a message is never permanently lost just
+                                // because construction happened to take longer than ~8s.
+                                const _onUiReadyLate = function() {
+                                    window.removeEventListener('messagesUIReady', _onUiReadyLate);
+                                    if (!_verifyGaveUp) return; // bounded poll above already handled it
+                                    try {
+                                        const _landed = document.querySelector('[data-message-id="' + _verifyId + '"], [data-id="' + _verifyId + '"]');
+                                        if (_landed) return;
+                                        if (window.UIRenderer && typeof window.UIRenderer.renderMessages === 'function') {
+                                            debugLog(`[FORENSIC] UI_RENDER_FALLBACK | messageId=${_verifyId} | reason=messagesUIReady_late | ts=${Date.now()}`);
+                                            window.UIRenderer.renderMessages(_renderMsgs, _now, SessionManager && SessionManager.getUser && SessionManager.getUser());
+                                        }
+                                    } catch (_) {}
+                                };
+                                window.addEventListener('messagesUIReady', _onUiReadyLate);
                             }
                         } catch (_) {}
                         try {
