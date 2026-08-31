@@ -1180,7 +1180,31 @@ const ChatManager = {
                 if (window.__pendingMsgMeta) delete window.__pendingMsgMeta;
             } else {
                 debugLog(`[ChatManager] 📤 Sending message to real conversation - using chatId: ${conversationId}`);
-                const _conv = this._conversationsMap.get(conversationId);
+                // FIX-ROOT-CAUSE-MAP-KEY-TYPE-MISMATCH: this was a single, non-coerced
+                // `.get(conversationId)` — but _conversationsMap keys are NOT
+                // consistently typed across every writer. bootstrapConversation()
+                // (above, ~line 605/610) sets realId as whatever type the backend's
+                // JSON conversationId naturally is (typically a number), while other
+                // writers explicitly String()-ify the key before set() (see
+                // messages-core.bootstrap.js:1205, 'ChatManager._conversationsMap.set(String(chatId), ...)').
+                // Map.get() is a strict-equality lookup, so a numeric conversationId
+                // stored under one write and looked up as a string here (or vice
+                // versa) silently returns undefined — several OTHER read sites in
+                // this same file already defend against exactly this (see line 1822:
+                // '.get(_aid) || .get(Number(_aid))', line 2043, and
+                // messages-core.bootstrap.js:1152/2444's '.get(chatId) ||
+                // .get(String(chatId))') but this one, the send path itself, never
+                // did. A real (non-pending) conversation whose map key happened to be
+                // the other type meant _conv came back undefined here, friendId/
+                // otherParticipant/participantIds resolution had nothing to read from,
+                // and the send correctly (per FIX-NO-PLAINTEXT-FALLBACK) refused to
+                // silently go out in plaintext — but incorrectly, because the
+                // conversation and its participant data genuinely existed all along,
+                // just under a differently-typed key. Matching the existing
+                // both-types lookup pattern here closes that gap.
+                const _conv = this._conversationsMap.get(conversationId)
+                    || this._conversationsMap.get(String(conversationId))
+                    || this._conversationsMap.get(Number(conversationId));
                 // FIX-DECRYPT-OTHERPARTY-RESOLUTION: friendId/otherParticipant.id
                 // alone aren't always populated on a conversation object the
                 // moment a message is sent (e.g. right after opening a chat

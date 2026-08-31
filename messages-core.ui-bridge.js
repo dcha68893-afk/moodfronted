@@ -1580,6 +1580,30 @@ const UIStateManager = {
             }
         };
 
+        // FIX-ROOT-CAUSE-NO-ACK-FROM-BACKGROUND-SYNC: ackMessageDelivered() above
+        // was only ever called from handleRealtimePayload (the live socket
+        // 'message:new' path, see _sendDeliveryAck further down). messageSync.engine.js's
+        // syncChat() — the REST-based catch-up fetch that backfills messages missed
+        // while offline/reconnecting (see its own _newlyArrived comment) — never had
+        // access to this function at all, so a message that only ever arrived through
+        // that background sync (live socket event genuinely missed/dropped during the
+        // gap) rendered and persisted correctly but the sender was never told it was
+        // delivered: the backend's 10s scheduleMessageDeliveryTimeout ran to
+        // completion and pushed a false 'message:delivery_failed' even though the
+        // message was sitting on screen the whole time. This is exactly symptom 5
+        // ("messages persisted in DB, but delivery ACKs can time out"). Exposed here,
+        // scoped to messages actually addressed to this user (never ack your own
+        // sent messages coming back through sync), so syncChat() can call the same
+        // idempotent, dedup'd ack path live delivery already uses — one ack
+        // mechanism, two ingestion paths, per the "one delivery ACK path" target.
+        window.__kynAckMessageDelivered = function(message, myUserId) {
+            try {
+                const senderId = message && (message.senderId || (message.sender && message.sender.id));
+                if (myUserId != null && senderId != null && String(senderId) === String(myUserId)) return;
+                ackMessageDelivered(message).catch(function(){});
+            } catch (_) {}
+        };
+
         // CRYPTO-PIPELINE: shared by both the immediate-decrypt attempt and the
         // pipeline's own later retry (onResolved), so a message that had to be
         // queued because keys weren't ready at receive time gets the exact same

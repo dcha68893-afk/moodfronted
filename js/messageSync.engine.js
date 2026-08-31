@@ -139,12 +139,24 @@
                 // Notify UI
                 this._emitChatUpdated(chatId);
 
+                // FIX-ROOT-CAUSE-NO-ACK-FROM-BACKGROUND-SYNC: a message that only ever
+                // reaches this client through this catch-up fetch (the live socket
+                // event was genuinely missed during a disconnect gap) rendered fine but
+                // was never acknowledged back to the sender — see the matching fix and
+                // full explanation on window.__kynAckMessageDelivered in
+                // messages-core.ui-bridge.js. One ack mechanism, reused here for the
+                // background-sync ingestion path exactly as the live socket path
+                // already uses it.
+                const _myIdForAck = window.KynectaE2E && window.KynectaE2E.getMyUserId ? window.KynectaE2E.getMyUserId() : null;
                 for (const m of _newlyArrived) {
                     try {
                         window.dispatchEvent(new CustomEvent('kyn:incomingMessage', {
                             detail: { message: m, chatId: String(chatId) }
                         }));
                     } catch (_) {}
+                    if (typeof window.__kynAckMessageDelivered === 'function') {
+                        window.__kynAckMessageDelivered(m, _myIdForAck);
+                    }
                 }
 
                 console.log(`[SyncEngine] ✅ Synced ${serverMessages.length} msgs for chat ${chatId}`);
