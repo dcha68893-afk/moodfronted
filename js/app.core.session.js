@@ -3600,17 +3600,30 @@
         updateUserDisplayElements: function(user) {
           if (!user) return;
           
+          // FIX (shows-"User"-everywhere): this used to read ONLY
+          // user.displayName, with no fallback to username or
+          // firstName/lastName. Any account whose cached user object hadn't
+          // been hydrated with a computed displayName yet (e.g. right after
+          // Google or manual login, before /auth/me ran) showed the literal
+          // string "User" even though a real username was sitting right on
+          // the same object. Compute the same fallback chain the backend
+          // itself uses for displayName instead of assuming it's populated.
+          const resolvedName = user.displayName
+            || [user.firstName, user.lastName].filter(Boolean).join(' ').trim()
+            || user.username
+            || 'User';
+
           const avatars = document.querySelectorAll('.user-avatar, .avatar-img');
           avatars.forEach(avatar => {
             if (user.photoURL) {
               avatar.src = user.photoURL;
-              avatar.alt = user.displayName || 'User';
+              avatar.alt = resolvedName;
             }
           });
           
           const names = document.querySelectorAll('.user-name, .display-name');
           names.forEach(name => {
-            name.textContent = user.displayName || 'User';
+            name.textContent = resolvedName;
           });
           
           const emails = document.querySelectorAll('.user-email');

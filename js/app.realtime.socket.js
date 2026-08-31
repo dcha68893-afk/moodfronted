@@ -443,6 +443,25 @@
         }
 
         handleReconnect(meta = {}) {
+            // ROOT-CAUSE FIX (zombie-reconnect-without-token): handleReconnect used
+            // to unconditionally clear _manualDisconnect and proceed, regardless of
+            // WHY the socket was disconnected. _onLoggedOut (above) deliberately
+            // sets _manualDisconnect + wipes _sessionToken when the session has
+            // genuinely ended (e.g. a failed refresh) specifically to stop the
+            // reconnect loop — but app.stability.bridge.js's network-restore
+            // handler calls handleReconnect() on every 'network back online' event
+            // with no awareness of that, silently reviving the loop with no token
+            // to use. That's the exact "[Realtime] Connecting WITHOUT token —
+            // expect auth/token-missing error" cascade: a logged-out/session-ended
+            // socket kept trying to reconnect forever, authenticating with
+            // nothing. If there's truly no token available anywhere (meta.token
+            // included), respect the disconnect instead of overriding it — a real
+            // login will set a fresh token and reconnect through the normal path.
+            const hasUsableToken = !!(meta && meta.token) || !!this._sessionToken || !!acquireToken();
+            if (this._manualDisconnect && !hasUsableToken) {
+                if (SOCKET_CONFIG.debug) console.log('[Realtime] handleReconnect: no session token available — leaving socket disconnected');
+                return;
+            }
             if (this._manualDisconnect) this._manualDisconnect = false;
             if (meta && meta.token) this._sessionToken = meta.token;
 
