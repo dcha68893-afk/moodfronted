@@ -254,6 +254,27 @@
     }
 
     async _onConnected() {
+      // FIX-ROOT-CAUSE-DUPLICATE-SYNC (verified against executable code,
+      // 2026-08-31): _onConnected() is wired to two independent EventBus
+      // subscriptions in _attachSocketListeners() below — bus.on('SOCKET_CONNECTED', ...)
+      // and bus.on('SOCKET_EVENT', ...) filtered to type 'socket:reconnected'.
+      // On an actual reconnect cycle, socket.io fires its native 'connect' event
+      // (which app.realtime.socket.js turns into 'SOCKET_CONNECTED' on the bus)
+      // AND its native 'reconnect' event (which RealtimeStabilizationLayer.js
+      // turns into a 'socket:reconnected' SOCKET_EVENT) for the same cycle — both
+      // observed firing back-to-back against the same socket, confirmed by
+      // reading _attachToSocket() in RealtimeStabilizationLayer.js alongside the
+      // 'connect' handler in app.realtime.socket.js, not by trusting either
+      // file's own comments. So _onConnected() — and its unguarded
+      // sync:missed_events/sync:missed_messages emits below — ran twice per
+      // reconnect. join_user_room downstream in _restore.restore() was already
+      // safe (it goes through _joinUserRoomOnce()), but the sync emits had no
+      // equivalent guard. This per-cycle guard makes the whole method
+      // idempotent per connection, mirroring that existing pattern; it resets
+      // in _onDisconnected() below so a genuinely new connection can sync again.
+      if (this._syncingThisConnection) return;
+      this._syncingThisConnection = true;
+
       this._lastConnectedAt = Date.now();
       this._reconnectCount++;
       this._backoff.reset();
@@ -326,6 +347,8 @@
 
     _onDisconnected(reason) {
       this._lastDisconnectedAt = Date.now(); // FIX #17 — track disconnect time for missed-event window
+      // Reset the _onConnected() dedup guard so the next genuine reconnect syncs again.
+      this._syncingThisConnection = false;
 
       // FIX Bug4: During the 10-second boot grace window, the socket hasn't been
       // authenticated yet — any DISCONNECTED is a false positive. Don't propagate

@@ -127,7 +127,22 @@ class StatusWebSocket {
         return true;
     }
 
-    // FIX Bug F: emit join_user_room so server adds socket to user:<id> room
+    // FIX-ROOT-CAUSE-DUPLICATE-JOIN_USER_ROOM (status-websocket.js instance):
+    // This used to call `socket.emit('join_user_room', ...)` directly on the
+    // shared KynectaRealtime manager. Traced KynectaRealtime.emit()→send()
+    // (app.realtime.socket.js) and confirmed it has NO special-casing for
+    // join_user_room — it goes straight to the wire. That made this a live,
+    // independent 5th emission source, completely bypassing
+    // app.realtime.socket.js's own `_joinUserRoomOnce()` idempotent gate
+    // (see its doc comment): once from init() and again on every single
+    // future 'connect' event for as long as this page lives, on top of
+    // whatever the gate itself already emits for the same connection.
+    // Fixed by routing through the same shared gate every other call site
+    // (ReconnectOrchestrator.js's _restoreChatSubscriptions) already uses:
+    // the gate performs the actual emit only for the first caller per
+    // socket connection and is a safe no-op for every later caller,
+    // including this one, whichever order they fire in. Falls back to a
+    // direct emit only if the manager doesn't expose the gate (defensive).
     _joinUserRoom() {
         const userId =
             (window.currentUser && (window.currentUser.id || window.currentUser.userId)) ||
@@ -139,13 +154,15 @@ class StatusWebSocket {
         const socket = this.socket;
         if (!socket) return;
 
-        // KynectaRealtime proxies emit() to the real socket
-        if (typeof socket.emit === 'function') {
-            try {
+        try {
+            if (typeof socket._joinUserRoomOnce === 'function') {
+                socket._joinUserRoomOnce(userId);
+                console.log(`[StatusWebSocket] 📡 Requested join_user_room (idempotent) for userId=${userId}`);
+            } else if (typeof socket.emit === 'function') {
                 socket.emit('join_user_room', { userId });
                 console.log(`[StatusWebSocket] 📡 Emitted join_user_room for userId=${userId}`);
-            } catch (_) {}
-        }
+            }
+        } catch (_) {}
     }
 
     // ── SOCKET EVENT LISTENERS ────────────────────────────────────────────────
