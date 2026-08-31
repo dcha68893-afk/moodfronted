@@ -1750,11 +1750,6 @@
          the same relative execution order as the sibling core scripts. -->
     <script defer src="messages-ui.js?v=5"></script>
     <script src="js/e2e-encryption.js" defer></script>
-    <!-- FIX (DUPLICATE-E2E-INIT): this used to be ~70 lines of inline script
-         duplicated verbatim in group.html. Consolidated into one shared,
-         shared-maintained implementation — see js/e2e-session-init.js for
-         the full explanation and behavior. Must load AFTER e2e-encryption.js. -->
-    <script src="js/e2e-session-init.js" defer></script>
     <script src="js/voice-recorder.js" defer></script>
     <script src="js/link-preview.js" defer></script>
     <script src="js/chat-sync.js" defer></script>
@@ -1802,6 +1797,26 @@
          the same fix applied here. Only ONE load of e2e-encryption.js should
          ever exist per document. -->
     <script src="js/double-ratchet.js" defer></script>
+    <!-- FIX-ROOT-CAUSE-MIXED-ENCRYPTION-PROTOCOL-VERSION (v:2 vs v:3 envelopes
+         inside the SAME 1:1 chat, confirmed live: one participant's messages
+         decoded as {"v":2,"eph":...} — double-ratchet.js's per-message ECDH
+         ratchet — while the other participant's messages in the identical
+         chat decoded as {"v":3,"kid":...,"sid":...,"x3dh":{...}} —
+         e2e-session-init.js's X3DH session protocol):
+         e2e-session-init.js and js/double-ratchet.js both monkey-patch the
+         SAME KynectaE2E.encryptForChat/decryptFromChat pair; whichever one
+         finishes loading LAST wins and becomes each page's active outgoing
+         protocol. This tag used to load right after js/e2e-encryption.js
+         (i.e. BEFORE double-ratchet.js), so on message.html double-ratchet.js
+         (v:2) was the final, active patch — while group.html loaded these two
+         scripts in the opposite order, so e2e-session-init.js (v:3) was final
+         there instead. Two chat surfaces in the same app, silently running
+         two different, mutually-incompatible active encryption protocols.
+         Moved below js/double-ratchet.js so message.html now settles on the
+         SAME final protocol (v:3 / X3DH) as group.html — see the matching
+         load order there (js/e2e-encryption.js → js/double-ratchet.js →
+         js/e2e-session-init.js). Must still load AFTER e2e-encryption.js. -->
+    <script src="js/e2e-session-init.js" defer></script>
     <script src="js/safety-numbers.js" defer></script>
     <!-- Remaining features -->
     <script src="js/voice-waveform.js" defer></script>

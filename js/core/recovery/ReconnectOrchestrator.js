@@ -126,12 +126,22 @@
     }
 
     async _restoreChatSubscriptions() {
-      // The existing webSocketService._joinUserChatRooms handles this server-side
-      // Client just needs to re-emit join_user_room
+      // The existing webSocketService._joinUserChatRooms handles this server-side.
+      // FIX-ROOT-CAUSE-DUPLICATE-JOIN_USER_ROOM: this used to independently
+      // emit('join_user_room', ...) directly on the socket — one of four
+      // redundant emit sites (see app.realtime.socket.js's _joinUserRoomOnce()
+      // doc comment for the full list). Routed through the same idempotent gate
+      // now: if app.realtime.socket.js's own connect/authenticated handlers
+      // already joined for this connection, this becomes a no-op instead of a
+      // duplicate emit; if this restore path runs first, it performs the join.
       const rt = window.KynectaRealtime;
       if (!rt?._socket?.connected) return;
-      const myId = this._getMyUserId();
-      if (myId) rt._socket.emit('join_user_room', { userId: myId });
+      if (typeof rt._joinUserRoomOnce === 'function') {
+        rt._joinUserRoomOnce(this._getMyUserId());
+      } else {
+        const myId = this._getMyUserId();
+        if (myId) rt._socket.emit('join_user_room', { userId: myId });
+      }
     }
 
     async _flushOfflineQueue() {

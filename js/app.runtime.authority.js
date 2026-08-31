@@ -836,14 +836,35 @@
                 timestamp: Date.now()
             });
             console.warn('[RuntimeAuthority] realtime connect failed:', msg);
-        }).then(function () {
-            if (window.KynectaRealtime && typeof window.KynectaRealtime.isConnected === 'function' && window.KynectaRealtime.isConnected()) {
-                emit('SOCKET_CONNECTED', {
-                    userId: auth.userId || auth.user?.id || null,
-                    timestamp: Date.now()
-                });
-            }
         });
+        // FIX-ROOT-CAUSE-DUPLICATE-SOCKET_CONNECTED (double heartbeat / double
+        // presence:active / double join_user_room / double sync:missed_events
+        // & sync:missed_messages emits on every single connect, confirmed via
+        // browser network capture — every event in the post-connect init
+        // sequence fired exactly twice, ~1ms apart):
+        //
+        // This .then() used to ALSO emit 'SOCKET_CONNECTED' here, on top of the
+        // 'SOCKET_CONNECTED' that app.realtime.socket.js's own
+        // _onSocketIOConnect() already emits internally on every real (re)connect
+        // (see FIX-CALL-RECOVERY comment there). Every subsystem listening for
+        // 'SOCKET_CONNECTED' — ReconnectOrchestrator (session restore + missed-
+        // event/missed-message resync), GroupOrchestrator (room rejoin),
+        // PresenceEngineFoundation, OfflineMessageQueue, WebRTCSessionOrchestrator,
+        // AdaptiveBitrateEngine, etc. — therefore ran its entire connect-handling
+        // logic TWICE per connection: two full session restores, two
+        // sync:missed_events/sync:missed_messages round-trips, two heartbeats,
+        // two presence announcements, extra redundant join_user_room emits.
+        // Concretely, this is the "notification fires but the message never
+        // renders in the panel" bug: two overlapping sync/restore passes racing
+        // against each other made it easy for one pass's state to clobber or
+        // pre-empt the other's before the UI update landed.
+        //
+        // app.realtime.socket.js is the single source of truth for real connect
+        // cycles (it's the module that actually owns the socket and emits this
+        // exact event on every fresh connect AND every rebuild-after-reconnect —
+        // see ReconnectOrchestrator.js's own comment on this). This module has no
+        // more information than that event already provides, so it must not
+        // re-emit it — just observe.
     }
 
     function ensureBootSession() {

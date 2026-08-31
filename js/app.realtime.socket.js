@@ -363,6 +363,7 @@
             this._registeredSocketListeners.clear();
             this._bridgeListenersLogged = false;
             this._hasSyncedThisConnection = false;
+            this._hasJoinedUserRoomThisConnection = false;
             this._emitStateChange();
         }
 
@@ -622,6 +623,11 @@
             this._registeredSocketListeners = new Set();
             this._socketHandlerMap = new Map();
             this._bridgeListenersLogged = false;
+            // FIX-ROOT-CAUSE-DUPLICATE-JOIN_USER_ROOM: reset alongside the socket
+            // rebuild above so a genuinely new socket (fresh connect or any
+            // reconnect) can join again — see _joinUserRoomOnce() for the guard
+            // this flag backs.
+            this._hasJoinedUserRoomThisConnection = false;
 
             this._lastConnectLogState = this._lastConnectLogState || 'disconnected';
 
@@ -777,16 +783,7 @@
                 // The connect-time join_user_room may fire before the server middleware
                 // has finished auth, so the join silently fails.  Re-joining here (after
                 // the server has confirmed auth) guarantees sendToUser() can reach us.
-                try {
-                    const myId = data?.userId || this._getUserId();
-                    if (myId && this._socket && typeof this._socket.emit === 'function') {
-                        const idStr = String(myId);
-                        this._socket.emit('join_user_room', { userId: myId });
-                        this._socket.emit('join', { room: 'user:' + idStr });
-                        this._socket.emit('join', { room: 'user_' + idStr });
-                        if (SOCKET_CONFIG.debug) console.log('[Realtime] ✅ Re-joined user rooms after auth confirmation, userId:', myId);
-                    }
-                } catch (_authJoinErr) {}
+                this._joinUserRoomOnce(data?.userId);
             });
 
             // FIX-SESSION-REPLACED: When server evicts this socket (e.g. max concurrent
@@ -864,13 +861,7 @@
             // correct user:<id> and user_<id> rooms. Without this, sendToUser() on the
             // backend cannot deliver messages or call:incoming events to this client.
             // The backend handler in webSocketService.js joins the rooms on this event.
-            try {
-                const myId = this._getUserId();
-                if (myId && this._socket && typeof this._socket.emit === 'function') {
-                    this._socket.emit('join_user_room', { userId: myId });
-                    if (SOCKET_CONFIG.debug) console.log('[Realtime] ✅ Emitted join_user_room for userId:', myId);
-                }
-            } catch (_jrErr) {}
+            this._joinUserRoomOnce();
         }
 
         // Helper to get current user ID from multiple possible storage locations
@@ -2144,6 +2135,36 @@
             }
         }
 
+        // FIX-ROOT-CAUSE-DUPLICATE-JOIN_USER_ROOM: this codebase grew four
+        // independent call sites that each emitted 'join_user_room' on their own
+        // trigger — the socket 'connect' handler (_onSocketIOConnect), the
+        // server's 'authenticated' confirmation handler, a 'connected' listener
+        // registered separately near the bottom of this file (FIX-6C), and
+        // ReconnectOrchestrator.js's session-restore step — each added over time
+        // as its own "safety net" without removing the earlier ones. Per
+        // connection, that's up to 4 redundant join_user_room emits (plus 2 more
+        // 'join' room emits from the 'authenticated' handler), all doing the
+        // exact same thing. This is the single, idempotent gate every one of
+        // those call sites now routes through: it performs the actual emit only
+        // for the FIRST caller per socket connection; every later caller in the
+        // same connection is a safe no-op. _hasJoinedUserRoomThisConnection is
+        // reset whenever a new socket instance is created (fresh connect or any
+        // reconnect — see _connectSocketIO()/disconnect()), so a genuinely new
+        // connection can join again exactly once.
+        _joinUserRoomOnce(myIdOverride) {
+            if (this._hasJoinedUserRoomThisConnection) return;
+            try {
+                const myId = myIdOverride || this._getUserId();
+                if (!myId || !this._socket || typeof this._socket.emit !== 'function') return;
+                this._hasJoinedUserRoomThisConnection = true;
+                const idStr = String(myId);
+                this._socket.emit('join_user_room', { userId: myId });
+                this._socket.emit('join', { room: 'user:' + idStr });
+                this._socket.emit('join', { room: 'user_' + idStr });
+                if (SOCKET_CONFIG.debug) console.log('[Realtime] ✅ Joined user rooms once for userId:', myId);
+            } catch (_) {}
+        }
+
         _triggerSync() {
             if (this._hasSyncedThisConnection) return;
             this._hasSyncedThisConnection = true;
@@ -2614,15 +2635,18 @@
             });
         })();
 
-        // ── FIX-6C: Emit join_user_room after EVERY socket connection ─────────────
-        // Ensure the server room join happens even when the socket reconnects silently
+        // ── FIX-6C (superseded): 'join_user_room after EVERY socket connection' is
+        // now handled by the single idempotent _joinUserRoomOnce() gate, called
+        // directly from _onSocketIOConnect() and the 'authenticated' handler above.
+        // This listener used to independently re-emit join_user_room on every
+        // 'connected' state change, which is one of the four redundant call sites
+        // consolidated in FIX-ROOT-CAUSE-DUPLICATE-JOIN_USER_ROOM (see
+        // _joinUserRoomOnce's doc comment). Kept as a no-op call into the same
+        // gate (rather than deleted outright) so reconnect paths that only ever
+        // relied on this 'connected' listener firing are still covered — but it
+        // can no longer cause an extra emit.
         realtimeManager.on('connected', function() {
-            try {
-                var myId = realtimeManager._getUserId ? realtimeManager._getUserId() : null;
-                if (myId && realtimeManager._socket && typeof realtimeManager._socket.emit === 'function') {
-                    realtimeManager._socket.emit('join_user_room', { userId: myId });
-                }
-            } catch(_) {}
+            realtimeManager._joinUserRoomOnce();
         });
     }
 
