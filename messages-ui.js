@@ -12017,8 +12017,23 @@ Type: ${message.type || 'text'}`;
                         if (window.innerWidth <= 768) document.body.classList.add('chat-active');
                         const coreState = _core.getState?.();
                         const _chatId = (_conv && _conv.id) ? _conv.id : _conv;
-                        const _chatOpts = (_conv && typeof _conv === 'object') ? { friendName: _conv.friendName || _conv.name, friendAvatar: _conv.friendAvatar || _conv.avatar, userName: _conv.friendName || _conv.name } : {};
+                        // FIX (BYPASS-MISSING-FRIENDID): every other openConversation()
+                        // call site in messages-core.operations.js passes friendId in
+                        // options (see ConversationManager.sendMessage/loadChatByFriendId
+                        // call sites) — this bypass path was the one exception, passing
+                        // only display fields. openConversation()'s own cache-hit branch
+                        // doesn't need it (the cached conversation object already carries
+                        // friendId/otherParticipant from its server fetch), but the
+                        // no-cache branch uses options as its only source of truth for a
+                        // conversation that's never been fetched from the server before —
+                        // exactly the first-contact-via-Friend/Status/Calls case this
+                        // bypass exists for. numericUserId is already the resolved target
+                        // user id this same function used to call
+                        // startOrGetDirectConversation() two lines above, so it's the
+                        // correct value here too.
+                        const _chatOpts = (_conv && typeof _conv === 'object') ? { friendName: _conv.friendName || _conv.name, friendAvatar: _conv.friendAvatar || _conv.avatar, userName: _conv.friendName || _conv.name, friendId: numericUserId } : { friendId: numericUserId };
                         // Same dedupe key the real openChat() checks — if construction
+
                         // finishes later and messagesUIReady fires the real openChat()
                         // for this same conversation, its own guard will see this and
                         // skip instead of opening it a second time.
@@ -14906,15 +14921,34 @@ Type: ${message.type || 'text'}`;
             // resolver, same retry-on-keys-not-ready queue, same cache as the
             // chat panel's own render path and the sidebar preview. No second,
             // locally-duplicated otherPartyId/decrypt implementation here.
-            const chatId = String(
-                msg.chatId || msg.conversationId ||
-                window.ChatManager?._activeConversation?.id ||
-                window.__activeChatId || ''
-            );
+            // FIX (CHATID-GATE-BLOCKS-VALID-PEER / FROZEN-CHATID-CLOSURE): this used
+            // to compute chatId once, before the retry loop, from
+            // window.ChatManager?._activeConversation?.id — which is exactly the
+            // field the slow bypass-open path (Friend/Status/Calls, see
+            // _openViaUnifiedPipeline's own multi-second retry chain) is often still
+            // populating when a realtime message arrives. Two compounding bugs: (1)
+            // the retry loop below re-checked the SAME frozen empty string on every
+            // one of its 6 attempts, since chatId was captured once outside the
+            // closure and never recomputed, so a conversation that finished loading
+            // on attempt 3 still couldn't unblock attempt 4; and (2) even recomputed,
+            // requiring chatId at all was unnecessary — e2e-session-init.js's
+            // loadState()/pairKey() key the X3DH session purely by the peer's user
+            // id, never by chatId, so gating decrypt on chatId being resolved yet
+            // was blocking on a value the crypto layer doesn't actually need.
+            // resolveMessageCryptoPeer() already resolves peer.peerUserId instantly
+            // and authoritatively for an incoming message (it's just senderId) —
+            // recomputing chatId per attempt and falling back to peerUserId when
+            // nothing else is available means this path no longer silently gives up
+            // after 1.8s just because the bypass-open flow hasn't finished yet.
             const attemptBypassDecrypt = function (attemptsLeft) {
                 const peer = window.KynectaE2E.resolveMessageCryptoPeer
                     ? window.KynectaE2E.resolveMessageCryptoPeer(msg, myId, window.ChatManager?._activeConversation)
                     : { peerUserId: null };
+                const chatId = String(
+                    msg.chatId || msg.conversationId ||
+                    window.ChatManager?._activeConversation?.id ||
+                    window.__activeChatId || peer.peerUserId || ''
+                );
                 if (chatId && peer.peerUserId) {
                     // FIX (PLACEHOLDER-STICKS-ON-FIRST-MESSAGE): a bubble built
                     // via this path either shows real content or nothing yet —

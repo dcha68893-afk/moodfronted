@@ -287,7 +287,36 @@
 
   async function bootstrapE2E() {
     if (!window.KynectaE2E) return false; let pw = null, legacy = null; try { pw = sessionStorage.getItem('kyn_e2e_pw_session'); legacy = sessionStorage.getItem('kyn_e2e_pw_legacy_session'); } catch (_) {}
-    if (!pw) return false; const ready = await window.KynectaE2E.init(pw, legacy); if (!ready && !window.KynectaE2E.enabled) return false; const prekeysReady = await provisionWithRetry(); installSecureTransport();
+    if (!pw) return false; const ready = await window.KynectaE2E.init(pw, legacy); if (!ready && !window.KynectaE2E.enabled) return false;
+    // FIX (SEND-BEFORE-TRANSPORT-INSTALLED — root cause of a permanent, silent
+    // v2/v3 protocol split between two accounts in the SAME conversation):
+    // this used to call installSecureTransport() only after `await
+    // provisionWithRetry()` — a real network round-trip (prekey count check +
+    // registration, with its own multi-second/backoff retries on a slow or
+    // cold Render backend) — returned. But the send path's own readiness gate
+    // (_waitForEnabledBounded in e2e-encryption.js) only waits on `_enabled`,
+    // which _markEnabled() sets the moment `init()` above resolves — well
+    // before provisionWithRetry() has had a chance to run, let alone finish.
+    // A message sent by a freshly-unlocked user inside that window passed the
+    // gate, found window.KynectaE2E.encryptForChat still pointing at the
+    // ORIGINAL (pre-X3DH, envelope v2) function — installSecureTransport()
+    // hadn't monkey-patched it to the v3 version yet — and went out as v2
+    // permanently, with no error and nothing to ever re-send it as v3. The
+    // other party's client (if already past this same window) sends and
+    // expects v3, so its receive-side decryptor for v2 messages from this
+    // sender works, but THIS sender can never produce a v3 envelope the
+    // receiver's X3DH session actually expects for anything beyond that one
+    // race, and — more importantly — cannot receive-and-decrypt a v3 message
+    // FROM the other party correctly either, since v3-vs-v2 is a real,
+    // permanent per-message format choice baked in at encrypt time, not a
+    // timing artifact that resolves itself. installSecureTransport() has no
+    // dependency on prekeys being published — it only needs the original
+    // encrypt/decrypt functions to exist, which they already do — so moving
+    // it here, before the prekey network round-trip, closes that window down
+    // to effectively zero (a same-tick synchronous call) instead of leaving
+    // it open for however long provisionWithRetry() takes.
+    installSecureTransport();
+    const prekeysReady = await provisionWithRetry();
     try { document.dispatchEvent(new CustomEvent('kyn:e2eProvisioned', { detail: { userId: userId(), identityReady: !!window.KynectaE2E.enabled, prekeysReady } })); } catch (_) {}
     return !!window.KynectaE2E.enabled && prekeysReady;
   }
