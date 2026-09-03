@@ -2297,7 +2297,17 @@
             
             if (!_getUserToken || typeof _getUserToken !== 'function') {
                 console.warn("[API] ⏳ getUserToken not found in window.__API_CORE");
-                _getUserToken = getAuthToken;
+                // FIX (infinite-recursion): _getUserToken must NEVER be set to
+                // getAuthToken. getAuthToken() calls _getUserToken() as one of
+                // its own fallback steps, so pointing _getUserToken back at
+                // getAuthToken made every call recurse into itself forever
+                // ("Maximum call stack size exceeded"), which in turn made
+                // every protected request fail and cascade into retry storms
+                // across chat/messages/groups. Leave _getUserToken unset here;
+                // getAuthToken()'s own guard (`if (_getUserToken && typeof
+                // _getUserToken === 'function')`) will simply skip this step
+                // and fall through to its localStorage-based last resort.
+                _getUserToken = null;
             }
             
             if (!_apiCache) {
@@ -2322,7 +2332,9 @@
         } catch (error) {
             console.error("[API] ❌ Failed to initialize dependencies:", error);
             _secureApiFetch = createFallbackSecureFetch();
-            _getUserToken = getAuthToken;
+            // FIX (infinite-recursion): see comment above — never alias
+            // _getUserToken to getAuthToken, it creates self-recursion.
+            _getUserToken = null;
             _apiCache = {
                 get: () => null,
                 set: () => {},
