@@ -6675,11 +6675,19 @@
                             // the visible list-flash window for no benefit — fire immediately,
                             // the veil above is what actually hides the gap now.
                             _postRFC();
-                        } else if (payload.userId || payload.userName) {
+                        } else if (payload.userId || payload.userName || payload.conversationId) {
                             // ✅ FIXED: Regular navigation from friends/calls - open chat with user
+                            // FIX (notification-click-drops-target): this previously always
+                            // dropped conversationId/messageId even when the caller supplied
+                            // them (e.g. a DM notification click already knows exactly which
+                            // chat/message to jump to) — forwarding them through now instead
+                            // of forcing every SWITCH_MODULE-based open through a fresh
+                            // by-userId lookup.
                             const chatPayload = {
                                 userId: payload.userId,
                                 userName: payload.userName || 'User',
+                                conversationId: payload.conversationId || null,
+                                messageId: payload.messageId || null,
                                 findExisting: true, // Continue existing chat if available
                                 timestamp: Date.now(),
                                 source: payload.source || 'parent-frame'

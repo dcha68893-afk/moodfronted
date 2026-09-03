@@ -140,6 +140,8 @@
                 window.NotifStab.notifyApp(title, body, {
                     module: 'dm',
                     contextId: chatId || senderId || 'message',
+                    userId: senderId || null,
+                    messageId: message.id || null,
                     icon: '💬'
                 });
             }

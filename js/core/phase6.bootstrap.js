@@ -81,13 +81,13 @@
   // FIX (Forensic Audit P3): Rich /mesh/ engine — crypto, transport, router, orchestrator.
   // Previously only the lightweight MeshRelayEngine was loaded; the full E2EE mesh stack
   // in /mesh/ was never initialized. Load order matters: crypto → transport → router → engine.
-  // mesh-messages-bridge.js is loaded last as it depends on MeshEngine + MeshTransport.
+  // mesh-messages-bridge.js REMOVED (messaging module deleted) — it only wired mesh
+  // delivery into the now-deleted messages-core/messages-ui pipeline.
   const MESH_MODULES = [
     '/mesh/mesh-crypto.js',
     '/mesh/mesh-transport.js',
     '/mesh/mesh-router.js',
     '/mesh/mesh-engine.js',
-    '/mesh/mesh-messages-bridge.js',
   ];
 
   // Phase 11: Central Orchestration Runtime — wires all engines together

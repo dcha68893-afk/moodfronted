@@ -234,7 +234,7 @@
             var title = message.senderName || message.sender || message.username || 'New message';
             try {
                 if (window.NotifStab && typeof window.NotifStab.notifyApp === 'function') {
-                    window.NotifStab.notifyApp(title, body, { module: 'dm', contextId: chatId || senderId || 'message', icon: '💬' });
+                    window.NotifStab.notifyApp(title, body, { module: 'dm', contextId: chatId || senderId || 'message', userId: senderId || null, messageId: message.id || null, icon: '💬' });
                 }
             } catch (_) {}
         }
