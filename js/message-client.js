@@ -103,26 +103,53 @@
         return res && res.data ? res.data : [];
     }
 
+    // Uses the existing generic /api/files/upload endpoint — not
+    // message-specific infra, and not the Media-table path (routes/media.js
+    // has a pre-existing bug where its Media.create() call uses field names
+    // that don't match the Media model's actual schema; not touching that).
+    // Attachment info instead travels in the message's own metadata field,
+    // which messageDeliveryService.sendMessage() already supports generically.
+    async function uploadAttachment(file, onProgress) {
+        const formData = new FormData();
+        formData.append('file', file);
+        const res = await api().post('/files/upload', formData);
+        if (!res || res.success === false) throw new Error((res && res.message) || 'Upload failed');
+        const data = res.data || res;
+        return { url: data.url, mimeType: data.mimeType, size: data.size, type: data.type, originalName: data.originalName };
+    }
+
+    // Message.type is a DB ENUM that only allows 'file' for non-media
+    // documents (files.js's upload endpoint returns 'document' for
+    // PDFs/docs, which isn't a valid value there — would fail the insert).
+    const MESSAGE_TYPE_ENUM = new Set(['text', 'image', 'video', 'audio', 'file', 'sticker', 'location', 'contact', 'system', 'status_reply', 'poll', 'view_once']);
+    function toMessageType(attachmentType) {
+        return MESSAGE_TYPE_ENUM.has(attachmentType) ? attachmentType : 'file';
+    }
+
     // ONE send pipeline: REST. (Verified against chat.html: there is no
     // parent-side handler for the generic REALTIME_SEND bridge that
     // KynectaRealtime.emit() would use from inside an iframe, and the
     // app's own established pattern for sending is REST — see the original
     // api.request.js sendMessage(). Using REST here also satisfies §16:
     // sending must not depend on an active socket connection.)
-    async function sendMessage({ chatId, receiverId, content, type = 'text', replyToId = null }) {
+    async function sendMessage({ chatId, receiverId, content, type = 'text', replyToId = null, attachment = null }) {
         const clientMessageId = generateClientMessageId();
         const optimisticId = `optimistic:${clientMessageId}`;
         const optimisticMessage = {
             id: optimisticId, _optimisticId: optimisticId, chatId: chatId || `pending:${receiverId}`,
-            senderId: window._kynCurrentUserId || null, content, type, replyToId,
+            senderId: window._kynCurrentUserId || null, content, type: attachment ? toMessageType(attachment.type) : type, replyToId,
             clientMessageId, createdAt: new Date().toISOString(), status: 'sending',
+            metadata: attachment ? { attachment } : null,
         };
         const bucket = getOrCreateConversationBucket(optimisticMessage.chatId);
         bucket.set(optimisticId, optimisticMessage);
         notify('message:added', { chatId: optimisticMessage.chatId, message: optimisticMessage });
 
         try {
-            const res = await api().post('/messages', { chatId, receiverId, content, type, replyToId, clientMessageId });
+            const res = await api().post('/messages', {
+                chatId, receiverId, content, type: attachment ? toMessageType(attachment.type) : type, replyToId, clientMessageId,
+                metadata: attachment ? { attachment } : undefined,
+            });
             if (res && res.success) {
                 bucket.delete(optimisticId);
                 // Real conversations may have a different chatId than the
@@ -148,6 +175,49 @@
         if (!messageIds || messageIds.length === 0) return;
         upsertConversationMeta(chatId, { unreadCount: 0 });
         try { await api().post('/messages/read', { messageIds }); } catch (_) {}
+    }
+
+    async function deleteMessage(chatId, messageId, { forEveryone = false } = {}) {
+        try {
+            const res = await api().delete(`/messages/${messageId}?deleteForEveryone=${forEveryone}`);
+            if (res && res.success) {
+                const bucket = state.messagesByConversation.get(chatId);
+                if (bucket && bucket.has(messageId)) {
+                    const existing = bucket.get(messageId);
+                    bucket.set(messageId, Object.assign({}, existing, {
+                        content: forEveryone ? 'This message was deleted' : existing.content,
+                        deleted: true, deleteForEveryone: forEveryone,
+                    }));
+                    notify('message:deleted', { chatId, messageId });
+                }
+                return { success: true };
+            }
+            return { success: false, error: res && res.message };
+        } catch (err) {
+            return { success: false, error: err.message };
+        }
+    }
+
+    async function editMessage(chatId, messageId, content) {
+        try {
+            // window.api.request has no .patch() — only .put(); the backend
+            // route accepts both (matching the app's existing PUT-alias
+            // convention for exactly this reason).
+            const res = await api().put(`/messages/${messageId}`, { content });
+            if (res && res.success) {
+                const bucket = state.messagesByConversation.get(chatId);
+                if (bucket && bucket.has(messageId)) {
+                    bucket.set(messageId, Object.assign({}, bucket.get(messageId), {
+                        content: res.data.content, isEdited: true, editedAt: res.data.editedAt,
+                    }));
+                    notify('message:edited', { chatId, messageId });
+                }
+                return { success: true };
+            }
+            return { success: false, error: res && res.message };
+        } catch (err) {
+            return { success: false, error: err.message };
+        }
     }
 
     // Inbound realtime: chat.html's existing bridge (_fwdNewMessage /
@@ -199,12 +269,44 @@
                 }
                 return;
             }
+            if (data.type === 'message:deleted' || data.type === 'message_deleted') {
+                const p = data.payload || {};
+                const bucket = state.messagesByConversation.get(p.chatId);
+                if (bucket && p.messageId != null && bucket.has(p.messageId)) {
+                    const existing = bucket.get(p.messageId);
+                    if (p.deleteForEveryone || (p.deletedFor || []).includes(window._kynCurrentUserId)) {
+                        bucket.set(p.messageId, Object.assign({}, existing, {
+                            content: p.deleteForEveryone ? 'This message was deleted' : existing.content,
+                            deleted: true, deleteForEveryone: !!p.deleteForEveryone,
+                        }));
+                        notify('message:deleted', { chatId: p.chatId, messageId: p.messageId });
+                    }
+                }
+                return;
+            }
             if (data.type === 'CONVERSATION_UPDATED') {
                 const p = data.payload || {};
                 if (p.chatId) upsertConversationMeta(p.chatId, { lastMessage: { content: p.lastMessage, createdAt: p.lastMessageAt } });
                 return;
             }
         });
+
+        // No dedicated raw bridge exists for message:edited yet (only
+        // message:new/delivered/read/deleted have one in chat.html), but it
+        // isn't on chat.html's SKIP_WILDCARD list either, so it already
+        // reaches this iframe through the generic REALTIME_EVENT: wildcard
+        // forwarder — KynectaRealtime.on() is the correct way to receive it.
+        if (window.KynectaRealtime && window.KynectaRealtime.on) {
+            window.KynectaRealtime.on('message:edited', (payload) => {
+                const bucket = state.messagesByConversation.get(payload.chatId);
+                if (bucket && bucket.has(payload.messageId)) {
+                    bucket.set(payload.messageId, Object.assign({}, bucket.get(payload.messageId), {
+                        content: payload.content, isEdited: true, editedAt: payload.editedAt,
+                    }));
+                    notify('message:edited', { chatId: payload.chatId, messageId: payload.messageId });
+                }
+            });
+        }
 
         // Tell chat.html's bridge we're ready so any messages queued while
         // this iframe was still loading get flushed to us now (existing
@@ -282,7 +384,10 @@
         getConversations: () => Array.from(state.conversations.values()),
         openChat,
         sendMessage,
+        uploadAttachment,
         markRead,
+        deleteMessage,
+        editMessage,
         loadHistory,
         getConnectionState: () => state.connectionState,
         getActiveChatId: () => state.activeChatId,

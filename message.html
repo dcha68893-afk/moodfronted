@@ -52,6 +52,15 @@
   .bubble-row.mine .bubble { background: var(--kyn-accent, #2d7ff9); color: #fff; }
   .bubble-meta { font-size: 10px; opacity: 0.65; margin-top: 3px; text-align: right; }
   .bubble-row.failed .bubble { outline: 2px solid #e04b4b; }
+  .bubble-deleted { font-style: italic; opacity: 0.6; }
+  .bubble-row { position: relative; align-items: center; gap: 4px; }
+  .bubble-actions { display: none; gap: 2px; }
+  .bubble-row.mine:hover .bubble-actions { display: flex; }
+  .bubble-action-btn {
+    background: none; border: none; cursor: pointer; font-size: 12px; opacity: 0.6;
+    padding: 4px; border-radius: 4px;
+  }
+  .bubble-action-btn:hover { opacity: 1; background: var(--kyn-bg-hover, #f0f0f0); }
   #composeBar { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--kyn-border, #e2e2e2); }
   #composeInput {
     flex: 1; border-radius: 20px; border: 1px solid var(--kyn-border, #ddd);
@@ -62,6 +71,19 @@
     width: 40px; height: 40px; cursor: pointer; flex-shrink: 0;
   }
   #sendBtn:disabled { opacity: 0.5; cursor: default; }
+  #attachBtn {
+    background: none; border: none; font-size: 20px; cursor: pointer; flex-shrink: 0;
+    width: 36px; height: 36px; border-radius: 50%;
+  }
+  #attachBtn:hover { background: var(--kyn-bg-hover, #f0f0f0); }
+  #attachBtn:disabled { opacity: 0.5; cursor: default; }
+  .bubble-attachment-image { max-width: 220px; max-height: 220px; border-radius: 10px; display: block; margin-bottom: 4px; }
+  .bubble-attachment-file {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px;
+    background: rgba(0,0,0,0.06); text-decoration: none; color: inherit; margin-bottom: 4px; font-size: 13px;
+  }
+  .bubble-row.mine .bubble-attachment-file { background: rgba(255,255,255,0.2); }
+  #attachUploadProgress { font-size: 12px; color: var(--kyn-text-secondary,#999); padding: 0 14px; }
   #emptyState { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--kyn-text-secondary, #999); }
   #loadOlderBtn { text-align: center; padding: 8px; font-size: 12px; color: var(--kyn-accent, #2d7ff9); cursor: pointer; }
   @media (max-width: 720px) {
@@ -75,15 +97,15 @@
 
   <div id="convList"></div>
 
-  <div id="chatPanel">
+  <div id="chatPanel" class="hide-on-mobile">
     <div id="emptyState">Select a conversation</div>
   </div>
 
-  <script src="js/api.request.js"></script>
-  <script src="js/api.core.js"></script>
-  <script src="js/app.realtime.socket.js"></script>
-  <script src="js/core/identity/IdentityProfileStore.js"></script>
-  <script src="message-client.js"></script>
+  <script src="/js/api.request.js"></script>
+  <script src="/js/api.core.js"></script>
+  <script src="/js/app.realtime.socket.js"></script>
+  <script src="/js/core/identity/IdentityProfileStore.js"></script>
+  <script src="/js/message-client.js"></script>
 
   <script>
   (function () {
@@ -124,15 +146,39 @@
       });
     }
 
+    function attachmentHtml(m) {
+      let meta = m.metadata;
+      if (typeof meta === 'string') { try { meta = JSON.parse(meta); } catch (_) { meta = null; } }
+      const att = meta && meta.attachment;
+      if (!att) return '';
+      if ((att.type || m.type) === 'image') {
+        return `<img class="bubble-attachment-image" src="${escapeHtml(att.url)}" alt="${escapeHtml(att.originalName || 'image')}">`;
+      }
+      const icon = { video: '🎬', audio: '🎵', document: '📄', file: '📎' }[att.type] || '📎';
+      return `<a class="bubble-attachment-file" href="${escapeHtml(att.url)}" target="_blank" rel="noopener">
+                ${icon} ${escapeHtml(att.originalName || 'Attachment')}
+              </a>`;
+    }
+
     function bubbleHtml(m, isMine) {
       const time = m.createdAt ? new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
       const statusTick = isMine ? ({ sending: '…', sent: '✓', delivered: '✓✓', read: '✓✓', failed: '⚠' }[m.status] || '') : '';
+      const editedTag = m.isEdited ? ' (edited)' : '';
+      const isDeletedForEveryone = m.deleted && m.deleteForEveryone;
+      const content = isDeletedForEveryone ? 'This message was deleted' : m.content;
+      const actions = (isMine && !m.deleted && typeof m.id === 'number') ? `
+          <div class="bubble-actions">
+            <button class="bubble-action-btn" data-action="edit" data-message-id="${m.id}" title="Edit">✎</button>
+            <button class="bubble-action-btn" data-action="delete" data-message-id="${m.id}" title="Delete">🗑</button>
+          </div>` : '';
       return `
         <div class="bubble-row ${isMine ? 'mine' : ''}${m.status === 'failed' ? ' failed' : ''}" data-message-id="${m.id}">
-          <div class="bubble">
-            ${escapeHtml(m.content)}
+          <div class="bubble${isDeletedForEveryone ? ' bubble-deleted' : ''}">
+            ${!isDeletedForEveryone ? attachmentHtml(m) : ''}
+            ${content ? escapeHtml(content) : ''}${!isDeletedForEveryone ? editedTag : ''}
             <div class="bubble-meta">${time} ${statusTick}</div>
           </div>
+          ${actions}
         </div>`;
     }
 
@@ -150,6 +196,8 @@
         <div id="loadOlderBtn">Load earlier messages</div>
         <div id="messageLog"></div>
         <div id="composeBar">
+          <button id="attachBtn" title="Attach file">📎</button>
+          <input type="file" id="attachInput" style="display:none" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt">
           <textarea id="composeInput" rows="1" placeholder="Message..."></textarea>
           <button id="sendBtn">&#9658;</button>
         </div>
@@ -173,6 +221,8 @@
 
       const input = document.getElementById('composeInput');
       const sendBtn = document.getElementById('sendBtn');
+      const attachBtn = document.getElementById('attachBtn');
+      const attachInput = document.getElementById('attachInput');
 
       async function doSend() {
         const content = input.value.trim();
@@ -188,6 +238,26 @@
       input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doSend(); }
       });
+
+      attachBtn.addEventListener('click', () => attachInput.click());
+      attachInput.addEventListener('change', async () => {
+        const file = attachInput.files[0];
+        if (!file) return;
+        attachBtn.disabled = true;
+        attachBtn.textContent = '⏳';
+        try {
+          const attachment = await window.MessageModule.uploadAttachment(file);
+          const caption = input.value.trim();
+          input.value = '';
+          await window.MessageModule.sendMessage({ chatId, content: caption, attachment });
+        } catch (err) {
+          alert('Upload failed: ' + err.message);
+        } finally {
+          attachBtn.disabled = false;
+          attachBtn.textContent = '📎';
+          attachInput.value = '';
+        }
+      });
     }
 
     function renderMessages(chatId, { preserveScroll = false } = {}) {
@@ -202,6 +272,23 @@
       } else {
         log.scrollTop = log.scrollHeight;
       }
+
+      log.querySelectorAll('.bubble-action-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const messageId = Number(btn.dataset.messageId);
+          if (btn.dataset.action === 'delete') {
+            const forEveryone = confirm('Delete for everyone? Click Cancel to delete just for you.');
+            await window.MessageModule.deleteMessage(chatId, messageId, { forEveryone });
+          } else if (btn.dataset.action === 'edit') {
+            const current = window.MessageModule.getMessages(chatId).find(m => m.id === messageId);
+            const newContent = prompt('Edit message:', current ? current.content : '');
+            if (newContent && newContent.trim()) {
+              await window.MessageModule.editMessage(chatId, messageId, newContent.trim());
+            }
+          }
+        });
+      });
     }
 
     window.MessageModule.subscribe((event, data) => {
@@ -213,6 +300,8 @@
         case 'message:failed':
         case 'delivery-state:updated':
         case 'read-state:updated':
+        case 'message:deleted':
+        case 'message:edited':
           if (data && data.chatId === window.MessageModule.getActiveChatId()) {
             renderMessages(data.chatId, { preserveScroll: true });
           }
