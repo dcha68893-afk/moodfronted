@@ -47,7 +47,7 @@
 
     // The ONE place a message (from any source) enters client state.
     // Handles: dedup by id, dedup by clientMessageId (optimistic reconciliation),
-    // and ordering by id (server-authoritative — spec §36).
+    // ordering by id (server-authoritative — spec §36), and decryption.
     function applyIncomingMessage(message, { fromSelf = false } = {}) {
         const chatId = message.chatId;
         const bucket = getOrCreateConversationBucket(chatId);
@@ -65,12 +65,54 @@
         });
 
         notify('message:added', { chatId, message });
+        decryptForDisplay(chatId, message);
+    }
+
+    // Runs decryptMessageForDisplay() (the app's one canonical decrypt path
+    // — every UI surface is supposed to go through it, per its own header
+    // comment) and stores the result separately from the raw .content, so
+    // the raw envelope is preserved (needed for retry-on-key-arrival) while
+    // rendering always uses the resolved plaintext.
+    async function decryptForDisplay(chatId, message) {
+        if (message.displayContent !== undefined) return; // already resolved (e.g. our own just-sent message)
+        if (!window.KynectaE2E) {
+            const bucket = state.messagesByConversation.get(chatId);
+            if (bucket && bucket.has(message.id)) {
+                bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: message.content }));
+            }
+            return;
+        }
+        const conv = state.conversations.get(chatId);
+        try {
+            const plaintext = await window.KynectaE2E.decryptMessageForDisplay(message, chatId, window._kynCurrentUserId, {
+                activeConversation: conv ? { otherUserId: conv.otherUser && conv.otherUser.id } : null,
+                onResolved: (resolvedText) => {
+                    const bucket = state.messagesByConversation.get(chatId);
+                    if (bucket && bucket.has(message.id)) {
+                        bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: resolvedText }));
+                        notify('message:decrypted', { chatId, messageId: message.id });
+                    }
+                },
+            });
+            const bucket = state.messagesByConversation.get(chatId);
+            if (bucket && bucket.has(message.id)) {
+                bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: plaintext }));
+                notify('message:decrypted', { chatId, messageId: message.id });
+            }
+        } catch (_) {
+            const bucket = state.messagesByConversation.get(chatId);
+            if (bucket && bucket.has(message.id)) {
+                bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: '🔒 Encrypted message' }));
+            }
+        }
     }
 
     function getMessages(chatId) {
         const bucket = state.messagesByConversation.get(chatId);
         if (!bucket) return [];
-        return Array.from(bucket.values()).sort((a, b) => a.id - b.id);
+        return Array.from(bucket.values())
+            .filter(m => !(m.deleted && !m.deleteForEveryone)) // "delete for me" hides it from my own view only
+            .sort((a, b) => a.id - b.id);
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -126,12 +168,34 @@
         return MESSAGE_TYPE_ENUM.has(attachmentType) ? attachmentType : 'file';
     }
 
+    // Resolves the userId to encrypt FOR — the other participant in a
+    // known conversation, or the explicit receiverId when starting a
+    // brand-new one (no chatId yet).
+    function resolveRecipientUserId(chatId, receiverId) {
+        if (receiverId) return receiverId;
+        const conv = state.conversations.get(chatId);
+        return conv && conv.otherUser ? conv.otherUser.id : null;
+    }
+
     // ONE send pipeline: REST. (Verified against chat.html: there is no
     // parent-side handler for the generic REALTIME_SEND bridge that
     // KynectaRealtime.emit() would use from inside an iframe, and the
     // app's own established pattern for sending is REST — see the original
     // api.request.js sendMessage(). Using REST here also satisfies §16:
     // sending must not depend on an active socket connection.)
+    //
+    // SECURITY NOTE: this encrypts the text content/caption via the app's
+    // existing window.KynectaE2E.encryptForChat() before it ever leaves the
+    // client — matching how the deleted messaging module worked, which this
+    // rebuild had omitted entirely until now. It does NOT encrypt the
+    // attachment file itself (the uploaded file bytes go through the plain
+    // generic /api/files/upload endpoint and are reachable at a bare URL);
+    // window.KynectaE2E does expose encryptAttachment()/decryptAttachment()
+    // for that, but wiring actual file-content encryption (encrypt before
+    // upload, decrypt after download, plus key handling for the file itself)
+    // is a separate, larger piece of work not done here — flagging this
+    // explicitly rather than implying attachments are covered when they
+    // are not.
     async function sendMessage({ chatId, receiverId, content, type = 'text', replyToId = null, attachment = null }) {
         const clientMessageId = generateClientMessageId();
         const optimisticId = `optimistic:${clientMessageId}`;
@@ -140,15 +204,28 @@
             senderId: window._kynCurrentUserId || null, content, type: attachment ? toMessageType(attachment.type) : type, replyToId,
             clientMessageId, createdAt: new Date().toISOString(), status: 'sending',
             metadata: attachment ? { attachment } : null,
+            displayContent: content, // optimistic bubble shows plaintext immediately — it's our own message
         };
         const bucket = getOrCreateConversationBucket(optimisticMessage.chatId);
         bucket.set(optimisticId, optimisticMessage);
         notify('message:added', { chatId: optimisticMessage.chatId, message: optimisticMessage });
 
+        let outgoingContent = content;
+        const recipientUserId = resolveRecipientUserId(optimisticMessage.chatId, receiverId);
+        if (content && window.KynectaE2E && recipientUserId) {
+            try {
+                outgoingContent = await window.KynectaE2E.encryptForChat(content, chatId || null, recipientUserId);
+            } catch (err) {
+                bucket.set(optimisticId, Object.assign({}, optimisticMessage, { status: 'failed' }));
+                notify('message:failed', { chatId: optimisticMessage.chatId, clientMessageId, error: err.message });
+                return { success: false, error: err.message || 'Could not establish a secure connection to send this message' };
+            }
+        }
+
         try {
             const res = await api().post('/messages', {
-                chatId, receiverId, content, type: attachment ? toMessageType(attachment.type) : type, replyToId, clientMessageId,
-                metadata: attachment ? { attachment } : undefined,
+                chatId, receiverId, content: outgoingContent, type: attachment ? toMessageType(attachment.type) : type,
+                replyToId, clientMessageId, metadata: attachment ? { attachment } : undefined,
             });
             if (res && res.success) {
                 bucket.delete(optimisticId);
@@ -158,7 +235,11 @@
                 if (optimisticMessage.chatId !== res.data.chatId) {
                     state.messagesByConversation.delete(optimisticMessage.chatId);
                 }
-                applyIncomingMessage(Object.assign({}, res.data, { clientMessageId }), { fromSelf: true });
+                // We already have the plaintext (we just typed it) — no need
+                // to round-trip it through decrypt; store the server's
+                // envelope in .content (for consistency with history/sync)
+                // but keep our own plaintext as displayContent directly.
+                applyIncomingMessage(Object.assign({}, res.data, { clientMessageId, displayContent: content }), { fromSelf: true });
                 return { success: true, messageId: res.data.id, chatId: res.data.chatId };
             }
             bucket.set(optimisticId, Object.assign({}, optimisticMessage, { status: 'failed' }));
@@ -174,6 +255,7 @@
     async function markRead(chatId, messageIds) {
         if (!messageIds || messageIds.length === 0) return;
         upsertConversationMeta(chatId, { unreadCount: 0 });
+        if (settingsState.privacy.readReceipts === false) return; // instant, no refresh needed
         try { await api().post('/messages/read', { messageIds }); } catch (_) {}
     }
 
@@ -200,15 +282,24 @@
 
     async function editMessage(chatId, messageId, content) {
         try {
+            let outgoingContent = content;
+            const recipientUserId = resolveRecipientUserId(chatId, null);
+            if (content && window.KynectaE2E && recipientUserId) {
+                try {
+                    outgoingContent = await window.KynectaE2E.encryptForChat(content, chatId, recipientUserId);
+                } catch (err) {
+                    return { success: false, error: err.message || 'Could not encrypt the edited message' };
+                }
+            }
             // window.api.request has no .patch() — only .put(); the backend
             // route accepts both (matching the app's existing PUT-alias
             // convention for exactly this reason).
-            const res = await api().put(`/messages/${messageId}`, { content });
+            const res = await api().put(`/messages/${messageId}`, { content: outgoingContent });
             if (res && res.success) {
                 const bucket = state.messagesByConversation.get(chatId);
                 if (bucket && bucket.has(messageId)) {
                     bucket.set(messageId, Object.assign({}, bucket.get(messageId), {
-                        content: res.data.content, isEdited: true, editedAt: res.data.editedAt,
+                        content: res.data.content, displayContent: content, isEdited: true, editedAt: res.data.editedAt,
                     }));
                     notify('message:edited', { chatId, messageId });
                 }
@@ -226,10 +317,37 @@
     // Listen for those directly rather than via KynectaRealtime.on(), which
     // only reacts to the generic REALTIME_EVENT:-prefixed form these events
     // deliberately bypass (see chat.html's _SKIP_WILDCARD list).
+    // Live settings reactivity — same postMessage contract every other
+    // module (friend, calls, group, tools) already listens for; not a new
+    // mechanism. Defaults match this app's actual settings schema
+    // (settings-core.js: privacy.readReceipts, chat.enterToSend/messagePreviews).
+    const settingsState = { privacy: { readReceipts: true }, chat: { enterToSend: true, messagePreviews: true } };
+
+    function applySettingToMessageModule(section, key, value) {
+        if (!settingsState[section]) settingsState[section] = {};
+        settingsState[section][key] = value;
+        notify('settings:changed', { section, key, value });
+    }
+
     function wireRealtimeListeners() {
         window.addEventListener('message', (event) => {
             const data = event.data;
             if (!data || typeof data !== 'object') return;
+
+            if (data.type === 'SETTING_CHANGED' || data.type === 'SETTINGS_UPDATED') {
+                const payload = data.payload || data;
+                if (data.type === 'SETTING_CHANGED' && payload.section && payload.key !== undefined) {
+                    applySettingToMessageModule(payload.section, payload.key, payload.value);
+                }
+                if (data.type === 'SETTINGS_UPDATED' && payload.settings) {
+                    Object.entries(payload.settings).forEach(([sec, secVal]) => {
+                        if (secVal && typeof secVal === 'object') {
+                            Object.entries(secVal).forEach(([k, v]) => applySettingToMessageModule(sec, k, v));
+                        }
+                    });
+                }
+                return;
+            }
 
             if (data.type === 'SESSION_DATA' && data.payload && data.payload.userId != null) {
                 window._kynCurrentUserId = data.payload.userId;
@@ -392,6 +510,7 @@
         getConnectionState: () => state.connectionState,
         getActiveChatId: () => state.activeChatId,
         setActiveChatId: (id) => { state.activeChatId = id; },
+        getSetting: (section, key) => settingsState[section] && settingsState[section][key],
     };
 
     wireRealtimeListeners();

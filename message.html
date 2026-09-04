@@ -18,11 +18,45 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     background: var(--kyn-bg-primary, #fff); color: var(--kyn-text-primary, #111);
   }
-  #convList {
+  #convListPanel {
     width: 320px; min-width: 260px; border-right: 1px solid var(--kyn-border, #e2e2e2);
-    display: flex; flex-direction: column; overflow-y: auto;
+    display: flex; flex-direction: column; overflow: hidden;
   }
-  #convList.hide-on-mobile { display: none; }
+  #convListPanel.hide-on-mobile { display: none; }
+  #convListHeader {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 14px; font-weight: 600; border-bottom: 1px solid var(--kyn-border, #f0f0f0);
+  }
+  #newChatBtn {
+    background: none; border: none; font-size: 18px; cursor: pointer;
+    width: 32px; height: 32px; border-radius: 50%;
+  }
+  #newChatBtn:hover { background: var(--kyn-bg-hover, #f0f0f0); }
+  #convList { flex: 1; overflow-y: auto; }
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 1000;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .modal-overlay.hidden { display: none; }
+  .modal-box {
+    background: var(--kyn-bg-primary, #fff); border-radius: 12px; width: 90%; max-width: 380px;
+    max-height: 70vh; display: flex; flex-direction: column; overflow: hidden;
+  }
+  .modal-header {
+    display: flex; align-items: center; justify-content: space-between; padding: 14px;
+    font-weight: 600; border-bottom: 1px solid var(--kyn-border, #eee);
+  }
+  #closeNewChatModal { background: none; border: none; font-size: 20px; cursor: pointer; }
+  #newChatSearchInput {
+    margin: 10px 14px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--kyn-border, #ddd);
+    font-size: 14px;
+  }
+  #newChatResults { overflow-y: auto; flex: 1; }
+  .new-chat-result-item {
+    display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer;
+  }
+  .new-chat-result-item:hover { background: var(--kyn-bg-hover, #f5f5f5); }
+  .new-chat-result-item img { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; background: #ccc; }
   .conv-item {
     display: flex; align-items: center; gap: 10px; padding: 12px 14px; cursor: pointer;
     border-bottom: 1px solid var(--kyn-border, #f0f0f0);
@@ -61,7 +95,22 @@
     padding: 4px; border-radius: 4px;
   }
   .bubble-action-btn:hover { opacity: 1; background: var(--kyn-bg-hover, #f0f0f0); }
-  #composeBar { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--kyn-border, #e2e2e2); }
+  #chatHeader { display: flex; align-items: center; justify-content: space-between; }
+  #chatHeaderName { flex: 1; }
+  #chatHeaderActions { display: flex; gap: 4px; }
+  .header-icon-btn { background: none; border: none; font-size: 16px; cursor: pointer; width: 34px; height: 34px; border-radius: 50%; }
+  .header-icon-btn:hover { background: var(--kyn-bg-hover, #f0f0f0); }
+  #emojiBtn { background: none; border: none; font-size: 18px; cursor: pointer; width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0; }
+  #emojiBtn:hover { background: var(--kyn-bg-hover, #f0f0f0); }
+  #emojiPicker {
+    position: absolute; bottom: 60px; right: 10px; background: var(--kyn-bg-primary, #fff);
+    border: 1px solid var(--kyn-border, #ddd); border-radius: 10px; padding: 8px;
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  }
+  #emojiPicker.hidden { display: none; }
+  .emoji-option { background: none; border: none; font-size: 20px; cursor: pointer; padding: 4px; border-radius: 6px; }
+  .emoji-option:hover { background: var(--kyn-bg-hover, #f0f0f0); }
+  #composeBar { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--kyn-border, #e2e2e2); position: relative; }
   #composeInput {
     flex: 1; border-radius: 20px; border: 1px solid var(--kyn-border, #ddd);
     padding: 10px 14px; font-size: 14px; resize: none; max-height: 120px;
@@ -87,7 +136,7 @@
   #emptyState { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--kyn-text-secondary, #999); }
   #loadOlderBtn { text-align: center; padding: 8px; font-size: 12px; color: var(--kyn-accent, #2d7ff9); cursor: pointer; }
   @media (max-width: 720px) {
-    #convList { width: 100%; }
+    #convListPanel { width: 100%; }
     #chatPanel.hide-on-mobile { display: none; }
     #backBtn { display: inline-block; }
   }
@@ -95,7 +144,24 @@
 </head>
 <body>
 
-  <div id="convList"></div>
+  <div id="convListPanel">
+    <div id="convListHeader">
+      <span>Chats</span>
+      <button id="newChatBtn" title="New chat">✎</button>
+    </div>
+    <div id="convList"></div>
+  </div>
+
+  <div id="newChatModal" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <span>New chat</span>
+        <button id="closeNewChatModal">&times;</button>
+      </div>
+      <input type="text" id="newChatSearchInput" placeholder="Search people...">
+      <div id="newChatResults"></div>
+    </div>
+  </div>
 
   <div id="chatPanel" class="hide-on-mobile">
     <div id="emptyState">Select a conversation</div>
@@ -105,6 +171,9 @@
   <script src="/js/api.core.js"></script>
   <script src="/js/app.realtime.socket.js"></script>
   <script src="/js/core/identity/IdentityProfileStore.js"></script>
+  <script src="/js/e2e-encryption.js" defer></script>
+  <script src="/js/double-ratchet.js" defer></script>
+  <script src="/js/e2e-session-init.js" defer></script>
   <script src="/js/message-client.js"></script>
 
   <script>
@@ -165,7 +234,7 @@
       const statusTick = isMine ? ({ sending: '…', sent: '✓', delivered: '✓✓', read: '✓✓', failed: '⚠' }[m.status] || '') : '';
       const editedTag = m.isEdited ? ' (edited)' : '';
       const isDeletedForEveryone = m.deleted && m.deleteForEveryone;
-      const content = isDeletedForEveryone ? 'This message was deleted' : m.content;
+      const content = isDeletedForEveryone ? 'This message was deleted' : (m.displayContent !== undefined ? m.displayContent : '…');
       const actions = (isMine && !m.deleted && typeof m.id === 'number') ? `
           <div class="bubble-actions">
             <button class="bubble-action-btn" data-action="edit" data-message-id="${m.id}" title="Edit">✎</button>
@@ -191,22 +260,80 @@
       chatPanelEl.innerHTML = `
         <div id="chatHeader">
           <button id="backBtn">&larr;</button>
-          <strong>${escapeHtml(conv?.otherUser?.username || 'Conversation')}</strong>
+          <strong id="chatHeaderName">${escapeHtml(conv?.otherUser?.username || 'Conversation')}</strong>
+          <div id="chatHeaderActions">
+            <button class="header-icon-btn" id="voiceCallBtn" title="Voice call">📞</button>
+            <button class="header-icon-btn" id="videoCallBtn" title="Video call">🎥</button>
+            <button class="header-icon-btn" id="chatMoreBtn" title="More">⋮</button>
+          </div>
         </div>
         <div id="loadOlderBtn">Load earlier messages</div>
         <div id="messageLog"></div>
         <div id="composeBar">
           <button id="attachBtn" title="Attach file">📎</button>
           <input type="file" id="attachInput" style="display:none" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt">
+          <button id="emojiBtn" title="Emoji">🙂</button>
           <textarea id="composeInput" rows="1" placeholder="Message..."></textarea>
           <button id="sendBtn">&#9658;</button>
         </div>
+        <div id="emojiPicker" class="hidden"></div>
       `;
       renderMessages(chatId);
 
+      const otherUserId = conv?.otherUser?.id;
+      function startCall(callType) {
+        window.parent.postMessage({
+          type: 'SWITCH_MODULE', module: 'calls',
+          payload: { userId: otherUserId, userName: conv?.otherUser?.username || 'User', callType, returnTo: 'messages' },
+        }, '*');
+      }
+      document.getElementById('voiceCallBtn').addEventListener('click', () => startCall('voice'));
+      document.getElementById('videoCallBtn').addEventListener('click', () => startCall('video'));
+      document.getElementById('chatMoreBtn').addEventListener('click', async () => {
+        const action = prompt('Type "clear" to clear this chat for you, or "block" to block this user');
+        if (action === 'clear') {
+          if (confirm('Clear this conversation for you? This cannot be undone.')) {
+            window.MessageModule.getMessages(chatId).forEach(m => {
+              if (typeof m.id === 'number') window.MessageModule.deleteMessage(chatId, m.id, { forEveryone: false });
+            });
+          }
+        } else if (action === 'block') {
+          if (!otherUserId) { alert('Cannot block: unknown user for this conversation.'); return; }
+          if (!confirm(`Block ${conv?.otherUser?.username || 'this user'}? They won't be able to message or call you.`)) return;
+          try {
+            const res = await window.api.request.post(`/friends/${otherUserId}/block`);
+            if (res && res.success !== false) {
+              alert('User blocked.');
+              window.MessageModule.setActiveChatId(null);
+              document.getElementById('convListPanel').classList.remove('hide-on-mobile');
+              document.getElementById('chatPanel').classList.add('hide-on-mobile');
+              renderChatPanel(null);
+              renderConversationList();
+            } else {
+              alert('Could not block user: ' + (res && res.message ? res.message : 'unknown error'));
+            }
+          } catch (err) {
+            alert('Could not block user: ' + err.message);
+          }
+        }
+      });
+
+      const emojiBtn = document.getElementById('emojiBtn');
+      const emojiPicker = document.getElementById('emojiPicker');
+      const EMOJI_SET = ['😀','😂','😍','😊','😉','😢','😮','😡','👍','👎','❤️','🔥','🎉','🙏','👏','😴','🤔','😎','😭','💯'];
+      emojiPicker.innerHTML = EMOJI_SET.map(e => `<button class="emoji-option">${e}</button>`).join('');
+      emojiBtn.addEventListener('click', () => emojiPicker.classList.toggle('hidden'));
+      emojiPicker.querySelectorAll('.emoji-option').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.getElementById('composeInput').value += btn.textContent;
+          emojiPicker.classList.add('hidden');
+          document.getElementById('composeInput').focus();
+        });
+      });
+
       document.getElementById('backBtn').addEventListener('click', () => {
         window.MessageModule.setActiveChatId(null);
-        document.getElementById('convList').classList.remove('hide-on-mobile');
+        document.getElementById('convListPanel').classList.remove('hide-on-mobile');
         document.getElementById('chatPanel').classList.add('hide-on-mobile');
         renderChatPanel(null);
       });
@@ -236,7 +363,10 @@
 
       sendBtn.addEventListener('click', doSend);
       input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doSend(); }
+        if (e.key !== 'Enter' || e.shiftKey) return;
+        const sendOnEnter = window.MessageModule.getSetting('chat', 'enterToSend') !== false;
+        if (sendOnEnter) { e.preventDefault(); doSend(); }
+        // else: let Enter insert a newline as normal textarea behavior
       });
 
       attachBtn.addEventListener('click', () => attachInput.click());
@@ -291,6 +421,54 @@
       });
     }
 
+    const newChatModal = document.getElementById('newChatModal');
+    const newChatSearchInput = document.getElementById('newChatSearchInput');
+    const newChatResults = document.getElementById('newChatResults');
+    let newChatSearchTimer = null;
+
+    async function runNewChatSearch(query) {
+      newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary,#999);font-size:13px;">Searching...</div>';
+      try {
+        const res = await window.api.request.get(`/friends/users/all?limit=20${query ? '&search=' + encodeURIComponent(query) : ''}`);
+        const users = (res && res.data && (res.data.users || res.data)) || [];
+        if (!Array.isArray(users) || users.length === 0) {
+          newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary,#999);font-size:13px;">No people found</div>';
+          return;
+        }
+        newChatResults.innerHTML = users.map(u => `
+          <div class="new-chat-result-item" data-user-id="${u.id}" data-user-name="${escapeHtml(u.username || '')}" data-user-avatar="${escapeHtml(u.avatar || '')}">
+            <img src="${escapeHtml(u.avatar || '/img/default-avatar.png')}" alt="">
+            <span>${escapeHtml(u.username || u.firstName || 'User')}</span>
+          </div>
+        `).join('');
+        newChatResults.querySelectorAll('.new-chat-result-item').forEach(el => {
+          el.addEventListener('click', () => {
+            newChatModal.classList.add('hidden');
+            window.MessageModule.openChat({
+              userId: Number(el.dataset.userId),
+              userName: el.dataset.userName,
+              avatar: el.dataset.userAvatar,
+            });
+          });
+        });
+      } catch (err) {
+        newChatResults.innerHTML = '<div style="padding:14px;color:#e04b4b;font-size:13px;">Search failed</div>';
+      }
+    }
+
+    document.getElementById('newChatBtn').addEventListener('click', () => {
+      newChatModal.classList.remove('hidden');
+      newChatSearchInput.value = '';
+      runNewChatSearch('');
+      newChatSearchInput.focus();
+    });
+    document.getElementById('closeNewChatModal').addEventListener('click', () => newChatModal.classList.add('hidden'));
+    newChatModal.addEventListener('click', (e) => { if (e.target === newChatModal) newChatModal.classList.add('hidden'); });
+    newChatSearchInput.addEventListener('input', () => {
+      clearTimeout(newChatSearchTimer);
+      newChatSearchTimer = setTimeout(() => runNewChatSearch(newChatSearchInput.value.trim()), 300);
+    });
+
     window.MessageModule.subscribe((event, data) => {
       switch (event) {
         case 'conversation:updated':
@@ -302,6 +480,7 @@
         case 'read-state:updated':
         case 'message:deleted':
         case 'message:edited':
+        case 'message:decrypted':
           if (data && data.chatId === window.MessageModule.getActiveChatId()) {
             renderMessages(data.chatId, { preserveScroll: true });
           }
@@ -309,7 +488,7 @@
           break;
         case 'chat:open-requested': {
           const { conversationId, userId } = data;
-          document.getElementById('convList').classList.add('hide-on-mobile');
+          document.getElementById('convListPanel').classList.add('hide-on-mobile');
           document.getElementById('chatPanel').classList.remove('hide-on-mobile');
           renderChatPanel(conversationId);
           // Ack to chat.html — stops its retry loop and loading veil (see
