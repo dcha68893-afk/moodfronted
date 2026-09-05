@@ -62,6 +62,13 @@
             lastMessage: message,
             unreadCount: fromSelf ? (state.conversations.get(chatId)?.unreadCount || 0)
                                   : (chatId === state.activeChatId ? 0 : (state.conversations.get(chatId)?.unreadCount || 0) + 1),
+            otherUser: (!fromSelf && message.senderId)
+                ? Object.assign({}, state.conversations.get(chatId)?.otherUser, {
+                    id: message.senderId,
+                    username: (state.conversations.get(chatId)?.otherUser?.username) || (message.sender && message.sender.username),
+                    avatar: (state.conversations.get(chatId)?.otherUser?.avatar) || (message.sender && message.sender.avatar),
+                  })
+                : state.conversations.get(chatId)?.otherUser,
         });
 
         notify('message:added', { chatId, message });
@@ -83,9 +90,11 @@
             return;
         }
         const conv = state.conversations.get(chatId);
+        const DECRYPT_FALLBACK = '🔒 Encrypted message';
         try {
             const plaintext = await window.KynectaE2E.decryptMessageForDisplay(message, chatId, window._kynCurrentUserId, {
                 activeConversation: conv ? { otherUserId: conv.otherUser && conv.otherUser.id } : null,
+                fallbackText: DECRYPT_FALLBACK,
                 onResolved: (resolvedText) => {
                     const bucket = state.messagesByConversation.get(chatId);
                     if (bucket && bucket.has(message.id)) {
@@ -94,9 +103,11 @@
                     }
                 },
             });
+            const isQueued = typeof window.KynectaE2E.isMessageQueued === 'function' && window.KynectaE2E.isMessageQueued(message);
+            const displayValue = (isQueued && plaintext === DECRYPT_FALLBACK) ? 'Decrypting…' : plaintext;
             const bucket = state.messagesByConversation.get(chatId);
             if (bucket && bucket.has(message.id)) {
-                bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: plaintext }));
+                bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: displayValue }));
                 notify('message:decrypted', { chatId, messageId: message.id });
             }
         } catch (_) {
@@ -105,6 +116,18 @@
                 bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: '🔒 Encrypted message' }));
             }
         }
+    }
+
+    // Gives the user an actual recovery path when decryption failed
+    // (e.g. the key exchange completes later) instead of leaving the
+    // "🔒 Encrypted message" placeholder as a permanent dead end.
+    async function retryDecrypt(chatId, messageId) {
+        const bucket = state.messagesByConversation.get(chatId);
+        if (!bucket || !bucket.has(messageId)) return;
+        const message = bucket.get(messageId);
+        bucket.set(messageId, Object.assign({}, message, { displayContent: undefined }));
+        await decryptForDisplay(chatId, bucket.get(messageId));
+        notify('message:decrypted', { chatId, messageId });
     }
 
     function getMessages(chatId) {
@@ -210,6 +233,12 @@
         bucket.set(optimisticId, optimisticMessage);
         notify('message:added', { chatId: optimisticMessage.chatId, message: optimisticMessage });
 
+        if (receiverId) {
+            upsertConversationMeta(optimisticMessage.chatId, {
+                otherUser: Object.assign({}, state.conversations.get(optimisticMessage.chatId)?.otherUser, { id: receiverId }),
+            });
+        }
+
         let outgoingContent = content;
         const recipientUserId = resolveRecipientUserId(optimisticMessage.chatId, receiverId);
         if (content && window.KynectaE2E && recipientUserId) {
@@ -231,9 +260,17 @@
                 bucket.delete(optimisticId);
                 // Real conversations may have a different chatId than the
                 // "pending:<receiverId>" bucket we optimistically wrote to
-                // on the very first message — move the bucket if so.
+                // on the very first message — move the bucket AND the
+                // conversation metadata (otherUser especially — without
+                // this, encryption's recipient resolution would silently
+                // have nothing to go on for this conversation going forward).
                 if (optimisticMessage.chatId !== res.data.chatId) {
                     state.messagesByConversation.delete(optimisticMessage.chatId);
+                    const pendingMeta = state.conversations.get(optimisticMessage.chatId);
+                    if (pendingMeta) {
+                        upsertConversationMeta(res.data.chatId, { otherUser: pendingMeta.otherUser });
+                        state.conversations.delete(optimisticMessage.chatId);
+                    }
                 }
                 // We already have the plaintext (we just typed it) — no need
                 // to round-trip it through decrypt; store the server's
@@ -317,6 +354,97 @@
     // Listen for those directly rather than via KynectaRealtime.on(), which
     // only reacts to the generic REALTIME_EVENT:-prefixed form these events
     // deliberately bypass (see chat.html's _SKIP_WILDCARD list).
+    async function starMessage(chatId, messageId) {
+        try {
+            const res = await api().post(`/messages/${messageId}/star`);
+            if (res && res.success) {
+                const bucket = state.messagesByConversation.get(chatId);
+                if (bucket && bucket.has(messageId)) {
+                    bucket.set(messageId, Object.assign({}, bucket.get(messageId), { starred: true }));
+                    notify('message:starred', { chatId, messageId });
+                }
+            }
+            return res;
+        } catch (err) { return { success: false, error: err.message }; }
+    }
+
+    async function unstarMessage(chatId, messageId) {
+        try {
+            const res = await api().delete(`/messages/${messageId}/star`);
+            if (res && res.success) {
+                const bucket = state.messagesByConversation.get(chatId);
+                if (bucket && bucket.has(messageId)) {
+                    bucket.set(messageId, Object.assign({}, bucket.get(messageId), { starred: false }));
+                    notify('message:starred', { chatId, messageId });
+                }
+            }
+            return res;
+        } catch (err) { return { success: false, error: err.message }; }
+    }
+
+    async function muteChat(chatId, duration) {
+        try {
+            const res = await api().put(`/messages/${chatId}/mute`, { muted: true, duration });
+            if (res && res.success) upsertConversationMeta(chatId, { muted: true });
+            return res;
+        } catch (err) { return { success: false, error: err.message }; }
+    }
+
+    async function unmuteChat(chatId) {
+        try {
+            const res = await api().delete(`/messages/${chatId}/mute`);
+            if (res && res.success) upsertConversationMeta(chatId, { muted: false });
+            return res;
+        } catch (err) { return { success: false, error: err.message }; }
+    }
+
+    async function reactToMessage(chatId, messageId, emoji) {
+        try {
+            const res = await api().post(`/messages/${messageId}/react`, { emoji });
+            if (res && res.success) {
+                const bucket = state.messagesByConversation.get(chatId);
+                if (bucket && bucket.has(messageId)) {
+                    bucket.set(messageId, Object.assign({}, bucket.get(messageId), { reactions: res.data.reactions }));
+                    notify('message:reaction', { chatId, messageId });
+                }
+            }
+            return res;
+        } catch (err) { return { success: false, error: err.message }; }
+    }
+
+    async function removeReaction(chatId, messageId) {
+        try {
+            const res = await api().delete(`/messages/${messageId}/react`);
+            if (res && res.success) {
+                const bucket = state.messagesByConversation.get(chatId);
+                if (bucket && bucket.has(messageId)) {
+                    bucket.set(messageId, Object.assign({}, bucket.get(messageId), { reactions: res.data.reactions }));
+                    notify('message:reaction', { chatId, messageId });
+                }
+            }
+            return res;
+        } catch (err) { return { success: false, error: err.message }; }
+    }
+
+    // Client-side search only — Message.content is E2E-encrypted ciphertext,
+    // so a server-side search endpoint (ILIKE/full-text) can never match
+    // what the user actually typed. This searches already-decrypted
+    // displayContent held locally, exactly like real E2E messengers do.
+    function searchMessages(chatId, query) {
+        const q = (query || '').trim().toLowerCase();
+        if (!q) return [];
+        const scope = chatId ? [chatId] : Array.from(state.messagesByConversation.keys());
+        const results = [];
+        scope.forEach(cid => {
+            getMessages(cid).forEach(m => {
+                if (m.displayContent && m.displayContent.toLowerCase().includes(q)) {
+                    results.push(m);
+                }
+            });
+        });
+        return results;
+    }
+
     // Live settings reactivity — same postMessage contract every other
     // module (friend, calls, group, tools) already listens for; not a new
     // mechanism. Defaults match this app's actual settings schema
@@ -327,6 +455,25 @@
         if (!settingsState[section]) settingsState[section] = {};
         settingsState[section][key] = value;
         notify('settings:changed', { section, key, value });
+    }
+
+    // Typing indicators. Outbound goes through chat.html's existing
+    // START_TYPING/STOP_TYPING postMessage bridge (confirmed working —
+    // it already relays to the real socket; this isn't a new mechanism).
+    // Inbound arrives via the generic KynectaRealtime wildcard forwarder,
+    // since typing:start/stop aren't on chat.html's dedicated-bridge skip
+    // list. A safety auto-clear timeout guards against a missed 'stop'
+    // event (e.g. the other person's network drops mid-typing) leaving the
+    // indicator stuck forever — same lesson as the encryption placeholder.
+    const typingState = new Map(); // chatId -> timeout handle
+
+    function sendTypingStart(chatId) {
+        if (!chatId) return;
+        try { window.parent.postMessage({ type: 'START_TYPING', payload: { conversationId: chatId } }, '*'); } catch (_) {}
+    }
+    function sendTypingStop(chatId) {
+        if (!chatId) return;
+        try { window.parent.postMessage({ type: 'STOP_TYPING', payload: { conversationId: chatId } }, '*'); } catch (_) {}
     }
 
     function wireRealtimeListeners() {
@@ -424,6 +571,31 @@
                     notify('message:edited', { chatId: payload.chatId, messageId: payload.messageId });
                 }
             });
+            window.KynectaRealtime.on('message:reaction', (payload) => {
+                const bucket = state.messagesByConversation.get(payload.chatId);
+                if (bucket && bucket.has(payload.messageId)) {
+                    bucket.set(payload.messageId, Object.assign({}, bucket.get(payload.messageId), {
+                        reactions: payload.reactions,
+                    }));
+                    notify('message:reaction', { chatId: payload.chatId, messageId: payload.messageId });
+                }
+            });
+            window.KynectaRealtime.on('typing:start', (payload) => {
+                if (!payload || !payload.chatId) return;
+                clearTimeout(typingState.get(payload.chatId));
+                notify('typing:changed', { chatId: payload.chatId, isTyping: true });
+                const timeout = setTimeout(() => {
+                    typingState.delete(payload.chatId);
+                    notify('typing:changed', { chatId: payload.chatId, isTyping: false });
+                }, 5000); // safety auto-clear — never leaves the indicator stuck if 'stop' is missed
+                typingState.set(payload.chatId, timeout);
+            });
+            window.KynectaRealtime.on('typing:stop', (payload) => {
+                if (!payload || !payload.chatId) return;
+                clearTimeout(typingState.get(payload.chatId));
+                typingState.delete(payload.chatId);
+                notify('typing:changed', { chatId: payload.chatId, isTyping: false });
+            });
         }
 
         // Tell chat.html's bridge we're ready so any messages queued while
@@ -479,9 +651,10 @@
         // A brand-new chat has no messages yet to derive a display name
         // from — use whatever the caller told us (calls-ui.js and the
         // friend-ui.js→chat.html SWITCH_MODULE path both send userName).
-        if (resolvedChatId && (userName || avatar)) {
+        if (resolvedChatId && (userId || userName || avatar)) {
             upsertConversationMeta(resolvedChatId, {
                 otherUser: Object.assign({}, state.conversations.get(resolvedChatId)?.otherUser, {
+                    id: userId || state.conversations.get(resolvedChatId)?.otherUser?.id,
                     username: userName || state.conversations.get(resolvedChatId)?.otherUser?.username,
                     avatar: avatar || state.conversations.get(resolvedChatId)?.otherUser?.avatar,
                 }),
@@ -490,6 +663,25 @@
 
         state.activeChatId = resolvedChatId || null;
         notify('chat:open-requested', { conversationId: resolvedChatId, userId, messageId });
+
+        // Pre-warm the encryption session now, not on first keystroke/send —
+        // this is exactly what real E2E messengers do: the network round-trip
+        // to fetch the other person's prekey bundle and derive a shared
+        // session happens while the user is still looking at the chat, not
+        // after they hit send. Nothing is actually sent to the server here —
+        // encryptForChat's side effect (establishing the session) is what we
+        // want; the resulting ciphertext is discarded.
+        if (window.KynectaE2E) {
+            const recipientForWarmup = resolveRecipientUserId(resolvedChatId, userId);
+            if (recipientForWarmup) {
+                window.KynectaE2E.encryptForChat(' ', resolvedChatId || null, recipientForWarmup).catch(() => {
+                    // Non-fatal — if the recipient hasn't published prekeys yet
+                    // (they've never opened the app, or are mid-registration),
+                    // the real send later will retry this the normal way.
+                });
+            }
+        }
+
         if (resolvedChatId) {
             await loadHistory(resolvedChatId);
             if (messageId) notify('message:scroll-to', { chatId: resolvedChatId, messageId });
@@ -506,6 +698,17 @@
         markRead,
         deleteMessage,
         editMessage,
+        starMessage,
+        unstarMessage,
+        muteChat,
+        unmuteChat,
+        reactToMessage,
+        removeReaction,
+        searchMessages,
+        retryDecrypt,
+        sendTypingStart,
+        sendTypingStop,
+        isTyping: (chatId) => typingState.has(chatId),
         loadHistory,
         getConnectionState: () => state.connectionState,
         getActiveChatId: () => state.activeChatId,

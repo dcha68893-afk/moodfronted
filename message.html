@@ -87,6 +87,11 @@
   .bubble-meta { font-size: 10px; opacity: 0.65; margin-top: 3px; text-align: right; }
   .bubble-row.failed .bubble { outline: 2px solid #e04b4b; }
   .bubble-deleted { font-style: italic; opacity: 0.6; }
+  .date-separator { text-align: center; font-size: 12px; color: var(--kyn-text-secondary,#999); margin: 10px 0; }
+  .date-separator span { background: var(--kyn-bg-secondary,#f0f0f0); padding: 3px 10px; border-radius: 10px; }
+  .bubble-reactions { margin-top: 2px; font-size: 14px; }
+  .decrypt-retry { cursor: pointer; text-decoration: underline dotted; opacity: 0.8; }
+  .decrypt-pending { opacity: 0.6; font-style: italic; }
   .bubble-row { position: relative; align-items: center; gap: 4px; }
   .bubble-actions { display: none; gap: 2px; }
   .bubble-row.mine:hover .bubble-actions { display: flex; }
@@ -234,18 +239,31 @@
       const statusTick = isMine ? ({ sending: '…', sent: '✓', delivered: '✓✓', read: '✓✓', failed: '⚠' }[m.status] || '') : '';
       const editedTag = m.isEdited ? ' (edited)' : '';
       const isDeletedForEveryone = m.deleted && m.deleteForEveryone;
+      const decryptFailed = m.displayContent === '🔒 Encrypted message';
+      const decryptPending = m.displayContent === 'Decrypting…';
       const content = isDeletedForEveryone ? 'This message was deleted' : (m.displayContent !== undefined ? m.displayContent : '…');
+      const contentAttrs = decryptFailed ? ` class="decrypt-retry" title="Tap to retry decryption" data-retry-message-id="${m.id}"`
+                          : decryptPending ? ` class="decrypt-pending"` : '';
       const actions = (isMine && !m.deleted && typeof m.id === 'number') ? `
           <div class="bubble-actions">
+            <button class="bubble-action-btn" data-action="react" data-message-id="${m.id}" title="React">🙂</button>
+            <button class="bubble-action-btn" data-action="star" data-message-id="${m.id}" title="${m.starred ? 'Unstar' : 'Star'}">${m.starred ? '⭐' : '☆'}</button>
             <button class="bubble-action-btn" data-action="edit" data-message-id="${m.id}" title="Edit">✎</button>
             <button class="bubble-action-btn" data-action="delete" data-message-id="${m.id}" title="Delete">🗑</button>
-          </div>` : '';
+          </div>` : (!m.deleted && typeof m.id === 'number' ? `
+          <div class="bubble-actions">
+            <button class="bubble-action-btn" data-action="react" data-message-id="${m.id}" title="React">🙂</button>
+            <button class="bubble-action-btn" data-action="star" data-message-id="${m.id}" title="${m.starred ? 'Unstar' : 'Star'}">${m.starred ? '⭐' : '☆'}</button>
+          </div>` : '');
+      const reactionsHtml = (m.reactions && Object.keys(m.reactions).length > 0) ?
+        `<div class="bubble-reactions">${Object.values(m.reactions).map(e => `<span>${e}</span>`).join('')}</div>` : '';
       return `
         <div class="bubble-row ${isMine ? 'mine' : ''}${m.status === 'failed' ? ' failed' : ''}" data-message-id="${m.id}">
           <div class="bubble${isDeletedForEveryone ? ' bubble-deleted' : ''}">
             ${!isDeletedForEveryone ? attachmentHtml(m) : ''}
-            ${content ? escapeHtml(content) : ''}${!isDeletedForEveryone ? editedTag : ''}
-            <div class="bubble-meta">${time} ${statusTick}</div>
+            <span${contentAttrs}>${content ? escapeHtml(content) : ''}</span>${!isDeletedForEveryone ? editedTag : ''}
+            ${reactionsHtml}
+            <div class="bubble-meta">${time} ${statusTick}${m.starred ? ' ⭐' : ''}</div>
           </div>
           ${actions}
         </div>`;
@@ -332,6 +350,7 @@
       });
 
       document.getElementById('backBtn').addEventListener('click', () => {
+        window.MessageModule.sendTypingStop(chatId);
         window.MessageModule.setActiveChatId(null);
         document.getElementById('convListPanel').classList.remove('hide-on-mobile');
         document.getElementById('chatPanel').classList.add('hide-on-mobile');
@@ -356,12 +375,20 @@
         if (!content) return;
         input.value = '';
         sendBtn.disabled = true;
+        window.MessageModule.sendTypingStop(chatId);
+        clearTimeout(typingStopTimer);
         await window.MessageModule.sendMessage({ chatId, content });
         sendBtn.disabled = false;
         input.focus();
       }
 
+      let typingStopTimer = null;
       sendBtn.addEventListener('click', doSend);
+      input.addEventListener('input', () => {
+        window.MessageModule.sendTypingStart(chatId);
+        clearTimeout(typingStopTimer);
+        typingStopTimer = setTimeout(() => window.MessageModule.sendTypingStop(chatId), 3000);
+      });
       input.addEventListener('keydown', (e) => {
         if (e.key !== 'Enter' || e.shiftKey) return;
         const sendOnEnter = window.MessageModule.getSetting('chat', 'enterToSend') !== false;
@@ -390,13 +417,35 @@
       });
     }
 
+    function dateSeparatorLabel(dateStr) {
+      const d = new Date(dateStr);
+      const today = new Date();
+      const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+      const sameDay = (a, b) => a.toDateString() === b.toDateString();
+      if (sameDay(d, today)) return 'Today';
+      if (sameDay(d, yesterday)) return 'Yesterday';
+      return d.toLocaleDateString([], { month: 'long', day: 'numeric', year: d.getFullYear() !== today.getFullYear() ? 'numeric' : undefined });
+    }
+
     function renderMessages(chatId, { preserveScroll = false } = {}) {
       const log = document.getElementById('messageLog');
       if (!log) return;
       const prevHeight = preserveScroll ? log.scrollHeight : 0;
       const currentUserId = window._kynCurrentUserId;
       const msgs = window.MessageModule.getMessages(chatId);
-      log.innerHTML = msgs.map(m => bubbleHtml(m, m.senderId === currentUserId)).join('');
+
+      let html = '';
+      let lastDateKey = null;
+      msgs.forEach(m => {
+        const dateKey = m.createdAt ? new Date(m.createdAt).toDateString() : null;
+        if (dateKey && dateKey !== lastDateKey) {
+          html += `<div class="date-separator"><span>${dateSeparatorLabel(m.createdAt)}</span></div>`;
+          lastDateKey = dateKey;
+        }
+        html += bubbleHtml(m, m.senderId === currentUserId);
+      });
+      log.innerHTML = html;
+
       if (preserveScroll) {
         log.scrollTop = log.scrollHeight - prevHeight;
       } else {
@@ -412,11 +461,31 @@
             await window.MessageModule.deleteMessage(chatId, messageId, { forEveryone });
           } else if (btn.dataset.action === 'edit') {
             const current = window.MessageModule.getMessages(chatId).find(m => m.id === messageId);
-            const newContent = prompt('Edit message:', current ? current.content : '');
+            const newContent = prompt('Edit message:', current ? current.displayContent : '');
             if (newContent && newContent.trim()) {
               await window.MessageModule.editMessage(chatId, messageId, newContent.trim());
             }
+          } else if (btn.dataset.action === 'star') {
+            const current = window.MessageModule.getMessages(chatId).find(m => m.id === messageId);
+            if (current && current.starred) {
+              await window.MessageModule.unstarMessage(chatId, messageId);
+            } else {
+              await window.MessageModule.starMessage(chatId, messageId);
+            }
+            renderMessages(chatId, { preserveScroll: true });
+          } else if (btn.dataset.action === 'react') {
+            const emoji = prompt('React with an emoji:', '👍');
+            if (emoji && emoji.trim()) {
+              await window.MessageModule.reactToMessage(chatId, messageId, emoji.trim());
+            }
           }
+        });
+      });
+
+      log.querySelectorAll('.decrypt-retry').forEach(el => {
+        el.addEventListener('click', async () => {
+          const messageId = Number(el.dataset.retryMessageId);
+          await window.MessageModule.retryDecrypt(chatId, messageId);
         });
       });
     }
@@ -481,11 +550,21 @@
         case 'message:deleted':
         case 'message:edited':
         case 'message:decrypted':
+        case 'message:starred':
+        case 'message:reaction':
           if (data && data.chatId === window.MessageModule.getActiveChatId()) {
             renderMessages(data.chatId, { preserveScroll: true });
           }
           renderConversationList();
           break;
+        case 'typing:changed': {
+          if (data.chatId !== window.MessageModule.getActiveChatId()) break;
+          const nameEl = document.getElementById('chatHeaderName');
+          if (!nameEl) break;
+          const conv = window.MessageModule.getConversations().find(c => c.chatId === data.chatId);
+          nameEl.textContent = data.isTyping ? 'typing…' : (conv?.otherUser?.username || 'Conversation');
+          break;
+        }
         case 'chat:open-requested': {
           const { conversationId, userId } = data;
           document.getElementById('convListPanel').classList.add('hide-on-mobile');
