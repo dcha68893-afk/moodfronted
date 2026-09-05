@@ -80,12 +80,21 @@
     // comment) and stores the result separately from the raw .content, so
     // the raw envelope is preserved (needed for retry-on-key-arrival) while
     // rendering always uses the resolved plaintext.
+    function syncLastMessageDisplay(chatId, messageId, displayContent) {
+        const conv = state.conversations.get(chatId);
+        if (conv && conv.lastMessage && conv.lastMessage.id === messageId) {
+            conv.lastMessage = Object.assign({}, conv.lastMessage, { displayContent });
+            notify('conversation:updated', conv);
+        }
+    }
+
     async function decryptForDisplay(chatId, message) {
         if (message.displayContent !== undefined) return; // already resolved (e.g. our own just-sent message)
         if (!window.KynectaE2E) {
             const bucket = state.messagesByConversation.get(chatId);
             if (bucket && bucket.has(message.id)) {
                 bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: message.content }));
+                syncLastMessageDisplay(chatId, message.id, message.content);
             }
             return;
         }
@@ -99,6 +108,7 @@
                     const bucket = state.messagesByConversation.get(chatId);
                     if (bucket && bucket.has(message.id)) {
                         bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: resolvedText }));
+                        syncLastMessageDisplay(chatId, message.id, resolvedText);
                         notify('message:decrypted', { chatId, messageId: message.id });
                     }
                 },
@@ -108,12 +118,14 @@
             const bucket = state.messagesByConversation.get(chatId);
             if (bucket && bucket.has(message.id)) {
                 bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: displayValue }));
+                syncLastMessageDisplay(chatId, message.id, displayValue);
                 notify('message:decrypted', { chatId, messageId: message.id });
             }
         } catch (_) {
             const bucket = state.messagesByConversation.get(chatId);
             if (bucket && bucket.has(message.id)) {
                 bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: '🔒 Encrypted message' }));
+                syncLastMessageDisplay(chatId, message.id, '🔒 Encrypted message');
             }
         }
     }
@@ -635,9 +647,16 @@
         let resolvedChatId = conversationId;
 
         // Opened from another module with only a userId (Friends, Status,
-        // Calls, a notification) — no chatId known yet. Resolve it before
-        // rendering, so reopening an existing conversation shows its
-        // history instead of a blank compose view (§6, §21, §51).
+        // Calls, a notification) — check if we already know this
+        // conversation locally first (it's already in the sidebar because
+        // we've talked to this person before) before ever hitting the
+        // network. Only a genuinely new/unknown conversation needs the
+        // one-time server round-trip.
+        if (!resolvedChatId && userId) {
+            for (const [cid, meta] of state.conversations) {
+                if (meta.otherUser && meta.otherUser.id === userId) { resolvedChatId = cid; break; }
+            }
+        }
         if (!resolvedChatId && userId) {
             try {
                 const res = await api().get(`/messages/resolve/${userId}`);
@@ -688,6 +707,75 @@
         }
     }
 
+    // Fetches the actual list of existing conversations on startup — this
+    // was missing entirely before: state.conversations only ever got
+    // populated reactively (opening a chat, sending, or receiving a live
+    // message), so a fresh page load always started empty regardless of
+    // real conversation history in the database. Uses the existing,
+    // pre-built /chats endpoint (already returns other-participant info,
+    // unread count, and the last message in one call — not reimplemented).
+    async function archiveChat(chatId) {
+        try {
+            const res = await api().put(`/chats/${chatId}/archive`);
+            if (res && (res.status === 'success' || res.success)) {
+                state.conversations.delete(chatId);
+                notify('conversation:archived', { chatId });
+            }
+            return res;
+        } catch (err) { return { success: false, error: err.message }; }
+    }
+
+    async function unarchiveChat(chatId) {
+        try {
+            const res = await api().post(`/chats/${chatId}/unarchive`);
+            if (res && (res.status === 'success' || res.success)) {
+                notify('conversation:unarchived', { chatId });
+                loadConversations();
+            }
+            return res;
+        } catch (err) { return { success: false, error: err.message }; }
+    }
+
+    async function loadArchivedConversations() {
+        try {
+            const res = await api().get('/chats?limit=50&includeArchived=true');
+            const chats = (res && res.data && Array.isArray(res.data.chats)) ? res.data.chats : [];
+            return chats.filter(c => c.type === 'direct' && c.otherParticipant && c.isArchived).map(c => {
+                const lastRaw = Array.isArray(c.chatMessages) && c.chatMessages[0] ? c.chatMessages[0] : null;
+                return {
+                    chatId: c.id,
+                    otherUser: { id: c.otherParticipant.id, username: c.otherParticipant.displayName || c.otherParticipant.username, avatar: c.otherParticipant.avatar },
+                    lastMessage: lastRaw ? { id: lastRaw.id, content: lastRaw.content, createdAt: lastRaw.createdAt } : null,
+                };
+            });
+        } catch (err) {
+            console.error('[MessageModule] Failed to load archived conversations:', err.message);
+            return [];
+        }
+    }
+
+    async function loadConversations() {
+        try {
+            const res = await api().get('/chats?limit=50');
+            const chats = (res && res.data && Array.isArray(res.data.chats)) ? res.data.chats : [];
+            chats.filter(c => c.type === 'direct' && c.otherParticipant).forEach(c => {
+                const lastRaw = Array.isArray(c.chatMessages) && c.chatMessages[0] ? c.chatMessages[0] : null;
+                upsertConversationMeta(c.id, {
+                    otherUser: {
+                        id: c.otherParticipant.id,
+                        username: c.otherParticipant.displayName || c.otherParticipant.username,
+                        avatar: c.otherParticipant.avatar,
+                    },
+                    unreadCount: c.unreadCount || 0,
+                    lastMessage: lastRaw ? { id: lastRaw.id, content: lastRaw.content, type: lastRaw.type, createdAt: lastRaw.createdAt, senderId: lastRaw.senderId, chatId: c.id } : null,
+                });
+                if (lastRaw) decryptForDisplay(c.id, { id: lastRaw.id, chatId: c.id, content: lastRaw.content, type: lastRaw.type, senderId: lastRaw.senderId, createdAt: lastRaw.createdAt });
+            });
+        } catch (err) {
+            console.error('[MessageModule] Failed to load conversation list:', err.message);
+        }
+    }
+
     window.MessageModule = {
         subscribe,
         getMessages,
@@ -709,6 +797,9 @@
         sendTypingStart,
         sendTypingStop,
         isTyping: (chatId) => typingState.has(chatId),
+        archiveChat,
+        unarchiveChat,
+        loadArchivedConversations,
         loadHistory,
         getConnectionState: () => state.connectionState,
         getActiveChatId: () => state.activeChatId,
@@ -717,6 +808,7 @@
     };
 
     wireRealtimeListeners();
+    loadConversations();
 
     // Listen for the shell's existing OPEN_CHAT_WITH_USER postMessage
     // contract (already used by other modules — reused, not reinvented, §54).
