@@ -125,6 +125,7 @@
     width: 40px; height: 40px; cursor: pointer; flex-shrink: 0;
   }
   #sendBtn:disabled { opacity: 0.5; cursor: default; }
+  .compose-hidden { display: none !important; }
   #attachBtn {
     background: none; border: none; font-size: 20px; cursor: pointer; flex-shrink: 0;
     width: 36px; height: 36px; border-radius: 50%;
@@ -154,6 +155,171 @@
     #chatPanel.hide-on-mobile { display: none; }
     #backBtn { display: inline-block; }
   }
+
+  /* ── Header utility icons (search / archived) ───────────────────────── */
+  #convListHeaderActions { display: flex; align-items: center; gap: 2px; }
+  .header-icon-btn-sm {
+    background: none; border: none; font-size: 15px; cursor: pointer;
+    width: 30px; height: 30px; border-radius: 50%; color: inherit;
+  }
+  .header-icon-btn-sm:hover { background: var(--kyn-bg-hover, #f0f0f0); }
+
+  /* ── Overlay panel shell (search / archived / chat-info / forward) ──── */
+  .side-panel-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 1200;
+    display: flex; justify-content: flex-end;
+  }
+  .side-panel-overlay.hidden { display: none; }
+  .side-panel {
+    width: 360px; max-width: 92vw; height: 100%; background: var(--kyn-bg-panel, #fff);
+    display: flex; flex-direction: column; box-shadow: -2px 0 16px rgba(0,0,0,0.2);
+  }
+  .side-panel-header {
+    display: flex; align-items: center; gap: 10px; padding: 14px; font-weight: 600;
+    border-bottom: 1px solid var(--kyn-border, #eee); flex-shrink: 0;
+  }
+  .side-panel-header .close-x { background: none; border: none; font-size: 20px; cursor: pointer; margin-left: auto; }
+  .side-panel-body { flex: 1; overflow-y: auto; }
+
+  /* ── Search panel ─────────────────────────────────────────────────── */
+  #searchInputBox {
+    margin: 10px 14px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--kyn-border, #ddd);
+    font-size: 14px; width: calc(100% - 28px);
+  }
+  .search-result-item { padding: 10px 14px; border-bottom: 1px solid var(--kyn-border, #f2f2f2); cursor: pointer; }
+  .search-result-item:hover { background: var(--kyn-bg-hover, #f5f5f5); }
+  .search-result-chat { font-size: 12px; color: var(--kyn-accent-primary, #22c55e); font-weight: 600; margin-bottom: 2px; }
+  .search-result-snippet { font-size: 13px; color: var(--kyn-text-primary, #222); }
+  .search-result-time { font-size: 11px; color: var(--kyn-text-secondary, #999); margin-top: 2px; }
+  .search-empty { padding: 30px 14px; text-align: center; color: var(--kyn-text-secondary, #999); font-size: 13px; }
+
+  /* ── Archived chats panel ─────────────────────────────────────────── */
+  .archived-banner {
+    padding: 10px 14px; font-size: 12px; color: var(--kyn-text-secondary, #888);
+    border-bottom: 1px solid var(--kyn-border, #f0f0f0);
+  }
+
+  /* ── Chat info panel ──────────────────────────────────────────────── */
+  .chat-info-avatar-wrap { text-align: center; padding: 24px 14px 10px; }
+  .chat-info-avatar { width: 96px; height: 96px; border-radius: 50%; object-fit: cover; background: #ccc; }
+  .chat-info-name { font-size: 17px; font-weight: 600; margin-top: 10px; }
+  .chat-info-sub { font-size: 13px; color: var(--kyn-text-secondary, #888); margin-top: 2px; }
+  .chat-info-section { border-top: 8px solid var(--kyn-bg-input, #f5f5f5); padding: 4px 0; }
+  .chat-info-row {
+    display: flex; align-items: center; gap: 12px; padding: 12px 16px; cursor: pointer; font-size: 14px;
+  }
+  .chat-info-row:hover { background: var(--kyn-bg-hover, #f5f5f5); }
+  .chat-info-row .row-icon { width: 20px; text-align: center; opacity: 0.75; }
+  .chat-info-row .row-label { flex: 1; }
+  .chat-info-row.danger { color: #e04b4b; }
+  .toggle-switch { position: relative; width: 38px; height: 22px; flex-shrink: 0; }
+  .toggle-switch input { opacity: 0; width: 0; height: 0; }
+  .toggle-slider {
+    position: absolute; inset: 0; background: #ccc; border-radius: 22px; cursor: pointer; transition: 0.15s;
+  }
+  .toggle-slider::before {
+    content: ""; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px;
+    background: #fff; border-radius: 50%; transition: 0.15s;
+  }
+  .toggle-switch input:checked + .toggle-slider { background: var(--kyn-accent-primary, #22c55e); }
+  .toggle-switch input:checked + .toggle-slider::before { transform: translateX(16px); }
+  .media-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; padding: 8px 16px; }
+  .media-grid img, .media-grid video { width: 100%; height: 90px; object-fit: cover; border-radius: 6px; cursor: pointer; background: #ddd; }
+  .doc-list-item {
+    display: flex; align-items: center; gap: 10px; padding: 9px 16px; font-size: 13px; text-decoration: none; color: inherit;
+  }
+  .doc-list-item:hover { background: var(--kyn-bg-hover, #f5f5f5); }
+  .chat-info-empty-hint { padding: 10px 16px; font-size: 12px; color: var(--kyn-text-secondary, #999); }
+
+  /* ── Message context menu ─────────────────────────────────────────── */
+  .bubble-more-btn {
+    background: none; border: none; cursor: pointer; font-size: 14px; opacity: 0.55;
+    padding: 2px 5px; border-radius: 4px; align-self: flex-start;
+  }
+  .bubble-row:hover .bubble-more-btn { opacity: 0.9; }
+  .bubble-more-btn:hover { background: rgba(0,0,0,0.08); }
+  #msgContextMenu {
+    position: fixed; z-index: 1300; background: var(--kyn-bg-panel, #fff); border-radius: 8px;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.22); padding: 6px 0; min-width: 170px; font-size: 14px;
+  }
+  #msgContextMenu.hidden { display: none; }
+  .ctx-menu-item {
+    display: flex; align-items: center; gap: 10px; padding: 9px 16px; cursor: pointer; white-space: nowrap;
+  }
+  .ctx-menu-item:hover { background: var(--kyn-bg-hover, #f0f0f0); }
+  .ctx-menu-item.danger { color: #e04b4b; }
+  .ctx-menu-emoji-row { display: flex; gap: 6px; padding: 6px 12px 8px; border-bottom: 1px solid var(--kyn-border, #eee); }
+  .ctx-menu-emoji-row button { background: none; border: none; font-size: 18px; cursor: pointer; padding: 2px 4px; border-radius: 5px; }
+  .ctx-menu-emoji-row button:hover { background: var(--kyn-bg-hover, #f0f0f0); }
+  #ctxMenuOverlay { position: fixed; inset: 0; z-index: 1290; }
+  #ctxMenuOverlay.hidden { display: none; }
+
+  /* ── Reply preview bar (above composer) ───────────────────────────── */
+  #replyPreviewBar {
+    display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin: 0 10px;
+    background: var(--kyn-bg-input, #f0f2f5); border-left: 3px solid var(--kyn-accent-primary, #22c55e);
+    border-radius: 6px 6px 0 0; font-size: 13px;
+  }
+  #replyPreviewBar.hidden { display: none; }
+  #replyPreviewBar .reply-preview-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.85; }
+  #replyPreviewBar .reply-preview-label { font-weight: 600; color: var(--kyn-accent-primary, #22c55e); display: block; font-size: 12px; }
+  #replyPreviewBar .cancel-reply-btn { background: none; border: none; font-size: 16px; cursor: pointer; opacity: 0.6; }
+  .bubble-reply-quote {
+    font-size: 12px; padding: 5px 8px; margin-bottom: 4px; border-left: 3px solid var(--kyn-accent-primary, #22c55e);
+    background: rgba(0,0,0,0.05); border-radius: 4px; opacity: 0.85; cursor: pointer;
+  }
+  .bubble-row.mine .bubble-reply-quote { background: rgba(255,255,255,0.25); }
+
+  /* ── Voice recording button + recording bar ──────────────────────── */
+  #voiceRecordBtn {
+    background: none; border: none; font-size: 19px; cursor: pointer; flex-shrink: 0;
+    width: 36px; height: 36px; border-radius: 50%;
+  }
+  #voiceRecordBtn:hover { background: var(--kyn-bg-hover, #f0f0f0); }
+  #recordingBar {
+    display: none; align-items: center; gap: 10px; padding: 10px 14px; flex: 1;
+  }
+  #recordingBar.active { display: flex; }
+  .recording-dot {
+    width: 10px; height: 10px; border-radius: 50%; background: #e04b4b; flex-shrink: 0;
+    animation: recPulse 1s infinite;
+  }
+  @keyframes recPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+  #recordingTimer { font-size: 13px; color: var(--kyn-text-secondary, #666); flex-shrink: 0; }
+  #recordingHint { flex: 1; font-size: 12px; color: var(--kyn-text-secondary, #999); }
+  .recording-cancel-btn, .recording-send-btn {
+    background: none; border: none; font-size: 18px; cursor: pointer; width: 34px; height: 34px; border-radius: 50%;
+  }
+  .recording-cancel-btn:hover, .recording-send-btn:hover { background: var(--kyn-bg-hover, #f0f0f0); }
+  .recording-send-btn { color: var(--kyn-accent-primary, #22c55e); }
+
+  /* ── Media viewer (images/video lightbox) ─────────────────────────── */
+  #mediaViewer {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.92); z-index: 1400;
+    display: flex; align-items: center; justify-content: center; flex-direction: column;
+  }
+  #mediaViewer.hidden { display: none; }
+  #mediaViewerTopBar { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; padding: 14px; }
+  #mediaViewerTopBar button { background: rgba(255,255,255,0.12); color: #fff; border: none; border-radius: 50%; width: 38px; height: 38px; font-size: 16px; cursor: pointer; }
+  #mediaViewerTopBar button:hover { background: rgba(255,255,255,0.25); }
+  #mediaViewerContent { max-width: 92vw; max-height: 80vh; display: flex; align-items: center; justify-content: center; }
+  #mediaViewerContent img, #mediaViewerContent video { max-width: 92vw; max-height: 80vh; border-radius: 4px; }
+  .media-nav-btn {
+    position: absolute; top: 50%; transform: translateY(-50%); background: rgba(255,255,255,0.12); color: #fff;
+    border: none; width: 42px; height: 42px; border-radius: 50%; font-size: 18px; cursor: pointer;
+  }
+  .media-nav-btn:hover { background: rgba(255,255,255,0.25); }
+  #mediaPrevBtn { left: 16px; } #mediaNextBtn { right: 16px; }
+
+  /* ── Forward modal (reuses modal-overlay/modal-box) ───────────────── */
+  .forward-target-item { display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer; }
+  .forward-target-item:hover { background: var(--kyn-bg-hover, #f5f5f5); }
+  .forward-target-item img { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; background: #ccc; }
+  #forwardPreview { padding: 10px 14px; font-size: 12px; color: var(--kyn-text-secondary, #888); border-bottom: 1px solid var(--kyn-border, #eee); }
+
+  #hdrChatAvatarImg { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; background: #ccc; cursor: pointer; flex-shrink: 0; }
+  #chatHeaderNameWrap { display: flex; flex-direction: column; min-width: 0; cursor: pointer; flex: 1; }
+  #chatHeaderStatus { font-size: 12px; color: var(--kyn-text-secondary, #888); }
 </style>
 </head>
 <body>
@@ -161,7 +327,11 @@
   <div id="convListPanel">
     <div id="convListHeader">
       <span>Chats</span>
-      <button id="newChatBtn" title="New chat">✎</button>
+      <div id="convListHeaderActions">
+        <button class="header-icon-btn-sm" id="openSearchBtn" title="Search">🔍</button>
+        <button class="header-icon-btn-sm" id="openArchivedBtn" title="Archived chats">🗄</button>
+        <button id="newChatBtn" title="New chat">✎</button>
+      </div>
     </div>
     <div id="convList"></div>
   </div>
@@ -175,6 +345,67 @@
       <input type="text" id="newChatSearchInput" placeholder="Search people...">
       <div id="newChatResults"></div>
     </div>
+  </div>
+
+  <!-- Search panel: global search across chats, or scoped to the open chat -->
+  <div id="searchOverlay" class="side-panel-overlay hidden">
+    <div class="side-panel">
+      <div class="side-panel-header">
+        <span id="searchPanelTitle">Search</span>
+        <button class="close-x" id="closeSearchPanel">&times;</button>
+      </div>
+      <input type="text" id="searchInputBox" placeholder="Search messages...">
+      <div class="side-panel-body" id="searchResultsBody"></div>
+    </div>
+  </div>
+
+  <!-- Archived chats panel -->
+  <div id="archivedOverlay" class="side-panel-overlay hidden">
+    <div class="side-panel">
+      <div class="side-panel-header">
+        <span>Archived chats</span>
+        <button class="close-x" id="closeArchivedPanel">&times;</button>
+      </div>
+      <div class="side-panel-body" id="archivedListBody"></div>
+    </div>
+  </div>
+
+  <!-- Chat info panel: contact details, media, starred messages, settings -->
+  <div id="chatInfoOverlay" class="side-panel-overlay hidden">
+    <div class="side-panel">
+      <div class="side-panel-header">
+        <span>Contact info</span>
+        <button class="close-x" id="closeChatInfoPanel">&times;</button>
+      </div>
+      <div class="side-panel-body" id="chatInfoBody"></div>
+    </div>
+  </div>
+
+  <!-- Forward-message modal -->
+  <div id="forwardModal" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <span>Forward message</span>
+        <button id="closeForwardModal">&times;</button>
+      </div>
+      <div id="forwardPreview"></div>
+      <div id="forwardTargets" style="overflow-y:auto;"></div>
+    </div>
+  </div>
+
+  <!-- Message / context menu popup (reply, forward, copy, react, star, edit, delete) -->
+  <div id="ctxMenuOverlay" class="hidden"></div>
+  <div id="msgContextMenu" class="hidden"></div>
+
+  <!-- Media viewer: full-screen image/video lightbox with next/prev -->
+  <div id="mediaViewer" class="hidden">
+    <div id="mediaViewerTopBar">
+      <button id="mediaDownloadBtn" title="Download">⬇</button>
+      <button id="mediaCloseBtn" title="Close">&times;</button>
+    </div>
+    <button class="media-nav-btn" id="mediaPrevBtn" title="Previous">&#8592;</button>
+    <div id="mediaViewerContent"></div>
+    <button class="media-nav-btn" id="mediaNextBtn" title="Next">&#8594;</button>
   </div>
 
   <div id="chatPanel" class="hide-on-mobile">
@@ -203,6 +434,7 @@
     function renderConversationList() {
       const convs = window.MessageModule.getConversations()
         .slice()
+        .filter(c => !ChatArchiveStore.isArchived(c.chatId))
         .sort((a, b) => new Date(b.lastMessage?.createdAt || 0) - new Date(a.lastMessage?.createdAt || 0));
 
       if (convs.length === 0) {
@@ -233,24 +465,111 @@
         el.addEventListener('click', () => {
           window.MessageModule.openChat({ conversationId: Number(el.dataset.chatId) });
         });
+        el.addEventListener('contextmenu', async (e) => {
+          e.preventDefault();
+          const cid = Number(el.dataset.chatId);
+          const conv = window.MessageModule.getConversations().find(c => c.chatId === cid);
+          const key = await showMenu([
+            { key: 'mute', icon: conv?.muted ? '🔔' : '🔕', label: conv?.muted ? 'Unmute notifications' : 'Mute notifications' },
+            { key: 'archive', icon: '🗄', label: 'Archive chat' },
+          ], e.clientX, e.clientY);
+          if (key === 'mute') {
+            if (conv?.muted) await window.MessageModule.unmuteChat(cid); else await window.MessageModule.muteChat(cid);
+            renderConversationList();
+          } else if (key === 'archive') {
+            ChatArchiveStore.archive(cid);
+            renderConversationList();
+          }
+        });
       });
     }
 
-    function attachmentHtml(m) {
+    function parseAttachment(m) {
       let meta = m.metadata;
       if (typeof meta === 'string') { try { meta = JSON.parse(meta); } catch (_) { meta = null; } }
-      const att = meta && meta.attachment;
+      return meta && meta.attachment;
+    }
+
+    function attachmentHtml(m) {
+      const att = parseAttachment(m);
       if (!att) return '';
-      if ((att.type || m.type) === 'image') {
-        return `<img class="bubble-attachment-image" src="${escapeHtml(att.url)}" alt="${escapeHtml(att.originalName || 'image')}">`;
+      const type = att.type || m.type;
+      if (type === 'image') {
+        return `<img class="bubble-attachment-image" data-media-type="image" data-message-id="${m.id}"
+                   src="${escapeHtml(att.url)}" alt="${escapeHtml(att.originalName || 'image')}">`;
       }
-      const icon = { video: '🎬', audio: '🎵', document: '📄', file: '📎' }[att.type] || '📎';
+      if (type === 'video') {
+        return `<div class="bubble-attachment-image" data-media-type="video" data-message-id="${m.id}"
+                   style="position:relative;cursor:pointer;background:#000;display:flex;align-items:center;justify-content:center;min-height:120px;">
+                   <span style="font-size:34px;color:#fff;">&#9654;</span>
+                 </div>`;
+      }
+      if (type === 'audio') {
+        return `<audio controls src="${escapeHtml(att.url)}" style="max-width:220px;display:block;margin-bottom:4px;"></audio>`;
+      }
+      const icon = { document: '📄', file: '📎' }[type] || '📎';
       return `<a class="bubble-attachment-file" href="${escapeHtml(att.url)}" target="_blank" rel="noopener">
                 ${icon} ${escapeHtml(att.originalName || 'Attachment')}
               </a>`;
     }
 
-    function bubbleHtml(m, isMine) {
+    // ── Generic popup menu (used for message context menu, chat "more" menu,
+    // and conversation-list quick actions). Resolves with the clicked item's
+    // key, or null if dismissed by clicking the overlay. ────────────────────
+    function showMenu(items, x, y, extraHtml) {
+      return new Promise((resolve) => {
+        const menu = document.getElementById('msgContextMenu');
+        const overlay = document.getElementById('ctxMenuOverlay');
+        menu.innerHTML = (extraHtml || '') + items.map(it => `
+          <div class="ctx-menu-item${it.danger ? ' danger' : ''}" data-key="${escapeHtml(it.key)}">
+            <span>${it.icon || ''}</span><span>${escapeHtml(it.label)}</span>
+          </div>`).join('');
+        menu.classList.remove('hidden');
+        overlay.classList.remove('hidden');
+        menu.style.visibility = 'hidden';
+        menu.style.left = '0px'; menu.style.top = '0px';
+        requestAnimationFrame(() => {
+          const vw = window.innerWidth, vh = window.innerHeight;
+          const mw = menu.offsetWidth, mh = menu.offsetHeight;
+          const left = Math.max(8, Math.min(x, vw - mw - 8));
+          const top = Math.max(8, Math.min(y, vh - mh - 8));
+          menu.style.left = left + 'px';
+          menu.style.top = top + 'px';
+          menu.style.visibility = 'visible';
+        });
+        function cleanup(result) {
+          menu.classList.add('hidden');
+          overlay.classList.add('hidden');
+          menu.removeEventListener('click', onMenuClick);
+          overlay.removeEventListener('click', onOverlayClick);
+          resolve(result);
+        }
+        function onMenuClick(e) {
+          const emojiBtn = e.target.closest('.ctx-menu-emoji-row button');
+          if (emojiBtn) { cleanup('react:' + emojiBtn.dataset.emoji); return; }
+          const el = e.target.closest('.ctx-menu-item');
+          if (!el) return;
+          cleanup(el.dataset.key);
+        }
+        function onOverlayClick() { cleanup(null); }
+        menu.addEventListener('click', onMenuClick);
+        overlay.addEventListener('click', onOverlayClick);
+      });
+    }
+
+    // ── Client-side archived-chats store. The backend has no archive concept
+    // (there's no such field on Conversation), so this is tracked locally,
+    // the same way this file already tracks other purely-client UI state. ──
+    const ChatArchiveStore = {
+      _key: 'kyn_archived_chat_ids',
+      _read() { try { return JSON.parse(localStorage.getItem(this._key) || '[]'); } catch (_) { return []; } },
+      _write(list) { try { localStorage.setItem(this._key, JSON.stringify(list)); } catch (_) {} },
+      isArchived(chatId) { return this._read().includes(chatId); },
+      archive(chatId) { const s = new Set(this._read()); s.add(chatId); this._write([...s]); },
+      unarchive(chatId) { const s = new Set(this._read()); s.delete(chatId); this._write([...s]); },
+    };
+
+    function bubbleHtml(m, isMine, chatId) {
       const time = m.createdAt ? new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
       const statusTick = isMine ? ({ sending: '…', sent: '✓', delivered: '✓✓', read: '✓✓', failed: '⚠' }[m.status] || '') : '';
       const editedTag = m.isEdited ? ' (edited)' : '';
@@ -260,28 +579,27 @@
       const content = isDeletedForEveryone ? 'This message was deleted' : (m.displayContent !== undefined ? m.displayContent : '…');
       const contentAttrs = decryptFailed ? ` class="decrypt-retry" title="Tap to retry decryption" data-retry-message-id="${m.id}"`
                           : decryptPending ? ` class="decrypt-pending"` : '';
-      const actions = (isMine && !m.deleted && typeof m.id === 'number') ? `
-          <div class="bubble-actions">
-            <button class="bubble-action-btn" data-action="react" data-message-id="${m.id}" title="React">🙂</button>
-            <button class="bubble-action-btn" data-action="star" data-message-id="${m.id}" title="${m.starred ? 'Unstar' : 'Star'}">${m.starred ? '⭐' : '☆'}</button>
-            <button class="bubble-action-btn" data-action="edit" data-message-id="${m.id}" title="Edit">✎</button>
-            <button class="bubble-action-btn" data-action="delete" data-message-id="${m.id}" title="Delete">🗑</button>
-          </div>` : (!m.deleted && typeof m.id === 'number' ? `
-          <div class="bubble-actions">
-            <button class="bubble-action-btn" data-action="react" data-message-id="${m.id}" title="React">🙂</button>
-            <button class="bubble-action-btn" data-action="star" data-message-id="${m.id}" title="${m.starred ? 'Unstar' : 'Star'}">${m.starred ? '⭐' : '☆'}</button>
-          </div>` : '');
+      const moreBtn = (!m.deleted && typeof m.id === 'number') ?
+        `<button class="bubble-more-btn" data-message-id="${m.id}" title="More">⋮</button>` : '';
       const reactionsHtml = (m.reactions && Object.keys(m.reactions).length > 0) ?
         `<div class="bubble-reactions">${Object.values(m.reactions).map(e => `<span>${e}</span>`).join('')}</div>` : '';
+      let replyQuoteHtml = '';
+      if (m.replyToId && !isDeletedForEveryone) {
+        const quoted = chatId ? window.MessageModule.getMessages(chatId).find(x => x.id === m.replyToId) : null;
+        const quotedText = quoted ? (quoted.displayContent || '…') : 'Original message';
+        replyQuoteHtml = `<div class="bubble-reply-quote" data-jump-to="${m.replyToId}">${escapeHtml(quotedText.slice(0, 120))}</div>`;
+      }
       return `
         <div class="bubble-row ${isMine ? 'mine' : ''}${m.status === 'failed' ? ' failed' : ''}" data-message-id="${m.id}">
+          ${!isMine ? moreBtn : ''}
           <div class="bubble${isDeletedForEveryone ? ' bubble-deleted' : ''}">
+            ${replyQuoteHtml}
             ${!isDeletedForEveryone ? attachmentHtml(m) : ''}
             <span${contentAttrs}>${content ? escapeHtml(content) : ''}</span>${!isDeletedForEveryone ? editedTag : ''}
             ${reactionsHtml}
             <div class="bubble-meta">${time} ${statusTick}${m.starred ? ' ⭐' : ''}</div>
           </div>
-          ${actions}
+          ${isMine ? moreBtn : ''}
         </div>`;
     }
 
@@ -294,25 +612,43 @@
       chatPanelEl.innerHTML = `
         <div id="chatHeader">
           <button id="backBtn">&larr;</button>
-          <strong id="chatHeaderName">${escapeHtml(conv?.otherUser?.username || 'Conversation')}</strong>
+          <img id="hdrChatAvatarImg" src="${escapeHtml(conv?.otherUser?.avatar || '/img/default-avatar.png')}" alt="">
+          <div id="chatHeaderNameWrap">
+            <strong id="chatHeaderName">${escapeHtml(conv?.otherUser?.username || 'Conversation')}</strong>
+            <span id="chatHeaderStatus"></span>
+          </div>
           <div id="chatHeaderActions">
             <button class="header-icon-btn" id="voiceCallBtn" title="Voice call">📞</button>
             <button class="header-icon-btn" id="videoCallBtn" title="Video call">🎥</button>
+            <button class="header-icon-btn" id="chatSearchBtn" title="Search in chat">🔍</button>
             <button class="header-icon-btn" id="chatMoreBtn" title="More">⋮</button>
           </div>
         </div>
         <div id="loadOlderBtn">Load earlier messages</div>
         <div id="messageLog"></div>
+        <div id="replyPreviewBar" class="hidden">
+          <div class="reply-preview-text"><span class="reply-preview-label"></span><span class="reply-preview-content"></span></div>
+          <button class="cancel-reply-btn" id="cancelReplyBtn" title="Cancel">&times;</button>
+        </div>
         <div id="composeBar">
           <button id="attachBtn" title="Attach file">📎</button>
           <input type="file" id="attachInput" style="display:none" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt">
           <button id="emojiBtn" title="Emoji">🙂</button>
           <textarea id="composeInput" rows="1" placeholder="Message..."></textarea>
+          <div id="recordingBar">
+            <span class="recording-dot"></span>
+            <span id="recordingTimer">0:00</span>
+            <span id="recordingHint">Recording voice message…</span>
+            <button class="recording-cancel-btn" id="recordingCancelBtn" title="Cancel">🗑</button>
+            <button class="recording-send-btn" id="recordingSendBtn" title="Send">&#9658;</button>
+          </div>
+          <button id="voiceRecordBtn" title="Record voice message">🎤</button>
           <button id="sendBtn">&#9658;</button>
         </div>
         <div id="emojiPicker" class="hidden"></div>
       `;
       renderMessages(chatId);
+      let replyingToId = null;
 
       const otherUserId = conv?.otherUser?.id;
       function startCall(callType) {
@@ -323,34 +659,203 @@
       }
       document.getElementById('voiceCallBtn').addEventListener('click', () => startCall('voice'));
       document.getElementById('videoCallBtn').addEventListener('click', () => startCall('video'));
-      document.getElementById('chatMoreBtn').addEventListener('click', async () => {
-        const action = prompt('Type "clear" to clear this chat for you, or "block" to block this user');
-        if (action === 'clear') {
-          if (confirm('Clear this conversation for you? This cannot be undone.')) {
-            window.MessageModule.getMessages(chatId).forEach(m => {
-              if (typeof m.id === 'number') window.MessageModule.deleteMessage(chatId, m.id, { forEveryone: false });
-            });
+
+      async function clearChatForUser() {
+        if (!confirm('Clear this conversation for you? This cannot be undone.')) return;
+        window.MessageModule.getMessages(chatId).forEach(m => {
+          if (typeof m.id === 'number') window.MessageModule.deleteMessage(chatId, m.id, { forEveryone: false });
+        });
+      }
+      async function blockThisUser() {
+        if (!otherUserId) { alert('Cannot block: unknown user for this conversation.'); return; }
+        if (!confirm(`Block ${conv?.otherUser?.username || 'this user'}? They won't be able to message or call you.`)) return;
+        try {
+          const res = await window.api.request.post(`/friends/${otherUserId}/block`);
+          if (res && res.success !== false) {
+            alert('User blocked.');
+            document.getElementById('chatInfoOverlay').classList.add('hidden');
+            window.MessageModule.setActiveChatId(null);
+            document.getElementById('convListPanel').classList.remove('hide-on-mobile');
+            document.getElementById('chatPanel').classList.add('hide-on-mobile');
+            renderChatPanel(null);
+            renderConversationList();
+          } else {
+            alert('Could not block user: ' + (res && res.message ? res.message : 'unknown error'));
           }
-        } else if (action === 'block') {
-          if (!otherUserId) { alert('Cannot block: unknown user for this conversation.'); return; }
-          if (!confirm(`Block ${conv?.otherUser?.username || 'this user'}? They won't be able to message or call you.`)) return;
-          try {
-            const res = await window.api.request.post(`/friends/${otherUserId}/block`);
-            if (res && res.success !== false) {
-              alert('User blocked.');
-              window.MessageModule.setActiveChatId(null);
-              document.getElementById('convListPanel').classList.remove('hide-on-mobile');
-              document.getElementById('chatPanel').classList.add('hide-on-mobile');
-              renderChatPanel(null);
-              renderConversationList();
-            } else {
-              alert('Could not block user: ' + (res && res.message ? res.message : 'unknown error'));
-            }
-          } catch (err) {
-            alert('Could not block user: ' + err.message);
-          }
+        } catch (err) {
+          alert('Could not block user: ' + err.message);
         }
+      }
+
+      function openSearchInChat() {
+        searchScopeChatId = chatId;
+        document.getElementById('searchPanelTitle').textContent = 'Search in chat';
+        document.getElementById('searchInputBox').value = '';
+        runSearch('');
+        document.getElementById('searchOverlay').classList.remove('hidden');
+        document.getElementById('searchInputBox').focus();
+      }
+
+      // ── Chat info panel (contact/group details, media, starred, settings) ──
+      function renderChatInfoPanel() {
+        const body = document.getElementById('chatInfoBody');
+        const c = window.MessageModule.getConversations().find(x => x.chatId === chatId);
+        const msgs = window.MessageModule.getMessages(chatId);
+        const mediaMsgs = msgs.filter(m => { const a = parseAttachment(m); return a && (a.type === 'image' || a.type === 'video'); });
+        const docMsgs = msgs.filter(m => { const a = parseAttachment(m); return a && a.type !== 'image' && a.type !== 'video' && a.type !== 'audio'; });
+        const starredMsgs = msgs.filter(m => m.starred);
+        const isMuted = !!c?.muted;
+        const isArchived = ChatArchiveStore.isArchived(chatId);
+
+        body.innerHTML = `
+          <div class="chat-info-avatar-wrap">
+            <img class="chat-info-avatar" src="${escapeHtml(c?.otherUser?.avatar || '/img/default-avatar.png')}" alt="">
+            <div class="chat-info-name">${escapeHtml(c?.otherUser?.username || 'Conversation')}</div>
+            <div class="chat-info-sub">${otherUserId ? 'Tap below to search, mute, or manage this chat' : ''}</div>
+          </div>
+          <div class="chat-info-section">
+            <div class="chat-info-row" id="ciSearchRow"><span class="row-icon">🔍</span><span class="row-label">Search in chat</span></div>
+            <div class="chat-info-row" id="ciMuteRow">
+              <span class="row-icon">🔕</span><span class="row-label">Mute notifications</span>
+              <label class="toggle-switch"><input type="checkbox" id="ciMuteToggle" ${isMuted ? 'checked' : ''}><span class="toggle-slider"></span></label>
+            </div>
+            <div class="chat-info-row" id="ciArchiveRow">
+              <span class="row-icon">🗄</span><span class="row-label">Archive chat</span>
+              <label class="toggle-switch"><input type="checkbox" id="ciArchiveToggle" ${isArchived ? 'checked' : ''}><span class="toggle-slider"></span></label>
+            </div>
+          </div>
+          <div class="chat-info-section">
+            <div class="chat-info-row" style="cursor:default;"><span class="row-icon">🖼</span><span class="row-label">Media, links and docs</span></div>
+            ${mediaMsgs.length ? `<div class="media-grid">${mediaMsgs.map(m => {
+              const a = parseAttachment(m);
+              return a.type === 'video'
+                ? `<div data-media-type="video" data-message-id="${m.id}" style="width:100%;height:90px;display:flex;align-items:center;justify-content:center;background:#000;color:#fff;border-radius:6px;cursor:pointer;">▶</div>`
+                : `<img data-media-type="image" data-message-id="${m.id}" src="${escapeHtml(a.url)}" alt="">`;
+            }).join('')}</div>` : '<div class="chat-info-empty-hint">No media shared yet</div>'}
+            ${docMsgs.length ? docMsgs.map(m => { const a = parseAttachment(m); return `<a class="doc-list-item" href="${escapeHtml(a.url)}" target="_blank" rel="noopener">📄 ${escapeHtml(a.originalName || 'Document')}</a>`; }).join('') : ''}
+          </div>
+          <div class="chat-info-section">
+            <div class="chat-info-row" style="cursor:default;"><span class="row-icon">⭐</span><span class="row-label">Starred messages (${starredMsgs.length})</span></div>
+            ${starredMsgs.length ? starredMsgs.map(m => `<div class="doc-list-item" data-jump-starred="${m.id}" style="cursor:pointer;">⭐ ${escapeHtml((m.displayContent || '').slice(0, 60))}</div>`).join('') : '<div class="chat-info-empty-hint">No starred messages</div>'}
+          </div>
+          <div class="chat-info-section">
+            <div class="chat-info-row danger" id="ciClearRow"><span class="row-icon">🧹</span><span class="row-label">Clear chat</span></div>
+            <div class="chat-info-row danger" id="ciBlockRow"><span class="row-icon">🚫</span><span class="row-label">Block user</span></div>
+          </div>
+        `;
+        body.querySelectorAll('[data-media-type]').forEach(el => el.addEventListener('click', () => openMediaViewer(chatId, Number(el.dataset.messageId))));
+        body.querySelectorAll('[data-jump-starred]').forEach(el => el.addEventListener('click', () => {
+          document.getElementById('chatInfoOverlay').classList.add('hidden');
+          const target = document.querySelector(`[data-message-id="${el.dataset.jumpStarred}"]`);
+          if (target) { target.scrollIntoView({ block: 'center' }); target.style.outline = '2px solid var(--kyn-accent-primary, #22c55e)'; setTimeout(() => target.style.outline = '', 1500); }
+        }));
+        document.getElementById('ciSearchRow').addEventListener('click', () => { document.getElementById('chatInfoOverlay').classList.add('hidden'); openSearchInChat(); });
+        document.getElementById('ciMuteToggle').addEventListener('change', async (e) => {
+          if (e.target.checked) await window.MessageModule.muteChat(chatId); else await window.MessageModule.unmuteChat(chatId);
+        });
+        document.getElementById('ciArchiveToggle').addEventListener('change', (e) => {
+          if (e.target.checked) ChatArchiveStore.archive(chatId); else ChatArchiveStore.unarchive(chatId);
+          renderConversationList();
+        });
+        document.getElementById('ciClearRow').addEventListener('click', clearChatForUser);
+        document.getElementById('ciBlockRow').addEventListener('click', blockThisUser);
+      }
+
+      function openChatInfo() {
+        renderChatInfoPanel();
+        document.getElementById('chatInfoOverlay').classList.remove('hidden');
+      }
+      document.getElementById('hdrChatAvatarImg').addEventListener('click', openChatInfo);
+      document.getElementById('chatHeaderNameWrap').addEventListener('click', openChatInfo);
+      document.getElementById('chatSearchBtn').addEventListener('click', openSearchInChat);
+
+      document.getElementById('chatMoreBtn').addEventListener('click', async (e) => {
+        const c = window.MessageModule.getConversations().find(x => x.chatId === chatId);
+        const isMuted = !!c?.muted;
+        const isArchived = ChatArchiveStore.isArchived(chatId);
+        const key = await showMenu([
+          { key: 'info', icon: 'ℹ️', label: 'Contact info' },
+          { key: 'search', icon: '🔍', label: 'Search in chat' },
+          { key: 'mute', icon: isMuted ? '🔔' : '🔕', label: isMuted ? 'Unmute notifications' : 'Mute notifications' },
+          { key: 'archive', icon: '🗄', label: isArchived ? 'Unarchive chat' : 'Archive chat' },
+          { key: 'clear', icon: '🧹', label: 'Clear chat' },
+          { key: 'block', icon: '🚫', label: 'Block user', danger: true },
+        ], e.clientX, e.clientY);
+        if (key === 'info') openChatInfo();
+        else if (key === 'search') openSearchInChat();
+        else if (key === 'mute') { if (isMuted) await window.MessageModule.unmuteChat(chatId); else await window.MessageModule.muteChat(chatId); }
+        else if (key === 'archive') { if (isArchived) ChatArchiveStore.unarchive(chatId); else ChatArchiveStore.archive(chatId); renderConversationList(); }
+        else if (key === 'clear') clearChatForUser();
+        else if (key === 'block') blockThisUser();
       });
+
+      // ── Reply-to preview bar ─────────────────────────────────────────
+      const replyBar = document.getElementById('replyPreviewBar');
+      activeStartReply = (cid, message) => {
+        if (cid !== chatId) return;
+        replyingToId = message.id;
+        replyBar.querySelector('.reply-preview-label').textContent =
+          message.senderId === window._kynCurrentUserId ? 'You' : (conv?.otherUser?.username || 'Them');
+        replyBar.querySelector('.reply-preview-content').textContent = (message.displayContent || 'Attachment').slice(0, 100);
+        replyBar.classList.remove('hidden');
+        document.getElementById('composeInput').focus();
+      };
+      document.getElementById('cancelReplyBtn').addEventListener('click', () => {
+        replyingToId = null;
+        replyBar.classList.add('hidden');
+      });
+
+      // ── Voice message recording ──────────────────────────────────────
+      let mediaRecorder = null, recordedChunks = [], recordingStart = 0, recordingTimerInt = null, recordingCancelled = false;
+      function setRecordingUiActive(active) {
+        document.getElementById('recordingBar').classList.toggle('active', active);
+        document.getElementById('composeInput').classList.toggle('compose-hidden', active);
+        document.getElementById('voiceRecordBtn').classList.toggle('compose-hidden', active);
+        document.getElementById('emojiBtn').classList.toggle('compose-hidden', active);
+        document.getElementById('attachBtn').classList.toggle('compose-hidden', active);
+      }
+      async function startRecording() {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          recordedChunks = [];
+          recordingCancelled = false;
+          mediaRecorder = new MediaRecorder(stream);
+          mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
+          mediaRecorder.onstop = async () => {
+            stream.getTracks().forEach(t => t.stop());
+            clearInterval(recordingTimerInt);
+            setRecordingUiActive(false);
+            if (recordingCancelled || recordedChunks.length === 0) return;
+            const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+            const file = new File([blob], `voice-message-${Date.now()}.webm`, { type: blob.type });
+            try {
+              const attachment = await window.MessageModule.uploadAttachment(file);
+              await window.MessageModule.sendMessage({ chatId, content: '', attachment, replyToId: replyingToId || undefined });
+              replyingToId = null;
+              replyBar.classList.add('hidden');
+            } catch (err) {
+              alert('Could not send voice message: ' + err.message);
+            }
+          };
+          mediaRecorder.start();
+          recordingStart = Date.now();
+          setRecordingUiActive(true);
+          document.getElementById('recordingTimer').textContent = '0:00';
+          recordingTimerInt = setInterval(() => {
+            const secs = Math.floor((Date.now() - recordingStart) / 1000);
+            document.getElementById('recordingTimer').textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+          }, 250);
+        } catch (err) {
+          alert('Microphone access is unavailable: ' + err.message);
+        }
+      }
+      function stopRecording(cancel) {
+        recordingCancelled = !!cancel;
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+      }
+      document.getElementById('voiceRecordBtn').addEventListener('click', startRecording);
+      document.getElementById('recordingCancelBtn').addEventListener('click', () => stopRecording(true));
+      document.getElementById('recordingSendBtn').addEventListener('click', () => stopRecording(false));
 
       const emojiBtn = document.getElementById('emojiBtn');
       const emojiPicker = document.getElementById('emojiPicker');
@@ -393,7 +898,10 @@
         sendBtn.disabled = true;
         window.MessageModule.sendTypingStop(chatId);
         clearTimeout(typingStopTimer);
-        await window.MessageModule.sendMessage({ chatId, content });
+        const replyToId = replyingToId || undefined;
+        replyingToId = null;
+        replyBar.classList.add('hidden');
+        await window.MessageModule.sendMessage({ chatId, content, replyToId });
         sendBtn.disabled = false;
         input.focus();
       }
@@ -401,10 +909,14 @@
       let typingStopTimer = null;
       sendBtn.addEventListener('click', doSend);
       input.addEventListener('input', () => {
+        const hasText = input.value.trim().length > 0;
+        sendBtn.classList.toggle('compose-hidden', !hasText);
+        document.getElementById('voiceRecordBtn').classList.toggle('compose-hidden', hasText);
         window.MessageModule.sendTypingStart(chatId);
         clearTimeout(typingStopTimer);
         typingStopTimer = setTimeout(() => window.MessageModule.sendTypingStop(chatId), 3000);
       });
+      sendBtn.classList.add('compose-hidden');
       input.addEventListener('keydown', (e) => {
         if (e.key !== 'Enter' || e.shiftKey) return;
         const sendOnEnter = window.MessageModule.getSetting('chat', 'enterToSend') !== false;
@@ -422,7 +934,10 @@
           const attachment = await window.MessageModule.uploadAttachment(file);
           const caption = input.value.trim();
           input.value = '';
-          await window.MessageModule.sendMessage({ chatId, content: caption, attachment });
+          const replyToId = replyingToId || undefined;
+          replyingToId = null;
+          replyBar.classList.add('hidden');
+          await window.MessageModule.sendMessage({ chatId, content: caption, attachment, replyToId });
         } catch (err) {
           alert('Upload failed: ' + err.message);
         } finally {
@@ -458,7 +973,7 @@
           html += `<div class="date-separator"><span>${dateSeparatorLabel(m.createdAt)}</span></div>`;
           lastDateKey = dateKey;
         }
-        html += bubbleHtml(m, m.senderId === currentUserId);
+        html += bubbleHtml(m, m.senderId === currentUserId, chatId);
       });
       log.innerHTML = html;
 
@@ -468,32 +983,28 @@
         log.scrollTop = log.scrollHeight;
       }
 
-      log.querySelectorAll('.bubble-action-btn').forEach(btn => {
-        btn.addEventListener('click', async (e) => {
+      log.querySelectorAll('.bubble-more-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
           e.stopPropagation();
           const messageId = Number(btn.dataset.messageId);
-          if (btn.dataset.action === 'delete') {
-            const forEveryone = confirm('Delete for everyone? Click Cancel to delete just for you.');
-            await window.MessageModule.deleteMessage(chatId, messageId, { forEveryone });
-          } else if (btn.dataset.action === 'edit') {
-            const current = window.MessageModule.getMessages(chatId).find(m => m.id === messageId);
-            const newContent = prompt('Edit message:', current ? current.displayContent : '');
-            if (newContent && newContent.trim()) {
-              await window.MessageModule.editMessage(chatId, messageId, newContent.trim());
-            }
-          } else if (btn.dataset.action === 'star') {
-            const current = window.MessageModule.getMessages(chatId).find(m => m.id === messageId);
-            if (current && current.starred) {
-              await window.MessageModule.unstarMessage(chatId, messageId);
-            } else {
-              await window.MessageModule.starMessage(chatId, messageId);
-            }
-            renderMessages(chatId, { preserveScroll: true });
-          } else if (btn.dataset.action === 'react') {
-            const emoji = prompt('React with an emoji:', '👍');
-            if (emoji && emoji.trim()) {
-              await window.MessageModule.reactToMessage(chatId, messageId, emoji.trim());
-            }
+          const message = window.MessageModule.getMessages(chatId).find(m => m.id === messageId);
+          if (!message) return;
+          const isMine = message.senderId === window._kynCurrentUserId;
+          openMsgContextMenu(chatId, message, isMine, e.clientX, e.clientY);
+        });
+      });
+
+      log.querySelectorAll('[data-media-type]').forEach(el => {
+        el.addEventListener('click', () => openMediaViewer(chatId, Number(el.dataset.messageId)));
+      });
+
+      log.querySelectorAll('.bubble-reply-quote').forEach(el => {
+        el.addEventListener('click', () => {
+          const target = log.querySelector(`[data-message-id="${el.dataset.jumpTo}"]`);
+          if (target) {
+            target.scrollIntoView({ block: 'center' });
+            target.style.outline = '2px solid var(--kyn-accent-primary, #22c55e)';
+            setTimeout(() => { target.style.outline = ''; }, 1500);
           }
         });
       });
@@ -545,6 +1056,214 @@
       } catch (err) {
         newChatResults.innerHTML = '<div style="padding:14px;color:#e04b4b;font-size:13px;">Search failed</div>';
       }
+    }
+
+    // ── Archived chats panel ────────────────────────────────────────────
+    function renderArchivedList() {
+      const body = document.getElementById('archivedListBody');
+      const archivedIds = new Set(window.MessageModule.getConversations().map(c => c.chatId).filter(id => ChatArchiveStore.isArchived(id)));
+      const convs = window.MessageModule.getConversations().filter(c => archivedIds.has(c.chatId));
+      if (convs.length === 0) {
+        body.innerHTML = '<div class="chat-info-empty-hint" style="padding:30px 16px;text-align:center;">No archived chats</div>';
+        return;
+      }
+      body.innerHTML = `<div class="archived-banner">Archived chats stay here until you unarchive them.</div>` +
+        convs.map(c => `
+          <div class="conv-item" data-chat-id="${c.chatId}">
+            <img class="conv-avatar" src="${escapeHtml(c.otherUser?.avatar || '/img/default-avatar.png')}" alt="">
+            <div class="conv-meta">
+              <div class="conv-name">${escapeHtml(c.otherUser?.username || 'Conversation')}</div>
+              <div class="conv-preview">${escapeHtml(c.lastMessage?.content || '')}</div>
+            </div>
+            <button class="header-icon-btn-sm" data-unarchive="${c.chatId}" title="Unarchive">⤴</button>
+          </div>`).join('');
+      body.querySelectorAll('[data-unarchive]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          ChatArchiveStore.unarchive(Number(btn.dataset.unarchive));
+          renderArchivedList();
+          renderConversationList();
+        });
+      });
+      body.querySelectorAll('.conv-item').forEach(el => {
+        el.addEventListener('click', () => {
+          document.getElementById('archivedOverlay').classList.add('hidden');
+          window.MessageModule.openChat({ conversationId: Number(el.dataset.chatId) });
+        });
+      });
+    }
+    document.getElementById('openArchivedBtn').addEventListener('click', () => {
+      renderArchivedList();
+      document.getElementById('archivedOverlay').classList.remove('hidden');
+    });
+    document.getElementById('closeArchivedPanel').addEventListener('click', () => {
+      document.getElementById('archivedOverlay').classList.add('hidden');
+    });
+    document.getElementById('archivedOverlay').addEventListener('click', (e) => {
+      if (e.target.id === 'archivedOverlay') e.currentTarget.classList.add('hidden');
+    });
+
+    // ── Search panel (global, or scoped to one chat via chatSearchBtn) ──
+    let searchScopeChatId = null;
+    function runSearch(query) {
+      const resultsBody = document.getElementById('searchResultsBody');
+      const q = (query || '').trim();
+      if (!q) { resultsBody.innerHTML = '<div class="search-empty">Type to search messages</div>'; return; }
+      const results = window.MessageModule.searchMessages(searchScopeChatId, q)
+        .slice()
+        .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+        .slice(0, 100);
+      if (results.length === 0) {
+        resultsBody.innerHTML = '<div class="search-empty">No messages found</div>';
+        return;
+      }
+      resultsBody.innerHTML = results.map(m => {
+        const conv = window.MessageModule.getConversations().find(c => c.chatId === m.chatId);
+        const time = m.createdAt ? new Date(m.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+        return `<div class="search-result-item" data-chat-id="${m.chatId}" data-message-id="${m.id}">
+          ${!searchScopeChatId ? `<div class="search-result-chat">${escapeHtml(conv?.otherUser?.username || 'Conversation')}</div>` : ''}
+          <div class="search-result-snippet">${escapeHtml(m.displayContent || '')}</div>
+          <div class="search-result-time">${time}</div>
+        </div>`;
+      }).join('');
+      resultsBody.querySelectorAll('.search-result-item').forEach(el => {
+        el.addEventListener('click', () => {
+          document.getElementById('searchOverlay').classList.add('hidden');
+          window.MessageModule.openChat({ conversationId: Number(el.dataset.chatId), messageId: Number(el.dataset.messageId) });
+        });
+      });
+    }
+    let searchDebounce = null;
+    document.getElementById('searchInputBox').addEventListener('input', (e) => {
+      clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(() => runSearch(e.target.value), 200);
+    });
+    document.getElementById('openSearchBtn').addEventListener('click', () => {
+      searchScopeChatId = null;
+      document.getElementById('searchPanelTitle').textContent = 'Search all chats';
+      document.getElementById('searchInputBox').value = '';
+      runSearch('');
+      document.getElementById('searchOverlay').classList.remove('hidden');
+      document.getElementById('searchInputBox').focus();
+    });
+    document.getElementById('closeSearchPanel').addEventListener('click', () => {
+      document.getElementById('searchOverlay').classList.add('hidden');
+    });
+    document.getElementById('searchOverlay').addEventListener('click', (e) => {
+      if (e.target.id === 'searchOverlay') e.currentTarget.classList.add('hidden');
+    });
+
+    // ── Media viewer (image/video lightbox with prev/next) ─────────────
+    let mediaViewerList = [];
+    let mediaViewerIndex = 0;
+    function renderMediaViewerCurrent() {
+      const content = document.getElementById('mediaViewerContent');
+      const item = mediaViewerList[mediaViewerIndex];
+      if (!item) return;
+      content.innerHTML = item.type === 'video'
+        ? `<video src="${escapeHtml(item.url)}" controls autoplay></video>`
+        : `<img src="${escapeHtml(item.url)}" alt="">`;
+      document.getElementById('mediaPrevBtn').style.visibility = mediaViewerIndex > 0 ? 'visible' : 'hidden';
+      document.getElementById('mediaNextBtn').style.visibility = mediaViewerIndex < mediaViewerList.length - 1 ? 'visible' : 'hidden';
+      document.getElementById('mediaDownloadBtn').onclick = () => window.open(item.url, '_blank');
+    }
+    function openMediaViewer(chatId, startMessageId) {
+      mediaViewerList = window.MessageModule.getMessages(chatId)
+        .map(m => { const att = parseAttachment(m); return att && (att.type === 'image' || att.type === 'video') ? { id: m.id, url: att.url, type: att.type } : null; })
+        .filter(Boolean);
+      mediaViewerIndex = Math.max(0, mediaViewerList.findIndex(x => x.id === startMessageId));
+      renderMediaViewerCurrent();
+      document.getElementById('mediaViewer').classList.remove('hidden');
+    }
+    document.getElementById('mediaCloseBtn').addEventListener('click', () => document.getElementById('mediaViewer').classList.add('hidden'));
+    document.getElementById('mediaPrevBtn').addEventListener('click', () => { if (mediaViewerIndex > 0) { mediaViewerIndex--; renderMediaViewerCurrent(); } });
+    document.getElementById('mediaNextBtn').addEventListener('click', () => { if (mediaViewerIndex < mediaViewerList.length - 1) { mediaViewerIndex++; renderMediaViewerCurrent(); } });
+
+    // ── Forward-message modal ───────────────────────────────────────────
+    let forwardingMessage = null;
+    function openForwardModal(chatId, message) {
+      forwardingMessage = message;
+      document.getElementById('forwardPreview').textContent = message.displayContent
+        ? ('Forward: "' + message.displayContent.slice(0, 80) + '"')
+        : 'Forward attachment';
+      const targetsEl = document.getElementById('forwardTargets');
+      const convs = window.MessageModule.getConversations().slice()
+        .sort((a, b) => new Date(b.lastMessage?.createdAt || 0) - new Date(a.lastMessage?.createdAt || 0));
+      targetsEl.innerHTML = convs.map(c => `
+        <div class="forward-target-item" data-chat-id="${c.chatId}" data-user-id="${c.otherUser?.id || ''}">
+          <img src="${escapeHtml(c.otherUser?.avatar || '/img/default-avatar.png')}" alt="">
+          <span>${escapeHtml(c.otherUser?.username || 'Conversation')}</span>
+        </div>`).join('');
+      targetsEl.querySelectorAll('.forward-target-item').forEach(el => {
+        el.addEventListener('click', async () => {
+          const att = parseAttachment(forwardingMessage);
+          await window.MessageModule.sendMessage({
+            chatId: Number(el.dataset.chatId),
+            content: forwardingMessage.displayContent || '',
+            attachment: att || undefined,
+          });
+          document.getElementById('forwardModal').classList.add('hidden');
+        });
+      });
+      document.getElementById('forwardModal').classList.remove('hidden');
+    }
+    document.getElementById('closeForwardModal').addEventListener('click', () => document.getElementById('forwardModal').classList.add('hidden'));
+    document.getElementById('forwardModal').addEventListener('click', (e) => { if (e.target.id === 'forwardModal') e.currentTarget.classList.add('hidden'); });
+
+    // ── Message context menu (reply, forward, copy, react, star, edit, delete) ──
+    async function openMsgContextMenu(chatId, message, isMine, x, y) {
+      const EMOJI_QUICK = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+      const emojiRow = `<div class="ctx-menu-emoji-row">${EMOJI_QUICK.map(e => `<button data-emoji="${e}">${e}</button>`).join('')}</div>`;
+      const items = [];
+      items.push({ key: 'reply', icon: '↩️', label: 'Reply' });
+      items.push({ key: 'forward', icon: '➡️', label: 'Forward' });
+      if (message.displayContent) items.push({ key: 'copy', icon: '📋', label: 'Copy' });
+      items.push({ key: 'star', icon: message.starred ? '⭐' : '☆', label: message.starred ? 'Unstar' : 'Star' });
+      if (isMine && message.type !== 'image' && message.type !== 'video' && message.type !== 'audio') {
+        items.push({ key: 'edit', icon: '✎', label: 'Edit' });
+      }
+      items.push({ key: 'delete', icon: '🗑', label: 'Delete', danger: true });
+
+      const key = await showMenu(items, x, y, emojiRow);
+      if (!key) return;
+      if (key.startsWith('react:')) {
+        await window.MessageModule.reactToMessage(chatId, message.id, key.slice(6));
+        return;
+      }
+      switch (key) {
+        case 'reply':
+          startReply(chatId, message);
+          break;
+        case 'forward':
+          openForwardModal(chatId, message);
+          break;
+        case 'copy':
+          try { await navigator.clipboard.writeText(message.displayContent || ''); } catch (_) {}
+          break;
+        case 'star':
+          if (message.starred) await window.MessageModule.unstarMessage(chatId, message.id);
+          else await window.MessageModule.starMessage(chatId, message.id);
+          renderMessages(chatId, { preserveScroll: true });
+          break;
+        case 'edit': {
+          const newContent = prompt('Edit message:', message.displayContent || '');
+          if (newContent && newContent.trim()) await window.MessageModule.editMessage(chatId, message.id, newContent.trim());
+          break;
+        }
+        case 'delete': {
+          const forEveryone = isMine ? confirm('Delete for everyone? Click Cancel to delete just for you.') : false;
+          await window.MessageModule.deleteMessage(chatId, message.id, { forEveryone });
+          break;
+        }
+      }
+    }
+
+    // Reply-preview state lives per open chat panel; startReply/cancelReply
+    // are re-bound each time renderChatPanel() runs (see below), but this
+    // wrapper lets the context menu (defined once, outside that scope) reach it.
+    let activeStartReply = null;
+    function startReply(chatId, message) {
+      if (activeStartReply) activeStartReply(chatId, message);
     }
 
     document.getElementById('newChatBtn').addEventListener('click', () => {
