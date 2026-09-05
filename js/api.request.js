@@ -1305,7 +1305,7 @@
                 const xhr = new XMLHttpRequest();
                 
                 let fullUrl = normalizedUrl;
-                if (!normalizedUrl.startsWith('http://') && !normalizedUrl.startsWith('https://') && !normalizedUrl.startsWith('/')) {
+                if (!normalizedUrl.startsWith('http://') && !normalizedUrl.startsWith('https://')) {
                     let baseUrl = _BACKEND_BASE_URL || _BASE_API_URL || window.API_BASE_URL || '';
                     
                     if (!baseUrl && typeof window !== 'undefined' && window.location && window.location.origin) {
@@ -2297,17 +2297,7 @@
             
             if (!_getUserToken || typeof _getUserToken !== 'function') {
                 console.warn("[API] ⏳ getUserToken not found in window.__API_CORE");
-                // FIX (infinite-recursion): _getUserToken must NEVER be set to
-                // getAuthToken. getAuthToken() calls _getUserToken() as one of
-                // its own fallback steps, so pointing _getUserToken back at
-                // getAuthToken made every call recurse into itself forever
-                // ("Maximum call stack size exceeded"), which in turn made
-                // every protected request fail and cascade into retry storms
-                // across chat/messages/groups. Leave _getUserToken unset here;
-                // getAuthToken()'s own guard (`if (_getUserToken && typeof
-                // _getUserToken === 'function')`) will simply skip this step
-                // and fall through to its localStorage-based last resort.
-                _getUserToken = null;
+                _getUserToken = getAuthToken;
             }
             
             if (!_apiCache) {
@@ -2332,9 +2322,7 @@
         } catch (error) {
             console.error("[API] ❌ Failed to initialize dependencies:", error);
             _secureApiFetch = createFallbackSecureFetch();
-            // FIX (infinite-recursion): see comment above — never alias
-            // _getUserToken to getAuthToken, it creates self-recursion.
-            _getUserToken = null;
+            _getUserToken = getAuthToken;
             _apiCache = {
                 get: () => null,
                 set: () => {},
@@ -2434,8 +2422,7 @@
                 
                 let fullUrl = normalizedUrl;
                 if (!normalizedUrl.startsWith('http://') && 
-                    !normalizedUrl.startsWith('https://') && 
-                    !normalizedUrl.startsWith('/')) {
+                    !normalizedUrl.startsWith('https://')) {
                     
                     let baseUrl = _BACKEND_BASE_URL || _BASE_API_URL || window.API_BASE_URL || '';
                     

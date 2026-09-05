@@ -16,7 +16,7 @@
   body {
     margin: 0; height: 100vh; display: flex; overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: var(--kyn-bg-primary, #fff); color: var(--kyn-text-primary, #111);
+    background: var(--kyn-bg-panel, #fff); color: var(--kyn-text-primary, #111b21);
   }
   #convListPanel {
     width: 320px; min-width: 260px; border-right: 1px solid var(--kyn-border, #e2e2e2);
@@ -39,7 +39,7 @@
   }
   .modal-overlay.hidden { display: none; }
   .modal-box {
-    background: var(--kyn-bg-primary, #fff); border-radius: 12px; width: 90%; max-width: 380px;
+    background: var(--kyn-bg-panel, #fff); border-radius: 12px; width: 90%; max-width: 380px;
     max-height: 70vh; display: flex; flex-direction: column; overflow: hidden;
   }
   .modal-header {
@@ -67,7 +67,7 @@
   .conv-name { font-weight: 600; font-size: 14px; }
   .conv-preview { font-size: 13px; color: var(--kyn-text-secondary, #777); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .unread-badge {
-    background: var(--kyn-accent, #2d7ff9); color: #fff; border-radius: 999px;
+    background: var(--kyn-accent-primary, #22c55e); color: #fff; border-radius: 999px;
     font-size: 11px; padding: 2px 7px; min-width: 18px; text-align: center;
   }
   #chatPanel { flex: 1; display: flex; flex-direction: column; min-width: 0; }
@@ -76,19 +76,19 @@
     display: flex; align-items: center; gap: 10px;
   }
   #backBtn { display: none; background: none; border: none; font-size: 20px; cursor: pointer; }
-  #messageLog { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 6px; }
+  #messageLog { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 6px; background: var(--kyn-bg-chat, #efeae2); }
   .bubble-row { display: flex; }
   .bubble-row.mine { justify-content: flex-end; }
   .bubble {
     max-width: 70%; padding: 8px 12px; border-radius: 14px; font-size: 14px; line-height: 1.4;
-    background: var(--kyn-bg-secondary, #f0f0f0); word-wrap: break-word;
+    background: var(--kyn-bubble-recv, #fff); color: var(--kyn-bubble-recv-text, #111b21); word-wrap: break-word;
   }
-  .bubble-row.mine .bubble { background: var(--kyn-accent, #2d7ff9); color: #fff; }
+  .bubble-row.mine .bubble { background: var(--kyn-bubble-sent, #d9fdd3); color: var(--kyn-bubble-sent-text, #111b21); }
   .bubble-meta { font-size: 10px; opacity: 0.65; margin-top: 3px; text-align: right; }
   .bubble-row.failed .bubble { outline: 2px solid #e04b4b; }
   .bubble-deleted { font-style: italic; opacity: 0.6; }
   .date-separator { text-align: center; font-size: 12px; color: var(--kyn-text-secondary,#999); margin: 10px 0; }
-  .date-separator span { background: var(--kyn-bg-secondary,#f0f0f0); padding: 3px 10px; border-radius: 10px; }
+  .date-separator span { background: var(--kyn-bg-input,#f0f2f5); padding: 3px 10px; border-radius: 10px; }
   .bubble-reactions { margin-top: 2px; font-size: 14px; }
   .decrypt-retry { cursor: pointer; text-decoration: underline dotted; opacity: 0.8; }
   .decrypt-pending { opacity: 0.6; font-style: italic; }
@@ -108,7 +108,7 @@
   #emojiBtn { background: none; border: none; font-size: 18px; cursor: pointer; width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0; }
   #emojiBtn:hover { background: var(--kyn-bg-hover, #f0f0f0); }
   #emojiPicker {
-    position: absolute; bottom: 60px; right: 10px; background: var(--kyn-bg-primary, #fff);
+    position: absolute; bottom: 60px; right: 10px; background: var(--kyn-bg-panel, #fff);
     border: 1px solid var(--kyn-border, #ddd); border-radius: 10px; padding: 8px;
     display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
   }
@@ -121,7 +121,7 @@
     padding: 10px 14px; font-size: 14px; resize: none; max-height: 120px;
   }
   #sendBtn {
-    background: var(--kyn-accent, #2d7ff9); color: #fff; border: none; border-radius: 50%;
+    background: var(--kyn-accent-primary, #22c55e); color: #fff; border: none; border-radius: 50%;
     width: 40px; height: 40px; cursor: pointer; flex-shrink: 0;
   }
   #sendBtn:disabled { opacity: 0.5; cursor: default; }
@@ -139,7 +139,16 @@
   .bubble-row.mine .bubble-attachment-file { background: rgba(255,255,255,0.2); }
   #attachUploadProgress { font-size: 12px; color: var(--kyn-text-secondary,#999); padding: 0 14px; }
   #emptyState { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--kyn-text-secondary, #999); }
-  #loadOlderBtn { text-align: center; padding: 8px; font-size: 12px; color: var(--kyn-accent, #2d7ff9); cursor: pointer; }
+  .empty-conv-list { padding: 60px 24px; text-align: center; color: var(--kyn-text-secondary, #999); }
+  .empty-conv-icon { font-size: 40px; margin-bottom: 14px; }
+  .empty-conv-title { font-size: 15px; font-weight: 600; color: var(--kyn-text-primary, #333); margin-bottom: 4px; }
+  .empty-conv-subtitle { font-size: 13px; margin-bottom: 16px; }
+  #emptyStateNewChatBtn {
+    background: var(--kyn-accent-primary, #22c55e); color: #fff; border: none; border-radius: 20px;
+    padding: 9px 20px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  #emptyStateNewChatBtn:hover { opacity: 0.9; }
+  #loadOlderBtn { text-align: center; padding: 8px; font-size: 12px; color: var(--kyn-accent-primary, #22c55e); cursor: pointer; }
   @media (max-width: 720px) {
     #convListPanel { width: 100%; }
     #chatPanel.hide-on-mobile { display: none; }
@@ -169,11 +178,10 @@
   </div>
 
   <div id="chatPanel" class="hide-on-mobile">
-    <div id="emptyState">Select a conversation</div>
+    <div id="emptyState"><div><div style="font-size:48px;margin-bottom:10px;">💬</div>Select a conversation to start messaging</div></div>
   </div>
 
   <script src="/js/api.request.js"></script>
-  <script src="/js/api.core.js"></script>
   <script src="/js/app.realtime.socket.js"></script>
   <script src="/js/core/identity/IdentityProfileStore.js"></script>
   <script src="/js/e2e-encryption.js" defer></script>
@@ -198,7 +206,15 @@
         .sort((a, b) => new Date(b.lastMessage?.createdAt || 0) - new Date(a.lastMessage?.createdAt || 0));
 
       if (convs.length === 0) {
-        convListEl.innerHTML = '<div style="padding:20px;color:var(--kyn-text-secondary,#999);font-size:13px;">No conversations yet</div>';
+        convListEl.innerHTML = `
+          <div class="empty-conv-list">
+            <div class="empty-conv-icon">💬</div>
+            <div class="empty-conv-title">No conversations yet</div>
+            <div class="empty-conv-subtitle">Start a new chat to message someone</div>
+            <button id="emptyStateNewChatBtn">Start a chat</button>
+          </div>`;
+        const startBtn = document.getElementById('emptyStateNewChatBtn');
+        if (startBtn) startBtn.addEventListener('click', () => document.getElementById('newChatBtn').click());
         return;
       }
 
@@ -271,7 +287,7 @@
 
     function renderChatPanel(chatId) {
       if (!chatId) {
-        chatPanelEl.innerHTML = '<div id="emptyState">Select a conversation</div>';
+        chatPanelEl.innerHTML = '<div id="emptyState"><div><div style="font-size:48px;margin-bottom:10px;">💬</div>Select a conversation to start messaging</div></div>';
         return;
       }
       const conv = window.MessageModule.getConversations().find(c => c.chatId === chatId);
@@ -499,8 +515,14 @@
       newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary,#999);font-size:13px;">Searching...</div>';
       try {
         const res = await window.api.request.get(`/friends/users/all?limit=20${query ? '&search=' + encodeURIComponent(query) : ''}`);
-        const users = (res && res.data && (res.data.users || res.data)) || [];
-        if (!Array.isArray(users) || users.length === 0) {
+        if (!res || res.success === false || res.ok === false) {
+          const reason = (res && (res.message || (res.data && res.data.message))) || 'Unknown error';
+          newChatResults.innerHTML = `<div style="padding:14px;color:#e04b4b;font-size:13px;">Could not load people: ${escapeHtml(reason)}</div>`;
+          console.error('[Messages] /friends/users/all failed:', res);
+          return;
+        }
+        const users = (res.data && Array.isArray(res.data.users)) ? res.data.users : [];
+        if (users.length === 0) {
           newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary,#999);font-size:13px;">No people found</div>';
           return;
         }
@@ -588,7 +610,7 @@
         }
         case 'message:scroll-to': {
           const el = document.querySelector(`[data-message-id="${data.messageId}"]`);
-          if (el) { el.scrollIntoView({ block: 'center' }); el.style.outline = '2px solid var(--kyn-accent,#2d7ff9)'; }
+          if (el) { el.scrollIntoView({ block: 'center' }); el.style.outline = '2px solid var(--kyn-accent-primary, #22c55e)'; }
           break;
         }
       }
