@@ -160,6 +160,7 @@
     display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
   }
   #emojiPicker.hidden { display: none; }
+  #newChatSearchInput.hidden { display: none; }
   .emoji-option { background: none; border: none; font-size: 20px; cursor: pointer; padding: 4px; border-radius: 6px; }
   .emoji-option:hover { background: var(--kyn-bg-hover, #f0f0f0); }
   #composeBar { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--kyn-border, #e2e2e2); position: relative; }
@@ -964,6 +965,19 @@
              (u.lastName || '').toLowerCase().includes(q);
     }
 
+    // Below this many known people, just show them all — a search box adds
+    // a step with nothing to filter yet. Once there's a real list to sift
+    // through, bring the search box back so it stays usable at scale.
+    const NEW_CHAT_SEARCH_VISIBLE_THRESHOLD = 8;
+    function updateNewChatSearchVisibility(knownCount, activeQuery) {
+      if (activeQuery) { newChatSearchInput.classList.remove('hidden'); return; }
+      if (knownCount > NEW_CHAT_SEARCH_VISIBLE_THRESHOLD) {
+        newChatSearchInput.classList.remove('hidden');
+      } else {
+        newChatSearchInput.classList.add('hidden');
+      }
+    }
+
     async function runNewChatSearch(query) {
       // ROOT-CAUSE FIX (this is the real reason Calls/Status/Group show
       // friends instantly and Messages doesn't): the comment this replaced
@@ -1014,6 +1028,16 @@
       const q = (query || '').trim().toLowerCase();
       const filteredCache = cachedUsers.filter(u => matchesSearch(u, q));
 
+      // FIX (start-chat shows a search box first instead of the friend list
+      // like every other module): Friends/Calls/Status/Group all just paint
+      // their known list straight away with no search step in between —
+      // this modal always rendered the search input above the results too,
+      // even for people with only a handful of friends, where a search box
+      // adds a step for no benefit. Only surface it once there are enough
+      // people that scrolling/searching actually helps; below that,
+      // everyone the user knows is already right there to tap.
+      updateNewChatSearchVisibility(cachedUsers.length, q);
+
       if (filteredCache.length > 0) {
         renderNewChatResults(filteredCache);
       } else {
@@ -1046,6 +1070,9 @@
               window.KynectaFriendsLocalStore.saveUsers(users);
             }
           } catch (_) {}
+          // Re-check with the authoritative live count once it's in —
+          // the cache-derived count above is just the first paint.
+          updateNewChatSearchVisibility(users.length, q);
         }
 
         if (users.length === 0) {

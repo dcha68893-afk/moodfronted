@@ -665,6 +665,34 @@
     // state.activeChatId itself.
     let _openChatGeneration = 0;
 
+    // ROOT-CAUSE FIX (opening chat from another module reliably fails —
+    // "⚠️ Couldn't open this conversation" — while opening the exact same
+    // chat from Chat History always works): Chat History always supplies a
+    // conversationId, so openChat() resolves it locally with no network
+    // call and no wait, so it can never lose the generation race below.
+    // Friend/Calls/Status only supply a userId for a conversation that
+    // isn't cached yet, so openChat() has to await the /messages/resolve
+    // network round trip. chat.html's caller retries the SAME open request
+    // every 600-800ms (up to 12x) for as long as sessionStorage's
+    // pending_chat key is still set — and every retry calls openChat()
+    // again, which unconditionally did `++_openChatGeneration` and made
+    // isStale() true for whatever attempt was still in flight. On any
+    // connection where the resolve round trip legitimately takes longer
+    // than one retry interval (a slow network, a cold DB connection pool,
+    // a waking backend), EVERY attempt gets superseded by the next retry
+    // before it can finish — so a resolve that actually succeeds on the
+    // server is thrown away every single time, the chat never opens, and
+    // the retry loop just runs out after ~7s and leaves the failure banner
+    // up. This generation counter is meant to stop an OLDER open request
+    // for a DIFFERENT chat from clobbering a NEWER one for a DIFFERENT
+    // chat once it finally resolves — not to invalidate repeated retries of
+    // the identical request. Tracking what the current target actually is
+    // and only bumping the generation when the target changes fixes this:
+    // repeated retries for the same user/conversation now share one
+    // generation and let whichever attempt finishes first win, while a
+    // genuine switch to a different chat still correctly supersedes it.
+    let _openChatTargetKey = null;
+
     // ROOT-CAUSE FIX (opening chat from another module still fails even
     // with api.request.js's cooldown breaker in place): chat.html's
     // OPEN_CHAT_WITH_USER relay (used by Friend/Status/Calls "message this
@@ -688,11 +716,24 @@
     const _pendingResolves = new Map();
 
     async function openChat({ conversationId = null, userId = null, messageId = null, userName = null, avatar = null } = {}) {
-        const myGeneration = ++_openChatGeneration;
-        const isStale = () => myGeneration !== _openChatGeneration;
-
         let resolvedChatId = normalizeChatId(conversationId);
         const normalizedUserId = normalizeChatId(userId);
+
+        // Same target as the currently in-flight/active open? Reuse its
+        // generation instead of bumping — see _openChatTargetKey comment
+        // above. Only a genuinely different target invalidates prior
+        // attempts.
+        const targetKey = resolvedChatId != null
+            ? `conv:${resolvedChatId}`
+            : normalizedUserId != null
+                ? `user:${normalizedUserId}`
+                : `msg:${messageId}`;
+        if (targetKey !== _openChatTargetKey) {
+            _openChatTargetKey = targetKey;
+            _openChatGeneration++;
+        }
+        const myGeneration = _openChatGeneration;
+        const isStale = () => myGeneration !== _openChatGeneration;
 
         // Opened from another module with only a userId (Friends, Status,
         // Calls, a notification) — check if we already know this
