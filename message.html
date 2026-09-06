@@ -1062,7 +1062,24 @@
       }
 
       try {
-        const res = await window.api.request.get(`/friends/users/all?limit=20${query ? '&search=' + encodeURIComponent(query) : ''}`);
+        // ROOT-CAUSE FIX (Start chat shows a search-all-users box instead of
+        // just the friend list, unlike Friends/Calls/Groups): this live
+        // "background refresh" call was hitting /friends/users/all — which,
+        // per server.js, is every OTHER user on the platform (friend or not,
+        // capped at `limit`), each merely tagged with an `isFriend` flag —
+        // not the person's actual friends. Friends/Calls/Groups all populate
+        // their lists from GET /api/friends (via friend-core.ui-bridge.js's
+        // loadFriendsFromBackend(), which is also what fills the 'friends'
+        // localStorage key this same function already reads for its cache
+        // preview above). Refreshing from /friends/users/all instead meant
+        // this modal's "live" results silently replaced the correct
+        // friends-only cache preview with the full discoverable-user list —
+        // usually far larger than the 8-person search-visibility threshold —
+        // which is why a search box appeared and non-friends showed up.
+        // Use the same friends-only endpoint every other module uses, and
+        // filter it client-side for the search box (which now only exists
+        // to filter a large friends list, not to browse all users).
+        const res = await window.api.request.get('/friends');
         if (!res || res.success === false || res.ok === false) {
           // Only replace the screen with an error if we had nothing cached
           // to fall back on — don't blow away a working cached list because
@@ -1071,30 +1088,37 @@
             const reason = (res && (res.message || (res.data && res.data.message))) || 'Unknown error';
             newChatResults.innerHTML = `<div style="padding:14px;color:#e04b4b;font-size:13px;">Could not load people: ${escapeHtml(reason)}</div>`;
           }
-          console.error('[Messages] /friends/users/all failed:', res);
+          console.error('[Messages] /friends failed:', res);
           return;
         }
-        const users = (res.data && Array.isArray(res.data.users)) ? res.data.users : [];
+        // Same "handle different response formats" shape friend-core.ui-bridge.js
+        // already tolerates for this exact endpoint.
+        let friendsRaw = [];
+        if (res.data && Array.isArray(res.data.friends)) friendsRaw = res.data.friends;
+        else if (res.data && res.data.data && Array.isArray(res.data.data.friends)) friendsRaw = res.data.data.friends;
+        else if (Array.isArray(res.data)) friendsRaw = res.data;
+        const allFriends = friendsRaw.map(normalizePushedFriend).filter(Boolean);
+        const users = allFriends.filter(u => matchesSearch(u, q));
 
         // Refresh the shared cache (same key + store friend-core.ui-bridge.js
         // writes) so other modules, and the next time this modal opens,
         // benefit too — only for the unfiltered "browse all" load, not a
         // narrowed search.
         if (!query) {
-          try { localStorage.setItem('discover_users', JSON.stringify(users)); } catch (_) {}
+          try { localStorage.setItem('friends', JSON.stringify(allFriends)); } catch (_) {}
           try {
             if (window.KynectaFriendsLocalStore && typeof window.KynectaFriendsLocalStore.saveUsers === 'function') {
-              window.KynectaFriendsLocalStore.saveUsers(users);
+              window.KynectaFriendsLocalStore.saveUsers(allFriends);
             }
           } catch (_) {}
           // Re-check with the authoritative live count once it's in —
           // the cache-derived count above is just the first paint.
-          updateNewChatSearchVisibility(users.length, q);
+          updateNewChatSearchVisibility(allFriends.length, q);
         }
 
         if (users.length === 0) {
           if (filteredCache.length === 0) {
-            newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary,#999);font-size:13px;">No people found</div>';
+            newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary,#999);font-size:13px;">No friends found</div>';
           }
           return;
         }

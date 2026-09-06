@@ -160,6 +160,44 @@
         return window.api.request;
     }
 
+    // ROOT-CAUSE FIX (opening chat from Friends/Calls/Status fails every time
+    // with a "postMessage storm" of CHAT_LIST_SHOWN, then gives up after
+    // ~7s): when message.html's iframe is freshly created by that navigation
+    // (rather than already sitting loaded in the background), api.request.js
+    // is still running its own async bootstrap (backend-origin detection,
+    // auth wiring, etc — see waitForBootstrap()'s own up-to-30s gate) at the
+    // exact moment chat.html's OPEN_CHAT_WITH_USER retry loop starts firing
+    // every 600ms. Until that bootstrap finishes, window.api.request does
+    // not exist yet, so api() above throws synchronously — not a network
+    // failure, not something worth ever retrying via the resolve() call
+    // below. openChat()'s catch block treated that throw exactly like a
+    // real "conversation not found" failure and immediately notified
+    // 'chat:open-failed', which message.html turns into a CHAT_LIST_SHOWN
+    // postMessage back to chat.html. Every one of the 12 retries (they all
+    // land before a slow bootstrap finishes) re-fires openChat() and
+    // re-throws the same synchronous error, so CHAT_LIST_SHOWN fires 5+
+    // times inside 2 seconds (tripping RealtimeStabilizationLayer's storm
+    // detector) and the chat never opens — pending_chat is only ever
+    // cleared by a real CHAT_OPENED ack, which this path can never send.
+    // Fix: instead of failing instantly, wait (briefly, shared across
+    // concurrent callers so repeated retries don't each start their own
+    // poll loop) for window.api.request to actually exist before treating
+    // its absence as a real failure.
+    let _apiReadyPromise = null;
+    function waitForApiReady(maxMs = 10000) {
+        if (window.api && window.api.request) return Promise.resolve(true);
+        if (_apiReadyPromise) return _apiReadyPromise;
+        _apiReadyPromise = new Promise((resolve) => {
+            const startedAt = Date.now();
+            (function poll() {
+                if (window.api && window.api.request) { _apiReadyPromise = null; resolve(true); return; }
+                if (Date.now() - startedAt >= maxMs) { _apiReadyPromise = null; resolve(false); return; }
+                setTimeout(poll, 150);
+            })();
+        });
+        return _apiReadyPromise;
+    }
+
     async function loadHistory(chatId, { before = null, limit = 50 } = {}) {
         const qs = new URLSearchParams();
         if (before) qs.set('before', before);
@@ -772,6 +810,13 @@
         }
         if (!resolvedChatId && userId) {
             try {
+                // See waitForApiReady() above: don't let a not-yet-finished
+                // api.request.js bootstrap masquerade as a resolve failure.
+                if (!(window.api && window.api.request)) {
+                    const ready = await waitForApiReady();
+                    if (isStale()) return; // a newer openChat() call has since taken over
+                    if (!ready) throw new Error('window.api.request not ready');
+                }
                 const resolveKey = String(normalizedUserId);
                 let resolvePromise = _pendingResolves.get(resolveKey);
                 if (!resolvePromise) {
