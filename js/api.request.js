@@ -173,7 +173,19 @@
         activeRequests: new Set(),
         maxConcurrentRequests: 10,
         lastErrorLogs: new Map(),
-        errorLogInterval: 5000
+        errorLogInterval: 5000,
+        // FIX (safety-guard-deadlock): errorCounts/retryAttempts were only ever
+        // cleared on a SUCCESSFUL request (trackRequestEnd(..., true)). Once an
+        // endpoint hit maxErrorsPerEndpoint it was blocked forever for the rest
+        // of the page's life, because a blocked request never reaches the
+        // network and therefore can never record the success needed to clear
+        // its own count. These two maps + cooldown windows let a failure
+        // streak expire on its own (e.g. once auth/session finishes
+        // initializing) instead of permanently wedging the endpoint.
+        retryFirstSeen: new Map(),
+        retryCooldownMs: 15000,
+        errorFirstSeen: new Map(),
+        errorCooldownMs: 30000
     };
     
     // Internal state
@@ -1789,9 +1801,17 @@
         if (missingGates.length > 0) {
             logRequest(requestId, `⏳ Blocked: Waiting for gates: ${missingGates.join(', ')}`);
             
-            if (_gatewayState.initialization.steps.queueActivated) {
-                return false;
-            }
+            // FIX (premature-request-before-auth-ready): this used to only
+            // block the request if the queue had already been marked active
+            // — otherwise it fell through to `return true` and let a
+            // protected request fire with no confirmed auth/session gate at
+            // all. That's what caused /messages/resolve/:userId and
+            // /friends/users/all to go out (and fail) before a real token
+            // was available, which then tripped the per-endpoint circuit
+            // breaker in shouldAllowRequest() before auth ever finished
+            // initializing. Missing gates should always block/queue the
+            // request, regardless of queue-activation state.
+            return false;
         }
         
         return true;
@@ -2203,6 +2223,19 @@
         
         const errorCount = _safetyState.errorCounts.get(endpointKey) || 0;
         if (errorCount >= _safetyState.maxErrorsPerEndpoint) {
+            // FIX (safety-guard-deadlock): previously this blocked the endpoint
+            // permanently — a blocked request never reaches the network, so it
+            // could never record the success needed to clear errorCounts, and
+            // trackError() (the only other place the count changed) never got
+            // called again either. Give the endpoint a fresh chance once the
+            // cooldown window has passed since the failure streak started.
+            const firstSeen = _safetyState.errorFirstSeen.get(endpointKey) || 0;
+            if (Date.now() - firstSeen > _safetyState.errorCooldownMs) {
+                _safetyState.errorCounts.delete(endpointKey);
+                _safetyState.errorFirstSeen.delete(endpointKey);
+                return true;
+            }
+            
             if (shouldLogError(endpointKey, 'error_limit')) {
                 console.warn(`[API] ⏳ Error limit reached for ${endpointKey}, blocking further requests`);
             }
@@ -2215,6 +2248,18 @@
     function trackRequestStart(endpoint, functionName) {
         const endpointKey = `${functionName}:${endpoint}`;
         _safetyState.activeRequests.add(endpointKey);
+        
+        // FIX (safety-guard-deadlock): if the last failure on this endpoint
+        // was longer ago than retryCooldownMs, treat this as a fresh attempt
+        // instead of continuing to add to a stale count from an earlier
+        // streak (e.g. from before auth/session finished initializing).
+        const now = Date.now();
+        const firstSeen = _safetyState.retryFirstSeen.get(endpointKey);
+        if (!firstSeen || (now - firstSeen) > _safetyState.retryCooldownMs) {
+            _safetyState.retryFirstSeen.set(endpointKey, now);
+            _safetyState.retryAttempts.set(endpointKey, 1);
+            return 1;
+        }
         
         const retryCount = (_safetyState.retryAttempts.get(endpointKey) || 0) + 1;
         _safetyState.retryAttempts.set(endpointKey, retryCount);
@@ -2229,11 +2274,23 @@
         if (success) {
             _safetyState.errorCounts.delete(endpointKey);
             _safetyState.retryAttempts.delete(endpointKey);
+            _safetyState.retryFirstSeen.delete(endpointKey);
+            _safetyState.errorFirstSeen.delete(endpointKey);
         }
     }
     
     function trackError(endpoint, functionName, errorType) {
         const endpointKey = `${functionName}:${endpoint}`;
+        
+        // FIX (safety-guard-deadlock): same cooldown reasoning as trackRequestStart.
+        const now = Date.now();
+        const firstSeen = _safetyState.errorFirstSeen.get(endpointKey);
+        if (!firstSeen || (now - firstSeen) > _safetyState.errorCooldownMs) {
+            _safetyState.errorFirstSeen.set(endpointKey, now);
+            _safetyState.errorCounts.set(endpointKey, 1);
+            return 1;
+        }
+        
         const errorCount = (_safetyState.errorCounts.get(endpointKey) || 0) + 1;
         _safetyState.errorCounts.set(endpointKey, errorCount);
         
@@ -7141,18 +7198,46 @@ fetchOptions.signal = controller.signal;
                 });
             });
             
+            // FIX (queued-request-never-flushed): this used to be a single
+            // one-shot check at 100ms. If getAuthToken() didn't have a token
+            // yet at that exact moment (a real possibility — this file's own
+            // fallback for _getUserToken is `() => null`, so the only source
+            // at this point is getAuthToken()'s own localStorage read), these
+            // gates would never become true by any other route in a frame
+            // that never receives the auth-state-changed/token-updated/etc.
+            // events (e.g. an isolated iframe like message.html) — and
+            // anything queued behind checkDependencyGates() would then sit in
+            // the queue forever, since flushRequestQueue() is otherwise only
+            // called from those same events or an online/offline transition.
+            // Poll for a real token/session for up to 10s instead, and flush
+            // the queue the moment either gate newly resolves.
+            let _authCheckAttempts = 0;
             const checkInitialAuthState = () => {
+                _authCheckAttempts++;
                 const token = getAuthToken();
                 const isAuthReady = window.__API_AUTH ? window.__API_AUTH.isReady : false;
+                let gateChanged = false;
                 
-                if (token || isAuthReady) {
+                if (!_gatewayState.gates.authReady && (token || isAuthReady)) {
                     _gatewayState.gates.authReady = true;
+                    gateChanged = true;
                     console.log("[API] ✅ Initial auth state ready");
                 }
                 
-                if (isSessionReady()) {
+                if (!_gatewayState.gates.sessionReady && isSessionReady()) {
                     _gatewayState.gates.sessionReady = true;
+                    gateChanged = true;
                     console.log("[API] ✅ Initial session state ready");
+                }
+                
+                if (gateChanged && _gatewayState.queue.requests.length > 0) {
+                    flushRequestQueue();
+                }
+                
+                if (!_gatewayState.gates.authReady || !_gatewayState.gates.sessionReady) {
+                    if (_authCheckAttempts < 50) {
+                        setTimeout(checkInitialAuthState, 200);
+                    }
                 }
             };
             
@@ -7196,6 +7281,11 @@ fetchOptions.signal = controller.signal;
         }
         
         console.log("[API] ✅ API Gateway Ready");
+        
+        // FIX (queued-request-never-flushed): see checkInitialAuthState comment.
+        if (_gatewayState.queue.requests.length > 0) {
+            flushRequestQueue();
+        }
     }
     
     async function initializeGateway() {
