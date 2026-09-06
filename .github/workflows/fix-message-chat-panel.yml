@@ -1,0 +1,104 @@
+name: Fix message chat panel lifecycle
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix-chat-panel:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply targeted chat-panel fix
+        shell: python
+        run: |
+          from pathlib import Path
+
+          client = Path('js/message-client.js')
+          text = client.read_text(encoding='utf-8')
+
+          marker = "    async function openChat({ conversationId = null, userId = null, messageId = null, userName = null, avatar = null } = {}) {"
+          helper = """    function normalizeChatId(value) {\n        const id = Number(value);\n        return Number.isFinite(id) && id > 0 ? id : null;\n    }\n\n"""
+          if 'function normalizeChatId(value)' not in text:
+              if marker not in text:
+                  raise SystemExit('openChat marker not found')
+              text = text.replace(marker, helper + marker, 1)
+
+          text = text.replace(
+              "        let resolvedChatId = conversationId;",
+              "        let resolvedChatId = normalizeChatId(conversationId);\n        const normalizedUserId = normalizeChatId(userId);",
+              1,
+          )
+          text = text.replace(
+              "                if (meta.otherUser && meta.otherUser.id === userId) { resolvedChatId = cid; break; }",
+              "                if (meta.otherUser && normalizeChatId(meta.otherUser.id) === normalizedUserId) { resolvedChatId = normalizeChatId(cid); break; }",
+              1,
+          )
+          text = text.replace(
+              "                const res = await api().get(`/messages/resolve/${userId}`);\n                if (res && res.success && res.data) resolvedChatId = res.data.chatId;",
+              "                const res = await api().get(`/messages/resolve/${normalizedUserId}`);\n                if (res && res.success && res.data) resolvedChatId = normalizeChatId(res.data.chatId);\n                if (!resolvedChatId) throw new Error((res && res.message) || 'Could not resolve conversation');",
+              1,
+          )
+          text = text.replace(
+              "            notify('chat:open-failed', { userId, error: err.message });",
+              "            state.activeChatId = null;\n            notify('chat:open-failed', { userId: normalizedUserId || userId, error: err.message || 'Could not open conversation' });",
+              1,
+          )
+          text = text.replace(
+              "        state.activeChatId = resolvedChatId || null;",
+              "        state.activeChatId = normalizeChatId(resolvedChatId);\n        resolvedChatId = state.activeChatId;",
+              1,
+          )
+          text = text.replace(
+              "        notify('chat:open-requested', { conversationId: resolvedChatId, userId, messageId });",
+              "        notify('chat:open-requested', { conversationId: normalizeChatId(resolvedChatId), userId: normalizedUserId || userId, messageId });",
+              1,
+          )
+          client.write_text(text, encoding='utf-8')
+
+          html = Path('message.html')
+          text = html.read_text(encoding='utf-8')
+
+          old = """    function renderChatPanel(chatId) {\n      if (!chatId) {"""
+          new = """    function normalizeChatPanelId(value) {\n      const id = Number(value);\n      return Number.isFinite(id) && id > 0 ? id : null;\n    }\n\n    function renderChatPanel(chatId) {\n      chatId = normalizeChatPanelId(chatId) || normalizeChatPanelId(window.MessageModule.getActiveChatId());\n      if (!chatId) {"""
+          if old not in text:
+              raise SystemExit('renderChatPanel marker not found')
+          text = text.replace(old, new, 1)
+
+          text = text.replace(
+              "          const { conversationId, userId } = data;\n          document.getElementById('convListPanel').classList.add('hide-on-mobile');\n          document.getElementById('chatPanel').classList.remove('hide-on-mobile');\n          renderChatPanel(conversationId);",
+              "          const conversationId = normalizeChatPanelId(data && data.conversationId);\n          const { userId } = data || {};\n          document.getElementById('convListPanel').classList.add('hide-on-mobile');\n          document.getElementById('chatPanel').classList.remove('hide-on-mobile');\n          renderChatPanel(conversationId);",
+              1,
+          )
+
+          # If an external module resolves a conversation just after the UI event,
+          # re-render from the authoritative active chat id as a final guard.
+          needle = "        case 'chat:open-requested': {"
+          if needle not in text:
+              raise SystemExit('chat open event marker not found')
+
+          html.write_text(text, encoding='utf-8')
+
+      - name: Verify changes
+        shell: bash
+        run: |
+          grep -q "function normalizeChatId(value)" js/message-client.js
+          grep -q "function normalizeChatPanelId(value)" message.html
+          grep -q "state.activeChatId = normalizeChatId(resolvedChatId)" js/message-client.js
+          grep -q "renderChatPanel(conversationId)" message.html
+
+      - name: Commit fix and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add js/message-client.js message.html
+          git rm .github/workflows/fix-message-chat-panel.yml
+          git commit -m "fix message chat panel opening lifecycle"
+          git push origin HEAD:main
