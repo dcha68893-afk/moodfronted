@@ -735,6 +735,30 @@
         const myGeneration = _openChatGeneration;
         const isStale = () => myGeneration !== _openChatGeneration;
 
+        // INSTANT-OPEN (mirrors the group module's openGroupChat(), which
+        // calls updateGroupChatHeader(groupData) + renderGroupChatLoadingState()
+        // synchronously — using the group data the caller already has —
+        // before its own network calls even start; see
+        // group-core-operations.js). Friends/Calls/Status/notifications
+        // already know the target's userId/userName (and sometimes avatar)
+        // the instant the user clicks — that's exactly what made those
+        // modules feel instant. Messages never used that: it always waited
+        // for the full resolvedChatId (a network round trip for any
+        // not-yet-cached conversation) before rendering anything, so the
+        // chat panel sat on its bare "No conversation selected" placeholder
+        // — a lone search icon and a disabled composer — until that round
+        // trip finished (chat.html's veil hides this for up to 3s, then
+        // reveals it as-is if resolution is still pending). Firing this
+        // here, before the local-cache lookup / resolve below, lets the UI
+        // show the correct person's name right away and a real loading
+        // state instead of that placeholder — exactly like the group module
+        // does. Only fires when there isn't already a resolved chat to show
+        // immediately (the conversationId fast path / local-cache hit
+        // render straight away and don't need it).
+        if (!resolvedChatId && normalizedUserId && (userName || avatar)) {
+            notify('chat:opening', { userId: normalizedUserId, userName, avatar });
+        }
+
         // Opened from another module with only a userId (Friends, Status,
         // Calls, a notification) — check if we already know this
         // conversation locally first (it's already in the sidebar because

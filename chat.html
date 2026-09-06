@@ -3472,6 +3472,32 @@
                 if (!isTrustedOrigin(event.origin)) return;
                 const data = event.data || {};
                 
+                // INSTANT-OPEN (see message.html's 'chat:opening' case /
+                // js/message-client.js's 'chat:opening' notify): lifts the
+                // chat-opening-veil the moment the messages iframe knows WHO
+                // it's opening a chat with, even before the conversationId
+                // round trip finishes — same instant-reveal idea the group
+                // module already uses (openGroupChat() shows the header +
+                // a loading state before its own network calls, instead of
+                // waiting on them). Deliberately does NOT set
+                // __dcChatOpened/__ocwuChatOpened or clear pending_chat —
+                // those retry loops must keep running until the real
+                // CHAT_OPENED ack below arrives, in case this specific
+                // attempt never resolves and needs a retry to get through.
+                if (data.type === 'CHAT_OPENING') {
+                    _unveilMessages();
+                    var _openingInfo = data.payload || {};
+                    if ((_openingInfo.name || _openingInfo.userId) && typeof showChatHeader === 'function') {
+                        showChatHeader({
+                            name: _openingInfo.name,
+                            avatarUrl: _openingInfo.avatar,
+                            online: false,
+                            chatId: _openingInfo.userId,
+                            seq: 1
+                        });
+                    }
+                }
+
                 // Handle chat panel state
                 if (data.type === 'CHAT_OPENED' || data.type === 'CONVERSATION_OPENED') {
                     // FIX (chat-history list flashes before a specific chat opens):

@@ -413,6 +413,16 @@
       chatId = normalizeChatPanelId(chatId) || normalizeChatPanelId(window.MessageModule.getActiveChatId());
       const conv = chatId ? window.MessageModule.getConversations().find(c => c.chatId === chatId) : null;
       const hasChat = !!chatId;
+      // INSTANT-OPEN (see js/message-client.js's 'chat:opening' notify):
+      // when we don't have a real chatId yet but the caller (Friends/Calls/
+      // Status/a notification) already told us who we're opening a chat
+      // with, show that person's name in the header and a real loading
+      // state — same idea as the group module's updateGroupChatHeader() +
+      // renderGroupChatLoadingState() firing before its own network calls —
+      // instead of the old bare "No conversation selected" + search-icon
+      // placeholder while the conversationId resolves in the background.
+      const pending = !hasChat ? options.pendingContact : null;
+      const headerName = hasChat ? (conv?.otherUser?.username || 'Conversation') : (pending?.userName || 'No conversation selected');
 
       // ROOT-CAUSE FIX: this used to swap the whole panel for a static
       // "Select a conversation to start messaging" placeholder div whenever
@@ -424,10 +434,11 @@
       // full-panel takeover.
       chatPanelEl.innerHTML = `
         <div id="chatHeader">
-          <button id="backBtn"${hasChat ? '' : ' disabled style="visibility:hidden;"'}>&larr;</button>
-          <strong id="chatHeaderName" style="cursor:${hasChat ? 'pointer' : 'default'};">${hasChat ? escapeHtml(conv?.otherUser?.username || 'Conversation') : 'No conversation selected'}</strong>
+          <button id="backBtn"${(hasChat || pending) ? '' : ' disabled style="visibility:hidden;"'}>&larr;</button>
+          ${pending && pending.avatar ? `<img class="conv-avatar" src="${escapeHtml(pending.avatar)}" alt="" style="width:28px;height:28px;border-radius:50%;margin-right:8px;">` : ''}
+          <strong id="chatHeaderName" style="cursor:${hasChat ? 'pointer' : 'default'};">${escapeHtml(headerName)}</strong>
           <div id="chatHeaderActions">
-            <button class="header-icon-btn" id="searchInChatBtn" title="Search">🔍</button>
+            <button class="header-icon-btn" id="searchInChatBtn" title="Search"${hasChat ? '' : ' disabled style="visibility:hidden;"'}>🔍</button>
             <button class="header-icon-btn" id="voiceCallBtn" title="Voice call"${hasChat ? '' : ' disabled'}>📞</button>
             <button class="header-icon-btn" id="videoCallBtn" title="Video call"${hasChat ? '' : ' disabled'}>🎥</button>
             <button class="header-icon-btn" id="chatMoreBtn" title="More">⋮</button>
@@ -444,12 +455,18 @@
           <button id="retryOpenChatBtn" style="flex-shrink:0;">Try again</button>
         </div>` : ''}
         <div id="loadOlderBtn"${hasChat ? '' : ' style="display:none;"'}>Load earlier messages</div>
-        <div id="messageLog"></div>
+        <div id="messageLog">${pending ? `
+          <div class="chat-loading-state" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--kyn-text-secondary,#888);">
+            <div class="spinner" style="width:22px;height:22px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:kyn-spin .8s linear infinite;"></div>
+            <p style="margin-top:10px;">Opening chat with ${escapeHtml(pending.userName || 'user')}…</p>
+          </div>
+          <style>@keyframes kyn-spin{to{transform:rotate(360deg)}}</style>
+        ` : ''}</div>
         <div id="composeBar">
           <button id="attachBtn" title="Attach file">📎</button>
           <input type="file" id="attachInput" style="display:none" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt">
           <button id="emojiBtn" title="Emoji">🙂</button>
-          <textarea id="composeInput" rows="1" placeholder="${hasChat ? 'Message...' : 'Pick a conversation to start typing…'}"></textarea>
+          <textarea id="composeInput" rows="1" placeholder="${hasChat ? 'Message...' : (pending ? 'Connecting…' : 'Pick a conversation to start typing…')}"></textarea>
           <button id="sendBtn"${hasChat ? '' : ' disabled'}>&#9658;</button>
         </div>
         <div id="emojiPicker" class="hidden"></div>
@@ -1154,6 +1171,27 @@
           if (!nameEl) break;
           const conv = window.MessageModule.getConversations().find(c => c.chatId === data.chatId);
           nameEl.textContent = data.isTyping ? 'typing…' : (conv?.otherUser?.username || 'Conversation');
+          break;
+        }
+        case 'chat:opening': {
+          // INSTANT-OPEN: fired by js/message-client.js the moment a
+          // Friends/Calls/Status/notification open starts, before the
+          // conversationId round trip completes — see the comment there and
+          // renderChatPanel()'s pendingContact handling above. Reveal the
+          // panel now, with what we already know, instead of leaving
+          // chat.html's veil to time out onto the bare placeholder.
+          const { userId, userName, avatar } = data || {};
+          document.getElementById('convListPanel').classList.add('hide-on-mobile');
+          document.getElementById('chatPanel').classList.remove('hide-on-mobile');
+          renderChatPanel(null, { pendingContact: { userId, userName, avatar } });
+          // Deliberately NOT the 'CHAT_OPENED' message type — that one stops
+          // chat.html's OPEN_CHAT_WITH_USER retry loop and clears
+          // pending_chat (see chat.html's CHAT_OPENED handler), which must
+          // keep running until the real chat actually opens. This is a
+          // separate, lighter signal that only lifts the veil early.
+          try {
+            window.parent.postMessage({ type: 'CHAT_OPENING', payload: { userId, name: userName || null, avatar: avatar || null } }, '*');
+          } catch (_) {}
           break;
         }
         case 'chat:open-requested': {
