@@ -167,9 +167,18 @@
     // Safety tracking
     const _safetyState = {
         errorCounts: new Map(),
-        maxErrorsPerEndpoint: 3,
+        // FIX (retry-storm-vs-legitimate-retry-until-ack): chat.html's own
+        // OPEN_CHAT_WITH_USER relay loop legitimately retries up to 12 times
+        // at 600ms intervals (chat.html:6702-6717) whenever it hasn't yet
+        // received a CHAT_OPENED ack — each retry calls openChat() again,
+        // which counts as another attempt against this same endpoint. With
+        // the old limit of 3, that external (and already-bounded) retry
+        // pattern tripped this internal safety limit well before chat.html's
+        // own loop gave up, guaranteeing failure regardless of how fast auth
+        // actually became ready. Widened past that known ceiling.
+        maxErrorsPerEndpoint: 6,
         retryAttempts: new Map(),
-        maxRetriesPerRequest: 3,
+        maxRetriesPerRequest: 15,
         activeRequests: new Set(),
         maxConcurrentRequests: 10,
         lastErrorLogs: new Map(),
@@ -261,6 +270,25 @@
                 window.__API_AUTH?.isSessionReady === true ||
                 _gatewayState.gates.sessionReady === true) {
                 return true;
+            }
+            
+            // FIX (message.html-never-resolves-gates): these readiness signals
+            // are only ever set inside the top shell (chat.html/index.html) by
+            // auth.session.manager.js, which message.html doesn't load. Without
+            // this check, a same-origin child iframe like message.html could
+            // never see the shell's own session as ready and always fell
+            // through to the 10s timeout below — even though the parent frame
+            // had usually already finished initializing.
+            if (window.parent && window.parent !== window) {
+                try {
+                    if (window.parent.Session && typeof window.parent.Session.isReady === 'function') {
+                        if (window.parent.Session.isReady()) return true;
+                    }
+                    if (window.parent.__SESSION_READY__ === true ||
+                        window.parent.__API_AUTH?.isSessionReady === true) {
+                        return true;
+                    }
+                } catch (_) { /* cross-origin or parent not ready — ignore */ }
             }
             
             return false;
@@ -7147,12 +7175,31 @@ fetchOptions.signal = controller.signal;
 
             // Primary fast path: listen for the event dispatched by app.core.bootstrap.js
             window.addEventListener('nexopa-bootstrap-complete', () => markReady('event'), { once: true });
+            // FIX (message.html-never-resolves-gates): app.core.bootstrap.js only
+            // runs in the top shell (chat.html/index.html), not in message.html —
+            // so the event above never fires locally. Same-origin iframes can
+            // listen on window.parent directly; do so as well.
+            try {
+                if (window.parent && window.parent !== window) {
+                    window.parent.addEventListener('nexopa-bootstrap-complete', () => markReady('parent-event'), { once: true });
+                }
+            } catch (_) { /* cross-origin — ignore */ }
 
             const checkBootstrap = () => {
                 const isBootstrapComplete = 
                     (window.AppState && window.AppState.bootstrapComplete) ||
                     (window.__APP_BOOTSTRAP_COMPLETE__) ||
-                    (document.readyState === 'complete' && window.__API_CORE_LOADED_V24);                
+                    (document.readyState === 'complete' && window.__API_CORE_LOADED_V24) ||
+                    // FIX (message.html-never-resolves-gates): fall back to the
+                    // parent frame's own copies of these same flags, set by
+                    // app.core.bootstrap.js / api.core.js which only load there.
+                    (window.parent && window.parent !== window && (() => {
+                        try {
+                            return !!((window.parent.AppState && window.parent.AppState.bootstrapComplete) ||
+                                window.parent.__APP_BOOTSTRAP_COMPLETE__ ||
+                                window.parent.__API_CORE_LOADED_V24);
+                        } catch (_) { return false; }
+                    })());
                 if (isBootstrapComplete) {
                     markReady('poll');
                     return;
@@ -7215,7 +7262,14 @@ fetchOptions.signal = controller.signal;
             const checkInitialAuthState = () => {
                 _authCheckAttempts++;
                 const token = getAuthToken();
-                const isAuthReady = window.__API_AUTH ? window.__API_AUTH.isReady : false;
+                let isAuthReady = window.__API_AUTH ? window.__API_AUTH.isReady : false;
+                if (!isAuthReady) {
+                    try {
+                        if (window.parent && window.parent !== window && window.parent.__API_AUTH) {
+                            isAuthReady = !!window.parent.__API_AUTH.isReady;
+                        }
+                    } catch (_) { /* cross-origin — ignore */ }
+                }
                 let gateChanged = false;
                 
                 if (!_gatewayState.gates.authReady && (token || isAuthReady)) {
