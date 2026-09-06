@@ -243,7 +243,9 @@
   </div>
 
   <div id="chatPanel" class="hide-on-mobile">
-    <div id="emptyState"><div><div style="font-size:48px;margin-bottom:10px;">💬</div>Select a conversation to start messaging</div></div>
+    <!-- Populated by renderChatPanel() as soon as the script below runs —
+         always the full real chat shell (header/list/composer), never a
+         placeholder, whether or not a conversation is active yet. -->
   </div>
 
   <script src="/js/kynecta.safety.layer.js"></script>
@@ -407,22 +409,31 @@
       return Number.isFinite(id) && id > 0 ? id : null;
     }
 
+    // FIX (placeholder shown instead of real chat UI): renderChatPanel()
+    // used to early-return into a static "Select a conversation" div
+    // whenever chatId was falsy, meaning the ENTIRE chat shell — header,
+    // message list, reply/composer, emoji, attachment, send — only ever
+    // existed in the DOM once a specific conversation had successfully
+    // resolved. Any gap between "panel is supposed to be showing" and "a
+    // real chatId has actually arrived" (a slow/failed resolve, a dropped
+    // postMessage, or simply no chat picked yet) rendered as that bare
+    // placeholder with none of the real controls. The shell itself never
+    // needed a chatId to exist — only the actions that send to/load a
+    // specific conversation do. So: always build the full shell; guard the
+    // handful of handlers that require a real chatId individually instead
+    // of gating the whole panel on one.
     function renderChatPanel(chatId) {
       chatId = normalizeChatPanelId(chatId) || normalizeChatPanelId(window.MessageModule.getActiveChatId());
-      if (!chatId) {
-        chatPanelEl.innerHTML = '<div id="emptyState"><div><div style="font-size:48px;margin-bottom:10px;">💬</div>Select a conversation to start messaging</div></div>';
-        return;
-      }
-      const conv = window.MessageModule.getConversations().find(c => c.chatId === chatId);
+      const conv = chatId ? window.MessageModule.getConversations().find(c => c.chatId === chatId) : null;
       chatPanelEl.innerHTML = `
         <div id="chatHeader">
-          <button id="backBtn">&larr;</button>
-          <strong id="chatHeaderName" style="cursor:pointer;">${escapeHtml(conv?.otherUser?.username || 'Conversation')}</strong>
+          <button id="backBtn"${chatId ? '' : ' class="hidden"'}>&larr;</button>
+          <strong id="chatHeaderName" style="${conv ? 'cursor:pointer;' : ''}">${escapeHtml(conv?.otherUser?.username || 'Messages')}</strong>
           <div id="chatHeaderActions">
-            <button class="header-icon-btn" id="searchInChatBtn" title="Search">🔍</button>
-            <button class="header-icon-btn" id="voiceCallBtn" title="Voice call">📞</button>
-            <button class="header-icon-btn" id="videoCallBtn" title="Video call">🎥</button>
-            <button class="header-icon-btn" id="chatMoreBtn" title="More">⋮</button>
+            <button class="header-icon-btn" id="searchInChatBtn" title="Search"${chatId ? '' : ' disabled'}>🔍</button>
+            <button class="header-icon-btn" id="voiceCallBtn" title="Voice call"${chatId ? '' : ' disabled'}>📞</button>
+            <button class="header-icon-btn" id="videoCallBtn" title="Video call"${chatId ? '' : ' disabled'}>🎥</button>
+            <button class="header-icon-btn" id="chatMoreBtn" title="More"${chatId ? '' : ' disabled'}>⋮</button>
           </div>
         </div>
         <div id="chatSearchBar" class="hidden">
@@ -430,21 +441,29 @@
           <span id="chatSearchCount"></span>
           <button id="closeChatSearchBtn">&times;</button>
         </div>
-        <div id="loadOlderBtn">Load earlier messages</div>
+        <div id="loadOlderBtn"${chatId ? '' : ' class="hidden"'}>Load earlier messages</div>
         <div id="messageLog"></div>
         <div id="composeBar">
-          <button id="attachBtn" title="Attach file">📎</button>
+          <button id="attachBtn" title="Attach file"${chatId ? '' : ' disabled'}>📎</button>
           <input type="file" id="attachInput" style="display:none" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt">
-          <button id="emojiBtn" title="Emoji">🙂</button>
-          <textarea id="composeInput" rows="1" placeholder="Message..."></textarea>
-          <button id="sendBtn">&#9658;</button>
+          <button id="emojiBtn" title="Emoji"${chatId ? '' : ' disabled'}>🙂</button>
+          <textarea id="composeInput" rows="1" placeholder="${chatId ? 'Message...' : 'Pick a conversation to start typing...'}"${chatId ? '' : ' disabled'}></textarea>
+          <button id="sendBtn"${chatId ? '' : ' disabled'}>&#9658;</button>
         </div>
         <div id="emojiPicker" class="hidden"></div>
       `;
-      renderMessages(chatId);
+      if (chatId) {
+        renderMessages(chatId);
+      } else {
+        // No conversation resolved yet/at all — the shell above is still
+        // fully real and visible; only the transcript itself is empty.
+        document.getElementById('messageLog').innerHTML =
+          '<div class="empty-conv-subtitle" style="text-align:center;padding:24px 12px;">Pick a conversation on the left, or start a new one, to see messages here.</div>';
+      }
 
       const otherUserId = conv?.otherUser?.id;
       function startCall(callType) {
+        if (!chatId) return;
         window.parent.postMessage({
           type: 'SWITCH_MODULE', module: 'calls',
           payload: { userId: otherUserId, userName: conv?.otherUser?.username || 'User', callType, returnTo: 'messages' },
@@ -453,12 +472,15 @@
       document.getElementById('voiceCallBtn').addEventListener('click', () => startCall('voice'));
       document.getElementById('videoCallBtn').addEventListener('click', () => startCall('video'));
 
-      document.getElementById('chatHeaderName').addEventListener('click', () => openChatInfoPanel(chatId, conv));
+      if (conv) {
+        document.getElementById('chatHeaderName').addEventListener('click', () => openChatInfoPanel(chatId, conv));
+      }
 
       const searchBar = document.getElementById('chatSearchBar');
       const chatSearchInput = document.getElementById('chatSearchInput');
       const chatSearchCount = document.getElementById('chatSearchCount');
       document.getElementById('searchInChatBtn').addEventListener('click', () => {
+        if (!chatId) return;
         searchBar.classList.toggle('hidden');
         if (!searchBar.classList.contains('hidden')) chatSearchInput.focus();
       });
@@ -469,6 +491,7 @@
         document.getElementById('messageLog').querySelectorAll('.search-hit').forEach(el => el.classList.remove('search-hit'));
       });
       chatSearchInput.addEventListener('input', () => {
+        if (!chatId) return;
         const msgLog = document.getElementById('messageLog');
         const results = window.MessageModule.searchMessages(chatId, chatSearchInput.value);
         msgLog.querySelectorAll('.search-hit').forEach(el => el.classList.remove('search-hit'));
@@ -484,6 +507,7 @@
       });
 
       document.getElementById('chatMoreBtn').addEventListener('click', async () => {
+        if (!chatId) return;
         const action = prompt('Type "clear" to clear this chat, "archive" to archive it, or "block" to block this user');
         if (action === 'clear') {
           if (confirm('Clear this conversation for you? This cannot be undone.')) {
@@ -538,6 +562,7 @@
       });
 
       document.getElementById('backBtn').addEventListener('click', () => {
+        if (!chatId) return;
         window.MessageModule.sendTypingStop(chatId);
         window.MessageModule.setActiveChatId(null);
         document.getElementById('convListPanel').classList.remove('hide-on-mobile');
@@ -546,6 +571,7 @@
       });
 
       document.getElementById('loadOlderBtn').addEventListener('click', async () => {
+        if (!chatId) return;
         const msgs = window.MessageModule.getMessages(chatId);
         const oldestId = msgs.length ? msgs[0].id : null;
         if (typeof oldestId !== 'number') return; // no real cursor yet (all optimistic/local)
@@ -559,6 +585,7 @@
       const attachInput = document.getElementById('attachInput');
 
       async function doSend() {
+        if (!chatId) return;
         const content = input.value.trim();
         if (!content) return;
         input.value = '';
@@ -576,19 +603,22 @@
       let typingStopTimer = null;
       sendBtn.addEventListener('click', doSend);
       input.addEventListener('input', () => {
+        if (!chatId) return;
         window.MessageModule.sendTypingStart(chatId);
         clearTimeout(typingStopTimer);
         typingStopTimer = setTimeout(() => window.MessageModule.sendTypingStop(chatId), 3000);
       });
       input.addEventListener('keydown', (e) => {
+        if (!chatId) return;
         if (e.key !== 'Enter' || e.shiftKey) return;
         const sendOnEnter = window.MessageModule.getSetting('chat', 'enterToSend') !== false;
         if (sendOnEnter) { e.preventDefault(); doSend(); }
         // else: let Enter insert a newline as normal textarea behavior
       });
 
-      attachBtn.addEventListener('click', () => attachInput.click());
+      attachBtn.addEventListener('click', () => { if (chatId) attachInput.click(); });
       attachInput.addEventListener('change', async () => {
+        if (!chatId) { attachInput.value = ''; return; }
         const file = attachInput.files[0];
         if (!file) return;
         attachBtn.disabled = true;
@@ -1031,6 +1061,41 @@
           } catch (_) {}
           break;
         }
+        case 'chat:open-failed': {
+          // ROOT-CAUSE FIX: MessageModule.openChat() already notifies this
+          // event when a first-time/non-friend conversation fails to resolve
+          // (backend error, cold-start timeout, unknown user, etc.) — see
+          // js/message-client.js. Nothing here ever handled it, so the panel
+          // was left showing whatever it already had, with no error shown
+          // and no acknowledgement sent back to chat.html. chat.html's veil
+          // (which hides the panel while a chat is opening) then only
+          // lifted 3s later via its own safety-net timeout. Now: fall back
+          // to the same always-real chat shell renderChatPanel() shows for
+          // "no chat selected" (never the old bare placeholder text), plus
+          // a small dismissible error banner with a retry action, and tell
+          // chat.html to unveil/return to the list immediately via the
+          // existing (previously unused) CHAT_LIST_SHOWN ack instead of
+          // making the user wait out the 3s timeout.
+          document.getElementById('convListPanel').classList.remove('hide-on-mobile');
+          document.getElementById('chatPanel').classList.add('hide-on-mobile');
+          window.MessageModule.setActiveChatId(null);
+          renderChatPanel(null);
+          const msgLog = document.getElementById('messageLog');
+          if (msgLog) {
+            const banner = document.createElement('div');
+            banner.style.cssText = 'text-align:center;padding:14px;color:#e11d48;font-size:13px;';
+            banner.innerHTML = `Couldn't open that conversation. <button id="retryOpenChatBtn" style="margin-left:8px;">Try again</button>`;
+            msgLog.prepend(banner);
+            const retryBtn = document.getElementById('retryOpenChatBtn');
+            if (retryBtn && data && (data.userId || data.conversationId)) {
+              retryBtn.addEventListener('click', () => {
+                window.MessageModule.openChat({ userId: data.userId, conversationId: data.conversationId });
+              });
+            }
+          }
+          try { window.parent.postMessage({ type: 'CHAT_LIST_SHOWN' }, '*'); } catch (_) {}
+          break;
+        }
         case 'message:scroll-to': {
           const el = document.querySelector(`[data-message-id="${data.messageId}"]`);
           if (el) { el.scrollIntoView({ block: 'center' }); el.style.outline = '2px solid var(--kyn-accent-primary, #22c55e)'; }
@@ -1040,6 +1105,12 @@
     });
 
     renderConversationList();
+    // Render the complete chat shell immediately on load, even before any
+    // conversation is picked — see renderChatPanel()'s comment above for
+    // why the shell no longer needs a chatId to exist at all. Whatever
+    // conversation was last active (if any) re-renders with its real
+    // content the moment 'chat:open-requested' fires for it.
+    renderChatPanel(window.MessageModule.getActiveChatId());
   })();
   </script>
 </body>
