@@ -808,7 +808,17 @@
     };
 
     wireRealtimeListeners();
-    loadConversations();
+
+    // window.api.request may not be ready yet at this exact point —
+    // api.request.js runs its own async bootstrap sequence with retries/
+    // timeouts, and there's no guarantee it's finished by the time this
+    // script's top-level code executes. Poll briefly rather than firing
+    // the initial load immediately and failing silently.
+    (function waitForApiThenLoadConversations(attempt = 0) {
+        if (window.api && window.api.request) { loadConversations(); return; }
+        if (attempt >= 40) { console.warn('[MessageModule] window.api.request never became ready — conversation list not loaded'); return; }
+        setTimeout(() => waitForApiThenLoadConversations(attempt + 1), 250);
+    })();
 
     // Listen for the shell's existing OPEN_CHAT_WITH_USER postMessage
     // contract (already used by other modules — reused, not reinvented, §54).

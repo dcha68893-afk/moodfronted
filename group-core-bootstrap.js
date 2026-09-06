@@ -1105,10 +1105,34 @@ const MessageRouter = {
     // against a parent session that may no longer be valid, with no way to
     // recover short of the user manually reloading. Re-run the same
     // WAIT_PARENT → ACTIVE validation this message normally drives.
+    //
+    // FIX (parent-ready-bounce-loop): the check above fired on ANY fresh
+    // PARENT_READY while ACTIVE, but chat.html legitimately re-sends
+    // PARENT_READY many times during normal operation (module switches,
+    // periodic session refresh — see chat.html's own multiple
+    // sendSessionToModule() call sites), not only on an actual parent
+    // reload. Since a genuine parent reload would also destroy and
+    // recreate this very iframe (resetting LifecycleState from scratch,
+    // so we could never observe ourselves as ACTIVE at that moment), the
+    // old condition was actually firing on routine redundant resends of
+    // the SAME still-valid session — producing a repeating
+    // ACTIVE → WAIT_PARENT → ACTIVE bounce with no real state change.
+    // The one case this guard genuinely needs to catch is a same-tab
+    // account switch (parent re-authenticates as a different user without
+    // a full page reload) — detectable by the incoming message's userId
+    // actually differing from the user we're currently active for.
     if (LifecycleState.isActive()) {
-      parentReadyReceived = false;
-      _parentReadyProcessedFlag = false;
-      LifecycleState.reenterWaitParent('fresh PARENT_READY while ACTIVE');
+      const incomingUserId = message?.payload?.userId ?? message?.userId ?? null;
+      const activeUserId = (getCurrentUserLocal() || {}).id ?? (getCurrentUserLocal() || {}).uid ?? null;
+      const isGenuineAccountSwitch = incomingUserId != null && activeUserId != null && String(incomingUserId) !== String(activeUserId);
+      if (isGenuineAccountSwitch) {
+        parentReadyReceived = false;
+        _parentReadyProcessedFlag = false;
+        LifecycleState.reenterWaitParent('account switch detected via fresh PARENT_READY while ACTIVE');
+      } else {
+        debugLog('Ignoring redundant PARENT_READY while ACTIVE (same user, no reload) — not re-entering WAIT_PARENT');
+        return true;
+      }
     }
 
     // STRICT: Only process if waiting for parent

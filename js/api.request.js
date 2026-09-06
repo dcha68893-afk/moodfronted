@@ -2297,7 +2297,17 @@
             
             if (!_getUserToken || typeof _getUserToken !== 'function') {
                 console.warn("[API] ⏳ getUserToken not found in window.__API_CORE");
-                _getUserToken = getAuthToken;
+                // FIX (getAuthToken-infinite-recursion): getAuthToken() itself calls
+                // _getUserToken() as one of its own fallback steps. Assigning
+                // _getUserToken = getAuthToken here created a circular reference —
+                // getAuthToken -> _getUserToken -> getAuthToken -> ... -> stack
+                // overflow ('Maximum call stack size exceeded'), which silently
+                // broke every authenticated request across every module (Messages,
+                // Friends, Groups, Tools) the moment Session.getToken() didn't
+                // return a token on the first try. getAuthToken()'s other two
+                // fallback steps (Session.getToken, direct localStorage read)
+                // already cover real token retrieval without this.
+                _getUserToken = () => null;
             }
             
             if (!_apiCache) {
@@ -2322,7 +2332,8 @@
         } catch (error) {
             console.error("[API] ❌ Failed to initialize dependencies:", error);
             _secureApiFetch = createFallbackSecureFetch();
-            _getUserToken = getAuthToken;
+            // Same circular-reference fix as above — see the detailed comment there.
+            _getUserToken = () => null;
             _apiCache = {
                 get: () => null,
                 set: () => {},
