@@ -1,0 +1,71 @@
+name: Make chat panel visible by default
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Remove empty chat-panel gate
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('message.html')
+          s = p.read_text(encoding='utf-8')
+
+          old = '''    function renderChatPanel(chatId) {\n      chatId = normalizeChatPanelId(chatId) || normalizeChatPanelId(window.MessageModule.getActiveChatId());\n      if (!chatId) {\n        chatPanelEl.innerHTML = '<div id="emptyState"><div><div style="font-size:48px;margin-bottom:10px;">💬</div>Select a conversation to start messaging</div></div>';\n        return;\n      }\n      const conv = window.MessageModule.getConversations().find(c => c.chatId === chatId);'''
+
+          new = '''    function renderChatPanel(chatId) {\n      chatId = normalizeChatPanelId(chatId) || normalizeChatPanelId(window.MessageModule.getActiveChatId());\n      // The chat shell is always rendered. A conversation ID is only required\n      // for loading/sending messages, not for displaying the messaging controls.\n      const conv = chatId\n        ? window.MessageModule.getConversations().find(c => normalizeChatPanelId(c.chatId) === chatId)\n        : null;'''
+
+          if old not in s:
+              raise SystemExit('Expected renderChatPanel gate not found')
+          s = s.replace(old, new, 1)
+
+          old2 = '''      renderConversationList();\n  })();'''
+          new2 = '''      renderConversationList();\n      // Render the complete chat shell immediately, even with no selected chat.\n      // Opening a conversation later re-renders this same shell with its chat ID.\n      renderChatPanel(window.MessageModule.getActiveChatId());\n  })();'''
+          if old2 not in s:
+              raise SystemExit('Expected initialization marker not found')
+          s = s.replace(old2, new2, 1)
+
+          # Prevent actions that require a real conversation from firing while\n          # still allowing the controls themselves to remain visible.\n          s = s.replace(
+              '''      async function doSend() {\n        const content = input.value.trim();''',
+              '''      async function doSend() {\n        if (!chatId) return;\n        const content = input.value.trim();''',
+              1,
+          )
+          s = s.replace(
+              '''      input.addEventListener('input', () => {\n        window.MessageModule.sendTypingStart(chatId);''',
+              '''      input.addEventListener('input', () => {\n        if (!chatId) return;\n        window.MessageModule.sendTypingStart(chatId);''',
+              1,
+          )
+          s = s.replace(
+              '''      attachInput.addEventListener('change', async () => {\n        const file = attachInput.files[0];''',
+              '''      attachInput.addEventListener('change', async () => {\n        if (!chatId) { attachInput.value = ''; return; }\n        const file = attachInput.files[0];''',
+              1,
+          )
+
+          p.write_text(s, encoding='utf-8')
+
+      - name: Verify
+        shell: bash
+        run: |
+          grep -q "The chat shell is always rendered" message.html
+          grep -q "renderChatPanel(window.MessageModule.getActiveChatId())" message.html
+          ! grep -q "Select a conversation to start messaging" message.html
+
+      - name: Commit and remove workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add message.html
+          git rm .github/workflows/fix-chat-panel-visible.yml
+          git commit -m "fix message chat panel visible before chat selection"
+          git push origin HEAD:main
