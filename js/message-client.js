@@ -665,6 +665,28 @@
     // state.activeChatId itself.
     let _openChatGeneration = 0;
 
+    // ROOT-CAUSE FIX (opening chat from another module still fails even
+    // with api.request.js's cooldown breaker in place): chat.html's
+    // OPEN_CHAT_WITH_USER relay (used by Friend/Status/Calls "message this
+    // person" icons) retries every 600ms for up to 12 attempts — up to
+    // 7.2s — for as long as sessionStorage's pending_chat key is still
+    // set, which it is until a real CHAT_OPENED ack fires. Each retry
+    // calls openChat() again, and openChat() had no awareness of an
+    // already-in-flight resolve() call for the same user — so on a slow/
+    // cold backend (the /messages/resolve/:id call can take up to the
+    // full 45s request timeout), a single open action was firing up to 12
+    // *separate, concurrent* resolve requests to the exact same endpoint.
+    // Since normalizeEndpoint() doesn't template out the userId, all 12
+    // share one safety-guard error-counter key — so as soon as 3 of them
+    // time out (likely, since they're all hitting the same slow backend
+    // around the same time), the breaker trips and blocks the rest,
+    // including whichever one might otherwise have eventually succeeded.
+    // Coalescing concurrent resolves for the same userId into one shared
+    // in-flight promise means chat.html's retry loop no longer causes
+    // duplicate network calls at all — just one real resolve, however
+    // long it takes, that every retry within that window awaits together.
+    const _pendingResolves = new Map();
+
     async function openChat({ conversationId = null, userId = null, messageId = null, userName = null, avatar = null } = {}) {
         const myGeneration = ++_openChatGeneration;
         const isStale = () => myGeneration !== _openChatGeneration;
@@ -685,7 +707,14 @@
         }
         if (!resolvedChatId && userId) {
             try {
-                const res = await api().get(`/messages/resolve/${normalizedUserId}`);
+                const resolveKey = String(normalizedUserId);
+                let resolvePromise = _pendingResolves.get(resolveKey);
+                if (!resolvePromise) {
+                    resolvePromise = api().get(`/messages/resolve/${normalizedUserId}`)
+                        .finally(() => _pendingResolves.delete(resolveKey));
+                    _pendingResolves.set(resolveKey, resolvePromise);
+                }
+                const res = await resolvePromise;
                 if (isStale()) return; // a newer openChat() call has since taken over
                 if (res && res.success && res.data) resolvedChatId = normalizeChatId(res.data.chatId);
                 if (!resolvedChatId) throw new Error((res && res.message) || 'Could not resolve conversation');
@@ -697,6 +726,7 @@
             }
         }
         if (isStale()) return; // covers the synchronous/local-lookup path too
+
 
         // A brand-new chat has no messages yet to derive a display name
         // from — use whatever the caller told us (calls-ui.js and the
