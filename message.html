@@ -148,6 +148,10 @@
   #chatHeaderActions { display: flex; gap: 4px; }
   .header-icon-btn { background: none; border: none; font-size: 16px; cursor: pointer; width: 34px; height: 34px; border-radius: 50%; }
   .header-icon-btn:hover { background: var(--kyn-bg-hover, #f0f0f0); }
+  .header-icon-btn:disabled { opacity: 0.35; cursor: default; }
+  .header-icon-btn:disabled:hover { background: none; }
+  #composeInput:disabled { opacity: 0.6; cursor: default; }
+  #emojiBtn:disabled { opacity: 0.5; cursor: default; }
   #emojiBtn { background: none; border: none; font-size: 18px; cursor: pointer; width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0; }
   #emojiBtn:hover { background: var(--kyn-bg-hover, #f0f0f0); }
   #emojiPicker {
@@ -187,7 +191,6 @@
   }
   .bubble-row.mine .bubble-attachment-file { background: rgba(255,255,255,0.2); }
   #attachUploadProgress { font-size: 12px; color: var(--kyn-text-secondary,#999); padding: 0 14px; }
-  #emptyState { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--kyn-text-secondary, #999); }
   .empty-conv-list { padding: 60px 24px; text-align: center; color: var(--kyn-text-secondary, #999); }
   .empty-conv-icon { font-size: 40px; margin-bottom: 14px; }
   .empty-conv-title { font-size: 15px; font-weight: 600; color: var(--kyn-text-primary, #333); margin-bottom: 4px; }
@@ -242,11 +245,7 @@
     </div>
   </div>
 
-  <div id="chatPanel" class="hide-on-mobile">
-    <!-- Populated by renderChatPanel() as soon as the script below runs —
-         always the full real chat shell (header/list/composer), never a
-         placeholder, whether or not a conversation is active yet. -->
-  </div>
+  <div id="chatPanel" class="hide-on-mobile"></div>
 
   <script src="/js/kynecta.safety.layer.js"></script>
   <script src="/js/app.cache.js"></script>
@@ -409,31 +408,28 @@
       return Number.isFinite(id) && id > 0 ? id : null;
     }
 
-    // FIX (placeholder shown instead of real chat UI): renderChatPanel()
-    // used to early-return into a static "Select a conversation" div
-    // whenever chatId was falsy, meaning the ENTIRE chat shell — header,
-    // message list, reply/composer, emoji, attachment, send — only ever
-    // existed in the DOM once a specific conversation had successfully
-    // resolved. Any gap between "panel is supposed to be showing" and "a
-    // real chatId has actually arrived" (a slow/failed resolve, a dropped
-    // postMessage, or simply no chat picked yet) rendered as that bare
-    // placeholder with none of the real controls. The shell itself never
-    // needed a chatId to exist — only the actions that send to/load a
-    // specific conversation do. So: always build the full shell; guard the
-    // handful of handlers that require a real chatId individually instead
-    // of gating the whole panel on one.
-    function renderChatPanel(chatId) {
+    function renderChatPanel(chatId, options = {}) {
       chatId = normalizeChatPanelId(chatId) || normalizeChatPanelId(window.MessageModule.getActiveChatId());
       const conv = chatId ? window.MessageModule.getConversations().find(c => c.chatId === chatId) : null;
+      const hasChat = !!chatId;
+
+      // ROOT-CAUSE FIX: this used to swap the whole panel for a static
+      // "Select a conversation to start messaging" placeholder div whenever
+      // there was no active chat. That's gone — the real header, message
+      // list, reply bar, composer, emoji picker, attach button, and send
+      // button are always built, every time. With no chat selected there's
+      // just nothing yet to call/search/send to, so those specific controls
+      // render disabled and the composer shows a neutral prompt instead of a
+      // full-panel takeover.
       chatPanelEl.innerHTML = `
         <div id="chatHeader">
-          <button id="backBtn"${chatId ? '' : ' class="hidden"'}>&larr;</button>
-          <strong id="chatHeaderName" style="${conv ? 'cursor:pointer;' : ''}">${escapeHtml(conv?.otherUser?.username || 'Messages')}</strong>
+          <button id="backBtn"${hasChat ? '' : ' disabled style="visibility:hidden;"'}>&larr;</button>
+          <strong id="chatHeaderName" style="cursor:${hasChat ? 'pointer' : 'default'};">${hasChat ? escapeHtml(conv?.otherUser?.username || 'Conversation') : 'No conversation selected'}</strong>
           <div id="chatHeaderActions">
-            <button class="header-icon-btn" id="searchInChatBtn" title="Search"${chatId ? '' : ' disabled'}>🔍</button>
-            <button class="header-icon-btn" id="voiceCallBtn" title="Voice call"${chatId ? '' : ' disabled'}>📞</button>
-            <button class="header-icon-btn" id="videoCallBtn" title="Video call"${chatId ? '' : ' disabled'}>🎥</button>
-            <button class="header-icon-btn" id="chatMoreBtn" title="More"${chatId ? '' : ' disabled'}>⋮</button>
+            <button class="header-icon-btn" id="searchInChatBtn" title="Search"${hasChat ? '' : ' disabled'}>🔍</button>
+            <button class="header-icon-btn" id="voiceCallBtn" title="Voice call"${hasChat ? '' : ' disabled'}>📞</button>
+            <button class="header-icon-btn" id="videoCallBtn" title="Video call"${hasChat ? '' : ' disabled'}>🎥</button>
+            <button class="header-icon-btn" id="chatMoreBtn" title="More"${hasChat ? '' : ' disabled'}>⋮</button>
           </div>
         </div>
         <div id="chatSearchBar" class="hidden">
@@ -441,29 +437,37 @@
           <span id="chatSearchCount"></span>
           <button id="closeChatSearchBtn">&times;</button>
         </div>
-        <div id="loadOlderBtn"${chatId ? '' : ' class="hidden"'}>Load earlier messages</div>
+        ${options.retryBanner ? `
+        <div id="chatOpenFailedBanner" style="padding:10px 14px;background:#fdecea;color:#611a15;font-size:13px;display:flex;align-items:center;justify-content:space-between;gap:10px;">
+          <span>⚠️ Couldn't open this conversation.</span>
+          <button id="retryOpenChatBtn" style="flex-shrink:0;">Try again</button>
+        </div>` : ''}
+        <div id="loadOlderBtn"${hasChat ? '' : ' style="display:none;"'}>Load earlier messages</div>
         <div id="messageLog"></div>
         <div id="composeBar">
-          <button id="attachBtn" title="Attach file"${chatId ? '' : ' disabled'}>📎</button>
+          <button id="attachBtn" title="Attach file"${hasChat ? '' : ' disabled'}>📎</button>
           <input type="file" id="attachInput" style="display:none" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt">
-          <button id="emojiBtn" title="Emoji"${chatId ? '' : ' disabled'}>🙂</button>
-          <textarea id="composeInput" rows="1" placeholder="${chatId ? 'Message...' : 'Pick a conversation to start typing...'}"${chatId ? '' : ' disabled'}></textarea>
-          <button id="sendBtn"${chatId ? '' : ' disabled'}>&#9658;</button>
+          <button id="emojiBtn" title="Emoji"${hasChat ? '' : ' disabled'}>🙂</button>
+          <textarea id="composeInput" rows="1" placeholder="${hasChat ? 'Message...' : 'Pick a conversation to start typing…'}"${hasChat ? '' : ' disabled'}></textarea>
+          <button id="sendBtn"${hasChat ? '' : ' disabled'}>&#9658;</button>
         </div>
         <div id="emojiPicker" class="hidden"></div>
       `;
-      if (chatId) {
-        renderMessages(chatId);
-      } else {
-        // No conversation resolved yet/at all — the shell above is still
-        // fully real and visible; only the transcript itself is empty.
-        document.getElementById('messageLog').innerHTML =
-          '<div class="empty-conv-subtitle" style="text-align:center;padding:24px 12px;">Pick a conversation on the left, or start a new one, to see messages here.</div>';
+
+      if (hasChat) renderMessages(chatId);
+
+      if (options.retryBanner) {
+        const retryBtn = document.getElementById('retryOpenChatBtn');
+        if (retryBtn) {
+          retryBtn.addEventListener('click', () => {
+            window.MessageModule.openChat({ userId: options.retryBanner.userId, conversationId: options.retryBanner.conversationId });
+          });
+        }
       }
 
       const otherUserId = conv?.otherUser?.id;
       function startCall(callType) {
-        if (!chatId) return;
+        if (!hasChat) return;
         window.parent.postMessage({
           type: 'SWITCH_MODULE', module: 'calls',
           payload: { userId: otherUserId, userName: conv?.otherUser?.username || 'User', callType, returnTo: 'messages' },
@@ -472,15 +476,16 @@
       document.getElementById('voiceCallBtn').addEventListener('click', () => startCall('voice'));
       document.getElementById('videoCallBtn').addEventListener('click', () => startCall('video'));
 
-      if (conv) {
-        document.getElementById('chatHeaderName').addEventListener('click', () => openChatInfoPanel(chatId, conv));
-      }
+      document.getElementById('chatHeaderName').addEventListener('click', () => {
+        if (!hasChat) return;
+        openChatInfoPanel(chatId, conv);
+      });
 
       const searchBar = document.getElementById('chatSearchBar');
       const chatSearchInput = document.getElementById('chatSearchInput');
       const chatSearchCount = document.getElementById('chatSearchCount');
       document.getElementById('searchInChatBtn').addEventListener('click', () => {
-        if (!chatId) return;
+        if (!hasChat) return;
         searchBar.classList.toggle('hidden');
         if (!searchBar.classList.contains('hidden')) chatSearchInput.focus();
       });
@@ -491,7 +496,7 @@
         document.getElementById('messageLog').querySelectorAll('.search-hit').forEach(el => el.classList.remove('search-hit'));
       });
       chatSearchInput.addEventListener('input', () => {
-        if (!chatId) return;
+        if (!hasChat) return;
         const msgLog = document.getElementById('messageLog');
         const results = window.MessageModule.searchMessages(chatId, chatSearchInput.value);
         msgLog.querySelectorAll('.search-hit').forEach(el => el.classList.remove('search-hit'));
@@ -507,7 +512,7 @@
       });
 
       document.getElementById('chatMoreBtn').addEventListener('click', async () => {
-        if (!chatId) return;
+        if (!hasChat) return;
         const action = prompt('Type "clear" to clear this chat, "archive" to archive it, or "block" to block this user');
         if (action === 'clear') {
           if (confirm('Clear this conversation for you? This cannot be undone.')) {
@@ -552,9 +557,13 @@
       const emojiPicker = document.getElementById('emojiPicker');
       const EMOJI_SET = ['😀','😂','😍','😊','😉','😢','😮','😡','👍','👎','❤️','🔥','🎉','🙏','👏','😴','🤔','😎','😭','💯'];
       emojiPicker.innerHTML = EMOJI_SET.map(e => `<button class="emoji-option">${e}</button>`).join('');
-      emojiBtn.addEventListener('click', () => emojiPicker.classList.toggle('hidden'));
+      emojiBtn.addEventListener('click', () => {
+        if (!hasChat) return;
+        emojiPicker.classList.toggle('hidden');
+      });
       emojiPicker.querySelectorAll('.emoji-option').forEach(btn => {
         btn.addEventListener('click', () => {
+          if (!hasChat) return;
           document.getElementById('composeInput').value += btn.textContent;
           emojiPicker.classList.add('hidden');
           document.getElementById('composeInput').focus();
@@ -562,7 +571,7 @@
       });
 
       document.getElementById('backBtn').addEventListener('click', () => {
-        if (!chatId) return;
+        if (!hasChat) return;
         window.MessageModule.sendTypingStop(chatId);
         window.MessageModule.setActiveChatId(null);
         document.getElementById('convListPanel').classList.remove('hide-on-mobile');
@@ -571,7 +580,7 @@
       });
 
       document.getElementById('loadOlderBtn').addEventListener('click', async () => {
-        if (!chatId) return;
+        if (!hasChat) return;
         const msgs = window.MessageModule.getMessages(chatId);
         const oldestId = msgs.length ? msgs[0].id : null;
         if (typeof oldestId !== 'number') return; // no real cursor yet (all optimistic/local)
@@ -585,7 +594,7 @@
       const attachInput = document.getElementById('attachInput');
 
       async function doSend() {
-        if (!chatId) return;
+        if (!hasChat) return;
         const content = input.value.trim();
         if (!content) return;
         input.value = '';
@@ -603,22 +612,25 @@
       let typingStopTimer = null;
       sendBtn.addEventListener('click', doSend);
       input.addEventListener('input', () => {
-        if (!chatId) return;
+        if (!hasChat) return;
         window.MessageModule.sendTypingStart(chatId);
         clearTimeout(typingStopTimer);
         typingStopTimer = setTimeout(() => window.MessageModule.sendTypingStop(chatId), 3000);
       });
       input.addEventListener('keydown', (e) => {
-        if (!chatId) return;
+        if (!hasChat) return;
         if (e.key !== 'Enter' || e.shiftKey) return;
         const sendOnEnter = window.MessageModule.getSetting('chat', 'enterToSend') !== false;
         if (sendOnEnter) { e.preventDefault(); doSend(); }
         // else: let Enter insert a newline as normal textarea behavior
       });
 
-      attachBtn.addEventListener('click', () => { if (chatId) attachInput.click(); });
+      attachBtn.addEventListener('click', () => {
+        if (!hasChat) return;
+        attachInput.click();
+      });
       attachInput.addEventListener('change', async () => {
-        if (!chatId) { attachInput.value = ''; return; }
+        if (!hasChat) return;
         const file = attachInput.files[0];
         if (!file) return;
         attachBtn.disabled = true;
@@ -846,6 +858,66 @@
     const newChatResults = document.getElementById('newChatResults');
     let newChatSearchTimer = null;
 
+    // ROOT-CAUSE FIX (friends not shown instantly on "Start a chat"): chat.html
+    // (the shell) already pushes the user's friends list to every module the
+    // same way — sendFriendsToStatusIframe/GroupIframe/CallsIframe/ToolsIframe
+    // all have a sibling sendFriendsToMessagesIframe() that posts
+    // {type:'FRIENDS_LIST_UPDATE', payload:{friends}} straight to
+    // #messagesIframe (this document) every time the friend list changes, and
+    // again in response to a GET_FRIENDS_LIST request (see chat.html). This
+    // document never had a `message` listener at all, so every one of those
+    // pushes was silently dropped and the New Chat modal fell back to a cold
+    // IndexedDB/localStorage/network chain every time it opened. Calls and
+    // Groups already listen for exactly this event (see calls-ui.js's
+    // setupFriendsListListener / GroupModerationEngine._attachListeners) —
+    // mirror that here so friends paint instantly, the same as those modules.
+    let pushedFriendsCache = [];
+    function normalizePushedFriend(f) {
+      const id = f && (f.id ?? f.userId);
+      if (id == null) return null;
+      return {
+        id: Number(id) || id,
+        username: f.username || f.displayName || f.name || '',
+        displayName: f.displayName || f.username || f.name || '',
+        avatar: f.avatar || f.photoURL || f.profilePicture || '',
+        firstName: f.firstName || '',
+        lastName: f.lastName || '',
+      };
+    }
+    window.addEventListener('message', (event) => {
+      const data = event.data;
+      if (!data || typeof data !== 'object') return;
+      if (data.type !== 'FRIENDS_LIST_UPDATE' && data.type !== 'FRIENDS_LIST_RESPONSE' &&
+          data.type !== 'FRIENDS_DATA' && data.type !== 'FRIENDS_SYNC') return;
+      const rawFriends = (data.payload && data.payload.friends) || data.friends || [];
+      if (!Array.isArray(rawFriends) || rawFriends.length === 0) return;
+      pushedFriendsCache = rawFriends.map(normalizePushedFriend).filter(Boolean);
+      // Persist alongside the same IndexedDB 'users' store the discovery
+      // cache uses (keyed by id, so this only ever fills in/updates entries —
+      // never clobbers the broader discoverable-users list) so a friend is
+      // still there for an instant paint on the next load even before this
+      // push arrives again.
+      try {
+        if (window.KynectaFriendsLocalStore && typeof window.KynectaFriendsLocalStore.saveUsers === 'function') {
+          window.KynectaFriendsLocalStore.saveUsers(pushedFriendsCache);
+        }
+      } catch (_) {}
+      // If the "Start a chat" modal is open right now, repaint immediately
+      // with the freshly pushed friends instead of waiting for the user to
+      // retype/reopen it.
+      if (newChatModal && !newChatModal.classList.contains('hidden')) {
+        runNewChatSearch(newChatSearchInput.value.trim());
+      }
+    });
+    // Ask the shell for whatever it already has cached right now (it answers
+    // synchronously from its own in-memory cachedFriendsList — see chat.html's
+    // GET_FRIENDS_LIST handler — the same request calls-ui.js and the group
+    // module use), so friends are available even if this module finished
+    // loading before the last FRIENDS_LIST_UPDATE broadcast went out.
+    try {
+      window.parent.postMessage({ type: 'GET_FRIENDS_LIST', source: 'messages', module: 'messages' }, '*');
+    } catch (_) {}
+
     // Renders a user list into the "Start chat" results panel and wires up
     // click-to-open. Factored out so both the instant cache-painted list and
     // the later live-refreshed list can share the exact same rendering path.
@@ -907,11 +979,18 @@
       // readable here — check IndexedDB first (the deeper, larger tier),
       // then the localStorage snapshot as a fallback, same priority order
       // friend-core.ui-bridge.js itself uses.
-      let cachedUsers = [];
+      // Priority 1: friends pushed straight from the shell (in-memory,
+      // already parsed — see the FRIENDS_LIST_UPDATE listener above). This is
+      // the exact same data Calls/Groups/Status paint instantly from, so
+      // check it first rather than waiting on an IndexedDB round trip.
+      let cachedUsers = pushedFriendsCache.length > 0 ? pushedFriendsCache.slice() : [];
       try {
         if (window.KynectaFriendsLocalStore && typeof window.KynectaFriendsLocalStore.getAllUsers === 'function') {
           const idbUsers = await window.KynectaFriendsLocalStore.getAllUsers();
-          if (Array.isArray(idbUsers) && idbUsers.length > 0) cachedUsers = idbUsers;
+          if (Array.isArray(idbUsers) && idbUsers.length > 0) {
+            const seenIds = new Set(cachedUsers.map(u => String(u.id)));
+            idbUsers.forEach(u => { if (!seenIds.has(String(u.id))) cachedUsers.push(u); });
+          }
         }
       } catch (_) {}
       if (cachedUsers.length === 0) {
@@ -1068,31 +1147,17 @@
           // js/message-client.js. Nothing here ever handled it, so the panel
           // was left showing whatever it already had, with no error shown
           // and no acknowledgement sent back to chat.html. chat.html's veil
-          // (which hides the panel while a chat is opening) then only
-          // lifted 3s later via its own safety-net timeout. Now: fall back
-          // to the same always-real chat shell renderChatPanel() shows for
-          // "no chat selected" (never the old bare placeholder text), plus
-          // a small dismissible error banner with a retry action, and tell
-          // chat.html to unveil/return to the list immediately via the
-          // existing (previously unused) CHAT_LIST_SHOWN ack instead of
+          // (which hides the panel while a chat is opening) then only lifted
+          // 3s later via its own safety-net timeout. Now: fall back to the
+          // same real shell (disabled, no chat selected) plus a small inline
+          // retry banner instead of any placeholder-style full-panel screen,
+          // and tell chat.html to unveil/return to the list immediately via
+          // the existing (previously unused) CHAT_LIST_SHOWN ack instead of
           // making the user wait out the 3s timeout.
           document.getElementById('convListPanel').classList.remove('hide-on-mobile');
           document.getElementById('chatPanel').classList.add('hide-on-mobile');
           window.MessageModule.setActiveChatId(null);
-          renderChatPanel(null);
-          const msgLog = document.getElementById('messageLog');
-          if (msgLog) {
-            const banner = document.createElement('div');
-            banner.style.cssText = 'text-align:center;padding:14px;color:#e11d48;font-size:13px;';
-            banner.innerHTML = `Couldn't open that conversation. <button id="retryOpenChatBtn" style="margin-left:8px;">Try again</button>`;
-            msgLog.prepend(banner);
-            const retryBtn = document.getElementById('retryOpenChatBtn');
-            if (retryBtn && data && (data.userId || data.conversationId)) {
-              retryBtn.addEventListener('click', () => {
-                window.MessageModule.openChat({ userId: data.userId, conversationId: data.conversationId });
-              });
-            }
-          }
+          renderChatPanel(null, { retryBanner: { userId: data && data.userId, conversationId: data && data.conversationId } });
           try { window.parent.postMessage({ type: 'CHAT_LIST_SHOWN' }, '*'); } catch (_) {}
           break;
         }
@@ -1105,12 +1170,7 @@
     });
 
     renderConversationList();
-    // Render the complete chat shell immediately on load, even before any
-    // conversation is picked — see renderChatPanel()'s comment above for
-    // why the shell no longer needs a chatId to exist at all. Whatever
-    // conversation was last active (if any) re-renders with its real
-    // content the moment 'chat:open-requested' fires for it.
-    renderChatPanel(window.MessageModule.getActiveChatId());
+    renderChatPanel(null);
   })();
   </script>
 </body>
