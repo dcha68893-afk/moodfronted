@@ -402,7 +402,13 @@
         </div>`;
     }
 
+    function normalizeChatPanelId(value) {
+      const id = Number(value);
+      return Number.isFinite(id) && id > 0 ? id : null;
+    }
+
     function renderChatPanel(chatId) {
+      chatId = normalizeChatPanelId(chatId) || normalizeChatPanelId(window.MessageModule.getActiveChatId());
       if (!chatId) {
         chatPanelEl.innerHTML = '<div id="emptyState"><div><div style="font-size:48px;margin-bottom:10px;">💬</div>Select a conversation to start messaging</div></div>';
         return;
@@ -1004,7 +1010,8 @@
           break;
         }
         case 'chat:open-requested': {
-          const { conversationId, userId } = data;
+          const conversationId = normalizeChatPanelId(data && data.conversationId);
+          const { userId } = data || {};
           document.getElementById('convListPanel').classList.add('hide-on-mobile');
           document.getElementById('chatPanel').classList.remove('hide-on-mobile');
           renderChatPanel(conversationId);
@@ -1022,6 +1029,37 @@
               },
             }, '*');
           } catch (_) {}
+          break;
+        }
+        case 'chat:open-failed': {
+          // ROOT-CAUSE FIX: MessageModule.openChat() already notifies this
+          // event when a first-time/non-friend conversation fails to resolve
+          // (backend error, cold-start timeout, unknown user, etc.) — see
+          // js/message-client.js. Nothing here ever handled it, so the panel
+          // was left showing whatever it already had (almost always the
+          // static "Select a conversation" placeholder from the initial
+          // HTML), with no error shown and no acknowledgement sent back to
+          // chat.html. chat.html's veil (which hides the panel while a chat
+          // is opening) then only lifted 3s later via its own safety-net
+          // timeout, revealing that placeholder to the user. Now: show an
+          // explicit failure state instead of silently doing nothing, and
+          // tell chat.html to unveil/return to the list immediately via the
+          // existing (previously unused) CHAT_LIST_SHOWN ack instead of
+          // making the user wait out the 3s timeout.
+          document.getElementById('convListPanel').classList.remove('hide-on-mobile');
+          document.getElementById('chatPanel').classList.add('hide-on-mobile');
+          chatPanelEl.innerHTML = `<div id="emptyState"><div>
+            <div style="font-size:48px;margin-bottom:10px;">⚠️</div>
+            Couldn't open this conversation.<br>
+            <button id="retryOpenChatBtn" style="margin-top:12px;">Try again</button>
+          </div></div>`;
+          const retryBtn = document.getElementById('retryOpenChatBtn');
+          if (retryBtn && data && (data.userId || data.conversationId)) {
+            retryBtn.addEventListener('click', () => {
+              window.MessageModule.openChat({ userId: data.userId, conversationId: data.conversationId });
+            });
+          }
+          try { window.parent.postMessage({ type: 'CHAT_LIST_SHOWN' }, '*'); } catch (_) {}
           break;
         }
         case 'message:scroll-to': {

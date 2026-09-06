@@ -643,8 +643,34 @@
     //    lets the first sendMessage() call resolve it server-side.
     // ═══════════════════════════════════════════════════════════════════════
 
+    function normalizeChatId(value) {
+        const id = Number(value);
+        return Number.isFinite(id) && id > 0 ? id : null;
+    }
+
+    // ROOT-CAUSE FIX (race condition — stale open overwrites a newer one):
+    // openChat() awaits a network round-trip (/messages/resolve/:userId) for
+    // any first-time/non-friend/notification open. If the user (or another
+    // rapid-fire postMessage retry — chat.html's own retry loops fire the
+    // *same* open several times 600-800ms apart) opens a second, different
+    // chat before the first's resolve response comes back, the first
+    // response was landing AFTER the second and unconditionally overwriting
+    // state.activeChatId + firing 'chat:open-requested' for the stale target
+    // — silently switching the visible chat back to the wrong conversation,
+    // or, if the stale request had actually failed to resolve, replacing an
+    // already-correctly-open chat with the failure placeholder. A simple
+    // monotonically increasing generation counter, checked immediately
+    // before this call is allowed to touch shared state, closes that
+    // window without adding any new state variable that competes with
+    // state.activeChatId itself.
+    let _openChatGeneration = 0;
+
     async function openChat({ conversationId = null, userId = null, messageId = null, userName = null, avatar = null } = {}) {
-        let resolvedChatId = conversationId;
+        const myGeneration = ++_openChatGeneration;
+        const isStale = () => myGeneration !== _openChatGeneration;
+
+        let resolvedChatId = normalizeChatId(conversationId);
+        const normalizedUserId = normalizeChatId(userId);
 
         // Opened from another module with only a userId (Friends, Status,
         // Calls, a notification) — check if we already know this
@@ -654,18 +680,23 @@
         // one-time server round-trip.
         if (!resolvedChatId && userId) {
             for (const [cid, meta] of state.conversations) {
-                if (meta.otherUser && meta.otherUser.id === userId) { resolvedChatId = cid; break; }
+                if (meta.otherUser && normalizeChatId(meta.otherUser.id) === normalizedUserId) { resolvedChatId = normalizeChatId(cid); break; }
             }
         }
         if (!resolvedChatId && userId) {
             try {
-                const res = await api().get(`/messages/resolve/${userId}`);
-                if (res && res.success && res.data) resolvedChatId = res.data.chatId;
+                const res = await api().get(`/messages/resolve/${normalizedUserId}`);
+                if (isStale()) return; // a newer openChat() call has since taken over
+                if (res && res.success && res.data) resolvedChatId = normalizeChatId(res.data.chatId);
+                if (!resolvedChatId) throw new Error((res && res.message) || 'Could not resolve conversation');
             } catch (err) {
-                notify('chat:open-failed', { userId, error: err.message });
+                if (isStale()) return;
+                state.activeChatId = null;
+            notify('chat:open-failed', { userId: normalizedUserId || userId, error: err.message || 'Could not open conversation' });
                 return;
             }
         }
+        if (isStale()) return; // covers the synchronous/local-lookup path too
 
         // A brand-new chat has no messages yet to derive a display name
         // from — use whatever the caller told us (calls-ui.js and the
@@ -680,8 +711,9 @@
             });
         }
 
-        state.activeChatId = resolvedChatId || null;
-        notify('chat:open-requested', { conversationId: resolvedChatId, userId, messageId });
+        state.activeChatId = normalizeChatId(resolvedChatId);
+        resolvedChatId = state.activeChatId;
+        notify('chat:open-requested', { conversationId: normalizeChatId(resolvedChatId), userId: normalizedUserId || userId, messageId });
 
         // Pre-warm the encryption session now, not on first keystroke/send —
         // this is exactly what real E2E messengers do: the network round-trip
@@ -703,7 +735,7 @@
 
         if (resolvedChatId) {
             await loadHistory(resolvedChatId);
-            if (messageId) notify('message:scroll-to', { chatId: resolvedChatId, messageId });
+            if (messageId && !isStale()) notify('message:scroll-to', { chatId: resolvedChatId, messageId });
         }
     }
 
@@ -822,11 +854,33 @@
 
     // Listen for the shell's existing OPEN_CHAT_WITH_USER postMessage
     // contract (already used by other modules — reused, not reinvented, §54).
+    //
+    // ROOT-CAUSE FIX (notification/deep-link chat opens silently no-op'd):
+    // chat.html's push-notification relay (js/push-init.js → 'kyn:openChat' →
+    // messagesIframe.postMessage({ type: 'OPEN_CHAT_BY_ID', payload: { chatId,
+    // scrollToMessageId } })) has existed for a while, but nothing in this
+    // iframe ever listened for 'OPEN_CHAT_BY_ID' — a comment in chat.html
+    // claimed a 'messages-ui.js' file with an 'openChatByIdInUI' handler
+    // wired this up, but that file does not exist anywhere in the repo.
+    // The postMessage was sent into a void: no MessageModule.openChat() call
+    // ever happened, so no 'chat:open-requested' event fired, renderChatPanel()
+    // was never invoked with a real chatId, and the chat panel just kept
+    // showing its static initial-HTML "Select a conversation" placeholder
+    // until chat.html's 3s veil safety-net (_unveilMessages) revealed it.
+    // Fix: route it through the exact same canonical openChat() entry point
+    // every other caller uses — no parallel chat-opening logic, no new bridge.
     window.addEventListener('message', (event) => {
         const data = event.data;
-        if (!data || data.type !== 'OPEN_CHAT_WITH_USER') return;
-        const { userId, conversationId, messageId, userName, avatar } = data.payload || {};
-        window.MessageModule.openChat({ conversationId, userId, messageId, userName, avatar });
+        if (!data) return;
+        if (data.type === 'OPEN_CHAT_WITH_USER') {
+            const { userId, conversationId, messageId, userName, avatar } = data.payload || {};
+            window.MessageModule.openChat({ conversationId, userId, messageId, userName, avatar });
+            return;
+        }
+        if (data.type === 'OPEN_CHAT_BY_ID') {
+            const { chatId, scrollToMessageId } = data.payload || {};
+            window.MessageModule.openChat({ conversationId: chatId, messageId: scrollToMessageId });
+        }
     });
 
     // Support direct-load query params (?openChat=<userId> or ?conversationId=<id>)
