@@ -247,6 +247,8 @@
   </div>
 
   <script src="/js/kynecta.safety.layer.js"></script>
+  <script src="/js/app.cache.js"></script>
+  <script src="/js/localStore.friends.js"></script>
   <script src="/js/api.request.js"></script>
   <script src="/js/app.realtime.socket.js"></script>
   <script src="/js/core/identity/IdentityProfileStore.js"></script>
@@ -863,14 +865,25 @@
       // `await` on a live fetch with nothing to show in the meantime, so any
       // slow network or still-initializing session showed "No people found"
       // even when real friends existed. window._allUsersCache itself lives
-      // in a sibling iframe (friend.html) we can't reach directly, but the
-      // localStorage snapshot that same code writes ('discover_users') is
-      // same-origin and readable here — use it as an instant first paint.
+      // in a sibling iframe (friend.html) we can't reach directly, but
+      // localStore.friends.js's IndexedDB store and the localStorage
+      // snapshot it also writes ('discover_users') are same-origin and
+      // readable here — check IndexedDB first (the deeper, larger tier),
+      // then the localStorage snapshot as a fallback, same priority order
+      // friend-core.ui-bridge.js itself uses.
       let cachedUsers = [];
       try {
-        const raw = JSON.parse(localStorage.getItem('discover_users') || '[]');
-        if (Array.isArray(raw)) cachedUsers = raw;
+        if (window.KynectaFriendsLocalStore && typeof window.KynectaFriendsLocalStore.getAllUsers === 'function') {
+          const idbUsers = await window.KynectaFriendsLocalStore.getAllUsers();
+          if (Array.isArray(idbUsers) && idbUsers.length > 0) cachedUsers = idbUsers;
+        }
       } catch (_) {}
+      if (cachedUsers.length === 0) {
+        try {
+          const raw = JSON.parse(localStorage.getItem('discover_users') || '[]');
+          if (Array.isArray(raw)) cachedUsers = raw;
+        } catch (_) {}
+      }
 
       const q = (query || '').trim().toLowerCase();
       const filteredCache = cachedUsers.filter(u => matchesSearch(u, q));
@@ -896,11 +909,17 @@
         }
         const users = (res.data && Array.isArray(res.data.users)) ? res.data.users : [];
 
-        // Refresh the shared cache (same key friend-core.ui-bridge.js writes)
-        // so other modules, and the next time this modal opens, benefit too —
-        // only for the unfiltered "browse all" load, not a narrowed search.
+        // Refresh the shared cache (same key + store friend-core.ui-bridge.js
+        // writes) so other modules, and the next time this modal opens,
+        // benefit too — only for the unfiltered "browse all" load, not a
+        // narrowed search.
         if (!query) {
           try { localStorage.setItem('discover_users', JSON.stringify(users)); } catch (_) {}
+          try {
+            if (window.KynectaFriendsLocalStore && typeof window.KynectaFriendsLocalStore.saveUsers === 'function') {
+              window.KynectaFriendsLocalStore.saveUsers(users);
+            }
+          } catch (_) {}
         }
 
         if (users.length === 0) {
