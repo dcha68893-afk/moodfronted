@@ -965,25 +965,36 @@
     }
 
     async function runNewChatSearch(query) {
-      // FIX (no-cache-so-always-a-cold-blocking-fetch): every other module's
-      // people list (friend.html's Browse All, etc.) paints instantly from
-      // window._allUsersCache / FriendCacheManager / IndexedDB before ever
-      // touching the network — see friend-core.ui-bridge.js's
-      // getDiscoverableUsers(). message.html had none of that: a bare
-      // `await` on a live fetch with nothing to show in the meantime, so any
-      // slow network or still-initializing session showed "No people found"
-      // even when real friends existed. window._allUsersCache itself lives
-      // in a sibling iframe (friend.html) we can't reach directly, but
-      // localStore.friends.js's IndexedDB store and the localStorage
-      // snapshot it also writes ('discover_users') are same-origin and
-      // readable here — check IndexedDB first (the deeper, larger tier),
-      // then the localStorage snapshot as a fallback, same priority order
-      // friend-core.ui-bridge.js itself uses.
-      // Priority 1: friends pushed straight from the shell (in-memory,
-      // already parsed — see the FRIENDS_LIST_UPDATE listener above). This is
-      // the exact same data Calls/Groups/Status paint instantly from, so
-      // check it first rather than waiting on an IndexedDB round trip.
-      let cachedUsers = pushedFriendsCache.length > 0 ? pushedFriendsCache.slice() : [];
+      // ROOT-CAUSE FIX (this is the real reason Calls/Status/Group show
+      // friends instantly and Messages doesn't): the comment this replaced
+      // claimed those modules paint instantly from the in-memory
+      // pushedFriendsCache below — that was never actually verified and is
+      // wrong. Checked calls-ui.js/status-ui.js/friend-ui.js directly: they
+      // all synchronously read `localStorage.getItem('friends')` — a plain
+      // key friend-core.ui-bridge.js's saveFriendsToLocalStorage() keeps
+      // fresh every time the real friends list changes, with zero async
+      // wait. This file never read that key at all — it only had
+      // pushedFriendsCache (postMessage, races with chat.html's own
+      // cachedFriendsList being populated first) and 'discover_users' (a
+      // different, broader "all discoverable users" cache this file writes
+      // itself after a live fetch — not the authoritative friends list).
+      // Reading the same 'friends' key first, synchronously, closes that
+      // gap and matches every other module's actual behavior.
+      let cachedUsers = [];
+      try {
+        const localFriends = JSON.parse(localStorage.getItem('friends') || '[]');
+        if (Array.isArray(localFriends) && localFriends.length > 0) {
+          cachedUsers = localFriends.map(normalizePushedFriend).filter(Boolean);
+        }
+      } catch (_) {}
+      // Priority 2: friends pushed straight from the shell (in-memory,
+      // already parsed — see the FRIENDS_LIST_UPDATE listener above).
+      // Merged in (not overwritten) since it can be more current than the
+      // last localStorage write in a live session.
+      if (pushedFriendsCache.length > 0) {
+        const seenIds = new Set(cachedUsers.map(u => String(u.id)));
+        pushedFriendsCache.forEach(u => { if (!seenIds.has(String(u.id))) cachedUsers.push(u); });
+      }
       try {
         if (window.KynectaFriendsLocalStore && typeof window.KynectaFriendsLocalStore.getAllUsers === 'function') {
           const idbUsers = await window.KynectaFriendsLocalStore.getAllUsers();
