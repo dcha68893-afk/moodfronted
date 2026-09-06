@@ -165,8 +165,22 @@
     let _validateAuth;
     
     // Safety tracking
+    // FIX (permanent per-endpoint lockout): errorCounts had no time
+    // dimension at all — once any endpoint hit maxErrorsPerEndpoint,
+    // shouldAllowRequest() blocked it forever for the rest of the page
+    // load (only a full reload cleared it). A transient burst (backend
+    // cold-start, a slow resolve/friends-sync round trip timing out a
+    // couple of times while Render/DB wakes up) permanently disabled
+    // that exact endpoint — this is the root cause behind both "Start
+    // Chat doesn't show friends" and "Couldn't open this conversation"
+    // once a few early requests fail. errorTimestamps + errorCooldownMs
+    // turn this into a half-open circuit breaker: still blocks during
+    // the cooldown window, but forgives the streak once it elapses and
+    // lets a real request through again.
     const _safetyState = {
         errorCounts: new Map(),
+        errorTimestamps: new Map(),
+        errorCooldownMs: 20000,
         maxErrorsPerEndpoint: 3,
         retryAttempts: new Map(),
         maxRetriesPerRequest: 3,
@@ -2203,10 +2217,18 @@
         
         const errorCount = _safetyState.errorCounts.get(endpointKey) || 0;
         if (errorCount >= _safetyState.maxErrorsPerEndpoint) {
-            if (shouldLogError(endpointKey, 'error_limit')) {
-                console.warn(`[API] ⏳ Error limit reached for ${endpointKey}, blocking further requests`);
+            const firstErrorAt = _safetyState.errorTimestamps.get(endpointKey) || 0;
+            const elapsed = Date.now() - firstErrorAt;
+            if (elapsed < _safetyState.errorCooldownMs) {
+                if (shouldLogError(endpointKey, 'error_limit')) {
+                    console.warn(`[API] ⏳ Error limit reached for ${endpointKey}, blocking further requests for ${Math.ceil((_safetyState.errorCooldownMs - elapsed) / 1000)}s`);
+                }
+                return false;
             }
-            return false;
+            // Cooldown elapsed — forgive the streak and let one real
+            // request through (half-open) instead of blocking forever.
+            _safetyState.errorCounts.delete(endpointKey);
+            _safetyState.errorTimestamps.delete(endpointKey);
         }
         
         return true;
@@ -2228,6 +2250,7 @@
         
         if (success) {
             _safetyState.errorCounts.delete(endpointKey);
+            _safetyState.errorTimestamps.delete(endpointKey);
             _safetyState.retryAttempts.delete(endpointKey);
         }
     }
@@ -2236,6 +2259,9 @@
         const endpointKey = `${functionName}:${endpoint}`;
         const errorCount = (_safetyState.errorCounts.get(endpointKey) || 0) + 1;
         _safetyState.errorCounts.set(endpointKey, errorCount);
+        if (errorCount === 1) {
+            _safetyState.errorTimestamps.set(endpointKey, Date.now());
+        }
         
         return errorCount;
     }

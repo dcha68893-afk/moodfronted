@@ -426,10 +426,10 @@
           <button id="backBtn"${hasChat ? '' : ' disabled style="visibility:hidden;"'}>&larr;</button>
           <strong id="chatHeaderName" style="cursor:${hasChat ? 'pointer' : 'default'};">${hasChat ? escapeHtml(conv?.otherUser?.username || 'Conversation') : 'No conversation selected'}</strong>
           <div id="chatHeaderActions">
-            <button class="header-icon-btn" id="searchInChatBtn" title="Search"${hasChat ? '' : ' disabled'}>🔍</button>
+            <button class="header-icon-btn" id="searchInChatBtn" title="Search">🔍</button>
             <button class="header-icon-btn" id="voiceCallBtn" title="Voice call"${hasChat ? '' : ' disabled'}>📞</button>
             <button class="header-icon-btn" id="videoCallBtn" title="Video call"${hasChat ? '' : ' disabled'}>🎥</button>
-            <button class="header-icon-btn" id="chatMoreBtn" title="More"${hasChat ? '' : ' disabled'}>⋮</button>
+            <button class="header-icon-btn" id="chatMoreBtn" title="More">⋮</button>
           </div>
         </div>
         <div id="chatSearchBar" class="hidden">
@@ -445,10 +445,10 @@
         <div id="loadOlderBtn"${hasChat ? '' : ' style="display:none;"'}>Load earlier messages</div>
         <div id="messageLog"></div>
         <div id="composeBar">
-          <button id="attachBtn" title="Attach file"${hasChat ? '' : ' disabled'}>📎</button>
+          <button id="attachBtn" title="Attach file">📎</button>
           <input type="file" id="attachInput" style="display:none" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt">
-          <button id="emojiBtn" title="Emoji"${hasChat ? '' : ' disabled'}>🙂</button>
-          <textarea id="composeInput" rows="1" placeholder="${hasChat ? 'Message...' : 'Pick a conversation to start typing…'}"${hasChat ? '' : ' disabled'}></textarea>
+          <button id="emojiBtn" title="Emoji">🙂</button>
+          <textarea id="composeInput" rows="1" placeholder="${hasChat ? 'Message...' : 'Pick a conversation to start typing…'}"></textarea>
           <button id="sendBtn"${hasChat ? '' : ' disabled'}>&#9658;</button>
         </div>
         <div id="emojiPicker" class="hidden"></div>
@@ -485,7 +485,10 @@
       const chatSearchInput = document.getElementById('chatSearchInput');
       const chatSearchCount = document.getElementById('chatSearchCount');
       document.getElementById('searchInChatBtn').addEventListener('click', () => {
-        if (!hasChat) return;
+        // Search-in-chat and the other non-call, non-send controls stay
+        // usable even with no conversation open (per product decision) —
+        // only actually searching needs a chatId, which chatSearchInput's
+        // own input handler below still guards.
         searchBar.classList.toggle('hidden');
         if (!searchBar.classList.contains('hidden')) chatSearchInput.focus();
       });
@@ -496,7 +499,7 @@
         document.getElementById('messageLog').querySelectorAll('.search-hit').forEach(el => el.classList.remove('search-hit'));
       });
       chatSearchInput.addEventListener('input', () => {
-        if (!hasChat) return;
+        if (!hasChat) { chatSearchCount.textContent = ''; return; } // nothing to search without an open chat
         const msgLog = document.getElementById('messageLog');
         const results = window.MessageModule.searchMessages(chatId, chatSearchInput.value);
         msgLog.querySelectorAll('.search-hit').forEach(el => el.classList.remove('search-hit'));
@@ -512,7 +515,7 @@
       });
 
       document.getElementById('chatMoreBtn').addEventListener('click', async () => {
-        if (!hasChat) return;
+        if (!hasChat) { alert('Select a conversation first.'); return; }
         const action = prompt('Type "clear" to clear this chat, "archive" to archive it, or "block" to block this user');
         if (action === 'clear') {
           if (confirm('Clear this conversation for you? This cannot be undone.')) {
@@ -558,12 +561,10 @@
       const EMOJI_SET = ['😀','😂','😍','😊','😉','😢','😮','😡','👍','👎','❤️','🔥','🎉','🙏','👏','😴','🤔','😎','😭','💯'];
       emojiPicker.innerHTML = EMOJI_SET.map(e => `<button class="emoji-option">${e}</button>`).join('');
       emojiBtn.addEventListener('click', () => {
-        if (!hasChat) return;
         emojiPicker.classList.toggle('hidden');
       });
       emojiPicker.querySelectorAll('.emoji-option').forEach(btn => {
         btn.addEventListener('click', () => {
-          if (!hasChat) return;
           document.getElementById('composeInput').value += btn.textContent;
           emojiPicker.classList.add('hidden');
           document.getElementById('composeInput').focus();
@@ -626,11 +627,10 @@
       });
 
       attachBtn.addEventListener('click', () => {
-        if (!hasChat) return;
         attachInput.click();
       });
       attachInput.addEventListener('change', async () => {
-        if (!hasChat) return;
+        if (!hasChat) { alert('Select a conversation first.'); attachInput.value = ''; return; }
         const file = attachInput.files[0];
         if (!file) return;
         attachBtn.disabled = true;
