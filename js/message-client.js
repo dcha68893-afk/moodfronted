@@ -643,8 +643,14 @@
     //    lets the first sendMessage() call resolve it server-side.
     // ═══════════════════════════════════════════════════════════════════════
 
+    function normalizeChatId(value) {
+        const id = Number(value);
+        return Number.isFinite(id) && id > 0 ? id : null;
+    }
+
     async function openChat({ conversationId = null, userId = null, messageId = null, userName = null, avatar = null } = {}) {
-        let resolvedChatId = conversationId;
+        let resolvedChatId = normalizeChatId(conversationId);
+        const normalizedUserId = normalizeChatId(userId);
 
         // Opened from another module with only a userId (Friends, Status,
         // Calls, a notification) — check if we already know this
@@ -654,15 +660,17 @@
         // one-time server round-trip.
         if (!resolvedChatId && userId) {
             for (const [cid, meta] of state.conversations) {
-                if (meta.otherUser && meta.otherUser.id === userId) { resolvedChatId = cid; break; }
+                if (meta.otherUser && normalizeChatId(meta.otherUser.id) === normalizedUserId) { resolvedChatId = normalizeChatId(cid); break; }
             }
         }
         if (!resolvedChatId && userId) {
             try {
-                const res = await api().get(`/messages/resolve/${userId}`);
-                if (res && res.success && res.data) resolvedChatId = res.data.chatId;
+                const res = await api().get(`/messages/resolve/${normalizedUserId}`);
+                if (res && res.success && res.data) resolvedChatId = normalizeChatId(res.data.chatId);
+                if (!resolvedChatId) throw new Error((res && res.message) || 'Could not resolve conversation');
             } catch (err) {
-                notify('chat:open-failed', { userId, error: err.message });
+                state.activeChatId = null;
+            notify('chat:open-failed', { userId: normalizedUserId || userId, error: err.message || 'Could not open conversation' });
                 return;
             }
         }
@@ -680,8 +688,9 @@
             });
         }
 
-        state.activeChatId = resolvedChatId || null;
-        notify('chat:open-requested', { conversationId: resolvedChatId, userId, messageId });
+        state.activeChatId = normalizeChatId(resolvedChatId);
+        resolvedChatId = state.activeChatId;
+        notify('chat:open-requested', { conversationId: normalizeChatId(resolvedChatId), userId: normalizedUserId || userId, messageId });
 
         // Pre-warm the encryption session now, not on first keystroke/send —
         // this is exactly what real E2E messengers do: the network round-trip

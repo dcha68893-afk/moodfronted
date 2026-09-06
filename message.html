@@ -402,7 +402,13 @@
         </div>`;
     }
 
+    function normalizeChatPanelId(value) {
+      const id = Number(value);
+      return Number.isFinite(id) && id > 0 ? id : null;
+    }
+
     function renderChatPanel(chatId) {
+      chatId = normalizeChatPanelId(chatId) || normalizeChatPanelId(window.MessageModule.getActiveChatId());
       if (!chatId) {
         chatPanelEl.innerHTML = '<div id="emptyState"><div><div style="font-size:48px;margin-bottom:10px;">💬</div>Select a conversation to start messaging</div></div>';
         return;
@@ -1004,7 +1010,8 @@
           break;
         }
         case 'chat:open-requested': {
-          const { conversationId, userId } = data;
+          const conversationId = normalizeChatPanelId(data && data.conversationId);
+          const { userId } = data || {};
           document.getElementById('convListPanel').classList.add('hide-on-mobile');
           document.getElementById('chatPanel').classList.remove('hide-on-mobile');
           renderChatPanel(conversationId);
