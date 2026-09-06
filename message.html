@@ -808,52 +808,112 @@
     const newChatResults = document.getElementById('newChatResults');
     let newChatSearchTimer = null;
 
+    // Renders a user list into the "Start chat" results panel and wires up
+    // click-to-open. Factored out so both the instant cache-painted list and
+    // the later live-refreshed list can share the exact same rendering path.
+    function renderNewChatResults(users) {
+      newChatResults.innerHTML = users.map(u => `
+        <div class="new-chat-result-item" data-user-id="${u.id}" data-user-name="${escapeHtml(u.username || '')}" data-user-avatar="${escapeHtml(u.avatar || u.photoURL || '')}">
+          <img src="${escapeHtml(u.avatar || u.photoURL || '/img/default-avatar.png')}" alt="">
+          <span>${escapeHtml(u.username || u.firstName || u.displayName || 'User')}</span>
+        </div>
+      `).join('');
+      newChatResults.querySelectorAll('.new-chat-result-item').forEach(el => {
+        el.addEventListener('click', async () => {
+          newChatModal.classList.add('hidden');
+          const targetUserId = Number(el.dataset.userId);
+          if (forwardingMessage) {
+            const msg = forwardingMessage;
+            forwardingMessage = null;
+            document.querySelector('.modal-header span').textContent = 'New chat';
+            const content = msg.displayContent || '';
+            await window.MessageModule.sendMessage({
+              receiverId: targetUserId, content,
+              attachment: (msg.metadata && msg.metadata.attachment) || null,
+            });
+            window.MessageModule.openChat({ userId: targetUserId, userName: el.dataset.userName, avatar: el.dataset.userAvatar });
+            return;
+          }
+          window.MessageModule.openChat({
+            userId: targetUserId,
+            userName: el.dataset.userName,
+            avatar: el.dataset.userAvatar,
+          });
+        });
+      });
+    }
+
+    // Matches a cached user against the current search text the same way
+    // the backend's own search does (username/firstName/lastName, substring,
+    // case-insensitive) so the instant cache preview and the live results
+    // filter consistently.
+    function matchesSearch(u, q) {
+      if (!q) return true;
+      return (u.username || '').toLowerCase().includes(q) ||
+             (u.firstName || '').toLowerCase().includes(q) ||
+             (u.lastName || '').toLowerCase().includes(q);
+    }
+
     async function runNewChatSearch(query) {
-      newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary,#999);font-size:13px;">Searching...</div>';
+      // FIX (no-cache-so-always-a-cold-blocking-fetch): every other module's
+      // people list (friend.html's Browse All, etc.) paints instantly from
+      // window._allUsersCache / FriendCacheManager / IndexedDB before ever
+      // touching the network — see friend-core.ui-bridge.js's
+      // getDiscoverableUsers(). message.html had none of that: a bare
+      // `await` on a live fetch with nothing to show in the meantime, so any
+      // slow network or still-initializing session showed "No people found"
+      // even when real friends existed. window._allUsersCache itself lives
+      // in a sibling iframe (friend.html) we can't reach directly, but the
+      // localStorage snapshot that same code writes ('discover_users') is
+      // same-origin and readable here — use it as an instant first paint.
+      let cachedUsers = [];
+      try {
+        const raw = JSON.parse(localStorage.getItem('discover_users') || '[]');
+        if (Array.isArray(raw)) cachedUsers = raw;
+      } catch (_) {}
+
+      const q = (query || '').trim().toLowerCase();
+      const filteredCache = cachedUsers.filter(u => matchesSearch(u, q));
+
+      if (filteredCache.length > 0) {
+        renderNewChatResults(filteredCache);
+      } else {
+        newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary,#999);font-size:13px;">Searching...</div>';
+      }
+
       try {
         const res = await window.api.request.get(`/friends/users/all?limit=20${query ? '&search=' + encodeURIComponent(query) : ''}`);
         if (!res || res.success === false || res.ok === false) {
-          const reason = (res && (res.message || (res.data && res.data.message))) || 'Unknown error';
-          newChatResults.innerHTML = `<div style="padding:14px;color:#e04b4b;font-size:13px;">Could not load people: ${escapeHtml(reason)}</div>`;
+          // Only replace the screen with an error if we had nothing cached
+          // to fall back on — don't blow away a working cached list because
+          // the background refresh happened to fail.
+          if (filteredCache.length === 0) {
+            const reason = (res && (res.message || (res.data && res.data.message))) || 'Unknown error';
+            newChatResults.innerHTML = `<div style="padding:14px;color:#e04b4b;font-size:13px;">Could not load people: ${escapeHtml(reason)}</div>`;
+          }
           console.error('[Messages] /friends/users/all failed:', res);
           return;
         }
         const users = (res.data && Array.isArray(res.data.users)) ? res.data.users : [];
+
+        // Refresh the shared cache (same key friend-core.ui-bridge.js writes)
+        // so other modules, and the next time this modal opens, benefit too —
+        // only for the unfiltered "browse all" load, not a narrowed search.
+        if (!query) {
+          try { localStorage.setItem('discover_users', JSON.stringify(users)); } catch (_) {}
+        }
+
         if (users.length === 0) {
-          newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary,#999);font-size:13px;">No people found</div>';
+          if (filteredCache.length === 0) {
+            newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary,#999);font-size:13px;">No people found</div>';
+          }
           return;
         }
-        newChatResults.innerHTML = users.map(u => `
-          <div class="new-chat-result-item" data-user-id="${u.id}" data-user-name="${escapeHtml(u.username || '')}" data-user-avatar="${escapeHtml(u.avatar || '')}">
-            <img src="${escapeHtml(u.avatar || '/img/default-avatar.png')}" alt="">
-            <span>${escapeHtml(u.username || u.firstName || 'User')}</span>
-          </div>
-        `).join('');
-        newChatResults.querySelectorAll('.new-chat-result-item').forEach(el => {
-          el.addEventListener('click', async () => {
-            newChatModal.classList.add('hidden');
-            const targetUserId = Number(el.dataset.userId);
-            if (forwardingMessage) {
-              const msg = forwardingMessage;
-              forwardingMessage = null;
-              document.querySelector('.modal-header span').textContent = 'New chat';
-              const content = msg.displayContent || '';
-              await window.MessageModule.sendMessage({
-                receiverId: targetUserId, content,
-                attachment: (msg.metadata && msg.metadata.attachment) || null,
-              });
-              window.MessageModule.openChat({ userId: targetUserId, userName: el.dataset.userName, avatar: el.dataset.userAvatar });
-              return;
-            }
-            window.MessageModule.openChat({
-              userId: targetUserId,
-              userName: el.dataset.userName,
-              avatar: el.dataset.userAvatar,
-            });
-          });
-        });
+        renderNewChatResults(users);
       } catch (err) {
-        newChatResults.innerHTML = '<div style="padding:14px;color:#e04b4b;font-size:13px;">Search failed</div>';
+        if (filteredCache.length === 0) {
+          newChatResults.innerHTML = '<div style="padding:14px;color:#e04b4b;font-size:13px;">Search failed</div>';
+        }
       }
     }
 
