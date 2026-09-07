@@ -2432,6 +2432,26 @@
                     method: options.method || 'GET',
                     headers: headers,
                     credentials: 'include',
+                    // ROOT-CAUSE FIX (the real one — see the long comment
+                    // above createFallbackSecureFetch's call site): this is
+                    // the actual function message.html runs for every API
+                    // call, since message.html only loads api.request.js and
+                    // never api.core.js (that one's loaded solely inside
+                    // chat.html's own frame — a separate iframe, a separate
+                    // window, window.__API_CORE from it is never visible
+                    // here), so it always takes this fallback path, not the
+                    // one in api.core.js I patched earlier for the same
+                    // reason. Same fix, same reason: no cache option here
+                    // meant the browser's default HTTP cache could answer a
+                    // repeat GET (exactly chat.html's retry loop re-hitting
+                    // /messages/resolve/:userId, or the New Chat picker's
+                    // /friends/users/all) with a conditional 304 — valid
+                    // cached body, but response.ok is false for a 304
+                    // regardless of what's in that body, so every caller
+                    // here that reads response.ok reported it as a failure.
+                    // 'no-store' forces a full fresh request+response every
+                    // time so there's nothing to conditionally revalidate.
+                    cache: options.cache || 'no-store',
                     ...trustedOptions
                 };
                 
