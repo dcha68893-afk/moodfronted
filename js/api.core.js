@@ -1146,7 +1146,26 @@ if (url.startsWith('http://') || url.startsWith('https://')) {
                 },
                 credentials: isProduction() ? 'include' : (options.credentials || 'same-origin'),
                 mode: options.mode || 'cors',
-                cache: options.cache || 'default',
+                // ROOT-CAUSE FIX (opening a chat from another module returns
+                // HTTP 304 with a perfectly valid cached body — e.g.
+                // {success:true,data:{chatId:1}} — but gets treated as a
+                // failure anyway): 'default' cache mode lets the browser
+                // answer a repeat GET to the same URL (exactly what
+                // /messages/resolve/:userId is under chat.html's retry loop)
+                // with a conditional request. When the server confirms
+                // nothing changed, the browser can hand back a bare 304.
+                // response.ok is computed from the HTTP status, not the JSON
+                // body, so it's false for a 304 even though the cached body
+                // it's carrying says success:true — every caller here reads
+                // response.ok, so a fully valid, already-resolved answer
+                // gets reported as a failure. This is a live API for
+                // dynamic, per-request data (auth'd resolves, message
+                // fetches, etc.) — none of it should ever be served from the
+                // HTTP cache in the first place. 'no-store' forces a full,
+                // fresh request+response every time, so there's no
+                // conditional revalidation and therefore no 304 to
+                // mishandle.
+                cache: options.cache || 'no-store',
                 redirect: options.redirect || 'follow',
                 referrerPolicy: options.referrerPolicy || 'strict-origin-when-cross-origin'
             };

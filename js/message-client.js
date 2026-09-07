@@ -703,6 +703,13 @@
     // generation and let whichever attempt finishes first win, while a
     // genuine switch to a different chat still correctly supersedes it.
     let _openChatTargetKey = null;
+    // Companion to _openChatTargetKey: which target the 'chat:opening'
+    // instant-render signal was last sent for, so retries of that same
+    // target (chat.html's retry loop) don't re-fire it — see the comment at
+    // its one call site in openChat() below. Reset once that attempt
+    // concludes (success or failure) so a later, genuinely new open of the
+    // same person fires it again.
+    let _lastOpeningNotifiedKey = null;
 
     // ROOT-CAUSE FIX (opening chat from another module still fails even
     // with api.request.js's cooldown breaker in place): chat.html's
@@ -779,7 +786,19 @@
         // does. Only fires when there isn't already a resolved chat to show
         // immediately (the conversationId fast path / local-cache hit
         // render straight away and don't need it).
-        if (!resolvedChatId && normalizedUserId && (userName || avatar)) {
+        // FIX (spinner never settles): chat.html's retry loop calls openChat()
+        // again every ~600ms for the same target while it waits for an ack.
+        // This notify used to fire on every one of those retries — each
+        // re-entering renderChatPanel() and stomping over whatever was
+        // already showing, including an error banner from a failure a
+        // moment earlier. That produced exactly the reported symptom: the
+        // loading spinner appears to "never finish" because it keeps getting
+        // redrawn on top of the outcome. Only fire it the first time for a
+        // given target (tracked by the same targetKey the generation counter
+        // above uses) — retries of the same target reuse the state that's
+        // already on screen.
+        if (!resolvedChatId && normalizedUserId && (userName || avatar) && _lastOpeningNotifiedKey !== targetKey) {
+            _lastOpeningNotifiedKey = targetKey;
             notify('chat:opening', { userId: normalizedUserId, userName, avatar });
         }
 
@@ -894,11 +913,13 @@
                 if (Date.now() - lastNotified < 3000) return;
                 _recentFailureNotified.set(resolveKey, Date.now());
                 state.activeChatId = null;
+                if (_lastOpeningNotifiedKey === targetKey) _lastOpeningNotifiedKey = null;
                 notify('chat:open-failed', { userId: normalizedUserId || userId, error: (err && err.transient) ? 'Still connecting — please try again' : (err.message || 'Could not open conversation') });
                 return;
             }
         }
         if (isStale()) return; // covers the synchronous/local-lookup path too
+        if (_lastOpeningNotifiedKey === targetKey) _lastOpeningNotifiedKey = null;
 
 
         // A brand-new chat has no messages yet to derive a display name
