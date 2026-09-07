@@ -156,46 +156,19 @@
     // ═══════════════════════════════════════════════════════════════════════
 
     function api() {
-        if (!window.api || !window.api.request) throw new Error('window.api.request not ready');
+        if (!window.api || !window.api.request) {
+            // Tagged so callers (openChat's resolve path) can tell "the
+            // shared API client hasn't finished booting yet" apart from a
+            // genuine server-side failure — see the retry-storm fix in
+            // openChat() below. This is a real, observed condition: e.g.
+            // "[API] ✅ Bootstrap ready (timeout)" in js/api.request.js
+            // means bootstrap fell back after stalling, and window.api can
+            // still be unset for a moment after that.
+            const err = new Error('window.api.request not ready');
+            err.transient = true;
+            throw err;
+        }
         return window.api.request;
-    }
-
-    // ROOT-CAUSE FIX (opening chat from Friends/Calls/Status fails every time
-    // with a "postMessage storm" of CHAT_LIST_SHOWN, then gives up after
-    // ~7s): when message.html's iframe is freshly created by that navigation
-    // (rather than already sitting loaded in the background), api.request.js
-    // is still running its own async bootstrap (backend-origin detection,
-    // auth wiring, etc — see waitForBootstrap()'s own up-to-30s gate) at the
-    // exact moment chat.html's OPEN_CHAT_WITH_USER retry loop starts firing
-    // every 600ms. Until that bootstrap finishes, window.api.request does
-    // not exist yet, so api() above throws synchronously — not a network
-    // failure, not something worth ever retrying via the resolve() call
-    // below. openChat()'s catch block treated that throw exactly like a
-    // real "conversation not found" failure and immediately notified
-    // 'chat:open-failed', which message.html turns into a CHAT_LIST_SHOWN
-    // postMessage back to chat.html. Every one of the 12 retries (they all
-    // land before a slow bootstrap finishes) re-fires openChat() and
-    // re-throws the same synchronous error, so CHAT_LIST_SHOWN fires 5+
-    // times inside 2 seconds (tripping RealtimeStabilizationLayer's storm
-    // detector) and the chat never opens — pending_chat is only ever
-    // cleared by a real CHAT_OPENED ack, which this path can never send.
-    // Fix: instead of failing instantly, wait (briefly, shared across
-    // concurrent callers so repeated retries don't each start their own
-    // poll loop) for window.api.request to actually exist before treating
-    // its absence as a real failure.
-    let _apiReadyPromise = null;
-    function waitForApiReady(maxMs = 10000) {
-        if (window.api && window.api.request) return Promise.resolve(true);
-        if (_apiReadyPromise) return _apiReadyPromise;
-        _apiReadyPromise = new Promise((resolve) => {
-            const startedAt = Date.now();
-            (function poll() {
-                if (window.api && window.api.request) { _apiReadyPromise = null; resolve(true); return; }
-                if (Date.now() - startedAt >= maxMs) { _apiReadyPromise = null; resolve(false); return; }
-                setTimeout(poll, 150);
-            })();
-        });
-        return _apiReadyPromise;
     }
 
     async function loadHistory(chatId, { before = null, limit = 50 } = {}) {
@@ -753,7 +726,20 @@
     // long it takes, that every retry within that window awaits together.
     const _pendingResolves = new Map();
 
-    async function openChat({ conversationId = null, userId = null, messageId = null, userName = null, avatar = null } = {}) {
+    // Companion to _pendingResolves: debounces the *notification to the
+    // parent frame* (chat:open-failed → CHAT_LIST_SHOWN) once resolution has
+    // genuinely, definitively failed — separate from the network-call
+    // dedup above, so retries don't each independently tell chat.html to
+    // show/re-show the "Couldn't open this conversation" banner within the
+    // same few seconds. See the retry-storm comment in openChat() below.
+    const _recentFailureNotified = new Map();
+
+    // Companion to both maps above: counts consecutive transient ("api not
+    // ready yet") failures per target, so the silent-retry in openChat()'s
+    // catch block below has a bound instead of being able to spin forever.
+    const _transientFailCounts = new Map();
+
+    async function openChat({ conversationId = null, userId = null, messageId = null, userName = null, avatar = null, force = false } = {}) {
         let resolvedChatId = normalizeChatId(conversationId);
         const normalizedUserId = normalizeChatId(userId);
 
@@ -809,29 +795,106 @@
             }
         }
         if (!resolvedChatId && userId) {
+            const resolveKey = String(normalizedUserId);
+            // A deliberate manual "Try again" click (force: true, see
+            // message.html's retryOpenChatBtn handler) should always make a
+            // real attempt — never replay the automatic retry loop's cached
+            // failure/notify-debounce from a few seconds ago.
+            if (force) {
+                _pendingResolves.delete(resolveKey);
+                _recentFailureNotified.delete(resolveKey);
+            }
             try {
-                // See waitForApiReady() above: don't let a not-yet-finished
-                // api.request.js bootstrap masquerade as a resolve failure.
-                if (!(window.api && window.api.request)) {
-                    const ready = await waitForApiReady();
-                    if (isStale()) return; // a newer openChat() call has since taken over
-                    if (!ready) throw new Error('window.api.request not ready');
-                }
-                const resolveKey = String(normalizedUserId);
                 let resolvePromise = _pendingResolves.get(resolveKey);
                 if (!resolvePromise) {
                     resolvePromise = api().get(`/messages/resolve/${normalizedUserId}`)
-                        .finally(() => _pendingResolves.delete(resolveKey));
+                        .then((res) => { _pendingResolves.delete(resolveKey); return res; })
+                        .catch((err) => {
+                            // FIX (breaker-trip via retry storm): a settled
+                            // promise used to be deleted from
+                            // _pendingResolves immediately, success or
+                            // failure. That's fine for success, but for a
+                            // FAST failure (not a slow timeout — an
+                            // immediate error response, or api() throwing
+                            // because window.api isn't ready yet), the very
+                            // next 600ms retry saw no in-flight promise and
+                            // fired a brand-new /messages/resolve request —
+                            // and did that again every retry. Each one
+                            // counts against api.request.js's per-endpoint
+                            // error counter (_safetyState.maxErrorsPerEndpoint
+                            // = 3, see api.request.js), so 3 fast failures
+                            // within a couple hundred ms of each other — one
+                            // single click's worth of retries — was enough
+                            // to trip its 20s cooldown breaker mid-retry,
+                            // which then blocked every remaining attempt for
+                            // this open AND any other resolve for 20s
+                            // afterward. Keeping the rejected promise cached
+                            // for a few seconds means repeated retries for
+                            // the same target share the one real failed
+                            // attempt instead of each spawning a fresh
+                            // network call.
+                            setTimeout(() => _pendingResolves.delete(resolveKey), 4000);
+                            throw err;
+                        });
                     _pendingResolves.set(resolveKey, resolvePromise);
                 }
                 const res = await resolvePromise;
                 if (isStale()) return; // a newer openChat() call has since taken over
+                _transientFailCounts.delete(resolveKey);
                 if (res && res.success && res.data) resolvedChatId = normalizeChatId(res.data.chatId);
                 if (!resolvedChatId) throw new Error((res && res.message) || 'Could not resolve conversation');
             } catch (err) {
                 if (isStale()) return;
+                // FIX (retry-storm): chat.html's caller retries the SAME
+                // open request every ~600ms for up to 12 attempts while it
+                // waits for an ack. Each retry re-enters openChat(), and
+                // since a settled (resolved or rejected) promise is removed
+                // from _pendingResolves the moment it settles, a fast
+                // failure here used to mean a brand-new /messages/resolve
+                // call AND a brand-new 'chat:open-failed' notify on every
+                // single one of those retries — up to 12 in ~7s for one
+                // click. Each notify became a CHAT_LIST_SHOWN postMessage to
+                // chat.html (message.html's chat:open-failed handler,
+                // below), which is exactly the
+                // "[RealtimeStab] postMessage storm detected: CHAT_LIST_SHOWN"
+                // flood this was producing.
+                //
+                // Two distinct fixes, not one broad one:
+                // 1. A transient failure (api() throwing because
+                //    window.api.request hasn't finished booting yet — see
+                //    api() above) isn't a real "can't open this
+                //    conversation" failure, it's "not ready yet, the retry
+                //    loop will try again in 600ms" — so don't tell the
+                //    parent to show the error banner for it immediately;
+                //    let the existing retry keep going silently. But this
+                //    can't be unconditional forever — if window.api never
+                //    actually becomes ready, silently swallowing every
+                //    attempt just leaves the "Opening chat with X…" loading
+                //    state spinning forever with no way out. Bound it: after
+                //    a handful of consecutive transient failures for the
+                //    same target (roughly chat.html's whole 12-retry/~7s
+                //    window), stop treating it as "just not ready yet" and
+                //    surface it as a real failure so the retry banner
+                //    appears instead of an infinite spinner.
+                // 2. For a genuine failure (the resolve endpoint itself
+                //    errored), only notify the parent once per resolveKey
+                //    within a short window — repeated retries for the same
+                //    still-failing target reuse that one notification
+                //    instead of each firing their own.
+                if (err && err.transient) {
+                    const transientCount = (_transientFailCounts.get(resolveKey) || 0) + 1;
+                    _transientFailCounts.set(resolveKey, transientCount);
+                    if (transientCount < 8) return;
+                    // Given up waiting for window.api — fall through and
+                    // report it like any other failure below.
+                } else {
+                    _transientFailCounts.delete(resolveKey);
+                }
+                const lastNotified = _recentFailureNotified.get(resolveKey) || 0;
+                if (Date.now() - lastNotified < 3000) return;
+                _recentFailureNotified.set(resolveKey, Date.now());
                 state.activeChatId = null;
-            notify('chat:open-failed', { userId: normalizedUserId || userId, error: err.message || 'Could not open conversation' });
+                notify('chat:open-failed', { userId: normalizedUserId || userId, error: (err && err.transient) ? 'Still connecting — please try again' : (err.message || 'Could not open conversation') });
                 return;
             }
         }

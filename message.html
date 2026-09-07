@@ -32,6 +32,18 @@
     width: 32px; height: 32px; border-radius: 50%;
   }
   #newChatBtn:hover { background: var(--kyn-bg-hover, #f0f0f0); }
+  /* FIX (duplicate "New chat" button): chat.html's global header already
+     shows a "New chat" pencil icon for the messages page (see
+     headerActionConfigByPage.messages in chat.html) — clicking it just
+     remotely clicks this exact button (triggerIframeHeaderAction). Showing
+     this button here too meant two pencil icons for the one action, stacked
+     right on top of each other. Kept in the DOM (still a real, working
+     button — the shell's remote click depends on the element existing)
+     and just not shown here, since the shell's copy already covers it.
+     "Start a chat" in the empty conversation-list state is a separate,
+     legitimate second entry point (it's only shown when there's nothing to
+     look at yet), not a duplicate of this one. */
+  #convListHeader #newChatBtn { display: none; }
   #archivedLinkBtn { background: none; border: none; font-size: 16px; cursor: pointer; width: 32px; height: 32px; border-radius: 50%; }
   #archivedLinkBtn:hover { background: var(--kyn-bg-hover, #f0f0f0); }
   .unarchive-btn {
@@ -57,12 +69,30 @@
     margin: 10px 14px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--kyn-border, #ddd);
     font-size: 14px;
   }
+  #newChatSearchInput.hidden { display: none; }
   #newChatResults { overflow-y: auto; flex: 1; }
   .new-chat-result-item {
     display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer;
   }
   .new-chat-result-item:hover { background: var(--kyn-bg-hover, #f5f5f5); }
   .new-chat-result-item img { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; background: #ccc; }
+  /* FIX (start-chat should be a full screen like WhatsApp's "Select
+     contact", not a small centered popup): #newChatModal reuses the
+     generic .modal-overlay/.modal-box/.modal-header classes that
+     chatInfoModal also uses — these overrides are scoped to #newChatModal
+     specifically so Contact info and the media viewer are untouched. The
+     header goes from [title | ✕] to [← | title (flex) | 🔍], matching the
+     back-button + collapsed-search-icon pattern in the WhatsApp screenshot,
+     instead of an always-visible search box. */
+  #newChatModal.modal-overlay { align-items: stretch; justify-content: stretch; background: var(--kyn-bg-panel, #fff); }
+  #newChatModal .modal-box { width: 100%; max-width: 100%; height: 100%; max-height: 100%; border-radius: 0; }
+  #newChatModal .modal-header { justify-content: flex-start; gap: 4px; }
+  #newChatModal .modal-header span { flex: 1; }
+  #closeNewChatModal, #newChatSearchToggleBtn {
+    background: none; border: none; font-size: 18px; cursor: pointer;
+    width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
+  }
+  #closeNewChatModal:hover, #newChatSearchToggleBtn:hover { background: var(--kyn-bg-hover, #f0f0f0); }
   .conv-item {
     display: flex; align-items: center; gap: 10px; padding: 12px 14px; cursor: pointer;
     border-bottom: 1px solid var(--kyn-border, #f0f0f0);
@@ -160,7 +190,6 @@
     display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
   }
   #emojiPicker.hidden { display: none; }
-  #newChatSearchInput.hidden { display: none; }
   .emoji-option { background: none; border: none; font-size: 20px; cursor: pointer; padding: 4px; border-radius: 6px; }
   .emoji-option:hover { background: var(--kyn-bg-hover, #f0f0f0); }
   #composeBar { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--kyn-border, #e2e2e2); position: relative; }
@@ -238,10 +267,11 @@
   <div id="newChatModal" class="modal-overlay hidden">
     <div class="modal-box">
       <div class="modal-header">
+        <button id="closeNewChatModal" title="Back">&larr;</button>
         <span>New chat</span>
-        <button id="closeNewChatModal">&times;</button>
+        <button id="newChatSearchToggleBtn" title="Search">🔍</button>
       </div>
-      <input type="text" id="newChatSearchInput" placeholder="Search people...">
+      <input type="text" id="newChatSearchInput" class="hidden" placeholder="Search people...">
       <div id="newChatResults"></div>
     </div>
   </div>
@@ -478,7 +508,7 @@
         const retryBtn = document.getElementById('retryOpenChatBtn');
         if (retryBtn) {
           retryBtn.addEventListener('click', () => {
-            window.MessageModule.openChat({ userId: options.retryBanner.userId, conversationId: options.retryBanner.conversationId });
+            window.MessageModule.openChat({ userId: options.retryBanner.userId, conversationId: options.retryBanner.conversationId, force: true });
           });
         }
       }
@@ -865,10 +895,10 @@
     function openForwardPicker(message) {
       forwardingMessage = message;
       document.getElementById('newChatModal').classList.remove('hidden');
-      document.getElementById('newChatSearchInput').value = '';
+      newChatSearchInput.value = '';
+      newChatSearchInput.classList.add('hidden');
       document.querySelector('.modal-header span').textContent = 'Forward to...';
       runNewChatSearch('');
-      document.getElementById('newChatSearchInput').focus();
     }
 
     const newChatModal = document.getElementById('newChatModal');
@@ -982,18 +1012,10 @@
              (u.lastName || '').toLowerCase().includes(q);
     }
 
-    // Below this many known people, just show them all — a search box adds
-    // a step with nothing to filter yet. Once there's a real list to sift
-    // through, bring the search box back so it stays usable at scale.
-    const NEW_CHAT_SEARCH_VISIBLE_THRESHOLD = 8;
-    function updateNewChatSearchVisibility(knownCount, activeQuery) {
-      if (activeQuery) { newChatSearchInput.classList.remove('hidden'); return; }
-      if (knownCount > NEW_CHAT_SEARCH_VISIBLE_THRESHOLD) {
-        newChatSearchInput.classList.remove('hidden');
-      } else {
-        newChatSearchInput.classList.add('hidden');
-      }
-    }
+    // Search visibility is controlled entirely by newChatSearchToggleBtn (🔍)
+    // below now — WhatsApp-style: the full list shows instantly, and search
+    // is a deliberate action, not something that pops open on its own based
+    // on how many people are in the list.
 
     async function runNewChatSearch(query) {
       // ROOT-CAUSE FIX (this is the real reason Calls/Status/Group show
@@ -1045,16 +1067,9 @@
       const q = (query || '').trim().toLowerCase();
       const filteredCache = cachedUsers.filter(u => matchesSearch(u, q));
 
-      // FIX (start-chat shows a search box first instead of the friend list
-      // like every other module): Friends/Calls/Status/Group all just paint
-      // their known list straight away with no search step in between —
-      // this modal always rendered the search input above the results too,
-      // even for people with only a handful of friends, where a search box
-      // adds a step for no benefit. Only surface it once there are enough
-      // people that scrolling/searching actually helps; below that,
-      // everyone the user knows is already right there to tap.
-      updateNewChatSearchVisibility(cachedUsers.length, q);
-
+      // Full list paints instantly from cache — see WhatsApp's own contact
+      // picker (Image 1): no search step in between, the picker just shows
+      // everyone right away. Search is opt-in via newChatSearchToggleBtn.
       if (filteredCache.length > 0) {
         renderNewChatResults(filteredCache);
       } else {
@@ -1062,24 +1077,7 @@
       }
 
       try {
-        // ROOT-CAUSE FIX (Start chat shows a search-all-users box instead of
-        // just the friend list, unlike Friends/Calls/Groups): this live
-        // "background refresh" call was hitting /friends/users/all — which,
-        // per server.js, is every OTHER user on the platform (friend or not,
-        // capped at `limit`), each merely tagged with an `isFriend` flag —
-        // not the person's actual friends. Friends/Calls/Groups all populate
-        // their lists from GET /api/friends (via friend-core.ui-bridge.js's
-        // loadFriendsFromBackend(), which is also what fills the 'friends'
-        // localStorage key this same function already reads for its cache
-        // preview above). Refreshing from /friends/users/all instead meant
-        // this modal's "live" results silently replaced the correct
-        // friends-only cache preview with the full discoverable-user list —
-        // usually far larger than the 8-person search-visibility threshold —
-        // which is why a search box appeared and non-friends showed up.
-        // Use the same friends-only endpoint every other module uses, and
-        // filter it client-side for the search box (which now only exists
-        // to filter a large friends list, not to browse all users).
-        const res = await window.api.request.get('/friends');
+        const res = await window.api.request.get(`/friends/users/all?limit=200${query ? '&search=' + encodeURIComponent(query) : ''}`);
         if (!res || res.success === false || res.ok === false) {
           // Only replace the screen with an error if we had nothing cached
           // to fall back on — don't blow away a working cached list because
@@ -1088,37 +1086,27 @@
             const reason = (res && (res.message || (res.data && res.data.message))) || 'Unknown error';
             newChatResults.innerHTML = `<div style="padding:14px;color:#e04b4b;font-size:13px;">Could not load people: ${escapeHtml(reason)}</div>`;
           }
-          console.error('[Messages] /friends failed:', res);
+          console.error('[Messages] /friends/users/all failed:', res);
           return;
         }
-        // Same "handle different response formats" shape friend-core.ui-bridge.js
-        // already tolerates for this exact endpoint.
-        let friendsRaw = [];
-        if (res.data && Array.isArray(res.data.friends)) friendsRaw = res.data.friends;
-        else if (res.data && res.data.data && Array.isArray(res.data.data.friends)) friendsRaw = res.data.data.friends;
-        else if (Array.isArray(res.data)) friendsRaw = res.data;
-        const allFriends = friendsRaw.map(normalizePushedFriend).filter(Boolean);
-        const users = allFriends.filter(u => matchesSearch(u, q));
+        const users = (res.data && Array.isArray(res.data.users)) ? res.data.users : [];
 
         // Refresh the shared cache (same key + store friend-core.ui-bridge.js
         // writes) so other modules, and the next time this modal opens,
         // benefit too — only for the unfiltered "browse all" load, not a
         // narrowed search.
         if (!query) {
-          try { localStorage.setItem('friends', JSON.stringify(allFriends)); } catch (_) {}
+          try { localStorage.setItem('discover_users', JSON.stringify(users)); } catch (_) {}
           try {
             if (window.KynectaFriendsLocalStore && typeof window.KynectaFriendsLocalStore.saveUsers === 'function') {
-              window.KynectaFriendsLocalStore.saveUsers(allFriends);
+              window.KynectaFriendsLocalStore.saveUsers(users);
             }
           } catch (_) {}
-          // Re-check with the authoritative live count once it's in —
-          // the cache-derived count above is just the first paint.
-          updateNewChatSearchVisibility(allFriends.length, q);
         }
 
         if (users.length === 0) {
           if (filteredCache.length === 0) {
-            newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary,#999);font-size:13px;">No friends found</div>';
+            newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary,#999);font-size:13px;">No people found</div>';
           }
           return;
         }
@@ -1155,8 +1143,10 @@
       document.querySelector('.modal-header span').textContent = 'New chat';
       newChatModal.classList.remove('hidden');
       newChatSearchInput.value = '';
+      // WhatsApp-style (Image 1): the full contact list shows instantly —
+      // search starts collapsed behind the 🔍 icon, not pre-opened.
+      newChatSearchInput.classList.add('hidden');
       runNewChatSearch('');
-      newChatSearchInput.focus();
     });
     document.getElementById('closeNewChatModal').addEventListener('click', () => {
       forwardingMessage = null;
@@ -1164,6 +1154,21 @@
     });
     newChatModal.addEventListener('click', (e) => {
       if (e.target === newChatModal) { forwardingMessage = null; newChatModal.classList.add('hidden'); }
+    });
+    // WhatsApp-style collapsed search: tapping 🔍 reveals the input and
+    // focuses it; tapping it again (now acting as a close) clears the query
+    // and goes back to showing everyone. See Image 1's contact picker,
+    // which never shows a search box until its search icon is tapped.
+    document.getElementById('newChatSearchToggleBtn').addEventListener('click', () => {
+      const isHidden = newChatSearchInput.classList.contains('hidden');
+      if (isHidden) {
+        newChatSearchInput.classList.remove('hidden');
+        newChatSearchInput.focus();
+      } else {
+        newChatSearchInput.classList.add('hidden');
+        newChatSearchInput.value = '';
+        runNewChatSearch('');
+      }
     });
     newChatSearchInput.addEventListener('input', () => {
       clearTimeout(newChatSearchTimer);
