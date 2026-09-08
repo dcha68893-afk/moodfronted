@@ -587,7 +587,7 @@
           if (!otherUserId) { alert('Cannot block: unknown user for this conversation.'); return; }
           if (!confirm(`Block ${conv?.otherUser?.username || 'this user'}? They won't be able to message or call you.`)) return;
           try {
-            const res = await window.api.request.post(`/friends/${otherUserId}/block`);
+            const res = await window.MessageModule.request().post(`/friends/${otherUserId}/block`);
             if (res && res.success !== false) {
               alert('User blocked.');
               window.MessageModule.setActiveChatId(null);
@@ -1077,7 +1077,7 @@
       }
 
       try {
-        const res = await window.api.request.get(`/friends/users/all?limit=200${query ? '&search=' + encodeURIComponent(query) : ''}`);
+        const res = await window.MessageModule.request().get(`/friends/users/all?limit=200${query ? '&search=' + encodeURIComponent(query) : ''}`);
         if (!res || res.success === false || res.ok === false) {
           // Only replace the screen with an error if we had nothing cached
           // to fall back on — don't blow away a working cached list because

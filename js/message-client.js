@@ -151,24 +151,95 @@
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // 2. TRANSPORT — reuses window.api.request (REST) and window.KynectaRealtime
-    //    (socket). No new HTTP client, no new socket connection (§12, §54).
+    // 2. TRANSPORT — was "reuses window.api.request (REST) and
+    //    window.KynectaRealtime (socket)". The REST half of that never
+    //    actually worked the way it looked like it did: window.api.request
+    //    (js/api.request.js) is only a real, fully-featured client when it
+    //    can find window.__API_CORE — and that global is set by
+    //    js/api.core.js, which is loaded ONLY inside chat.html's own frame
+    //    (as a <script type="module">, no less). message.html is a separate
+    //    iframe with its own window — it can never see anything chat.html
+    //    attached to chat.html's window. So window.api.request here has
+    //    always silently been running api.request.js's OWN internal
+    //    fallback stub (createFallbackSecureFetch()), not the real
+    //    implementation, for every single request this module has ever
+    //    made. That stub had its own bugs (e.g. no `cache` option, so a
+    //    repeat GET like chat.html's retry loop hitting
+    //    /messages/resolve/:userId could get a cached 304 back and have it
+    //    misreported as a failure).
+    //
+    //    CORRECTION from an earlier version of this comment: it previously
+    //    said Friends avoids this by making its own independent fetch()
+    //    calls with no dependency on the parent at all, and had this module
+    //    do the same. That was wrong — checked friend-core.bootstrap.js's
+    //    authorizedRequest() (36 call sites across the Friends module, its
+    //    actual dominant mechanism) and it does the opposite: it posts
+    //    {type:'API_REQUEST', payload:{endpoint,method,body,requestId}} to
+    //    window.parent and waits for a matching {type:'API_RESPONSE',
+    //    requestId} — i.e. it deliberately hands the real network work to
+    //    chat.html, because chat.html's frame is the one place in the app
+    //    that actually has a fully working api.core.js (session handling,
+    //    token refresh, offline detection, a direct-fetch fallback of its
+    //    own — chat.html's API_REQUEST handler around line 6534). Depending
+    //    on the parent isn't the bug — reaching for a piece of the parent
+    //    that was never actually reachable (window.__API_CORE) was. This
+    //    does what Friends actually does: ask chat.html to make the call.
     // ═══════════════════════════════════════════════════════════════════════
 
+    async function _directRequest(method, path, body) {
+        return new Promise((resolve, reject) => {
+            const requestId = 'msg_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
+            let settled = false;
+            const timeoutId = setTimeout(() => {
+                if (settled) return;
+                settled = true;
+                window.removeEventListener('message', handler);
+                reject(new Error('API request timeout'));
+            }, 30000);
+            const handler = (event) => {
+                if (settled) return;
+                const msg = event.data;
+                if (!msg || msg.type !== 'API_RESPONSE' || msg.requestId !== requestId) return;
+                settled = true;
+                clearTimeout(timeoutId);
+                window.removeEventListener('message', handler);
+                const payload = msg.payload || {};
+                // chat.html's own handler is supposed to normalize whatever
+                // shape its underlying call returned into {success, data,
+                // error, statusCode} with data already unwrapped to the
+                // backend's inner data object (see responsePayload
+                // construction around chat.html:6612). In practice that
+                // pipeline has several legacy layers between here and the
+                // actual fetch, and this couldn't be fully verified without
+                // running it live — so defend against payload.data still
+                // being the raw, doubly-wrapped backend body
+                // ({success,data:{...}}) rather than already unwrapped: if
+                // it looks wrapped (has both a nested .data and .success),
+                // take the inner one. A real single-level payload like
+                // {chatId:1} or {users:[...]} never has its own .success
+                // key, so this can't misfire on correctly-shaped data.
+                let d = payload.data;
+                if (d && typeof d === 'object' && 'data' in d && 'success' in d) d = d.data;
+                resolve({
+                    ok: payload.success !== false,
+                    success: payload.success !== false,
+                    status: payload.statusCode || (payload.success !== false ? 200 : 500),
+                    data: d ?? {},
+                    message: payload.error || null,
+                });
+            };
+            window.addEventListener('message', handler);
+            window.parent.postMessage({ type: 'API_REQUEST', payload: { endpoint: path, method, body, requestId } }, '*');
+        });
+    }
+
     function api() {
-        if (!window.api || !window.api.request) {
-            // Tagged so callers (openChat's resolve path) can tell "the
-            // shared API client hasn't finished booting yet" apart from a
-            // genuine server-side failure — see the retry-storm fix in
-            // openChat() below. This is a real, observed condition: e.g.
-            // "[API] ✅ Bootstrap ready (timeout)" in js/api.request.js
-            // means bootstrap fell back after stalling, and window.api can
-            // still be unset for a moment after that.
-            const err = new Error('window.api.request not ready');
-            err.transient = true;
-            throw err;
-        }
-        return window.api.request;
+        return {
+            get: (path) => _directRequest('GET', path),
+            post: (path, body) => _directRequest('POST', path, body),
+            put: (path, body) => _directRequest('PUT', path, body),
+            delete: (path, body) => _directRequest('DELETE', path, body),
+        };
     }
 
     async function loadHistory(chatId, { before = null, limit = 50 } = {}) {
@@ -1057,6 +1128,12 @@
         unarchiveChat,
         loadArchivedConversations,
         loadHistory,
+        // Exposes the same self-contained request api() uses internally (see
+        // the TRANSPORT comment above) so message.html's own two direct
+        // window.api.request.* calls (the New Chat picker's people list, the
+        // block-user action) go through the one real implementation instead
+        // of api.request.js's fallback stub.
+        request: api,
         getConnectionState: () => state.connectionState,
         getActiveChatId: () => state.activeChatId,
         setActiveChatId: (id) => { state.activeChatId = id; },
