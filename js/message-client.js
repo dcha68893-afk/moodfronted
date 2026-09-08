@@ -266,6 +266,20 @@
         };
     }
 
+    // Generates the sender-local ID sendMessage() attaches to every outgoing
+    // message. The backend uses (senderId, clientMessageId) as an idempotency
+    // key (messageDeliveryService.sendMessage — a retry with the same ID
+    // always resolves to the original row instead of creating a duplicate),
+    // and it's stored in a STRING(64) column, so this only needs to be
+    // reasonably unique per sender and well under 64 chars.
+    function generateClientMessageId() {
+        if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+            return window.crypto.randomUUID();
+        }
+        // Fallback for browsers without crypto.randomUUID (older Safari/WebViews).
+        return `cm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+    }
+
     async function loadHistory(chatId, { before = null, limit = 50 } = {}) {
         const qs = new URLSearchParams();
         if (before) qs.set('before', before);
