@@ -4455,7 +4455,25 @@
                 if (body && !(body instanceof FormData)) headers['Content-Type'] = 'application/json';
                 if (currentToken) headers['Authorization'] = `Bearer ${currentToken}`;
 
-                const fetchOptions = { method, headers, credentials: 'include' };
+                const fetchOptions = {
+                    method,
+                    headers,
+                    credentials: 'include',
+                    // ROOT-CAUSE FIX (same bug, fourth confirmed occurrence —
+                    // already fixed in api.core.js, api.request.js's fallback
+                    // fetch, and js/e2e-encryption.js's two key-endpoint
+                    // calls): no cache option here means the browser's
+                    // default HTTP cache can answer a repeat request with a
+                    // conditional 304, and every caller of directApiRequest
+                    // reads responsePayload.success (ultimately from
+                    // response.ok below), which is false for a 304
+                    // regardless of the cached body. This function is the
+                    // ALWAYS-taken path for every non-GET request
+                    // (shouldPreferDirectApi returns true unconditionally
+                    // for POST/PUT/DELETE — see above), so this one covers
+                    // sending messages, not just GETs.
+                    cache: 'no-store',
+                };
                 if (body && method !== 'GET') {
                     if (body instanceof FormData) {
                         fetchOptions.body = body;

@@ -147,7 +147,31 @@
         if (!bucket) return [];
         return Array.from(bucket.values())
             .filter(m => !(m.deleted && !m.deleteForEveryone)) // "delete for me" hides it from my own view only
-            .sort((a, b) => a.id - b.id);
+            // ROOT-CAUSE FIX (a message you just sent doesn't appear to show
+            // up at all): this used to be `.sort((a, b) => a.id - b.id)`.
+            // Real, server-persisted messages have a numeric id — fine for
+            // that case. But sendMessage()'s optimistic message (the local
+            // echo shown the instant you hit send, before the server has
+            // even replied) is given id: `optimistic:${clientMessageId}` — a
+            // STRING. Subtracting a string from a number is NaN, and a
+            // comparator that can return NaN has undefined sort behavior —
+            // in practice this could land the message you just sent
+            // anywhere in the list except reliably at the bottom, so
+            // looking at the bottom of the chat (where a "message sent"
+            // build usually looks) showed nothing new. Compare numerically
+            // when both sides have a real numeric id (unchanged,
+            // server-authoritative order per spec §36); fall back to
+            // createdAt when either side is still optimistic, since every
+            // message — optimistic or not — always has that.
+            .sort((a, b) => {
+                const aNum = typeof a.id === 'number' ? a.id : null;
+                const bNum = typeof b.id === 'number' ? b.id : null;
+                if (aNum !== null && bNum !== null) return aNum - bNum;
+                const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+                const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+                if (aTime !== bTime) return aTime - bTime;
+                return aNum !== null ? -1 : (bNum !== null ? 1 : 0);
+            });
     }
 
     // ═══════════════════════════════════════════════════════════════════════

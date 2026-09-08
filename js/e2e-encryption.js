@@ -484,6 +484,16 @@
           headers: await _authHeaders(),
           body: JSON.stringify({ publicKey: pubKeyB64, keyId }),
           credentials: 'include',
+          // ROOT-CAUSE FIX (same class of bug as the one already found and
+          // fixed in api.core.js / api.request.js's fallback fetch — see
+          // those files: a GET without a cache option can get a cached/
+          // conditional 304 back from the browser and have it misread as a
+          // failure because resp.ok is false for 304 regardless of the
+          // body). Applying the same fix here defensively even though this
+          // one's a POST (POSTs aren't normally cached, but there's no
+          // reason to leave this on the browser's default cache behavior
+          // for a live API either).
+          cache: 'no-store',
           signal: _regController.signal,
         });
       } finally {
@@ -630,6 +640,25 @@
             resp = await fetch(`${await _apiBase()}/api/encryption/keys/${userId}`, {
               headers: await _authHeaders(),
               credentials: 'include',
+              // ROOT-CAUSE FIX (this is very likely why decryption gets
+              // permanently stuck on "Decrypting…" and sends fail): this is
+              // the third occurrence of the exact same bug already found
+              // and fixed in api.core.js and api.request.js's fallback
+              // fetch. No cache option here meant a repeat GET to this same
+              // URL — which happens constantly: every retry attempt below,
+              // every message that needs the same recipient's key — could
+              // get a cached/conditional 304 back from the browser. resp.ok
+              // is false for a 304 regardless of what's in the cached body,
+              // so line 638's `if (!resp.ok)` below treats a perfectly
+              // valid, already-known key as a failure. It's not a 404 (key
+              // genuinely missing) or 403 (not authorized) — those are
+              // handled explicitly right below — so it falls to the retry
+              // loop, keeps re-fetching, keeps getting 304 again from the
+              // same browser cache entry, and eventually gives up with no
+              // key at all. That directly blocks both decryptMessageForDisplay()
+              // (permanently "Decrypting…") and encryptForChat() (send never
+              // completes) for every message tied to that recipient.
+              cache: 'no-store',
               signal: _keyFetchController.signal,
             });
           } finally {
