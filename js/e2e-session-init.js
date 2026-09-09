@@ -1,37 +1,111 @@
-/* Canonical private-message E2E bridge. Group crypto stays untouched. */
+/* Canonical private-message E2E bridge.
+ *
+ * Ownership is strict:
+ *   - 1:1/private messages: KynectaMessageE2E -> KynectaE2EIdentity
+ *   - groups: existing KynectaE2E group Sender-Key primitives
+ *
+ * This file is only the compatibility boundary required by message-client.js;
+ * it is not a second crypto implementation.
+ */
 (function (global) {
   'use strict';
+
   let loadPromise = null;
+
   function loadScript(src) {
     return new Promise((resolve, reject) => {
       const existing = document.querySelector(`script[data-e2e-core="${src}"]`);
       if (existing) { resolve(); return; }
-      const s = document.createElement('script'); s.src = src; s.async = false; s.dataset.e2eCore = src;
-      s.onload = resolve; s.onerror = () => reject(new Error(`Could not load ${src}`)); document.head.appendChild(s);
+      const s = document.createElement('script');
+      s.src = src;
+      s.async = false;
+      s.dataset.e2eCore = src;
+      s.onload = resolve;
+      s.onerror = () => reject(new Error(`Could not load ${src}`));
+      document.head.appendChild(s);
     });
   }
+
   async function loadNewCore() {
-    if (!loadPromise) {
-      loadPromise = (async () => {
-        await loadScript('/js/e2e-identity-core.js');
-        await loadScript('/js/message-e2e-core.js');
-        const groupFacade = global.KynectaE2E || {};
-        const dm = global.KynectaMessageE2E;
-        if (!dm) throw new Error('Canonical message E2E core did not initialize');
-        const messageSurface = ['encryptForChat','decryptFromChat','decryptMessageForDisplay','retryDecrypt','prefetchRecipientKey','cacheRecipientKey','isMessageQueued','isMessageFailed','peekDecryptedText','registerPendingDecrypt','encryptAttachment','decryptAttachment'];
-        for (const name of messageSurface) if (typeof dm[name] === 'function') groupFacade[name] = dm[name];
-        const legacyDmNames = ['secureEncrypt','secureDecrypt','encryptMessage','decryptMessage','x3dhInitiate','x3dhAccept','establishSession','getSession','getSessionState','resetSession','clearSessions','provisionPrekeys','provisionWithRetry'];
-        for (const name of legacyDmNames) { try { delete groupFacade[name]; } catch (_) { groupFacade[name] = undefined; } }
-        global.KynectaE2E = groupFacade;
-        // Initialize the new DM identity immediately so this account is
-        // published to the public-key directory before a first-contact send.
-        await dm.init().catch(err => console.warn('[MessageE2E] identity bootstrap deferred:', err?.message || err));
-        try { document.dispatchEvent(new CustomEvent('kyn:canonicalMessageE2EReady')); } catch (_) {}
-        return groupFacade;
-      })();
+    if (loadPromise) return loadPromise;
+
+    loadPromise = (async () => {
+      await loadScript('/js/e2e-identity-core.js');
+      await loadScript('/js/message-e2e-core.js');
+
+      const facade = global.KynectaE2E || {};
+      const dm = global.KynectaMessageE2E;
+      if (!dm) throw new Error('Canonical message E2E core did not initialize');
+
+      // These are the ONLY private-message entry points. If a required
+      // operation is missing, fail loudly instead of silently falling back to
+      // an older crypto generation.
+      const messageSurface = Object.freeze([
+        'encryptForChat',
+        'decryptFromChat',
+        'decryptMessageForDisplay',
+        'retryDecrypt',
+        'prefetchRecipientKey',
+        'cacheRecipientKey',
+        'isMessageQueued',
+        'isMessageFailed',
+        'peekDecryptedText',
+        'registerPendingDecrypt',
+        'encryptAttachment',
+        'decryptAttachment'
+      ]);
+      const missing = messageSurface.filter(name => typeof dm[name] !== 'function');
+      if (missing.length) {
+        throw new Error(`Canonical message E2E surface incomplete: ${missing.join(', ')}`);
+      }
+      for (const name of messageSurface) facade[name] = dm[name];
+
+      // Explicitly remove the legacy 1:1/X3DH session surface. Group Sender-
+      // Key operations are intentionally not included here and remain owned
+      // by the working group implementation.
+      const legacyDmNames = Object.freeze([
+        'secureEncrypt',
+        'secureDecrypt',
+        'encryptMessage',
+        'decryptMessage',
+        'x3dhInitiate',
+        'x3dhAccept',
+        'establishSession',
+        'getSession',
+        'getSessionState',
+        'resetSession',
+        'clearSessions',
+        'provisionPrekeys',
+        'provisionWithRetry'
+      ]);
+      for (const name of legacyDmNames) {
+        try { delete facade[name]; } catch (_) { facade[name] = undefined; }
+      }
+
+      global.KynectaE2E = facade;
+
+      // Bootstrap exactly one DM identity before first-contact send/decrypt.
+      // The identity core persists it and reuses the same key instead of
+      // generating a new identity for every message/session.
+      await dm.init().catch(err => {
+        console.warn('[MessageE2E] identity bootstrap deferred:', err?.message || err);
+      });
+
+      try {
+        document.dispatchEvent(new CustomEvent('kyn:canonicalMessageE2EReady'));
+      } catch (_) {}
+
+      return facade;
+    })();
+
+    try {
+      return await loadPromise;
+    } catch (err) {
+      loadPromise = null;
+      throw err;
     }
-    return loadPromise;
   }
+
   global.KynectaMessageE2EReady = loadNewCore;
   loadNewCore().catch(err => console.error('[MessageE2E] canonical bootstrap failed:', err));
 })(window);
