@@ -3960,6 +3960,9 @@
          this page's init() has almost always already finished, so theirs
          resolves instantly instead of doing real work. -->
     <script src="js/e2e-encryption.js"></script>
+    <!-- Phase 1 redesign: durable IndexedDB-backed session/identity store with
+         encrypted backup/restore. Must load before e2e-session-init.js. -->
+    <script src="js/e2e-store-v2.js"></script>
     <script src="js/e2e-session-init.js" defer></script>
     <!-- FIX (REAL-PRESENCE): PresenceEngineFoundation.js was already fully built
          (heartbeats, idle detection, multi-tab coordination, matching backend

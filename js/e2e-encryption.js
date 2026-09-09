@@ -20,6 +20,16 @@
 
   const subtle    = global.crypto && global.crypto.subtle;
   const STORE_KEY_PREFIX = 'kyn_e2e_keypair_v1';   // localStorage key for encrypted private key
+
+  // Phase 2 (multi-device): this device's stable id, used to tag identity/
+  // prekey registration so a second device doesn't overwrite the first's
+  // keys server-side. Falls back to 'primary' if e2e-store-v2.js hasn't
+  // loaded yet (load-order safety) or IndexedDB is unavailable — matches
+  // the server's own default, so single-device behavior is unaffected.
+  async function _myDeviceId() {
+    try { if (global.KynectaE2EStore?.getOrCreateDeviceId) return await global.KynectaE2EStore.getOrCreateDeviceId(); } catch (_) {}
+    return 'primary';
+  }
   // FIX-ROOT-CAUSE-SHARED-BROWSER-IDENTITY-COLLISION: this used to be a
   // single fixed string with no per-user component. localStorage is shared
   // across every tab/window for the same browser origin — it is NOT scoped
@@ -482,7 +492,7 @@
         resp = await fetch(`${await _apiBase()}/api/encryption/keys`, {
           method: 'POST',
           headers: await _authHeaders(),
-          body: JSON.stringify({ publicKey: pubKeyB64, keyId }),
+          body: JSON.stringify({ publicKey: pubKeyB64, keyId, deviceId: await _myDeviceId() }),
           credentials: 'include',
           // ROOT-CAUSE FIX (same class of bug as the one already found and
           // fixed in api.core.js / api.request.js's fallback fetch — see
@@ -963,6 +973,22 @@
   // isn't directly awaiting the promise (e.g. an already-rendered bubble).
   const _pendingDecryptQueue = new Map();
   const _PENDING_RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 15000]; // capped backoff, then holds at 15s
+  // FIX (INFINITE-DECRYPTING-PLACEHOLDER): _scheduleRetry used to hold at
+  // 15s and retry FOREVER with no cap, for both "key not ready yet"
+  // (temporary/retryable) and "key will never match" (permanent, e.g. an
+  // AAD/context/ratchet-position mismatch) failures alike. Since
+  // isMessageQueued() stays true for as long as an entry exists in
+  // _pendingDecryptQueue, message-client.js's `isQueued ? 'Decrypting…' :
+  // plaintext` check never fell through to a real value for a permanently
+  // undecryptable message — the UI showed "Decrypting…" forever and the
+  // console warned every ~15s forever. MAX_QUEUE_ATTEMPTS bounds the
+  // *timer-driven* backoff only; explicit 'kyn:e2eUnlocked'/
+  // 'kyn:e2eKeyAvailable' events (a real signal that new key material just
+  // became available) still revive an exhausted entry for one more try —
+  // see _retryAllPending and the e2eKeyAvailable listener below.
+  const MAX_QUEUE_ATTEMPTS = 40; // ~10 minutes of backoff before giving up until a real key-available event
+  const _permanentlyFailedIds = new Set();
+  const _failedEntryCache = new Map(); // messageId -> entry, kept around so a later real key-available event can revive it
 
   function _envelopeShape(content) {
     if (!content || typeof content !== 'string') return null;
@@ -1019,6 +1045,17 @@
   function _scheduleRetry(messageId) {
     const entry = _pendingDecryptQueue.get(messageId);
     if (!entry || entry.timer) return;
+    if (entry.attempts >= MAX_QUEUE_ATTEMPTS) {
+      // Give up on the timer-driven loop — this message is being treated as
+      // a genuine, permanent decrypt failure, not "still waiting on keys".
+      _pendingDecryptQueue.delete(messageId);
+      _permanentlyFailedIds.add(messageId);
+      _failedEntryCache.set(messageId, entry);
+      try {
+        document.dispatchEvent(new CustomEvent('kyn:messageDecryptFailed', { detail: { messageId } }));
+      } catch (_) {}
+      return;
+    }
     const delay = _PENDING_RETRY_DELAYS_MS[Math.min(entry.attempts, _PENDING_RETRY_DELAYS_MS.length - 1)];
     entry.timer = setTimeout(() => { entry.timer = null; _attemptQueuedDecrypt(messageId); }, delay);
   }
@@ -1047,6 +1084,8 @@
     }
     if (result.ok) {
       _pendingDecryptQueue.delete(messageId);
+      _permanentlyFailedIds.delete(messageId);
+      _failedEntryCache.delete(messageId);
       _decryptCache.set(messageId, result.plaintext);
       entry.subscribers.forEach(fn => { try { fn(result.plaintext); } catch (_) {} });
       try {
@@ -1064,11 +1103,27 @@
     }
   }
 
+  // Revives an entry that the timer loop gave up on (see _scheduleRetry)
+  // back into the active queue with a fresh attempt budget. Only called in
+  // response to a real "new key material available" event, never blindly
+  // on a timer — otherwise a permanently-mismatched message would just
+  // resume its console spam forever instead of actually giving up.
+  function _revivePermanentlyFailed(messageId, entry) {
+    _permanentlyFailedIds.delete(messageId);
+    entry.attempts = 0;
+    _pendingDecryptQueue.set(messageId, entry);
+  }
+
   function _retryAllPending() {
     for (const messageId of Array.from(_pendingDecryptQueue.keys())) {
       const entry = _pendingDecryptQueue.get(messageId);
       if (entry && entry.timer) { clearTimeout(entry.timer); entry.timer = null; }
       _attemptQueuedDecrypt(messageId);
+    }
+    for (const messageId of Array.from(_permanentlyFailedIds)) {
+      const entry = _failedEntryCache.get(messageId);
+      if (entry) { _revivePermanentlyFailed(messageId, entry); _attemptQueuedDecrypt(messageId); }
+      else { _permanentlyFailedIds.delete(messageId); }
     }
   }
   document.addEventListener('kyn:e2eUnlocked', _retryAllPending);
@@ -1080,6 +1135,10 @@
         if (entry.timer) { clearTimeout(entry.timer); entry.timer = null; }
         _attemptQueuedDecrypt(messageId);
       }
+    }
+    for (const messageId of Array.from(_permanentlyFailedIds)) {
+      const entry = _failedEntryCache.get(messageId);
+      if (entry && String(entry.peerUserId) === uid) { _revivePermanentlyFailed(messageId, entry); _attemptQueuedDecrypt(messageId); }
     }
   });
 
@@ -1179,6 +1238,15 @@
   function isMessageQueued(message) {
     const messageId = String((message && (message.id || message.localId || message.serverId)) || message || '');
     return !!messageId && _pendingDecryptQueue.has(messageId);
+  }
+
+  // Companion to isMessageQueued(): true once the timer-driven retry loop
+  // has genuinely given up on this message (see MAX_QUEUE_ATTEMPTS above).
+  // UI callers should use this to show a distinct, final "couldn't decrypt"
+  // state instead of leaving the user staring at "Decrypting…" forever.
+  function isMessageFailed(message) {
+    const messageId = String((message && (message.id || message.localId || message.serverId)) || message || '');
+    return !!messageId && _permanentlyFailedIds.has(messageId);
   }
 
   // FIX (X3DH-QUEUE-BYPASS): generic entry point so a DIFFERENT transport
@@ -1482,6 +1550,7 @@
     peekDecryptedText,
     // FIX (PLACEHOLDER-STICKS-ON-FIRST-MESSAGE): see definition above.
     isMessageQueued,
+    isMessageFailed,
     // FIX (X3DH-QUEUE-BYPASS): see definition above.
     registerPendingDecrypt,
     log: _pipelineLog,

@@ -114,7 +114,15 @@
                 },
             });
             const isQueued = typeof window.KynectaE2E.isMessageQueued === 'function' && window.KynectaE2E.isMessageQueued(message);
-            const displayValue = (isQueued && plaintext === DECRYPT_FALLBACK) ? 'Decrypting…' : plaintext;
+            const isFailed = typeof window.KynectaE2E.isMessageFailed === 'function' && window.KynectaE2E.isMessageFailed(message);
+            // FIX (INFINITE-DECRYPTING-PLACEHOLDER): previously this only had
+            // two states — queued ("Decrypting…") or resolved (plaintext) —
+            // so a message the queue had permanently given up on stayed
+            // rendered as plaintext === DECRYPT_FALLBACK forever, which this
+            // line then displayed as "Decrypting…" indefinitely. isFailed
+            // gives a third, final state.
+            const displayValue = isFailed ? '🔒 Unable to decrypt this message'
+              : (isQueued && plaintext === DECRYPT_FALLBACK) ? 'Decrypting…' : plaintext;
             const bucket = state.messagesByConversation.get(chatId);
             if (bucket && bucket.has(message.id)) {
                 bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: displayValue }));
@@ -141,6 +149,35 @@
         await decryptForDisplay(chatId, bucket.get(messageId));
         notify('message:decrypted', { chatId, messageId });
     }
+
+    // FIX (INFINITE-DECRYPTING-PLACEHOLDER): e2e-encryption.js's retry queue
+    // now gives up on a message after MAX_QUEUE_ATTEMPTS and fires this
+    // event once, instead of retrying every 15s forever. Without this
+    // listener, a message that failed permanently would sit rendered with
+    // whatever displayContent it last had ("Decrypting…") until something
+    // else happened to re-run decryptForDisplay for it. This makes the "🔒
+    // Unable to decrypt this message" state (see decryptForDisplay above)
+    // show up immediately instead of only on next reload/re-render.
+    document.addEventListener('kyn:messageDecryptFailed', (e) => {
+        const failedId = e?.detail?.messageId;
+        if (!failedId) return;
+        // Match by String() rather than bucket.has(failedId) directly — the
+        // event's messageId always comes through String() on the
+        // e2e-encryption.js side, but bucket keys can be a raw numeric
+        // message.id (server messages) or a string like
+        // "optimistic:<clientId>" (local echo), so a strict Map key type
+        // match isn't guaranteed.
+        for (const [chatId, bucket] of state.messagesByConversation.entries()) {
+            for (const [key, message] of bucket.entries()) {
+                if (String(key) !== String(failedId)) continue;
+                const displayValue = '🔒 Unable to decrypt this message';
+                bucket.set(key, Object.assign({}, message, { displayContent: displayValue }));
+                syncLastMessageDisplay(chatId, key, displayValue);
+                notify('message:decrypted', { chatId, messageId: key });
+                return;
+            }
+        }
+    });
 
     function getMessages(chatId) {
         const bucket = state.messagesByConversation.get(chatId);

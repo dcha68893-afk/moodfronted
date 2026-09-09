@@ -11,8 +11,8 @@
 // before. Bumped here because this session's js/e2e-encryption.js and
 // js/e2e-session-init.js changes (registerPendingDecrypt / X3DH queue fix)
 // would otherwise keep being served stale.
-const SW_VERSION = '19.9.0';
-const CACHE_NAME = 'nexopa-static-v32';
+const SW_VERSION = '19.10.0';
+const CACHE_NAME = 'nexopa-static-v33';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -36,7 +36,6 @@ const NETWORK_FIRST_PATTERNS = [
   /\/js\/e2e-encryption\.js/i,
   /\/js\/e2e-session-init\.js/i,
   /\/js\/double-ratchet\.js/i,
-  /\/js\/e2e-ratchet\.js/i,
   /\/js\/api\.auth\.js/i,
   /\/js\/app\.core\.session\.js/i,
   /\/js\/app\.core\.bootstrap\.js/i,

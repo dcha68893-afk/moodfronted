@@ -74,6 +74,10 @@
          Consolidated into one shared, single-maintained implementation —
          see js/e2e-session-init.js for the full explanation and behavior.
          Must load AFTER e2e-encryption.js (loaded just above). -->
+    <!-- Phase 1 redesign: durable IndexedDB-backed session/identity store with
+         encrypted backup/restore. Must load AFTER e2e-encryption.js and
+         BEFORE e2e-session-init.js. -->
+    <script src="js/e2e-store-v2.js"></script>
     <script src="js/e2e-session-init.js" defer></script>
     <link rel="manifest" href="../manifest.json">
     <!-- theme-color is now set dynamically by theme.engine.js to match the saved theme -->

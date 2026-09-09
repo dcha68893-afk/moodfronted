@@ -566,59 +566,35 @@
   }
 
   // ── Monkey-patch KynectaE2E when both modules are loaded ────────────────────
-  // This upgrades 1:1 DM encryption to use Double Ratchet automatically
   //
-  // FIX-DR-WIRING: this patch previously never actually activated. Two bugs:
-  //  1. Nothing anywhere in the codebase ever called initSend(), so
-  //     hasSession() was always false on the sender's side and encryptForChat
-  //     fell straight back to the legacy static-ECDH path every time —
-  //     forward secrecy was never actually in effect despite the log message
-  //     below claiming otherwise.
-  //  2. decryptFromChat called decrypt(chatId, ciphertext, null, null) — i.e.
-  //     always passed null for both the sender's identity public key AND our
-  //     own identity private key. The very first message in any session
-  //     bootstraps via initRecv(), which immediately does ECDH on those two
-  //     null values and throws, so even if something HAD sent a v2 envelope,
-  //     decrypting it would always fail and silently fall back to the legacy
-  //     decrypter (which can't parse a v2 envelope either).
-  // Both are fixed below using the identity-key getters js/e2e-encryption.js
-  // now exposes. This also reuses the SAME stable per-pair context as the
-  // static-ECDH fix above (KynectaE2E.getEncryptionContext) instead of the
-  // raw chatId, for the same reason: a brand-new chat's first message is
-  // encrypted before the real chatId exists.
+  // FIX (DUPLICATE-CONFLICTING-ENCRYPT-IMPLEMENTATION — same class of bug
+  // already found and removed in js/e2e-ratchet.js, see that file's header):
+  // this used to ALSO patch encryptForChat, racing js/e2e-session-init.js
+  // (loaded after this file on every page that loads both — see
+  // message.html/group.html) to be "whoever patches last wins". Since
+  // e2e-session-init.js's installSecureTransport() captures whatever
+  // encryptForChat already was (this file's patched version) as its
+  // `original`, but its own secureEncrypt() never calls back into that
+  // `original` for the encrypt path, this patch's encrypt half has been
+  // 100% unreachable dead code for as long as e2e-session-init.js has been
+  // loaded on the same page — every message has been encrypted via X3DH
+  // (v:3/4/5) regardless. Leaving unreachable code that LOOKS load-bearing
+  // sitting right next to genuinely load-bearing code is exactly what makes
+  // future edits risky (see e2e-ratchet.js's audit note for the concrete
+  // failure mode: two implementations tagging incompatible payloads with
+  // the same version number, only working today by accident of load
+  // order). Removed outright rather than left commented out, so there is
+  // exactly one place that can ever produce a new-message envelope.
+  //
+  // decryptFromChat, below, is NOT dead — it's the only remaining path that
+  // can still read a v:2 envelope already sitting in message history from
+  // before X3DH existed. That patch stays.
   function _patchKynectaE2E() {
     if (!global.KynectaE2E) return;
     if (global.KynectaE2E._drPatched) return;
     global.KynectaE2E._drPatched = true;
 
-    const _origEncrypt = global.KynectaE2E.encryptForChat.bind(global.KynectaE2E);
     const _origDecrypt = global.KynectaE2E.decryptFromChat.bind(global.KynectaE2E);
-
-    // Wrap encrypt: bootstrap a session on first use, then use DR going forward
-    global.KynectaE2E.encryptForChat = async function (plaintext, chatId, recipientUserId) {
-      try {
-        if (global.KynectaE2E.enabled && recipientUserId) {
-          const ctx = global.KynectaE2E.getEncryptionContext(chatId, recipientUserId);
-          let hasSess = await hasSession(ctx);
-          if (!hasSess) {
-            const myPriv = global.KynectaE2E.getMyIdentityPrivateKey();
-            const theirPub = await global.KynectaE2E.getIdentityPublicKeyB64(recipientUserId);
-            if (myPriv && theirPub) {
-              await initSend(ctx, myPriv, theirPub);
-              hasSess = true;
-            }
-          }
-          if (hasSess) {
-            const ct = await encrypt(ctx, plaintext, null);
-            if (ct) return ct;
-          }
-        }
-      } catch (e) {
-        console.warn('[DR] encrypt error, falling back:', e.message);
-      }
-      return _origEncrypt(plaintext, chatId, recipientUserId);
-    };
-
     // Wrap decrypt: detect v2 envelope and use DR, else fall through to ECDH
     //
     // FIX (DM-only message corruption / "character splitting"): decrypt()
