@@ -55,12 +55,6 @@
   async function decryptEnvelope(envelope, peerUserId) {
     const identity = await ensureIdentity();
     if (!peerUserId) throw new Error('Message sender/recipient is missing');
-
-    // Use the sender key carried by this v2 envelope for the ECDH operation.
-    // The backend key directory can point at another active device/key for
-    // the same account; requiring directoryKey === envelope.spk caused valid
-    // private messages to fail before AES-GCM was attempted. AES-GCM still
-    // authenticates the ciphertext under the derived shared key.
     const senderKey = await crypto.subtle.importKey(
       'spki',
       Uint8Array.from(atob(envelope.spk), c => c.charCodeAt(0)),
@@ -93,8 +87,27 @@
   function isMessageFailed(message) { return failed.has(messageId(message)); }
   function peekDecryptedText(message) { return decryptCache.get(messageId(message)) ?? null; }
   async function registerPendingDecrypt(messageIdValue, attemptFn, onResolved) { const id = String(messageIdValue || ''); if (!id || typeof attemptFn !== 'function') return { ok: false }; if (decryptCache.has(id)) return { ok: true, plaintext: decryptCache.get(id) }; if (pending.has(id)) { if (onResolved) pending.get(id).subscribers.add(onResolved); return { ok: false, queued: true }; } const entry = { subscribers: new Set(onResolved ? [onResolved] : []) }; pending.set(id, entry); try { const text = await attemptFn(); notifyResolved(id, text, entry); return { ok: true, plaintext: text }; } catch (e) { notifyFailed(id, e, entry); return { ok: false, queued: false }; } }
-  async function encryptAttachment(arrayBuffer, chatId, recipientUserId) { const identity = await ensureIdentity(); const peer = await identity.publicKeyFor(recipientUserId); const shared = await identity.deriveShared(peer.key); const key = await identity.hkdf(shared, pairContext(recipientUserId) + ':attachment'); const iv = crypto.getRandomValues(new Uint8Array(12)); const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, tagLength: 128 }, key, arrayBuffer); return { v: 2, iv: btoa(String.fromCharCode(...iv)), ct: btoa(String.fromCharCode(...new Uint8Array(ct))) }; }
-  async function decryptAttachment(env, chatId, senderUserId) { const identity = await ensureIdentity(); const peer = await identity.publicKeyFor(senderUserId); const shared = await identity.deriveShared(peer.key); const key = await identity.hkdf(shared, pairContext(senderUserId) + ':attachment'); return crypto.subtle.decrypt({ name: 'AES-GCM', iv: Uint8Array.from(atob(env.iv), c => c.charCodeAt(0)), tagLength: 128 }, key, Uint8Array.from(atob(env.ct), c => c.charCodeAt(0))); }
+  async function encryptAttachment(arrayBuffer, chatId, recipientUserId) {
+    const identity = await ensureIdentity();
+    const peer = await identity.publicKeyFor(recipientUserId);
+    const shared = await identity.deriveShared(peer.key);
+    const key = await identity.hkdf(shared, pairContext(recipientUserId) + ':attachment');
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, tagLength: 128 }, key, arrayBuffer);
+    return { v: 2, spk: identity.publicKey, iv: btoa(String.fromCharCode(...iv)), ct: btoa(String.fromCharCode(...new Uint8Array(ct))) };
+  }
+  async function decryptAttachment(env, chatId, senderUserId) {
+    const identity = await ensureIdentity();
+    let peerKey;
+    if (env && env.spk) {
+      peerKey = await crypto.subtle.importKey('spki', Uint8Array.from(atob(env.spk), c => c.charCodeAt(0)), { name: 'ECDH', namedCurve: 'P-256' }, true, []);
+    } else {
+      peerKey = (await identity.publicKeyFor(senderUserId)).key;
+    }
+    const shared = await identity.deriveShared(peerKey);
+    const key = await identity.hkdf(shared, pairContext(senderUserId) + ':attachment');
+    return crypto.subtle.decrypt({ name: 'AES-GCM', iv: Uint8Array.from(atob(env.iv), c => c.charCodeAt(0)), tagLength: 128 }, key, Uint8Array.from(atob(env.ct), c => c.charCodeAt(0)));
+  }
 
   global.KynectaMessageE2E = { init, encryptForChat, decryptFromChat, decryptMessageForDisplay, retryDecrypt, prefetchRecipientKey, cacheRecipientKey, isMessageQueued, isMessageFailed, peekDecryptedText, registerPendingDecrypt, encryptAttachment, decryptAttachment, getSafetyNumbers: (...args) => I()?.getSafetyNumbers?.(...args), get enabled() { return !!I()?.enabled; }, get publicKey() { return I()?.publicKey || null; }, get keyId() { return I()?.keyId || null; }, getMyUserId: () => I()?.userId || null, clearKeys: () => I()?.clear?.() };
 })(window);
