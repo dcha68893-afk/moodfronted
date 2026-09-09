@@ -44,9 +44,6 @@
       const dm = global.KynectaMessageE2E;
       if (!dm) throw new Error('Canonical message E2E core did not initialize');
 
-      // These are the ONLY private-message entry points. If a required
-      // operation is missing, fail loudly instead of silently falling back to
-      // an older crypto generation.
       const messageSurface = Object.freeze([
         'encryptForChat',
         'decryptFromChat',
@@ -98,6 +95,16 @@
       try {
         document.dispatchEvent(new CustomEvent('kyn:canonicalMessageE2EReady'));
       } catch (_) {}
+
+      // message-client.js and message.html are already present by the time
+      // this deferred bootstrap runs. Load the small post-bootstrap stability
+      // adapter now so it can replace the compatibility retry delay, provide
+      // legacy-v1 decoding, persist the chat list, use the real friends list,
+      // and correct realtime scroll behavior without creating another crypto
+      // or message transport implementation.
+      if (/\/message(?:\.html)?$/i.test(global.location?.pathname || '')) {
+        await loadScript('/js/message-module-stability-fix.js');
+      }
 
       return facade;
     })();
