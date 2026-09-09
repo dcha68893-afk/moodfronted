@@ -96,9 +96,33 @@
     } catch (_) { return false; }
   }
 
+  async function adoptSharedIdentity() {
+    const legacyE2E = global.KynectaE2E;
+    if (!legacyE2E || typeof legacyE2E.getMyIdentityPrivateKey !== 'function') return false;
+    try {
+      if (!legacyE2E.enabled && typeof legacyE2E.waitForEnabledBounded === 'function') {
+        await legacyE2E.waitForEnabledBounded(4000);
+      }
+      if (!legacyE2E.enabled) return false;
+      const adoptedPriv = await legacyE2E.getMyIdentityPrivateKey();
+      if (!adoptedPriv || !legacyE2E.publicKey || !legacyE2E.keyId) return false;
+      privateKey = adoptedPriv;
+      publicKeyB64 = legacyE2E.publicKey;
+      keyId = legacyE2E.keyId;
+      enabled = true;
+      readyResolve(true);
+      try { document.dispatchEvent(new CustomEvent('kyn:e2eUnlocked')); } catch (_) {}
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   async function init(password, legacyPassword) {
     if (!subtle || !uid()) return false;
     await getWrapKey(password).catch(() => {});
+    const adopted = await adoptSharedIdentity();
+    if (adopted) return true;
     const stored = localStorage.getItem(storeKey());
     if (stored) {
       const o = JSON.parse(stored);
