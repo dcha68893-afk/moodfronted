@@ -33,6 +33,10 @@
       await loadScript('/js/e2e-identity-core.js');
       await loadScript('/js/message-e2e-core.js');
       await loadScript('/js/message-e2e-compat.js');
+      // Realtime is a transport concern, not crypto. Load the direct receiver
+      // bridge here so message.html does not depend on chat.html being the
+      // middleman for Socket.IO message:new events.
+      await loadScript('/js/message-realtime-bridge.js');
 
       const facade = global.KynectaE2E || {};
       const dm = global.KynectaMessageE2E;
