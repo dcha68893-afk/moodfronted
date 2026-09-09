@@ -23,14 +23,29 @@
   // that's still clearly an encrypted envelope (has a version field plus a
   // ciphertext/iv field) must never be treated as plaintext, even if this
   // engine can't decrypt that particular version.
+  // ROOT-CAUSE FIX (RAW-CIPHERTEXT-LEAK, v5/multi-device history): the old
+  // shape check only looked for ct/iv at the TOP level of the envelope
+  // object. The v5 multi-device format nests those fields one level down,
+  // inside devices[deviceId] — {"v":5,"mid":...,"devices":{"<id>":{"iv":
+  // ...,"ct":...}}} — so it had no top-level ct/iv, isUnsupportedEnvelope()
+  // returned false, and it fell through to "treat as plaintext," rendering
+  // the raw ciphertext JSON directly in the chat bubble (confirmed live —
+  // see screenshot). Now also recognizes the nested per-device shape and
+  // other known crypto-envelope markers (mid/sid/kid) so ANY versioned
+  // envelope this engine doesn't decrypt gets the safe placeholder instead
+  // of ever being shown as if it were real text.
   function isUnsupportedEnvelope(content) {
     if (typeof content !== 'string') return false;
     const s = content.trim();
     if (s.charAt(0) !== '{') return false;
-    try {
-      const o = JSON.parse(s);
-      return !!(o && typeof o === 'object' && ('v' in o) && (('ct' in o) || ('iv' in o)));
-    } catch (_) { return false; }
+    let o;
+    try { o = JSON.parse(s); } catch (_) { return false; }
+    if (!o || typeof o !== 'object' || !('v' in o)) return false;
+    if ('ct' in o || 'iv' in o) return true;
+    if (o.devices && typeof o.devices === 'object') {
+      return Object.values(o.devices).some(d => d && typeof d === 'object' && ('ct' in d || 'iv' in d));
+    }
+    return 'mid' in o || 'sid' in o || 'kid' in o;
   }
   function peerFor(message, currentUserId, activeConversation) {
     const meId = currentUserId != null ? String(currentUserId) : me();
@@ -90,13 +105,31 @@
   // current public key directly (same lookup encryptForChat itself uses)
   // is both correct for received messages and fixes the own-message case,
   // without needing to special-case direction here at all.
-  async function decryptEnvelope(envelope, peerUserId) {
+  // ROOT-CAUSE FIX (STALE-CACHED-PEER-KEY-NEVER-RETRIED): decryption used
+  // to make exactly one attempt against whatever key was already cached for
+  // this peer, cache-hit or not. The single most common reason a
+  // previously-working conversation starts failing is that the peer's key
+  // actually changed (they re-registered — see e2e-identity-core.js's new
+  // live key-rotation listener, which fixes this going FORWARD) but our
+  // side is still holding whatever copy was cached BEFORE that happened —
+  // no future push event replays a rotation that already happened. On a
+  // genuine AES-GCM failure, purge the cached entry and retry exactly once
+  // against a forced, fresh fetch of the peer's current key before giving
+  // up — cheap (one retry, not a loop) and turns "permanently broken until
+  // someone manually clears storage" into "self-heals on the next message".
+  async function decryptEnvelope(envelope, peerUserId, _retried) {
     const identity = await ensureIdentity();
     if (!peerUserId) throw new Error('Message sender/recipient is missing');
-    const peerEntry = await identity.publicKeyFor(peerUserId);
+    const peerEntry = await identity.publicKeyFor(peerUserId, _retried);
     const shared = await identity.deriveShared(peerEntry.key);
     const key = await identity.hkdf(shared, pairContext(peerUserId));
-    return identity.aesDecrypt(envelope, key, pairContext(peerUserId));
+    try {
+      return await identity.aesDecrypt(envelope, key, pairContext(peerUserId));
+    } catch (err) {
+      if (_retried) throw err;
+      identity.purgePublicKey?.(peerUserId);
+      return decryptEnvelope(envelope, peerUserId, true);
+    }
   }
 
   async function decryptFromChat(encContent, chatId, peerUserId) { const env = parseEnvelope(encContent); return env ? decryptEnvelope(env, peerUserId) : encContent; }

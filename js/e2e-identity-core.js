@@ -255,6 +255,36 @@
     } catch (_) { return false; }
   }
 
+  // ROOT-CAUSE FIX (LIVE-KEY-ROTATION-NEVER-APPLIED): the backend already
+  // pushes 'e2e:key_available'/'e2e:key_rotated' over the socket the moment
+  // someone (re)registers a key — see moodchat src/routes/encryption.js's
+  // _broadcastKeyEvent — and js/app.realtime.socket.js already relays it
+  // both same-frame (a 'kyn:e2e:key_available'/'kyn:e2e:key_rotated'
+  // CustomEvent) and cross-frame (a postMessage to every iframe). But
+  // NOTHING in this v2 identity layer was ever listening for either — only
+  // the legacy js/e2e-encryption.js was, and it only ever updated its own,
+  // no-longer-read v1 store (kyn_e2e_pubkeys_v1). Concretely: if a contact
+  // ever regenerates their identity (their storage was cleared, a previous
+  // testing round wiped it, they reinstalled), everyone who already had
+  // their OLD key cached here just kept silently encrypting/decrypting
+  // against it forever — every message either direction after that point
+  // fails AES-GCM with a real, current key sitting one push event away.
+  // This is very likely why a live back-and-forth can still show "Unable to
+  // decrypt this message" even though the pipeline is otherwise healthy.
+  function _handleKeyPush(payload) {
+    if (!payload || !payload.userId || !payload.publicKey) return;
+    cachePublicKey(payload.userId, payload.publicKey, payload.keyId);
+  }
+  try {
+    window.addEventListener('kyn:e2e:key_available', (e) => _handleKeyPush(e.detail));
+    window.addEventListener('kyn:e2e:key_rotated', (e) => _handleKeyPush(e.detail));
+    window.addEventListener('message', (e) => {
+      const data = e && e.data;
+      if (!data || data.type !== 'SOCKET_EVENT') return;
+      if (data.event === 'e2e:key_available' || data.event === 'e2e:key_rotated') _handleKeyPush(data.payload);
+    });
+  } catch (_) {}
+
   async function deriveShared(peerKey) { return subtle.deriveBits({ name: 'ECDH', public: peerKey }, privateKey, 256); }
   async function hkdf(shared, info) {
     const k = await subtle.importKey('raw', shared, 'HKDF', false, ['deriveKey']);

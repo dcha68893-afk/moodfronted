@@ -43,14 +43,25 @@
   // encrypted envelope (has a version field plus a ciphertext/iv field)
   // must never be treated as plaintext just because this engine doesn't
   // support that particular version.
+  // ROOT-CAUSE FIX (RAW-CIPHERTEXT-LEAK, v5/multi-device history): same gap
+  // as the one fixed in message-e2e-core.js — this only caught ct/iv at the
+  // TOP level, but the v5 multi-device envelope nests them inside
+  // devices[deviceId], so it slipped through as "plaintext" and the raw
+  // ciphertext JSON rendered directly in the chat bubble. This is the file
+  // that actually wraps the live decryptMessageForDisplay path, so this is
+  // the copy that matters at runtime.
   function isUnsupportedEnvelope(content) {
     if (typeof content !== 'string') return false;
     const s = content.trim();
     if (s.charAt(0) !== '{') return false;
-    try {
-      const o = JSON.parse(s);
-      return !!(o && typeof o === 'object' && ('v' in o) && (('ct' in o) || ('iv' in o)));
-    } catch (_) { return false; }
+    let o;
+    try { o = JSON.parse(s); } catch (_) { return false; }
+    if (!o || typeof o !== 'object' || !('v' in o)) return false;
+    if ('ct' in o || 'iv' in o) return true;
+    if (o.devices && typeof o.devices === 'object') {
+      return Object.values(o.devices).some(d => d && typeof d === 'object' && ('ct' in d || 'iv' in d));
+    }
+    return 'mid' in o || 'sid' in o || 'kid' in o;
   }
 
   async function decryptWithPrivate(privateKey, senderKey, envelope, info, aad) {
@@ -177,6 +188,21 @@
       } catch (e) {
         attempts.delete(id);
         failures.add(id);
+        // DIAGNOSTIC (previously silent): a genuine v1/v2 decrypt failure —
+        // as opposed to an unsupported envelope version, handled above —
+        // had no console trace at all, only the generic UI placeholder.
+        // That made it impossible to tell "wrong/rotated key for this peer"
+        // apart from "transient network hiccup" apart from "corrupted
+        // envelope" after the fact. Logging the envelope's own kid alongside
+        // our current identity keyId/userId and the resolved peer id is
+        // usually enough on its own to tell which of those it was.
+        try {
+          const envMeta = JSON.parse(content);
+          console.warn('[E2E] Decrypt failed for message', id, {
+            chatId, peer, envelopeVersion: envMeta?.v, envelopeKeyId: envMeta?.kid || envMeta?.spk?.slice?.(0, 12),
+            myUserId: identity.userId, myKeyId: identity.keyId, error: e?.message || String(e),
+          });
+        } catch (_) { console.warn('[E2E] Decrypt failed for message', id, e?.message || String(e)); }
         try { document.dispatchEvent(new CustomEvent('kyn:messageDecryptFailed', { detail: { messageId: id, error: e?.message || String(e) } })); } catch (_) {}
         return opts.fallbackText === undefined ? '🔒 Encrypted message' : opts.fallbackText;
       }
