@@ -79,10 +79,6 @@
     if (!env) throw new Error('Invalid v1 envelope');
 
     const candidates = [];
-    // v1 envelopes only carried the sender keyId. For a received message that
-    // identifies the historical peer key exactly. For an own sent message v1
-    // did not record the recipient keyId, so current peer key is the only safe
-    // candidate available from the envelope itself.
     if (!ownMessage && env.kid && typeof identity.publicKeyForVersion === 'function') {
       candidates.push(async () => {
         const e = await identity.publicKeyForVersion(peerUserId, env.kid);
@@ -116,11 +112,7 @@
     if (dm.__fastDisplayDecryptInstalled) return true;
 
     const canonicalDecryptFromChat = dm.decryptFromChat.bind(dm);
-    const canonicalDisplay = dm.decryptMessageForDisplay?.bind(dm);
 
-    // Bypass message-e2e-compat's five-attempt 0.5/1/1.5s backoff for v2.
-    // v2 is self-contained (spk/rpk) and canonical decrypt is deterministic;
-    // a successful message therefore needs one WebCrypto operation chain only.
     dm.decryptMessageForDisplay = async function (message, chatId, userId, opts = {}) {
       const content = message?.content;
       const id = String(message?.id || message?.localId || message?.serverId || `${chatId}:${content || ''}`);
@@ -137,15 +129,9 @@
           : sender;
         if (!peer) throw new Error('Message peer is unavailable');
 
-        let text;
-        if (isV1(content)) {
-          text = await decryptV1(content, chatId, peer, own);
-        } else {
-          // Canonical v2 path only: no compatibility retry loop and no current
-          // key lookup added here. decryptFromChat() already uses the exact
-          // envelope spk/rpk and historical-key fallback.
-          text = await canonicalDecryptFromChat(content, chatId, peer, own);
-        }
+        const text = isV1(content)
+          ? await decryptV1(content, chatId, peer, own)
+          : await canonicalDecryptFromChat(content, chatId, peer, own);
         if (typeof text !== 'string') throw new Error('Decryption returned non-text');
         opts.onResolved?.(text);
         return text;
@@ -160,26 +146,23 @@
       }
     };
 
-    // Keep the canonical decryptFromChat implementation. The display wrapper
-    // above is the only latency-sensitive entry point used by message-client.
     dm.__fastDisplayDecryptInstalled = true;
-    dm.__fastDisplayDecryptCanonical = canonicalDisplay;
     return true;
   }
 
-  function conversationStorageKey() {
-    return `${STORAGE_PREFIX}${currentUserId()}`;
+  function conversationStorageKey(uid = currentUserId()) {
+    return `${STORAGE_PREFIX}${uid}`;
   }
 
-  function loadConversationCache() {
+  function loadConversationCache(uid) {
     try {
-      const raw = localStorage.getItem(conversationStorageKey());
+      const raw = localStorage.getItem(conversationStorageKey(uid));
       const parsed = JSON.parse(raw || '[]');
       return Array.isArray(parsed) ? parsed : [];
     } catch (_) { return []; }
   }
 
-  function saveConversationCache(conversations) {
+  function saveConversationCache(conversations, uid) {
     try {
       const clean = conversations
         .filter(c => c && c.chatId != null && c.otherUser?.id != null)
@@ -200,7 +183,7 @@
             chatId: c.chatId,
           } : null,
         }));
-      localStorage.setItem(conversationStorageKey(), JSON.stringify(clean));
+      localStorage.setItem(conversationStorageKey(uid), JSON.stringify(clean));
     } catch (_) {}
   }
 
@@ -212,8 +195,6 @@
     const originalRequest = mm.request.bind(mm);
     let cache = loadConversationCache();
 
-    // Merge persisted conversations into the live store so a transient API
-    // startup/auth delay cannot make the sidebar look empty after reload.
     mm.getConversations = function () {
       const live = originalGetConversations();
       const byId = new Map(live.map(c => [String(c.chatId), c]));
@@ -229,9 +210,6 @@
       const originalGet = api.get;
       return Object.assign({}, api, {
         get: async function (path) {
-          // Start Chat is intentionally a FRIENDS picker, not a global-user
-          // discover list. Preserve the existing caller contract by mapping
-          // its old endpoint to /friends and returning data.users.
           if (typeof path === 'string' && path.startsWith('/friends/users/all')) {
             const url = new URL(path, global.location.origin);
             const query = (url.searchParams.get('search') || '').trim().toLowerCase();
@@ -251,9 +229,6 @@
           if (typeof path === 'string' && path.startsWith('/chats')) {
             const chats = Array.isArray(res?.data?.chats) ? res.data.chats : null;
             if (res?.success && chats) {
-              // A successful authenticated /chats response is authoritative.
-              // It removes entries that the server says were explicitly
-              // deleted/archived, while retaining cache on failed requests.
               cache = chats.filter(c => c?.type === 'direct' && c?.otherParticipant).map(c => ({
                 chatId: c.id,
                 otherUser: {
@@ -274,17 +249,18 @@
       });
     };
 
-    // Persist changes produced by realtime/new sends without changing the
-    // message-client's private state model.
-    mm.subscribe((event) => {
-      if (event === 'conversation:updated' || event === 'conversation:archived' || event === 'message:added') {
+    mm.subscribe((event, data) => {
+      if (event === 'conversation:archived') {
+        const id = data?.chatId;
+        cache = cache.filter(c => String(c.chatId) !== String(id));
+        saveConversationCache(cache);
+        return;
+      }
+      if (event === 'conversation:updated' || event === 'message:added') {
         try {
           cache = originalGetConversations();
           saveConversationCache(cache);
         } catch (_) {}
-      }
-      if (event === 'conversation:archived') {
-        try { cache = cache.filter(c => String(c.chatId) !== String(arguments?.chatId)); } catch (_) {}
       }
     });
 
@@ -292,23 +268,60 @@
     return true;
   }
 
+  function renderCachedConversationList() {
+    const list = document.getElementById('convList');
+    const mm = global.MessageModule;
+    if (!list || !mm) return;
+    const conversations = mm.getConversations?.() || [];
+    if (!conversations.length) return;
+    // Do not replace a populated live list. This is only the reload/offline
+    // fallback when the normal module has not painted anything yet.
+    if (list.querySelector('.conv-item')) return;
+    const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[ch]));
+    list.innerHTML = conversations.slice().sort((a,b) => new Date(b.lastMessage?.createdAt || 0) - new Date(a.lastMessage?.createdAt || 0)).map(c => {
+      const name = c.otherUser?.username || 'Conversation';
+      const preview = c.lastMessage?.content && typeof c.lastMessage.content === 'string' && !isUnsupported(c.lastMessage.content)
+        ? c.lastMessage.content : '';
+      return `<div class="conv-item" data-chat-id="${esc(c.chatId)}"><img class="conv-avatar" src="${esc(c.otherUser?.avatar || '/img/default-avatar.png')}" alt=""><div class="conv-meta"><div class="conv-name">${esc(name)}</div><div class="conv-preview">${esc(preview)}</div></div>${c.unreadCount ? `<span class="unread-badge">${esc(c.unreadCount)}</span>` : ''}</div>`;
+    }).join('');
+    list.querySelectorAll('.conv-item').forEach(el => el.addEventListener('click', () => {
+      mm.openChat({ conversationId: Number(el.dataset.chatId) });
+    }));
+  }
+
+  async function warmConversationCacheFromServer() {
+    const mm = global.MessageModule;
+    if (!mm?.request) return;
+    try {
+      const res = await mm.request().get('/chats?limit=50');
+      const chats = Array.isArray(res?.data?.chats) ? res.data.chats : null;
+      if (res?.success && chats) {
+        const cache = chats.filter(c => c?.type === 'direct' && c?.otherParticipant).map(c => ({
+          chatId: c.id,
+          otherUser: { id: c.otherParticipant.id, username: c.otherParticipant.displayName || c.otherParticipant.username || '', avatar: c.otherParticipant.avatar || null },
+          unreadCount: c.unreadCount || 0,
+          lastMessage: Array.isArray(c.chatMessages) && c.chatMessages[0] ? { id: c.chatMessages[0].id, content: c.chatMessages[0].content, type: c.chatMessages[0].type, createdAt: c.chatMessages[0].createdAt, senderId: c.chatMessages[0].senderId, chatId: c.id } : null,
+        }));
+        saveConversationCache(cache);
+        renderCachedConversationList();
+      }
+    } catch (_) {
+      renderCachedConversationList();
+    }
+  }
+
   function installAutoScroll() {
     const log = document.getElementById('messageLog');
     if (!log || log.__kynAutoScrollInstalled) return !!log;
     let wasNearBottom = true;
     let lastHeight = log.scrollHeight;
-
     const nearBottom = () => log.scrollHeight - (log.scrollTop + log.clientHeight) < 120;
     log.addEventListener('scroll', () => { wasNearBottom = nearBottom(); });
-
     const observer = new MutationObserver(() => {
       const active = global.MessageModule?.getActiveChatId?.();
       if (!active) return;
       const distance = log.scrollHeight - (log.scrollTop + log.clientHeight);
-      const heightChanged = log.scrollHeight !== lastHeight;
       lastHeight = log.scrollHeight;
-      // Initial/normal realtime rendering and decryption should keep the
-      // newest message visible when the user was already near the bottom.
       if (wasNearBottom || distance < 120 || log.childElementCount <= 1) {
         requestAnimationFrame(() => { log.scrollTop = log.scrollHeight; });
       }
@@ -350,6 +363,7 @@
     installFastDecrypt();
     installConversationPersistence();
     installUiGuards();
+    warmConversationCacheFromServer().catch(() => {});
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
