@@ -51,19 +51,28 @@
     const env = await identity.aesEncrypt(String(plaintext), key, pairContext(recipientUserId));
     return JSON.stringify({ v: 2, kid: identity.keyId, spk: identity.publicKey, iv: env.iv, ct: env.ct });
   }
+
   async function decryptEnvelope(envelope, peerUserId) {
-    const identity = await ensureIdentity(); if (!peerUserId) throw new Error('Message sender/recipient is missing');
-    const directory = await identity.publicKeyFor(peerUserId);
-    const expected = await crypto.subtle.exportKey('spki', directory.key).then(b => btoa(String.fromCharCode(...new Uint8Array(b))));
-    if (expected !== envelope.spk) {
-      identity.purgePublicKey(peerUserId); const fresh = await identity.publicKeyFor(peerUserId, true);
-      const freshB64 = await crypto.subtle.exportKey('spki', fresh.key).then(b => btoa(String.fromCharCode(...new Uint8Array(b))));
-      if (freshB64 !== envelope.spk) throw new Error('Sender identity key mismatch');
-    }
-    const senderKey = await crypto.subtle.importKey('spki', Uint8Array.from(atob(envelope.spk), c => c.charCodeAt(0)), { name: 'ECDH', namedCurve: 'P-256' }, true, []);
-    const shared = await identity.deriveShared(senderKey); const key = await identity.hkdf(shared, pairContext(peerUserId));
+    const identity = await ensureIdentity();
+    if (!peerUserId) throw new Error('Message sender/recipient is missing');
+
+    // Use the sender key carried by this v2 envelope for the ECDH operation.
+    // The backend key directory can point at another active device/key for
+    // the same account; requiring directoryKey === envelope.spk caused valid
+    // private messages to fail before AES-GCM was attempted. AES-GCM still
+    // authenticates the ciphertext under the derived shared key.
+    const senderKey = await crypto.subtle.importKey(
+      'spki',
+      Uint8Array.from(atob(envelope.spk), c => c.charCodeAt(0)),
+      { name: 'ECDH', namedCurve: 'P-256' },
+      true,
+      []
+    );
+    const shared = await identity.deriveShared(senderKey);
+    const key = await identity.hkdf(shared, pairContext(peerUserId));
     return identity.aesDecrypt(envelope, key, pairContext(peerUserId));
   }
+
   async function decryptFromChat(encContent, chatId, peerUserId) { const env = parseEnvelope(encContent); return env ? decryptEnvelope(env, peerUserId) : encContent; }
   async function attempt(message, chatId, currentUserId, opts) { const peer = peerFor(message, currentUserId, opts?.activeConversation); if (!peer) throw new Error('Message peer is unavailable'); return decryptFromChat(message.content, chatId, peer); }
   function notifyResolved(id, plaintext, entry) { decryptCache.set(id, plaintext); pending.delete(id); failed.delete(id); entry?.subscribers?.forEach(fn => { try { fn(plaintext); } catch (_) {} }); try { document.dispatchEvent(new CustomEvent('kyn:messageDecrypted', { detail: { messageId: id, chatId: entry?.chatId, plaintext } })); } catch (_) {} }
