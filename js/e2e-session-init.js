@@ -32,6 +32,7 @@
     loadPromise = (async () => {
       await loadScript('/js/e2e-identity-core.js');
       await loadScript('/js/message-e2e-core.js');
+      await loadScript('/js/message-e2e-compat.js');
 
       const facade = global.KynectaE2E || {};
       const dm = global.KynectaMessageE2E;
