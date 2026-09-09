@@ -31,6 +31,27 @@
     if (typeof content !== 'string') return false;
     try { const o = JSON.parse(content); return !!o && o.v === 2 && o.iv && o.ct && o.spk; } catch (_) { return false; }
   }
+  // ROOT-CAUSE FIX (old conversation history renders as raw ciphertext JSON
+  // instead of a placeholder): this bridge only recognizes v1/v2 envelopes.
+  // Messages from an earlier protocol generation (v3/v4/v5 — the previous
+  // X3DH double-ratchet format, e.g. {"v":3,"kid":...,"sid":...,"iv":...,
+  // "ct":...} or the v5 multi-device {"v":5,"mid":...,"devices":{...}} shape
+  // visible in stored history) parse as neither v1 nor v2 and used to fall
+  // straight through to "return content as-is" below — indistinguishable
+  // from real plaintext to bubbleHtml(), so the raw envelope JSON got
+  // rendered directly in the chat bubble. Anything that's still clearly an
+  // encrypted envelope (has a version field plus a ciphertext/iv field)
+  // must never be treated as plaintext just because this engine doesn't
+  // support that particular version.
+  function isUnsupportedEnvelope(content) {
+    if (typeof content !== 'string') return false;
+    const s = content.trim();
+    if (s.charAt(0) !== '{') return false;
+    try {
+      const o = JSON.parse(s);
+      return !!(o && typeof o === 'object' && ('v' in o) && (('ct' in o) || ('iv' in o)));
+    } catch (_) { return false; }
+  }
 
   async function decryptWithPrivate(privateKey, senderKey, envelope, info, aad) {
     const identity = global.KynectaE2EIdentity;
@@ -70,20 +91,33 @@
       }
     }
 
+    // ROOT-CAUSE FIX (own sent messages show "Unable to decrypt this
+    // message" after leaving the chat / reloading): this used to import
+    // env.spk and use it as "the other party's public key". env.spk is
+    // always the ENCRYPTER's own public key — correct when the local user
+    // is the recipient of this specific message, but wrong when the local
+    // user is re-decrypting a message THEY sent (env.spk is then their own
+    // key, and deriving a shared secret from your own priv + your own pub
+    // is not the key the message was encrypted with, so AES-GCM decrypt
+    // always fails). peerUserId here is already resolved by peerFor() above
+    // to "whichever side isn't me" regardless of who originally sent this
+    // message, so looking up that peer's current public key directly (the
+    // same lookup used at encrypt time) is correct in both directions and
+    // doesn't depend on trusting envelope-supplied key material at all.
     async function sharedIdentityV2Decrypt(content, chatId, peerUserId) {
       const env = JSON.parse(content);
-      if (!env.spk) throw new Error('Missing sender public key');
-      const senderKey = await importSpki(env.spk);
+      const peerEntry = await identity.publicKeyFor(peerUserId);
+      const peerKey = peerEntry.key;
       const me = String(identity.userId || dm.getMyUserId?.() || '');
       const canonicalPrivate = identity.privateKey;
       if (canonicalPrivate) {
         try {
-          return await decryptWithPrivate(canonicalPrivate, senderKey, env, pairContext(peerUserId, me), pairContext(peerUserId, me));
+          return await decryptWithPrivate(canonicalPrivate, peerKey, env, pairContext(peerUserId, me), pairContext(peerUserId, me));
         } catch (_) {}
       }
       const sharedPrivate = await global.KynectaE2E?.getMyIdentityPrivateKey?.();
       if (sharedPrivate) {
-        return decryptWithPrivate(sharedPrivate, senderKey, env, pairContext(peerUserId, me), pairContext(peerUserId, me));
+        return decryptWithPrivate(sharedPrivate, peerKey, env, pairContext(peerUserId, me), pairContext(peerUserId, me));
       }
       throw new Error('No compatible E2E identity available');
     }
@@ -100,7 +134,14 @@
     dm.decryptMessageForDisplay = async function (message, chatId, currentUserId, opts = {}) {
       const content = message?.content;
       const id = String(message?.id || message?.localId || message?.serverId || `${chatId}:${content || ''}`);
-      if (!isV1(content) && !isV2(content)) return typeof content === 'string' ? content : (content || '');
+      if (!isV1(content) && !isV2(content)) {
+        if (isUnsupportedEnvelope(content)) {
+          failures.add(id);
+          try { document.dispatchEvent(new CustomEvent('kyn:messageDecryptFailed', { detail: { messageId: id, error: 'Unsupported/legacy envelope version' } })); } catch (_) {}
+          return opts.fallbackText === undefined ? '🔒 Encrypted message' : opts.fallbackText;
+        }
+        return typeof content === 'string' ? content : (content || '');
+      }
       if (cache.has(id)) return cache.get(id);
       if (attempts.has(id)) return opts.fallbackText === undefined ? '🔒 Encrypted message' : opts.fallbackText;
 

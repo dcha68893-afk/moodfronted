@@ -12,6 +12,26 @@
   function pairContext(peerId) { const a = String(me() || ''), b = String(peerId || ''); return `kynecta-dm-v2:${[a, b].sort().join(':')}`; }
   function messageId(message) { return String(message?.id || message?.localId || message?.serverId || ''); }
   function parseEnvelope(content) { if (typeof content !== 'string') return null; try { const o = JSON.parse(content); return o && o.v === 2 && o.iv && o.ct && o.spk ? o : null; } catch (_) { return null; } }
+  // ROOT-CAUSE FIX (old messages render as raw ciphertext JSON instead of a
+  // placeholder): this engine only understands v2 envelopes. Older
+  // conversation history encrypted by a previous protocol generation (v1/v3/
+  // v4/v5, e.g. the earlier X3DH double-ratchet format — kid/sid/n/iv/ct or
+  // mid/senderDeviceId/devices shapes) parsed as null above and used to fall
+  // straight through to "return content as-is", which is indistinguishable
+  // from genuine plaintext to every caller — the literal ciphertext JSON got
+  // stored as displayContent and rendered in the chat bubble. Any object
+  // that's still clearly an encrypted envelope (has a version field plus a
+  // ciphertext/iv field) must never be treated as plaintext, even if this
+  // engine can't decrypt that particular version.
+  function isUnsupportedEnvelope(content) {
+    if (typeof content !== 'string') return false;
+    const s = content.trim();
+    if (s.charAt(0) !== '{') return false;
+    try {
+      const o = JSON.parse(s);
+      return !!(o && typeof o === 'object' && ('v' in o) && (('ct' in o) || ('iv' in o)));
+    } catch (_) { return false; }
+  }
   function peerFor(message, currentUserId, activeConversation) {
     const meId = currentUserId != null ? String(currentUserId) : me();
     const sender = message?.senderId != null ? String(message.senderId) : (message?.sender?.id != null ? String(message.sender.id) : null);
@@ -52,17 +72,29 @@
     return JSON.stringify({ v: 2, kid: identity.keyId, spk: identity.publicKey, iv: env.iv, ct: env.ct });
   }
 
+  // ROOT-CAUSE FIX (own sent messages become "Unable to decrypt" after a
+  // reload): this used to import envelope.spk and treat it as "the other
+  // party's public key" for the ECDH shared-secret derivation. envelope.spk
+  // is always the ENCRYPTER's own public key (see encryptForChat above,
+  // spk: identity.publicKey) — correct when the person decrypting is the
+  // recipient (their priv + sender's spk reproduces the same shared secret
+  // the sender computed with their own priv + recipient's pub, since
+  // static-static ECDH is symmetric either direction). But when the
+  // ORIGINAL SENDER later re-decrypts their own history (e.g. after a page
+  // reload wipes the in-memory optimistic displayContent), envelope.spk is
+  // THEIR OWN key, not the peer's — deriving ECDH(myPriv, myPub) instead of
+  // ECDH(myPriv, peerPub) silently produces the wrong key and a guaranteed
+  // AES-GCM auth failure. peerUserId (from peerFor()/attempt() above) is
+  // already correctly resolved to "whichever side isn't me" regardless of
+  // who originally sent this specific message, so fetching that peer's
+  // current public key directly (same lookup encryptForChat itself uses)
+  // is both correct for received messages and fixes the own-message case,
+  // without needing to special-case direction here at all.
   async function decryptEnvelope(envelope, peerUserId) {
     const identity = await ensureIdentity();
     if (!peerUserId) throw new Error('Message sender/recipient is missing');
-    const senderKey = await crypto.subtle.importKey(
-      'spki',
-      Uint8Array.from(atob(envelope.spk), c => c.charCodeAt(0)),
-      { name: 'ECDH', namedCurve: 'P-256' },
-      true,
-      []
-    );
-    const shared = await identity.deriveShared(senderKey);
+    const peerEntry = await identity.publicKeyFor(peerUserId);
+    const shared = await identity.deriveShared(peerEntry.key);
     const key = await identity.hkdf(shared, pairContext(peerUserId));
     return identity.aesDecrypt(envelope, key, pairContext(peerUserId));
   }
@@ -73,7 +105,13 @@
   function notifyFailed(id, error, entry) { pending.delete(id); failed.add(id); entry?.subscribers?.forEach(fn => { try { fn(null, error); } catch (_) {} }); try { document.dispatchEvent(new CustomEvent('kyn:messageDecryptFailed', { detail: { messageId: id, error: error?.message || String(error || 'Decryption failed') } })); } catch (_) {} }
   async function decryptMessageForDisplay(message, chatId, currentUserId, opts = {}) {
     const id = messageId(message) || `${chatId}:${message?.content || ''}`;
-    if (!parseEnvelope(message?.content)) return typeof message?.content === 'string' ? message.content : (message?.content || '');
+    if (!parseEnvelope(message?.content)) {
+      if (isUnsupportedEnvelope(message?.content)) {
+        failed.add(id);
+        return opts.fallbackText === undefined ? '' : opts.fallbackText;
+      }
+      return typeof message?.content === 'string' ? message.content : (message?.content || '');
+    }
     if (decryptCache.has(id)) return decryptCache.get(id); if (inflight.has(id)) return inflight.get(id);
     const entry = pending.get(id) || { chatId, subscribers: new Set() }; pending.set(id, entry);
     if (typeof opts.onResolved === 'function') entry.subscribers.add(opts.onResolved);
