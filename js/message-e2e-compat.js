@@ -103,41 +103,59 @@
     }
 
     // ROOT-CAUSE FIX (own sent messages show "Unable to decrypt this
-    // message" after leaving the chat / reloading): this used to import
-    // env.spk and use it as "the other party's public key". env.spk is
-    // always the ENCRYPTER's own public key — correct when the local user
-    // is the recipient of this specific message, but wrong when the local
-    // user is re-decrypting a message THEY sent (env.spk is then their own
-    // key, and deriving a shared secret from your own priv + your own pub
-    // is not the key the message was encrypted with, so AES-GCM decrypt
-    // always fails). peerUserId here is already resolved by peerFor() above
-    // to "whichever side isn't me" regardless of who originally sent this
-    // message, so looking up that peer's current public key directly (the
-    // same lookup used at encrypt time) is correct in both directions and
-    // doesn't depend on trusting envelope-supplied key material at all.
-    async function sharedIdentityV2Decrypt(content, chatId, peerUserId) {
+    // message" after leaving the chat / reloading; receiver decrypts using
+    // the sender's CURRENT key instead of the key that actually encrypted
+    // the message): this used to always import env.spk and treat it as
+    // "the other party's public key" — wrong direction the moment the
+    // local user is re-decrypting a message THEY sent, since env.spk is
+    // always the ENCRYPTER's own key. It also always called
+    // identity.publicKeyFor(peerUserId) for the ECDH partner key —
+    // whichever key is active for that user RIGHT NOW — which is the wrong
+    // key entirely once either side has rotated since this message was
+    // sent. This is the fallback path used when the canonical core's own
+    // decrypt (message-e2e-core.js's decryptEnvelope, which already tries
+    // the envelope's self-contained spk/rpk and a historical-keyId lookup
+    // first) has already failed, so mirror the same priority order here
+    // instead of jumping straight to "whatever's current": isOwnMessage
+    // (now threaded through from decryptMessageForDisplay below, instead
+    // of being silently dropped) picks env.rpk vs env.spk, `identity.
+    // publicKeyForVersion` is tried against kid/rkid, and only after both
+    // of those are exhausted does this fall back to the current-key
+    // lookup that was previously the only option.
+    async function sharedIdentityV2Decrypt(content, chatId, peerUserId, isOwnMessage) {
       const env = JSON.parse(content);
-      const peerEntry = await identity.publicKeyFor(peerUserId);
-      const peerKey = peerEntry.key;
       const me = String(identity.userId || dm.getMyUserId?.() || '');
       const canonicalPrivate = identity.privateKey;
-      if (canonicalPrivate) {
-        try {
-          return await decryptWithPrivate(canonicalPrivate, peerKey, env, pairContext(peerUserId, me), pairContext(peerUserId, me));
-        } catch (_) {}
+      const sharedPrivate = canonicalPrivate || await global.KynectaE2E?.getMyIdentityPrivateKey?.();
+      if (!sharedPrivate) throw new Error('No compatible E2E identity available');
+
+      const selfContainedRaw = isOwnMessage ? env.rpk : env.spk;
+      const historicalKeyId = isOwnMessage ? env.rkid : env.kid;
+      const candidates = [];
+      if (selfContainedRaw && typeof identity.importPeerKey === 'function') candidates.push(() => identity.importPeerKey(selfContainedRaw));
+      if (historicalKeyId && typeof identity.publicKeyForVersion === 'function') candidates.push(async () => {
+        const historical = await identity.publicKeyForVersion(peerUserId, historicalKeyId);
+        if (!historical) throw new Error('Historical key unavailable');
+        return historical.key;
+      });
+      candidates.push(async () => (await identity.publicKeyFor(peerUserId)).key);
+
+      let lastErr = null;
+      for (const getKey of candidates) {
+        let peerKey;
+        try { peerKey = await getKey(); } catch (_) { continue; }
+        if (!peerKey) continue;
+        try { return await decryptWithPrivate(sharedPrivate, peerKey, env, pairContext(peerUserId, me), pairContext(peerUserId, me)); }
+        catch (err) { lastErr = err; }
       }
-      const sharedPrivate = await global.KynectaE2E?.getMyIdentityPrivateKey?.();
-      if (sharedPrivate) {
-        return decryptWithPrivate(sharedPrivate, peerKey, env, pairContext(peerUserId, me), pairContext(peerUserId, me));
-      }
-      throw new Error('No compatible E2E identity available');
+      throw lastErr || new Error('Decryption failed');
     }
 
-    dm.decryptFromChat = async function (encContent, chatId, peerUserId) {
+    dm.decryptFromChat = async function (encContent, chatId, peerUserId, isOwnMessage) {
       if (isV1(encContent)) return legacyDecrypt(encContent, chatId, peerUserId);
       if (isV2(encContent)) {
-        try { return await originalDecryptFromChat(encContent, chatId, peerUserId); }
-        catch (_) { return sharedIdentityV2Decrypt(encContent, chatId, peerUserId); }
+        try { return await originalDecryptFromChat(encContent, chatId, peerUserId, isOwnMessage); }
+        catch (_) { return sharedIdentityV2Decrypt(encContent, chatId, peerUserId, isOwnMessage); }
       }
       return encContent;
     };
@@ -161,6 +179,16 @@
         failures.add(id);
         return opts.fallbackText === undefined ? '🔒 Encrypted message' : opts.fallbackText;
       }
+      // FIX: direction was never computed here, so every decrypt — including
+      // the local user re-viewing their OWN sent messages — was silently
+      // treated as "receiving" (isOwnMessage undefined/false). That's the
+      // flag decryptFromChat/decryptEnvelope now need to pick envelope.rpk
+      // over envelope.spk; without threading it through, own-message
+      // re-decryption after a key rotation could never work even though the
+      // core and this fallback both now know how to do it correctly.
+      const meIdForDirection = currentUserId != null ? String(currentUserId) : String(dm.getMyUserId?.() || '');
+      const senderIdForDirection = message?.senderId != null ? String(message.senderId) : (message?.sender?.id != null ? String(message.sender.id) : null);
+      const isOwnMessage = !!(senderIdForDirection && meIdForDirection && senderIdForDirection === meIdForDirection);
 
       attempts.set(id, 0);
       const tryDecrypt = async () => {
@@ -168,7 +196,7 @@
         for (let i = 0; i < 5; i++) {
           attempts.set(id, i + 1);
           try {
-            const text = await dm.decryptFromChat(content, chatId, peer);
+            const text = await dm.decryptFromChat(content, chatId, peer, isOwnMessage);
             if (typeof text === 'string' && text && !/^\[Encrypted|^\[Decryption failed/.test(text)) return text;
             lastError = new Error(text || 'Decryption failed');
           } catch (e) { lastError = e; }

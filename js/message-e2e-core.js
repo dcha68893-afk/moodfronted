@@ -84,56 +84,87 @@
     const shared = await identity.deriveShared(peer.key);
     const key = await identity.hkdf(shared, pairContext(recipientUserId));
     const env = await identity.aesEncrypt(String(plaintext), key, pairContext(recipientUserId));
-    return JSON.stringify({ v: 2, kid: identity.keyId, spk: identity.publicKey, iv: env.iv, ct: env.ct });
+    // FIX (HISTORICAL-KEY-SELF-CONTAINED-ENVELOPE): the envelope already
+    // carried `spk` (the SENDER's own public key at encryption time) but
+    // nothing recorded which of the RECIPIENT's public keys was used to
+    // derive the shared secret. Without that, re-deriving this exact
+    // shared secret later (by either party, after either side's key has
+    // possibly rotated) had to fall back on "whatever key is active right
+    // now" — wrong the moment either party rotates. `rpk`/`rkid` embed the
+    // recipient's public key bytes and keyId actually used here, making
+    // the envelope fully self-describing: decrypting it later never has to
+    // depend on a live "current key" lookup for either side. See
+    // decryptEnvelope() below for how these are consumed.
+    return JSON.stringify({ v: 2, kid: identity.keyId, spk: identity.publicKey, rkid: peer.keyId, rpk: peer.pub, iv: env.iv, ct: env.ct });
   }
 
-  // ROOT-CAUSE FIX (own sent messages become "Unable to decrypt" after a
-  // reload): this used to import envelope.spk and treat it as "the other
-  // party's public key" for the ECDH shared-secret derivation. envelope.spk
-  // is always the ENCRYPTER's own public key (see encryptForChat above,
-  // spk: identity.publicKey) — correct when the person decrypting is the
-  // recipient (their priv + sender's spk reproduces the same shared secret
-  // the sender computed with their own priv + recipient's pub, since
-  // static-static ECDH is symmetric either direction). But when the
-  // ORIGINAL SENDER later re-decrypts their own history (e.g. after a page
-  // reload wipes the in-memory optimistic displayContent), envelope.spk is
-  // THEIR OWN key, not the peer's — deriving ECDH(myPriv, myPub) instead of
-  // ECDH(myPriv, peerPub) silently produces the wrong key and a guaranteed
-  // AES-GCM auth failure. peerUserId (from peerFor()/attempt() above) is
-  // already correctly resolved to "whichever side isn't me" regardless of
-  // who originally sent this specific message, so fetching that peer's
-  // current public key directly (same lookup encryptForChat itself uses)
-  // is both correct for received messages and fixes the own-message case,
-  // without needing to special-case direction here at all.
-  // ROOT-CAUSE FIX (STALE-CACHED-PEER-KEY-NEVER-RETRIED): decryption used
-  // to make exactly one attempt against whatever key was already cached for
-  // this peer, cache-hit or not. The single most common reason a
-  // previously-working conversation starts failing is that the peer's key
-  // actually changed (they re-registered — see e2e-identity-core.js's new
-  // live key-rotation listener, which fixes this going FORWARD) but our
-  // side is still holding whatever copy was cached BEFORE that happened —
-  // no future push event replays a rotation that already happened. On a
-  // genuine AES-GCM failure, purge the cached entry and retry exactly once
-  // against a forced, fresh fetch of the peer's current key before giving
-  // up — cheap (one retry, not a loop) and turns "permanently broken until
-  // someone manually clears storage" into "self-heals on the next message".
-  async function decryptEnvelope(envelope, peerUserId, _retried) {
+  // ROOT-CAUSE FIX (receiver decrypts using the sender's CURRENT public key
+  // instead of the key that actually encrypted the message): this used to
+  // ignore envelope.spk/kid entirely and always fetch identity.publicKeyFor
+  // (peerUserId) — whatever key is active for that user RIGHT NOW. If the
+  // sender's key had rotated since this particular message was sent (new
+  // device, reinstall, cleared storage), that's the WRONG key and AES-GCM
+  // authentication fails deterministically. The message already carries
+  // the exact key it was encrypted against:
+  //   - received message (peer is the sender): envelope.spk is the
+  //     sender's public key at encryption time — use it directly.
+  //   - own sent message viewed later (peer is the recipient): envelope.rpk
+  //     is the recipient's public key that was used — use it directly.
+  // Neither case needs a network round trip or depends on what's currently
+  // registered server-side; the envelope is self-contained. This resolves
+  // candidate keys in priority order and tries each in turn:
+  //   1. the self-contained key embedded in the envelope (spk/rpk) — no
+  //      lookup at all, correct even if the peer has since rotated.
+  //   2. a historical lookup by keyId (kid/rkid) against the server's key
+  //      history (identity.publicKeyForVersion) — covers messages sent
+  //      before rpk existed, where the exact key isn't embedded but its
+  //      keyId is.
+  //   3. whatever is currently cached/registered for this peer — the
+  //      pre-existing behavior, kept as a last resort for the oldest
+  //      messages (no rpk, no useful kid) and as defense-in-depth.
+  //   4. purge the cache and force one fresh fetch of the current key, in
+  //      case it's simply stale locally (self-heals a rotation the live
+  //      key-push listener in e2e-identity-core.js hasn't caught up on).
+  async function decryptEnvelope(envelope, peerUserId, isOwnMessage) {
     const identity = await ensureIdentity();
     if (!peerUserId) throw new Error('Message sender/recipient is missing');
-    const peerEntry = await identity.publicKeyFor(peerUserId, _retried);
-    const shared = await identity.deriveShared(peerEntry.key);
-    const key = await identity.hkdf(shared, pairContext(peerUserId));
-    try {
-      return await identity.aesDecrypt(envelope, key, pairContext(peerUserId));
-    } catch (err) {
-      if (_retried) throw err;
-      identity.purgePublicKey?.(peerUserId);
-      return decryptEnvelope(envelope, peerUserId, true);
+
+    const selfContainedRaw = isOwnMessage ? envelope.rpk : envelope.spk;
+    const historicalKeyId = isOwnMessage ? envelope.rkid : envelope.kid;
+
+    const candidates = [];
+    if (selfContainedRaw) candidates.push(() => identity.importPeerKey(selfContainedRaw));
+    if (historicalKeyId) candidates.push(async () => {
+      const historical = await identity.publicKeyForVersion(peerUserId, historicalKeyId);
+      if (!historical) throw new Error('Historical key unavailable');
+      return historical.key;
+    });
+    candidates.push(async () => (await identity.publicKeyFor(peerUserId)).key);
+    candidates.push(async () => { identity.purgePublicKey?.(peerUserId); return (await identity.publicKeyFor(peerUserId, true)).key; });
+
+    let lastErr = null;
+    for (const getKey of candidates) {
+      let peerKey;
+      try { peerKey = await getKey(); } catch (_) { continue; }
+      if (!peerKey) continue;
+      try {
+        const shared = await identity.deriveShared(peerKey);
+        const key = await identity.hkdf(shared, pairContext(peerUserId));
+        return await identity.aesDecrypt(envelope, key, pairContext(peerUserId));
+      } catch (err) { lastErr = err; }
     }
+    throw lastErr || new Error('Decryption failed');
   }
 
-  async function decryptFromChat(encContent, chatId, peerUserId) { const env = parseEnvelope(encContent); return env ? decryptEnvelope(env, peerUserId) : encContent; }
-  async function attempt(message, chatId, currentUserId, opts) { const peer = peerFor(message, currentUserId, opts?.activeConversation); if (!peer) throw new Error('Message peer is unavailable'); return decryptFromChat(message.content, chatId, peer); }
+  async function decryptFromChat(encContent, chatId, peerUserId, isOwnMessage) { const env = parseEnvelope(encContent); return env ? decryptEnvelope(env, peerUserId, isOwnMessage) : encContent; }
+  async function attempt(message, chatId, currentUserId, opts) {
+    const peer = peerFor(message, currentUserId, opts?.activeConversation);
+    if (!peer) throw new Error('Message peer is unavailable');
+    const meId = currentUserId != null ? String(currentUserId) : me();
+    const sender = message?.senderId != null ? String(message.senderId) : (message?.sender?.id != null ? String(message.sender.id) : null);
+    const isOwnMessage = !!(sender && meId && sender === meId);
+    return decryptFromChat(message.content, chatId, peer, isOwnMessage);
+  }
   function notifyResolved(id, plaintext, entry) { decryptCache.set(id, plaintext); pending.delete(id); failed.delete(id); entry?.subscribers?.forEach(fn => { try { fn(plaintext); } catch (_) {} }); try { document.dispatchEvent(new CustomEvent('kyn:messageDecrypted', { detail: { messageId: id, chatId: entry?.chatId, plaintext } })); } catch (_) {} }
   function notifyFailed(id, error, entry) { pending.delete(id); failed.add(id); entry?.subscribers?.forEach(fn => { try { fn(null, error); } catch (_) {} }); try { document.dispatchEvent(new CustomEvent('kyn:messageDecryptFailed', { detail: { messageId: id, error: error?.message || String(error || 'Decryption failed') } })); } catch (_) {} }
   async function decryptMessageForDisplay(message, chatId, currentUserId, opts = {}) {

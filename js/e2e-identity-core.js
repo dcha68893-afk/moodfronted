@@ -160,7 +160,17 @@
       try {
         const s = JSON.parse(localStorage.getItem(PUB_STORE) || '{}');
         if (s[userId]?.pub) {
-          const entry = { key: await importPub(s[userId].pub), keyId: s[userId].keyId };
+          // FIX (HISTORICAL-KEY-SELF-CONTAINED-ENVELOPE): entries now retain
+          // the raw base64 public key (`pub`), not just the imported
+          // CryptoKey. Callers that need to embed/compare the exact bytes
+          // (encryptForChat's rpk, decryptEnvelope's envelope.spk/.rpk
+          // handling) previously had no way to get back the original
+          // base64 from an already-imported CryptoKey without a redundant
+          // re-export. See message-e2e-core.js decryptEnvelope() for why
+          // this matters: a message envelope now carries the exact public
+          // key bytes used at encryption time, so decrypting it later
+          // never has to depend on whatever this cache happens to hold.
+          const entry = { key: await importPub(s[userId].pub), keyId: s[userId].keyId, pub: s[userId].pub };
           pubCache.set(userId, entry); return entry;
         }
       } catch (_) {}
@@ -172,7 +182,7 @@
       const j = await r.json();
       const raw = j?.data?.publicKey;
       if (!raw) throw new Error('Recipient has no public key');
-      const entry = { key: await importPub(raw), keyId: j.data.keyId };
+      const entry = { key: await importPub(raw), keyId: j.data.keyId, pub: raw };
       pubCache.set(userId, entry);
       try { const s = JSON.parse(localStorage.getItem(PUB_STORE) || '{}'); s[userId] = { pub: raw, keyId: entry.keyId }; localStorage.setItem(PUB_STORE, JSON.stringify(s)); } catch (_) {}
       try { document.dispatchEvent(new CustomEvent('kyn:e2eKeyAvailable', { detail: { userId } })); } catch (_) {}
@@ -180,6 +190,44 @@
     })().finally(() => inflightFetch.delete(userId));
     inflightFetch.set(userId, p);
     return p;
+  }
+
+  // FIX (HISTORICAL-KEY-LOOKUP): companion to the backend's new
+  // GET /api/encryption/keys/:userId/version/:keyId. publicKeyFor() above
+  // only ever resolves to whichever key is CURRENTLY active for a user —
+  // exactly wrong for re-deriving the shared secret of a message that was
+  // encrypted against an older, since-rotated key. This resolves one
+  // SPECIFIC historical keyId and caches it separately (keyed by
+  // "userId:keyId", never overwriting the "current key" cache above, which
+  // callers still need for encrypting NEW outgoing messages). Used as a
+  // fallback in message-e2e-core.js's decryptEnvelope() when a message
+  // envelope predates the self-contained spk/rpk fix and only has
+  // `kid`/`rkid` to go on.
+  const histCache = new Map();
+  const HIST_STORE = 'kyn_e2e_pubkeys_hist_v1';
+  async function publicKeyForVersion(userId, keyIdValue) {
+    userId = String(userId);
+    if (!userId || !keyIdValue) return null;
+    const cacheKey = `${userId}:${keyIdValue}`;
+    if (histCache.has(cacheKey)) return histCache.get(cacheKey);
+    try {
+      const s = JSON.parse(localStorage.getItem(HIST_STORE) || '{}');
+      if (s[cacheKey]?.pub) {
+        const entry = { key: await importPub(s[cacheKey].pub), keyId: keyIdValue, pub: s[cacheKey].pub };
+        histCache.set(cacheKey, entry); return entry;
+      }
+    } catch (_) {}
+    try {
+      const r = await request(`/api/encryption/keys/${encodeURIComponent(userId)}/version/${encodeURIComponent(keyIdValue)}`);
+      if (!r.ok) return null;
+      const j = await r.json();
+      const raw = j?.data?.publicKey;
+      if (!raw) return null;
+      const entry = { key: await importPub(raw), keyId: keyIdValue, pub: raw };
+      histCache.set(cacheKey, entry);
+      try { const s = JSON.parse(localStorage.getItem(HIST_STORE) || '{}'); s[cacheKey] = { pub: raw }; localStorage.setItem(HIST_STORE, JSON.stringify(s)); } catch (_) {}
+      return entry;
+    } catch (_) { return null; }
   }
 
   // FIX (LOGIN-TIME-KEY-WARMUP): publicKeyFor() above is already cache-first
@@ -201,7 +249,7 @@
     for (const id of wanted) {
       if (pubCache.has(id)) continue;
       if (store[id]?.pub) {
-        try { pubCache.set(id, { key: await importPub(store[id].pub), keyId: store[id].keyId }); continue; }
+        try { pubCache.set(id, { key: await importPub(store[id].pub), keyId: store[id].keyId, pub: store[id].pub }); continue; }
         catch (_) { /* corrupted entry — fall through to re-fetch */ }
       }
       missing.push(id);
@@ -217,7 +265,7 @@
         const raw = data[id]?.publicKey;
         if (!raw) continue;
         try {
-          pubCache.set(id, { key: await importPub(raw), keyId: data[id].keyId });
+          pubCache.set(id, { key: await importPub(raw), keyId: data[id].keyId, pub: raw });
           store[id] = { pub: raw, keyId: data[id].keyId };
           dirty = true;
         } catch (_) { /* skip a corrupt individual entry, keep the rest */ }
@@ -246,7 +294,7 @@
     userId = String(userId);
     if (!userId || !rawPubB64) return false;
     try {
-      pubCache.set(userId, { key: await importPub(rawPubB64), keyId: keyIdValue });
+      pubCache.set(userId, { key: await importPub(rawPubB64), keyId: keyIdValue, pub: rawPubB64 });
       const s = JSON.parse(localStorage.getItem(PUB_STORE) || '{}');
       s[userId] = { pub: rawPubB64, keyId: keyIdValue };
       localStorage.setItem(PUB_STORE, JSON.stringify(s));
@@ -305,7 +353,14 @@
 
   global.KynectaE2EIdentity = {
     init, get enabled() { return enabled; }, get privateKey() { return privateKey; }, get publicKey() { return publicKeyB64; }, get keyId() { return keyId; }, get userId() { return uid(); }, ready: () => readyPromise,
-    publicKeyFor, publicKeysForBatch, purgePublicKey, cachePublicKey, deriveShared, hkdf, aesEncrypt, aesDecrypt, wrapAtRest, unwrapAtRest,
+    publicKeyFor, publicKeysForBatch, publicKeyForVersion, purgePublicKey, cachePublicKey, deriveShared, hkdf, aesEncrypt, aesDecrypt, wrapAtRest, unwrapAtRest,
+    // FIX (HISTORICAL-KEY-SELF-CONTAINED-ENVELOPE): lets message-e2e-core /
+    // message-e2e-compat import a raw public key they already have in hand
+    // (envelope.spk / envelope.rpk) directly, with no cache/network lookup
+    // at all — the whole point of embedding those bytes in the envelope in
+    // the first place. importPub is otherwise a private helper of this
+    // module.
+    importPeerKey: (rawB64) => importPub(rawB64),
     getOrCreateDeviceId: async () => global.KynectaE2EStore?.getOrCreateDeviceId?.() || 'primary',
     getSafetyNumbers: async function(theirPubKeyB64) {
       if (!publicKeyB64 || !theirPubKeyB64) return null;
