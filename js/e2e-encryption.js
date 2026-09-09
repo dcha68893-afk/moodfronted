@@ -1537,27 +1537,26 @@
 
   global.KynectaE2E = {
     init,
-    encryptForChat,
-    decryptFromChat,
-    // CRYPTO-PIPELINE: the single canonical decrypt-for-display service and
-    // its peer-resolution helper — see the block above decryptFromChat.
-    // Every UI surface (chat panel, sidebar/recent-chats, search, multi-send
-    // picker, hidden vault, unread counter, notifications) should call
-    // decryptMessageForDisplay() instead of hand-rolling its own envelope
-    // detection + decrypt call.
-    decryptMessageForDisplay,
+    // OWNERSHIP NOTE (single canonical private-message path): this object
+    // intentionally does NOT expose encryptForChat / decryptFromChat /
+    // decryptMessageForDisplay / prefetchRecipientKey / cacheRecipientKey /
+    // isMessageQueued / isMessageFailed / registerPendingDecrypt /
+    // encryptAttachment / decryptAttachment / peekDecryptedText here anymore.
+    // Those are private-message operations and are owned exclusively by
+    // js/message-e2e-core.js (via js/e2e-session-init.js, which patches this
+    // exact object with the canonical versions once it loads). Previously
+    // this file also exported its own legacy versions of all of the above,
+    // which meant window.KynectaE2E briefly ran THIS file's decrypt/encrypt
+    // implementation against the canonical v2 envelope format until
+    // e2e-session-init.js's async patch landed — a real, reachable race that
+    // produced OperationError / stuck "Decrypting…" / reverting plaintext.
+    // group.html/groupEncryption.client.js was audited and does not call any
+    // of the removed names (it only uses wrapForLocalStorage + the sender-key
+    // functions below), so removing them here does not affect group E2E.
+    // The function bodies remain defined above for this file's own internal
+    // legacy retry-queue bookkeeping; they are simply no longer exported.
     resolveMessageCryptoPeer,
-    peekDecryptedText,
-    // FIX (PLACEHOLDER-STICKS-ON-FIRST-MESSAGE): see definition above.
-    isMessageQueued,
-    isMessageFailed,
-    // FIX (X3DH-QUEUE-BYPASS): see definition above.
-    registerPendingDecrypt,
     log: _pipelineLog,
-    // FIX (SEND-HANG-NON-HISTORY-OPEN): see prefetchRecipientKey definition above.
-    prefetchRecipientKey,
-    // FIX (BOOTSTRAP-KEY-NEVER-CACHED): see cacheRecipientKey definition above.
-    cacheRecipientKey,
     // FIX-NO-PLAINTEXT-FALLBACK: single catchable error constructor so
     // callers can distinguish "couldn't secure this send in time" (retry
     // is the right move) from other failures instead of guessing off
@@ -1565,9 +1564,6 @@
     E2ESecureFailureError,
     waitForEnabled: _waitForEnabled,
     waitForEnabledBounded: _waitForEnabledBounded,
-    encryptAttachment,
-    decryptAttachment,
-    getSafetyNumbers,
     // Group encryption (Sender Keys)
     generateSenderKey,
     importSenderKey,

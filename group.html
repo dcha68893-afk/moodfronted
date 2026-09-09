@@ -66,7 +66,11 @@
          looks up window.KynectaE2E fresh at call time (not via a captured
          reference), so this only worked by luck of timing rather than by
          design — removed. -->
-    <script src="js/double-ratchet.js" defer></script>
+    <!-- js/double-ratchet.js was deleted (obsolete private-message Double
+         Ratchet generation, commit a080662); this reference to it was dead
+         (404 on every load) and group encryption never depended on it —
+         group.html only needs e2e-encryption.js's sender-key functions +
+         groupEncryption.client.js/sealed-groups.js below. Removed. -->
     <script src="js/safety-numbers.js" defer></script>
     <script src="js/sealed-groups.js" defer></script>
     <!-- FIX (DUPLICATE-E2E-INIT): this used to be ~35 lines of inline script

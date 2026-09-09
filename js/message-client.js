@@ -28,6 +28,51 @@
         connectionState: 'disconnected',
     };
 
+    // FIX (CANONICAL-E2E-RACE): js/e2e-session-init.js patches window.KynectaE2E
+    // with the canonical private-message implementation asynchronously (it
+    // dynamically loads js/e2e-identity-core.js + js/message-e2e-core.js over
+    // the network, then swaps the encrypt/decrypt functions in). Until that
+    // patch lands, window.KynectaE2E is already truthy — it's the object
+    // js/e2e-encryption.js created — so a naive `if (window.KynectaE2E)` check
+    // is not a valid readiness signal. Every call site below that touches
+    // encryption must wait on this instead of just checking truthiness.
+    function waitForMessageE2E(timeoutMs) {
+        timeoutMs = timeoutMs || 8000;
+        if (typeof window.KynectaMessageE2EReady === 'function') {
+            return Promise.race([
+                window.KynectaMessageE2EReady().then(() => true).catch(() => false),
+                new Promise((resolve) => setTimeout(() => resolve(false), timeoutMs)),
+            ]);
+        }
+        // e2e-session-init.js hasn't defined the loader yet (extremely early
+        // call) — poll briefly for it, then fall through to the race above.
+        return new Promise((resolve) => {
+            const start = Date.now();
+            (function poll() {
+                if (typeof window.KynectaMessageE2EReady === 'function') {
+                    resolve(waitForMessageE2E(timeoutMs - (Date.now() - start)));
+                    return;
+                }
+                if (Date.now() - start >= timeoutMs) { resolve(false); return; }
+                setTimeout(poll, 50);
+            })();
+        });
+    }
+
+    // When the canonical core finishes loading after some messages already
+    // rendered a fallback (because they were decrypted — or attempted — during
+    // the race window above), re-run decryption for anything in the visible
+    // conversations that isn't already resolved plaintext.
+    document.addEventListener('kyn:canonicalMessageE2EReady', () => {
+        for (const [chatId, bucket] of state.messagesByConversation.entries()) {
+            for (const message of bucket.values()) {
+                if (message && message.displayContent === undefined) {
+                    decryptForDisplay(chatId, message);
+                }
+            }
+        }
+    });
+
     const listeners = new Set();
     function subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); }
     function notify(event, data) { listeners.forEach(fn => { try { fn(event, data); } catch (_) {} }); }
@@ -88,14 +133,38 @@
         }
     }
 
+    // Cheap, local shape check only — NOT a second decrypt implementation.
+    // Lets plain/system-message content render immediately without waiting
+    // on crypto readiness; anything that looks like a v2 envelope still goes
+    // through the one canonical decrypt path below.
+    function looksLikeEnvelope(content) {
+        if (typeof content !== 'string' || content.charAt(0) !== '{') return false;
+        try { const o = JSON.parse(content); return !!(o && typeof o === 'object' && ('v' in o || 'ct' in o || 'iv' in o)); }
+        catch (_) { return false; }
+    }
+
     async function decryptForDisplay(chatId, message) {
         if (message.displayContent !== undefined) return; // already resolved (e.g. our own just-sent message)
-        if (!window.KynectaE2E) {
+        if (!looksLikeEnvelope(message.content)) {
             const bucket = state.messagesByConversation.get(chatId);
             if (bucket && bucket.has(message.id)) {
                 bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: message.content }));
                 syncLastMessageDisplay(chatId, message.id, message.content);
             }
+            return;
+        }
+        // FIX (CANONICAL-E2E-RACE): wait for the canonical core to be patched
+        // in before deciding KynectaE2E isn't available. Without this, a
+        // message that arrives before js/e2e-session-init.js finishes its
+        // async load either silently ran through the legacy decrypt path
+        // (mismatched key derivation -> OperationError) or hit an undefined
+        // function — both permanently mis-rendered the message with no retry.
+        const ready = await waitForMessageE2E();
+        if (!ready || !window.KynectaE2E || typeof window.KynectaE2E.decryptMessageForDisplay !== 'function') {
+            // Canonical core genuinely unavailable (or timed out) — leave the
+            // message unresolved (displayContent stays undefined) rather than
+            // rendering raw ciphertext, so the kyn:canonicalMessageE2EReady
+            // listener above can retry it once the core does load.
             return;
         }
         const conv = state.conversations.get(chatId);
@@ -410,8 +479,16 @@
 
         let outgoingContent = content;
         const recipientUserId = resolveRecipientUserId(optimisticMessage.chatId, receiverId);
-        if (content && window.KynectaE2E && recipientUserId) {
+        if (content && recipientUserId) {
             try {
+                // FIX (CANONICAL-E2E-RACE): see waitForMessageE2E() above —
+                // don't gate only on window.KynectaE2E truthiness, which is
+                // set synchronously by the legacy file long before the
+                // canonical encryptForChat is actually patched in.
+                const ready = await waitForMessageE2E();
+                if (!ready || typeof window.KynectaE2E?.encryptForChat !== 'function') {
+                    throw new Error('Secure messaging is not ready yet');
+                }
                 outgoingContent = await window.KynectaE2E.encryptForChat(content, chatId || null, recipientUserId);
             } catch (err) {
                 bucket.set(optimisticId, Object.assign({}, optimisticMessage, { status: 'failed' }));
@@ -490,8 +567,12 @@
         try {
             let outgoingContent = content;
             const recipientUserId = resolveRecipientUserId(chatId, null);
-            if (content && window.KynectaE2E && recipientUserId) {
+            if (content && recipientUserId) {
                 try {
+                    const ready = await waitForMessageE2E();
+                    if (!ready || typeof window.KynectaE2E?.encryptForChat !== 'function') {
+                        throw new Error('Secure messaging is not ready yet');
+                    }
                     outgoingContent = await window.KynectaE2E.encryptForChat(content, chatId, recipientUserId);
                 } catch (err) {
                     return { success: false, error: err.message || 'Could not encrypt the edited message' };
@@ -1085,23 +1166,30 @@
         resolvedChatId = state.activeChatId;
         notify('chat:open-requested', { conversationId: normalizeChatId(resolvedChatId), userId: normalizedUserId || userId, messageId });
 
-        // Pre-warm the encryption session now, not on first keystroke/send —
-        // this is exactly what real E2E messengers do: the network round-trip
-        // to fetch the other person's prekey bundle and derive a shared
-        // session happens while the user is still looking at the chat, not
-        // after they hit send. Nothing is actually sent to the server here —
-        // encryptForChat's side effect (establishing the session) is what we
-        // want; the resulting ciphertext is discarded.
-        if (window.KynectaE2E) {
+        // Pre-warm the recipient key fetch now, not on first keystroke/send —
+        // the network round-trip to fetch the other person's public key
+        // happens while the user is still looking at the chat, not after
+        // they hit send.
+        // FIX (DUMMY-ENCRYPT-WARMUP): this used to call
+        // encryptForChat(' ', ...) purely for its side effect of fetching and
+        // caching the recipient's public key, discarding the resulting
+        // ciphertext. That did a full ECDH derive + HKDF + AES-GCM encrypt of
+        // a throwaway string for no reason — the canonical core already
+        // exposes prefetchRecipientKey() for exactly this, with no wasted
+        // crypto work and no dependency on a chatId. Also now correctly waits
+        // for the canonical core (see waitForMessageE2E above) instead of
+        // just checking window.KynectaE2E truthiness.
+        waitForMessageE2E().then((ready) => {
+            if (!ready || typeof window.KynectaE2E?.prefetchRecipientKey !== 'function') return;
             const recipientForWarmup = resolveRecipientUserId(resolvedChatId, userId);
             if (recipientForWarmup) {
-                window.KynectaE2E.encryptForChat(' ', resolvedChatId || null, recipientForWarmup).catch(() => {
-                    // Non-fatal — if the recipient hasn't published prekeys yet
+                window.KynectaE2E.prefetchRecipientKey(recipientForWarmup).catch(() => {
+                    // Non-fatal — if the recipient hasn't published a key yet
                     // (they've never opened the app, or are mid-registration),
                     // the real send later will retry this the normal way.
                 });
             }
-        }
+        });
 
         if (resolvedChatId) {
             await loadHistory(resolvedChatId);

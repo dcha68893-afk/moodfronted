@@ -8,11 +8,13 @@
 // serving the old cached copy of a just-fixed file (stale-while-revalidate
 // shows the OLD version immediately, the fixed one only lands on the NEXT
 // load) — this exact class of "fix isn't showing live" has bitten this app
-// before. Bumped here because this session's js/e2e-encryption.js and
-// js/e2e-session-init.js changes (registerPendingDecrypt / X3DH queue fix)
-// would otherwise keep being served stale.
-const SW_VERSION = '19.10.0';
-const CACHE_NAME = 'nexopa-static-v33';
+// before. Bumped here because this session's js/e2e-encryption.js,
+// js/e2e-session-init.js, js/message-client.js, message.html and group.html
+// changes (removed duplicate legacy DM crypto export, fixed the canonical-
+// core readiness race, removed dead double-ratchet.js references) would
+// otherwise keep being served stale.
+const SW_VERSION = '19.11.0';
+const CACHE_NAME = 'nexopa-static-v34';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -35,7 +37,13 @@ const NETWORK_FIRST_PATTERNS = [
   /\/theme\.colors\.css/i,
   /\/js\/e2e-encryption\.js/i,
   /\/js\/e2e-session-init\.js/i,
-  /\/js\/double-ratchet\.js/i,
+  // js/double-ratchet.js was deleted (obsolete private-message Double
+  // Ratchet generation); replaced this dead pattern with the two files that
+  // are now the actual canonical private-message crypto core, so a stale
+  // service-worker cache can't silently serve an old copy of them after a
+  // deploy — the same class of bug this audit exists to prevent.
+  /\/js\/message-e2e-core\.js/i,
+  /\/js\/e2e-identity-core\.js/i,
   /\/js\/api\.auth\.js/i,
   /\/js\/app\.core\.session\.js/i,
   /\/js\/app\.core\.bootstrap\.js/i,

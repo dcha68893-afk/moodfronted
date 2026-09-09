@@ -285,7 +285,11 @@
   <script src="/js/app.realtime.socket.js"></script>
   <script src="/js/core/identity/IdentityProfileStore.js"></script>
   <script src="/js/e2e-encryption.js" defer></script>
-  <script src="/js/double-ratchet.js" defer></script>
+  <!-- js/double-ratchet.js was deleted (obsolete private-message Double
+       Ratchet generation, commit a080662) but this <script> tag referencing
+       it was left behind, causing a 404 on every load of this page. Removed;
+       the canonical private-message core is loaded dynamically by
+       js/e2e-session-init.js below. -->
   <!-- Phase 1 redesign: durable IndexedDB-backed session/identity store. -->
   <script src="/js/e2e-store-v2.js" defer></script>
   <script src="/js/e2e-session-init.js" defer></script>

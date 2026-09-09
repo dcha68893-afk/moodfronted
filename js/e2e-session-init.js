@@ -55,6 +55,9 @@
         'encryptAttachment',
         'decryptAttachment'
       ]);
+      // getSafetyNumbers is bound (not function-checked) since it's optional
+      // and message-e2e-core.js proxies it straight to the identity layer.
+      if (typeof dm.getSafetyNumbers === 'function') facade.getSafetyNumbers = dm.getSafetyNumbers;
       const missing = messageSurface.filter(name => typeof dm[name] !== 'function');
       if (missing.length) {
         throw new Error(`Canonical message E2E surface incomplete: ${missing.join(', ')}`);
