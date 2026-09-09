@@ -302,6 +302,29 @@
       return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     }
 
+    // ROOT-CAUSE FIX (chat list shows raw ciphertext JSON instead of a
+    // preview — screenshot showed a "denis" row with
+    // {"v":5,"kid":"...","mid":"...","senderDev... as the preview text):
+    // the conv-preview line below used to fall back to
+    // c.lastMessage?.content whenever displayContent hadn't resolved yet.
+    // That's the raw, still-encrypted envelope — exactly the thing the
+    // decrypt pipeline's own fallbackText ('🔒 Encrypted message') exists
+    // to prevent ever reaching a screen (see decryptForDisplay /
+    // decryptMessageForDisplay's "never leak ciphertext, either way"
+    // comment in js/e2e-encryption.js). The chat bubbles already honor
+    // that; this list preview just wasn't going through the same check.
+    function safeConvPreview(lastMessage) {
+      if (!lastMessage) return '';
+      if (lastMessage.displayContent !== undefined) return lastMessage.displayContent;
+      const c = lastMessage.content;
+      // An E2E envelope is always a JSON object with a "v" (version) field
+      // — see _envelopeShape's own check in js/e2e-encryption.js. Anything
+      // shaped like that is still-encrypted content that hasn't resolved
+      // yet, never something safe to show as-is.
+      if (typeof c === 'string' && /^\s*\{/.test(c) && c.indexOf('"v"') !== -1) return 'Decrypting…';
+      return c ?? '';
+    }
+
     function renderConversationList() {
       if (viewingArchived) return; // don't let realtime updates overwrite the archived view
       const convs = window.MessageModule.getConversations()
@@ -326,7 +349,7 @@
           <img class="conv-avatar" src="${escapeHtml(c.otherUser?.avatar || '/img/default-avatar.png')}" alt="">
           <div class="conv-meta">
             <div class="conv-name">${escapeHtml(c.otherUser?.username || 'Conversation')}</div>
-            <div class="conv-preview">${escapeHtml(c.lastMessage?.displayContent ?? c.lastMessage?.content ?? '')}</div>
+            <div class="conv-preview">${escapeHtml(safeConvPreview(c.lastMessage))}</div>
           </div>
           ${c.unreadCount > 0 ? `<span class="unread-badge">${c.unreadCount > 99 ? '99+' : c.unreadCount}</span>` : ''}
         </div>
@@ -1019,22 +1042,21 @@
     // is a deliberate action, not something that pops open on its own based
     // on how many people are in the list.
 
-    async function runNewChatSearch(query) {
-      // ROOT-CAUSE FIX (this is the real reason Calls/Status/Group show
-      // friends instantly and Messages doesn't): the comment this replaced
-      // claimed those modules paint instantly from the in-memory
-      // pushedFriendsCache below — that was never actually verified and is
-      // wrong. Checked calls-ui.js/status-ui.js/friend-ui.js directly: they
-      // all synchronously read `localStorage.getItem('friends')` — a plain
-      // key friend-core.ui-bridge.js's saveFriendsToLocalStorage() keeps
-      // fresh every time the real friends list changes, with zero async
-      // wait. This file never read that key at all — it only had
-      // pushedFriendsCache (postMessage, races with chat.html's own
-      // cachedFriendsList being populated first) and 'discover_users' (a
-      // different, broader "all discoverable users" cache this file writes
-      // itself after a live fetch — not the authoritative friends list).
-      // Reading the same 'friends' key first, synchronously, closes that
-      // gap and matches every other module's actual behavior.
+    // ROOT-CAUSE FIX (typing a letter doesn't filter instantly): the single
+    // runNewChatSearch() below used to run its ENTIRE body — a localStorage
+    // read, an `await` on IndexedDB, THEN the filter+render — on every
+    // single keystroke (after a 300ms debounce). So even once real cached
+    // data exists, each letter typed still waited on a fresh async
+    // IndexedDB round trip before anything painted, instead of instantly
+    // filtering something already sitting in memory. Split into two clearly
+    // separate jobs: _loadKnownUsers() reads local/IndexedDB caches ONCE,
+    // when the picker opens (not per keystroke) into this array; typing
+    // then filters this array synchronously, with zero debounce, on every
+    // keystroke — the debounce and the `await` only apply to the live
+    // network refinement, which still runs in the background afterward and
+    // merges in anything new.
+    let _knownUsers = [];
+    async function _loadKnownUsers() {
       let cachedUsers = [];
       try {
         const localFriends = JSON.parse(localStorage.getItem('friends') || '[]');
@@ -1042,10 +1064,6 @@
           cachedUsers = localFriends.map(normalizePushedFriend).filter(Boolean);
         }
       } catch (_) {}
-      // Priority 2: friends pushed straight from the shell (in-memory,
-      // already parsed — see the FRIENDS_LIST_UPDATE listener above).
-      // Merged in (not overwritten) since it can be more current than the
-      // last localStorage write in a live session.
       if (pushedFriendsCache.length > 0) {
         const seenIds = new Set(cachedUsers.map(u => String(u.id)));
         pushedFriendsCache.forEach(u => { if (!seenIds.has(String(u.id))) cachedUsers.push(u); });
@@ -1065,18 +1083,28 @@
           if (Array.isArray(raw)) cachedUsers = raw;
         } catch (_) {}
       }
+      _knownUsers = cachedUsers;
+    }
 
+    // Instant, synchronous filter over whatever's already loaded — this is
+    // what the search input calls on every keystroke, with no debounce and
+    // no await, so a letter typed shows matching people immediately.
+    function filterKnownUsersNow(query) {
       const q = (query || '').trim().toLowerCase();
-      const filteredCache = cachedUsers.filter(u => matchesSearch(u, q));
-
-      // Full list paints instantly from cache — see WhatsApp's own contact
-      // picker (Image 1): no search step in between, the picker just shows
-      // everyone right away. Search is opt-in via newChatSearchToggleBtn.
-      if (filteredCache.length > 0) {
-        renderNewChatResults(filteredCache);
-      } else {
+      const filtered = _knownUsers.filter(u => matchesSearch(u, q));
+      if (filtered.length > 0) {
+        renderNewChatResults(filtered);
+      } else if (_knownUsers.length === 0) {
         newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary,#999);font-size:13px;">Searching...</div>';
+      } else {
+        newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary,#999);font-size:13px;">No matches</div>';
       }
+      return filtered;
+    }
+
+    async function runNewChatSearch(query) {
+      await _loadKnownUsers();
+      const filteredCache = filterKnownUsersNow(query);
 
       try {
         const res = await window.MessageModule.request().get(`/friends/users/all?limit=200${query ? '&search=' + encodeURIComponent(query) : ''}`);
@@ -1173,6 +1201,11 @@
       }
     });
     newChatSearchInput.addEventListener('input', () => {
+      // Instant local filter on every keystroke — no debounce, no await,
+      // just filtering the array _loadKnownUsers() already put in memory
+      // when the picker opened. Only the live network refinement below is
+      // debounced, since that's the part that's actually expensive.
+      filterKnownUsersNow(newChatSearchInput.value);
       clearTimeout(newChatSearchTimer);
       newChatSearchTimer = setTimeout(() => runNewChatSearch(newChatSearchInput.value.trim()), 300);
     });
