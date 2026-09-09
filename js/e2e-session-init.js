@@ -1,7 +1,4 @@
-/* Canonical E2E bootstrap bridge.
- * Group crypto remains on the existing KynectaE2E object. Private-message
- * crypto is replaced by e2e-identity-core.js + message-e2e-core.js.
- */
+/* Canonical private-message E2E bridge. Group crypto stays untouched. */
 (function (global) {
   'use strict';
   let loadPromise = null;
@@ -22,47 +19,39 @@
       loadPromise = (async () => {
         await loadScript('/js/e2e-identity-core.js');
         await loadScript('/js/message-e2e-core.js');
-        const old = global.KynectaE2E || {};
-        const next = global.KynectaMessageE2E;
-        if (!next) throw new Error('Canonical message E2E core did not initialize');
+        const groupFacade = global.KynectaE2E || {};
+        const dm = global.KynectaMessageE2E;
+        if (!dm) throw new Error('Canonical message E2E core did not initialize');
 
-        // Remove the old 1-to-1/X3DH surface from the active facade. Group
-        // primitives are intentionally preserved because groupEncryption.client.js
-        // still depends on them and the group system is known-good.
-        const legacyDmNames = [
+        // Replace ONLY the private-message surface. Do not replace group
+        // enabled/publicKey/keyId/identity helpers or init(), because the
+        // working group implementation still uses those properties.
+        const messageSurface = [
           'encryptForChat', 'decryptFromChat', 'decryptMessageForDisplay',
           'retryDecrypt', 'prefetchRecipientKey', 'cacheRecipientKey',
           'isMessageQueued', 'isMessageFailed', 'peekDecryptedText',
-          'registerPendingDecrypt', 'encryptAttachment', 'decryptAttachment',
-          'getSafetyNumbers', 'getMyUserId', 'clearKeys', 'init',
+          'registerPendingDecrypt', 'encryptAttachment', 'decryptAttachment'
+        ];
+        for (const name of messageSurface) {
+          if (typeof dm[name] === 'function') groupFacade[name] = dm[name];
+        }
+
+        // Remove only legacy DM/X3DH methods from the active facade. Group
+        // primitives remain available. This prevents any private-message
+        // caller from accidentally discovering and using a second crypto path.
+        const legacyDmNames = [
           'secureEncrypt', 'secureDecrypt', 'encryptMessage', 'decryptMessage',
           'x3dhInitiate', 'x3dhAccept', 'establishSession', 'getSession',
           'getSessionState', 'resetSession', 'clearSessions', 'provisionPrekeys',
           'provisionWithRetry'
         ];
         for (const name of legacyDmNames) {
-          try { delete old[name]; } catch (_) { old[name] = undefined; }
+          try { delete groupFacade[name]; } catch (_) { groupFacade[name] = undefined; }
         }
 
-        // Copy only callable canonical message operations. Dynamic properties
-        // are installed as getters below so `enabled`, `publicKey`, and `keyId`
-        // never become stale snapshots.
-        const callable = [
-          'encryptForChat', 'decryptFromChat', 'decryptMessageForDisplay',
-          'retryDecrypt', 'prefetchRecipientKey', 'cacheRecipientKey',
-          'isMessageQueued', 'isMessageFailed', 'peekDecryptedText',
-          'registerPendingDecrypt', 'encryptAttachment', 'decryptAttachment',
-          'getSafetyNumbers', 'getMyUserId', 'clearKeys'
-        ];
-        for (const name of callable) if (typeof next[name] === 'function') old[name] = next[name];
-        Object.defineProperty(old, 'enabled', { configurable: true, enumerable: true, get: () => !!next.enabled });
-        Object.defineProperty(old, 'publicKey', { configurable: true, enumerable: true, get: () => next.publicKey || null });
-        Object.defineProperty(old, 'keyId', { configurable: true, enumerable: true, get: () => next.keyId || null });
-        old.init = async function (password, legacyPassword) { return next.init(password, legacyPassword); };
-
-        global.KynectaE2E = old;
+        global.KynectaE2E = groupFacade;
         try { document.dispatchEvent(new CustomEvent('kyn:canonicalMessageE2EReady')); } catch (_) {}
-        return old;
+        return groupFacade;
       })();
     }
     return loadPromise;
