@@ -1,17 +1,9 @@
-/*
- * Canonical E2E bootstrap bridge.
- *
- * The working group crypto remains on the existing KynectaE2E object for
- * backwards-compatible group operation. Private-message crypto is replaced
- * by js/e2e-identity-core.js + js/message-e2e-core.js and is the ONLY
- * implementation used by message-client.js.
- *
- * This file intentionally contains no X3DH, Double Ratchet, retry loop,
- * session generation, sent-message cache, or message decrypt queue.
+/* Canonical E2E bootstrap bridge.
+ * Group crypto remains on the existing KynectaE2E object. Private-message
+ * crypto is replaced by e2e-identity-core.js + message-e2e-core.js.
  */
 (function (global) {
   'use strict';
-
   let loadPromise = null;
 
   function loadScript(src) {
@@ -19,11 +11,8 @@
       const existing = document.querySelector(`script[data-e2e-core="${src}"]`);
       if (existing) { resolve(); return; }
       const s = document.createElement('script');
-      s.src = src;
-      s.async = false;
-      s.dataset.e2eCore = src;
-      s.onload = resolve;
-      s.onerror = () => reject(new Error(`Could not load ${src}`));
+      s.src = src; s.async = false; s.dataset.e2eCore = src;
+      s.onload = resolve; s.onerror = () => reject(new Error(`Could not load ${src}`));
       document.head.appendChild(s);
     });
   }
@@ -37,27 +26,41 @@
         const next = global.KynectaMessageE2E;
         if (!next) throw new Error('Canonical message E2E core did not initialize');
 
-        // Preserve only non-message/group-facing capabilities from the existing
-        // object. Every private-message entry point below is replaced.
-        const messageNames = new Set([
+        // Remove the old 1-to-1/X3DH surface from the active facade. Group
+        // primitives are intentionally preserved because groupEncryption.client.js
+        // still depends on them and the group system is known-good.
+        const legacyDmNames = [
           'encryptForChat', 'decryptFromChat', 'decryptMessageForDisplay',
           'retryDecrypt', 'prefetchRecipientKey', 'cacheRecipientKey',
           'isMessageQueued', 'isMessageFailed', 'peekDecryptedText',
           'registerPendingDecrypt', 'encryptAttachment', 'decryptAttachment',
-          'getSafetyNumbers', 'getMyUserId', 'clearKeys', 'init'
-        ]);
-        for (const [k, v] of Object.entries(next)) old[k] = v;
+          'getSafetyNumbers', 'getMyUserId', 'clearKeys', 'init',
+          'secureEncrypt', 'secureDecrypt', 'encryptMessage', 'decryptMessage',
+          'x3dhInitiate', 'x3dhAccept', 'establishSession', 'getSession',
+          'getSessionState', 'resetSession', 'clearSessions', 'provisionPrekeys',
+          'provisionWithRetry'
+        ];
+        for (const name of legacyDmNames) {
+          try { delete old[name]; } catch (_) { old[name] = undefined; }
+        }
 
-        // Group encryption still reads KynectaE2E directly. Those methods remain
-        // untouched. The private-message module sees only the canonical methods
-        // copied above, so it cannot accidentally route through X3DH/ratchet code.
+        // Copy only callable canonical message operations. Dynamic properties
+        // are installed as getters below so `enabled`, `publicKey`, and `keyId`
+        // never become stale snapshots.
+        const callable = [
+          'encryptForChat', 'decryptFromChat', 'decryptMessageForDisplay',
+          'retryDecrypt', 'prefetchRecipientKey', 'cacheRecipientKey',
+          'isMessageQueued', 'isMessageFailed', 'peekDecryptedText',
+          'registerPendingDecrypt', 'encryptAttachment', 'decryptAttachment',
+          'getSafetyNumbers', 'getMyUserId', 'clearKeys'
+        ];
+        for (const name of callable) if (typeof next[name] === 'function') old[name] = next[name];
+        Object.defineProperty(old, 'enabled', { configurable: true, enumerable: true, get: () => !!next.enabled });
+        Object.defineProperty(old, 'publicKey', { configurable: true, enumerable: true, get: () => next.publicKey || null });
+        Object.defineProperty(old, 'keyId', { configurable: true, enumerable: true, get: () => next.keyId || null });
+        old.init = async function (password, legacyPassword) { return next.init(password, legacyPassword); };
+
         global.KynectaE2E = old;
-
-        const canonicalInit = next.init;
-        global.KynectaE2E.init = async function (password, legacyPassword) {
-          return canonicalInit(password, legacyPassword);
-        };
-
         try { document.dispatchEvent(new CustomEvent('kyn:canonicalMessageE2EReady')); } catch (_) {}
         return old;
       })();
@@ -65,12 +68,6 @@
     return loadPromise;
   }
 
-  // Message-client loads before deferred scripts execute. Install a stable
-  // readiness promise now so calls made immediately after bootstrap can wait
-  // for the one canonical implementation instead of falling back to the old
-  // decryptor.
   global.KynectaMessageE2EReady = loadNewCore;
-
-  // Replace the message-facing API as soon as the new core is available.
   loadNewCore().catch(err => console.error('[MessageE2E] canonical bootstrap failed:', err));
 })(window);
