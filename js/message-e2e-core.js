@@ -63,15 +63,50 @@
     try { localStorage.setItem(key, value); } catch (_) {}
     return value;
   }
+  // ROOT-CAUSE FIX (WRONG-BOOTSTRAP-PASSWORD / "Unable to decrypt this
+  // message" on every message, every reload, every relogin): this used to
+  // always call identity.init(bootstrapSecret()) — a throwaway random
+  // secret generated locally and stored under its own unrelated
+  // localStorage key (kyn_dm_identity_bootstrap_v2_<id>). But the identity
+  // blob that's actually sitting in localStorage (kyn_e2e_keypair_v1_<id>)
+  // was wrapped with the REAL login-derived password/e2eWrapSecret by
+  // js/e2e-encryption.js's own init() call on index.html at login time
+  // (see index.html's `sessionStorage.setItem('kyn_e2e_pw_session', ...)`
+  // right after a successful login). chat.html/message.html/group.html
+  // never call legacy KynectaE2E.init() themselves, so
+  // adoptSharedIdentity() (inside identity.init(), tried first) never has
+  // a live legacy identity to adopt either. Net effect: this engine could
+  // never unlock the real, already-registered identity private key on any
+  // page except index.html itself — every decryptEnvelope() call threw,
+  // identityReady got reset to null and retried the exact same wrong
+  // password again on the very next message, forever. Use the real
+  // session-scoped password (same sessionStorage key legacy already
+  // writes at login) first; only fall back to the throwaway bootstrap
+  // secret when no login-session password is available at all (e.g. this
+  // tab never went through the login form).
+  function sessionPassword() {
+    try { return sessionStorage.getItem('kyn_e2e_pw_session') || null; } catch (_) { return null; }
+  }
+  function sessionLegacyPassword() {
+    try { return sessionStorage.getItem('kyn_e2e_pw_legacy_session') || null; } catch (_) { return null; }
+  }
   async function ensureIdentity() {
     if (I()?.enabled && I()?.privateKey) return I();
     if (!identityReady) {
       identityReady = (async () => {
         const identity = I(); if (!identity) throw new Error('E2E identity layer unavailable');
-        await identity.init(bootstrapSecret());
-        if (!identity.enabled || !identity.privateKey || !identity.publicKey) throw new Error('Secure messaging identity could not be initialized');
+        const realPw = sessionPassword();
+        const pw = realPw || bootstrapSecret();
+        const legacyPw = sessionLegacyPassword();
+        const ok = await identity.init(pw, legacyPw || undefined);
+        if (!ok || !identity.enabled || !identity.privateKey || !identity.publicKey) {
+          const reason = realPw
+            ? 'the stored identity key would not unlock with the current session password'
+            : 'no login-session password was available and no existing identity could be adopted';
+          throw new Error(`Secure messaging identity could not be initialized (${reason})`);
+        }
         return identity;
-      })().catch(err => { identityReady = null; throw err; });
+      })().catch(err => { identityReady = null; console.error('[MessageE2E] identity init failed:', err?.message || err); throw err; });
     }
     return identityReady;
   }
