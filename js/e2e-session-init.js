@@ -20,9 +20,9 @@
       s.src = src;
       s.async = false;
       s.dataset.e2eCore = src;
+      document.head.appendChild(s);
       s.onload = resolve;
       s.onerror = () => reject(new Error(`Could not load ${src}`));
-      document.head.appendChild(s);
     });
   }
 
@@ -33,6 +33,12 @@
       await loadScript('/js/e2e-identity-core.js');
       await loadScript('/js/message-e2e-core.js');
       await loadScript('/js/message-e2e-compat.js');
+      // Realtime is a transport concern, not crypto. Only the Messages iframe
+      // gets the direct receiver bridge; group/calls/tools pages must not attach
+      // a second message:new consumer or emit duplicate delivery receipts.
+      if (/\/message(?:\.html)?$/i.test(global.location?.pathname || '')) {
+        await loadScript('/js/message-realtime-bridge.js');
+      }
 
       const facade = global.KynectaE2E || {};
       const dm = global.KynectaMessageE2E;
@@ -56,8 +62,6 @@
         'encryptAttachment',
         'decryptAttachment'
       ]);
-      // getSafetyNumbers is bound (not function-checked) since it's optional
-      // and message-e2e-core.js proxies it straight to the identity layer.
       if (typeof dm.getSafetyNumbers === 'function') facade.getSafetyNumbers = dm.getSafetyNumbers;
       const missing = messageSurface.filter(name => typeof dm[name] !== 'function');
       if (missing.length) {
@@ -65,9 +69,6 @@
       }
       for (const name of messageSurface) facade[name] = dm[name];
 
-      // Explicitly remove the legacy 1:1/X3DH session surface. Group Sender-
-      // Key operations are intentionally not included here and remain owned
-      // by the working group implementation.
       const legacyDmNames = Object.freeze([
         'secureEncrypt',
         'secureDecrypt',
@@ -90,8 +91,6 @@
       global.KynectaE2E = facade;
 
       // Bootstrap exactly one DM identity before first-contact send/decrypt.
-      // The identity core persists it and reuses the same key instead of
-      // generating a new identity for every message/session.
       await dm.init().catch(err => {
         console.warn('[MessageE2E] identity bootstrap deferred:', err?.message || err);
       });
