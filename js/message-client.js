@@ -1244,10 +1244,34 @@
         }
     }
 
+    // FIX (LOGIN-TIME-KEY-WARMUP): fetch and locally cache every existing
+    // contact's public key in ONE batch request right after the
+    // conversation list loads, instead of only ever resolving a contact's
+    // key lazily the moment their specific chat gets opened (see the
+    // per-chat prefetchRecipientKey call in openChat below). This is the
+    // same pattern other E2E messaging apps use — resolve known contacts'
+    // keys once per session/login and keep them in local storage — so
+    // decrypting a message or a chat-list preview from someone you've
+    // already talked to needs no network round trip at all, even on a cold
+    // start or a flaky connection. Fire-and-forget: a failed warmup just
+    // leaves those contacts to fall back to the existing lazy per-chat
+    // fetch, nothing here is on the critical path for showing the list.
+    function _warmupKnownContactKeys(chats) {
+        try {
+            const ids = chats.filter(c => c.type === 'direct' && c.otherParticipant?.id).map(c => c.otherParticipant.id);
+            if (!ids.length) return;
+            waitForMessageE2E().then((ready) => {
+                if (!ready || typeof window.KynectaE2E?.prefetchRecipientKeys !== 'function') return;
+                window.KynectaE2E.prefetchRecipientKeys(ids).catch(() => {});
+            });
+        } catch (_) {}
+    }
+
     async function loadConversations() {
         try {
             const res = await api().get('/chats?limit=50');
             const chats = (res && res.data && Array.isArray(res.data.chats)) ? res.data.chats : [];
+            _warmupKnownContactKeys(chats);
             chats.filter(c => c.type === 'direct' && c.otherParticipant).forEach(c => {
                 const lastRaw = Array.isArray(c.chatMessages) && c.chatMessages[0] ? c.chatMessages[0] : null;
                 upsertConversationMeta(c.id, {

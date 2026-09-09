@@ -182,9 +182,77 @@
     return p;
   }
 
+  // FIX (LOGIN-TIME-KEY-WARMUP): publicKeyFor() above is already cache-first
+  // (memory -> localStorage PUB_STORE -> network), but nothing ever primed
+  // that cache in bulk — every contact's key was only ever fetched the
+  // first time a chat with them happened to be opened, one network round
+  // trip each. This is the batch counterpart used right after login (see
+  // message-client.js's loadConversations()) to resolve every existing
+  // contact's key in ONE request and warm both the in-memory and
+  // localStorage caches, so opening any of those chats later — or
+  // decrypting an incoming message/preview from them — needs no network at
+  // all. Never throws; a failed warmup just leaves those contacts to fall
+  // back to the existing per-chat lazy fetch.
+  async function publicKeysForBatch(userIds) {
+    const wanted = Array.from(new Set((userIds || []).map(String).filter(Boolean)));
+    const missing = [];
+    let store = null;
+    try { store = JSON.parse(localStorage.getItem(PUB_STORE) || '{}'); } catch (_) { store = {}; }
+    for (const id of wanted) {
+      if (pubCache.has(id)) continue;
+      if (store[id]?.pub) {
+        try { pubCache.set(id, { key: await importPub(store[id].pub), keyId: store[id].keyId }); continue; }
+        catch (_) { /* corrupted entry — fall through to re-fetch */ }
+      }
+      missing.push(id);
+    }
+    if (!missing.length) return;
+    try {
+      const r = await request(`/api/encryption/keys/batch?userIds=${missing.map(encodeURIComponent).join(',')}`);
+      if (!r.ok) return;
+      const j = await r.json();
+      const data = j?.data || {};
+      let dirty = false;
+      for (const id of Object.keys(data)) {
+        const raw = data[id]?.publicKey;
+        if (!raw) continue;
+        try {
+          pubCache.set(id, { key: await importPub(raw), keyId: data[id].keyId });
+          store[id] = { pub: raw, keyId: data[id].keyId };
+          dirty = true;
+        } catch (_) { /* skip a corrupt individual entry, keep the rest */ }
+      }
+      if (dirty) {
+        try { localStorage.setItem(PUB_STORE, JSON.stringify(store)); } catch (_) {}
+        try { document.dispatchEvent(new CustomEvent('kyn:e2eKeysAvailable', { detail: { userIds: Object.keys(data) } })); } catch (_) {}
+      }
+    } catch (_) { /* network hiccup — per-chat lazy fetch still covers this */ }
+  }
+
   function purgePublicKey(userId) {
     userId = String(userId); pubCache.delete(userId);
     try { const s = JSON.parse(localStorage.getItem(PUB_STORE) || '{}'); delete s[userId]; localStorage.setItem(PUB_STORE, JSON.stringify(s)); } catch (_) {}
+  }
+
+  // FIX (CACHE-RECIPIENT-KEY-DISCONNECTED-STORE): a key handed to us
+  // directly (a bootstrap response that already includes it, or a live
+  // 'e2e:key_available'/'e2e:key_rotated' socket push) needs to land in the
+  // exact same cache publicKeyFor() reads from — this is that single write
+  // path. Previously the only exposed "cache a given key" entry point
+  // (message-e2e-core.js's cacheRecipientKey) wrote to an entirely
+  // different, never-read localStorage key, so every such call was a
+  // silent no-op as far as decryption was concerned.
+  async function cachePublicKey(userId, rawPubB64, keyIdValue) {
+    userId = String(userId);
+    if (!userId || !rawPubB64) return false;
+    try {
+      pubCache.set(userId, { key: await importPub(rawPubB64), keyId: keyIdValue });
+      const s = JSON.parse(localStorage.getItem(PUB_STORE) || '{}');
+      s[userId] = { pub: rawPubB64, keyId: keyIdValue };
+      localStorage.setItem(PUB_STORE, JSON.stringify(s));
+      try { document.dispatchEvent(new CustomEvent('kyn:e2eKeyAvailable', { detail: { userId } })); } catch (_) {}
+      return true;
+    } catch (_) { return false; }
   }
 
   async function deriveShared(peerKey) { return subtle.deriveBits({ name: 'ECDH', public: peerKey }, privateKey, 256); }
@@ -207,7 +275,7 @@
 
   global.KynectaE2EIdentity = {
     init, get enabled() { return enabled; }, get privateKey() { return privateKey; }, get publicKey() { return publicKeyB64; }, get keyId() { return keyId; }, get userId() { return uid(); }, ready: () => readyPromise,
-    publicKeyFor, purgePublicKey, deriveShared, hkdf, aesEncrypt, aesDecrypt, wrapAtRest, unwrapAtRest,
+    publicKeyFor, publicKeysForBatch, purgePublicKey, cachePublicKey, deriveShared, hkdf, aesEncrypt, aesDecrypt, wrapAtRest, unwrapAtRest,
     getOrCreateDeviceId: async () => global.KynectaE2EStore?.getOrCreateDeviceId?.() || 'primary',
     getSafetyNumbers: async function(theirPubKeyB64) {
       if (!publicKeyB64 || !theirPubKeyB64) return null;

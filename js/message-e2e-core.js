@@ -120,7 +120,22 @@
   }
   async function retryDecrypt(chatId, message) { const id = messageId(message); decryptCache.delete(id); failed.delete(id); pending.delete(id); return decryptMessageForDisplay(message, chatId, me(), {}); }
   async function prefetchRecipientKey(userId) { try { await ensureIdentity(); return await I().publicKeyFor(userId); } catch (_) { return null; } }
-  async function cacheRecipientKey(userId, keyEntry) { if (!userId || !keyEntry?.publicKey) return false; try { localStorage.setItem('kyn_e2e_bootstrap_pub_' + String(userId), JSON.stringify({ pub: keyEntry.publicKey, keyId: keyEntry.keyId })); return true; } catch (_) { return false; } }
+  // Login-time batch warmup — see e2e-identity-core.js's publicKeysForBatch
+  // for the full rationale. Called once with every known contact id right
+  // after the conversation list loads.
+  async function prefetchRecipientKeys(userIds) { try { await ensureIdentity(); await I().publicKeysForBatch(userIds); return true; } catch (_) { return false; } }
+  // ROOT-CAUSE FIX (silent no-op): this used to write to its own
+  // 'kyn_e2e_bootstrap_pub_<id>' localStorage key, which decryptEnvelope()/
+  // identity.publicKeyFor() never read from — so a key handed to this
+  // function (an inline bootstrap response, a live key-rotation push) was
+  // cached somewhere nothing ever looked, and the real decrypt path always
+  // fell through to a fresh network fetch anyway. Now writes through
+  // identity-core's cachePublicKey(), the same store publicKeyFor() reads.
+  async function cacheRecipientKey(userId, keyEntry) {
+    if (!userId || !keyEntry?.publicKey) return false;
+    try { await ensureIdentity(); return await I().cachePublicKey(userId, keyEntry.publicKey, keyEntry.keyId); }
+    catch (_) { return false; }
+  }
   function isMessageQueued(message) { return pending.has(messageId(message)); }
   function isMessageFailed(message) { return failed.has(messageId(message)); }
   function peekDecryptedText(message) { return decryptCache.get(messageId(message)) ?? null; }
@@ -147,5 +162,5 @@
     return crypto.subtle.decrypt({ name: 'AES-GCM', iv: Uint8Array.from(atob(env.iv), c => c.charCodeAt(0)), tagLength: 128 }, key, Uint8Array.from(atob(env.ct), c => c.charCodeAt(0)));
   }
 
-  global.KynectaMessageE2E = { init, encryptForChat, decryptFromChat, decryptMessageForDisplay, retryDecrypt, prefetchRecipientKey, cacheRecipientKey, isMessageQueued, isMessageFailed, peekDecryptedText, registerPendingDecrypt, encryptAttachment, decryptAttachment, getSafetyNumbers: (...args) => I()?.getSafetyNumbers?.(...args), get enabled() { return !!I()?.enabled; }, get publicKey() { return I()?.publicKey || null; }, get keyId() { return I()?.keyId || null; }, getMyUserId: () => I()?.userId || null, clearKeys: () => I()?.clear?.() };
+  global.KynectaMessageE2E = { init, encryptForChat, decryptFromChat, decryptMessageForDisplay, retryDecrypt, prefetchRecipientKey, prefetchRecipientKeys, cacheRecipientKey, isMessageQueued, isMessageFailed, peekDecryptedText, registerPendingDecrypt, encryptAttachment, decryptAttachment, getSafetyNumbers: (...args) => I()?.getSafetyNumbers?.(...args), get enabled() { return !!I()?.enabled; }, get publicKey() { return I()?.publicKey || null; }, get keyId() { return I()?.keyId || null; }, getMyUserId: () => I()?.userId || null, clearKeys: () => I()?.clear?.() };
 })(window);

@@ -47,6 +47,7 @@
         'decryptMessageForDisplay',
         'retryDecrypt',
         'prefetchRecipientKey',
+        'prefetchRecipientKeys',
         'cacheRecipientKey',
         'isMessageQueued',
         'isMessageFailed',
