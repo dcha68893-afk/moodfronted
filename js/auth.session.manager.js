@@ -764,6 +764,26 @@
                      && rawSession.token.length >= 10 && rawSession.user && typeof rawSession.user === 'object');
 
             if (!isValid) {
+                // DIAGNOSTIC (CORRUPTED-SESSION-WIPE-CAUSE-UNKNOWN): this branch
+                // wipes every auth/session key in localStorage, and a user
+                // report showed it firing on a real mobile session (right
+                // before "Failed to fetch chats" and every other authenticated
+                // call failing) with no way to tell WHY isValid came back
+                // false — raw missing entirely? JSON.parse failure? token
+                // present but short? user missing? Each has a different real
+                // cause (never logged in here vs. a genuine write/parse race),
+                // and guessing which one without this log would mean patching
+                // blind. Logging the shape (never the token value itself) so
+                // the next repro tells us definitively instead of us guessing.
+                console.warn('[SessionManager] Session validity check detail:', {
+                    rawWasNull: rawSession === null,
+                    rawType: typeof rawSession,
+                    hasToken: !!(rawSession && rawSession.token),
+                    tokenType: rawSession ? typeof rawSession.token : 'n/a',
+                    tokenLength: (rawSession && typeof rawSession.token === 'string') ? rawSession.token.length : 'n/a',
+                    hasUser: !!(rawSession && rawSession.user),
+                    userType: rawSession ? typeof rawSession.user : 'n/a',
+                });
                 // AUTO-CLEAR all session state — no manual browser clearing needed on mobile
                 console.warn('[SessionManager] ⚠️ Corrupted/incomplete session detected — auto-clearing all keys');
                 const ALL_SESSION_KEYS = [
