@@ -1348,6 +1348,20 @@
       // flat array), not just the one this picker assumed. Matching that
       // same defensive parsing here is what actually fixes this, not a
       // guess at "the" correct shape.
+      // ROOT-CAUSE FIX (Start chat shows empty / search finds no friends
+      // despite an existing, cached friend): this picker had exactly one
+      // way to reach the friends list — the relay call below, a round trip
+      // through chat.html's postMessage bridge. Compare to the Group
+      // module's "Add member" picker (group-core-patch.js's
+      // _loadMemberPicker), which tries several sources and, as a last
+      // resort, fetches straight from the backend — same-origin, so just as
+      // reachable from this iframe as it is from Group's — instead of
+      // depending on the relay alone. `gotDefinitiveAnswer` tracks whether
+      // ANY source actually resolved (even to a genuinely empty list) so
+      // the loop below can fall through to the next source on failure.
+      let gotDefinitiveAnswer = false;
+
+      // Source 1: the existing relay round trip through chat.html.
       try {
         const res = await window.MessageModule.request().get('/friends');
         if (res && res.success !== false && res.data) {
@@ -1366,18 +1380,74 @@
             _knownUsers = friends.length > 0 ? friends : _knownUsers;
           }
           if (friends.length > 0) {
+            gotDefinitiveAnswer = true;
             try { localStorage.setItem('friends', JSON.stringify(friends)); } catch (_) {}
             try {
               if (window.KynectaFriendsLocalStore && typeof window.KynectaFriendsLocalStore.saveUsers === 'function') {
                 window.KynectaFriendsLocalStore.saveUsers(friends);
               }
             } catch (_) {}
+          } else if (Array.isArray(rawFriends)) {
+            // The relay is alive and the server gave a real (if empty)
+            // answer — that's definitive too, just with nothing to show.
+            gotDefinitiveAnswer = true;
           }
         }
       } catch (err) {
-        console.warn('[Messages] Failed to load /friends, using cached list:', err && err.message);
+        console.warn('[Messages] Relay /friends request failed, trying direct fetch:', err && err.message);
       }
-      _knownUsersLoaded = true;
+
+      // Source 2: direct fetch straight to the backend, bypassing the relay
+      // entirely — same-origin iframe, so this is just as reachable from
+      // Messages as it is from Group's picker. Only tried if the relay
+      // above didn't already produce a non-empty list; this is what lets a
+      // friend show up even if chat.html's relay was down, not yet wired
+      // up, or simply never answers the postMessage in this session.
+      if (!_knownUsers.length) {
+        try {
+          const token = window.__AUTH_TOKEN || window.session?.token || window.__PARENT_SESSION__?.token ||
+              window.__SESSION__?.token || sessionStorage.getItem('auth_token') || localStorage.getItem('auth_token') ||
+              localStorage.getItem('authToken') || localStorage.getItem('token') || null;
+          if (token) {
+            const base = ((window.__kynAPI && window.__kynAPI.baseUrl) || window.API_BASE_URL ||
+                window.__API_BASE || (window.__getApiBase && window.__getApiBase()) || 'https://noxopa.onrender.com/api');
+            const url = /\/api$/.test(base) ? base : (base.replace(/\/$/, '') + '/api');
+            const res = await fetch(`${url}/friends`, { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } });
+            if (res.ok) {
+              const d = await res.json();
+              const rawFriends = d?.data?.friends || d?.data || d?.friends || [];
+              const friends = (Array.isArray(rawFriends) ? rawFriends : []).map(normalizePushedFriend).filter(Boolean);
+              if (friends.length > 0) {
+                _knownUsers = friends;
+                gotDefinitiveAnswer = true;
+                try { localStorage.setItem('friends', JSON.stringify(friends)); } catch (_) {}
+                try {
+                  if (window.KynectaFriendsLocalStore && typeof window.KynectaFriendsLocalStore.saveUsers === 'function') {
+                    window.KynectaFriendsLocalStore.saveUsers(friends);
+                  }
+                } catch (_) {}
+              } else {
+                gotDefinitiveAnswer = true;
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('[Messages] Direct /friends fetch also failed:', err && err.message);
+        }
+      }
+
+      // FIX (never-retries-after-one-failure): previously this flag was set
+      // unconditionally here, so a picker opened before chat.html's relay
+      // was fully wired up (e.g. right after page load) permanently
+      // stopped trying for the rest of the session — even though a friend
+      // was sitting there the whole time and other modules (Group, Calls)
+      // could see them fine, because THEIR retries weren't blocked by a
+      // stale flag. Only latch _knownUsersLoaded once some source above
+      // actually gave a real answer; if every source failed (no network,
+      // no token yet, relay not ready), leave it false so the next time
+      // "Start chat" is opened, it tries again instead of showing a
+      // permanently empty list.
+      if (gotDefinitiveAnswer) _knownUsersLoaded = true;
     }
 
     // Instant, synchronous filter over whatever's already loaded — this is
