@@ -935,8 +935,17 @@
           row.addEventListener('touchstart', () => {
             pressTimer = setTimeout(() => enterSelectMode(id), 500);
           }, { passive: true });
+          // FIX (TOUCHMOVE-SCROLL-VIOLATION): these handlers never call
+          // preventDefault(), so there was no reason for the browser to keep
+          // them as scroll-blocking by default — that's what was triggering
+          // Chrome's "[Violation] Added non-passive event listener to a
+          // scroll-blocking 'touchmove' event" warning on every single
+          // renderMessages() call (i.e. on every incoming message). Marking
+          // them passive, same as the touchstart listener above, removes the
+          // warning and lets the browser start scrolling immediately instead
+          // of waiting to see if this handler will cancel it.
           ['touchend', 'touchmove', 'touchcancel'].forEach(evt => {
-            row.addEventListener(evt, () => { if (pressTimer) clearTimeout(pressTimer); });
+            row.addEventListener(evt, () => { if (pressTimer) clearTimeout(pressTimer); }, { passive: true });
           });
           row.addEventListener('contextmenu', (e) => {
             e.preventDefault();
