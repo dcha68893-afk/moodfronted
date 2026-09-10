@@ -142,12 +142,20 @@
     // comment) and stores the result separately from the raw .content, so
     // the raw envelope is preserved (needed for retry-on-key-arrival) while
     // rendering always uses the resolved plaintext.
-    function syncLastMessageDisplay(chatId, messageId, displayContent) {
+    //
+    // persistToCache defaults to true (the plaintext/genuine-success call
+    // sites below all want the sidebar preview cached), but the queued- and
+    // failed-decrypt call sites explicitly pass false — same reasoning as
+    // the guarded persistMessage() calls in decryptForDisplay: never let a
+    // transient or terminal decrypt failure get written into the cached
+    // conversation preview, or the sidebar's last-message snippet would get
+    // stuck on "Unable to decrypt" forever instead of retrying fresh.
+    function syncLastMessageDisplay(chatId, messageId, displayContent, persistToCache = true) {
         const conv = state.conversations.get(chatId);
         if (conv && conv.lastMessage && conv.lastMessage.id === messageId) {
             conv.lastMessage = Object.assign({}, conv.lastMessage, { displayContent });
             notify('conversation:updated', conv);
-            persistConversation(chatId); // so the sidebar preview is also decrypt-free on next load
+            if (persistToCache) persistConversation(chatId); // so the sidebar preview is also decrypt-free on next load
         }
     }
 
@@ -215,19 +223,40 @@
             const bucket = state.messagesByConversation.get(chatId);
             if (bucket && bucket.has(message.id)) {
                 bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: displayValue }));
-                syncLastMessageDisplay(chatId, message.id, displayValue);
+                const isGenuineSuccess = !isFailed && displayValue !== 'Decrypting…' && displayValue !== DECRYPT_FALLBACK;
+                syncLastMessageDisplay(chatId, message.id, displayValue, isGenuineSuccess);
                 notify('message:decrypted', { chatId, messageId: message.id });
-                // Deliberately NOT persisting transient "Decrypting…" states —
-                // only a final resolved plaintext or the terminal failure
-                // placeholder below is worth writing to disk; a queued state
-                // caught mid-flight should always re-attempt fresh next load.
-                if (displayValue !== 'Decrypting…') persistMessage(chatId, bucket.get(message.id));
+                // ROOT-CAUSE FIX (REGRESSION — a decrypt failure that used to
+                // self-heal on the next reload now got stuck forever): this
+                // used to also persist the terminal "🔒 Unable to decrypt
+                // this message" state (guarded only against the transient
+                // "Decrypting…" one). Before the local cache existed, EVERY
+                // reload did a fresh loadHistory() + fresh decrypt attempt
+                // for every message with no memory of a prior failure — so a
+                // message that failed once (key not warmed yet, a transient
+                // fetch timeout, etc.) got a clean retry next time and often
+                // succeeded, which is exactly the "fails, then a refresh
+                // fixes it" behavior this app is supposed to have. Caching
+                // the failure broke that: decryptForDisplay's very first
+                // line (`if (message.displayContent !== undefined) return`)
+                // now short-circuited on the cached "Unable to decrypt"
+                // value on every future load, so it could never even
+                // attempt to re-decrypt again — a message stuck there was
+                // stuck there permanently, reload or not. Only a genuine,
+                // resolved plaintext is ever written to disk now; both the
+                // queued and the terminal-failure states are left
+                // unpersisted on purpose (same guard now shared with the
+                // sidebar-preview cache above), so either one always gets a
+                // fresh, real retry next time this chat is opened.
+                if (isGenuineSuccess) {
+                    persistMessage(chatId, bucket.get(message.id));
+                }
             }
         } catch (_) {
             const bucket = state.messagesByConversation.get(chatId);
             if (bucket && bucket.has(message.id)) {
                 bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: '🔒 Encrypted message' }));
-                syncLastMessageDisplay(chatId, message.id, '🔒 Encrypted message');
+                syncLastMessageDisplay(chatId, message.id, '🔒 Encrypted message', false);
             }
         }
     }
@@ -266,9 +295,13 @@
                 if (String(key) !== String(failedId)) continue;
                 const displayValue = '🔒 Unable to decrypt this message';
                 bucket.set(key, Object.assign({}, message, { displayContent: displayValue }));
-                syncLastMessageDisplay(chatId, key, displayValue);
+                syncLastMessageDisplay(chatId, key, displayValue, false);
                 notify('message:decrypted', { chatId, messageId: key });
-                persistMessage(chatId, bucket.get(key));
+                // NOT persisted — see the matching comment in
+                // decryptForDisplay above: a terminal decrypt failure must
+                // stay in-memory-only so the next reload gets a genuine
+                // fresh retry instead of replaying the same cached failure
+                // forever.
                 return;
             }
         }
