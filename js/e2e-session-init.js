@@ -44,9 +44,6 @@
       const dm = global.KynectaMessageE2E;
       if (!dm) throw new Error('Canonical message E2E core did not initialize');
 
-      // These are the ONLY private-message entry points. If a required
-      // operation is missing, fail loudly instead of silently falling back to
-      // an older crypto generation.
       const messageSurface = Object.freeze([
         'encryptForChat',
         'decryptFromChat',
@@ -58,11 +55,6 @@
         'isMessageQueued',
         'isMessageFailed',
         'peekDecryptedText',
-        // FIX (delete doesn't clean up the decrypt queue): lets
-        // message-client.js's removeMessageFromState() tell this engine to
-        // drop any pending/failed/cached decrypt state for a message once
-        // it's been deleted — see message-e2e-core.js's forgetMessage() for
-        // the full rationale.
         'forgetMessage',
         'registerPendingDecrypt',
         'encryptAttachment',
@@ -96,14 +88,28 @@
 
       global.KynectaE2E = facade;
 
-      // Bootstrap exactly one DM identity before first-contact send/decrypt.
-      await dm.init().catch(err => {
-        console.warn('[MessageE2E] identity bootstrap deferred:', err?.message || err);
-      });
+      // Do NOT announce E2E readiness until the identity is actually unlocked.
+      // The previous implementation swallowed dm.init() failures and then
+      // dispatched kyn:canonicalMessageE2EReady anyway. message-client.js would
+      // consequently begin decrypting with a facade whose private identity was
+      // still unavailable, turning a temporary login/bootstrap race into a
+      // terminal-looking "Unable to decrypt" state. loadPromise now rejects on
+      // identity failure, so the existing bounded wait/retry path can try again
+      // once the login session password becomes available.
+      const identity = await dm.init();
+      if (!identity || !global.KynectaE2EIdentity?.enabled || !global.KynectaE2EIdentity?.privateKey) {
+        throw new Error('Canonical message E2E identity is not unlocked');
+      }
 
-      try {
-        document.dispatchEvent(new CustomEvent('kyn:canonicalMessageE2EReady'));
-      } catch (_) {}
+      try { document.dispatchEvent(new CustomEvent('kyn:canonicalMessageE2EReady')); } catch (_) {}
+
+      // The message client already owns the authoritative chat state. This
+      // lightweight fallback only exists for the mobile/slow-bootstrap case
+      // where the iframe loaded before its normal sidebar request was started.
+      // It never replaces the message client's state or crypto pipeline.
+      if (/\/message(?:\.html)?$/i.test(global.location?.pathname || '')) {
+        await loadScript('/js/message-mobile-bootstrap-fix.js');
+      }
 
       return facade;
     })();
@@ -117,5 +123,5 @@
   }
 
   global.KynectaMessageE2EReady = loadNewCore;
-  loadNewCore().catch(err => console.error('[MessageE2E] canonical bootstrap failed:', err));
+  loadNewCore().catch(err => console.error('[MessageE2E] canonical bootstrap failed:', err?.message || err));
 })(window);
