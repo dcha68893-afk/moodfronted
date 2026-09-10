@@ -1359,6 +1359,64 @@
         } catch (err) { return { success: false, error: err.message }; }
     }
 
+    // "Delete chat" — long-press a conversation -> Delete chat. Removes it
+    // from THIS device/account's chat list only; the other participant's
+    // copy is untouched (server-side: chat_participants.hiddenAt, see
+    // chatService.deleteChat). If they send a new message afterward, the
+    // conversation reappears in the list automatically on next load — no
+    // client-side "undelete" needed, the server handles that.
+    async function deleteChat(chatId) {
+        try {
+            const res = await api().delete(`/chats/${chatId}`);
+            if (res && (res.status === 'success' || res.success)) {
+                state.conversations.delete(chatId);
+                notify('conversation:deleted', { chatId });
+            }
+            return res;
+        } catch (err) { return { success: false, error: err.message }; }
+    }
+
+    // "Clear chat" — wipes MY OWN message history in this conversation.
+    // The chat stays in the list; the other participant keeps every message.
+    async function clearChatHistory(chatId) {
+        try {
+            const res = await api().delete(`/chats/${chatId}/history`);
+            if (res && (res.status === 'success' || res.success)) {
+                const bucket = state.messagesByConversation.get(chatId);
+                if (bucket) bucket.clear();
+                upsertConversationMeta(chatId, { lastMessage: null });
+                notify('conversation:cleared', { chatId });
+            }
+            return res;
+        } catch (err) { return { success: false, error: err.message }; }
+    }
+
+    // Multi-select delete (long-press a message -> select more -> Delete).
+    // One request for the whole selection instead of N; each id is
+    // still authorized individually server-side (see routes/messages.js
+    // POST /bulk-delete) so a mixed selection degrades gracefully rather
+    // than failing outright.
+    async function bulkDeleteMessages(chatId, messageIds, { forEveryone = false } = {}) {
+        if (!Array.isArray(messageIds) || messageIds.length === 0) return { success: false, error: 'No messages selected' };
+        try {
+            const res = await api().post('/messages/bulk-delete', { messageIds, deleteForEveryone: forEveryone });
+            const deleted = (res && Array.isArray(res.deleted)) ? res.deleted : [];
+            const bucket = state.messagesByConversation.get(chatId);
+            deleted.forEach((messageId) => {
+                if (bucket && bucket.has(messageId)) {
+                    const existing = bucket.get(messageId);
+                    bucket.set(messageId, Object.assign({}, existing, {
+                        content: forEveryone ? 'This message was deleted' : existing.content,
+                        deleted: true, deleteForEveryone: forEveryone,
+                    }));
+                    persistMessage(chatId, bucket.get(messageId));
+                }
+            });
+            if (deleted.length) notify('message:deleted', { chatId, messageIds: deleted });
+            return { success: !!(res && res.success), deleted, failed: (res && res.failed) || [] };
+        } catch (err) { return { success: false, error: err.message }; }
+    }
+
     async function loadArchivedConversations() {
         try {
             const res = await api().get('/chats?limit=50&includeArchived=true');
@@ -1451,6 +1509,7 @@
         uploadAttachment,
         markRead,
         deleteMessage,
+        bulkDeleteMessages,
         editMessage,
         starMessage,
         unstarMessage,
@@ -1465,6 +1524,8 @@
         isTyping: (chatId) => typingState.has(chatId),
         archiveChat,
         unarchiveChat,
+        deleteChat,
+        clearChatHistory,
         loadArchivedConversations,
         loadHistory,
         // Exposes the same self-contained request api() uses internally (see
