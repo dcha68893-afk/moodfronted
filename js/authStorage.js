@@ -1,424 +1,147 @@
 // authStorage.js - Persistent Authentication Storage
-// VERSION: 1.1.0 - WhatsApp-style persistent auth layer
-// PURPOSE: Single source of truth for auth persistence in localStorage
-
+// VERSION: 1.2.0 - account-isolated two-account switching
 (function () {
     'use strict';
 
     const AUTH_STORAGE_KEY = 'kynecta_auth';
     const LOGIN_STATE_KEY = 'isLoggedIn';
-    const LEGACY_TOKEN_KEYS = ['authToken', 'accessToken', 'token', 'nexopa_token', 'USER_TOKEN', 'kynecta_token', 'auth_token', 'kyn_token', 'kyn_access_token'];
-    const LEGACY_USER_KEYS = ['currentUser', 'user', 'nexopa_user'];
+    const LEGACY_TOKEN_KEYS = ['authToken','accessToken','token','nexopa_token','USER_TOKEN','kynecta_token','auth_token','kyn_token','kyn_access_token'];
+    const LEGACY_USER_KEYS = ['currentUser','user','nexopa_user'];
+    const ACCOUNT_LIST_KEY = 'kynecta_saved_accounts';
 
+    function safeParse(raw, fallback = null) { try { return raw ? JSON.parse(raw) : fallback; } catch (_) { return fallback; } }
     function withAuthMutation(fn) {
         const previous = window.__allowAuthStorageMutation__;
         window.__allowAuthStorageMutation__ = true;
-        try {
-            return fn();
-        } finally {
-            window.__allowAuthStorageMutation__ = previous === true;
-        }
+        try { return fn(); } finally { window.__allowAuthStorageMutation__ = previous === true; }
     }
-
-    function safeParse(raw, fallback = null) {
-        try {
-            return raw ? JSON.parse(raw) : fallback;
-        } catch (_) {
-            return fallback;
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // ACCOUNT-SWITCH ISOLATION
-    // A device is allowed to hold accounts for different people over
-    // time (Google sign-in or manual login), but data from account A
-    // must never leak into account B's UI. The old "clear on logout"
-    // paths only cleared a handful of keys and never ran at all when
-    // someone signed straight into a *different* account without
-    // explicitly logging out first (exactly what Google's "choose an
-    // account" picker lets people do). We detect that switch here, at
-    // the single choke point every login path (password login, Google
-    // login) funnels through, and wipe everything belonging to the
-    // previous account before the new token/user is written.
-    // ------------------------------------------------------------------
-    const KNOWN_INDEXEDDB_NAMES = [
-        'KnectaToolsDB', 'kynectaMesh', 'AppDB', 'calls-db', 'KnectaStatusDB',
-        'kyn_offline_queue', 'nexopa_repair_v1', 'kyn_stories_v1', 'nexopa_dq_v1',
-        // Message history — was missing here, which meant that on any
-        // browser/webview without IDBFactory.databases() support (older
-        // Android System WebView), the account-switch wipe silently never
-        // touched the message-history DB at all, and it uses this exact
-        // fallback list as its only source of truth in that case.
-        'nexopa_message_lifecycle_v1'
-    ];
-    // Device-level (not account) keys that are safe to keep across switches.
-    // 'kynecta_saved_accounts' is the small quick-switch account list (managed
-    // separately by auth.session.manager.js's addAccount/removeAccount) — it
-    // must survive a wipe or the "2 accounts per device" quick-switch feature
-    // would delete itself every time it runs.
-    const WIPE_ALLOWLIST = ['nexopa_theme', 'nexopa_nav_state', 'kynecta_saved_accounts'];
-
     function getStoredUserId() {
-        try {
-            const raw = localStorage.getItem(AUTH_STORAGE_KEY);
-            const parsed = raw ? safeParse(raw) : null;
-            const user = parsed && parsed.user;
-            if (user) return user.id || user.uid || user._id || null;
-        } catch (_) { /* ignore */ }
-        return null;
+        const auth = safeParse(localStorage.getItem(AUTH_STORAGE_KEY));
+        return auth?.user?.id ?? auth?.user?.userId ?? auth?.user?.uid ?? auth?.user?._id ?? null;
     }
 
-    // Deletes one IndexedDB database and actually waits to know whether it
-    // worked. Fire-and-forget deleteDatabase() calls silently hang forever
-    // if any tab/module still holds an open connection to that DB (a
-    // "blocked" delete never resolves on its own) — the previous account's
-    // data then just stays on disk while the wipe appears to have "run".
+    // IMPORTANT: message history is account-scoped inside
+    // nexopa_message_lifecycle_v1. Never delete that database during an
+    // account switch. The previous implementation deleted every IndexedDB
+    // database, including the message DB, which made switching from account
+    // A to B destroy A's cached history and made switching back look empty.
+    const NEVER_WIPE_INDEXEDDB = new Set(['nexopa_message_lifecycle_v1']);
+    const WIPE_ALLOWLIST = new Set(['nexopa_theme','nexopa_nav_state',ACCOUNT_LIST_KEY]);
+
     function deleteOneDB(name) {
-        return new Promise((resolve) => {
-            let settled = false;
-            const finish = (ok) => { if (!settled) { settled = true; resolve(ok); } };
+        return new Promise(resolve => {
+            if (NEVER_WIPE_INDEXEDDB.has(name)) return resolve(true);
             try {
                 const req = indexedDB.deleteDatabase(name);
+                let settled = false;
+                const finish = ok => { if (!settled) { settled = true; resolve(ok); } };
                 req.onsuccess = () => finish(true);
                 req.onerror = () => finish(false);
-                // onblocked fires when a connection (e.g. one opened before this
-                // module's account-switch handler ran, or in another tab) is
-                // still open. We already broadcast kyn:accountSwitchWipe first
-                // so in-page connections should self-close via onversionchange;
-                // if it's still blocked after that, give it a short grace
-                // window rather than hanging forever.
-                req.onblocked = () => {
-                    console.warn(`[AuthStorage] deleteDatabase("${name}") blocked by an open connection — waiting briefly for it to close.`);
-                    setTimeout(() => finish(false), 1500);
-                };
-            } catch (_) { finish(false); }
+                req.onblocked = () => setTimeout(() => finish(false), 1500);
+            } catch (_) { resolve(false); }
         });
     }
 
     function wipeIndexedDBData() {
         try {
             if (typeof indexedDB === 'undefined') return;
-            const deleteAll = (names) => {
-                Promise.all(names.map(deleteOneDB)).then((results) => {
-                    const failed = names.filter((_, i) => !results[i]);
-                    if (failed.length) {
-                        console.warn('[AuthStorage] Some databases were not confirmed deleted (still open elsewhere):', failed);
-                    }
-                });
-            };
+            const deleteAll = names => Promise.all(names.filter(n => !NEVER_WIPE_INDEXEDDB.has(n)).map(deleteOneDB));
             if (typeof indexedDB.databases === 'function') {
-                indexedDB.databases().then((dbs) => {
-                    const names = Array.from(new Set([
-                        ...((dbs || []).map((d) => d && d.name).filter(Boolean)),
-                        ...KNOWN_INDEXEDDB_NAMES // union, in case databases() under-reports on this webview
-                    ]));
+                indexedDB.databases().then(dbs => {
+                    const names = Array.from(new Set([...(dbs || []).map(d => d?.name).filter(Boolean)]));
                     deleteAll(names);
-                }).catch(() => deleteAll(KNOWN_INDEXEDDB_NAMES));
-            } else {
-                deleteAll(KNOWN_INDEXEDDB_NAMES);
+                }).catch(() => {});
             }
-        } catch (_) { /* ignore */ }
+        } catch (_) {}
     }
 
     function wipePreviousAccountData() {
+        // This remains available for genuine full-account cleanup, but the
+        // message DB is explicitly excluded because its records are keyed by
+        // accountId and are therefore safe to retain for quick switching.
         try {
-            withAuthMutation(() => {
-                Object.keys(localStorage).forEach((key) => {
-                    if (WIPE_ALLOWLIST.indexOf(key) === -1) {
-                        try { localStorage.removeItem(key); } catch (_) { /* ignore */ }
-                    }
-                });
-            });
-        } catch (_) { /* ignore */ }
-        try { sessionStorage.clear(); } catch (_) { /* ignore */ }
-        // Tell every module holding an open IndexedDB connection (message
-        // history, calls, status/stories, offline queues, mesh, cache) to
-        // close it *now*, synchronously, before we start deleting databases.
-        // Without this, deleteDatabase() below just blocks forever against
-        // whichever connections are already open on the page and the wipe
-        // silently does nothing for those DBs.
-        try {
-            if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
-                window.dispatchEvent(new CustomEvent('kyn:accountSwitchWipe'));
-            }
-        } catch (_) { /* ignore */ }
+            withAuthMutation(() => Object.keys(localStorage).forEach(key => {
+                if (!WIPE_ALLOWLIST.has(key)) { try { localStorage.removeItem(key); } catch (_) {} }
+            }));
+            sessionStorage.clear();
+        } catch (_) {}
+        try { window.dispatchEvent(new CustomEvent('kyn:accountSwitchWipe')); } catch (_) {}
         wipeIndexedDBData();
-        console.warn('[AuthStorage] Detected sign-in from a different account on this device — cleared previous account local data.');
     }
 
     function saveAuth(data) {
         try {
-            if (!data || !data.token) {
-                console.warn('[AuthStorage] saveAuth() called with missing token');
-                return false;
-            }
-
-            const incomingUserId = data.user ? (data.user.id || data.user.uid || data.user._id || null) : null;
+            if (!data?.token) return false;
+            const incomingUserId = data.user?.id ?? data.user?.uid ?? data.user?._id ?? null;
             const previousUserId = getStoredUserId();
-            if (incomingUserId && previousUserId && String(previousUserId) !== String(incomingUserId)) {
-                wipePreviousAccountData();
-            }
-
+            // A normal login into a different account still needs stale
+            // account-agnostic caches cleared, but MUST NOT destroy the
+            // account-isolated message DB.
+            if (incomingUserId && previousUserId && String(previousUserId) !== String(incomingUserId)) wipePreviousAccountData();
             const payload = {
                 token: data.token,
                 refreshToken: data.refreshToken || null,
                 user: data.user || null,
-                expiresAt: data.expiresAt || (Date.now() + 24 * 60 * 60 * 1000),
+                expiresAt: data.expiresAt || (Date.now() + 30 * 24 * 60 * 60 * 1000),
                 issuedAt: data.issuedAt || Date.now(),
                 savedAt: new Date().toISOString(),
                 _version: '1.2.0'
             };
-
-            // CRITICAL: Non-blocking storage write with timeout protection
-            const writeStartTime = Date.now();
-            
             withAuthMutation(() => {
-                try {
-                    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(payload));
-                    
-                    // Set legacy keys for compatibility (non-blocking)
-                    LEGACY_TOKEN_KEYS.forEach((key) => {
-                        try {
-                            localStorage.setItem(key, payload.token);
-                        } catch (e) {
-                            console.warn(`[AuthStorage] Failed to set legacy token key ${key}:`, e.message);
-                        }
-                    });
-                    
-                    LEGACY_USER_KEYS.forEach((key) => {
-                        try {
-                            localStorage.setItem(key, JSON.stringify(payload.user || null));
-                        } catch (e) {
-                            console.warn(`[AuthStorage] Failed to set legacy user key ${key}:`, e.message);
-                        }
-                    });
-                    
-                    localStorage.setItem(LOGIN_STATE_KEY, 'true');
-                    
-                    const writeDuration = Date.now() - writeStartTime;
-                    if (writeDuration > 50) {
-                        console.warn(`[AuthStorage] Slow storage write detected: ${writeDuration}ms`);
-                    }
-                    
-                    console.log('[AuthStorage] ✅ Auth data saved successfully');
-                } catch (storageError) {
-                    console.error('[AuthStorage] Storage write error:', storageError.message);
-                    throw storageError;
-                }
+                localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(payload));
+                LEGACY_TOKEN_KEYS.forEach(k => { try { localStorage.setItem(k, payload.token); } catch (_) {} });
+                LEGACY_USER_KEYS.forEach(k => { try { localStorage.setItem(k, JSON.stringify(payload.user)); } catch (_) {} });
+                localStorage.setItem(LOGIN_STATE_KEY, 'true');
             });
-
             return true;
-        } catch (error) {
-            console.error('[AuthStorage] saveAuth failed:', error.message);
-            return false;
-        }
+        } catch (e) { console.error('[AuthStorage] saveAuth failed:', e.message); return false; }
     }
 
     function getAuth() {
         try {
-            // CRITICAL: Instant read with performance tracking
-            const readStartTime = Date.now();
-            
             const raw = localStorage.getItem(AUTH_STORAGE_KEY);
             if (raw) {
                 const parsed = safeParse(raw);
-                // CRITICAL: Validate structure only, never throw
-                if (parsed && typeof parsed === 'object' && parsed.token) {
-                    const readDuration = Date.now() - readStartTime;
-                    if (readDuration > 10) {
-                        console.warn(`[AuthStorage] Slow auth read detected: ${readDuration}ms`);
-                    }
-                    
-                    // Set global state immediately for UI rendering
-                    if (!window.currentUser && parsed.user) {
-                        window.currentUser = parsed.user;
-                    }
-                    
-                    return parsed;
-                }
+                if (parsed?.token) { if (!window.currentUser && parsed.user) window.currentUser = parsed.user; return parsed; }
             }
-
-            // Fallback to legacy keys (non-blocking)
-            const fallbackToken = LEGACY_TOKEN_KEYS.map((key) => {
-                try {
-                    return localStorage.getItem(key);
-                } catch (e) {
-                    console.warn(`[AuthStorage] Failed to read legacy token key ${key}:`, e.message);
-                    return null;
-                }
-            }).find(Boolean);
-            
-            if (!fallbackToken) return null;
-
-            const fallbackUserRaw = LEGACY_USER_KEYS.map((key) => {
-                try {
-                    return localStorage.getItem(key);
-                } catch (e) {
-                    console.warn(`[AuthStorage] Failed to read legacy user key ${key}:`, e.message);
-                    return null;
-                }
-            }).find(Boolean);
-            
-            const fallbackAuth = {
-                token: fallbackToken,
-                refreshToken: null,
-                user: safeParse(fallbackUserRaw),
-                expiresAt: null,
-                issuedAt: null,
-                _fallback: true // Mark as fallback for debugging
-            };
-            
-            // Set global state immediately for UI rendering
-            if (!window.currentUser && fallbackAuth.user) {
-                window.currentUser = fallbackAuth.user;
-            }
-            
-            const readDuration = Date.now() - readStartTime;
-            if (readDuration > 20) {
-                console.warn(`[AuthStorage] Slow fallback auth read: ${readDuration}ms`);
-            }
-            
-            return fallbackAuth;
-        } catch (error) {
-            // CRITICAL: NEVER throw, always return null on any error
-            console.warn('[AuthStorage] getAuth() handled error safely:', error.message);
-            return null;
-        }
+            const token = LEGACY_TOKEN_KEYS.map(k => { try { return localStorage.getItem(k); } catch (_) { return null; } }).find(Boolean);
+            if (!token) return null;
+            const user = safeParse(LEGACY_USER_KEYS.map(k => { try { return localStorage.getItem(k); } catch (_) { return null; } }).find(Boolean));
+            return { token, refreshToken: null, user, expiresAt: null, issuedAt: null, _fallback: true };
+        } catch (_) { return null; }
     }
-    
-    // CRITICAL: Add saveSession method that matches expected interface
-    function saveSession(data) {
-        return saveAuth(data);
-    }
-    
-    // CRITICAL: Add getSession alias that never throws
+    function saveSession(data) { return saveAuth(data); }
     function getSession() {
-        try {
-            const auth = getAuth();
-            if (!auth) {
-                return null;
-            }
-            
-            // Return session structure with required fields
-            return {
-                token: auth.token,
-                refreshToken: auth.refreshToken,
-                user: auth.user,
-                userId: auth.user?.id || auth.user?.uid || null,
-                expiresAt: auth.expiresAt,
-                issuedAt: auth.issuedAt,
-                authenticated: !!auth.token
-            };
-        } catch (error) {
-            // CRITICAL: NEVER throw, always return null
-            console.warn('[AuthStorage] getSession() handled corruption safely:', error.message);
-            return null;
-        }
+        const a = getAuth();
+        return a ? { token:a.token, refreshToken:a.refreshToken, user:a.user, userId:a.user?.id ?? a.user?.uid ?? null, expiresAt:a.expiresAt, issuedAt:a.issuedAt, authenticated:!!a.token } : null;
     }
-
-    // BUG (the actual cross-account leak): saveAuth()'s account-switch wipe
-    // only fires when getStoredUserId() finds a *previous* account still on
-    // disk. But an explicit user-initiated logout used to call ONLY the four
-    // key removals below — it never touched IndexedDB (message history,
-    // calls, status/stories, offline queues) or any of the many other
-    // account-agnostic localStorage caches other modules keep (friends,
-    // groups, marketplace, tools, mesh, etc). Worse, removing
-    // AUTH_STORAGE_KEY here means the *next* login's getStoredUserId() reads
-    // nothing, so saveAuth() thinks there's no previous account and skips
-    // its own wipe too. Net effect: logout → log in as a different account
-    // on the same device silently kept 100% of account A's local caches
-    // (most visibly, account A's message history) exactly where account B's
-    // UI reads from them. Fix: every explicit logout now runs the same full
-    // wipe used for a same-session account switch, so stale data can never
-    // survive to greet the next account regardless of which order
-    // logout/login happen in.
     function clearAuth() {
         try {
             withAuthMutation(() => {
                 localStorage.removeItem(AUTH_STORAGE_KEY);
-                LEGACY_TOKEN_KEYS.forEach((key) => localStorage.removeItem(key));
-                LEGACY_USER_KEYS.forEach((key) => localStorage.removeItem(key));
+                LEGACY_TOKEN_KEYS.forEach(k => localStorage.removeItem(k));
+                LEGACY_USER_KEYS.forEach(k => localStorage.removeItem(k));
                 localStorage.removeItem(LOGIN_STATE_KEY);
             });
-            wipePreviousAccountData();
+            // Keep retained account/message data for quick switching. The
+            // explicit account removal path is responsible for removing the
+            // account from the saved-account list.
             return true;
-        } catch (error) {
-            console.error('[AuthStorage] clearAuth failed:', error.message);
-            return false;
-        }
+        } catch (e) { return false; }
     }
-
     function hasValidAuth() {
-        const auth = getAuth();
-        if (!auth || !auth.token) return false;
-        if (auth.expiresAt && Date.now() > auth.expiresAt) return false;
-        return true;
+        const a = getAuth();
+        return !!(a?.token && (!a.expiresAt || Date.now() <= a.expiresAt));
     }
-
-    function updateAuthTokens({ token, refreshToken, expiresAt }) {
-        try {
-            const existing = getAuth() || {};
-            return saveAuth({
-                ...existing,
-                token: token || existing.token,
-                refreshToken: refreshToken || existing.refreshToken,
-                expiresAt: expiresAt || existing.expiresAt,
-                issuedAt: Date.now()
-            });
-        } catch (error) {
-            console.error('[AuthStorage] updateAuthTokens failed:', error.message);
-            return false;
-        }
+    function updateAuthTokens({token, refreshToken, expiresAt}) {
+        const a = getAuth() || {};
+        return saveAuth({ ...a, token: token || a.token, refreshToken: refreshToken || a.refreshToken, expiresAt: expiresAt || a.expiresAt, issuedAt: Date.now() });
     }
+    function getToken() { return getAuth()?.token || null; }
+    function getUser() { return getAuth()?.user || null; }
+    function isValidSession(s) { return !!(s && typeof s === 'object' && typeof s.token === 'string' && s.token.length >= 10 && s.user && typeof s.user === 'object'); }
 
-    function getToken() {
-        const auth = getAuth();
-        const token = auth?.token || null;
-        console.log('[AUTH TOKEN]', token);
-        return token;
-    }
-
-    function getUser() {
-        return getAuth()?.user || null;
-    }
-
-    // FIX (dead code): js/auth.session.manager.js's initialize() calls
-    // window.AuthStorage.isValidSession(rawSession) to decide whether to
-    // auto-clear all session keys on boot ("Corrupted/incomplete session
-    // detected — auto-clearing all keys"). No function of that name was ever
-    // defined on this object — only hasValidAuth() exists, which takes no
-    // arguments and reads from storage itself rather than validating a
-    // passed-in session object. Since `typeof window.AuthStorage.isValidSession
-    // === 'function'` was always false, that call silently always fell back to
-    // auth.session.manager.js's own inline check, and never checked
-    // expiresAt — so a session whose token had simply expired was treated as
-    // "valid" by the boot check right up until the first API call failed with
-    // a 401. Providing the real function here: (a) makes the intended
-    // canonical check actually run instead of silently no-op'ing to the
-    // fallback every time.
-    //
-    // Deliberately NOT checking expiresAt here even though hasValidAuth()
-    // does: an expired-but-otherwise-well-formed session should trigger a
-    // token *refresh* (see refreshAuthToken() in chat.html / the refresh flow
-    // in api.auth.js), not a full auto-clear-and-show-login on every page
-    // boot. Wiring expiry into this boot-time check without being able to
-    // verify live what expiresAt actually contains for real sessions risks
-    // turning a merely-stale token into a forced logout; kept the check
-    // identical in behavior to the pre-existing inline fallback in
-    // auth.session.manager.js so this change only fixes the broken wiring,
-    // not the validation rules.
-    function isValidSession(sessionObj) {
-        if (!sessionObj || typeof sessionObj !== 'object') return false;
-        if (!sessionObj.token || typeof sessionObj.token !== 'string' || sessionObj.token.length < 10) return false;
-        if (!sessionObj.user || typeof sessionObj.user !== 'object') return false;
-        return true;
-    }
-
-    // Exposed so any explicit "switch account" UI flow can force the same
-    // full local wipe on demand, without needing to fake a logout+login.
-    const AuthStorage = { saveAuth, saveSession, getAuth, getSession, clearAuth, hasValidAuth, updateAuthTokens, getToken, getUser, isValidSession, wipeAccountData: wipePreviousAccountData };
-
-    window.AuthStorage = AuthStorage;
+    window.AuthStorage = { saveAuth, saveSession, getAuth, getSession, clearAuth, hasValidAuth, updateAuthTokens, getToken, getUser, isValidSession, wipeAccountData: wipePreviousAccountData };
     window.api = window.api || {};
-    window.api.storage = AuthStorage;
+    window.api.storage = window.AuthStorage;
 })();
