@@ -30,12 +30,17 @@
     if (loadPromise) return loadPromise;
 
     loadPromise = (async () => {
+      // Mobile chat-list bootstrap is intentionally independent from crypto.
+      // A slow E2E identity must never make an existing conversation list look
+      // empty, and a missing identity must never cause plaintext/ciphertext
+      // UI to be rendered as a substitute for the actual chat state.
+      if (/\/message(?:\.html)?$/i.test(global.location?.pathname || '')) {
+        await loadScript('/js/message-mobile-bootstrap-fix.js');
+      }
+
       await loadScript('/js/e2e-identity-core.js');
       await loadScript('/js/message-e2e-core.js');
       await loadScript('/js/message-e2e-compat.js');
-      // Realtime is a transport concern, not crypto. Only the Messages iframe
-      // gets the direct receiver bridge; group/calls/tools pages must not attach
-      // a second message:new consumer or emit duplicate delivery receipts.
       if (/\/message(?:\.html)?$/i.test(global.location?.pathname || '')) {
         await loadScript('/js/message-realtime-bridge.js');
       }
@@ -62,9 +67,7 @@
       ]);
       if (typeof dm.getSafetyNumbers === 'function') facade.getSafetyNumbers = dm.getSafetyNumbers;
       const missing = messageSurface.filter(name => typeof dm[name] !== 'function');
-      if (missing.length) {
-        throw new Error(`Canonical message E2E surface incomplete: ${missing.join(', ')}`);
-      }
+      if (missing.length) throw new Error(`Canonical message E2E surface incomplete: ${missing.join(', ')}`);
       for (const name of messageSurface) facade[name] = dm[name];
 
       const legacyDmNames = Object.freeze([
@@ -88,29 +91,17 @@
 
       global.KynectaE2E = facade;
 
-      // Do NOT announce E2E readiness until the identity is actually unlocked.
-      // The previous implementation swallowed dm.init() failures and then
-      // dispatched kyn:canonicalMessageE2EReady anyway. message-client.js would
-      // consequently begin decrypting with a facade whose private identity was
-      // still unavailable, turning a temporary login/bootstrap race into a
-      // terminal-looking "Unable to decrypt" state. loadPromise now rejects on
-      // identity failure, so the existing bounded wait/retry path can try again
-      // once the login session password becomes available.
+      // E2E readiness means the identity is actually unlocked. Do not swallow
+      // init failures and announce readiness: doing so races message-client's
+      // decrypt pipeline and turns a temporary auth/bootstrap delay into
+      // "Unable to decrypt". loadPromise is reset on failure so a later call
+      // can retry after the login session password becomes available.
       const identity = await dm.init();
       if (!identity || !global.KynectaE2EIdentity?.enabled || !global.KynectaE2EIdentity?.privateKey) {
         throw new Error('Canonical message E2E identity is not unlocked');
       }
 
       try { document.dispatchEvent(new CustomEvent('kyn:canonicalMessageE2EReady')); } catch (_) {}
-
-      // The message client already owns the authoritative chat state. This
-      // lightweight fallback only exists for the mobile/slow-bootstrap case
-      // where the iframe loaded before its normal sidebar request was started.
-      // It never replaces the message client's state or crypto pipeline.
-      if (/\/message(?:\.html)?$/i.test(global.location?.pathname || '')) {
-        await loadScript('/js/message-mobile-bootstrap-fix.js');
-      }
-
       return facade;
     })();
 
