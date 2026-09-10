@@ -18,6 +18,7 @@
   let fallbackChats = [];
   let timer = null;
   let started = false;
+  let friendRenderTimer = null;
 
   function previewFor(chat) {
     const last = Array.isArray(chat?.chatMessages) ? chat.chatMessages[0] : null;
@@ -101,6 +102,213 @@
     if (openCrossModuleTarget(data.payload || data)) event.stopImmediatePropagation();
   }, true);
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // DM E2E key-freshness guard
+  //
+  // message-e2e-core.js embeds the recipient key used for a message, which
+  // makes decryption self-contained. New messages still MUST be encrypted
+  // with the recipient's CURRENT server key. The canonical encryptForChat()
+  // path is cache-first, so a stale PUB_STORE entry can produce a ciphertext
+  // that the recipient cannot decrypt. Warm the canonical cache with one
+  // forced network lookup immediately before every new outgoing encryption.
+  // We do not replace the crypto algorithm; we only force the existing
+  // identity directory to refresh before the canonical encryptor consumes it.
+  function installOutgoingKeyFreshnessFix() {
+    const e2e = global.KynectaE2E;
+    const identity = global.KynectaE2EIdentity;
+    if (!e2e || typeof e2e.encryptForChat !== 'function') return false;
+    if (!identity || typeof identity.publicKeyFor !== 'function') return false;
+    if (e2e.__outgoingKeyFreshnessFixed) return true;
+
+    const original = e2e.encryptForChat.bind(e2e);
+    e2e.encryptForChat = async function freshRecipientKeyEncrypt(plaintext, chatId, recipientUserId) {
+      if (!recipientUserId) throw new Error('Recipient is required for secure messaging');
+      // Force the current key into the exact cache used by the canonical
+      // encryptor. If refresh fails, do NOT silently fall back to stale cache:
+      // sending with an unverified key would create undecryptable messages.
+      let fresh;
+      try {
+        fresh = await identity.publicKeyFor(String(recipientUserId), true);
+      } catch (err) {
+        throw new Error(`Recipient encryption key could not be refreshed: ${err?.message || 'unavailable'}`);
+      }
+      if (!fresh?.key || !fresh?.pub) throw new Error('Recipient encryption key is unavailable');
+      return original(plaintext, chatId, recipientUserId);
+    };
+    e2e.__outgoingKeyFreshnessFixed = true;
+    return true;
+  }
+
+  function installE2EKeyFreshnessWhenReady() {
+    if (installOutgoingKeyFreshnessFix()) return true;
+    const retry = () => installOutgoingKeyFreshnessFix();
+    document.addEventListener('kyn:canonicalMessageE2EReady', retry, { once:false });
+    document.addEventListener('kyn:e2eUnlocked', retry, { once:false });
+    return false;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Start-chat contact picker: paint cached friends immediately, then refresh
+  // in the background. Opening the picker must never wait for a network call.
+  function normalizeFriend(raw) {
+    if (!raw) return null;
+    const id = raw.id ?? raw.userId ?? raw.friendId;
+    if (id == null || String(id) === '') return null;
+    return {
+      id: String(id),
+      name: raw.displayName || raw.name || [raw.firstName, raw.lastName].filter(Boolean).join(' ') || raw.username || 'User',
+      username: raw.username || '',
+      avatar: raw.avatar || raw.photoURL || raw.profilePicture || null,
+    };
+  }
+
+  function readSynchronousFriends() {
+    const sources = [];
+    try { if (Array.isArray(global.__friendsList)) sources.push(global.__friendsList); } catch (_) {}
+    try {
+      const cached = global.KynectaStore?.get?.('friends.list');
+      if (Array.isArray(cached)) sources.push(cached);
+    } catch (_) {}
+    try {
+      const gcFriends = global.FriendCore?.friends || global.FriendsCore?.friends;
+      if (Array.isArray(gcFriends)) sources.push(gcFriends);
+    } catch (_) {}
+
+    const out = [];
+    const seen = new Set();
+    for (const source of sources) {
+      for (const raw of source) {
+        const friend = normalizeFriend(raw);
+        if (!friend || seen.has(friend.id)) continue;
+        seen.add(friend.id); out.push(friend);
+      }
+    }
+    return out;
+  }
+
+  function friendNameMatch(friend, query) {
+    if (!query) return true;
+    const q = query.toLowerCase();
+    return `${friend.name} ${friend.username}`.toLowerCase().includes(q);
+  }
+
+  function renderInstantFriends(friends) {
+    const results = document.getElementById('newChatResults');
+    const modal = document.getElementById('newChatModal');
+    if (!results || !modal || modal.classList.contains('hidden')) return false;
+    if (!friends.length) return false;
+    const input = document.getElementById('newChatSearchInput');
+    const query = input?.value?.trim() || '';
+    const filtered = friends.filter(f => friendNameMatch(f, query));
+    if (!filtered.length) return false;
+
+    // Do not overwrite a canonical render that has already populated the list.
+    if (results.children.length > 0 && !results.querySelector('[data-kyn-instant-friend]')) return true;
+    const frag = document.createDocumentFragment();
+    filtered.forEach(friend => {
+      const row = document.createElement('div');
+      row.className = 'new-chat-result-item';
+      row.dataset.kynInstantFriend = '1';
+      row.dataset.userId = friend.id;
+      const img = document.createElement('img');
+      img.alt = '';
+      img.src = friend.avatar || '';
+      img.onerror = () => { img.style.visibility = 'hidden'; };
+      const meta = document.createElement('div');
+      meta.style.flex = '1'; meta.style.minWidth = '0';
+      const name = document.createElement('div'); name.textContent = friend.name;
+      name.style.fontWeight = '600';
+      const sub = document.createElement('div'); sub.textContent = friend.username ? `@${friend.username}` : '';
+      sub.style.fontSize = '12px'; sub.style.opacity = '0.65';
+      meta.append(name, sub);
+      row.append(img, meta);
+      row.addEventListener('click', () => {
+        global.MessageModule?.openChat?.({
+          userId: friend.id,
+          conversationId: null,
+          userName: friend.name,
+          avatar: friend.avatar,
+        });
+      });
+      frag.appendChild(row);
+    });
+    results.replaceChildren(frag);
+    return true;
+  }
+
+  async function refreshFriendsPicker() {
+    const store = global.KynectaFriendsLocalStore;
+    if (!store?.getFriends) return;
+    try {
+      const records = await store.getFriends();
+      const friends = records.map(normalizeFriend).filter(Boolean);
+      if (!friends.length) return;
+      const results = document.getElementById('newChatResults');
+      const modal = document.getElementById('newChatModal');
+      if (!results || !modal || modal.classList.contains('hidden')) return;
+      // Canonical message.html owns the final picker. This layer only supplies
+      // data when it is still empty, then lets the canonical renderer take over.
+      renderInstantFriends(friends);
+    } catch (_) {}
+  }
+
+  function warmStartChatPicker() {
+    const modal = document.getElementById('newChatModal');
+    const results = document.getElementById('newChatResults');
+    if (!modal || !results) return;
+    if (modal.classList.contains('hidden')) return;
+
+    // First paint is synchronous from already-loaded memory.
+    renderInstantFriends(readSynchronousFriends());
+    // Then hydrate from IndexedDB without blocking the modal opening.
+    refreshFriendsPicker();
+  }
+
+  function installStartChatInstantFriends() {
+    if (global.__kynInstantFriendsInstalled) return true;
+    global.__kynInstantFriendsInstalled = true;
+
+    const run = () => {
+      warmStartChatPicker();
+      if (friendRenderTimer) clearTimeout(friendRenderTimer);
+      friendRenderTimer = setTimeout(warmStartChatPicker, 120);
+    };
+
+    document.addEventListener('click', (e) => {
+      if (e.target.closest('#newChatBtn, #startChatBtn, [data-action="start-chat"], [data-action="new-chat"]')) {
+        setTimeout(run, 0);
+      }
+    }, true);
+
+    document.addEventListener('input', (e) => {
+      if (e.target.id === 'newChatSearchInput') {
+        // Search is local-only once the friend list is available; never require
+        // the user to type before the initial friend list is rendered.
+        const sync = readSynchronousFriends();
+        if (sync.length) renderInstantFriends(sync);
+      }
+    }, true);
+
+    const observer = new MutationObserver(() => {
+      const modal = document.getElementById('newChatModal');
+      if (!modal || modal.classList.contains('hidden')) return;
+      warmStartChatPicker();
+    });
+    observer.observe(document.body, { attributes:true, childList:true, subtree:true, attributeFilter:['class','style'] });
+
+    global.addEventListener('message', (e) => {
+      if (e.data?.type === 'FRIENDS_LIST_UPDATE') {
+        const list = e.data?.payload?.friends || e.data?.friends || [];
+        if (Array.isArray(list) && list.length) {
+          global.__friendsList = list;
+          warmStartChatPicker();
+        }
+      }
+    });
+    global.addEventListener('kyn:friendStore', warmStartChatPicker);
+    return true;
+  }
+
   // FormData is NOT structured-cloneable. message-client.js correctly builds
   // FormData for /files/upload, but its generic iframe API transport then put
   // that FormData inside window.parent.postMessage(), causing:
@@ -145,12 +353,22 @@
   function start() {
     if (started) return;
     started = true;
+    installE2EKeyFreshnessWhenReady();
+    installStartChatInstantFriends();
     installAttachmentUploadFix();
     pollUntilReady(Date.now());
-    const retry = () => installAttachmentUploadFix();
+    const retry = () => {
+      installAttachmentUploadFix();
+      installOutgoingKeyFreshnessFix();
+      installStartChatInstantFriends();
+      warmStartChatPicker();
+    };
     global.addEventListener('load', retry, { once:true });
     const timerId = setInterval(() => {
-      if (installAttachmentUploadFix()) clearInterval(timerId);
+      const attachmentReady = installAttachmentUploadFix();
+      const e2eReady = installOutgoingKeyFreshnessFix();
+      installStartChatInstantFriends();
+      if (attachmentReady && e2eReady) clearInterval(timerId);
     }, 250);
     setTimeout(() => clearInterval(timerId), MAX_WAIT_MS);
   }
