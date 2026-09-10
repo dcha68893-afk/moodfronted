@@ -238,6 +238,26 @@
   function isMessageQueued(message) { return pending.has(messageId(message)); }
   function isMessageFailed(message) { return failed.has(messageId(message)); }
   function peekDecryptedText(message) { return decryptCache.get(messageId(message)) ?? null; }
+  // FIX (deleted message can be re-inserted by a late decrypt/retry):
+  // deleting a message only ever removed it from message-client.js's own
+  // state.messagesByConversation bucket — this engine's own pending/failed/
+  // decryptCache/inflight entries for that id were never cleaned up, so a
+  // retry already in flight (or scheduled) for a message that FAILED to
+  // decrypt could still resolve/fail after the delete and fire
+  // kyn:messageDecrypted / kyn:messageDecryptFailed for an id nothing
+  // should care about anymore. message-client.js's own listeners guard
+  // against re-adding a message that's no longer in the bucket, but letting
+  // the queue entry linger is still wasted work and a latent resurrection
+  // risk if that guard is ever missed by a future caller. Called from
+  // message-client.js's removeMessageFromState() on every delete.
+  function forgetMessage(messageIdValue) {
+    const id = messageId({ id: messageIdValue });
+    if (!id) return;
+    pending.delete(id);
+    failed.delete(id);
+    decryptCache.delete(id);
+    inflight.delete(id);
+  }
   async function registerPendingDecrypt(messageIdValue, attemptFn, onResolved) { const id = String(messageIdValue || ''); if (!id || typeof attemptFn !== 'function') return { ok: false }; if (decryptCache.has(id)) return { ok: true, plaintext: decryptCache.get(id) }; if (pending.has(id)) { if (onResolved) pending.get(id).subscribers.add(onResolved); return { ok: false, queued: true }; } const entry = { subscribers: new Set(onResolved ? [onResolved] : []) }; pending.set(id, entry); try { const text = await attemptFn(); notifyResolved(id, text, entry); return { ok: true, plaintext: text }; } catch (e) { notifyFailed(id, e, entry); return { ok: false, queued: false }; } }
   async function encryptAttachment(arrayBuffer, chatId, recipientUserId) {
     const identity = await ensureIdentity();
@@ -261,5 +281,5 @@
     return crypto.subtle.decrypt({ name: 'AES-GCM', iv: Uint8Array.from(atob(env.iv), c => c.charCodeAt(0)), tagLength: 128 }, key, Uint8Array.from(atob(env.ct), c => c.charCodeAt(0)));
   }
 
-  global.KynectaMessageE2E = { init, encryptForChat, decryptFromChat, decryptMessageForDisplay, retryDecrypt, prefetchRecipientKey, prefetchRecipientKeys, cacheRecipientKey, isMessageQueued, isMessageFailed, peekDecryptedText, registerPendingDecrypt, encryptAttachment, decryptAttachment, getSafetyNumbers: (...args) => I()?.getSafetyNumbers?.(...args), get enabled() { return !!I()?.enabled; }, get publicKey() { return I()?.publicKey || null; }, get keyId() { return I()?.keyId || null; }, getMyUserId: () => I()?.userId || null, clearKeys: () => I()?.clear?.() };
+  global.KynectaMessageE2E = { init, encryptForChat, decryptFromChat, decryptMessageForDisplay, retryDecrypt, prefetchRecipientKey, prefetchRecipientKeys, cacheRecipientKey, isMessageQueued, isMessageFailed, peekDecryptedText, forgetMessage, registerPendingDecrypt, encryptAttachment, decryptAttachment, getSafetyNumbers: (...args) => I()?.getSafetyNumbers?.(...args), get enabled() { return !!I()?.enabled; }, get publicKey() { return I()?.publicKey || null; }, get keyId() { return I()?.keyId || null; }, getMyUserId: () => I()?.userId || null, clearKeys: () => I()?.clear?.() };
 })(window);

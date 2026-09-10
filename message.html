@@ -22,7 +22,6 @@
     width: 320px; min-width: 260px; border-right: 1px solid var(--kyn-border, #e2e2e2);
     display: flex; flex-direction: column; overflow: hidden;
   }
-  #convListPanel.hide-on-mobile { display: none; }
   #convListHeader {
     display: flex; align-items: center; justify-content: space-between;
     padding: 12px 14px; font-weight: 600; border-bottom: 1px solid var(--kyn-border, #f0f0f0);
@@ -264,8 +263,19 @@
   }
   #emptyStateNewChatBtn:hover { opacity: 0.9; }
   #loadOlderBtn { text-align: center; padding: 8px; font-size: 12px; color: var(--kyn-accent-primary, #22c55e); cursor: pointer; }
+  /* FIX (two-panel desktop layout lost its sidebar): #convListPanel's
+     "hide it while a chat is open" rule used to sit outside this media
+     query — display:none at every width, not just mobile — so opening any
+     chat hid the sidebar on desktop too, leaving only the single chat pane
+     where the spec calls for sidebar + chat side by side on a large
+     screen. Scoping both hide-on-mobile rules to this one mobile-only
+     media query is what actually makes it mobile-only: below 720px, only
+     one of the two panels shows at a time (WhatsApp/Telegram mobile
+     style); at 720px and up, both stay visible together regardless of
+     which panel the mobile-only navigation state thinks is "active". */
   @media (max-width: 720px) {
     #convListPanel { width: 100%; }
+    #convListPanel.hide-on-mobile { display: none; }
     #chatPanel.hide-on-mobile { display: none; }
     #backBtn { display: inline-block; }
   }
@@ -483,7 +493,17 @@
       const statusTick = isMine ? ({ sending: '…', sent: '✓', delivered: '✓✓', read: '✓✓', failed: '⚠' }[m.status] || '') : '';
       const editedTag = m.isEdited ? ' (edited)' : '';
       const isDeletedForEveryone = m.deleted && m.deleteForEveryone;
-      const decryptFailed = m.displayContent === '🔒 Encrypted message';
+      // FIX (retry-tap silently did nothing on a truly-failed message):
+      // this only matched '🔒 Encrypted message' — decryptForDisplay's
+      // catch-block fallback for an unexpected exception — but the actual
+      // terminal "the queue gave up on this message" state (see
+      // message-client.js's isFailed branch and its kyn:messageDecryptFailed
+      // listener) sets displayContent to '🔒 Unable to decrypt this
+      // message' instead. That string never matched here, so a genuinely,
+      // permanently failed message rendered without the decrypt-retry
+      // class/handler at all — it looked like plain text with no way to
+      // retry it.
+      const decryptFailed = m.displayContent === '🔒 Encrypted message' || m.displayContent === '🔒 Unable to decrypt this message';
       const decryptPending = m.displayContent === 'Decrypting…';
       const content = isDeletedForEveryone ? 'This message was deleted' : (m.displayContent !== undefined ? m.displayContent : '…');
       const contentAttrs = decryptFailed ? ` class="decrypt-retry" title="Tap to retry decryption" data-retry-message-id="${m.id}"`
@@ -1021,7 +1041,35 @@
     function openBubbleMenu(anchorEl, chatId, messageId) {
       closeBubbleMenu();
       const current = window.MessageModule.getMessages(chatId).find(m => m.id === messageId);
-      if (!current) return;
+      // FIX (menu silently does nothing — most visible on a received
+      // message that failed to decrypt): this used to just `return` here
+      // with no menu, no error, nothing — indistinguishable from a broken
+      // button to the user. Whatever the reason getMessages() didn't
+      // return this exact id (a render slightly ahead of a state update
+      // mid-sync is the likeliest, but this should never leave the user
+      // with a dead button regardless of the cause), fall back to a
+      // minimal menu that still offers the one action that only needs the
+      // id itself — delete "for me", which every participant can always
+      // do — instead of silently no-op'ing.
+      if (!current) {
+        console.warn('[Messages] openBubbleMenu: message', messageId, 'not found in local state — showing fallback menu');
+        const fallbackMenu = document.createElement('div');
+        fallbackMenu.id = 'bubbleContextMenu';
+        fallbackMenu.className = 'bubble-context-menu';
+        fallbackMenu.innerHTML = `<button data-menu-action="delete">🗑 Delete</button>`;
+        document.body.appendChild(fallbackMenu);
+        const fbRect = anchorEl.getBoundingClientRect();
+        fallbackMenu.style.top = `${fbRect.bottom + 4}px`;
+        fallbackMenu.style.left = `${Math.max(8, fbRect.left - 120)}px`;
+        fallbackMenu.querySelector('button').addEventListener('click', async (e) => {
+          e.stopPropagation();
+          closeBubbleMenu();
+          if (!confirm('Delete this message for you?')) return;
+          await window.MessageModule.deleteMessage(chatId, messageId, { forEveryone: false });
+        });
+        setTimeout(() => document.addEventListener('click', closeBubbleMenu, { once: true }), 0);
+        return;
+      }
       const isMine = current.senderId === window._kynCurrentUserId;
 
       const menu = document.createElement('div');
@@ -1185,7 +1233,10 @@
     // mirror that here so friends paint instantly, the same as those modules.
     let pushedFriendsCache = [];
     function normalizePushedFriend(f) {
-      const id = f && (f.id ?? f.userId);
+      // .friendId covers records read straight out of KynectaFriendsLocalStore
+      // (IndexedDB) — friend-core.operations.js's saveFriendLocal() upserts
+      // those keyed by friendId, not id (see that file's saveFriendLocal).
+      const id = f && (f.id ?? f.userId ?? f.friendId);
       if (id == null) return null;
       return {
         id: Number(id) || id,
@@ -1226,9 +1277,24 @@
     // GET_FRIENDS_LIST handler — the same request calls-ui.js and the group
     // module use), so friends are available even if this module finished
     // loading before the last FRIENDS_LIST_UPDATE broadcast went out.
-    try {
-      window.parent.postMessage({ type: 'GET_FRIENDS_LIST', source: 'messages', module: 'messages' }, '*');
-    } catch (_) {}
+    //
+    // FIX: calls-ui.js's setupFriendsListListener fires this same request
+    // after a 1s delay, not immediately — chat.html's own cachedFriendsList
+    // is often still empty (or the friendsIframe hasn't answered its own
+    // REQUEST_FRIENDS_LIST yet) at the instant this iframe finishes loading,
+    // so a single request made right away can easily land before there's
+    // anything to answer with. Ask immediately (costs nothing if it's
+    // empty), then again at 1s and 3s — mirrors calls-ui.js's timing for
+    // the first retry and adds one more for slower first loads — so this
+    // module gets the same number of chances the reliably-working ones do.
+    function _requestFriendsFromParent() {
+      try {
+        window.parent.postMessage({ type: 'GET_FRIENDS_LIST', source: 'messages', module: 'messages' }, '*');
+      } catch (_) {}
+    }
+    _requestFriendsFromParent();
+    setTimeout(_requestFriendsFromParent, 1000);
+    setTimeout(_requestFriendsFromParent, 3000);
 
     // Renders a user list into the "Start chat" results panel and wires up
     // click-to-open. Factored out so both the instant cache-painted list and
@@ -1293,75 +1359,98 @@
     // "den" flickered through "Searching..." / a different result set
     // instead of progressively narrowing the same friend list.
     //
-    // Fix: _loadKnownUsers() loads the real friends list via GET /friends
-    // exactly ONCE per modal-open (not per keystroke) into _knownUsers.
-    // filterKnownUsersNow() is a pure, synchronous, in-memory filter over
-    // that array — every keystroke calls ONLY this, with zero network
-    // requests and zero debounce, so the list narrows immediately and never
-    // gets clobbered by a delayed server response.
+    // Fix: _loadKnownUsers() loads the real friends list exactly ONCE per
+    // modal-open (not per keystroke) into _knownUsers. filterKnownUsersNow()
+    // is a pure, synchronous, in-memory filter over that array — every
+    // keystroke calls ONLY this, with zero network requests and zero
+    // debounce, so the list narrows immediately and never gets clobbered by
+    // a delayed server response.
+    //
+    // ROOT-CAUSE FIX #2 (still empty after the above — verified against the
+    // actual storage this app writes to, not a guess): this read
+    // localStorage.getItem('friends'), a key nothing in the app ever writes
+    // to. The Friends module's real cache lives under
+    // knecta_friends_cache / kynecta_friends_cache_v8 (see
+    // friend-core.bootstrap.js's LOCAL_STORAGE_KEYS.FRIENDS and
+    // loadFriendsFromBackend's second localStorage.setItem) and, more
+    // reliably, in two places every other module already reads from:
+    //   - window.KynectaStore.get('friends.list') — a plain, already-shaped
+    //     {id, displayName, username, avatar} array that
+    //     friend-core.operations.js's saveFriendLocal() keeps in sync on
+    //     every friend-state change. This is Group's "Add member" picker's
+    //     Strategy 3 (group-core-patch.js's _loadMemberPicker) — the exact
+    //     source that makes it "reliably work".
+    //   - window.KynectaFriendsLocalStore.getFriends() — the IndexedDB
+    //     'accepted' bucket the same saveFriendLocal() upserts into
+    //     (friend-core.operations.js). This picker used to call
+    //     .getAllUsers() instead, which is a different bucket — the
+    //     "discovery/all users" cache, not friends.
+    // Every source below is tried, in order, the same way Group's picker
+    // does it, so a friend shows up from whichever source actually has data
+    // — not just the one this file originally guessed.
     let _knownUsers = [];
     let _knownUsersLoaded = false;
     async function _loadKnownUsers(forceRefresh = false) {
       if (_knownUsersLoaded && !forceRefresh) return;
 
-      // Instant local caches first, so something paints immediately even
-      // before the network call below resolves.
-      let cachedUsers = [];
+      const mergeIn = (arr) => {
+        if (!Array.isArray(arr) || arr.length === 0) return;
+        const normalized = arr.map(normalizePushedFriend).filter(Boolean);
+        const seenIds = new Set(_knownUsers.map(u => String(u.id)));
+        normalized.forEach(u => { if (!seenIds.has(String(u.id))) { _knownUsers.push(u); seenIds.add(String(u.id)); } });
+      };
+
+      // Source 1: in-memory cache already pushed into this iframe via
+      // FRIENDS_LIST_UPDATE/FRIENDS_DATA/FRIENDS_SYNC (see the
+      // window.addEventListener('message', ...) above) — zero-latency,
+      // no storage read at all.
+      mergeIn(pushedFriendsCache);
+
+      // Source 2: window.KynectaStore's 'friends.list' — Group's own
+      // Strategy 3, and the most directly-shaped source in the app (see
+      // comment above). Reading it here means this picker shows exactly
+      // what Group would show, from the exact same place.
       try {
-        const localFriends = JSON.parse(localStorage.getItem('friends') || '[]');
-        if (Array.isArray(localFriends) && localFriends.length > 0) {
-          cachedUsers = localFriends.map(normalizePushedFriend).filter(Boolean);
+        if (window.KynectaStore && typeof window.KynectaStore.get === 'function') {
+          mergeIn(window.KynectaStore.get('friends.list') || []);
         }
       } catch (_) {}
-      if (pushedFriendsCache.length > 0) {
-        const seenIds = new Set(cachedUsers.map(u => String(u.id)));
-        pushedFriendsCache.forEach(u => { if (!seenIds.has(String(u.id))) cachedUsers.push(u); });
-      }
+
+      // Source 3: the real friends localStorage cache (not the 'friends'
+      // key — see the long comment above for why that was always empty).
       try {
-        if (window.KynectaFriendsLocalStore && typeof window.KynectaFriendsLocalStore.getAllUsers === 'function') {
-          const idbUsers = await window.KynectaFriendsLocalStore.getAllUsers();
-          if (Array.isArray(idbUsers) && idbUsers.length > 0) {
-            const seenIds = new Set(cachedUsers.map(u => String(u.id)));
-            idbUsers.forEach(u => { if (!seenIds.has(String(u.id))) cachedUsers.push(u); });
+        const real = JSON.parse(
+          localStorage.getItem('knecta_friends_cache') ||
+          localStorage.getItem('kynecta_friends_cache_v8') || '[]'
+        );
+        mergeIn(real);
+      } catch (_) {}
+
+      // Source 4: KynectaFriendsLocalStore's IndexedDB 'accepted' bucket —
+      // getFriends(), not getAllUsers() (that one is the discovery/all-users
+      // cache, a different bucket that was never guaranteed to contain this
+      // user's actual friends).
+      try {
+        if (window.KynectaFriendsLocalStore) {
+          if (typeof window.KynectaFriendsLocalStore.ready === 'function') {
+            await window.KynectaFriendsLocalStore.ready().catch(() => {});
+          }
+          if (typeof window.KynectaFriendsLocalStore.getFriends === 'function') {
+            mergeIn(await window.KynectaFriendsLocalStore.getFriends());
           }
         }
       } catch (_) {}
-      _knownUsers = cachedUsers;
 
-      // Now refresh from the REAL friends-list backend route (GET /friends
-      // → data.friends) — the authenticated user's actual friends, not the
-      // discovery/all-users endpoint. This runs once per modal-open; every
-      // keystroke after this only filters the _knownUsers array in memory.
-      //
-      // FIX (SHOWS-NO-FRIENDS-DESPITE-HAVING-FRIENDS): this used to accept
-      // only one exact response shape (res.data.friends as an array) and
-      // silently do nothing otherwise, falling through to whatever local
-      // cache happened to already exist (often empty, if this picker is
-      // opened before the Friends module has ever pushed its own cache).
-      // GET /friends goes through the exact same chat.html postMessage
-      // relay (API_REQUEST/API_RESPONSE) that the Friends module's own
-      // authorizedRequest() uses — see friend-core.ui-bridge.js's
-      // loadFriendsFromBackend(), the module that DOES reliably show
-      // friends — and that function has to defend against several
-      // different shapes the relay can hand back depending on which
-      // internal path served it (single-wrapped, double-wrapped, or a
-      // flat array), not just the one this picker assumed. Matching that
-      // same defensive parsing here is what actually fixes this, not a
-      // guess at "the" correct shape.
-      // ROOT-CAUSE FIX (Start chat shows empty / search finds no friends
-      // despite an existing, cached friend): this picker had exactly one
-      // way to reach the friends list — the relay call below, a round trip
-      // through chat.html's postMessage bridge. Compare to the Group
-      // module's "Add member" picker (group-core-patch.js's
-      // _loadMemberPicker), which tries several sources and, as a last
-      // resort, fetches straight from the backend — same-origin, so just as
-      // reachable from this iframe as it is from Group's — instead of
-      // depending on the relay alone. `gotDefinitiveAnswer` tracks whether
-      // ANY source actually resolved (even to a genuinely empty list) so
-      // the loop below can fall through to the next source on failure.
-      let gotDefinitiveAnswer = false;
+      // `gotDefinitiveAnswer` tracks whether some source below actually
+      // resolved (even to a genuinely empty answer) so _knownUsersLoaded
+      // only latches on real information — see the FIX comment further
+      // down for why that matters.
+      let gotDefinitiveAnswer = _knownUsers.length > 0;
 
-      // Source 1: the existing relay round trip through chat.html.
+      // Source 5: the relay round trip through chat.html — the original,
+      // and still the most authoritative, source (it's a live server
+      // call). Kept as-is; only used to fill in anything the caches above
+      // missed, and to refresh stale cached data.
       try {
         const res = await window.MessageModule.request().get('/friends');
         if (res && res.success !== false && res.data) {
@@ -1370,26 +1459,18 @@
           else if (res.data.data && Array.isArray(res.data.data.friends)) rawFriends = res.data.data.friends;
           else if (Array.isArray(res.data)) rawFriends = res.data;
 
-          const friends = rawFriends.map(normalizePushedFriend).filter(Boolean);
-          // SAFETY (mirrors friend-core.ui-bridge.js's same guard): never
-          // let a momentarily-empty/misshapen response wipe out a
-          // populated list already sitting in _knownUsers from the local
-          // caches above — only replace when the server actually gave us
-          // something.
-          if (friends.length > 0 || rawFriends.length === 0) {
-            _knownUsers = friends.length > 0 ? friends : _knownUsers;
-          }
-          if (friends.length > 0) {
+          if (rawFriends.length > 0) {
+            mergeIn(rawFriends);
             gotDefinitiveAnswer = true;
-            try { localStorage.setItem('friends', JSON.stringify(friends)); } catch (_) {}
+            try { localStorage.setItem('knecta_friends_cache', JSON.stringify(_knownUsers)); } catch (_) {}
             try {
               if (window.KynectaFriendsLocalStore && typeof window.KynectaFriendsLocalStore.saveUsers === 'function') {
-                window.KynectaFriendsLocalStore.saveUsers(friends);
+                window.KynectaFriendsLocalStore.saveUsers(_knownUsers);
               }
             } catch (_) {}
           } else if (Array.isArray(rawFriends)) {
             // The relay is alive and the server gave a real (if empty)
-            // answer — that's definitive too, just with nothing to show.
+            // answer — that's definitive too, just with nothing new to add.
             gotDefinitiveAnswer = true;
           }
         }
@@ -1397,17 +1478,28 @@
         console.warn('[Messages] Relay /friends request failed, trying direct fetch:', err && err.message);
       }
 
-      // Source 2: direct fetch straight to the backend, bypassing the relay
+      // Source 6: direct fetch straight to the backend, bypassing the relay
       // entirely — same-origin iframe, so this is just as reachable from
-      // Messages as it is from Group's picker. Only tried if the relay
-      // above didn't already produce a non-empty list; this is what lets a
-      // friend show up even if chat.html's relay was down, not yet wired
-      // up, or simply never answers the postMessage in this session.
+      // Messages as it is from Group's picker (group-core-patch.js's own
+      // Strategy 4 does the same thing). Only tried if nothing above found
+      // anything, and only using the token keys this app actually writes:
+      // kynecta_session / kynecta_auth (see js/auth.session.manager.js —
+      // the plain 'token'/'authToken'/'auth_token' keys are explicitly
+      // wiped there as legacy, so checking only those, as this fallback
+      // used to, could never find a real token).
       if (!_knownUsers.length) {
         try {
-          const token = window.__AUTH_TOKEN || window.session?.token || window.__PARENT_SESSION__?.token ||
-              window.__SESSION__?.token || sessionStorage.getItem('auth_token') || localStorage.getItem('auth_token') ||
-              localStorage.getItem('authToken') || localStorage.getItem('token') || null;
+          let token = null;
+          try {
+            const s = JSON.parse(localStorage.getItem('kynecta_session') || 'null');
+            token = s && s.token || null;
+          } catch (_) {}
+          if (!token) {
+            try {
+              const a = JSON.parse(localStorage.getItem('kynecta_auth') || 'null');
+              token = a && a.token || null;
+            } catch (_) {}
+          }
           if (token) {
             const base = ((window.__kynAPI && window.__kynAPI.baseUrl) || window.API_BASE_URL ||
                 window.__API_BASE || (window.__getApiBase && window.__getApiBase()) || 'https://noxopa.onrender.com/api');
@@ -1416,17 +1508,16 @@
             if (res.ok) {
               const d = await res.json();
               const rawFriends = d?.data?.friends || d?.data || d?.friends || [];
-              const friends = (Array.isArray(rawFriends) ? rawFriends : []).map(normalizePushedFriend).filter(Boolean);
-              if (friends.length > 0) {
-                _knownUsers = friends;
+              if (Array.isArray(rawFriends) && rawFriends.length > 0) {
+                mergeIn(rawFriends);
                 gotDefinitiveAnswer = true;
-                try { localStorage.setItem('friends', JSON.stringify(friends)); } catch (_) {}
+                try { localStorage.setItem('knecta_friends_cache', JSON.stringify(_knownUsers)); } catch (_) {}
                 try {
                   if (window.KynectaFriendsLocalStore && typeof window.KynectaFriendsLocalStore.saveUsers === 'function') {
-                    window.KynectaFriendsLocalStore.saveUsers(friends);
+                    window.KynectaFriendsLocalStore.saveUsers(_knownUsers);
                   }
                 } catch (_) {}
-              } else {
+              } else if (Array.isArray(rawFriends)) {
                 gotDefinitiveAnswer = true;
               }
             }

@@ -58,6 +58,12 @@
         'isMessageQueued',
         'isMessageFailed',
         'peekDecryptedText',
+        // FIX (delete doesn't clean up the decrypt queue): lets
+        // message-client.js's removeMessageFromState() tell this engine to
+        // drop any pending/failed/cached decrypt state for a message once
+        // it's been deleted — see message-e2e-core.js's forgetMessage() for
+        // the full rationale.
+        'forgetMessage',
         'registerPendingDecrypt',
         'encryptAttachment',
         'decryptAttachment'

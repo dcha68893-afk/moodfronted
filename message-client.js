@@ -677,6 +677,11 @@
         if (!bucket || !bucket.has(messageId)) return;
         bucket.delete(messageId);
         try { window.KynectaMessageCache && window.KynectaMessageCache.deleteMessage(chatId, messageId); } catch (_) {}
+        // FIX: also drop any pending/failed/cached decrypt-queue state for
+        // this id — see message-e2e-core.js's forgetMessage() comment for
+        // why a deleted message's queue entry needs to be cleaned up too,
+        // not just its entry in this bucket.
+        try { window.KynectaE2E && typeof window.KynectaE2E.forgetMessage === 'function' && window.KynectaE2E.forgetMessage(messageId); } catch (_) {}
 
         const conv = state.conversations.get(chatId);
         if (conv && conv.lastMessage && conv.lastMessage.id === messageId) {
