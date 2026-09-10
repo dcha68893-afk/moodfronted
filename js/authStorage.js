@@ -52,7 +52,11 @@
         'nexopa_message_lifecycle_v1'
     ];
     // Device-level (not account) keys that are safe to keep across switches.
-    const WIPE_ALLOWLIST = ['nexopa_theme', 'nexopa_nav_state'];
+    // 'kynecta_saved_accounts' is the small quick-switch account list (managed
+    // separately by auth.session.manager.js's addAccount/removeAccount) — it
+    // must survive a wipe or the "2 accounts per device" quick-switch feature
+    // would delete itself every time it runs.
+    const WIPE_ALLOWLIST = ['nexopa_theme', 'nexopa_nav_state', 'kynecta_saved_accounts'];
 
     function getStoredUserId() {
         try {
@@ -312,6 +316,22 @@
         }
     }
 
+    // BUG (the actual cross-account leak): saveAuth()'s account-switch wipe
+    // only fires when getStoredUserId() finds a *previous* account still on
+    // disk. But an explicit user-initiated logout used to call ONLY the four
+    // key removals below — it never touched IndexedDB (message history,
+    // calls, status/stories, offline queues) or any of the many other
+    // account-agnostic localStorage caches other modules keep (friends,
+    // groups, marketplace, tools, mesh, etc). Worse, removing
+    // AUTH_STORAGE_KEY here means the *next* login's getStoredUserId() reads
+    // nothing, so saveAuth() thinks there's no previous account and skips
+    // its own wipe too. Net effect: logout → log in as a different account
+    // on the same device silently kept 100% of account A's local caches
+    // (most visibly, account A's message history) exactly where account B's
+    // UI reads from them. Fix: every explicit logout now runs the same full
+    // wipe used for a same-session account switch, so stale data can never
+    // survive to greet the next account regardless of which order
+    // logout/login happen in.
     function clearAuth() {
         try {
             withAuthMutation(() => {
@@ -320,6 +340,7 @@
                 LEGACY_USER_KEYS.forEach((key) => localStorage.removeItem(key));
                 localStorage.removeItem(LOGIN_STATE_KEY);
             });
+            wipePreviousAccountData();
             return true;
         } catch (error) {
             console.error('[AuthStorage] clearAuth failed:', error.message);
@@ -393,7 +414,9 @@
         return true;
     }
 
-    const AuthStorage = { saveAuth, saveSession, getAuth, getSession, clearAuth, hasValidAuth, updateAuthTokens, getToken, getUser, isValidSession };
+    // Exposed so any explicit "switch account" UI flow can force the same
+    // full local wipe on demand, without needing to fake a logout+login.
+    const AuthStorage = { saveAuth, saveSession, getAuth, getSession, clearAuth, hasValidAuth, updateAuthTokens, getToken, getUser, isValidSession, wipeAccountData: wipePreviousAccountData };
 
     window.AuthStorage = AuthStorage;
     window.api = window.api || {};
