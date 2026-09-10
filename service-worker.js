@@ -58,8 +58,24 @@
 // something (like starting to type, which touches session/token state)
 // happens to unstick it" split reported. Added here, alongside its direct
 // siblings.
-const SW_VERSION = '19.13.0';
-const CACHE_NAME = 'nexopa-static-v36';
+// ROOT-CAUSE FIX (SETTINGS-SWITCH-ACCOUNT-NOT-VISIBLE): settings-ui.js and
+// js/settings-ui.local-first.patch.js — the two files that build the
+// Settings sidebar and inject the "Switch account" row into it — were
+// never in CORE_STATIC_ASSETS or NETWORK_FIRST_PATTERNS. Both are plain
+// .js requests, so they always fell through to staticAsset(): cache-first,
+// reused as-is for up to CACHE_MAX_AGE (7 days) before the network is even
+// checked. Any browser/PWA that already had a service worker installed
+// before "Add visible two-account switcher to Settings" shipped keeps
+// serving its old cached copy of settings-ui.js (whose buildSettingsMenu()
+// wipes #settingsMenu and rebuilds it from a hardcoded list that predates
+// the switcher) and/or the old settings-ui.local-first.patch.js, so the
+// button that injects/re-injects "Switch account" never runs — exactly the
+// same class of bug called out above for message-client.js/api.request.js.
+// Added both to NETWORK_FIRST_PATTERNS and bumped CACHE_NAME/SW_VERSION so
+// already-installed clients get the fix immediately instead of waiting out
+// the 7-day max age.
+const SW_VERSION = '19.14.0';
+const CACHE_NAME = 'nexopa-static-v37';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -127,7 +143,9 @@ const NETWORK_FIRST_PATTERNS = [
   /\/calls-core\.part[1-8]\.js/i,
   /\/calls-ui\.js/i,
   /\/callSession\.manager\.js/i,
-  /\/callRetry\.engine\.js/i
+  /\/callRetry\.engine\.js/i,
+  /\/settings-ui\.js/i,
+  /\/js\/settings-ui\.local-first\.patch\.js/i
 ];
 
 const BYPASS_PATTERNS = [
