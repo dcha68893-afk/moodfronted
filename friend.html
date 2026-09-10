@@ -3143,6 +3143,26 @@
                         if (startBtn && !startBtn.disabled) startBtn.click();
                     }, 100);
                 }
+                // ROOT-CAUSE FIX (BROWSE-ALL-DOESN'T-SHOW-CACHED-FRIENDS): unlike
+                // 'qr' and 'nearby' above, "Browse All" has no dedicated button
+                // of its own to click — its instant-cache-then-background-sync
+                // logic (friend-ui.js's renderAllUsersList: render whatever's
+                // already cached immediately, then refresh from the API in the
+                // background) only ever ran from the OLD .add-friend-tab click
+                // listener (friend-ui.js, the `tabName === 'all-users'` branch).
+                // This new fullscreen-panel entry point re-implements that
+                // listener's class-toggling above but never reached that
+                // module-scoped function — friend-ui.js loads as
+                // type="module", so it isn't reachable from this classic
+                // <script> block directly. Firing a real click on the actual
+                // legacy tab button (already looked up as `legacyTab` above)
+                // reaches it exactly like the qr/nearby cases reach their own
+                // buttons — same "replay the real click" pattern, not a new
+                // parallel one. Harmless if it also re-applies the same
+                // active-class toggling already done a few lines up.
+                if (tabName === 'all-users') {
+                    if (legacyTab) legacyTab.click();
+                }
             }
 
             document.querySelectorAll('.discover-panel-back').forEach(function (btn) {

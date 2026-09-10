@@ -320,6 +320,65 @@
     return _localWrapKey;
   }
 
+  // ROOT-CAUSE FIX (MULTI-DEVICE-CANNOT-DECRYPT-OLD-MESSAGES): fetches
+  // whatever password-wrapped private-key backup this account has on file
+  // (uploaded by whichever device generated it — see
+  // _registerPublicKeyWithRetry's third argument, and the opportunistic
+  // backfill calls in the "load from storage" branches of init()) and tries
+  // to unwrap it with the password(s) this login already has in hand. On
+  // success this device adopts the exact same identity — same keyId, same
+  // key material — as every other device on the account, so historical
+  // messages (encrypted against that identity) decrypt normally here too,
+  // and persists a local copy so future logins on this device are instant
+  // and offline-capable exactly like the original device. Never throws:
+  // any failure (no backup on file, network error, wrong/unavailable
+  // password) just means "nothing to restore," and the caller falls back to
+  // generating a fresh identity exactly as it did before this fix existed.
+  async function _restoreIdentityFromServerBackup(password, legacyPassword) {
+    try {
+      const resp = await fetch(`${await _apiBase()}/api/encryption/identity-backup`, {
+        headers: await _authHeaders(),
+        credentials: 'include',
+        cache: 'no-store',
+      });
+      if (!resp.ok) return false;
+      const json = await resp.json();
+      const backup = json && json.data;
+      if (!backup || !backup.encryptedPrivateKey || !backup.publicKey || !backup.keyId) return false;
+
+      let pkcs8;
+      try { pkcs8 = await _decryptPrivateKey(backup.encryptedPrivateKey, password); }
+      catch (primaryErr) {
+        if (!legacyPassword || legacyPassword === password) return false;
+        try { pkcs8 = await _decryptPrivateKey(backup.encryptedPrivateKey, legacyPassword); }
+        catch (_) { return false; }
+      }
+
+      _myPrivKey   = await importPrivateKey(pkcs8);
+      _myPubKeyB64 = backup.publicKey;
+      _myKeyId     = backup.keyId;
+
+      // Persist locally under THIS device's wrap secret (re-wrapping with
+      // `password`, not whatever secret the originating device used —
+      // matches the "load from storage" path's own wrap scheme) so the next
+      // login on this device is instant/local, same as the device the
+      // identity originally came from.
+      const encPrivKey = await _encryptPrivateKey(pkcs8, password);
+      localStorage.setItem(_storeKey(), JSON.stringify({ encPrivKey, pubKey: _myPubKeyB64, keyId: _myKeyId, registered: true }));
+
+      // Tell the server about this device (adds a user_devices row / touches
+      // deviceId) without disturbing the shared identity key itself.
+      _postRegisterKey(_myPubKeyB64, _myKeyId).catch(() => {});
+
+      _markEnabled();
+      console.log('[E2E] ✅ Identity restored from server backup — same key as other device(s)');
+      return true;
+    } catch (e) {
+      console.warn('[E2E] Identity backup restore skipped:', e?.message || e);
+      return false;
+    }
+  }
+
   // ── Init: load or generate keys ───────────────────────────────────────────
   async function init(password, legacyPassword) {
     if (!subtle) {
@@ -361,8 +420,18 @@
 
         _markEnabled();
         // Opportunistic, non-blocking re-sync: keeps the server's record in
-        // sync with this device's key without gating readiness on it.
-        _postRegisterKey(_myPubKeyB64, _myKeyId).catch(() => {});
+        // sync with this device's key without gating readiness on it. Also
+        // backfills the server-side encrypted backup (see
+        // _postRegisterKey's third argument above) for any identity that
+        // was generated before that backup existed, so a FUTURE second
+        // device can still restore this one instead of orphaning it.
+        (async () => {
+          try {
+            const pkcs8 = await exportPrivateKey({ privateKey: _myPrivKey });
+            const backup = await _encryptPrivateKey(pkcs8, password);
+            _postRegisterKey(_myPubKeyB64, _myKeyId, backup).catch(() => {});
+          } catch (_) { _postRegisterKey(_myPubKeyB64, _myKeyId).catch(() => {}); }
+        })();
         console.log('[E2E] ✅ Keys loaded from storage');
         return true;
       } catch (e) {
@@ -396,6 +465,11 @@
             try {
               const reEncPrivKey = await _encryptPrivateKey(pkcs8, password);
               localStorage.setItem(_storeKey(), JSON.stringify({ encPrivKey: reEncPrivKey, pubKey: _myPubKeyB64, keyId: _myKeyId }));
+              // Also refresh the server-side backup under the new wrap
+              // secret so a future device restore (see
+              // _restoreIdentityFromServerBackup below) doesn't hand back a
+              // blob wrapped with the now-stale secret.
+              _postRegisterKey(_myPubKeyB64, _myKeyId, reEncPrivKey).catch(() => {});
               console.log('[E2E] ✅ Stored key migrated to new wrap secret — identity preserved.');
             } catch (migrateErr) {
               console.warn('[E2E] Key recovered but re-wrap/migration failed (will retry next login):', migrateErr.message);
@@ -423,6 +497,19 @@
       }
     }
 
+    // ROOT-CAUSE FIX (MULTI-DEVICE-CANNOT-DECRYPT-OLD-MESSAGES): before
+    // minting a brand-new identity for a device that just has no LOCAL copy
+    // of the key (new phone/browser, or this device's storage was cleared),
+    // check whether the account already has one backed up server-side (see
+    // POST /api/encryption/keys' encryptedPrivateKey field and GET
+    // /identity-backup in moodchat routes/encryption.js). If it unwraps
+    // with a password we have, this device should ADOPT that identity
+    // rather than generate a competing one — generating a new keypair here
+    // is exactly what orphaned every previously-encrypted message when this
+    // was reported ("switch devices, old chats say Unable to decrypt").
+    const restored = await _restoreIdentityFromServerBackup(password, legacyPassword);
+    if (restored) return true;
+
     // Generate new key pair
     const kp         = await generateKeyPair();
     const pubKeyB64   = await exportPublicKey(kp);
@@ -437,8 +524,11 @@
     // never actually stored, and anyone messaging THIS account got a 404
     // for its public key. _registerPublicKeyWithRetry() below retries with
     // capped backoff for a few seconds before this init() call gives up and
-    // returns; only a real 2xx from the server counts as confirmed.
-    const registered = await _registerPublicKeyWithRetry(pubKeyB64, keyId);
+    // returns; only a real 2xx from the server counts as confirmed. The
+    // encPrivKey backup rides along on this same call (see
+    // _postRegisterKey above) so the NEXT new device can restore this
+    // identity instead of repeating this same fallback-to-fresh-keypair path.
+    const registered = await _registerPublicKeyWithRetry(pubKeyB64, keyId, encPrivKey);
 
     // Store encrypted private key locally regardless of registration
     // outcome — the identity itself is real and must not be regenerated on
@@ -474,25 +564,39 @@
   // indefinitely on a slow/cold backend — see _retryRegistrationInBackground
   // for what happens if even this gives up.
   const _REG_RETRY_DELAYS_MS = [0, 500, 1000, 1500];
-  async function _registerPublicKeyWithRetry(pubKeyB64, keyId) {
+  async function _registerPublicKeyWithRetry(pubKeyB64, keyId, encryptedPrivateKeyBackup) {
     for (let i = 0; i < _REG_RETRY_DELAYS_MS.length; i++) {
       if (_REG_RETRY_DELAYS_MS[i] > 0) await _sleep(_REG_RETRY_DELAYS_MS[i]);
-      const ok = await _postRegisterKey(pubKeyB64, keyId);
+      const ok = await _postRegisterKey(pubKeyB64, keyId, encryptedPrivateKeyBackup);
       if (ok) return true;
     }
     return false;
   }
 
-  async function _postRegisterKey(pubKeyB64, keyId) {
+  // ROOT-CAUSE FIX (MULTI-DEVICE-CANNOT-DECRYPT-OLD-MESSAGES): the optional
+  // third argument uploads the SAME password-wrapped private-key blob this
+  // device already writes to its own localStorage (see the "Generate new
+  // key pair" branch of init() below) to the server's now-unused
+  // "encryptedPrivateKey" column (see moodchat routes/encryption.js). The
+  // server only ever stores/returns this ciphertext — it's AES-256-GCM
+  // under a key derived from the account's password/e2eWrapSecret via
+  // PBKDF2, exactly like the local copy — so this doesn't weaken E2E, it
+  // just lets _restoreIdentityFromServerBackup() below pull the identical
+  // identity back down on a different device or after local storage was
+  // cleared, instead of that device silently minting a new, incompatible
+  // keypair (which is what made every older message unreadable there).
+  async function _postRegisterKey(pubKeyB64, keyId, encryptedPrivateKeyBackup) {
     try {
       const _regController = new AbortController();
       const _regTimeout = setTimeout(() => _regController.abort(), 8000);
       let resp;
       try {
+        const body = { publicKey: pubKeyB64, keyId, deviceId: await _myDeviceId() };
+        if (encryptedPrivateKeyBackup) body.encryptedPrivateKey = encryptedPrivateKeyBackup;
         resp = await fetch(`${await _apiBase()}/api/encryption/keys`, {
           method: 'POST',
           headers: await _authHeaders(),
-          body: JSON.stringify({ publicKey: pubKeyB64, keyId, deviceId: await _myDeviceId() }),
+          body: JSON.stringify(body),
           credentials: 'include',
           // ROOT-CAUSE FIX (same class of bug as the one already found and
           // fixed in api.core.js / api.request.js's fallback fetch — see

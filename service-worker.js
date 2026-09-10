@@ -36,8 +36,30 @@
 // reaches already-installed mobile clients immediately (see the activate
 // handler's cache purge + SW_UPDATED postMessage below) instead of waiting
 // out the old cache's 7-day max age.
-const SW_VERSION = '19.12.0';
-const CACHE_NAME = 'nexopa-static-v35';
+//
+// ROOT-CAUSE FIX (MOBILE-CHAT-LIST-SLOW-OR-EMPTY / panel waits until typing
+// to load history): the fix above chased down every messaging-pipeline file
+// EXCEPT the one every single one of them actually depends on —
+// js/api.request.js itself. message-client.js's own top-level bootstrap
+// polls `window.api.request` before it will even attempt loadConversations()
+// (see waitForApiThenLoadConversations), and every chat-list / history /
+// send call ultimately goes through the gateway this file sets up (auth
+// readiness, session readiness, backend-origin resolution, the request
+// queue). It was listed in CORE_STATIC_ASSETS (cached once, at install time)
+// but was never added to NETWORK_FIRST_PATTERNS, so it fell through to
+// staticAsset()'s cache-first path on every later load, same as the
+// message-client.js bug above — reused for up to 7 days before the network
+// is even checked. A desktop tab (SW usually not installed/controlling)
+// gets the current gateway from the network every time and the sidebar
+// populates instantly; an installed mobile PWA can easily be running a
+// gateway build from days ago whose auth/session/backend-resolution timing
+// no longer matches the rest of the already-updated pipeline it's driving —
+// exactly the "instant on laptop, slow or permanently empty on phone until
+// something (like starting to type, which touches session/token state)
+// happens to unstick it" split reported. Added here, alongside its direct
+// siblings.
+const SW_VERSION = '19.13.0';
+const CACHE_NAME = 'nexopa-static-v36';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -60,6 +82,7 @@ const NETWORK_FIRST_PATTERNS = [
   /\/theme\.colors\.css/i,
   /\/js\/e2e-encryption\.js/i,
   /\/js\/e2e-session-init\.js/i,
+  /\/js\/api\.request\.js/i,
   // js/double-ratchet.js was deleted (obsolete private-message Double
   // Ratchet generation); replaced this dead pattern with the two files that
   // are now the actual canonical private-message crypto core, so a stale
