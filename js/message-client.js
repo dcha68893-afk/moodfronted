@@ -1396,11 +1396,33 @@
     // still authorized individually server-side (see routes/messages.js
     // POST /bulk-delete) so a mixed selection degrades gracefully rather
     // than failing outright.
+    //
+    // ROOT-CAUSE FIX (SELECT-MODE-DELETE-DOES-NOTHING): this used to read
+    // res.deleted / res.failed straight off the _directRequest() wrapper
+    // object. That wrapper's actual shape is
+    // {ok, success, status, data, message} — the backend's real JSON body
+    // (POST /bulk-delete returns {success, deleted, failed}) is nested
+    // under .data (see _directRequest's `resolve({..., data: d ?? {}, ...})`
+    // above; same pattern loadConversations() etc. already read correctly
+    // via res.data.chats). res.deleted / res.failed were therefore always
+    // undefined, so `deleted` was always [] here — the backend genuinely
+    // deleted every message (confirmed: the single-message deleteMessage()
+    // path and this one both call the identical server-side
+    // _deleteOneMessage()), but this function never updated local state and
+    // never fired 'message:deleted', so message.html never re-rendered.
+    // The selection bar still cleared (performBulkDelete() calls
+    // exitSelectMode() unconditionally after this resolves) so it LOOKED
+    // like the action ran, but the selected bubbles just sat there — while
+    // the single-delete "..." menu path, which only ever checked
+    // `res.success` (a real top-level field), worked every time. Read
+    // res.data.deleted / res.data.failed instead.
     async function bulkDeleteMessages(chatId, messageIds, { forEveryone = false } = {}) {
         if (!Array.isArray(messageIds) || messageIds.length === 0) return { success: false, error: 'No messages selected' };
         try {
             const res = await api().post('/messages/bulk-delete', { messageIds, deleteForEveryone: forEveryone });
-            const deleted = (res && Array.isArray(res.deleted)) ? res.deleted : [];
+            const body = (res && res.data) || {};
+            const deleted = Array.isArray(body.deleted) ? body.deleted : [];
+            const failed = Array.isArray(body.failed) ? body.failed : [];
             const bucket = state.messagesByConversation.get(chatId);
             deleted.forEach((messageId) => {
                 if (bucket && bucket.has(messageId)) {
@@ -1413,7 +1435,7 @@
                 }
             });
             if (deleted.length) notify('message:deleted', { chatId, messageIds: deleted });
-            return { success: !!(res && res.success), deleted, failed: (res && res.failed) || [] };
+            return { success: !!(res && res.success) && deleted.length > 0, deleted, failed };
         } catch (err) { return { success: false, error: err.message }; }
     }
 

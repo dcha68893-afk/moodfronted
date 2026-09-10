@@ -13,8 +13,31 @@
 // changes (removed duplicate legacy DM crypto export, fixed the canonical-
 // core readiness race, removed dead double-ratchet.js references) would
 // otherwise keep being served stale.
-const SW_VERSION = '19.11.0';
-const CACHE_NAME = 'nexopa-static-v34';
+//
+// ROOT-CAUSE FIX (MOBILE-STALE-MESSAGE-CLIENT / desktop-vs-mobile behaving
+// differently on reload or relogin): the comment above has claimed since an
+// earlier session that js/message-client.js was made network-first, but it
+// was NEVER actually added to NETWORK_FIRST_PATTERNS below (confirmed —
+// grep only ever matched this comment, not a real pattern entry). It isn't
+// in CORE_STATIC_ASSETS either, so every request for it fell through to
+// staticAsset(): cache-first, reused as-is for up to CACHE_MAX_AGE (7 days)
+// before even checking the network. Desktop browser tabs mostly don't keep
+// a service worker installed/controlling across a plain reload the way an
+// installed mobile PWA does, so desktop was effectively always getting
+// message-client.js from the network while mobile kept running whatever
+// copy got cached up to a week ago — including the exact pre-fix version
+// that (a) unlocked E2E with the wrong password every reload/relogin
+// (message-e2e-core.js's now-fixed ensureIdentity bug) and (b) called
+// api.request.js's dead getChats() path instead of the direct-request
+// bypass, which is the literal source of the "Failed to fetch chats" text
+// mobile was still logging. js/e2e-store-v2.js, js/message-local-db.js and
+// js/message-realtime-bridge.js are the same messaging pipeline and were
+// missing for the same reason. CACHE_NAME/SW_VERSION bumped again so this
+// reaches already-installed mobile clients immediately (see the activate
+// handler's cache purge + SW_UPDATED postMessage below) instead of waiting
+// out the old cache's 7-day max age.
+const SW_VERSION = '19.12.0';
+const CACHE_NAME = 'nexopa-static-v35';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -55,6 +78,10 @@ const NETWORK_FIRST_PATTERNS = [
   /\/js\/api\.core\.js/i,
   /\/js\/messages-core\.js/i,
   /\/js\/messages-ui\.js/i,
+  /\/js\/message-client\.js/i,
+  /\/js\/e2e-store-v2\.js/i,
+  /\/js\/message-local-db\.js/i,
+  /\/js\/message-realtime-bridge\.js/i,
   /\/MessageLifecycleClient\.js/i,
   /\/messages-core\.bootstrap\.js/i,
   /\/messages-core\.operations\.js/i,
