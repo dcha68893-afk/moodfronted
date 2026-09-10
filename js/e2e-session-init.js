@@ -26,6 +26,40 @@
     });
   }
 
+  function sessionPassword() {
+    try { return sessionStorage.getItem('kyn_e2e_pw_session') || null; } catch (_) { return null; }
+  }
+
+  function sessionLegacyPassword() {
+    try { return sessionStorage.getItem('kyn_e2e_pw_legacy_session') || null; } catch (_) { return null; }
+  }
+
+  async function prepareLegacyIdentity() {
+    // The canonical identity layer deliberately does not duplicate private-key
+    // storage/recovery. The existing legacy E2E layer already owns the secure
+    // password-wrapped identity backup flow, including GET /api/encryption/
+    // identity-backup on a new device. Prepare that layer first so the
+    // canonical identity can adopt the exact same keypair instead of creating
+    // a new, incompatible identity on a phone/laptop switch.
+    await loadScript('/js/e2e-encryption.js');
+    const legacy = global.KynectaE2E;
+    if (!legacy || typeof legacy.init !== 'function') return false;
+
+    const password = sessionPassword();
+    if (!password) return false;
+
+    try {
+      const ok = await legacy.init(password, sessionLegacyPassword() || undefined);
+      if (!ok || !legacy.enabled || typeof legacy.getMyIdentityPrivateKey !== 'function') {
+        return false;
+      }
+      return true;
+    } catch (err) {
+      console.warn('[MessageE2E] legacy identity recovery unavailable:', err?.message || err);
+      return false;
+    }
+  }
+
   async function loadNewCore() {
     if (loadPromise) return loadPromise;
 
@@ -38,6 +72,12 @@
         await loadScript('/js/message-mobile-bootstrap-fix.js');
       }
 
+      // Prepare the existing password-wrapped identity before loading the
+      // canonical layer. On a second device this can restore the exact
+      // account identity from the encrypted server backup; the private key is
+      // decrypted locally and is never sent to the server in plaintext.
+      await prepareLegacyIdentity();
+
       await loadScript('/js/e2e-identity-core.js');
       await loadScript('/js/message-e2e-core.js');
       await loadScript('/js/message-e2e-compat.js');
@@ -45,6 +85,11 @@
         await loadScript('/js/message-realtime-bridge.js');
       }
 
+      // IMPORTANT: keep the legacy object as the compatibility facade. The
+      // canonical identity layer's adoptSharedIdentity() intentionally looks
+      // for the existing KynectaE2E object and imports its already-unlocked
+      // private key. We therefore extend that same object rather than
+      // replacing it with a fresh object that would hide the recovery path.
       const facade = global.KynectaE2E || {};
       const dm = global.KynectaMessageE2E;
       if (!dm) throw new Error('Canonical message E2E core did not initialize');
