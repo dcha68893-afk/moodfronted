@@ -138,7 +138,22 @@
         if (accounts.length > MAX_ACCOUNTS) return {success:false,error:`Maximum ${MAX_ACCOUNTS} accounts per device`};
         const target = accounts.find(a => String(a?.userId ?? a?.id ?? '') === targetId);
         if (!target || !target.token || !target.userId) return {success:false,error:'Account is not registered on this device'};
+        const currentId = getStoredUserId();
+        if (currentId != null && String(currentId) === targetId) return {success:false,error:'Already using this account'};
         try {
+            // FIX (account-switch cache leak): saveAuth() already wipes the
+            // outgoing account's localStorage/sessionStorage/IndexedDB (and
+            // fires kyn:accountSwitchWipe so FriendCacheManager/ChatManager/
+            // Identity clear their in-memory state) whenever a login detects
+            // a different user than the one previously stored. switchAccount()
+            // — the quick-switch path used by the Settings "Switch account"
+            // button — wrote the new session straight into localStorage
+            // without ever calling that wipe, so the account being switched
+            // AWAY FROM left its chat/friend caches behind for the next
+            // account to see. Route through the same wipe here before
+            // writing the target account's session.
+            if (currentId != null) wipePreviousAccountData();
+
             const user = { id:target.userId, email:target.email, username:target.username, displayName:target.displayName || target.username, avatar:target.avatar };
             const payload = { token:target.token, refreshToken:target.refreshToken || null, user, expiresAt:target.expiresAt || (Date.now()+30*24*60*60*1000), issuedAt:Date.now(), savedAt:new Date().toISOString(), _version:'1.4.0' };
             withAuthMutation(() => {
