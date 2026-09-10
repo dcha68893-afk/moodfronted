@@ -2,7 +2,7 @@
   "name": "Kynecta Nexopa",
   "short_name": "Nexopa",
   "description": "Real-time mood-based chat and marketplace platform",
-  "start_url": "/chat.html",
+  "start_url": "/index.html",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",

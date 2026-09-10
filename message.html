@@ -663,7 +663,7 @@
         const oldestId = msgs.length ? msgs[0].id : null;
         if (typeof oldestId !== 'number') return; // no real cursor yet (all optimistic/local)
         await window.MessageModule.loadHistory(chatId, { before: oldestId });
-        renderMessages(chatId, { preserveScroll: true });
+        renderMessages(chatId, { preserveScroll: 'prepend' });
       });
 
       const input = document.getElementById('composeInput');
@@ -737,10 +737,54 @@
       return d.toLocaleDateString([], { month: 'long', day: 'numeric', year: d.getFullYear() !== today.getFullYear() ? 'numeric' : undefined });
     }
 
+    // ROOT-CAUSE FIX (chat opens at the top): renderMessages() used to apply
+    // the SAME "preserve scroll" math to two completely different
+    // situations. That math (`log.scrollTop = log.scrollHeight - prevHeight`)
+    // is only correct for PREPENDING older history above the current view
+    // (Load Earlier Messages) — it deliberately ignores whatever scrollTop
+    // was before the render and rebuilds it purely from the height delta,
+    // which is exactly what you want when new content is inserted above
+    // what's on screen.
+    //
+    // But loadHistory() (js/message-client.js) fires a separate
+    // 'message:added' event for every individual message in the initial
+    // history batch when a conversation is opened (up to 50 in a row, all
+    // synchronously in one tick), and this file's subscribe() handler ran
+    // every one of those through the exact same preserveScroll:true path.
+    // For an APPENDED message, that formula collapses to "the height of
+    // just the newest message" each time (prevHeight is the height before
+    // that one message was added), so the effective scrollTop shrinks back
+    // toward a small number every call — ending with the view sitting near
+    // the top of a long conversation right after opening it, even though
+    // the panel's very first render (see the plain renderMessages(chatId)
+    // call above, preserveScroll left false) correctly asked for the
+    // bottom.
+    //
+    // Fix: three distinct, explicit modes instead of one boolean:
+    //   preserveScroll === false      → always scroll to the very bottom.
+    //     Used for the initial full-panel render when a chat is opened.
+    //   preserveScroll === true       → "sticky" update (new/edited/
+    //     starred/reacted/decrypted message, and — critically — every
+    //     'message:added' fired while the initial history batch streams
+    //     in). Snaps to the bottom UNLESS the user has actually scrolled
+    //     up first, in which case their position is left alone. This is
+    //     what makes the history-loading burst end at the bottom (each
+    //     call sees "was already at/near bottom" and keeps re-bottoming)
+    //     while still respecting "once the user manually scrolls upward,
+    //     subsequent renders must preserve that position."
+    //   preserveScroll === 'prepend'  → Load Earlier Messages only: shift
+    //     scrollTop by exactly how much taller the log just got, so the
+    //     messages already on screen don't jump.
     function renderMessages(chatId, { preserveScroll = false } = {}) {
       const log = document.getElementById('messageLog');
       if (!log) return;
-      const prevHeight = preserveScroll ? log.scrollHeight : 0;
+
+      const BOTTOM_THRESHOLD = 100; // px — "close enough to the bottom" to keep following it
+      const distanceFromBottom = log.scrollHeight - log.scrollTop - log.clientHeight;
+      const wasNearBottom = distanceFromBottom < BOTTOM_THRESHOLD;
+      const prevScrollTop = log.scrollTop;
+      const prevScrollHeight = log.scrollHeight;
+
       const currentUserId = window._kynCurrentUserId;
       const msgs = window.MessageModule.getMessages(chatId);
 
@@ -756,8 +800,10 @@
       });
       log.innerHTML = html;
 
-      if (preserveScroll) {
-        log.scrollTop = log.scrollHeight - prevHeight;
+      if (preserveScroll === 'prepend') {
+        log.scrollTop = prevScrollTop + (log.scrollHeight - prevScrollHeight);
+      } else if (preserveScroll && !wasNearBottom) {
+        log.scrollTop = prevScrollTop;
       } else {
         log.scrollTop = log.scrollHeight;
       }
@@ -933,7 +979,6 @@
     const newChatModal = document.getElementById('newChatModal');
     const newChatSearchInput = document.getElementById('newChatSearchInput');
     const newChatResults = document.getElementById('newChatResults');
-    let newChatSearchTimer = null;
 
     // ROOT-CAUSE FIX (friends not shown instantly on "Start a chat"): chat.html
     // (the shell) already pushes the user's friends list to every module the
@@ -1030,13 +1075,12 @@
       });
     }
 
-    // Matches a cached user against the current search text the same way
-    // the backend's own search does (username/firstName/lastName, substring,
-    // case-insensitive) so the instant cache preview and the live results
-    // filter consistently.
+    // Matches a cached user against the current search text — username,
+    // display name, first name, or last name, substring, case-insensitive.
     function matchesSearch(u, q) {
       if (!q) return true;
       return (u.username || '').toLowerCase().includes(q) ||
+             (u.displayName || '').toLowerCase().includes(q) ||
              (u.firstName || '').toLowerCase().includes(q) ||
              (u.lastName || '').toLowerCase().includes(q);
     }
@@ -1046,21 +1090,32 @@
     // is a deliberate action, not something that pops open on its own based
     // on how many people are in the list.
 
-    // ROOT-CAUSE FIX (typing a letter doesn't filter instantly): the single
-    // runNewChatSearch() below used to run its ENTIRE body — a localStorage
-    // read, an `await` on IndexedDB, THEN the filter+render — on every
-    // single keystroke (after a 300ms debounce). So even once real cached
-    // data exists, each letter typed still waited on a fresh async
-    // IndexedDB round trip before anything painted, instead of instantly
-    // filtering something already sitting in memory. Split into two clearly
-    // separate jobs: _loadKnownUsers() reads local/IndexedDB caches ONCE,
-    // when the picker opens (not per keystroke) into this array; typing
-    // then filters this array synchronously, with zero debounce, on every
-    // keystroke — the debounce and the `await` only apply to the live
-    // network refinement, which still runs in the background afterward and
-    // merges in anything new.
+    // ROOT-CAUSE FIX (Start Chat has no friends / search hits the server on
+    // every keystroke): this used to call GET /friends/users/all, which is
+    // the backend's "discover everyone" route, not the authenticated user's
+    // actual friends — see moodchat/src/routes/friends.js: the friends list
+    // lives at GET /friends (mounted as /api/friends) and returns
+    // {data:{friends:[...]}}, while /friends/users/all returns a filtered
+    // dump of ALL users on the platform. On top of fetching the wrong list,
+    // the old runNewChatSearch() re-hit that (wrong) endpoint with
+    // ?search=... 300ms after every keystroke and then OVERWROTE whatever
+    // the instant local filter had already rendered — so typing "d", "de",
+    // "den" flickered through "Searching..." / a different result set
+    // instead of progressively narrowing the same friend list.
+    //
+    // Fix: _loadKnownUsers() loads the real friends list via GET /friends
+    // exactly ONCE per modal-open (not per keystroke) into _knownUsers.
+    // filterKnownUsersNow() is a pure, synchronous, in-memory filter over
+    // that array — every keystroke calls ONLY this, with zero network
+    // requests and zero debounce, so the list narrows immediately and never
+    // gets clobbered by a delayed server response.
     let _knownUsers = [];
-    async function _loadKnownUsers() {
+    let _knownUsersLoaded = false;
+    async function _loadKnownUsers(forceRefresh = false) {
+      if (_knownUsersLoaded && !forceRefresh) return;
+
+      // Instant local caches first, so something paints immediately even
+      // before the network call below resolves.
       let cachedUsers = [];
       try {
         const localFriends = JSON.parse(localStorage.getItem('friends') || '[]');
@@ -1081,75 +1136,52 @@
           }
         }
       } catch (_) {}
-      if (cachedUsers.length === 0) {
-        try {
-          const raw = JSON.parse(localStorage.getItem('discover_users') || '[]');
-          if (Array.isArray(raw)) cachedUsers = raw;
-        } catch (_) {}
-      }
       _knownUsers = cachedUsers;
+
+      // Now refresh from the REAL friends-list backend route (GET /friends
+      // → data.friends) — the authenticated user's actual friends, not the
+      // discovery/all-users endpoint. This runs once per modal-open; every
+      // keystroke after this only filters the _knownUsers array in memory.
+      try {
+        const res = await window.MessageModule.request().get('/friends');
+        if (res && res.success !== false && res.data && Array.isArray(res.data.friends)) {
+          const friends = res.data.friends.map(normalizePushedFriend).filter(Boolean);
+          _knownUsers = friends; // real friends list is authoritative once it arrives
+          try { localStorage.setItem('friends', JSON.stringify(friends)); } catch (_) {}
+          try {
+            if (window.KynectaFriendsLocalStore && typeof window.KynectaFriendsLocalStore.saveUsers === 'function') {
+              window.KynectaFriendsLocalStore.saveUsers(friends);
+            }
+          } catch (_) {}
+        }
+      } catch (err) {
+        console.warn('[Messages] Failed to load /friends, using cached list:', err && err.message);
+      }
+      _knownUsersLoaded = true;
     }
 
     // Instant, synchronous filter over whatever's already loaded — this is
-    // what the search input calls on every keystroke, with no debounce and
-    // no await, so a letter typed shows matching people immediately.
+    // what the search input calls on every keystroke, with no debounce, no
+    // await, and no network request, so a letter typed narrows the list
+    // immediately.
     function filterKnownUsersNow(query) {
       const q = (query || '').trim().toLowerCase();
       const filtered = _knownUsers.filter(u => matchesSearch(u, q));
       if (filtered.length > 0) {
         renderNewChatResults(filtered);
       } else if (_knownUsers.length === 0) {
-        newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary,#999);font-size:13px;">Searching...</div>';
+        newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary,#999);font-size:13px;">No friends yet — add some friends to start chatting.</div>';
       } else {
         newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary,#999);font-size:13px;">No matches</div>';
       }
       return filtered;
     }
 
+    // Called when the picker opens (and once in the background to refresh),
+    // never on a keystroke — see _loadKnownUsers()'s comment above.
     async function runNewChatSearch(query) {
       await _loadKnownUsers();
-      const filteredCache = filterKnownUsersNow(query);
-
-      try {
-        const res = await window.MessageModule.request().get(`/friends/users/all?limit=200${query ? '&search=' + encodeURIComponent(query) : ''}`);
-        if (!res || res.success === false || res.ok === false) {
-          // Only replace the screen with an error if we had nothing cached
-          // to fall back on — don't blow away a working cached list because
-          // the background refresh happened to fail.
-          if (filteredCache.length === 0) {
-            const reason = (res && (res.message || (res.data && res.data.message))) || 'Unknown error';
-            newChatResults.innerHTML = `<div style="padding:14px;color:#e04b4b;font-size:13px;">Could not load people: ${escapeHtml(reason)}</div>`;
-          }
-          console.error('[Messages] /friends/users/all failed:', res);
-          return;
-        }
-        const users = (res.data && Array.isArray(res.data.users)) ? res.data.users : [];
-
-        // Refresh the shared cache (same key + store friend-core.ui-bridge.js
-        // writes) so other modules, and the next time this modal opens,
-        // benefit too — only for the unfiltered "browse all" load, not a
-        // narrowed search.
-        if (!query) {
-          try { localStorage.setItem('discover_users', JSON.stringify(users)); } catch (_) {}
-          try {
-            if (window.KynectaFriendsLocalStore && typeof window.KynectaFriendsLocalStore.saveUsers === 'function') {
-              window.KynectaFriendsLocalStore.saveUsers(users);
-            }
-          } catch (_) {}
-        }
-
-        if (users.length === 0) {
-          if (filteredCache.length === 0) {
-            newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary,#999);font-size:13px;">No people found</div>';
-          }
-          return;
-        }
-        renderNewChatResults(users);
-      } catch (err) {
-        if (filteredCache.length === 0) {
-          newChatResults.innerHTML = '<div style="padding:14px;color:#e04b4b;font-size:13px;">Search failed</div>';
-        }
-      }
+      filterKnownUsersNow(query);
     }
 
     document.getElementById('closeChatInfoModal').addEventListener('click', () => {
@@ -1205,13 +1237,13 @@
       }
     });
     newChatSearchInput.addEventListener('input', () => {
-      // Instant local filter on every keystroke — no debounce, no await,
-      // just filtering the array _loadKnownUsers() already put in memory
-      // when the picker opened. Only the live network refinement below is
-      // debounced, since that's the part that's actually expensive.
+      // Instant local filter on every keystroke — no debounce, no await, no
+      // network request. Just filters the friends array _loadKnownUsers()
+      // already loaded into memory when the picker opened, so typing "d",
+      // then "de", then "den" progressively narrows the same list instead
+      // of round-tripping to the server (and possibly showing "Searching…"
+      // or a different result set) on every letter.
       filterKnownUsersNow(newChatSearchInput.value);
-      clearTimeout(newChatSearchTimer);
-      newChatSearchTimer = setTimeout(() => runNewChatSearch(newChatSearchInput.value.trim()), 300);
     });
 
     window.MessageModule.subscribe((event, data) => {
