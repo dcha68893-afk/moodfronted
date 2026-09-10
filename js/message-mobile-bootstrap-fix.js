@@ -145,6 +145,80 @@
     timer = setTimeout(() => pollUntilReady(startedAt), 1000);
   }
 
+  // Cross-module open contract hardening.
+  //
+  // Friends, Calls and Status can legitimately open a person who is NOT yet
+  // a friend. The parent shell already forwards OPEN_CHAT_WITH_USER, but a
+  // message iframe can receive that event before message-client.js has
+  // finished booting, or another legacy listener can consume it without
+  // reaching the canonical module. Capture the event here and queue the
+  // latest target until MessageModule exists. We then call ONLY the
+  // canonical openChat() implementation; this does not create a second chat
+  // resolver or a second crypto pipeline.
+  //
+  // This also makes the behavior explicit: friendship is not a prerequisite
+  // for opening a direct chat. The backend remains authoritative for blocks,
+  // authorization and conversation creation.
+  let pendingCrossModuleOpen = null;
+  let crossModuleOpenTimer = null;
+
+  function openCrossModuleTarget(payload) {
+    const p = payload || {};
+    const targetUserId = p.userId ?? p.recipientId ?? p.targetUserId;
+    const conversationId = p.conversationId ?? p.chatId ?? null;
+    if (targetUserId == null && conversationId == null) return false;
+
+    pendingCrossModuleOpen = {
+      userId: targetUserId,
+      conversationId,
+      messageId: p.messageId ?? null,
+      userName: p.userName || p.recipientName || p.name || null,
+      avatar: p.avatar || p.recipientAvatar || null,
+    };
+
+    const attempt = () => {
+      const mm = global.MessageModule;
+      if (!mm || typeof mm.openChat !== 'function') {
+        crossModuleOpenTimer = setTimeout(attempt, POLL_MS);
+        return;
+      }
+
+      const target = pendingCrossModuleOpen;
+      pendingCrossModuleOpen = null;
+      crossModuleOpenTimer = null;
+
+      Promise.resolve(mm.openChat({
+        conversationId: target.conversationId,
+        userId: target.userId,
+        messageId: target.messageId,
+        userName: target.userName,
+        avatar: target.avatar,
+      })).catch((err) => {
+        // openChat owns its user-visible failure event. Do not emit a second
+        // error or retry storm from this bridge.
+        console.warn('[MessagesCrossModuleOpen] canonical openChat failed:', err?.message || err);
+      });
+    };
+
+    if (crossModuleOpenTimer) clearTimeout(crossModuleOpenTimer);
+    attempt();
+    return true;
+  }
+
+  // Capture first so a legacy/broken listener cannot silently consume the
+  // cross-module request before the canonical MessageModule sees it.
+  global.addEventListener('message', (event) => {
+    const data = event?.data;
+    if (!data || typeof data !== 'object') return;
+    if (data.type !== 'OPEN_CHAT_WITH_USER') return;
+    if (event.source === global) return;
+
+    const payload = data.payload || data;
+    if (openCrossModuleTarget(payload)) {
+      event.stopImmediatePropagation();
+    }
+  }, true);
+
   function start() {
     if (started) return;
     started = true;
