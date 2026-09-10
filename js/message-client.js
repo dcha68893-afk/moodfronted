@@ -479,7 +479,29 @@
 
         let outgoingContent = content;
         const recipientUserId = resolveRecipientUserId(optimisticMessage.chatId, receiverId);
-        if (content && recipientUserId) {
+        // ROOT-CAUSE FIX (SILENT-PLAINTEXT-SEND): this used to be
+        // `if (content && recipientUserId)` — when content existed but
+        // recipientUserId could NOT be resolved (message.html's doSend()
+        // never passes receiverId, so this depends entirely on
+        // state.conversations.get(chatId)?.otherUser?.id already being
+        // populated; a brand-new or bypass-opened chat can still be missing
+        // that at send time), the whole encrypt block was skipped with no
+        // error, and outgoingContent silently stayed as the raw plaintext
+        // `content` — sent to the server and to the recipient completely
+        // unencrypted, with nothing in the UI indicating this happened.
+        // This contradicts the app's "no plaintext fallback" design (see
+        // the !ready branch below, which already fails loudly instead of
+        // falling back) and is very likely why some messages show up
+        // readable instantly with no lock icon — they were never encrypted
+        // at all, not successfully decrypted. Fixed by failing loudly here
+        // too, exactly like the !ready case, instead of ever sending
+        // plaintext.
+        if (content) {
+            if (!recipientUserId) {
+                bucket.set(optimisticId, Object.assign({}, optimisticMessage, { status: 'failed' }));
+                notify('message:failed', { chatId: optimisticMessage.chatId, clientMessageId, error: 'Could not determine the recipient to encrypt this message for' });
+                return { success: false, error: 'Could not determine the recipient to encrypt this message for — message was not sent' };
+            }
             try {
                 // FIX (CANONICAL-E2E-RACE): see waitForMessageE2E() above —
                 // don't gate only on window.KynectaE2E truthiness, which is
@@ -567,7 +589,14 @@
         try {
             let outgoingContent = content;
             const recipientUserId = resolveRecipientUserId(chatId, null);
-            if (content && recipientUserId) {
+            // ROOT-CAUSE FIX (SILENT-PLAINTEXT-SEND): same bug as
+            // sendMessage() above — skipping the encrypt block when
+            // recipientUserId is unresolved used to leave outgoingContent as
+            // raw plaintext with no error. Fail loudly instead.
+            if (content) {
+                if (!recipientUserId) {
+                    return { success: false, error: 'Could not determine the recipient to encrypt this message for — edit was not sent' };
+                }
                 try {
                     const ready = await waitForMessageE2E();
                     if (!ready || typeof window.KynectaE2E?.encryptForChat !== 'function') {
@@ -1267,10 +1296,24 @@
         } catch (_) {}
     }
 
-    async function loadConversations() {
+    // ROOT-CAUSE FIX (SIDEBAR-EMPTY-AFTER-RELOAD): this used to be a single,
+    // unretried attempt — if it failed for any reason (the parent frame's
+    // 'API_REQUEST' listener not wired up yet, chat.html's own auth/session
+    // bootstrap not finished, a slow/cold backend hitting _directRequest's
+    // 30s timeout), the catch block below just logged to console and gave
+    // up. Nothing else in this file ever calls loadConversations() again on
+    // its own (the only other call site is unarchiveChat(), unrelated) and
+    // nothing re-fires it on socket reconnect either — so one bad first
+    // attempt permanently left the sidebar on its "No conversations yet /
+    // Start a chat" empty state for the rest of that page session, even
+    // though the conversations genuinely exist server-side. This is a
+    // transport-timing bug, not a real "you have no chats" state. Retries
+    // with backoff instead of giving up after one try.
+    async function loadConversations(attempt = 0) {
         try {
             const res = await api().get('/chats?limit=50');
-            const chats = (res && res.data && Array.isArray(res.data.chats)) ? res.data.chats : [];
+            if (!res || res.success === false) throw new Error((res && res.message) || 'Failed to load conversation list');
+            const chats = (res.data && Array.isArray(res.data.chats)) ? res.data.chats : [];
             _warmupKnownContactKeys(chats);
             chats.filter(c => c.type === 'direct' && c.otherParticipant).forEach(c => {
                 const lastRaw = Array.isArray(c.chatMessages) && c.chatMessages[0] ? c.chatMessages[0] : null;
@@ -1286,7 +1329,12 @@
                 if (lastRaw) decryptForDisplay(c.id, { id: lastRaw.id, chatId: c.id, content: lastRaw.content, type: lastRaw.type, senderId: lastRaw.senderId, createdAt: lastRaw.createdAt });
             });
         } catch (err) {
-            console.error('[MessageModule] Failed to load conversation list:', err.message);
+            console.error(`[MessageModule] Failed to load conversation list (attempt ${attempt + 1}):`, err.message);
+            if (attempt < 5) {
+                setTimeout(() => loadConversations(attempt + 1), Math.min(1000 * (attempt + 1), 5000));
+            } else {
+                console.error('[MessageModule] Giving up on loading conversation list after 6 attempts');
+            }
         }
     }
 
