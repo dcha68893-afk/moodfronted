@@ -1,54 +1,63 @@
-// group-core-patch.js — lifecycle + empty-sync stability guard
+// group-core-patch.js — lifecycle + group rendering stability guards
 import { LifecycleState } from './group-core-bootstrap.js';
 import './group-core-patch.legacy.js';
 
-// Keep ACTIVE monotonic. Routine parent/session handshakes must not bounce an
-// already-active group iframe back into the parent's retry state.
+// Once ACTIVE, redundant parent/session handshakes must not force the iframe
+// back into WAIT_PARENT. Account switching has its own explicit auth event.
 if (LifecycleState && typeof LifecycleState.reenterWaitParent === 'function') {
   LifecycleState.reenterWaitParent = function preventActiveBounce() {
     return false;
   };
 }
 
-// A transient / incomplete / unauthorized / cold-backend empty response from
-// /groups/user must never erase groups that are already visible locally.
-// The underlying requestGroupList() intentionally merges server data, but its
-// merge step can legitimately remove cached groups that are absent from one
-// bad response. Preserve the last known-good state and let a later sync repair
-// it instead of flashing the UI to an empty/placeholder state.
 const GC = window.GroupCore;
-if (GC && typeof GC.requestGroupList === 'function' && !GC.__emptySyncGuardInstalled) {
-  GC.__emptySyncGuardInstalled = true;
-  const originalRequestGroupList = GC.requestGroupList.bind(GC);
-  GC.requestGroupList = async function guardedRequestGroupList(...args) {
-    const before = {
-      groups: Array.isArray(this.groups) ? [...this.groups] : [],
-      myGroups: Array.isArray(this.myGroups) ? [...this.myGroups] : [],
-      joinedGroups: Array.isArray(this.joinedGroups) ? [...this.joinedGroups] : [],
-      adminGroups: Array.isArray(this.adminGroups) ? [...this.adminGroups] : []
+if (GC) {
+  // Never let a transient empty / incomplete / unauthorized server payload
+  // erase a group list that is already visible from local cache. The next
+  // successful sync can still update individual records normally.
+  if (typeof GC.mergeWithServerData === 'function' && !GC.__emptyServerPayloadGuard) {
+    GC.__emptyServerPayloadGuard = true;
+    const originalMerge = GC.mergeWithServerData.bind(GC);
+    GC.mergeWithServerData = async function guardedMerge(serverData, ...args) {
+      const existingCount = [this.groups, this.myGroups, this.joinedGroups, this.adminGroups]
+        .reduce((n, list) => n + (Array.isArray(list) ? list.length : 0), 0);
+      const payloadGroups = Array.isArray(serverData?.groups) ? serverData.groups : null;
+      const payloadPartitionCount = ['myGroups', 'joinedGroups', 'adminGroups']
+        .reduce((n, key) => n + (Array.isArray(serverData?.[key]) ? serverData[key].length : 0), 0);
+      const explicitlyEmpty = payloadGroups && payloadGroups.length === 0 && payloadPartitionCount === 0;
+      if (existingCount > 0 && explicitlyEmpty) {
+        console.warn('[GroupCore] Ignoring transient empty /groups/user payload; preserving cached groups');
+        return this.getGroupsData?.() || null;
+      }
+      return originalMerge(serverData, ...args);
     };
-    const result = await originalRequestGroupList(...args);
-    const after = [this.groups, this.myGroups, this.joinedGroups, this.adminGroups]
-      .map(v => Array.isArray(v) ? v.length : 0);
-    const hadVisibleGroups = before.groups.length || before.myGroups.length || before.joinedGroups.length || before.adminGroups.length;
-    const becameEmpty = after.every(n => n === 0);
-    if (hadVisibleGroups && becameEmpty && result?.success !== true) {
-      this.groups = before.groups;
-      this.myGroups = before.myGroups;
-      this.joinedGroups = before.joinedGroups;
-      this.adminGroups = before.adminGroups;
-      try {
-        this.emit('groups:list-updated', {
-          groups: this.groups,
-          myGroups: this.myGroups,
-          joinedGroups: this.joinedGroups,
-          adminGroups: this.adminGroups,
-          fromCache: true,
-          preservedAfterTransientEmptySync: true
-        });
-      } catch (_) {}
-      return { success: true, fromCache: true, preserved: true, data: this.getGroupsData?.() };
-    }
-    return result;
-  };
+  }
+
+  // Keep the request wrapper as a second line of defence if another code path
+  // replaces the merge function or mutates arrays after a failed sync.
+  if (typeof GC.requestGroupList === 'function' && !GC.__emptySyncGuardInstalled) {
+    GC.__emptySyncGuardInstalled = true;
+    const originalRequestGroupList = GC.requestGroupList.bind(GC);
+    GC.requestGroupList = async function guardedRequestGroupList(...args) {
+      const before = {
+        groups: Array.isArray(this.groups) ? [...this.groups] : [],
+        myGroups: Array.isArray(this.myGroups) ? [...this.myGroups] : [],
+        joinedGroups: Array.isArray(this.joinedGroups) ? [...this.joinedGroups] : [],
+        adminGroups: Array.isArray(this.adminGroups) ? [...this.adminGroups] : []
+      };
+      const result = await originalRequestGroupList(...args);
+      const afterEmpty = [this.groups, this.myGroups, this.joinedGroups, this.adminGroups]
+        .every(list => !Array.isArray(list) || list.length === 0);
+      const hadVisibleGroups = Object.values(before).some(list => list.length > 0);
+      if (hadVisibleGroups && afterEmpty && result?.fromCache === true) {
+        this.groups = before.groups;
+        this.myGroups = before.myGroups;
+        this.joinedGroups = before.joinedGroups;
+        this.adminGroups = before.adminGroups;
+        try { this.emit('groups:list-updated', { ...before, fromCache: true, preservedAfterFailedSync: true }); } catch (_) {}
+        return { success: true, fromCache: true, preserved: true, data: this.getGroupsData?.() };
+      }
+      return result;
+    };
+  }
 }
