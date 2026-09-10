@@ -4393,7 +4393,19 @@
             function shouldPreferDirectApi(endpoint, method) {
                 const normalizedMethod = String(method || 'GET').toUpperCase();
                 if (normalizedMethod !== 'GET') return true;
-                return ['/groups', '/status', '/calls', '/tools', '/marketplace']
+                // FIX (FRIENDS-LIST-INCONSISTENT-ACROSS-MODULES): '/calls',
+                // '/groups', etc. were already routed straight through
+                // directApiRequest (a single well-tested fetch + envelope-
+                // unwrap), skipping the older window.api.request.request
+                // path entirely. '/friends' wasn't on this list, so it took
+                // that other path instead — the same endpoint, hit by
+                // different modules (Friends, Messages' New Chat picker,
+                // Calls, Groups), could come back through two different
+                // response-shaping code paths depending on which one ran.
+                // Every module's own friends list should be resolved the
+                // same well-tested way, not just the ones that happened to
+                // already be listed here.
+                return ['/groups', '/status', '/calls', '/tools', '/marketplace', '/friends']
                     .some(prefix => endpoint === prefix || endpoint.startsWith(prefix + '/'));
             }
 

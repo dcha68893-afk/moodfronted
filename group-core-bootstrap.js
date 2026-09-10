@@ -3634,6 +3634,37 @@ const GroupCore = {
       if (response && response.success && response.data) {
         const messages = response.data;
 
+        // FIX (REDUNDANT-REDECRYPT / TRANSIENT-FAILURE-OVERWRITE): the
+        // server always returns raw ciphertext here (it never remembers
+        // what any one device has already decrypted), so without this,
+        // EVERY open/reload of a group chat re-ran real decryption on the
+        // entire history again, even messages that decrypted fine last
+        // time — needless crypto work, and any transient hiccup on the
+        // redo (sender key not synced yet this session) could overwrite
+        // an already-good cached plaintext with a failure placeholder.
+        // Build a lookup from this device's last known-good decrypted
+        // copy of this group (this.groupMessages[groupId], restored from
+        // SafeStorage at boot by loadCachedData()) and mark any message
+        // we already have genuine plaintext for so decryptIncomingBatch
+        // skips it entirely instead of re-deriving it.
+        const FAILURE_PLACEHOLDERS = new Set([
+          '[Encrypted message — unlock your key to read]',
+          '[Encrypted — sender key not available]',
+          '[Decryption failed]'
+        ]);
+        const previousById = new Map();
+        (this.groupMessages[groupId] || []).forEach((m) => {
+          if (m && m.id != null && typeof m.content === 'string' && !FAILURE_PLACEHOLDERS.has(m.content)) {
+            previousById.set(m.id, m.content);
+          }
+        });
+        messages.forEach((m) => {
+          if (m && m.id != null && previousById.has(m.id)) {
+            m.content = previousById.get(m.id);
+            m.__alreadyDecrypted = true;
+          }
+        });
+
         // FIX-GROUP-ENCRYPTION: decrypt the whole history batch
         // before it's cached or rendered — mirrors the 1:1 chat
         // syncChat() fix from an earlier round. One sender-key

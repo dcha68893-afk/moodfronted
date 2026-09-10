@@ -125,11 +125,44 @@
   .bubble-deleted { font-style: italic; opacity: 0.6; }
   .bubble-row { position: relative; }
   .bubble-menu-btn {
-    background: none; border: none; cursor: pointer; font-size: 14px; opacity: 0;
-    padding: 2px 6px; align-self: flex-start; margin-top: 4px;
+    /* FIX (TOO-SMALL / NOT-VISIBLE): this used to be font-size:14px,
+       padding:2px 6px, opacity:0 by default with opacity only raised on
+       `.bubble-row:hover` — invisible AND practically untappable on any
+       touch device (there is no hover state to trigger it at all), and
+       fiddly even with a mouse. Bigger hit target, and a real baseline
+       opacity so it's always visible (not just discoverable on hover),
+       with hover/focus/active only pushing it to fully opaque. */
+    background: none; border: none; cursor: pointer; font-size: 20px; opacity: 0.55;
+    width: 32px; height: 32px; line-height: 1; border-radius: 50%;
+    padding: 0; align-self: flex-start; margin-top: 4px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
   }
-  .bubble-row:hover .bubble-menu-btn { opacity: 0.6; }
-  .bubble-menu-btn:hover { opacity: 1 !important; }
+  .bubble-row:hover .bubble-menu-btn,
+  .bubble-menu-btn:hover,
+  .bubble-menu-btn:focus-visible,
+  .bubble-menu-btn:active { opacity: 1; background: rgba(0,0,0,0.06); }
+  /* Touch devices have no hover — always show at full baseline opacity
+     there instead of relying on a hover state that will never fire. */
+  @media (hover: none) {
+    .bubble-menu-btn { opacity: 0.75; }
+  }
+  .bubble-select-checkbox {
+    width: 22px; height: 22px; flex-shrink: 0; align-self: center; margin: 0 6px; cursor: pointer;
+  }
+  .bubble-row.selecting { align-items: center; cursor: pointer; }
+  .bubble-row.selected .bubble { outline: 2px solid var(--kyn-accent-primary, #22c55e); }
+  #selectionActions {
+    display: flex; align-items: center; gap: 12px; flex: 1;
+  }
+  #selectionActions.hidden { display: none; }
+  #selectionCount { flex: 1; font-weight: 600; font-size: 14px; }
+  #selectionActions button {
+    background: none; border: none; cursor: pointer; font-size: 20px;
+    width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  }
+  #selectionActions button:hover { background: rgba(0,0,0,0.06); }
+  #chatHeaderActions.hidden { display: none; }
   .bubble-context-menu {
     position: fixed; z-index: 1500; background: var(--kyn-bg-panel, #fff);
     border: 1px solid var(--kyn-border, #ddd); border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,0.18);
@@ -441,6 +474,10 @@
       return `<div class="reply-quote" data-jump-to="${m.replyToId}">${escapeHtml(label.slice(0, 80))}</div>`;
     }
 
+    // ── Multi-select (select many messages, delete at once) ───────────────
+    let selectMode = false;
+    let selectedIds = new Set();
+
     function bubbleHtml(m, isMine, chatId) {
       const time = m.createdAt ? new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
       const statusTick = isMine ? ({ sending: '…', sent: '✓', delivered: '✓✓', read: '✓✓', failed: '⚠' }[m.status] || '') : '';
@@ -452,11 +489,20 @@
       const contentAttrs = decryptFailed ? ` class="decrypt-retry" title="Tap to retry decryption" data-retry-message-id="${m.id}"`
                           : decryptPending ? ` class="decrypt-pending"` : '';
       const canAct = !m.deleted && typeof m.id === 'number';
-      const menuBtn = canAct ? `<button class="bubble-menu-btn" data-menu-for="${m.id}" title="More">⋮</button>` : '';
+      // FIX (SELECT-MODE): while selecting, the per-bubble "..." menu is
+      // replaced with a checkbox instead of sitting alongside it — mirrors
+      // how the rest of the app (and WhatsApp/Telegram) handles this, and
+      // avoids a tap on the bubble accidentally opening the single-message
+      // context menu mid-selection.
+      const isSelected = canAct && selectedIds.has(m.id);
+      const menuBtn = !canAct ? ''
+        : selectMode
+          ? `<input type="checkbox" class="bubble-select-checkbox" data-select-for="${m.id}"${isSelected ? ' checked' : ''}>`
+          : `<button class="bubble-menu-btn" data-menu-for="${m.id}" title="More">⋮</button>`;
       const reactionsHtml = (m.reactions && Object.keys(m.reactions).length > 0) ?
         `<div class="bubble-reactions">${Object.values(m.reactions).map(e => `<span>${e}</span>`).join('')}</div>` : '';
       return `
-        <div class="bubble-row ${isMine ? 'mine' : ''}${m.status === 'failed' ? ' failed' : ''}" data-message-id="${m.id}">
+        <div class="bubble-row ${isMine ? 'mine' : ''}${m.status === 'failed' ? ' failed' : ''}${selectMode ? ' selecting' : ''}${isSelected ? ' selected' : ''}" data-message-id="${m.id}">
           ${menuBtn}
           <div class="bubble${isDeletedForEveryone ? ' bubble-deleted' : ''}">
             ${!isDeletedForEveryone ? replyPreviewHtml(m, chatId) : ''}
@@ -475,6 +521,11 @@
     }
 
     function renderChatPanel(chatId, options = {}) {
+      // A new chat panel render (opening a different chat, or the initial
+      // render) always starts out of selection mode — a selection made in
+      // one conversation should never silently carry over into another.
+      selectMode = false;
+      selectedIds = new Set();
       chatId = normalizeChatPanelId(chatId) || normalizeChatPanelId(window.MessageModule.getActiveChatId());
       const conv = chatId ? window.MessageModule.getConversations().find(c => c.chatId === chatId) : null;
       const hasChat = !!chatId;
@@ -507,6 +558,11 @@
             <button class="header-icon-btn" id="voiceCallBtn" title="Voice call"${hasChat ? '' : ' disabled'}>📞</button>
             <button class="header-icon-btn" id="videoCallBtn" title="Video call"${hasChat ? '' : ' disabled'}>🎥</button>
             <button class="header-icon-btn" id="chatMoreBtn" title="More">⋮</button>
+          </div>
+          <div id="selectionActions" class="hidden">
+            <button id="cancelSelectBtn" title="Cancel selection">&times;</button>
+            <span id="selectionCount">0 selected</span>
+            <button id="bulkDeleteBtn" title="Delete selected">🗑</button>
           </div>
         </div>
         <div id="chatSearchBar" class="hidden">
@@ -597,10 +653,17 @@
         }
       });
 
+      const cancelSelectBtn = document.getElementById('cancelSelectBtn');
+      const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
+      if (cancelSelectBtn) cancelSelectBtn.addEventListener('click', exitSelectMode);
+      if (bulkDeleteBtn) bulkDeleteBtn.addEventListener('click', performBulkDelete);
+
       document.getElementById('chatMoreBtn').addEventListener('click', async () => {
         if (!hasChat) { alert('Select a conversation first.'); return; }
-        const action = prompt('Type "clear" to clear this chat, "archive" to archive it, or "block" to block this user');
-        if (action === 'clear') {
+        const action = prompt('Type "select" to select multiple messages to delete, "clear" to clear this chat, "archive" to archive it, or "block" to block this user');
+        if (action === 'select') {
+          enterSelectMode(null);
+        } else if (action === 'clear') {
           if (confirm('Clear this conversation for you? This cannot be undone.')) {
             window.MessageModule.getMessages(chatId).forEach(m => {
               if (typeof m.id === 'number') window.MessageModule.deleteMessage(chatId, m.id, { forEveryone: false });
@@ -822,6 +885,46 @@
         });
       });
 
+      // Selection mode: a checkbox click (or a tap anywhere on the bubble
+      // row while selecting — mirrors WhatsApp/Telegram) toggles that
+      // message in/out of the current selection.
+      log.querySelectorAll('.bubble-select-checkbox').forEach(cb => {
+        cb.addEventListener('click', (e) => {
+          e.stopPropagation();
+          toggleSelectMessage(Number(cb.dataset.selectFor));
+        });
+      });
+      if (selectMode) {
+        log.querySelectorAll('.bubble-row.selecting').forEach(row => {
+          row.addEventListener('click', () => {
+            const id = Number(row.dataset.messageId);
+            if (Number.isFinite(id)) toggleSelectMessage(id);
+          });
+        });
+      }
+
+      // Long-press (touch) or right-click (mouse) a bubble to enter
+      // selection mode starting with that message — the discoverable
+      // entry point on touch devices, where there's no hover to reveal
+      // the "..." button in the first place.
+      if (!selectMode) {
+        log.querySelectorAll('.bubble-row').forEach(row => {
+          const id = Number(row.dataset.messageId);
+          if (!Number.isFinite(id)) return;
+          let pressTimer = null;
+          row.addEventListener('touchstart', () => {
+            pressTimer = setTimeout(() => enterSelectMode(id), 500);
+          }, { passive: true });
+          ['touchend', 'touchmove', 'touchcancel'].forEach(evt => {
+            row.addEventListener(evt, () => { if (pressTimer) clearTimeout(pressTimer); });
+          });
+          row.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            enterSelectMode(id);
+          });
+        });
+      }
+
       log.querySelectorAll('.reply-quote').forEach(el => {
         el.addEventListener('click', () => {
           const target = document.querySelector(`[data-message-id="${el.dataset.jumpTo}"]`);
@@ -844,6 +947,72 @@
     // ── Bubble context menu (Reply, Forward, Copy, React, Star, Edit, Delete) ──
     let activeReplyTo = null; // { messageId, chatId, preview }
 
+    // ── Multi-select delete (spec: "delete many messages at once", no
+    // separate "select" entry point previously existed at all) ────────────
+    function enterSelectMode(initialMessageId) {
+      selectMode = true;
+      selectedIds = new Set(initialMessageId != null ? [initialMessageId] : []);
+      closeBubbleMenu();
+      renderMessages(window.MessageModule.getActiveChatId(), { preserveScroll: true });
+      updateSelectionBar();
+    }
+
+    function exitSelectMode() {
+      if (!selectMode) return;
+      selectMode = false;
+      selectedIds = new Set();
+      const chatId = window.MessageModule.getActiveChatId();
+      if (chatId) renderMessages(chatId, { preserveScroll: true });
+      updateSelectionBar();
+    }
+
+    function toggleSelectMessage(messageId) {
+      if (selectedIds.has(messageId)) selectedIds.delete(messageId);
+      else selectedIds.add(messageId);
+      if (selectedIds.size === 0) { exitSelectMode(); return; }
+      const chatId = window.MessageModule.getActiveChatId();
+      if (chatId) renderMessages(chatId, { preserveScroll: true });
+      updateSelectionBar();
+    }
+
+    // Toggles the header between its normal icon row and the selection
+    // count/cancel/delete bar. Header markup is rebuilt fresh every time a
+    // chat is opened (renderChatPanel) but NOT on every message render, so
+    // this only needs to flip visibility/text — it doesn't rebuild it.
+    function updateSelectionBar() {
+      const actions = document.getElementById('chatHeaderActions');
+      const selectionBar = document.getElementById('selectionActions');
+      const headerName = document.getElementById('chatHeaderName');
+      if (!actions || !selectionBar) return;
+      if (selectMode) {
+        actions.classList.add('hidden');
+        selectionBar.classList.remove('hidden');
+        const count = document.getElementById('selectionCount');
+        if (count) count.textContent = `${selectedIds.size} selected`;
+      } else {
+        actions.classList.remove('hidden');
+        selectionBar.classList.add('hidden');
+      }
+    }
+
+    async function performBulkDelete() {
+      const chatId = window.MessageModule.getActiveChatId();
+      if (!chatId || selectedIds.size === 0) return;
+      const ids = Array.from(selectedIds);
+      const allMine = ids.every((id) => {
+        const m = window.MessageModule.getMessages(chatId).find(x => x.id === id);
+        return m && m.senderId === window._kynCurrentUserId;
+      });
+      let forEveryone = false;
+      if (allMine) {
+        forEveryone = confirm(`Delete ${ids.length} message(s) for everyone? Click Cancel to delete just for you.`);
+      } else if (!confirm(`Delete ${ids.length} message(s) for you?`)) {
+        return;
+      }
+      await window.MessageModule.bulkDeleteMessages(chatId, ids, { forEveryone });
+      exitSelectMode();
+    }
+
     function closeBubbleMenu() {
       const existing = document.getElementById('bubbleContextMenu');
       if (existing) existing.remove();
@@ -864,11 +1033,17 @@
         { action: 'copy', label: '⧉ Copy' },
         { action: 'react', label: '🙂 React' },
         { action: 'star', label: current.starred ? '⭐ Unstar' : '☆ Star' },
+        { action: 'select', label: '☑ Select' },
       ];
-      if (isMine) {
-        items.push({ action: 'edit', label: '✎ Edit' });
-        items.push({ action: 'delete', label: '🗑 Delete' });
-      }
+      if (isMine) items.push({ action: 'edit', label: '✎ Edit' });
+      // FIX (NO-DELETE-ON-RECEIVED-MESSAGES): this used to only add Delete
+      // when isMine — a message someone else sent you had no delete
+      // option at all, not even "delete for me". Any participant can
+      // always remove a message from their own view; only "delete for
+      // everyone" is sender-only (enforced server-side too, see
+      // routes/messages.js _deleteOneMessage), so that choice is only
+      // offered when it's actually your own message.
+      items.push({ action: 'delete', label: '🗑 Delete' });
       menu.innerHTML = items.map(i => `<button data-menu-action="${i.action}">${i.label}</button>`).join('');
       document.body.appendChild(menu);
 
@@ -915,8 +1090,17 @@
           if (newContent && newContent.trim()) await window.MessageModule.editMessage(chatId, messageId, newContent.trim());
           break;
         }
+        case 'select':
+          enterSelectMode(messageId);
+          break;
         case 'delete': {
-          const forEveryone = confirm('Delete for everyone? Click Cancel to delete just for you.');
+          const isMine = current.senderId === window._kynCurrentUserId;
+          let forEveryone = false;
+          if (isMine) {
+            forEveryone = confirm('Delete for everyone? Click Cancel to delete just for you.');
+          } else if (!confirm('Delete this message for you?')) {
+            return;
+          }
           await window.MessageModule.deleteMessage(chatId, messageId, { forEveryone });
           break;
         }
@@ -1148,17 +1332,47 @@
       // → data.friends) — the authenticated user's actual friends, not the
       // discovery/all-users endpoint. This runs once per modal-open; every
       // keystroke after this only filters the _knownUsers array in memory.
+      //
+      // FIX (SHOWS-NO-FRIENDS-DESPITE-HAVING-FRIENDS): this used to accept
+      // only one exact response shape (res.data.friends as an array) and
+      // silently do nothing otherwise, falling through to whatever local
+      // cache happened to already exist (often empty, if this picker is
+      // opened before the Friends module has ever pushed its own cache).
+      // GET /friends goes through the exact same chat.html postMessage
+      // relay (API_REQUEST/API_RESPONSE) that the Friends module's own
+      // authorizedRequest() uses — see friend-core.ui-bridge.js's
+      // loadFriendsFromBackend(), the module that DOES reliably show
+      // friends — and that function has to defend against several
+      // different shapes the relay can hand back depending on which
+      // internal path served it (single-wrapped, double-wrapped, or a
+      // flat array), not just the one this picker assumed. Matching that
+      // same defensive parsing here is what actually fixes this, not a
+      // guess at "the" correct shape.
       try {
         const res = await window.MessageModule.request().get('/friends');
-        if (res && res.success !== false && res.data && Array.isArray(res.data.friends)) {
-          const friends = res.data.friends.map(normalizePushedFriend).filter(Boolean);
-          _knownUsers = friends; // real friends list is authoritative once it arrives
-          try { localStorage.setItem('friends', JSON.stringify(friends)); } catch (_) {}
-          try {
-            if (window.KynectaFriendsLocalStore && typeof window.KynectaFriendsLocalStore.saveUsers === 'function') {
-              window.KynectaFriendsLocalStore.saveUsers(friends);
-            }
-          } catch (_) {}
+        if (res && res.success !== false && res.data) {
+          let rawFriends = [];
+          if (Array.isArray(res.data.friends)) rawFriends = res.data.friends;
+          else if (res.data.data && Array.isArray(res.data.data.friends)) rawFriends = res.data.data.friends;
+          else if (Array.isArray(res.data)) rawFriends = res.data;
+
+          const friends = rawFriends.map(normalizePushedFriend).filter(Boolean);
+          // SAFETY (mirrors friend-core.ui-bridge.js's same guard): never
+          // let a momentarily-empty/misshapen response wipe out a
+          // populated list already sitting in _knownUsers from the local
+          // caches above — only replace when the server actually gave us
+          // something.
+          if (friends.length > 0 || rawFriends.length === 0) {
+            _knownUsers = friends.length > 0 ? friends : _knownUsers;
+          }
+          if (friends.length > 0) {
+            try { localStorage.setItem('friends', JSON.stringify(friends)); } catch (_) {}
+            try {
+              if (window.KynectaFriendsLocalStore && typeof window.KynectaFriendsLocalStore.saveUsers === 'function') {
+                window.KynectaFriendsLocalStore.saveUsers(friends);
+              }
+            } catch (_) {}
+          }
         }
       } catch (err) {
         console.warn('[Messages] Failed to load /friends, using cached list:', err && err.message);

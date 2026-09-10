@@ -361,7 +361,31 @@
     // Mutates `message.content` in place to the decrypted plaintext (or a
     // placeholder string on failure). Safe to call on already-plaintext
     // messages — does nothing if message.encrypted isn't true.
+    //
+    // FIX (REDUNDANT-REDECRYPT / TRANSIENT-FAILURE-OVERWRITE): callers
+    // (group-core-bootstrap.js's loadGroupMessages) can mark a message
+    // `__alreadyDecrypted: true` when they already have that exact
+    // message's genuine plaintext from a prior successful decrypt this
+    // device has cached (see the previousById lookup there). This mirrors
+    // the 1:1 chat fix's `displayContent !== undefined` short-circuit:
+    // every group chat open used to unconditionally re-fetch ciphertext
+    // and re-run decryptIncomingBatch on the ENTIRE history every single
+    // time, with no memory that a message had already been decrypted
+    // successfully before. Two real problems came from that — pure wasted
+    // crypto work on every reload/reopen, AND a transient failure on the
+    // redo (sender key not synced yet this session, a momentary
+    // syncReceivedKeys network hiccup) would overwrite an already-good
+    // cached plaintext with '[Decryption failed]' / '[Encrypted — sender
+    // key not available]', exactly the "previously decrypted message
+    // fails to decrypt again" symptom. Skipping the real decrypt entirely
+    // for already-known messages fixes both: zero redundant crypto work,
+    // and a message that once decrypted successfully can never regress to
+    // a failure placeholder on a later reload.
     async function decryptIncoming(groupId, message) {
+        if (message && message.__alreadyDecrypted) {
+            delete message.__alreadyDecrypted;
+            return message;
+        }
         if (!message || !message.metadata?.encrypted) return message;
         if (!E2E()?.enabled) {
             message.content = '[Encrypted message — unlock your key to read]';
@@ -401,7 +425,13 @@
 
     async function decryptIncomingBatch(groupId, messages) {
         if (!Array.isArray(messages) || messages.length === 0) return messages;
-        await syncReceivedKeys(groupId); // one fetch for the whole batch, not per-message
+        // FIX (REDUNDANT-REDECRYPT): if the caller already marked every
+        // message __alreadyDecrypted (see loadGroupMessages's previousById
+        // lookup), there's nothing left in this batch that needs a sender
+        // key — skip the network round-trip entirely instead of fetching
+        // keys that end up unused.
+        const needsKeys = messages.some((m) => !(m && m.__alreadyDecrypted));
+        if (needsKeys) await syncReceivedKeys(groupId); // one fetch for the whole batch, not per-message
         for (const m of messages) {
             await decryptIncoming(groupId, m);
         }
