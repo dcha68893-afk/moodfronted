@@ -19,6 +19,7 @@
   let timer = null;
   let started = false;
   let friendRenderTimer = null;
+  let friendWarmInFlight = false;
 
   function previewFor(chat) {
     const last = Array.isArray(chat?.chatMessages) ? chat.chatMessages[0] : null;
@@ -102,17 +103,6 @@
     if (openCrossModuleTarget(data.payload || data)) event.stopImmediatePropagation();
   }, true);
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // DM E2E key-freshness guard
-  //
-  // message-e2e-core.js embeds the recipient key used for a message, which
-  // makes decryption self-contained. New messages still MUST be encrypted
-  // with the recipient's CURRENT server key. The canonical encryptForChat()
-  // path is cache-first, so a stale PUB_STORE entry can produce a ciphertext
-  // that the recipient cannot decrypt. Warm the canonical cache with one
-  // forced network lookup immediately before every new outgoing encryption.
-  // We do not replace the crypto algorithm; we only force the existing
-  // identity directory to refresh before the canonical encryptor consumes it.
   function installOutgoingKeyFreshnessFix() {
     const e2e = global.KynectaE2E;
     const identity = global.KynectaE2EIdentity;
@@ -123,9 +113,6 @@
     const original = e2e.encryptForChat.bind(e2e);
     e2e.encryptForChat = async function freshRecipientKeyEncrypt(plaintext, chatId, recipientUserId) {
       if (!recipientUserId) throw new Error('Recipient is required for secure messaging');
-      // Force the current key into the exact cache used by the canonical
-      // encryptor. If refresh fails, do NOT silently fall back to stale cache:
-      // sending with an unverified key would create undecryptable messages.
       let fresh;
       try {
         fresh = await identity.publicKeyFor(String(recipientUserId), true);
@@ -147,9 +134,6 @@
     return false;
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Start-chat contact picker: paint cached friends immediately, then refresh
-  // in the background. Opening the picker must never wait for a network call.
   function normalizeFriend(raw) {
     if (!raw) return null;
     const id = raw.id ?? raw.userId ?? raw.friendId;
@@ -202,8 +186,20 @@
     const filtered = friends.filter(f => friendNameMatch(f, query));
     if (!filtered.length) return false;
 
-    // Do not overwrite a canonical render that has already populated the list.
-    if (results.children.length > 0 && !results.querySelector('[data-kyn-instant-friend]')) return true;
+    // Once this fallback has painted, do not replace its DOM again unless the
+    // visible friend set actually changed. Replacing children synchronously
+    // from a MutationObserver can create a self-triggering DOM loop and block
+    // the main thread for hundreds of milliseconds per click.
+    const instantRows = Array.from(results.querySelectorAll('[data-kyn-instant-friend]'));
+    if (instantRows.length) {
+      const currentIds = instantRows.map(row => String(row.dataset.userId || '')).join(',');
+      const nextIds = filtered.map(friend => String(friend.id)).join(',');
+      if (currentIds === nextIds) return true;
+    } else if (results.children.length > 0) {
+      // Canonical renderer already populated the picker.
+      return true;
+    }
+
     const frag = document.createDocumentFragment();
     filtered.forEach(friend => {
       const row = document.createElement('div');
@@ -223,12 +219,7 @@
       meta.append(name, sub);
       row.append(img, meta);
       row.addEventListener('click', () => {
-        global.MessageModule?.openChat?.({
-          userId: friend.id,
-          conversationId: null,
-          userName: friend.name,
-          avatar: friend.avatar,
-        });
+        global.MessageModule?.openChat?.({ userId: friend.id, conversationId: null, userName: friend.name, avatar: friend.avatar });
       });
       frag.appendChild(row);
     });
@@ -237,8 +228,10 @@
   }
 
   async function refreshFriendsPicker() {
+    if (friendWarmInFlight) return;
     const store = global.KynectaFriendsLocalStore;
     if (!store?.getFriends) return;
+    friendWarmInFlight = true;
     try {
       const records = await store.getFriends();
       const friends = records.map(normalizeFriend).filter(Boolean);
@@ -246,21 +239,17 @@
       const results = document.getElementById('newChatResults');
       const modal = document.getElementById('newChatModal');
       if (!results || !modal || modal.classList.contains('hidden')) return;
-      // Canonical message.html owns the final picker. This layer only supplies
-      // data when it is still empty, then lets the canonical renderer take over.
       renderInstantFriends(friends);
-    } catch (_) {}
+    } catch (_) {} finally {
+      friendWarmInFlight = false;
+    }
   }
 
   function warmStartChatPicker() {
     const modal = document.getElementById('newChatModal');
     const results = document.getElementById('newChatResults');
-    if (!modal || !results) return;
-    if (modal.classList.contains('hidden')) return;
-
-    // First paint is synchronous from already-loaded memory.
+    if (!modal || !results || modal.classList.contains('hidden')) return;
     renderInstantFriends(readSynchronousFriends());
-    // Then hydrate from IndexedDB without blocking the modal opening.
     refreshFriendsPicker();
   }
 
@@ -271,7 +260,7 @@
     const run = () => {
       warmStartChatPicker();
       if (friendRenderTimer) clearTimeout(friendRenderTimer);
-      friendRenderTimer = setTimeout(warmStartChatPicker, 120);
+      friendRenderTimer = setTimeout(() => { friendRenderTimer = null; warmStartChatPicker(); }, 250);
     };
 
     document.addEventListener('click', (e) => {
@@ -282,19 +271,21 @@
 
     document.addEventListener('input', (e) => {
       if (e.target.id === 'newChatSearchInput') {
-        // Search is local-only once the friend list is available; never require
-        // the user to type before the initial friend list is rendered.
         const sync = readSynchronousFriends();
         if (sync.length) renderInstantFriends(sync);
       }
     }, true);
 
+    // Observe only modal visibility changes. Do not observe childList: this
+    // fallback itself mutates #newChatResults and observing those mutations
+    // caused a recursive render loop that could monopolize the main thread.
     const observer = new MutationObserver(() => {
       const modal = document.getElementById('newChatModal');
       if (!modal || modal.classList.contains('hidden')) return;
-      warmStartChatPicker();
+      if (friendRenderTimer) clearTimeout(friendRenderTimer);
+      friendRenderTimer = setTimeout(() => { friendRenderTimer = null; warmStartChatPicker(); }, 50);
     });
-    observer.observe(document.body, { attributes:true, childList:true, subtree:true, attributeFilter:['class','style'] });
+    observer.observe(document.body, { attributes:true, subtree:true, attributeFilter:['class','style'] });
 
     global.addEventListener('message', (e) => {
       if (e.data?.type === 'FRIENDS_LIST_UPDATE') {
@@ -309,14 +300,6 @@
     return true;
   }
 
-  // FormData is NOT structured-cloneable. message-client.js correctly builds
-  // FormData for /files/upload, but its generic iframe API transport then put
-  // that FormData inside window.parent.postMessage(), causing:
-  // "Failed to execute 'postMessage' ... FormData object could not be cloned."
-  // Upload binary data directly from this iframe instead of sending FormData
-  // through postMessage. JSON API requests continue using the canonical parent
-  // transport. This also preserves the File object and multipart boundaries
-  // generated by the browser.
   function installAttachmentUploadFix() {
     const mm = global.MessageModule;
     if (!mm || typeof mm.uploadAttachment !== 'function' || mm.__directAttachmentUploadFixed) return !!mm;
