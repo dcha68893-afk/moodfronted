@@ -1,4 +1,24 @@
 // app.ui.auth.js - Authentication Gateway Module
+
+// FIX-ACCOUNT-SWITCH-RACE: every login/registration success path here used
+// to redirect to chat.html after a hardcoded, guessed delay (200-1000ms),
+// which is not long enough to guarantee the previous account's IndexedDB
+// data (calls, friends, status, groups, tools, settings caches) has
+// actually finished being wiped by AuthStorage on a switch/relogin. chat.html
+// would then boot and every module would read the still-present old
+// account's rows. This waits for the real wipe-completion promise (capped
+// internally so it can never hang the UI) and keeps the original delay as a
+// floor only for the "Redirecting..." UX, not as the actual guarantee.
+function redirectToChatWhenReady(minDelayMs) {
+    const wipeReady = (window.AuthStorage && typeof window.AuthStorage.waitForAccountWipe === 'function')
+        ? window.AuthStorage.waitForAccountWipe()
+        : Promise.resolve();
+    const minDelay = new Promise(resolve => setTimeout(resolve, minDelayMs || 0));
+    Promise.all([wipeReady, minDelay]).catch(() => {}).then(() => {
+        window.location.href = 'chat.html';
+    });
+}
+
 // VERSION: 4.1.1 - ENHANCED TOKEN PROPAGATION FIX
 // RESPONSIBILITIES: Authentication state management and API gateway
 // INTEGRATION: Exclusively uses api.auth.js for all authentication operations
@@ -2558,9 +2578,7 @@ if (window.SessionManager && token && user) {
                 console.log('🚀 Redirecting to chat.html...');
                 
                 // Use setTimeout to ensure all storage operations are complete
-                setTimeout(() => {
-                    window.location.href = 'chat.html';
-                }, 200);
+                redirectToChatWhenReady(200); // FIX-ACCOUNT-SWITCH-RACE: waits for AuthStorage.waitForAccountWipe() before navigating so chat.html never boots against a not-yet-wiped previous account's IndexedDB data
                 
                 return {
                     success: true,
@@ -2603,9 +2621,7 @@ if (window.SessionManager && token && user) {
                     window.currentUser = user;
                     
                     // Redirect to chat
-                    setTimeout(() => {
-                        window.location.href = 'chat.html';
-                    }, 500);
+                    redirectToChatWhenReady(500); // FIX-ACCOUNT-SWITCH-RACE: waits for AuthStorage.waitForAccountWipe() before navigating so chat.html never boots against a not-yet-wiped previous account's IndexedDB data
                     
                     return {
                         success: true,
@@ -2687,9 +2703,7 @@ if (window.SessionManager && token && user) {
                 }
             } catch (notifError) {}
             
-            setTimeout(() => {
-                window.location.href = 'chat.html';
-            }, 200);
+            redirectToChatWhenReady(200); // FIX-ACCOUNT-SWITCH-RACE: waits for AuthStorage.waitForAccountWipe() before navigating so chat.html never boots against a not-yet-wiped previous account's IndexedDB data
             
             return {
                 success: true,
@@ -2850,10 +2864,7 @@ if (window.SessionManager && token && user) {
                         window.CoreUtils.showNotification('Success', 'Registration successful! Redirecting to chat...', 'success');
                         
                         // Force redirect to chat.html
-                        setTimeout(() => {
-                            console.log('🚀 [AuthGateway] Redirecting to chat.html');
-                            window.location.href = 'chat.html';
-                        }, 1000);
+                        redirectToChatWhenReady(1000); // FIX-ACCOUNT-SWITCH-RACE: waits for AuthStorage.waitForAccountWipe() before navigating so chat.html never boots against a not-yet-wiped previous account's IndexedDB data
                         
                         return {
                             success: true,
@@ -2969,7 +2980,7 @@ if (window.SessionManager && token && user) {
                 const currentPath = window.location.pathname;
                 if (!currentPath.includes('chat.html')) {
                     console.log('[AUTH] Offline auto-login: redirecting to chat.html');
-                    setTimeout(() => { window.location.href = 'chat.html'; }, 300);
+                    redirectToChatWhenReady(300); // FIX-ACCOUNT-SWITCH-RACE: waits for AuthStorage.waitForAccountWipe() before navigating so chat.html never boots against a not-yet-wiped previous account's IndexedDB data
                 }
 
                 return {
@@ -3116,9 +3127,7 @@ if (window.SessionManager && token && user) {
             // CRITICAL: Redirect to chat.html
             if (window.location.pathname !== '/chat.html' && !window.location.pathname.includes('chat.html')) {
                 console.log('🚀 [AUTH] Auto-login successful, redirecting to chat.html');
-                setTimeout(() => {
-                    window.location.href = 'chat.html';
-                }, 500);
+                redirectToChatWhenReady(500); // FIX-ACCOUNT-SWITCH-RACE: waits for AuthStorage.waitForAccountWipe() before navigating so chat.html never boots against a not-yet-wiped previous account's IndexedDB data
             }
             
             return {
@@ -3158,9 +3167,7 @@ if (window.SessionManager && token && user) {
                     // CRITICAL: Redirect to chat.html
                     if (window.location.pathname !== '/chat.html' && !window.location.pathname.includes('chat.html')) {
                         console.log('🚀 Auto-login successful (fallback), redirecting to chat.html');
-                        setTimeout(() => {
-                            window.location.href = 'chat.html';
-                        }, 500);
+                        redirectToChatWhenReady(500); // FIX-ACCOUNT-SWITCH-RACE: waits for AuthStorage.waitForAccountWipe() before navigating so chat.html never boots against a not-yet-wiped previous account's IndexedDB data
                     }
                     
                     return {
@@ -3232,14 +3239,10 @@ if (window.SessionManager && token && user) {
                 const currentPath = window.location.pathname;
                 if (currentPath !== '/chat.html' && !currentPath.includes('chat.html') && currentPath !== '/') {
                     console.log('🚀 Auto-login successful, redirecting to chat.html from:', currentPath);
-                    setTimeout(() => {
-                        window.location.href = 'chat.html';
-                    }, 500);
+                    redirectToChatWhenReady(500); // FIX-ACCOUNT-SWITCH-RACE: waits for AuthStorage.waitForAccountWipe() before navigating so chat.html never boots against a not-yet-wiped previous account's IndexedDB data
                 } else if (currentPath === '/' || currentPath === '/index.html') {
                     console.log('🚀 Auto-login successful on index page, redirecting to chat.html');
-                    setTimeout(() => {
-                        window.location.href = 'chat.html';
-                    }, 500);
+                    redirectToChatWhenReady(500); // FIX-ACCOUNT-SWITCH-RACE: waits for AuthStorage.waitForAccountWipe() before navigating so chat.html never boots against a not-yet-wiped previous account's IndexedDB data
                 } else if (currentPath.includes('chat.html')) {
                     console.log('✅ Already on chat.html, auto-login complete');
                     // Still trigger UI update to show logged-in state
@@ -3314,9 +3317,7 @@ if (window.SessionManager && token && user) {
                 
                 // Redirect to chat.html
                 if (window.location.pathname !== '/chat.html' && !window.location.pathname.includes('chat.html')) {
-                    setTimeout(() => {
-                        window.location.href = 'chat.html';
-                    }, 500);
+                    redirectToChatWhenReady(500); // FIX-ACCOUNT-SWITCH-RACE: waits for AuthStorage.waitForAccountWipe() before navigating so chat.html never boots against a not-yet-wiped previous account's IndexedDB data
                 }
                 
                 return {
@@ -3386,7 +3387,17 @@ if (window.SessionManager) {
                 
                 // Force immediate UI update
                 this._forceUIUpdate();
-                
+
+                // FIX-LOGIN-SWITCHER-NOT-SHOWING: js/auth.account.limit.js only
+                // renders the "Choose an account" saved-account switcher once,
+                // at initial page load. Logout here is a same-page/SPA-style
+                // state change (no navigation), so nothing ever told that
+                // switcher to re-render — the login form came back up but the
+                // saved-account picker did not, even though the saved accounts
+                // (and their data) were still intact. Dispatching this event
+                // lets it re-render immediately after every logout path below.
+                try { window.dispatchEvent(new CustomEvent('auth:logged-out')); } catch (_) {}
+
                 return {
                     success: true,
                     message: 'Logged out successfully'
@@ -3404,7 +3415,9 @@ if (window.SessionManager) {
                         configurable: true
                     });
                 }
-                
+
+                try { window.dispatchEvent(new CustomEvent('auth:logged-out')); } catch (_) {}
+
                 return {
                     success: true,
                     message: 'Logged out (with errors)'
@@ -3414,6 +3427,7 @@ if (window.SessionManager) {
             window.__authSafetyGuards._logOnce(`Logout method failed: ${error.message}`, 'LOGOUT_METHOD');
             // Still try to clear local state
             this._clearAuthState();
+            try { window.dispatchEvent(new CustomEvent('auth:logged-out')); } catch (_) {}
             return {
                 success: true,
                 message: 'Logged out (with system errors)',

@@ -63,7 +63,15 @@
     list.querySelectorAll('[data-switch]').forEach(b=>b.onclick=()=>{
       const r=window.AuthStorage?.switchAccount?.(b.dataset.switch);
       if(!r?.success)return alert(r?.error||'Unable to switch account');
-      o.style.display='none'; location.reload();
+      // FIX-ACCOUNT-SWITCH-RACE: switchAccount() already reloads the page
+      // itself once the previous account's IndexedDB data has actually
+      // finished being wiped (see js/authStorage.js). Calling location.reload()
+      // again here, synchronously and immediately, used to win that race and
+      // reload the page before the wipe was done — which is exactly why
+      // Calls/Friends/Status/Groups/Tools/Settings kept showing the previous
+      // account's data after switching from this screen. Just hide the panel
+      // and let switchAccount()'s own reload happen at the right time.
+      o.style.display='none';
     });
 
     list.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{

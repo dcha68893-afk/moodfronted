@@ -63,25 +63,78 @@
     // account switch on those browsers, regardless of NEVER_WIPE_INDEXEDDB.
     // We now also explicitly delete every known per-module/per-account DB by
     // name, so isolation holds even where enumeration isn't supported.
-    const KNOWN_ACCOUNT_SCOPED_INDEXEDDB=['AppDB','calls-db','KnectaStatusDB','KnectaToolsDB','kynectaMesh','kyn_stories_v1'];
+    // FIX-ACCOUNT-SWITCH-RACE: these extra per-module DBs (offline message
+    // queue, durable queue layer, cache-repair DB) hold account-specific
+    // data but were missing from the wipe list, so browsers without
+    // indexedDB.databases() support (or where enumeration is flaky) never
+    // cleared them on switch/relogin.
+    const KNOWN_ACCOUNT_SCOPED_INDEXEDDB=['AppDB','calls-db','KnectaStatusDB','KnectaToolsDB','kynectaMesh','kyn_stories_v1','kyn_offline_queue','nexopa_dq_v1','nexopa_repair_v1'];
     const WIPE_ALLOWLIST=new Set(['nexopa_theme','nexopa_nav_state',ACCOUNT_LIST_KEY,ACCOUNT_STATE_KEY,LAST_ACTIVE_ACCOUNT_KEY]);
     function deleteOneDB(name){return new Promise(resolve=>{if(NEVER_WIPE_INDEXEDDB.has(name))return resolve(true);try{const req=indexedDB.deleteDatabase(name);let settled=false;const finish=ok=>{if(!settled){settled=true;resolve(ok);}};req.onsuccess=()=>finish(true);req.onerror=()=>finish(false);req.onblocked=()=>setTimeout(()=>finish(false),1500);}catch(_){resolve(false);}});}
+
+    // FIX-ACCOUNT-SWITCH-RACE (root cause of stale calls/messages/friends/
+    // status/groups/tools/settings data after switching accounts):
+    // indexedDB.deleteDatabase() is asynchronous. This used to be called and
+    // then immediately abandoned ("fire and forget") while the caller went
+    // straight on to reload/redirect the page on a hardcoded short timer
+    // (0ms in switchAccount(), 200-1000ms guesses in app.ui.auth.js). On a
+    // loaded device the deletes routinely take longer than that, so the new
+    // page loaded before the previous account's IndexedDB rows were
+    // actually gone, and every module that reads from AppDB/calls-db/
+    // KnectaStatusDB/KnectaToolsDB/kynectaMesh/etc. on boot kept showing the
+    // old account's data. wipeIndexedDBData() now RETURNS A PROMISE that
+    // only resolves once every delete has settled (bounded by a hard cap so
+    // a stuck browser can never hang the UI forever), and every caller that
+    // navigates away must await it first — see waitForAccountWipe() below.
+    const WIPE_HARD_CAP_MS=2500;
     function wipeIndexedDBData(){
+        if(typeof indexedDB==='undefined')return Promise.resolve();
+        const tasks=[];
         try{
-            if(typeof indexedDB==='undefined')return;
             // Always attempt the known per-module DBs by name first — this is
             // what makes wiping reliable on browsers without databases().
-            Promise.all(KNOWN_ACCOUNT_SCOPED_INDEXEDDB.filter(n=>!NEVER_WIPE_INDEXEDDB.has(n)).map(deleteOneDB)).catch(()=>{});
+            tasks.push(...KNOWN_ACCOUNT_SCOPED_INDEXEDDB.filter(n=>!NEVER_WIPE_INDEXEDDB.has(n)).map(deleteOneDB));
             // Then, where supported, also sweep anything else so future new
             // per-module DBs don't need a code change here to be covered.
             if(typeof indexedDB.databases==='function'){
-                indexedDB.databases().then(dbs=>Promise.all((dbs||[]).map(d=>d?.name).filter(Boolean).filter(n=>!NEVER_WIPE_INDEXEDDB.has(n)).map(deleteOneDB))).catch(()=>{});
+                tasks.push(indexedDB.databases().then(dbs=>Promise.all((dbs||[]).map(d=>d?.name).filter(Boolean).filter(n=>!NEVER_WIPE_INDEXEDDB.has(n)).map(deleteOneDB))).catch(()=>{}));
             }
         }catch(_){}
+        const settle=Promise.all(tasks).catch(()=>{});
+        const timeout=new Promise(resolve=>setTimeout(resolve,WIPE_HARD_CAP_MS));
+        return Promise.race([settle,timeout]);
     }
-    function wipePreviousAccountData(){const previousUserId=getStoredUserId();if(previousUserId!=null)captureAccountState(previousUserId);try{withAuthMutation(()=>Object.keys(localStorage).forEach(key=>{if(!WIPE_ALLOWLIST.has(key)){try{localStorage.removeItem(key);}catch(_){}}}));sessionStorage.clear();}catch(_){}try{window.dispatchEvent(new CustomEvent('kyn:accountSwitchWipe',{detail:{previousUserId}}));}catch(_){}wipeIndexedDBData();}
+    // Tracks the in-flight (or most recently completed) account wipe so any
+    // code that's about to navigate to another page/module can await it
+    // instead of guessing at a delay. Always resolves (never rejects/hangs
+    // past WIPE_HARD_CAP_MS).
+    let _pendingAccountWipe=Promise.resolve();
+    function waitForAccountWipe(){return _pendingAccountWipe;}
+    function wipePreviousAccountData(){const previousUserId=getStoredUserId();if(previousUserId!=null)captureAccountState(previousUserId);try{withAuthMutation(()=>Object.keys(localStorage).forEach(key=>{if(!WIPE_ALLOWLIST.has(key)){try{localStorage.removeItem(key);}catch(_){}}}));sessionStorage.clear();}catch(_){}try{window.dispatchEvent(new CustomEvent('kyn:accountSwitchWipe',{detail:{previousUserId}}));}catch(_){}_pendingAccountWipe=wipeIndexedDBData();return _pendingAccountWipe;}
 
-    function getSavedAccounts(){const accounts=safeParse(localStorage.getItem(ACCOUNT_LIST_KEY),[]);return Array.isArray(accounts)?accounts:[];}
+    // FIX-ACCOUNT-SWITCH-IFRAME-SCOPE: chat.html hosts Messages, Status,
+    // Groups, Friends, Calls, Settings and Tools each in their OWN iframe
+    // (see chat.html's "IFrame Containers" block), each a separate window/
+    // document. This file gets dynamically injected into whichever iframe
+    // calls switchAccount() (e.g. Settings, via settings-ui.local-first.patch.js
+    // loading /js/authStorage.js into its own document). A plain
+    // window.location.reload() there only reloads that ONE iframe — it never
+    // reaches the parent shell or any sibling iframe, which is exactly why
+    // switching from Settings made only Settings itself pick up the new
+    // account while Calls/Friends/Status/Groups/Tools and the parent kept
+    // showing the old one. Reload the top-level shell instead: that tears
+    // down and recreates every iframe fresh, so every module boots against
+    // the new account's (already-restored) localStorage/IndexedDB state.
+    function reloadAppShell(){
+        try{
+            const top=(window.top&&window.top!==window)?window.top:window;
+            top.location.reload();
+        }catch(_){
+            // Cross-origin/sandboxed access can throw; fall back to reloading
+            // just this frame so it at least recovers instead of doing nothing.
+            try{window.location.reload();}catch(__){}
+        }
+    }
     function registerAccount(data){
         const user=data?.user||{},userId=user.id??user.userId??user.uid??user._id;if(userId==null||!data?.token)return{success:false,error:'Missing account identity'};
         const accounts=getSavedAccounts(),id=String(userId);const normalized={userId,email:user.email||null,username:user.username||null,displayName:user.displayName||user.username||user.email||`Account ${userId}`,avatar:user.avatar||null,token:data.token,refreshToken:data.refreshToken||null,expiresAt:Object.prototype.hasOwnProperty.call(data,'expiresAt')?data.expiresAt:null,lastUsed:Date.now()};
@@ -100,7 +153,7 @@
             // empty but its application caches remain. Capture and clear that
             // previous account before admitting a different account.
             if(incomingUserId&&previousUserId&&String(previousUserId)!==String(incomingUserId))wipePreviousAccountData();
-            else if(incomingUserId&&lastActiveId&&String(lastActiveId)!==String(incomingUserId)&&!previousUserId){captureAccountState(lastActiveId);try{withAuthMutation(()=>Object.keys(localStorage).forEach(key=>{if(!WIPE_ALLOWLIST.has(key)){try{localStorage.removeItem(key);}catch(_){}}}));sessionStorage.clear();}catch(_){}wipeIndexedDBData();}
+            else if(incomingUserId&&lastActiveId&&String(lastActiveId)!==String(incomingUserId)&&!previousUserId){captureAccountState(lastActiveId);try{withAuthMutation(()=>Object.keys(localStorage).forEach(key=>{if(!WIPE_ALLOWLIST.has(key)){try{localStorage.removeItem(key);}catch(_){}}}));sessionStorage.clear();}catch(_){}_pendingAccountWipe=wipeIndexedDBData();}
             const expiresAt=Object.prototype.hasOwnProperty.call(data,'expiresAt')?data.expiresAt:(Date.now()+30*24*60*60*1000);const payload={token:data.token,refreshToken:data.refreshToken||null,user:data.user||null,expiresAt,issuedAt:data.issuedAt||Date.now(),savedAt:new Date().toISOString(),_version:'1.5.2'};
             withAuthMutation(()=>{localStorage.setItem(AUTH_STORAGE_KEY,JSON.stringify(payload));LEGACY_TOKEN_KEYS.forEach(k=>{try{localStorage.setItem(k,payload.token);}catch(_){}});LEGACY_USER_KEYS.forEach(k=>{try{localStorage.setItem(k,JSON.stringify(payload.user));}catch(_){}});localStorage.setItem(LOGIN_STATE_KEY,'true');});propagateOffSessionPolicy(payload.token);registerAccount(payload);setLastActiveAccountId(incomingUserId);return true;
         }catch(e){console.error('[AuthStorage] saveAuth failed:',e.message);return false;}
@@ -118,9 +171,9 @@
         const targetId=String(userId),accounts=getSavedAccounts();if(accounts.length>MAX_ACCOUNTS)return{success:false,error:`Maximum ${MAX_ACCOUNTS} accounts per device`};const target=accounts.find(a=>String(a?.userId??a?.id??'')===targetId);if(!target||!target.token||!target.userId)return{success:false,error:'Account is not registered on this device'};const currentId=getStoredUserId();if(currentId!=null&&String(currentId)===targetId)return{success:false,error:'Already using this account'};
         try{
             if(currentId!=null)wipePreviousAccountData();const user={id:target.userId,email:target.email,username:target.username,displayName:target.displayName||target.username,avatar:target.avatar};const payload={token:target.token,refreshToken:target.refreshToken||null,user,expiresAt:Object.prototype.hasOwnProperty.call(target,'expiresAt')?target.expiresAt:null,issuedAt:Date.now(),savedAt:new Date().toISOString(),_version:'1.5.2'};
-            withAuthMutation(()=>{localStorage.setItem(AUTH_STORAGE_KEY,JSON.stringify(payload));LEGACY_TOKEN_KEYS.forEach(k=>{try{localStorage.setItem(k,target.token);}catch(_){}});LEGACY_USER_KEYS.forEach(k=>{try{localStorage.setItem(k,JSON.stringify(user));}catch(_){}});localStorage.setItem(LOGIN_STATE_KEY,'true');});restoreAccountState(target.userId);withAuthMutation(()=>{localStorage.setItem(AUTH_STORAGE_KEY,JSON.stringify(payload));LEGACY_TOKEN_KEYS.forEach(k=>{try{localStorage.setItem(k,target.token);}catch(_){}});LEGACY_USER_KEYS.forEach(k=>{try{localStorage.setItem(k,JSON.stringify(user));}catch(_){}});localStorage.setItem(LOGIN_STATE_KEY,'true');});setLastActiveAccountId(target.userId);propagateOffSessionPolicy(target.token);window.currentUser=user;window.__userToken=target.token;window.__accessToken=target.token;target.lastUsed=Date.now();withAuthMutation(()=>localStorage.setItem(ACCOUNT_LIST_KEY,JSON.stringify(accounts.slice(0,MAX_ACCOUNTS))));try{window.dispatchEvent(new CustomEvent('auth:account:switched',{detail:{userId:target.userId,user,timestamp:Date.now()}}));}catch(_){}try{window.__ACCOUNT_SWITCH_RELOAD__=true;if(typeof window.location?.reload==='function')setTimeout(()=>window.location.reload(),0);}catch(_){}return{success:true,user,token:target.token};
+            withAuthMutation(()=>{localStorage.setItem(AUTH_STORAGE_KEY,JSON.stringify(payload));LEGACY_TOKEN_KEYS.forEach(k=>{try{localStorage.setItem(k,target.token);}catch(_){}});LEGACY_USER_KEYS.forEach(k=>{try{localStorage.setItem(k,JSON.stringify(user));}catch(_){}});localStorage.setItem(LOGIN_STATE_KEY,'true');});restoreAccountState(target.userId);withAuthMutation(()=>{localStorage.setItem(AUTH_STORAGE_KEY,JSON.stringify(payload));LEGACY_TOKEN_KEYS.forEach(k=>{try{localStorage.setItem(k,target.token);}catch(_){}});LEGACY_USER_KEYS.forEach(k=>{try{localStorage.setItem(k,JSON.stringify(user));}catch(_){}});localStorage.setItem(LOGIN_STATE_KEY,'true');});setLastActiveAccountId(target.userId);propagateOffSessionPolicy(target.token);window.currentUser=user;window.__userToken=target.token;window.__accessToken=target.token;target.lastUsed=Date.now();withAuthMutation(()=>localStorage.setItem(ACCOUNT_LIST_KEY,JSON.stringify(accounts.slice(0,MAX_ACCOUNTS))));try{window.dispatchEvent(new CustomEvent('auth:account:switched',{detail:{userId:target.userId,user,timestamp:Date.now()}}));}catch(_){}try{window.__ACCOUNT_SWITCH_RELOAD__=true;waitForAccountWipe().then(reloadAppShell).catch(reloadAppShell);}catch(_){}return{success:true,user,token:target.token};
         }catch(e){return{success:false,error:e.message||'Account switch failed'};}
     }
     function getSavedAccountList(){const active=getStoredUserId();return getSavedAccounts().map(a=>({userId:a.userId,email:a.email||null,username:a.username||null,displayName:a.displayName||a.username||a.email||`Account ${a.userId}`,avatar:a.avatar||null,lastUsed:a.lastUsed||0,active:String(a.userId)===String(active)}));}
-    window.AuthStorage={saveAuth,saveSession,getAuth,getSession,clearAuth,hasValidAuth,updateAuthTokens,getToken,getUser,isValidSession,wipeAccountData:wipePreviousAccountData,switchAccount,getSavedAccounts:getSavedAccountList,registerAccount,removeSavedAccount,getMaxAccounts:()=>MAX_ACCOUNTS,getAccountState:()=>getAccountStateMap()};window.api=window.api||{};window.api.storage=window.AuthStorage;try{propagateOffSessionPolicy(safeParse(localStorage.getItem(AUTH_STORAGE_KEY))?.token||null);}catch(_){}
+    window.AuthStorage={saveAuth,saveSession,getAuth,getSession,clearAuth,hasValidAuth,updateAuthTokens,getToken,getUser,isValidSession,wipeAccountData:wipePreviousAccountData,switchAccount,getSavedAccounts:getSavedAccountList,registerAccount,removeSavedAccount,getMaxAccounts:()=>MAX_ACCOUNTS,getAccountState:()=>getAccountStateMap(),waitForAccountWipe};window.api=window.api||{};window.api.storage=window.AuthStorage;try{propagateOffSessionPolicy(safeParse(localStorage.getItem(AUTH_STORAGE_KEY))?.token||null);}catch(_){}
 })();

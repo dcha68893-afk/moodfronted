@@ -157,6 +157,12 @@
         window.addEventListener('auth:account:switched', () => setTimeout(renderLoginAccountSwitcher, 0));
         window.addEventListener('auth-login-success', () => setTimeout(renderLoginAccountSwitcher, 0));
         window.addEventListener('auth-register-success', () => setTimeout(renderLoginAccountSwitcher, 0));
+        // FIX-LOGIN-SWITCHER-NOT-SHOWING: logout in app.ui.auth.js is a
+        // same-page state change with no navigation, so this switcher (only
+        // ever rendered once, at initial page load) never got a chance to
+        // reappear afterwards even though the saved accounts were still on
+        // this device. Re-render whenever app.ui.auth.js reports a logout.
+        window.addEventListener('auth:logged-out', () => setTimeout(renderLoginAccountSwitcher, 0));
         window.addEventListener('auth:account-limit-reached', () => {
             // The authentication request may already have succeeded server-side,
             // but a third distinct account is never admitted as a device session.
