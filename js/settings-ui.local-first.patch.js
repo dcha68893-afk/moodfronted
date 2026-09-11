@@ -53,15 +53,31 @@
     list.innerHTML=rows.map((a,i)=>`<div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border-color)">
       <div style="width:42px;height:42px;border-radius:50%;overflow:hidden;background:var(--hover-color);display:flex;align-items:center;justify-content:center;flex:none">${a.avatar?`<img src="${esc(a.avatar)}" alt="" style="width:100%;height:100%;object-fit:cover">`:'<i class="fas fa-user"></i>'}</div>
       <div style="flex:1;min-width:0"><strong style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(a.displayName||a.username||a.email||`Account ${i+1}`)}</strong><small style="color:var(--text-secondary)">${esc(a.email||a.username||'')}</small></div>
-      ${a.active?'<span style="font-size:12px;color:var(--primary-color);font-weight:600">Current</span>':`<button type="button" data-switch="${esc(a.userId)}" class="action-btn secondary" style="padding:7px 12px">Switch</button>`}
+      ${a.active?'<span style="font-size:12px;color:var(--primary-color);font-weight:600">Current</span>':''}
+      <button type="button" data-remove="${esc(a.userId)}" class="action-btn danger" style="padding:7px 12px" title="Remove this saved account"><i class="fas fa-trash"></i><span>Remove</span></button>
+      ${!a.active?`<button type="button" data-switch="${esc(a.userId)}" class="action-btn secondary" style="padding:7px 12px">Switch</button>`:''}
     </div>`).join('');
     if(rows.length<2) list.insertAdjacentHTML('beforeend',`<button id="addAccountButton" type="button" class="action-btn primary" style="width:100%;justify-content:center;margin-top:14px"><i class="fas fa-user-plus"></i><span>Add account</span></button>`);
     if(!rows.length) list.insertAdjacentHTML('afterbegin','<div style="padding:8px 0 4px;color:var(--text-secondary)">No saved accounts yet. Sign in below to add an account.</div>');
+
     list.querySelectorAll('[data-switch]').forEach(b=>b.onclick=()=>{
       const r=window.AuthStorage?.switchAccount?.(b.dataset.switch);
       if(!r?.success)return alert(r?.error||'Unable to switch account');
       o.style.display='none'; location.reload();
     });
+
+    list.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{
+      const id=b.dataset.remove;
+      const account=rows.find(a=>String(a.userId)===String(id));
+      const name=account?.displayName||account?.username||account?.email||'this account';
+      if(!confirm(`Remove ${name} from saved accounts on this device? This does not delete the account from Nexopa.`)) return;
+      const result=window.AuthStorage?.removeSavedAccount?.(id);
+      if(!result?.success){ alert(result?.error||'Unable to remove saved account'); return; }
+      renderAccounts();
+      updateCount();
+      try { window.dispatchEvent(new CustomEvent('auth:saved-account:removed',{detail:{userId:id}})); } catch (_) {}
+    });
+
     const add=list.querySelector('#addAccountButton'); if(add) add.onclick=showAddAccount;
     updateCount();
   }
@@ -165,4 +181,5 @@
   window.addEventListener('settingsUIReady',()=>{injectAccountSwitcher();injectSyncRow();});
   window.addEventListener('settingsSectionLoaded',()=>setTimeout(injectSyncRow,200));
   window.addEventListener('auth:account:switched',updateCount);
+  window.addEventListener('auth:saved-account:removed',updateCount);
 })();
