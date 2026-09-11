@@ -3408,9 +3408,17 @@
             } catch (_) {}
         }
 
-        function _performFullLogoutRedirect(reason) {
+        function _performFullLogoutRedirect(reason, origin) {
             if (window.__loggingOut) return; // avoid double-fire from multiple signals arriving together
             window.__loggingOut = true;
+            // DIAGNOSTIC-LOGIN-BOUNCE: this fires with no logging today, so
+            // when a real (not boot-grace-suppressed) fatal signal arrives
+            // shortly after login there's no way to tell which iframe/signal
+            // caused it from the console alone. Log it loudly, with the
+            // elapsed time since boot, so a reported "opens then bounces
+            // back to login after a few seconds" report can be traced to
+            // its actual source instead of guessed at.
+            console.error('[chat.html] REDIRECTING TO LOGIN — fatal auth signal:', reason, '| origin:', origin || '(n/a, e.g. SESSION_EXPIRED)', '| ms since boot:', Date.now() - __APP_SHELL_BOOT_TIME__, '| within boot grace:', _withinAuthBootGrace());
             _teardownAllPanelsForLogout();
             try {
                 if (window.AppRuntimeAuthority && typeof window.AppRuntimeAuthority.clearSession === 'function') {
@@ -3437,7 +3445,7 @@
                     console.warn('[chat.html] Ignoring auto-detected auth-failure message received during the post-login/switch boot grace window (treating as a module-boot race, not a real auth failure):', _d.type);
                     return;
                 }
-                _performFullLogoutRedirect(_d.type);
+                _performFullLogoutRedirect(_d.type, event.origin);
             }
         });
 
