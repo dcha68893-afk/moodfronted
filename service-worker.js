@@ -1,10 +1,17 @@
-// Kynecta service worker — v19.17.0
+// Kynecta service worker — v19.18.0
 // Critical runtime/theme/encryption/account-isolation assets are network-first
 // so an installed PWA cannot silently execute week-old code after a deploy.
 'use strict';
 
-const SW_VERSION = '19.17.0';
-const CACHE_NAME = 'nexopa-static-v40';
+const SW_VERSION = '19.18.0';
+// FIX-STALE-CACHE-AFTER-DEPLOY: bumped so every existing install evicts its
+// old cache on next activate (see the activate handler below, which deletes
+// every cache whose name isn't this one) and re-fetches chat.html fresh —
+// otherwise an already-installed PWA/browser tab can keep serving a
+// week-old cached chat.html indefinitely and never pick up account-switch
+// fixes shipped there, even though the deployed files on the server are
+// already correct.
+const CACHE_NAME = 'nexopa-static-v41';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -78,7 +85,16 @@ const NETWORK_FIRST_PATTERNS = [
   /\/callSession\.manager\.js/i,
   /\/callRetry\.engine\.js/i,
   /\/settings-ui\.js/i,
-  /\/js\/settings-ui\.local-first\.patch\.js/i
+  /\/js\/settings-ui\.local-first\.patch\.js/i,
+  // FIX-STALE-CACHE-AFTER-DEPLOY: chat.html carries the account-switch
+  // shell logic (reloadAppShell()'s reload target, the AUTH_ERROR/
+  // SESSION_EXPIRED boot-grace guard, per-iframe token propagation) — it
+  // was only ever in CORE_STATIC_ASSETS (install-time precache), never
+  // network-first, so a browser/PWA that installed this service worker
+  // before a chat.html fix shipped would keep serving that stale precached
+  // copy until this cache version bumped, even though every other
+  // account-isolation file here was already correctly network-first.
+  /\/chat\.html/i
 ];
 
 const BYPASS_PATTERNS = [

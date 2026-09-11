@@ -3338,6 +3338,30 @@
         // is what actually makes the redirect fire for session expiry in
         // normal use, not just for the two paths that happened to already
         // use the right name.
+        // FIX-BOOT-RACE-FALSE-LOGOUT: this shell now reloads in full on
+        // every account switch (see js/authStorage.js's reloadAppShell()),
+        // which means all 7 module iframes (Messages/Status/Groups/Friends/
+        // Calls/Settings/Tools) boot simultaneously and each independently
+        // races to receive its token and make its first API call. If ANY one
+        // of them fires an API call before it has the freshly-issued token
+        // propagated to it, it reports an auth failure upward — and, with no
+        // guard, _performFullLogoutRedirect() below fires immediately and
+        // bounces the user straight back to the login page seconds after a
+        // completely valid login/switch. This is a startup race, not an
+        // actual expired/invalid session (a token that's seconds old cannot
+        // legitimately be expired). Give the app a short window after boot
+        // to let every iframe finish its own handshake before any
+        // auto-detected (not user-initiated) auth failure is trusted.
+        const __APP_SHELL_BOOT_TIME__ = Date.now();
+        const AUTH_BOOT_GRACE_MS = 5000;
+        // LOGOUT / REDIRECT_TO_LOGIN are deliberate, explicit signals (a real
+        // logout button, or friend.html's manual "session problem" fallback
+        // button) — never suppress those, even during the boot grace window.
+        const EXPLICIT_FATAL_MESSAGE_TYPES = new Set(['LOGOUT', 'REDIRECT_TO_LOGIN']);
+        function _withinAuthBootGrace() {
+            return (Date.now() - __APP_SHELL_BOOT_TIME__) < AUTH_BOOT_GRACE_MS;
+        }
+
         function _isFatalAuthMessage(d) {
             if (!d || typeof d !== 'object' || !d.type) return false;
             switch (d.type) {
@@ -3398,12 +3422,21 @@
             window.location.replace('index.html');
         }
         window.addEventListener('SESSION_EXPIRED', (e) => {
-            _performFullLogoutRedirect(e && e.detail && e.detail.reason);
+            const reason = e && e.detail && e.detail.reason;
+            if (_withinAuthBootGrace()) {
+                console.warn('[chat.html] Ignoring SESSION_EXPIRED received during the post-login/switch boot grace window (treating as a module-boot race, not a real expiry):', reason);
+                return;
+            }
+            _performFullLogoutRedirect(reason);
         });
         window.addEventListener('message', (event) => {
             if (!isTrustedOrigin(event.origin)) return;
             const _d = event.data || {};
             if (_isFatalAuthMessage(_d)) {
+                if (_withinAuthBootGrace() && !EXPLICIT_FATAL_MESSAGE_TYPES.has(_d.type)) {
+                    console.warn('[chat.html] Ignoring auto-detected auth-failure message received during the post-login/switch boot grace window (treating as a module-boot race, not a real auth failure):', _d.type);
+                    return;
+                }
                 _performFullLogoutRedirect(_d.type);
             }
         });
