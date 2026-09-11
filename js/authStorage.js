@@ -1,5 +1,5 @@
 // authStorage.js - Persistent Authentication Storage
-// VERSION: 1.4.1 - Persistent two-account switching + explicit saved-account removal
+// VERSION: 1.4.2 - Persistent two-account switching + explicit saved-account removal + non-expiring sessions
 (function () {
     'use strict';
 
@@ -47,8 +47,6 @@
         return Array.isArray(accounts) ? accounts : [];
     }
 
-    // Register the current login as a reusable account slot. Existing entries
-    // are updated in place; a third account is never silently added.
     function registerAccount(data) {
         const user = data?.user || {};
         const userId = user.id ?? user.userId ?? user.uid ?? user._id;
@@ -64,7 +62,7 @@
             avatar: user.avatar || null,
             token: data.token,
             refreshToken: data.refreshToken || null,
-            expiresAt: data.expiresAt || null,
+            expiresAt: Object.prototype.hasOwnProperty.call(data, 'expiresAt') ? data.expiresAt : null,
             lastUsed: Date.now()
         };
         const index = accounts.findIndex(a => String(a?.userId ?? a?.id ?? '') === id);
@@ -80,10 +78,6 @@
         return { success:true, accounts:accounts.slice(0, MAX_ACCOUNTS) };
     }
 
-    // Permanently remove one account from the device's saved-account store.
-    // This is intentionally separate from clearAuth(): logging out can keep an
-    // account available for quick switching, while explicit account removal
-    // frees one of the two device slots.
     function removeSavedAccount(userId) {
         const targetId = String(userId ?? '');
         if (!targetId) return { success:false, error:'Missing account identity' };
@@ -112,7 +106,8 @@
             const incomingUserId = data.user?.id ?? data.user?.uid ?? data.user?._id ?? null;
             const previousUserId = getStoredUserId();
             if (incomingUserId && previousUserId && String(previousUserId) !== String(incomingUserId)) wipePreviousAccountData();
-            const payload = { token:data.token, refreshToken:data.refreshToken || null, user:data.user || null, expiresAt:data.expiresAt || (Date.now()+30*24*60*60*1000), issuedAt:data.issuedAt || Date.now(), savedAt:new Date().toISOString(), _version:'1.4.1' };
+            const expiresAt = Object.prototype.hasOwnProperty.call(data, 'expiresAt') ? data.expiresAt : (Date.now()+30*24*60*60*1000);
+            const payload = { token:data.token, refreshToken:data.refreshToken || null, user:data.user || null, expiresAt, issuedAt:data.issuedAt || Date.now(), savedAt:new Date().toISOString(), _version:'1.4.2' };
             withAuthMutation(() => {
                 localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(payload));
                 LEGACY_TOKEN_KEYS.forEach(k => { try { localStorage.setItem(k,payload.token); } catch (_) {} });
@@ -148,7 +143,8 @@
     function hasValidAuth() { const a=getAuth(); return !!(a?.token && (!a.expiresAt || Date.now()<=a.expiresAt)); }
     function updateAuthTokens({token,refreshToken,expiresAt}) {
         const a=getAuth()||{};
-        const ok = saveAuth({...a,token:token||a.token,refreshToken:refreshToken||a.refreshToken,expiresAt:expiresAt||a.expiresAt,issuedAt:Date.now()});
+        const nextExpiresAt = arguments[0] && Object.prototype.hasOwnProperty.call(arguments[0], 'expiresAt') ? expiresAt : a.expiresAt;
+        const ok = saveAuth({...a,token:token||a.token,refreshToken:refreshToken||a.refreshToken,expiresAt:nextExpiresAt,issuedAt:Date.now()});
         return ok;
     }
     function getToken() { return getAuth()?.token || null; }
@@ -166,7 +162,7 @@
         try {
             if (currentId != null) wipePreviousAccountData();
             const user = { id:target.userId, email:target.email, username:target.username, displayName:target.displayName || target.username, avatar:target.avatar };
-            const payload = { token:target.token, refreshToken:target.refreshToken || null, user, expiresAt:target.expiresAt || null, issuedAt:Date.now(), savedAt:new Date().toISOString(), _version:'1.4.1' };
+            const payload = { token:target.token, refreshToken:target.refreshToken || null, user, expiresAt:Object.prototype.hasOwnProperty.call(target,'expiresAt') ? target.expiresAt : null, issuedAt:Date.now(), savedAt:new Date().toISOString(), _version:'1.4.2' };
             withAuthMutation(() => {
                 localStorage.setItem(AUTH_STORAGE_KEY,JSON.stringify(payload));
                 LEGACY_TOKEN_KEYS.forEach(k=>{try{localStorage.setItem(k,target.token);}catch(_){}});
