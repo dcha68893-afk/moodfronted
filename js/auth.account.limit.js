@@ -124,10 +124,16 @@
         }
     }
 
+    function showAuthPanel() {
+        const panel = document.getElementById('authPanel');
+        if (panel) panel.classList.add('show-auth');
+    }
+
     function renderLoginAccountSwitcher() {
         if (window.top !== window.self) return;
         const container = document.getElementById('login-container');
         if (!container) return;
+        showAuthPanel();
         const accounts = getAuthAccounts();
         let switcher = document.getElementById('saved-account-switcher');
 
