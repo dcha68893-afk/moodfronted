@@ -82,6 +82,31 @@
     updateCount();
   }
 
+  function injectSessionTimeoutOff() {
+    const select = document.getElementById('sessionTimeoutSelect');
+    if (!select) return false;
+    if (!select.querySelector('option[value="off"]')) {
+      const option = document.createElement('option');
+      option.value = 'off';
+      option.textContent = 'Off';
+      select.appendChild(option);
+    }
+    const current = window.AppSettings?.get?.('security.sessionTimeout');
+    if (current === 'off') select.value = 'off';
+    if (!select.__offSessionBound) {
+      select.__offSessionBound = true;
+      select.addEventListener('change', () => {
+        if (select.value === 'off' && window.SessionManager?.setSessionDurationDays) {
+          // Existing session-manager versions treat a zero JWT timeout as their
+          // legacy fallback. Keep that fallback effectively disabled for the
+          // explicit Settings "Off" choice until the token is refreshed.
+          window.SessionManager.setSessionDurationDays(365000);
+        }
+      });
+    }
+    return true;
+  }
+
   function loadGoogleScript() {
     if (window.google?.accounts?.id) return Promise.resolve(true);
     if (window.__addAccountGoogleScriptPromise) return window.__addAccountGoogleScriptPromise;
@@ -174,12 +199,12 @@
   }
 
   async function boot(){
-    await loadAuthStorage(); injectAccountSwitcher(); injectSyncRow();
-    [700,1600,3000].forEach(ms=>setTimeout(()=>{injectAccountSwitcher();injectSyncRow();},ms));
+    await loadAuthStorage(); injectAccountSwitcher(); injectSyncRow(); injectSessionTimeoutOff();
+    [700,1600,3000].forEach(ms=>setTimeout(()=>{injectAccountSwitcher();injectSyncRow();injectSessionTimeoutOff();},ms));
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
-  window.addEventListener('settingsUIReady',()=>{injectAccountSwitcher();injectSyncRow();});
-  window.addEventListener('settingsSectionLoaded',()=>setTimeout(injectSyncRow,200));
+  window.addEventListener('settingsUIReady',()=>{injectAccountSwitcher();injectSyncRow();injectSessionTimeoutOff();});
+  window.addEventListener('settingsSectionLoaded',()=>setTimeout(()=>{injectSyncRow();injectSessionTimeoutOff();},200));
   window.addEventListener('auth:account:switched',updateCount);
   window.addEventListener('auth:saved-account:removed',updateCount);
 })();
