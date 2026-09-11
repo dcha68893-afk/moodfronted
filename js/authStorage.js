@@ -1,5 +1,5 @@
 // authStorage.js - Persistent Authentication Storage
-// VERSION: 1.4.3 - Persistent two-account switching + explicit saved-account removal + non-expiring sessions
+// VERSION: 1.4.4 - Persistent two-account switching + explicit saved-account removal + non-expiring sessions
 (function () {
     'use strict';
 
@@ -142,7 +142,7 @@
             const previousUserId = getStoredUserId();
             if (incomingUserId && previousUserId && String(previousUserId) !== String(incomingUserId)) wipePreviousAccountData();
             const expiresAt = Object.prototype.hasOwnProperty.call(data, 'expiresAt') ? data.expiresAt : (Date.now()+30*24*60*60*1000);
-            const payload = { token:data.token, refreshToken:data.refreshToken || null, user:data.user || null, expiresAt, issuedAt:data.issuedAt || Date.now(), savedAt:new Date().toISOString(), _version:'1.4.3' };
+            const payload = { token:data.token, refreshToken:data.refreshToken || null, user:data.user || null, expiresAt, issuedAt:data.issuedAt || Date.now(), savedAt:new Date().toISOString(), _version:'1.4.4' };
             withAuthMutation(() => {
                 localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(payload));
                 LEGACY_TOKEN_KEYS.forEach(k => { try { localStorage.setItem(k,payload.token); } catch (_) {} });
@@ -199,7 +199,7 @@
         try {
             if (currentId != null) wipePreviousAccountData();
             const user = { id:target.userId, email:target.email, username:target.username, displayName:target.displayName || target.username, avatar:target.avatar };
-            const payload = { token:target.token, refreshToken:target.refreshToken || null, user, expiresAt:Object.prototype.hasOwnProperty.call(target,'expiresAt') ? target.expiresAt : null, issuedAt:Date.now(), savedAt:new Date().toISOString(), _version:'1.4.3' };
+            const payload = { token:target.token, refreshToken:target.refreshToken || null, user, expiresAt:Object.prototype.hasOwnProperty.call(target,'expiresAt') ? target.expiresAt : null, issuedAt:Date.now(), savedAt:new Date().toISOString(), _version:'1.4.4' };
             withAuthMutation(() => {
                 localStorage.setItem(AUTH_STORAGE_KEY,JSON.stringify(payload));
                 LEGACY_TOKEN_KEYS.forEach(k=>{try{localStorage.setItem(k,target.token);}catch(_){}});
@@ -213,6 +213,22 @@
             target.lastUsed=Date.now();
             withAuthMutation(() => localStorage.setItem(ACCOUNT_LIST_KEY,JSON.stringify(accounts.slice(0, MAX_ACCOUNTS))));
             try { window.dispatchEvent(new CustomEvent('auth:account:switched',{detail:{userId:target.userId,user,timestamp:Date.now()}})); } catch (_) {}
+
+            // Account switching is an application identity transition, not just
+            // a credential change. Every module can hold account-specific memory,
+            // sockets, subscriptions, requests, DOM state and caches that cannot
+            // be safely replaced by changing localStorage alone. The existing app
+            // already has a complete bootstrap path, so restart that path by
+            // reloading the current document. The saved-account list is preserved
+            // in localStorage, while the old page is torn down and all modules
+            // initialize against the newly activated account.
+            try {
+                window.__ACCOUNT_SWITCH_RELOAD__ = true;
+                if (typeof window.location?.reload === 'function') {
+                    setTimeout(() => window.location.reload(), 0);
+                }
+            } catch (_) {}
+
             return {success:true,user,token:target.token};
         } catch (e) { return {success:false,error:e.message || 'Account switch failed'}; }
     }
