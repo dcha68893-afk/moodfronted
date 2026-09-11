@@ -92,14 +92,14 @@
       select.appendChild(option);
     }
     const current = window.AppSettings?.get?.('security.sessionTimeout');
-    if (current === 'off') select.value = 'off';
+    if (current === 'off') {
+      select.value = 'off';
+      if (window.SessionManager?.setSessionDurationDays) window.SessionManager.setSessionDurationDays(365000);
+    }
     if (!select.__offSessionBound) {
       select.__offSessionBound = true;
       select.addEventListener('change', () => {
         if (select.value === 'off' && window.SessionManager?.setSessionDurationDays) {
-          // Existing session-manager versions treat a zero JWT timeout as their
-          // legacy fallback. Keep that fallback effectively disabled for the
-          // explicit Settings "Off" choice until the token is refreshed.
           window.SessionManager.setSessionDurationDays(365000);
         }
       });
