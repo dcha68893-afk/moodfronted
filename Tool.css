@@ -878,6 +878,28 @@
             text-transform: uppercase;
             letter-spacing: .04em;
         }
+        /* FIX (item 1 of the Create Listing spec): collapsed-by-default
+           "More options" toggle — Premium/Templates/Trust Circles/Options/
+           Bulk now only render once this is tapped, instead of always
+           occupying the main screen. */
+        .cl-more-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+            margin-top: 18px;
+            padding: 12px 14px;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            background: transparent;
+            color: var(--text-primary);
+            font-size: 13.5px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .cl-more-toggle i { color: var(--text-secondary); transition: transform 0.2s ease; font-size: 12px; }
+        .cl-more-toggle[aria-expanded="true"] i { transform: rotate(180deg); }
+        .cl-more-options-panel .cl-more-title:first-child { margin-top: 10px; }
         .cl-card {
             display: flex;
             align-items: center;

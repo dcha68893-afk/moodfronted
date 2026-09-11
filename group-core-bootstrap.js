@@ -1130,7 +1130,28 @@ const MessageRouter = {
         _parentReadyProcessedFlag = false;
         LifecycleState.reenterWaitParent('account switch detected via fresh PARENT_READY while ACTIVE');
       } else {
-        debugLog('Ignoring redundant PARENT_READY while ACTIVE (same user, no reload) — not re-entering WAIT_PARENT');
+        // FIX (redundant-handshake-should-refresh-not-noop): a same-user
+        // re-handshake while ACTIVE (parent tab reconnected, token
+        // refreshed, module remounted inside chat.html without this
+        // iframe reloading, etc.) used to be a pure no-op — the module
+        // stayed ACTIVE (correct, per the guard above) but also kept
+        // whatever session/parentReady state it already had, even if the
+        // parent is resending PARENT_READY precisely because that state
+        // is now stale (e.g. a rotated token). Refresh the connection and
+        // session state in place — without touching LifecycleState at
+        // all — so a stale token or dropped parentReady flag actually
+        // gets repaired instead of silently persisting until the user
+        // manually reloads.
+        debugLog('Redundant PARENT_READY while ACTIVE (same user) — refreshing session/connection, staying ACTIVE');
+        try {
+          const refreshedSession = message?.payload?.session || message?.session || message?.payload;
+          if (refreshedSession && __isValidSession(refreshedSession)) {
+            applySession(refreshedSession);
+          }
+        } catch (_refreshErr) {}
+        parentReady = true;
+        handshakeCompleted = true;
+        try { flushQueue(); } catch (_flushErr) {}
         return true;
       }
     }

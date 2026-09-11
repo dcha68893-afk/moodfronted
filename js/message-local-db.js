@@ -14,11 +14,52 @@
   let dbPromise = null;
   let closed = false;
 
+  // FIX (CHAT-HISTORY-NOT-PERSISTING-ACROSS-RELOAD/RELOGIN): this read
+  // global.currentUser and global.AuthStorage — neither is ever set inside
+  // this file's actual window. message.html (the only page that loads this
+  // script) never loads js/authStorage.js and nothing here ever assigns
+  // window.currentUser, so currentUserId() always returned null, which
+  // silently no-op'd every KynectaMessageCache read/write
+  // (hydrateConversationsFromCache/putConversation/putMessage in
+  // message-client.js) — the "cache-first sidebar, no blank flash, works
+  // offline" feature those functions exist for was dead code. What actually
+  // made the sidebar look populated after reload before was
+  // waitForApiThenLoadConversations()'s live network re-fetch finishing
+  // quickly enough to be invisible — so this only ever "worked" on a fast,
+  // reliable connection, which is why it looked fine on desktop/laptop and
+  // fell apart on mobile once that fetch was slow, dropped, or ran into a
+  // stale/rotated token before finishing.
+  // Fix: resolve the account id straight from the localStorage keys this
+  // app's real auth code actually writes to (kynecta_auth is authStorage.js's
+  // AUTH_STORAGE_KEY; currentUser/nexopa_user are the plain mirrors
+  // finalizeLoginSuccess() in index.html also writes on every login) —
+  // localStorage is shared across same-origin iframes/reloads/relogins, so
+  // this works regardless of which scripts happen to be loaded in whichever
+  // window calls it, and survives exactly the reload/refresh/relogin cases
+  // that were breaking.
   function currentUserId() {
     try {
-      const u = global.currentUser || (global.AuthStorage && global.AuthStorage.getUser && global.AuthStorage.getUser());
-      const id = u && (u.id || u.userId || u.uid || u._id);
-      return id == null ? null : String(id);
+      if (global.currentUser && (global.currentUser.id || global.currentUser.userId || global.currentUser._id)) {
+        const u = global.currentUser;
+        return String(u.id || u.userId || u._id);
+      }
+      if (global.AuthStorage && typeof global.AuthStorage.getUser === 'function') {
+        const u = global.AuthStorage.getUser();
+        const id = u && (u.id || u.userId || u.uid || u._id);
+        if (id != null) return String(id);
+      }
+      const tryKeys = ['kynecta_auth', 'currentUser', 'nexopa_user', 'user'];
+      for (const key of tryKeys) {
+        try {
+          const raw = localStorage.getItem(key);
+          if (!raw) continue;
+          const parsed = JSON.parse(raw);
+          const u = parsed && parsed.user ? parsed.user : parsed;
+          const id = u && (u.id || u.userId || u.uid || u._id);
+          if (id != null) return String(id);
+        } catch (_) { /* try next key */ }
+      }
+      return null;
     } catch (_) { return null; }
   }
 

@@ -1765,6 +1765,17 @@
                 <button class="cl-type-btn" data-cl-type="digital">Digital Item</button>
             </div>
 
+            <!-- FIX (item 1 of the Create Listing spec): Premium/Templates/
+                 Trust Circles/Options/Bulk used to render open on the main
+                 screen unconditionally. Now collapsed behind a single
+                 "More options" toggle row, closed by default — the 5 cards
+                 only render once the seller taps it. Wiring is the small
+                 script right after .create-listing-content closes below. -->
+            <button type="button" class="cl-more-toggle" id="clMoreToggle" aria-expanded="false" aria-controls="clMoreOptionsPanel">
+                <span>More options</span>
+                <i class="fas fa-chevron-down"></i>
+            </button>
+            <div class="cl-more-options-panel" id="clMoreOptionsPanel" hidden>
             <div class="cl-more-title">More options</div>
             <div class="cl-card" id="clCardPremium" data-cl-target="premium">
                 <div class="cl-card-icon"><i class="fas fa-crown"></i></div>
@@ -1806,6 +1817,7 @@
                 </div>
                 <i class="fas fa-chevron-right"></i>
             </div>
+            </div><!-- /#clMoreOptionsPanel -->
             
             <div class="create-listing-content">
                 <!-- Service Listing Tab -->
@@ -1818,7 +1830,7 @@
 
                         <div class="input-group">
                             <label for="serviceCategory">Category</label>
-                            <select class="text-input" id="serviceCategory">
+                            <select class="text-input" id="serviceCategory" onchange="window._svcCategoryChanged(this.value)">
                                 <option value="services" selected>General Service</option>
                                 <option value="tutoring">Tutoring &amp; Education</option>
                                 <option value="repair">Repair &amp; Maintenance</option>
@@ -1831,7 +1843,31 @@
                                 <option value="other">Other</option>
                             </select>
                         </div>
-                        
+
+                        <!-- FIX (dynamic category flow + no image field at all,
+                             items 2/3/4 of the Create Listing spec): the Service
+                             tab had no subcategory and no image upload of any
+                             kind — every service listing went out with an empty
+                             images array. Subcategory list is populated by
+                             _svcCategoryChanged() from window._JM_CATS's
+                             'services' category (Tool-ui.js); if the seller
+                             skips the photo, that category's own image
+                             (window._JM_SERVICE_CAT_IMG) is used instead of a
+                             generic product photo. -->
+                        <div class="input-group">
+                            <label for="serviceSubcategory">Subcategory</label>
+                            <select class="text-input" id="serviceSubcategory">
+                                <option value="">Select subcategory…</option>
+                            </select>
+                        </div>
+
+                        <div class="input-group">
+                            <label>Photo <span style="font-size:11px;color:#9ca3af">(optional — we'll use a category photo if you skip this)</span></label>
+                            <div id="serviceImagePreview" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:6px"></div>
+                            <button type="button" onclick="document.getElementById('serviceImageInput').click()" style="margin-top:8px;width:100%;border:1.5px dashed #d1d5db;border-radius:10px;padding:10px;background:none;cursor:pointer;font-size:13px;color:#6b7280">+ Add Photo</button>
+                            <input type="file" id="serviceImageInput" accept="image/*" style="display:none" onchange="window._svcAddImage(this.files)">
+                        </div>
+
                         <div class="input-group">
                             <label for="serviceDescription">Description</label>
                             <textarea class="textarea-input" id="serviceDescription" placeholder="Describe your service in detail..."></textarea>
@@ -1881,7 +1917,16 @@
                         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
                             <div class="input-group">
                                 <label for="physBrand">Brand</label>
-                                <input type="text" class="text-input" id="physBrand" placeholder="e.g., Samsung, Nike">
+                                <!-- FIX (category-specific brands, item 2 of the Create
+                                     Listing spec): was a free-text input showing the same
+                                     placeholder for every category. Now a <select>,
+                                     repopulated by _physCategoryChanged() from
+                                     window._JM_BRANDS (Tool-ui.js) with the brand list
+                                     for whichever category is selected — Phones gets
+                                     Samsung/Redmi/Tecno/etc., Fashion gets Nike/Adidas/etc. -->
+                                <select class="text-input" id="physBrand">
+                                    <option value="">Select category first…</option>
+                                </select>
                             </div>
                             <div class="input-group">
                                 <label for="physSku">SKU / Product Code</label>
@@ -1910,14 +1955,24 @@
                                 </select>
                             </div>
                             <div class="input-group">
+                                <!-- FIX: was a free-text input ("e.g., Smartphones,
+                                     Sofas") that never connected to anything — dead
+                                     end for the category→subcategory→type→brand flow
+                                     the spec asks for. Now a <select> populated by
+                                     _physCategoryChanged() from window._JM_CATS
+                                     (Tool-ui.js), so it lists the real subcategories
+                                     for whichever category is picked, for every
+                                     category, not just Phones & Tablets. -->
                                 <label for="physSubcategory">Subcategory</label>
-                                <input type="text" class="text-input" id="physSubcategory" placeholder="e.g., Smartphones, Sofas">
+                                <select class="text-input" id="physSubcategory" onchange="window._physSubcategoryChanged(this.value)">
+                                    <option value="">Select category first…</option>
+                                </select>
                             </div>
                         </div>
 
-                        <!-- Material Selection (dynamic by category) -->
+                        <!-- Type / Features (dynamic by category) -->
                         <div class="input-group" id="physMaterialGroup" style="display:none">
-                            <label>Material / Composition</label>
+                            <label>Type / Features</label>
                             <div id="physMaterialOptions" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px"></div>
                         </div>
 
@@ -2416,6 +2471,15 @@
             </div>
             
             <div class="action-buttons">
+                <!-- FIX (item "Cancel button on Create Listing" of the spec):
+                     the modal only had a small X icon in the header before —
+                     added an explicit, visible Cancel action alongside
+                     Save Draft/Publish. Reuses the existing close handler
+                     already wired to #closeCreateListingModal rather than
+                     duplicating its logic. -->
+                <button type="button" class="action-btn secondary" id="cancelCreateListingBtn" onclick="document.getElementById('closeCreateListingModal')?.click()">
+                    <i class="fas fa-times"></i> Cancel
+                </button>
                 <button class="action-btn secondary" id="saveDraftBtn">
                     <i class="fas fa-save"></i> Save Draft
                 </button>
@@ -2546,6 +2610,18 @@
             document.querySelectorAll('.cl-panel-back').forEach(function (btn) {
                 btn.addEventListener('click', closeClPanels);
             });
+
+            // FIX (item 1 of the Create Listing spec): More options toggle —
+            // collapsed by default, panel only shows once tapped.
+            var moreToggle = document.getElementById('clMoreToggle');
+            var morePanel = document.getElementById('clMoreOptionsPanel');
+            if (moreToggle && morePanel) {
+                moreToggle.addEventListener('click', function () {
+                    var isOpen = moreToggle.getAttribute('aria-expanded') === 'true';
+                    moreToggle.setAttribute('aria-expanded', String(!isOpen));
+                    morePanel.hidden = isOpen;
+                });
+            }
         }
 
         if (document.readyState === 'loading') {

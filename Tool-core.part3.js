@@ -3957,7 +3957,14 @@ export async function createServiceListing(title, description, options = {}) {
         title,
         description,
         price: options.price ? parseFloat(options.price) : 0,
-        category: 'services',
+        // FIX: this was hardcoded to 'services' regardless of what the
+        // seller actually picked in the Create Listing category dropdown
+        // (cleaning, repair, tutoring...), so the optimistic/local echo of
+        // the listing never matched what was submitted. Category defaults
+        // to 'services' only when nothing was selected.
+        category: options.category || 'services',
+        subcategory: options.subcategory || '',
+        images: options.images || (options.image ? [options.image] : []),
         availability: options.availability || AVAILABILITY.FREE,
         visibility: options.visibility || TRUST_CIRCLES.FRIENDS,
         moodContext: options.moodContext,
@@ -3990,13 +3997,25 @@ export async function createServiceListing(title, description, options = {}) {
     // Backend call — safeApiCall now throws on failure (no silent null)
     try {
         if (window.__TOOLS_DEBUG__) console.log('[TOOLS FLOW] Step 2: API request sending');
+        // FIX (items 3 & 6 of the Create Listing spec — category-specific
+        // service imagery / no generic fallback): this request body used to
+        // hardcode category:'services' and images:[] no matter what the
+        // seller picked or uploaded, which is why cleaning/repair/tutoring
+        // listings could never carry their own category or photo — the
+        // backend never received either. Now forwards the real
+        // category/subcategory the seller chose and whatever image(s) they
+        // uploaded; the Create Listing UI supplies a category-specific
+        // placeholder image (see _JM_SERVICE_CAT_IMG in Tool-ui.js) when the
+        // seller didn't upload one, so `images` is still never empty for a
+        // category that has a known image.
         const response = await safeApiCall('POST', '/api/marketplace/listings', {
             title: optimistic.title,
             description: optimistic.description,
             price: optimistic.price,
-            category: 'services',
+            category: optimistic.category,
+            subcategory: optimistic.subcategory,
             type: 'service',
-            images: [],
+            images: optimistic.images,
             available: true
         });
 

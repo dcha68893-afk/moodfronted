@@ -126,7 +126,10 @@ function _barChart(data) {
     <div style="display:flex;gap:4px;padding:4px 8px 0">${data.map(d=>`<div style="flex:1;text-align:center;font-size:9px;color:#9ca3af;overflow:hidden">${d.date?.slice(5)||d.day||''}</div>`).join('')}</div>`;
 }
 
-// ─── Category materials ───────────────────────────────────────────────────────
+// ─── Category materials / type-features (fallback if Tool-ui.js's
+// window._JM_CATS/_JM_BRANDS haven't loaded yet — see getCatMeta() below) ──
+// FIX: computing/gaming/baby were missing entirely, so those 3 of the 12
+// physCategory options got no Type/Features chips at all before.
 const CAT_MAT = {
     home:['Wood','Mahogany','Oak','Bamboo','Metal','Plastic','Glass','Rattan'],
     fashion:['Cotton','Leather','Polyester','Silk','Wool','Denim','Linen','Nylon'],
@@ -137,24 +140,68 @@ const CAT_MAT = {
     sports:['Rubber','Foam','Nylon','Carbon Fiber','Aluminum','Polyester'],
     garden:['Steel','Aluminum','Cement','Ceramic','Marble','PVC','Wood'],
     appliances:['Steel','Plastic','Glass','Ceramic'],
+    computing:['Laptop','Desktop','2-in-1','Gaming','Ultrabook','Business','Refurbished'],
+    gaming:['Console','Handheld','Controller','Headset','VR','Refurbished'],
+    baby:['Cotton','BPA-Free','Organic','Hypoallergenic','Machine Washable'],
 };
 const _phys = {images:[],variants:[],specs:[],materials:[]};
 
+// FIX (metadata-driven category flow, item 4 of the Create Listing spec):
+// this used to be the whole story — a single hardcoded materials list per
+// category and nothing else, so subcategory/brand were dead free-text
+// inputs that never varied by category. Now pulls the real category tree
+// (window._JM_CATS) and brand lists (window._JM_BRANDS) that Tool-ui.js
+// already builds and exposes for the Categories browse page — one metadata
+// source drives both screens instead of Create Listing inventing its own.
+// Falls back to a minimal built-in list only if Tool-ui.js's module script
+// genuinely hasn't finished evaluating yet (it's `type="module"`/deferred
+// and loads before this script, so in practice this path is just a safety
+// net, not the normal case).
+const _FALLBACK_CATS = [{ id:'phones', name:'Phones & Tablets', sections:[{ name:'General', subs:[{name:'Smartphones'},{name:'Tablets'}] }] }];
+function getCatTree() { return (window._JM_CATS && window._JM_CATS.length) ? window._JM_CATS : _FALLBACK_CATS; }
+function getBrandsFor(cat) { return (window._JM_BRANDS && window._JM_BRANDS[cat]) || null; }
+function getSubcategoriesFor(cat) {
+    const entry = getCatTree().find(c => c.id === cat);
+    if (!entry) return [];
+    const out = [];
+    (entry.sections||[]).forEach(sec => (sec.subs||[]).forEach(s => out.push(s.name)));
+    return out;
+}
+
 window._physCategoryChanged = cat => {
-    const g=document.getElementById('physMatsGroup'), c=document.getElementById('physMatsChips');
+    // Type / Features chips
+    const g=document.getElementById('physMaterialGroup'), c=document.getElementById('physMatsChips')||document.getElementById('physMaterialOptions');
     const mats=CAT_MAT[cat]||[];
-    if(!g||!c)return;
-    g.style.display=mats.length?'block':'none';
-    _phys.materials=[];
-    c.innerHTML=mats.map(m=>`<span onclick="this.classList.toggle('on');_phys.materials=Array.from(document.querySelectorAll('#physMatsChips .on')).map(e=>e.textContent)" style="display:inline-flex;align-items:center;background:#f3f4f6;border:1.5px solid #e5e7eb;border-radius:20px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;margin:3px;transition:all .15s" class="">${m}</span>`).join('');
+    if(g && c){
+        g.style.display=mats.length?'block':'none';
+        _phys.materials=[];
+        c.innerHTML=mats.map(m=>`<span onclick="this.classList.toggle('on');_phys.materials=Array.from(document.querySelectorAll('#physMaterialOptions .on')).map(e=>e.textContent)" style="display:inline-flex;align-items:center;background:#f3f4f6;border:1.5px solid #e5e7eb;border-radius:20px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;margin:3px;transition:all .15s" class="">${m}</span>`).join('');
+    }
+    // Subcategory <select> — every category, driven by window._JM_CATS
+    const subSel = document.getElementById('physSubcategory');
+    if (subSel) {
+        const subs = getSubcategoriesFor(cat);
+        subSel.innerHTML = subs.length
+            ? '<option value="">Select subcategory…</option>' + subs.map(s=>`<option value="${_esc(s)}">${_esc(s)}</option>`).join('')
+            : '<option value="">No subcategories for this category</option>';
+    }
+    // Brand <select> — category-specific list, driven by window._JM_BRANDS
+    const brandSel = document.getElementById('physBrand');
+    if (brandSel) {
+        const brands = getBrandsFor(cat);
+        brandSel.innerHTML = brands
+            ? '<option value="">Select brand…</option>' + brands.map(b=>`<option value="${_esc(b)}">${_esc(b)}</option>`).join('')
+            : '<option value="">Select category first…</option>';
+    }
 };
-window._physCalcDisc=()=>{
-    const p=parseFloat(document.getElementById('physPrice')?.value||0),o=parseFloat(document.getElementById('physOrigPrice')?.value||0),l=document.getElementById('physDiscLabel');
+window._physSubcategoryChanged = () => { /* reserved: type/feature chips are category-level today; per-subcategory refinement can hook in here later without changing the payload shape */ };
+window._physCalcDiscount=()=>{
+    const p=parseFloat(document.getElementById('physPrice')?.value||0),o=parseFloat(document.getElementById('physOriginalPrice')?.value||0),l=document.getElementById('physDiscountLabel');
     if(!l)return;l.style.display=o>p&&p>0?'block':'none';
     if(o>p&&p>0)l.textContent=`🏷️ ${Math.round((1-p/o)*100)}% discount`;
 };
-window._physAddImgs=files=>{
-    const g=document.getElementById('physImgGrid');if(!g)return;
+window._physAddImages=files=>{
+    const g=document.getElementById('physImageGrid');if(!g)return;
     Array.from(files).slice(0,8-_phys.images.length).forEach(f=>{
         if(!f.type.startsWith('image/'))return;
         const url=URL.createObjectURL(f);const idx=_phys.images.push({url,file:f})-1;
@@ -165,14 +212,14 @@ window._physAddImgs=files=>{
     });
 };
 window._physAddVariant=()=>{
-    const c=document.getElementById('physVarWrap');if(!c)return;
+    const c=document.getElementById('physVariantsContainer');if(!c)return;
     const i=_phys.variants.push({name:'',opts:''})-1;
     const r=document.createElement('div');r.style.cssText='display:flex;gap:6px;align-items:center;background:#f9fafb;border-radius:8px;padding:8px;margin-bottom:6px';
     r.innerHTML=`<input placeholder="Type (Color)" oninput="_phys.variants[${i}].name=this.value" style="flex:1;border:1.5px solid #e5e7eb;border-radius:6px;padding:6px 10px;font-size:13px;background:#fff;outline:none"><input placeholder="Options: Red,Blue" oninput="_phys.variants[${i}].opts=this.value" style="flex:2;border:1.5px solid #e5e7eb;border-radius:6px;padding:6px 10px;font-size:13px;background:#fff;outline:none"><button onclick="this.parentElement.remove();_phys.variants.splice(${i},1)" style="background:#fee2e2;border:none;border-radius:6px;padding:6px 10px;cursor:pointer;color:#ef4444;font-size:12px;flex-shrink:0">✕</button>`;
     c.appendChild(r);
 };
 window._physAddSpec=()=>{
-    const c=document.getElementById('physSpecWrap');if(!c)return;
+    const c=document.getElementById('physSpecsContainer');if(!c)return;
     const i=_phys.specs.push({k:'',v:''})-1;
     const r=document.createElement('div');r.style.cssText='display:grid;grid-template-columns:1fr 1fr auto;gap:6px;margin-bottom:6px';
     r.innerHTML=`<input placeholder="Name (e.g. Weight)" oninput="_phys.specs[${i}].k=this.value" style="border:1.5px solid #e5e7eb;border-radius:6px;padding:6px 10px;font-size:13px;background:#fff;outline:none"><input placeholder="Value (e.g. 2kg)" oninput="_phys.specs[${i}].v=this.value" style="border:1.5px solid #e5e7eb;border-radius:6px;padding:6px 10px;font-size:13px;background:#fff;outline:none"><button onclick="this.parentElement.remove();_phys.specs.splice(${i},1)" style="background:#fee2e2;border:none;border-radius:6px;padding:6px 10px;cursor:pointer;color:#ef4444;font-size:12px;flex-shrink:0">✕</button>`;
@@ -181,15 +228,24 @@ window._physAddSpec=()=>{
 window._physPreview=()=>{
     const title=document.getElementById('physTitle')?.value||'Product';
     const price=document.getElementById('physPrice')?.value||'0';
-    const orig=document.getElementById('physOrigPrice')?.value||'';
-    const desc=document.getElementById('physDesc')?.value||'';
+    const orig=document.getElementById('physOriginalPrice')?.value||'';
+    const desc=document.getElementById('physDescription')?.value||'';
     const stock=parseInt(document.getElementById('physStock')?.value||'0');
+    // FIX (item 3 of the Create Listing spec — category-specific imagery):
+    // the preview used to show a generic 📦 box whenever no photo had been
+    // uploaded yet. Now shows that category/subcategory's real image
+    // (window._catImg, from Tool-ui.js) as the placeholder, so a seller
+    // picking "Cleaning" or "Phones & Tablets" sees relevant imagery even
+    // before they add their own photos.
+    const cat=document.getElementById('physCategory')?.value||'';
+    const sub=document.getElementById('physSubcategory')?.value||'';
+    const placeholderImg = (typeof window._catImg==='function') ? window._catImg(sub||cat) : null;
     document.getElementById('physPrevOv')?.remove();
     const ov=document.createElement('div');ov.id='physPrevOv';
     ov.style.cssText='position:fixed;inset:0;z-index:99999;background:#f9fafb;overflow-y:auto;display:flex;flex-direction:column';
     ov.innerHTML=`<div style="background:#111;color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0;position:sticky;top:0;z-index:10"><span style="background:#f59e0b;color:#111;border-radius:5px;padding:2px 8px;font-size:10px;font-weight:800">PREVIEW</span><span style="flex:1;font-size:12px;opacity:.7">Customer view — not live yet</span><button onclick="document.getElementById('physPrevOv').remove()" style="background:rgba(255,255,255,.15);border:none;border-radius:8px;padding:6px 14px;color:#fff;font-size:13px;cursor:pointer;font-weight:700">✕ Close</button></div>
     <div style="max-width:480px;margin:0 auto;width:100%;background:#fff">
-        <div style="background:#f3f4f6;aspect-ratio:1.1;max-height:280px;overflow:hidden;display:flex;align-items:center;justify-content:center">${_phys.images.length?`<img src="${_phys.images[0].url}" style="width:100%;height:100%;object-fit:cover">`:'<div style="font-size:60px">📦</div>'}</div>
+        <div style="background:#f3f4f6;aspect-ratio:1.1;max-height:280px;overflow:hidden;display:flex;align-items:center;justify-content:center">${_phys.images.length?`<img src="${_phys.images[0].url}" style="width:100%;height:100%;object-fit:cover">`:(placeholderImg?`<img src="${placeholderImg}" style="width:100%;height:100%;object-fit:cover;opacity:.55">`:'<div style="font-size:60px">📦</div>')}</div>
         <div style="padding:16px">
             <div style="font-size:18px;font-weight:800;color:#111;margin-bottom:8px">${_esc(title)}</div>
             <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:10px"><span style="font-size:26px;font-weight:900;color:#f57224">KES ${parseFloat(price).toLocaleString()}</span>${orig&&parseFloat(orig)>parseFloat(price)?`<span style="font-size:16px;color:#9ca3af;text-decoration:line-through">KES ${parseFloat(orig).toLocaleString()}</span>`:''}</div>
@@ -197,25 +253,30 @@ window._physPreview=()=>{
             <div style="display:flex;gap:10px"><button style="flex:1;background:#f57224;color:#fff;border:none;border-radius:12px;padding:14px;font-weight:800;font-size:15px">Add to Cart</button><button style="flex:1;background:#111;color:#fff;border:none;border-radius:12px;padding:14px;font-weight:800;font-size:15px">Buy Now</button></div>
         </div>
         ${desc?`<div style="background:#fff;border-top:8px solid #f9fafb;padding:16px"><div style="font-weight:800;font-size:14px;margin-bottom:8px">Description</div><div style="font-size:13px;color:#374151;line-height:1.7">${_esc(desc)}</div></div>`:''}
-        ${_phys.materials.length?`<div style="background:#fff;border-top:8px solid #f9fafb;padding:16px"><div style="font-weight:800;font-size:14px;margin-bottom:8px">Materials</div><div style="display:flex;flex-wrap:wrap;gap:6px">${_phys.materials.map(m=>`<span style="background:#f3f4f6;border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600">${_esc(m)}</span>`).join('')}</div></div>`:''}
+        ${_phys.materials.length?`<div style="background:#fff;border-top:8px solid #f9fafb;padding:16px"><div style="font-weight:800;font-size:14px;margin-bottom:8px">Type / Features</div><div style="display:flex;flex-wrap:wrap;gap:6px">${_phys.materials.map(m=>`<span style="background:#f3f4f6;border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600">${_esc(m)}</span>`).join('')}</div></div>`:''}
     </div>`;
     document.body.appendChild(ov);
 };
 window._physPublish=async()=>{
     const title=document.getElementById('physTitle')?.value?.trim();
     const price=parseFloat(document.getElementById('physPrice')?.value||0);
-    const desc=document.getElementById('physDesc')?.value?.trim();
+    const desc=document.getElementById('physDescription')?.value?.trim();
     const cat=document.getElementById('physCategory')?.value;
+    const sub=document.getElementById('physSubcategory')?.value?.trim()||'';
     const stock=parseInt(document.getElementById('physStock')?.value||0);
     if(!title){_toast('Product name required','error','⚠️');return null;}
     if(price<=0){_toast('Set a valid price','error','⚠️');return null;}
     if(!desc){_toast('Description required','error','⚠️');return null;}
     if(!cat){_toast('Select a category','error','⚠️');return null;}
     if(!_phys.images.length){_toast('Add at least one image','error','📸');return null;}
-    const btn=document.getElementById('physPubBtn');
+    const btn=document.getElementById('publishListingBtn');
     if(btn){btn.disabled=true;btn.textContent='⏳ Submitting…';}
     const imgs=await Promise.all(_phys.images.slice(0,8).map(img=>new Promise(res=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.readAsDataURL(img.file);})));
-    const payload={title,description:desc,short_description:document.getElementById('physShortDesc')?.value?.trim()||'',price,original_price:parseFloat(document.getElementById('physOrigPrice')?.value||0)||null,category:cat,subcategory:document.getElementById('physSubcat')?.value?.trim()||'',brand:document.getElementById('physBrand')?.value?.trim()||'',sku:document.getElementById('physSku')?.value?.trim()||'',stock_quantity:stock,weight:parseFloat(document.getElementById('physWeight')?.value||0)||null,images:imgs,type:'physical',condition:'new',available:false,status:'pending_review',approval_status:'pending',metadata:{materials:Array.from(document.querySelectorAll('#physMatsChips .on')).map(e=>e.textContent),variants:_phys.variants.filter(v=>v.name),specs:Object.fromEntries(_phys.specs.filter(s=>s.k&&s.v).map(s=>[s.k,s.v]))}};
+    // Payload shape is unchanged from before (same keys the backend already
+    // expects) — category/subcategory/brand now come from the metadata-driven
+    // selects instead of free text, but they're still plain strings, so
+    // existing submission/API behavior (item 5 of the spec) keeps working.
+    const payload={title,description:desc,short_description:document.getElementById('physShortDesc')?.value?.trim()||'',price,original_price:parseFloat(document.getElementById('physOriginalPrice')?.value||0)||null,category:cat,subcategory:sub,brand:document.getElementById('physBrand')?.value?.trim()||'',sku:document.getElementById('physSku')?.value?.trim()||'',stock_quantity:stock,weight:parseFloat(document.getElementById('physWeight')?.value||0)||null,images:imgs,type:'physical',condition:'new',available:false,status:'pending_review',approval_status:'pending',metadata:{materials:_phys.materials.slice(),variants:_phys.variants.filter(v=>v.name),specs:Object.fromEntries(_phys.specs.filter(s=>s.k&&s.v).map(s=>[s.k,s.v]))}};
     const r=await _api('POST','/marketplace/products',payload);
     if(btn){btn.disabled=false;btn.textContent='Submit for Review';}
     if(r?._error){_toast(r._error,'error','❌');return null;}
@@ -227,6 +288,44 @@ window._physPublish=async()=>{
     return product;
 };
 (()=>{const t=()=>{const b=document.getElementById('publishListingBtn');if(!b){setTimeout(t,800);return;}const o=b.onclick;b.onclick=async e=>{const tab=document.querySelector('.create-listing-tab.active')?.dataset?.tab;if(tab==='physical') await window._physPublish();else o?.call(b,e);};};setTimeout(t,600);})();
+
+// ─── Service tab: subcategory + photo (see Tools.html for the fields) ───────
+window._svcCategoryChanged = cat => {
+    const subSel = document.getElementById('serviceSubcategory');
+    if (!subSel) return;
+    const tree = getCatTree();
+    const svc = tree.find(c => c.id === 'services');
+    // The Service tab's <select id="serviceCategory"> uses short codes
+    // (tutoring/repair/design/tech/cleaning/events/beauty/transport/other)
+    // that don't 1:1 match window._JM_CATS's 'services' subcategory labels
+    // (Tutoring/Repairs/Design/Cleaning/Photography/Web Development), so map
+    // the ones that do have a curated subcategory list; codes without a
+    // dedicated list (tech/events/beauty/transport/other/services) just get
+    // a free "General <label>" option — they still get correct imagery via
+    // window._JM_SERVICE_CAT_IMG regardless of subcategory choice.
+    const CODE_TO_SECTION = { repair:'Repairs', cleaning:'Cleaning', tutoring:'Tutoring', design:'Design' };
+    const wanted = CODE_TO_SECTION[cat];
+    let subs = [];
+    if (svc && wanted) {
+        (svc.sections||[]).forEach(sec => (sec.subs||[]).forEach(s => { if (s.name === wanted) subs.push(s.name); }));
+    }
+    if (!subs.length && svc) {
+        // No dedicated match — offer every known service subcategory rather
+        // than leaving the field empty.
+        (svc.sections||[]).forEach(sec => (sec.subs||[]).forEach(s => subs.push(s.name)));
+    }
+    subSel.innerHTML = '<option value="">Select subcategory…</option>' + subs.map(s=>`<option value="${_esc(s)}">${_esc(s)}</option>`).join('');
+};
+window._svcAddImage = files => {
+    const g = document.getElementById('serviceImagePreview'); if (!g) return;
+    const f = files?.[0]; if (!f || !f.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+        window._svcImageDataUrl = e.target.result;
+        g.innerHTML = `<div style="position:relative;aspect-ratio:1;border-radius:8px;overflow:hidden;background:#f3f4f6"><img src="${e.target.result}" style="width:100%;height:100%;object-fit:cover"><button onclick="window._svcImageDataUrl=null;this.parentElement.remove()" style="position:absolute;top:3px;right:3px;width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;border:none;cursor:pointer;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center">✕</button></div>`;
+    };
+    reader.readAsDataURL(f);
+};
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 1. SELLER DASHBOARD

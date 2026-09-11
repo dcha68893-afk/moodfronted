@@ -2109,13 +2109,39 @@ const renderers = {
         card.dataset.listingId = listing.id;
         card.dataset.userId = listing.userId || listing.sellerId || '';
 
-        // Improved image handling: show a lightweight skeleton, load real image if available,
-        // fall back to a category tile or a real product image when missing or on error.
-        const _catKey = listing.category || listing.subcategory || listing.type || '';
-        const _fallbackBase = (typeof _CDN !== 'undefined' && _CDN[_catKey])
-            ? _CDN[_catKey]
-            : (typeof _catImg === 'function' ? _catImg(_catKey) : null);
-        const fallbackImg = _fallbackBase
+        // FIX (no-generic-fallback-when-category-specific-image-exists,
+        // item 3 of the Create Listing spec): this used to key straight into
+        // _CDN with listing.category ("phones", "cleaning"...), but _CDN is
+        // keyed by human subcategory labels ("Smartphones", "Cleaning"...),
+        // so category-only listings (the common case — free-text
+        // subcategory rarely matched a curated label exactly) always missed
+        // and fell through to one generic product photo for every category,
+        // service listings included. Now: try the exact subcategory label
+        // first, then a service-category image (serviceCategory select
+        // values), then case-insensitive match against every known
+        // subcategory label, then the first subcategory image that actually
+        // belongs to the listing's own top-level category (so a phone with
+        // an unrecognised subcategory still gets a phone photo, not a random
+        // one) — only truly unknown categories reach _catImg()'s own
+        // last-resort generic image.
+        const _resolveListingImg = (l) => {
+            const sub = (l.subcategory || '').trim();
+            const cat = (l.category || l.type || '').trim();
+            if (sub && typeof _CDN !== 'undefined' && _CDN[sub]) return _CDN[sub];
+            if (cat && typeof _JM_SERVICE_CAT_IMG !== 'undefined' && _JM_SERVICE_CAT_IMG[cat]) return _JM_SERVICE_CAT_IMG[cat];
+            if (sub && typeof _CDN !== 'undefined') {
+                const subLower = sub.toLowerCase();
+                const hit = Object.keys(_CDN).find(k => k.toLowerCase() === subLower);
+                if (hit) return _CDN[hit];
+            }
+            if (cat && typeof _JM_CATS !== 'undefined') {
+                const catEntry = _JM_CATS.find(c => c.id === cat);
+                const firstSub = catEntry?.sections?.[0]?.subs?.[0];
+                if (firstSub?.img) return firstSub.img;
+            }
+            return (typeof _catImg === 'function') ? _catImg(sub || cat) : null;
+        };
+        const fallbackImg = _resolveListingImg(listing)
             || `https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&h=300&fit=crop&q=70`;
 
         card.innerHTML = `
@@ -2963,6 +2989,17 @@ function showCreateListingModal() {
     if (modal) {
         modal.classList.add('active');
         console.log('[Tool-ui] Modal opened successfully');
+        // FIX (dynamic category flow): populate the Service tab's default
+        // subcategory list and the Physical tab's subcategory/brand selects
+        // for whatever category is already selected, instead of leaving
+        // them on their static placeholder until the seller touches the
+        // category dropdown.
+        try {
+            const svcCat = document.getElementById('serviceCategory');
+            if (svcCat && typeof window._svcCategoryChanged === 'function') window._svcCategoryChanged(svcCat.value);
+            const physCat = document.getElementById('physCategory');
+            if (physCat && physCat.value && typeof window._physCategoryChanged === 'function') window._physCategoryChanged(physCat.value);
+        } catch (_) {}
     } else {
         console.error('[Tool-ui] Modal element NOT FOUND!');
         // Fallback - create alert
@@ -2983,6 +3020,11 @@ function resetCreateListingForm() {
     if (DOM.serviceTitle) DOM.serviceTitle.value = '';
     if (DOM.serviceDescription) DOM.serviceDescription.value = '';
     if (DOM.servicePrice) DOM.servicePrice.value = '';
+    const svcSubSel = document.getElementById('serviceSubcategory');
+    if (svcSubSel) svcSubSel.innerHTML = '<option value="">Select subcategory…</option>';
+    const svcImgPrev = document.getElementById('serviceImagePreview');
+    if (svcImgPrev) svcImgPrev.innerHTML = '';
+    window._svcImageDataUrl = null;
     if (DOM.digitalTitle) DOM.digitalTitle.value = '';
     if (DOM.digitalDescription) DOM.digitalDescription.value = '';
     if (DOM.digitalPrice) DOM.digitalPrice.value = '';
@@ -3141,10 +3183,24 @@ async function publishListingFromModal() {
                 return;
             }
 
+            // FIX (category-driven image, item 3 & 6 of the Create Listing
+            // spec): a service listing had no image field at all before, so
+            // nothing was ever sent — pass through whatever the seller
+            // uploaded (window._svcImageDataUrl, set by the new image picker
+            // in the Service tab) or fall back to that service category's
+            // own image (window._JM_SERVICE_CAT_IMG, from Tool-ui.js), never
+            // a generic product photo.
+            const svcCategory = document.getElementById('serviceCategory')?.value || 'services';
+            const svcSubcategory = document.getElementById('serviceSubcategory')?.value || '';
+            const svcImage = window._svcImageDataUrl
+                || (window._JM_SERVICE_CAT_IMG && window._JM_SERVICE_CAT_IMG[svcCategory])
+                || null;
             const opts = {
                 price:          price       || '0',
                 condition:      condition,
-                category:       document.getElementById('serviceCategory')?.value || 'services',
+                category:       svcCategory,
+                subcategory:    svcSubcategory,
+                image:          svcImage,
                 visibility:     UIState.selectedTrustCircle,
                 moodContext:    UIState.selectedMoodContext,
                 template:       UIState.selectedTemplate,
@@ -5957,11 +6013,38 @@ const _CDN = {
     Design:                'https://images.unsplash.com/photo-1561070791-2526d30994b5?w=300&h=300&fit=crop',
     Photography:           'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=300&h=300&fit=crop',
     'Web Development':     'https://images.unsplash.com/photo-1547658719-da2b51169166?w=300&h=300&fit=crop',
+    // FIX (category-specific-service-imagery): the "Service" create-listing
+    // tab's category dropdown (serviceCategory) has options that never had a
+    // matching _CDN entry — events/beauty/transport/tech/general fell back
+    // to the one generic product photo below. Added real entries so every
+    // service category gets its own imagery, same as product categories.
+    'General Service':     'https://images.unsplash.com/photo-1521791136064-7986c2920216?w=300&h=300&fit=crop',
+    'Tech & IT Support':   'https://images.unsplash.com/photo-1518770660439-4636190af475?w=300&h=300&fit=crop',
+    'Events & Entertainment': 'https://images.unsplash.com/photo-1511795409834-ef04bbd61622?w=300&h=300&fit=crop',
+    'Beauty & Wellness':   'https://images.unsplash.com/photo-1487412947147-5cebf100ffc2?w=300&h=300&fit=crop',
+    'Transport & Delivery':'https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?w=300&h=300&fit=crop',
 };
 // Fallback for any entry not in the map — use a real product-style image
 function _catImg(name) {
     return _CDN[name] || `https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=300&h=300&fit=crop&q=80`;
 }
+// FIX (dynamic-category-image-selection): maps the *value* of the Create
+// Listing "Service" tab's <select id="serviceCategory"> to the image that
+// represents that service, so cleaning/repair/tutoring/etc. all render with
+// their own imagery instead of one generic product photo. Kept next to
+// _CDN/_catImg (same source of truth) rather than duplicated elsewhere.
+const _JM_SERVICE_CAT_IMG = {
+    services:  _catImg('General Service'),
+    tutoring:  _catImg('Tutoring'),
+    repair:    _catImg('Repairs'),
+    design:    _catImg('Design'),
+    tech:      _catImg('Tech & IT Support'),
+    cleaning:  _catImg('Cleaning'),
+    events:    _catImg('Events & Entertainment'),
+    beauty:    _catImg('Beauty & Wellness'),
+    transport: _catImg('Transport & Delivery'),
+    other:     _catImg('General Service'),
+};
 
 const _JM_CATS = [
     { id:'phones',     name:'Phones & Tablets',  icon:'📱', sections:[
@@ -6250,6 +6333,37 @@ const _JM_CATS = [
         ]},
     ]},
 ];
+
+// FIX (category-specific-brands, item 2 of the Create Listing spec): one
+// brand list per top-level category id (matching _JM_CATS ids above), so
+// "Phones & Tablets" offers Samsung/Redmi/Tecno/etc. while "Fashion" offers
+// Nike/Adidas/etc., instead of a single generic brand list for every
+// category. Categories that aren't in this map (currently: services,
+// digital) are treated as brand-less — the Create Listing form skips the
+// brand step for them rather than showing an empty/irrelevant dropdown.
+const _JM_BRANDS = {
+    phones:      ['Samsung','Apple','Xiaomi/Redmi','Tecno','Infinix','Itel','Oppo','Vivo','Nokia','Huawei','Neon','Other'],
+    electronics: ['Samsung','LG','Sony','Hisense','TCL','JBL','Skyworth','Vitron','Philips','Other'],
+    appliances:  ['LG','Samsung','Hisense','Ramtons','Von Hotpoint','Mika','Bruhm','Nunix','Armco','Other'],
+    health:      ["Nivea","L'Oréal",'Maybelline','Dove','Vaseline','Garnier','Fair & White','The Ordinary','Other'],
+    home:        ['Generic/Unbranded','Betta Furniture','Home Universal','Furniture Palace','Other'],
+    fashion:     ['Nike','Adidas','Puma','Zara','H&M','Vans','Converse',"Levi's",'Other'],
+    computing:   ['HP','Dell','Lenovo','Apple','Asus','Acer','Microsoft','MSI','Other'],
+    gaming:      ['Sony (PlayStation)','Microsoft (Xbox)','Nintendo','Logitech','Razer','Other'],
+    baby:        ['Pampers','Huggies','Chicco','Fisher-Price','Molfix','Other'],
+    sports:      ['Nike','Adidas','Puma','Under Armour','Wilson','Spalding','Other'],
+    supermarket: ['Generic/Local','Unga','Brookside','Bidco','Other'],
+    garden:      ['Generic/Unbranded','Bosch','Black+Decker','Other'],
+};
+
+// Expose the category metadata so it's a single source of truth that other
+// scripts (marketplace-seller.js's Create Listing form) drive their
+// category→subcategory→type→brand flow and image selection from, instead
+// of each script keeping its own hardcoded, phones-only category list.
+window._JM_CATS = _JM_CATS;
+window._JM_BRANDS = _JM_BRANDS;
+window._JM_SERVICE_CAT_IMG = _JM_SERVICE_CAT_IMG;
+window._catImg = _catImg;
 
 // ── CSS injected once for the new category UI ──────────────────────────────
 (function _injectCatStyles() {

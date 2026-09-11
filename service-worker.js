@@ -74,8 +74,22 @@
 // Added both to NETWORK_FIRST_PATTERNS and bumped CACHE_NAME/SW_VERSION so
 // already-installed clients get the fix immediately instead of waiting out
 // the 7-day max age.
-const SW_VERSION = '19.14.0';
-const CACHE_NAME = 'nexopa-static-v37';
+// FIX (GROUP-PLACEHOLDER-REVERT): group-os.js and group-os-integration.js
+// (the group sub-panel renderer — tasks/polls/notes/events/split-expenses)
+// live under /group-os/ and are plain .js files, so with no entry of their
+// own here they fell through to STATIC_PATTERNS -> staticAsset(), which is
+// cache-first and never revalidates in the background while the cached
+// copy is under CACHE_MAX_AGE (7 days) — see staticAsset() below, it just
+// returns the cached response with no fetch at all when fresh-enough.
+// Net effect: after any deploy that fixes a group-os bug, browsers with an
+// existing cache entry kept serving the pre-fix copy for up to a week —
+// the exact "fixed, then it's back" pattern reported for the Groups tab.
+// Adding both files here forces network-first (always fetch, cache only
+// as an offline fallback) the same way group-ui.js/group-core-*.js already
+// are a few lines down. Bumped SW_VERSION/CACHE_NAME so existing clients
+// pick this up immediately instead of only after their cache ages out.
+const SW_VERSION = '19.15.0';
+const CACHE_NAME = 'nexopa-static-v38';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -135,6 +149,12 @@ const NETWORK_FIRST_PATTERNS = [
   /\/group-core-bootstrap\.js/i,
   /\/group-core-operations\.js/i,
   /\/group-core-bridge\.js/i,
+  /\/group-os\/group-os\.js/i,
+  /\/group-os\/group-os-integration\.js/i,
+  /\/group-core-patch\.js/i,
+  /\/group-core-patch\.legacy\.js/i,
+  /\/js\/groupEncryption\.client\.js/i,
+  /\/js\/groupEncryption\.client\.legacy\.js/i,
   /\/friend-core\.ui-bridge\.js/i,
   /\/Tool-core\.part3\.js/i,
   /\/Tool-ui\.js/i,
