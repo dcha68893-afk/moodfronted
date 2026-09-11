@@ -43,10 +43,42 @@
         try{sessionStorage.clear();Object.entries(state.sessionStorage||{}).forEach(([key,value])=>{if(AUTH_KEYS.has(key))return;try{sessionStorage.setItem(key,value);}catch(_){}});}catch(_){ }
     }
 
-    const NEVER_WIPE_INDEXEDDB=new Set(['nexopa_message_lifecycle_v1','AppDB']);
+    // FIX-ACCOUNT-SWITCH-STALE-MODULE-DATA: 'AppDB' (js/app.cache.js) is the
+    // shared cache that backs Calls, Friends/Start-chat, Groups, Status,
+    // Tools and Settings. It was previously listed here alongside the E2E
+    // message cache, which meant it was NEVER cleared on account switch or
+    // relogin — every module kept reading the previous account's rows out
+    // of it forever. app.cache.js itself already closes its DB connection
+    // on 'versionchange' specifically so deleteDatabase() here can succeed
+    // (see the comment on its onversionchange handler) — this key was the
+    // only thing stopping that from ever running. Only the E2E message
+    // cache (which does its own per-account scoped purge in
+    // js/message-local-db.js via the kyn:accountSwitchWipe event below)
+    // should stay out of this blanket wipe.
+    const NEVER_WIPE_INDEXEDDB=new Set(['nexopa_message_lifecycle_v1']);
+    // FIX-ACCOUNT-SWITCH-STALE-MODULE-DATA: indexedDB.databases() (used to
+    // discover every DB to wipe) is not implemented in every browser/WebView
+    // (notably older Safari/iOS). When it's missing, the code below used to
+    // silently do nothing at all — no per-module DB was ever wiped on
+    // account switch on those browsers, regardless of NEVER_WIPE_INDEXEDDB.
+    // We now also explicitly delete every known per-module/per-account DB by
+    // name, so isolation holds even where enumeration isn't supported.
+    const KNOWN_ACCOUNT_SCOPED_INDEXEDDB=['AppDB','calls-db','KnectaStatusDB','KnectaToolsDB','kynectaMesh','kyn_stories_v1'];
     const WIPE_ALLOWLIST=new Set(['nexopa_theme','nexopa_nav_state',ACCOUNT_LIST_KEY,ACCOUNT_STATE_KEY,LAST_ACTIVE_ACCOUNT_KEY]);
     function deleteOneDB(name){return new Promise(resolve=>{if(NEVER_WIPE_INDEXEDDB.has(name))return resolve(true);try{const req=indexedDB.deleteDatabase(name);let settled=false;const finish=ok=>{if(!settled){settled=true;resolve(ok);}};req.onsuccess=()=>finish(true);req.onerror=()=>finish(false);req.onblocked=()=>setTimeout(()=>finish(false),1500);}catch(_){resolve(false);}});}
-    function wipeIndexedDBData(){try{if(typeof indexedDB==='undefined'||typeof indexedDB.databases!=='function')return;indexedDB.databases().then(dbs=>Promise.all((dbs||[]).map(d=>d?.name).filter(Boolean).filter(n=>!NEVER_WIPE_INDEXEDDB.has(n)).map(deleteOneDB))).catch(()=>{});}catch(_){}}
+    function wipeIndexedDBData(){
+        try{
+            if(typeof indexedDB==='undefined')return;
+            // Always attempt the known per-module DBs by name first — this is
+            // what makes wiping reliable on browsers without databases().
+            Promise.all(KNOWN_ACCOUNT_SCOPED_INDEXEDDB.filter(n=>!NEVER_WIPE_INDEXEDDB.has(n)).map(deleteOneDB)).catch(()=>{});
+            // Then, where supported, also sweep anything else so future new
+            // per-module DBs don't need a code change here to be covered.
+            if(typeof indexedDB.databases==='function'){
+                indexedDB.databases().then(dbs=>Promise.all((dbs||[]).map(d=>d?.name).filter(Boolean).filter(n=>!NEVER_WIPE_INDEXEDDB.has(n)).map(deleteOneDB))).catch(()=>{});
+            }
+        }catch(_){}
+    }
     function wipePreviousAccountData(){const previousUserId=getStoredUserId();if(previousUserId!=null)captureAccountState(previousUserId);try{withAuthMutation(()=>Object.keys(localStorage).forEach(key=>{if(!WIPE_ALLOWLIST.has(key)){try{localStorage.removeItem(key);}catch(_){}}}));sessionStorage.clear();}catch(_){}try{window.dispatchEvent(new CustomEvent('kyn:accountSwitchWipe',{detail:{previousUserId}}));}catch(_){}wipeIndexedDBData();}
 
     function getSavedAccounts(){const accounts=safeParse(localStorage.getItem(ACCOUNT_LIST_KEY),[]);return Array.isArray(accounts)?accounts:[];}

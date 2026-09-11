@@ -72,6 +72,25 @@
       this._db = null;
       this._memory = new Map(STORE_NAMES.map((name) => [name, new Map()]));
       this._bootstrapped = false;
+      // FIX-APPCACHE-BOOTSTRAP-DEADLOCK: this._readyPromise (see ready())
+      // only resolves once _bootstrapFromLocalSources() has finished. That
+      // bootstrap step seeds the "users" store by calling _seedCollectionIfEmpty()
+      // -> getAll(), and every CRUD method (save/get/getAll/remove/clear)
+      // used to gate on `await this.ready()` too. Whenever a valid session
+      // already existed in localStorage at cold boot (the normal case for a
+      // returning logged-in user, and — since the account-switch fix above
+      // now actually deletes and recreates AppDB — every single account
+      // switch or relogin), _bootstrapFromLocalSources() would call getAll(),
+      // which would await this._readyPromise, which could only resolve once
+      // _bootstrapFromLocalSources() itself returned: a permanent deadlock.
+      // AppCache.ready() (and therefore every module reading through it)
+      // would simply hang forever, no error, nothing rendered.
+      // _connectionReadyPromise resolves as soon as the IndexedDB connection
+      // itself is open (or memory fallback is decided) — before bootstrap
+      // seeding runs — so CRUD calls made *during* bootstrap can proceed
+      // without waiting on bootstrap's own completion.
+      this._connectionReadyResolve = null;
+      this._connectionReadyPromise = new Promise((resolve) => { this._connectionReadyResolve = resolve; });
       this._readyPromise = this.initDB();
       // Throttle [CACHE] Loaded/Saved logs — max once per storeName per 3s
       this._cacheLogTs = new Map();
@@ -84,9 +103,10 @@
     }
 
     async initDB() {
-      if (this._db) return this._db;
+      if (this._db) { this._connectionReadyResolve(this._db); return this._db; }
       if (!window.indexedDB) {
         console.warn("[CACHE] IndexedDB unavailable, using memory fallback");
+        this._connectionReadyResolve(null);
         return null;
       }
 
@@ -96,6 +116,7 @@
           request = indexedDB.open(DB_NAME, DB_VERSION);
         } catch (error) {
           console.warn("[CACHE] IndexedDB open threw, using memory fallback:", error.message);
+          this._connectionReadyResolve(null);
           resolve(null);
           return;
         }
@@ -134,11 +155,13 @@
             window._lastDBInitializedLogAt = Date.now();
             console.log("[CACHE] DB initialized");
           }
+          this._connectionReadyResolve(this._db);
           this._bootstrapFromLocalSources().finally(() => resolve(this._db));
         };
 
         request.onerror = () => {
           console.warn("[CACHE] IndexedDB failed, using memory fallback");
+          this._connectionReadyResolve(null);
           resolve(null);
         };
       });
@@ -146,6 +169,13 @@
 
     async ready() {
       return this._readyPromise;
+    }
+
+    // FIX-APPCACHE-BOOTSTRAP-DEADLOCK: see the constructor comment. Use this
+    // (instead of ready()) from any CRUD method that bootstrap itself might
+    // call, so bootstrap seeding can never wait on its own completion.
+    async _connectionReady() {
+      return this._connectionReadyPromise;
     }
 
     _safeJson(key, fallback = null) {
@@ -275,7 +305,7 @@
 
     async save(collection, data) {
       const storeName = this._normalizeCollection(collection);
-      await this.ready();
+      await this._connectionReady();
 
       const items = (Array.isArray(data) ? data : [data]).filter((item) => item !== undefined && item !== null);
       const normalized = items.map((item) => this._normalizeRecord(storeName, item));
@@ -307,7 +337,7 @@
 
     async get(collection, query) {
       const storeName = this._normalizeCollection(collection);
-      await this.ready();
+      await this._connectionReady();
 
       if (query === undefined || query === null) return null;
 
@@ -332,9 +362,45 @@
       }
     }
 
+    // FIX-ACCOUNT-SWITCH-STALE-MODULE-DATA: every record written through
+    // save()/_normalizeRecord() already carries a `userId`, but nothing ever
+    // read it back — getModuleSnapshot() (used by Calls, Friends/Start-chat,
+    // Groups, Status, Settings, Tools) returned the whole store regardless
+    // of which account was active. This is the second, independent layer of
+    // the fix: even if a wipe is ever skipped or races a reload, a record
+    // tagged with a different account's userId can never be handed to a UI
+    // module for the currently-active account.
+    _currentUserId() {
+      try {
+        const session = this.getSession();
+        const id = session?.user?.id ?? session?.user?.userId ?? session?.user?.uid ?? session?.user?._id;
+        if (id !== undefined && id !== null && id !== "") return String(id);
+      } catch (_error) {}
+      try {
+        const raw = localStorage.getItem("currentUser") || localStorage.getItem("user");
+        const user = raw ? JSON.parse(raw) : null;
+        const id = user?.id ?? user?.userId ?? user?.uid ?? user?._id;
+        if (id !== undefined && id !== null && id !== "") return String(id);
+      } catch (_error) {}
+      return null;
+    }
+
+    _filterToCurrentUser(storeName, records) {
+      if (!["friends", "messages", "chats", "groups", "calls", "status", "settings", "syncQueue"].includes(storeName)) {
+        return records;
+      }
+      const currentUserId = this._currentUserId();
+      if (!currentUserId) return records;
+      return records.filter((record) => {
+        const recordUserId = record?.userId;
+        if (recordUserId === undefined || recordUserId === null || recordUserId === "") return true;
+        return String(recordUserId) === currentUserId;
+      });
+    }
+
     async getAll(collection) {
       const storeName = this._normalizeCollection(collection);
-      await this.ready();
+      await this._connectionReady();
 
       let records;
       if (!this._db) {
@@ -348,6 +414,8 @@
           records = Array.from(this._memoryStore(storeName).values()).map((item) => clone(item));
         }
       }
+
+      records = this._filterToCurrentUser(storeName, records);
 
       // FIX #2 — TOMBSTONE AUTHORITY: filter deleted entities before returning.
       // Deleted chats/groups must never resurrect from IDB on hydration.
@@ -395,7 +463,7 @@
 
     async remove(collection, id) {
       const storeName = this._normalizeCollection(collection);
-      await this.ready();
+      await this._connectionReady();
       const key = String(id);
 
       if (!this._db) {
@@ -453,7 +521,7 @@
 
     async clear(collection) {
       const storeName = this._normalizeCollection(collection);
-      await this.ready();
+      await this._connectionReady();
 
       if (!this._db) {
         this._memoryStore(storeName).clear();

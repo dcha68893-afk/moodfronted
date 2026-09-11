@@ -100,6 +100,13 @@
         const accounts = getAuthAccounts();
         let switcher = document.getElementById('saved-account-switcher');
         const normalForms = panel.querySelectorAll('.login-container, .register-container, .forgot-container');
+        // FIX-ACCOUNT-SWITCH-UI-NOT-SHOWING: the older single-account
+        // "Quick Login" card lives in the same panel and was never hidden
+        // when a saved-account switcher had accounts to show, so on a
+        // device with a saved session the quick-login card rendered on top
+        // of (or instead of, depending on layout) this switcher and the
+        // multi-account picker was never actually seen.
+        const quickLoginCard = document.getElementById('quickLoginCard');
 
         if (accounts.length === 0) {
             normalForms.forEach(el => { el.style.display = ''; });
@@ -108,6 +115,7 @@
         }
 
         normalForms.forEach(el => { el.style.display = 'none'; });
+        if (quickLoginCard) quickLoginCard.classList.remove('visible');
         if (!switcher) {
             switcher = document.createElement('div');
             switcher.id = 'saved-account-switcher';
