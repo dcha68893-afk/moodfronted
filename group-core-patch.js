@@ -1,5 +1,6 @@
 // group-core-patch.js — lifecycle + group rendering stability guards
 import { LifecycleState, GroupCore } from './group-core-bootstrap.js';
+import { API_WRAPPER } from './group-core-operations.js';
 import './group-core-patch.legacy.js';
 
 // FIX-GROUP-CORE-GLOBAL: groupEncryption.client.js runs as a classic script and
@@ -15,6 +16,42 @@ if (GroupCore && !window.GroupCore) {
 if (LifecycleState && typeof LifecycleState.reenterWaitParent === 'function') {
   LifecycleState.reenterWaitParent = function preventActiveBounce() {
     return false;
+  };
+}
+
+// The group operations wrapper historically accepted timeout in its options,
+// but its internal apiRequest call does not forward that value. A slow
+// /groups/invites/user request could therefore occupy the caller far longer
+// than the group UI needs. Bound only GET requests to group endpoints here.
+// The underlying request is allowed to finish; the UI receives a deterministic
+// timeout result instead of remaining blocked on the network.
+if (API_WRAPPER && typeof API_WRAPPER.request === 'function' && !API_WRAPPER.__groupGetTimeoutGuard) {
+  API_WRAPPER.__groupGetTimeoutGuard = true;
+  const originalApiRequest = API_WRAPPER.request.bind(API_WRAPPER);
+  API_WRAPPER.request = async function groupGetTimeoutGuard(endpoint, options = {}) {
+    const method = String(options?.method || 'GET').toUpperCase();
+    const path = String(endpoint || '');
+    const isGroupRead = method === 'GET' && /^\/groups(?:\/|$)/i.test(path);
+    if (!isGroupRead) return originalApiRequest(endpoint, options);
+
+    const timeoutMs = Math.max(3000, Math.min(Number(options?.timeout) || 5000, 5000));
+    let timeoutId;
+    const timeoutResult = new Promise(resolve => {
+      timeoutId = setTimeout(() => resolve({
+        success: false,
+        status: 'timeout',
+        timedOut: true,
+        fromCache: true,
+        data: null,
+        message: 'Group request timed out; continuing with cached UI state.'
+      }), timeoutMs);
+    });
+
+    try {
+      return await Promise.race([originalApiRequest(endpoint, options), timeoutResult]);
+    } finally {
+      clearTimeout(timeoutId);
+    }
   };
 }
 
@@ -54,10 +91,6 @@ if (GC) {
         adminGroups: Array.isArray(this.adminGroups) ? [...this.adminGroups] : []
       };
 
-      // Do not allow a slow /groups/user handshake to hold a caller for the
-      // same 12s + 8s retry window visible in the browser console. Returning
-      // cached data after 5s keeps navigation/rendering responsive while the
-      // original request is allowed to finish in the background.
       const timeoutResult = new Promise(resolve => setTimeout(() => resolve({
         success: true,
         fromCache: true,
