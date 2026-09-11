@@ -97,10 +97,13 @@
     function switchSavedAccount(userId) {
         try {
             if (window.AuthStorage?.switchAccount) {
+                // AuthStorage owns the complete identity transition, including
+                // tearing down the old page and reloading the current document.
+                // Do not schedule a competing href/navigation here: that can race
+                // the reload and leave some modules booting against the old account.
                 const result = window.AuthStorage.switchAccount(userId);
                 if (result?.success) {
                     window.dispatchEvent(new CustomEvent('auth:saved-account:switched', { detail: result }));
-                    setTimeout(() => { window.location.href = 'chat.html'; }, 0);
                 }
                 return result;
             }
