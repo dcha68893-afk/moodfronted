@@ -64,9 +64,6 @@
     }
 
     function removeDeviceAccount(userId) {
-        // AuthStorage is the canonical saved-account database. Use its explicit
-        // removal API so Settings, the login switcher and the compatibility key
-        // cannot drift apart.
         try {
             if (window.AuthStorage?.removeSavedAccount) {
                 const result = window.AuthStorage.removeSavedAccount(userId);
@@ -77,7 +74,6 @@
             }
         } catch (_) {}
 
-        // Compatibility fallback for older pages where AuthStorage has not yet loaded.
         let removed = false;
         try {
             const accounts = parse(localStorage.getItem(AUTH_STORAGE_KEY), []);
@@ -112,21 +108,36 @@
         return { success: false, error: 'Account switching is unavailable' };
     }
 
+    function setNormalLoginVisibility(show) {
+        const loginForm = document.getElementById('login-form');
+        const registerContainer = document.getElementById('register-container');
+        const forgotContainer = document.getElementById('forgot-container');
+        const authTabs = document.querySelector('.auth-tabs');
+        if (loginForm) loginForm.style.display = show ? '' : 'none';
+        if (authTabs) authTabs.style.display = show ? '' : 'none';
+        if (show) {
+            if (registerContainer) registerContainer.style.display = '';
+            if (forgotContainer) forgotContainer.style.display = '';
+        } else {
+            if (registerContainer) registerContainer.style.display = 'none';
+            if (forgotContainer) forgotContainer.style.display = 'none';
+        }
+    }
+
     function renderLoginAccountSwitcher() {
         if (window.top !== window.self) return;
         const container = document.getElementById('login-container');
         if (!container) return;
-        const loginForm = document.getElementById('login-form');
         const accounts = getAuthAccounts();
         let switcher = document.getElementById('saved-account-switcher');
 
         if (accounts.length === 0) {
-            if (loginForm) loginForm.style.display = '';
+            setNormalLoginVisibility(true);
             if (switcher) switcher.remove();
             return;
         }
 
-        if (loginForm) loginForm.style.display = 'none';
+        setNormalLoginVisibility(false);
         if (!switcher) {
             switcher = document.createElement('div');
             switcher.id = 'saved-account-switcher';
@@ -152,7 +163,7 @@
                     </button>
                 `).join('')}
             </div>
-            <div style="text-align:center;margin-top:18px;font-size:12px;color:var(--text-secondary,#777);">Delete a saved account in Settings to make room for another account.</div>
+            <div style="text-align:center;margin-top:18px;font-size:12px;color:var(--text-secondary,#777);">Remove a saved account in Settings to make room for another account.</div>
         `;
 
         switcher.querySelectorAll('.saved-account-login-item').forEach(button => {
