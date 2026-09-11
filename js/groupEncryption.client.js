@@ -8,6 +8,11 @@
 
 (async function () {
   try {
+    // Load the canonical lifecycle/global/timeout guards from the same module
+    // graph before waiting for GroupCore. This fixes the race where this
+    // classic script could time out because ES-module GroupCore was not yet
+    // published on window.
+    await import('../group-core-patch.js');
     await import('./groupEncryption.client.legacy.js');
 
     const waitFor = async (getter, timeout = 12000) => {
@@ -23,7 +28,6 @@
     const e2e = await waitFor(() => window.KynectaGroupE2E);
     if (!e2e) throw new Error('Group E2E engine did not initialize');
 
-    // Never allow the legacy helper's plaintext fallback to cross the network.
     const originalEncryptOutgoing = e2e.encryptOutgoing.bind(e2e);
     e2e.encryptOutgoing = async function secureEncryptOutgoing(groupId, plaintext, memberUserIds) {
       const result = await originalEncryptOutgoing(groupId, plaintext, memberUserIds);
@@ -36,9 +40,6 @@
     const GC = await waitFor(() => window.GroupCore);
     if (!GC) throw new Error('GroupCore did not initialize');
 
-    // group-core-patch.js installs the final sendGroupMessage implementation
-    // after GroupCore loads. Wait for that method, then own the final network
-    // boundary so every text send is encrypted before POST /groups/:id/messages.
     await waitFor(() => typeof GC.sendGroupMessage === 'function');
     const originalSend = GC.sendGroupMessage.bind(GC);
     if (GC.sendGroupMessage.__groupE2ESecureBoundary) return;
