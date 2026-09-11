@@ -1,7 +1,6 @@
 // group-core-patch.js — lifecycle + group rendering stability guards
 import { LifecycleState, GroupCore } from './group-core-bootstrap.js';
 import { API_WRAPPER } from './group-core-operations.js';
-import './group-core-patch.legacy.js';
 
 // FIX-GROUP-CORE-GLOBAL: groupEncryption.client.js runs as a classic script and
 // cannot see an ES-module export through window automatically. Publish the SAME
