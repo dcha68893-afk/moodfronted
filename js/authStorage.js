@@ -1,5 +1,5 @@
 // authStorage.js - Persistent Authentication Storage
-// VERSION: 1.4.0 - account-isolated two-account switching + registration
+// VERSION: 1.4.1 - Persistent two-account switching + explicit saved-account removal
 (function () {
     'use strict';
 
@@ -80,22 +80,45 @@
         return { success:true, accounts:accounts.slice(0, MAX_ACCOUNTS) };
     }
 
+    // Permanently remove one account from the device's saved-account store.
+    // This is intentionally separate from clearAuth(): logging out can keep an
+    // account available for quick switching, while explicit account removal
+    // frees one of the two device slots.
+    function removeSavedAccount(userId) {
+        const targetId = String(userId ?? '');
+        if (!targetId) return { success:false, error:'Missing account identity' };
+        const accounts = getSavedAccounts();
+        const next = accounts.filter(account => String(account?.userId ?? account?.id ?? '') !== targetId);
+        if (next.length === accounts.length) return { success:false, error:'Saved account not found', removed:false, accounts:accounts.slice(0, MAX_ACCOUNTS) };
+
+        try {
+            withAuthMutation(() => localStorage.setItem(ACCOUNT_LIST_KEY, JSON.stringify(next.slice(0, MAX_ACCOUNTS))));
+            try {
+                const legacy = safeParse(localStorage.getItem('kynecta_device_accounts'), []);
+                if (Array.isArray(legacy)) {
+                    localStorage.setItem('kynecta_device_accounts', JSON.stringify(legacy.filter(account => String(account?.userId ?? account?.id ?? '') !== targetId).slice(0, MAX_ACCOUNTS)));
+                }
+            } catch (_) {}
+            try { window.dispatchEvent(new CustomEvent('auth:saved-account:removed', { detail:{ userId } })); } catch (_) {}
+            return { success:true, removed:true, accounts:next.slice(0, MAX_ACCOUNTS) };
+        } catch (error) {
+            return { success:false, error:error.message || 'Could not remove saved account', removed:false, accounts:accounts.slice(0, MAX_ACCOUNTS) };
+        }
+    }
+
     function saveAuth(data) {
         try {
             if (!data?.token) return false;
             const incomingUserId = data.user?.id ?? data.user?.uid ?? data.user?._id ?? null;
             const previousUserId = getStoredUserId();
             if (incomingUserId && previousUserId && String(previousUserId) !== String(incomingUserId)) wipePreviousAccountData();
-            const payload = { token:data.token, refreshToken:data.refreshToken || null, user:data.user || null, expiresAt:data.expiresAt || (Date.now()+30*24*60*60*1000), issuedAt:data.issuedAt || Date.now(), savedAt:new Date().toISOString(), _version:'1.4.0' };
+            const payload = { token:data.token, refreshToken:data.refreshToken || null, user:data.user || null, expiresAt:data.expiresAt || (Date.now()+30*24*60*60*1000), issuedAt:data.issuedAt || Date.now(), savedAt:new Date().toISOString(), _version:'1.4.1' };
             withAuthMutation(() => {
                 localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(payload));
                 LEGACY_TOKEN_KEYS.forEach(k => { try { localStorage.setItem(k,payload.token); } catch (_) {} });
                 LEGACY_USER_KEYS.forEach(k => { try { localStorage.setItem(k,JSON.stringify(payload.user)); } catch (_) {} });
                 localStorage.setItem(LOGIN_STATE_KEY,'true');
             });
-            // Registration is deliberately after the active credentials are saved.
-            // If the device already has two different accounts, preserve those slots
-            // rather than wiping or replacing an existing account implicitly.
             const registered = registerAccount(payload);
             if (!registered.success && registered.error?.includes('already has')) {
                 const existing = getSavedAccounts();
@@ -141,21 +164,9 @@
         const currentId = getStoredUserId();
         if (currentId != null && String(currentId) === targetId) return {success:false,error:'Already using this account'};
         try {
-            // FIX (account-switch cache leak): saveAuth() already wipes the
-            // outgoing account's localStorage/sessionStorage/IndexedDB (and
-            // fires kyn:accountSwitchWipe so FriendCacheManager/ChatManager/
-            // Identity clear their in-memory state) whenever a login detects
-            // a different user than the one previously stored. switchAccount()
-            // — the quick-switch path used by the Settings "Switch account"
-            // button — wrote the new session straight into localStorage
-            // without ever calling that wipe, so the account being switched
-            // AWAY FROM left its chat/friend caches behind for the next
-            // account to see. Route through the same wipe here before
-            // writing the target account's session.
             if (currentId != null) wipePreviousAccountData();
-
             const user = { id:target.userId, email:target.email, username:target.username, displayName:target.displayName || target.username, avatar:target.avatar };
-            const payload = { token:target.token, refreshToken:target.refreshToken || null, user, expiresAt:target.expiresAt || (Date.now()+30*24*60*60*1000), issuedAt:Date.now(), savedAt:new Date().toISOString(), _version:'1.4.0' };
+            const payload = { token:target.token, refreshToken:target.refreshToken || null, user, expiresAt:target.expiresAt || null, issuedAt:Date.now(), savedAt:new Date().toISOString(), _version:'1.4.1' };
             withAuthMutation(() => {
                 localStorage.setItem(AUTH_STORAGE_KEY,JSON.stringify(payload));
                 LEGACY_TOKEN_KEYS.forEach(k=>{try{localStorage.setItem(k,target.token);}catch(_){}});
@@ -166,7 +177,7 @@
             window.__userToken=target.token;
             window.__accessToken=target.token;
             target.lastUsed=Date.now();
-            withAuthMutation(() => localStorage.setItem(ACCOUNT_LIST_KEY,JSON.stringify(accounts)));
+            withAuthMutation(() => localStorage.setItem(ACCOUNT_LIST_KEY,JSON.stringify(accounts.slice(0, MAX_ACCOUNTS))));
             try { window.dispatchEvent(new CustomEvent('auth:account:switched',{detail:{userId:target.userId,user,timestamp:Date.now()}})); } catch (_) {}
             return {success:true,user,token:target.token};
         } catch (e) { return {success:false,error:e.message || 'Account switch failed'}; }
@@ -185,6 +196,6 @@
         }));
     }
 
-    window.AuthStorage = { saveAuth,saveSession,getAuth,getSession,clearAuth,hasValidAuth,updateAuthTokens,getToken,getUser,isValidSession,wipeAccountData:wipePreviousAccountData,switchAccount,getSavedAccounts:getSavedAccountList,registerAccount,getMaxAccounts:()=>MAX_ACCOUNTS };
+    window.AuthStorage = { saveAuth,saveSession,getAuth,getSession,clearAuth,hasValidAuth,updateAuthTokens,getToken,getUser,isValidSession,wipeAccountData:wipePreviousAccountData,switchAccount,getSavedAccounts:getSavedAccountList,registerAccount,removeSavedAccount,getMaxAccounts:()=>MAX_ACCOUNTS };
     window.api=window.api||{}; window.api.storage=window.AuthStorage;
 })();
