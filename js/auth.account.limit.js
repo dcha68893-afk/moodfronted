@@ -21,8 +21,6 @@
 
     function getDeviceAccounts() {
         const canonical = getAuthAccounts();
-        // Keep the older device-account key synchronized for existing code that
-        // still reads it, but never use a second independent account database.
         const normalized = canonical.map(acc => ({
             userId: acc.userId,
             email: acc.email || null,
@@ -61,13 +59,25 @@
         if (!canRegisterNewAccount()) {
             return { success: false, error: `Maximum ${MAX_ACCOUNTS} accounts per device. Remove an existing saved account before adding another.` };
         }
-        // AuthStorage.saveAuth()/registerAccount is the authoritative writer.
-        // This function only enforces the limit and keeps the compatibility key in sync.
         renderLoginAccountSwitcher();
         return { success: true };
     }
 
     function removeDeviceAccount(userId) {
+        // AuthStorage is the canonical saved-account database. Use its explicit
+        // removal API so Settings, the login switcher and the compatibility key
+        // cannot drift apart.
+        try {
+            if (window.AuthStorage?.removeSavedAccount) {
+                const result = window.AuthStorage.removeSavedAccount(userId);
+                if (result?.success) {
+                    renderLoginAccountSwitcher();
+                    return true;
+                }
+            }
+        } catch (_) {}
+
+        // Compatibility fallback for older pages where AuthStorage has not yet loaded.
         let removed = false;
         try {
             const accounts = parse(localStorage.getItem(AUTH_STORAGE_KEY), []);
@@ -81,7 +91,9 @@
             if (next.length !== accounts.length) removed = true;
             localStorage.setItem(STORAGE_KEY, JSON.stringify(next.slice(0, MAX_ACCOUNTS)));
         } catch (_) {}
-        try { window.dispatchEvent(new CustomEvent('auth:saved-account:removed', { detail: { userId } })); } catch (_) {}
+        if (removed) {
+            try { window.dispatchEvent(new CustomEvent('auth:saved-account:removed', { detail: { userId } })); } catch (_) {}
+        }
         renderLoginAccountSwitcher();
         return removed;
     }
