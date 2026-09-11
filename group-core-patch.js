@@ -5,8 +5,7 @@ import './group-core-patch.legacy.js';
 // FIX-GROUP-CORE-GLOBAL: groupEncryption.client.js runs as a classic script and
 // cannot see an ES-module export through window automatically. Publish the SAME
 // GroupCore object used by the module graph so the encryption boundary and UI
-// operate on one canonical instance instead of waiting forever for a nonexistent
-// window.GroupCore.
+// operate on one canonical instance.
 if (GroupCore && !window.GroupCore) {
   window.GroupCore = GroupCore;
 }
@@ -54,17 +53,47 @@ if (GC) {
         joinedGroups: Array.isArray(this.joinedGroups) ? [...this.joinedGroups] : [],
         adminGroups: Array.isArray(this.adminGroups) ? [...this.adminGroups] : []
       };
-      const result = await originalRequestGroupList(...args);
+
+      // Do not allow a slow /groups/user handshake to hold a caller for the
+      // same 12s + 8s retry window visible in the browser console. Returning
+      // cached data after 5s keeps navigation/rendering responsive while the
+      // original request is allowed to finish in the background.
+      const timeoutResult = new Promise(resolve => setTimeout(() => resolve({
+        success: true,
+        fromCache: true,
+        timedOut: true,
+        data: this.getGroupsData?.() || {
+          groups: before.groups,
+          myGroups: before.myGroups,
+          joinedGroups: before.joinedGroups,
+          adminGroups: before.adminGroups
+        }
+      }), 5000));
+
+      let result;
+      try {
+        result = await Promise.race([originalRequestGroupList(...args), timeoutResult]);
+      } catch (error) {
+        result = { success: true, fromCache: true, timedOut: true, data: this.getGroupsData?.() || before };
+      }
+
       const afterEmpty = [this.groups, this.myGroups, this.joinedGroups, this.adminGroups]
         .every(list => !Array.isArray(list) || list.length === 0);
       const hadVisibleGroups = Object.values(before).some(list => list.length > 0);
-      if (hadVisibleGroups && afterEmpty && result?.fromCache === true) {
+      if (hadVisibleGroups && afterEmpty) {
         this.groups = before.groups;
         this.myGroups = before.myGroups;
         this.joinedGroups = before.joinedGroups;
         this.adminGroups = before.adminGroups;
-        try { this.emit('groups:list-updated', { ...before, fromCache: true, preservedAfterFailedSync: true }); } catch (_) {}
-        return { success: true, fromCache: true, preserved: true, data: this.getGroupsData?.() };
+        try {
+          this.emit('groups:list-updated', {
+            ...before,
+            fromCache: true,
+            preservedAfterFailedSync: true,
+            timedOut: result?.timedOut === true
+          });
+        } catch (_) {}
+        return { success: true, fromCache: true, preserved: true, timedOut: result?.timedOut === true, data: this.getGroupsData?.() };
       }
       return result;
     };
