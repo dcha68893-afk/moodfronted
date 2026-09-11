@@ -5,32 +5,47 @@
   window.__SETTINGS_UI_LOCAL_PATCH__ = true;
 
   const ACCOUNT_SCRIPT = '/js/authStorage.js';
+  const GOOGLE_CLIENT_ID = '523213927690-volo0p7mbbqjucrksv8vasfvcqqicall.apps.googleusercontent.com';
   let accountBootPromise = null;
   const loadAuthStorage = () => {
     if (window.AuthStorage) return Promise.resolve(window.AuthStorage);
     if (accountBootPromise) return accountBootPromise;
     accountBootPromise = new Promise(resolve => {
-      const s = document.createElement('script'); s.src = ACCOUNT_SCRIPT;
-      s.onload = () => resolve(window.AuthStorage || null); s.onerror = () => resolve(null);
+      const s = document.createElement('script');
+      s.src = ACCOUNT_SCRIPT;
+      s.onload = () => resolve(window.AuthStorage || null);
+      s.onerror = () => resolve(null);
       document.head.appendChild(s);
     });
     return accountBootPromise;
   };
   const esc = v => { const d=document.createElement('div'); d.textContent=v==null?'':String(v); return d.innerHTML; };
   const getAccounts = () => { try { return window.AuthStorage?.getSavedAccounts?.() || []; } catch (_) { return []; } };
-  const apiBase = () => (window.__kynAPI?.baseUrl || window.API_BASE_URL || '/api').replace(/\/$/,'') + (window.__kynAPI?.baseUrl ? '' : '/api');
+  const apiBase = () => {
+    const configured = window.__kynAPI?.baseUrl || window.API_BASE_URL;
+    if (configured) return String(configured).replace(/\/$/, '');
+    return '/api';
+  };
 
   function ensureModal() {
-    let o=document.getElementById('savedAccountsModal'); if(o) return o;
+    let o=document.getElementById('savedAccountsModal');
+    if(o) return o;
     o=document.createElement('div'); o.id='savedAccountsModal';
     o.style.cssText='display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10050;align-items:center;justify-content:center;padding:16px';
     o.innerHTML=`<div style="width:min(460px,100%);max-height:90vh;overflow:auto;background:var(--card-bg);color:var(--text-color);border:1px solid var(--border-color);border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.25)">
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid var(--border-color)"><div><strong style="font-size:18px">Accounts</strong><div style="font-size:12px;color:var(--text-secondary);margin-top:3px">Up to 2 accounts on this device</div></div><button id="savedAccountsClose" aria-label="Close" style="border:0;background:transparent;color:var(--text-secondary);font-size:20px;cursor:pointer">×</button></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid var(--border-color)"><div><strong style="font-size:18px">Accounts</strong><div style="font-size:12px;color:var(--text-secondary);margin-top:3px">Up to 2 accounts on this device</div></div><button id="savedAccountsClose" type="button" aria-label="Close" style="border:0;background:transparent;color:var(--text-secondary);font-size:20px;cursor:pointer">×</button></div>
       <div id="savedAccountsList" style="padding:14px 20px"></div>
-      <div style="padding:12px 20px;border-top:1px solid var(--border-color);font-size:12px;color:var(--text-secondary)">Your password is used only for verification and is never saved by the account switcher.</div>
+      <div style="padding:12px 20px;border-top:1px solid var(--border-color);font-size:12px;color:var(--text-secondary)">Passwords are used only for verification and are never saved by the account switcher.</div>
     </div>`;
-    document.body.appendChild(o); o.addEventListener('click',e=>{if(e.target===o)o.style.display='none';});
-    o.querySelector('#savedAccountsClose').onclick=()=>o.style.display='none'; return o;
+    document.body.appendChild(o);
+    o.addEventListener('click',e=>{if(e.target===o)o.style.display='none';});
+    o.querySelector('#savedAccountsClose').onclick=()=>o.style.display='none';
+    return o;
+  }
+
+  function updateCount(){
+    const b=document.getElementById('settingsAccountCount');
+    if(b)b.textContent=`${getAccounts().length}/2`;
   }
 
   function renderAccounts() {
@@ -42,132 +57,112 @@
     </div>`).join('');
     if(rows.length<2) list.insertAdjacentHTML('beforeend',`<button id="addAccountButton" type="button" class="action-btn primary" style="width:100%;justify-content:center;margin-top:14px"><i class="fas fa-user-plus"></i><span>Add account</span></button>`);
     if(!rows.length) list.insertAdjacentHTML('afterbegin','<div style="padding:8px 0 4px;color:var(--text-secondary)">No saved accounts yet. Sign in below to add an account.</div>');
-    list.querySelectorAll('[data-switch]').forEach(b=>b.onclick=()=>{const r=window.AuthStorage?.switchAccount?.(b.dataset.switch);if(!r?.success)return alert(r?.error||'Unable to switch account');o.style.display='none';location.reload();});
+    list.querySelectorAll('[data-switch]').forEach(b=>b.onclick=()=>{
+      const r=window.AuthStorage?.switchAccount?.(b.dataset.switch);
+      if(!r?.success)return alert(r?.error||'Unable to switch account');
+      o.style.display='none'; location.reload();
+    });
     const add=list.querySelector('#addAccountButton'); if(add) add.onclick=showAddAccount;
+    updateCount();
   }
 
-<<<<<<< HEAD
-  function showAddAccount(){
-    const o=ensureModal(), list=o.querySelector('#savedAccountsList');
-    list.innerHTML=`<div style="padding:4px 0 12px"><strong style="font-size:17px">Add account</strong><div style="font-size:12px;color:var(--text-secondary);margin-top:4px">Enter the email and password for the second account. These details are verified by the server and the password is not stored.</div></div>
-      <form id="addAccountForm"><label style="display:block;margin:10px 0 5px;font-size:13px">Email</label><input id="addAccountEmail" type="email" autocomplete="email" required style="width:100%;box-sizing:border-box;padding:11px;border:1px solid var(--border-color);border-radius:8px;background:var(--bg-color);color:var(--text-color)">
-      <label style="display:block;margin:12px 0 5px;font-size:13px">Password</label><input id="addAccountPassword" type="password" autocomplete="current-password" required style="width:100%;box-sizing:border-box;padding:11px;border:1px solid var(--border-color);border-radius:8px;background:var(--bg-color);color:var(--text-color)">
-      <div id="addAccountError" style="display:none;color:var(--danger-color);font-size:12px;margin-top:10px"></div><button id="addAccountSubmit" type="submit" class="action-btn primary" style="width:100%;justify-content:center;margin-top:16px"><i class="fas fa-sign-in-alt"></i><span>Verify & add account</span></button></form>
-      <button id="addAccountBack" type="button" class="action-btn secondary" style="width:100%;justify-content:center;margin-top:8px">Back</button>`;
-    list.querySelector('#addAccountBack').onclick=renderAccounts;
-    list.querySelector('#addAccountForm').onsubmit=async e=>{
-      e.preventDefault(); const email=list.querySelector('#addAccountEmail').value.trim(); const password=list.querySelector('#addAccountPassword').value; const err=list.querySelector('#addAccountError'); const submit=list.querySelector('#addAccountSubmit');
-      err.style.display='none'; submit.disabled=true; submit.querySelector('span').textContent='Verifying…';
-      try{
-        const res=await fetch(apiBase()+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({identifier:email,password})});
-        const data=await res.json().catch(()=>({}));
-        if(!res.ok || !data.success){ throw new Error(data.message||'Invalid email or password'); }
-        if(data.requiresMfa){ throw new Error('This account requires two-factor verification. Sign in normally first, then add it again.'); }
-        const saved=window.AuthStorage?.registerAccount?.(data);
-        if(!saved?.success) throw new Error(saved?.error||'Could not save this account');
-        list.innerHTML='<div style="padding:24px 4px;text-align:center"><i class="fas fa-check-circle" style="font-size:28px;color:var(--success-color)"></i><div style="font-weight:600;margin-top:10px">Account added</div><div style="font-size:12px;color:var(--text-secondary);margin-top:5px">You can now switch to it without entering the password again.</div></div><button id="accountDone" class="action-btn primary" style="width:100%;justify-content:center;margin-top:14px">Done</button>';
-        list.querySelector('#accountDone').onclick=renderAccounts;
-        updateCount();
-      }catch(ex){err.textContent=ex.message||'Unable to add account';err.style.display='block';submit.disabled=false;submit.querySelector('span').textContent='Verify & add account';}
-    };
-  }
-
-  function updateCount(){const b=document.getElementById('settingsAccountCount');if(b)b.textContent=`${getAccounts().length}/2`;}
-  async function injectAccountSwitcher(){const menu=document.getElementById('settingsMenu');if(!menu||document.getElementById('settingsAccountSwitcher'))return;await loadAuthStorage();const b=document.createElement('button');b.type='button';b.id='settingsAccountSwitcher';b.className='menu-item';b.style.cssText='width:100%;border:0;background:transparent;text-align:left;color:inherit;cursor:pointer';b.innerHTML='<div class="menu-icon"><i class="fas fa-users"></i></div><div class="menu-text">Switch account</div><span class="menu-badge" id="settingsAccountCount">0/2</span>';menu.appendChild(b);b.onclick=async()=>{await loadAuthStorage();renderAccounts();ensureModal().style.display='flex';};updateCount();}
-
-=======
-  const GOOGLE_CLIENT_ID = '523213927690-volo0p7mbbqjucrksv8vasfvcqqicall.apps.googleusercontent.com';
   function loadGoogleScript() {
-    if (window.google && window.google.accounts && window.google.accounts.id) return Promise.resolve(true);
+    if (window.google?.accounts?.id) return Promise.resolve(true);
     if (window.__addAccountGoogleScriptPromise) return window.__addAccountGoogleScriptPromise;
     window.__addAccountGoogleScriptPromise = new Promise(resolve => {
-      const existing = document.querySelector('script[src="https://accounts.google.com/gsi/client"]');
-      if (existing) { existing.addEventListener('load', () => resolve(true)); existing.addEventListener('error', () => resolve(false)); return; }
-      const s = document.createElement('script'); s.src = 'https://accounts.google.com/gsi/client'; s.async = true; s.defer = true;
-      s.onload = () => resolve(true); s.onerror = () => resolve(false);
-      document.head.appendChild(s);
+      const existing=document.querySelector('script[src="https://accounts.google.com/gsi/client"]');
+      if(existing){ existing.addEventListener('load',()=>resolve(true),{once:true}); existing.addEventListener('error',()=>resolve(false),{once:true}); return; }
+      const s=document.createElement('script'); s.src='https://accounts.google.com/gsi/client'; s.async=true; s.defer=true;
+      s.onload=()=>resolve(true); s.onerror=()=>resolve(false); document.head.appendChild(s);
     });
     return window.__addAccountGoogleScriptPromise;
   }
 
   function showAddAccount(){
     const o=ensureModal(), list=o.querySelector('#savedAccountsList');
-    // FIX ("switch account" / add-account Google option): this form used to
-    // only offer manual email+password entry, with no way to add a second
-    // account via Google sign-in even though Google sign-in is how many
-    // accounts on this app are created in the first place. Adds a real
-    // "Continue with Google" option above the manual form, using the same
-    // Google Identity Services flow js/google-auth.js uses on the login
-    // page — but routed to AuthStorage.registerAccount() (add a saved
-    // account) instead of google-auth.js's own saveAuth()+redirect (which
-    // is for replacing the primary session, not adding a second one).
     list.innerHTML=`<div style="padding:4px 0 12px"><strong style="font-size:17px">Add account</strong><div style="font-size:12px;color:var(--text-secondary);margin-top:4px">Sign in with Google, or enter the email and password for the second account.</div></div>
       <div id="addAccountGoogleContainer" style="min-height:44px;display:flex;justify-content:center;margin-bottom:6px"></div>
       <div id="addAccountGoogleError" style="display:none;color:var(--danger-color);font-size:12px;margin:6px 0"></div>
       <div style="display:flex;align-items:center;gap:10px;margin:14px 0;color:var(--text-secondary);font-size:12px"><div style="flex:1;height:1px;background:var(--border-color)"></div><span>OR</span><div style="flex:1;height:1px;background:var(--border-color)"></div></div>
       <form id="addAccountForm"><label style="display:block;margin:10px 0 5px;font-size:13px">Email</label><input id="addAccountEmail" type="email" autocomplete="email" required style="width:100%;box-sizing:border-box;padding:11px;border:1px solid var(--border-color);border-radius:8px;background:var(--bg-color);color:var(--text-color)">
       <label style="display:block;margin:12px 0 5px;font-size:13px">Password</label><input id="addAccountPassword" type="password" autocomplete="current-password" required style="width:100%;box-sizing:border-box;padding:11px;border:1px solid var(--border-color);border-radius:8px;background:var(--bg-color);color:var(--text-color)">
-      <div id="addAccountError" style="display:none;color:var(--danger-color);font-size:12px;margin-top:10px"></div><button id="addAccountSubmit" type="submit" class="action-btn primary" style="width:100%;justify-content:center;margin-top:16px"><i class="fas fa-sign-in-alt"></i><span>Verify & add account</span></button></form>
+      <div id="addAccountPasswordError" style="display:none;color:var(--danger-color);font-size:12px;margin-top:10px"></div><button id="addAccountSubmit" type="submit" class="action-btn primary" style="width:100%;justify-content:center;margin-top:16px"><i class="fas fa-sign-in-alt"></i><span>Verify & add account</span></button></form>
       <button id="addAccountBack" type="button" class="action-btn secondary" style="width:100%;justify-content:center;margin-top:8px">Back</button>`;
     list.querySelector('#addAccountBack').onclick=renderAccounts;
 
-    (async () => {
-      const container = list.querySelector('#addAccountGoogleContainer');
-      const gErr = list.querySelector('#addAccountGoogleError');
-      const ok = await loadGoogleScript();
-      if (!ok || !container || !container.isConnected) return; // modal may have closed while loading
-      try {
-        window.google.accounts.id.initialize({
-          client_id: GOOGLE_CLIENT_ID,
-          callback: async (response) => {
-            const credential = response && response.credential;
-            if (!credential) { gErr.textContent = 'Google sign-in did not return a credential.'; gErr.style.display='block'; return; }
-            gErr.style.display = 'none';
-            try {
-              const res = await fetch(apiBase()+'/auth/google', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ credential }) });
-              const data = await res.json().catch(() => ({}));
-              if (!res.ok || !data.success) throw new Error(data.message || 'Google sign-in failed');
-              const saved = window.AuthStorage?.registerAccount?.(data);
-              if (!saved?.success) throw new Error(saved?.error || 'Could not save this account');
-              list.innerHTML='<div style="padding:24px 4px;text-align:center"><i class="fas fa-check-circle" style="font-size:28px;color:var(--success-color)"></i><div style="font-weight:600;margin-top:10px">Account added</div><div style="font-size:12px;color:var(--text-secondary);margin-top:5px">You can now switch to it without signing in again.</div></div><button id="accountDone" class="action-btn primary" style="width:100%;justify-content:center;margin-top:14px">Done</button>';
-              list.querySelector('#accountDone').onclick=renderAccounts;
-              updateCount();
-            } catch (ex) {
-              gErr.textContent = ex.message || 'Unable to add account with Google';
-              gErr.style.display = 'block';
-            }
-          },
-          auto_select: false
-        });
-        window.google.accounts.id.renderButton(container, { theme:'outline', size:'large', width: Math.max(200, Math.min(320, container.offsetWidth || 280)), text:'continue_with', shape:'pill' });
-      } catch (e) {
-        container.innerHTML = '';
-      }
+    (async()=>{
+      const container=list.querySelector('#addAccountGoogleContainer'), gErr=list.querySelector('#addAccountGoogleError');
+      const ok=await loadGoogleScript();
+      if(!ok||!container||!container.isConnected)return;
+      try{
+        window.google.accounts.id.initialize({client_id:GOOGLE_CLIENT_ID,auto_select:false,callback:async response=>{
+          const credential=response?.credential;
+          if(!credential){gErr.textContent='Google sign-in did not return a credential.';gErr.style.display='block';return;}
+          gErr.style.display='none';
+          try{
+            const res=await fetch(apiBase()+'/auth/google',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({credential})});
+            const data=await res.json().catch(()=>({}));
+            if(!res.ok||!data.success)throw new Error(data.message||'Google sign-in failed');
+            const saved=window.AuthStorage?.registerAccount?.(data);
+            if(!saved?.success)throw new Error(saved?.error||'Could not save this account');
+            list.innerHTML='<div style="padding:24px 4px;text-align:center"><i class="fas fa-check-circle" style="font-size:28px;color:var(--success-color)"></i><div style="font-weight:600;margin-top:10px">Account added</div><div style="font-size:12px;color:var(--text-secondary);margin-top:5px">You can now switch to it without signing in again.</div></div><button id="accountDone" type="button" class="action-btn primary" style="width:100%;justify-content:center;margin-top:14px">Done</button>';
+            list.querySelector('#accountDone').onclick=renderAccounts; updateCount();
+          }catch(ex){gErr.textContent=ex.message||'Unable to add account with Google';gErr.style.display='block';}
+        }});
+        window.google.accounts.id.renderButton(container,{theme:'outline',size:'large',width:Math.max(200,Math.min(320,container.offsetWidth||280)),text:'continue_with',shape:'pill'});
+      }catch(_){container.innerHTML='';}
     })();
 
     list.querySelector('#addAccountForm').onsubmit=async e=>{
-      e.preventDefault(); const email=list.querySelector('#addAccountEmail').value.trim(); const password=list.querySelector('#addAccountPassword').value; const err=list.querySelector('#addAccountError'); const submit=list.querySelector('#addAccountSubmit');
+      e.preventDefault();
+      const email=list.querySelector('#addAccountEmail').value.trim(), password=list.querySelector('#addAccountPassword').value;
+      const err=list.querySelector('#addAccountPasswordError'), submit=list.querySelector('#addAccountSubmit');
       err.style.display='none'; submit.disabled=true; submit.querySelector('span').textContent='Verifying…';
       try{
         const res=await fetch(apiBase()+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({identifier:email,password})});
         const data=await res.json().catch(()=>({}));
-        if(!res.ok || !data.success){ throw new Error(data.message||'Invalid email or password'); }
-        if(data.requiresMfa){ throw new Error('This account requires two-factor verification. Sign in normally first, then add it again.'); }
+        if(!res.ok||!data.success)throw new Error(data.message||'Invalid email or password');
+        if(data.requiresMfa)throw new Error('This account requires two-factor verification. Sign in normally first, then add it again.');
         const saved=window.AuthStorage?.registerAccount?.(data);
-        if(!saved?.success) throw new Error(saved?.error||'Could not save this account');
-        list.innerHTML='<div style="padding:24px 4px;text-align:center"><i class="fas fa-check-circle" style="font-size:28px;color:var(--success-color)"></i><div style="font-weight:600;margin-top:10px">Account added</div><div style="font-size:12px;color:var(--text-secondary);margin-top:5px">You can now switch to it without entering the password again.</div></div><button id="accountDone" class="action-btn primary" style="width:100%;justify-content:center;margin-top:14px">Done</button>';
-        list.querySelector('#accountDone').onclick=renderAccounts;
-        updateCount();
+        if(!saved?.success)throw new Error(saved?.error||'Could not save this account');
+        list.innerHTML='<div style="padding:24px 4px;text-align:center"><i class="fas fa-check-circle" style="font-size:28px;color:var(--success-color)"></i><div style="font-weight:600;margin-top:10px">Account added</div><div style="font-size:12px;color:var(--text-secondary);margin-top:5px">You can now switch to it without entering the password again.</div></div><button id="accountDone" type="button" class="action-btn primary" style="width:100%;justify-content:center;margin-top:14px">Done</button>';
+        list.querySelector('#accountDone').onclick=renderAccounts; updateCount();
       }catch(ex){err.textContent=ex.message||'Unable to add account';err.style.display='block';submit.disabled=false;submit.querySelector('span').textContent='Verify & add account';}
     };
   }
 
-  function updateCount(){const b=document.getElementById('settingsAccountCount');if(b)b.textContent=`${getAccounts().length}/2`;}
-  async function injectAccountSwitcher(){const menu=document.getElementById('settingsMenu');if(!menu||document.getElementById('settingsAccountSwitcher'))return;await loadAuthStorage();const b=document.createElement('button');b.type='button';b.id='settingsAccountSwitcher';b.className='menu-item';b.style.cssText='width:100%;border:0;background:transparent;text-align:left;color:inherit;cursor:pointer';b.innerHTML='<div class="menu-icon"><i class="fas fa-users"></i></div><div class="menu-text">Switch account</div><span class="menu-badge" id="settingsAccountCount">0/2</span>';menu.appendChild(b);b.onclick=async()=>{await loadAuthStorage();renderAccounts();ensureModal().style.display='flex';};updateCount();}
+  function injectAccountSwitcher(){
+    const menu=document.getElementById('settingsMenu');
+    if(!menu||document.getElementById('settingsAccountSwitcher'))return;
+    loadAuthStorage().then(()=>{
+      if(document.getElementById('settingsAccountSwitcher'))return;
+      const b=document.createElement('button'); b.type='button'; b.id='settingsAccountSwitcher'; b.className='menu-item';
+      b.style.cssText='width:100%;border:0;background:transparent;text-align:left;color:inherit;cursor:pointer';
+      b.innerHTML='<div class="menu-icon"><i class="fas fa-users"></i></div><div class="menu-text">Switch account</div><span class="menu-badge" id="settingsAccountCount">0/2</span>';
+      menu.appendChild(b);
+      b.onclick=async()=>{await loadAuthStorage();renderAccounts();ensureModal().style.display='flex';};
+      updateCount();
+    });
+  }
 
->>>>>>> 1ff5c36 (update files)
-  function injectSyncRow(){if(document.getElementById('syncEnabledToggle'))return;let body=null;document.querySelectorAll('.section-header h3').forEach(h=>{const t=(h.textContent||'').toLowerCase();if(t.includes('advanced')||t.includes('developer')||t.includes('connection')){const s=h.closest('.settings-section');if(s)body=s.querySelector('.section-body');}});if(!body)return;const enabled=window.LocalStoreSettings?.getAll?.().syncEnabled===true;const row=document.createElement('div');row.className='setting-item';row.id='syncToggleRow';row.innerHTML=`<div class="setting-info"><div class="setting-label">☁ Multi-Device Sync</div><div class="setting-description">Sync settings across devices (optional).</div></div><div class="setting-control"><label class="toggle-switch"><input type="checkbox" id="syncEnabledToggle"${enabled?' checked':''}><span class="toggle-slider"></span></label></div>`;body.appendChild(row);document.getElementById('syncEnabledToggle').onchange=e=>{if(typeof window.__updateSetting==='function')window.__updateSetting('advanced','syncEnabled',e.target.checked);};}
-  async function boot(){await loadAuthStorage();await injectAccountSwitcher();injectSyncRow();[700,1600,3000].forEach(ms=>setTimeout(()=>{injectAccountSwitcher();injectSyncRow();},ms));}
+  function injectSyncRow(){
+    if(document.getElementById('syncEnabledToggle'))return;
+    let body=null;
+    document.querySelectorAll('.section-header h3').forEach(h=>{const t=(h.textContent||'').toLowerCase();if(t.includes('advanced')||t.includes('developer')||t.includes('connection')){const s=h.closest('.settings-section');if(s)body=s.querySelector('.section-body');}});
+    if(!body)return;
+    const enabled=window.LocalStoreSettings?.getAll?.().syncEnabled===true;
+    const row=document.createElement('div'); row.className='setting-item'; row.id='syncToggleRow';
+    row.innerHTML=`<div class="setting-info"><div class="setting-label">☁ Multi-Device Sync</div><div class="setting-description">Sync settings across devices (optional).</div></div><div class="setting-control"><label class="toggle-switch"><input type="checkbox" id="syncEnabledToggle"${enabled?' checked':''}><span class="toggle-slider"></span></label></div>`;
+    body.appendChild(row);
+    document.getElementById('syncEnabledToggle').onchange=e=>{if(typeof window.__updateSetting==='function')window.__updateSetting('advanced','syncEnabled',e.target.checked);};
+  }
+
+  async function boot(){
+    await loadAuthStorage(); injectAccountSwitcher(); injectSyncRow();
+    [700,1600,3000].forEach(ms=>setTimeout(()=>{injectAccountSwitcher();injectSyncRow();},ms));
+  }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
-  window.addEventListener('settingsUIReady',()=>{injectAccountSwitcher();injectSyncRow();}); window.addEventListener('settingsSectionLoaded',()=>setTimeout(injectSyncRow,200)); window.addEventListener('auth:account:switched',updateCount);
+  window.addEventListener('settingsUIReady',()=>{injectAccountSwitcher();injectSyncRow();});
+  window.addEventListener('settingsSectionLoaded',()=>setTimeout(injectSyncRow,200));
+  window.addEventListener('auth:account:switched',updateCount);
 })();
