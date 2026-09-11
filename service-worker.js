@@ -1,13 +1,10 @@
-// Kynecta service worker — v19.8.0
-// Critical runtime/theme/encryption assets are network-first so an installed
-// PWA cannot silently execute week-old code after a deploy.
+// Kynecta service worker — v19.17.0
+// Critical runtime/theme/encryption/account-isolation assets are network-first
+// so an installed PWA cannot silently execute week-old code after a deploy.
 'use strict';
 
-// Runtime cache boundary update: app.cache.unified.js now owns account-scoped
-// IndexedDB access, so it must not be served from an older service-worker cache.
-// Bump both identifiers whenever this runtime boundary changes.
-const SW_VERSION = '19.16.0';
-const CACHE_NAME = 'nexopa-static-v39';
+const SW_VERSION = '19.17.0';
+const CACHE_NAME = 'nexopa-static-v40';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -38,7 +35,9 @@ const NETWORK_FIRST_PATTERNS = [
   /\/js\/app\.core\.bootstrap\.js/i,
   /\/js\/auth\.session\.manager\.js/i,
   /\/js\/authStorage\.js/i,
+  /\/js\/auth\.account\.limit\.js/i,
   /\/js\/app\.cache\.unified\.js/i,
+  /\/js\/app\.cache\.js/i,
   /\/js\/app\.ui\.auth\.js/i,
   /\/js\/app\.realtime\.socket\.js/i,
   /\/js\/app\.runtime\.authority\.js/i,
@@ -160,7 +159,7 @@ self.addEventListener('message',event=>{
   if(d.type==='SKIP_WAITING')self.skipWaiting();
   if(d.type==='CLEAR_CACHE')event.waitUntil(caches.delete(CACHE_NAME));
   if(d.type==='INVALIDATE_URLS'&&Array.isArray(d.urls))event.waitUntil(caches.open(CACHE_NAME).then(c=>Promise.all(d.urls.map(u=>c.delete(u)))));
-  if(d.type==='FORCE_REFRESH')event.waitUntil(caches.open(CACHE_NAME).then(c=>Promise.all(['/js/theme.engine.js','/theme.colors.css','/js/e2e-encryption.js'].map(async u=>{try{const r=await fetch(u,{cache:'no-store'});if(r.ok)await c.put(u,r);}catch(_){}}))));
+  if(d.type==='FORCE_REFRESH')event.waitUntil(caches.open(CACHE_NAME).then(c=>Promise.all(['/js/theme.engine.js','/theme.colors.css','/js/e2e-encryption.js','/js/authStorage.js','/js/auth.account.limit.js','/js/app.cache.unified.js','/js/app.cache.js'].map(async u=>{try{const r=await fetch(u,{cache:'no-store'});if(r.ok)await c.put(u,r);}catch(_){}}))));
   if(d.type==='ACTIVE_CHAT_CHANGED'){if(!self.__kynActiveChatByClient)self.__kynActiveChatByClient=new Map();const id=event.source&&event.source.id;if(id){if(d.chatId)self.__kynActiveChatByClient.set(id,String(d.chatId));else self.__kynActiveChatByClient.delete(id);}}
   if(d.type==='REGISTER_BACKGROUND_SYNC'&&self.registration.sync)event.waitUntil(self.registration.sync.register(d.tag||'offline-message-queue').catch(()=>{}));
   if(d.type==='RUN_CLEANUP')event.waitUntil(cleanupOldEntries());
