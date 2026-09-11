@@ -19,11 +19,10 @@ if (LifecycleState && typeof LifecycleState.reenterWaitParent === 'function') {
 }
 
 // The group operations wrapper historically accepted timeout in its options,
-// but its internal apiRequest call does not forward that value. A slow
-// /groups/invites/user request could therefore occupy the caller far longer
-// than the group UI needs. Bound only GET requests to group endpoints here.
-// The underlying request is allowed to finish; the UI receives a deterministic
-// timeout result instead of remaining blocked on the network.
+// but its internal apiRequest call does not forward that value. Bound only GET
+// requests to group endpoints here. The underlying request may finish later,
+// but the UI receives a deterministic timeout result instead of remaining
+// blocked on a slow network/database path.
 if (API_WRAPPER && typeof API_WRAPPER.request === 'function' && !API_WRAPPER.__groupGetTimeoutGuard) {
   API_WRAPPER.__groupGetTimeoutGuard = true;
   const originalApiRequest = API_WRAPPER.request.bind(API_WRAPPER);
@@ -33,7 +32,7 @@ if (API_WRAPPER && typeof API_WRAPPER.request === 'function' && !API_WRAPPER.__g
     const isGroupRead = method === 'GET' && /^\/groups(?:\/|$)/i.test(path);
     if (!isGroupRead) return originalApiRequest(endpoint, options);
 
-    const timeoutMs = Math.max(3000, Math.min(Number(options?.timeout) || 5000, 5000));
+    const timeoutMs = Math.max(2000, Math.min(Number(options?.timeout) || 3500, 3500));
     let timeoutId;
     const timeoutResult = new Promise(resolve => {
       timeoutId = setTimeout(() => resolve({
@@ -57,8 +56,7 @@ if (API_WRAPPER && typeof API_WRAPPER.request === 'function' && !API_WRAPPER.__g
 const GC = GroupCore || window.GroupCore;
 if (GC) {
   // Never let a transient empty / incomplete / unauthorized server payload
-  // erase a group list that is already visible from local cache. The next
-  // successful sync can still update individual records normally.
+  // erase a group list that is already visible from local cache.
   if (typeof GC.mergeWithServerData === 'function' && !GC.__emptyServerPayloadGuard) {
     GC.__emptyServerPayloadGuard = true;
     const originalMerge = GC.mergeWithServerData.bind(GC);
@@ -70,19 +68,27 @@ if (GC) {
         .reduce((n, key) => n + (Array.isArray(serverData?.[key]) ? serverData[key].length : 0), 0);
       const explicitlyEmpty = payloadGroups && payloadGroups.length === 0 && payloadPartitionCount === 0;
       if (existingCount > 0 && explicitlyEmpty) {
-        console.warn('[GroupCore] Ignoring transient empty /groups/user payload; preserving cached groups');
         return this.getGroupsData?.() || null;
       }
       return originalMerge(serverData, ...args);
     };
   }
 
-  // Keep the request wrapper as a second line of defence if another code path
-  // replaces the merge function or mutates arrays after a failed sync.
-  if (typeof GC.requestGroupList === 'function' && !GC.__emptySyncGuardInstalled) {
-    GC.__emptySyncGuardInstalled = true;
+  // Deduplicate all callers of requestGroupList(). The group UI has several
+  // legitimate startup paths (initial render, tab refresh, background sync,
+  // parent activation), but they must share one network request. Without this
+  // guard, each caller could start another /groups/user request before the
+  // previous one had settled, which produced the repeated backend
+  // getUserGroups warnings seen every ~second and kept desktop stuck on its
+  // loading skeleton while mobile happened to have already hydrated its cache.
+  if (typeof GC.requestGroupList === 'function' && !GC.__groupRequestDedupGuard) {
+    GC.__groupRequestDedupGuard = true;
     const originalRequestGroupList = GC.requestGroupList.bind(GC);
-    GC.requestGroupList = async function guardedRequestGroupList(...args) {
+    let inFlight = null;
+
+    GC.requestGroupList = function deduplicatedRequestGroupList(...args) {
+      if (inFlight) return inFlight;
+
       const before = {
         groups: Array.isArray(this.groups) ? [...this.groups] : [],
         myGroups: Array.isArray(this.myGroups) ? [...this.myGroups] : [],
@@ -94,40 +100,49 @@ if (GC) {
         success: true,
         fromCache: true,
         timedOut: true,
-        data: this.getGroupsData?.() || {
-          groups: before.groups,
-          myGroups: before.myGroups,
-          joinedGroups: before.joinedGroups,
-          adminGroups: before.adminGroups
-        }
-      }), 5000));
+        data: this.getGroupsData?.() || before
+      }), 2500));
 
-      let result;
-      try {
-        result = await Promise.race([originalRequestGroupList(...args), timeoutResult]);
-      } catch (error) {
-        result = { success: true, fromCache: true, timedOut: true, data: this.getGroupsData?.() || before };
-      }
-
-      const afterEmpty = [this.groups, this.myGroups, this.joinedGroups, this.adminGroups]
-        .every(list => !Array.isArray(list) || list.length === 0);
-      const hadVisibleGroups = Object.values(before).some(list => list.length > 0);
-      if (hadVisibleGroups && afterEmpty) {
-        this.groups = before.groups;
-        this.myGroups = before.myGroups;
-        this.joinedGroups = before.joinedGroups;
-        this.adminGroups = before.adminGroups;
+      inFlight = (async () => {
+        let result;
         try {
-          this.emit('groups:list-updated', {
-            ...before,
+          result = await Promise.race([originalRequestGroupList(...args), timeoutResult]);
+        } catch (_) {
+          result = { success: true, fromCache: true, timedOut: true, data: this.getGroupsData?.() || before };
+        }
+
+        const afterEmpty = [this.groups, this.myGroups, this.joinedGroups, this.adminGroups]
+          .every(list => !Array.isArray(list) || list.length === 0);
+        const hadVisibleGroups = Object.values(before).some(list => list.length > 0);
+
+        if (hadVisibleGroups && afterEmpty) {
+          this.groups = before.groups;
+          this.myGroups = before.myGroups;
+          this.joinedGroups = before.joinedGroups;
+          this.adminGroups = before.adminGroups;
+          try {
+            this.emit('groups:list-updated', {
+              ...before,
+              fromCache: true,
+              preservedAfterFailedSync: true,
+              timedOut: result?.timedOut === true
+            });
+          } catch (_) {}
+          return {
+            success: true,
             fromCache: true,
-            preservedAfterFailedSync: true,
-            timedOut: result?.timedOut === true
-          });
-        } catch (_) {}
-        return { success: true, fromCache: true, preserved: true, timedOut: result?.timedOut === true, data: this.getGroupsData?.() };
-      }
-      return result;
+            preserved: true,
+            timedOut: result?.timedOut === true,
+            data: this.getGroupsData?.()
+          };
+        }
+
+        return result;
+      })().finally(() => {
+        inFlight = null;
+      });
+
+      return inFlight;
     };
   }
 }
