@@ -3,93 +3,11 @@
 // PWA cannot silently execute week-old code after a deploy.
 'use strict';
 
-// FIX (STALE-CACHE-AFTER-E2E-FIX): CACHE_NAME must be bumped every session
-// that touches JS/CSS/HTML, or an already-installed service worker keeps
-// serving the old cached copy of a just-fixed file (stale-while-revalidate
-// shows the OLD version immediately, the fixed one only lands on the NEXT
-// load) — this exact class of "fix isn't showing live" has bitten this app
-// before. Bumped here because this session's js/e2e-encryption.js,
-// js/e2e-session-init.js, js/message-client.js, message.html and group.html
-// changes (removed duplicate legacy DM crypto export, fixed the canonical-
-// core readiness race, removed dead double-ratchet.js references) would
-// otherwise keep being served stale.
-//
-// ROOT-CAUSE FIX (MOBILE-STALE-MESSAGE-CLIENT / desktop-vs-mobile behaving
-// differently on reload or relogin): the comment above has claimed since an
-// earlier session that js/message-client.js was made network-first, but it
-// was NEVER actually added to NETWORK_FIRST_PATTERNS below (confirmed —
-// grep only ever matched this comment, not a real pattern entry). It isn't
-// in CORE_STATIC_ASSETS either, so every request for it fell through to
-// staticAsset(): cache-first, reused as-is for up to CACHE_MAX_AGE (7 days)
-// before even checking the network. Desktop browser tabs mostly don't keep
-// a service worker installed/controlling across a plain reload the way an
-// installed mobile PWA does, so desktop was effectively always getting
-// message-client.js from the network while mobile kept running whatever
-// copy got cached up to a week ago — including the exact pre-fix version
-// that (a) unlocked E2E with the wrong password every reload/relogin
-// (message-e2e-core.js's now-fixed ensureIdentity bug) and (b) called
-// api.request.js's dead getChats() path instead of the direct-request
-// bypass, which is the literal source of the "Failed to fetch chats" text
-// mobile was still logging. js/e2e-store-v2.js, js/message-local-db.js and
-// js/message-realtime-bridge.js are the same messaging pipeline and were
-// missing for the same reason. CACHE_NAME/SW_VERSION bumped again so this
-// reaches already-installed mobile clients immediately (see the activate
-// handler's cache purge + SW_UPDATED postMessage below) instead of waiting
-// out the old cache's 7-day max age.
-//
-// ROOT-CAUSE FIX (MOBILE-CHAT-LIST-SLOW-OR-EMPTY / panel waits until typing
-// to load history): the fix above chased down every messaging-pipeline file
-// EXCEPT the one every single one of them actually depends on —
-// js/api.request.js itself. message-client.js's own top-level bootstrap
-// polls `window.api.request` before it will even attempt loadConversations()
-// (see waitForApiThenLoadConversations), and every chat-list / history /
-// send call ultimately goes through the gateway this file sets up (auth
-// readiness, session readiness, backend-origin resolution, the request
-// queue). It was listed in CORE_STATIC_ASSETS (cached once, at install time)
-// but was never added to NETWORK_FIRST_PATTERNS, so it fell through to
-// staticAsset()'s cache-first path on every later load, same as the
-// message-client.js bug above — reused for up to 7 days before the network
-// is even checked. A desktop tab (SW usually not installed/controlling)
-// gets the current gateway from the network every time and the sidebar
-// populates instantly; an installed mobile PWA can easily be running a
-// gateway build from days ago whose auth/session/backend-resolution timing
-// no longer matches the rest of the already-updated pipeline it's driving —
-// exactly the "instant on laptop, slow or permanently empty on phone until
-// something (like starting to type, which touches session/token state)
-// happens to unstick it" split reported. Added here, alongside its direct
-// siblings.
-// ROOT-CAUSE FIX (SETTINGS-SWITCH-ACCOUNT-NOT-VISIBLE): settings-ui.js and
-// js/settings-ui.local-first.patch.js — the two files that build the
-// Settings sidebar and inject the "Switch account" row into it — were
-// never in CORE_STATIC_ASSETS or NETWORK_FIRST_PATTERNS. Both are plain
-// .js requests, so they always fell through to staticAsset(): cache-first,
-// reused as-is for up to CACHE_MAX_AGE (7 days) before the network is even
-// checked. Any browser/PWA that already had a service worker installed
-// before "Add visible two-account switcher to Settings" shipped keeps
-// serving its old cached copy of settings-ui.js (whose buildSettingsMenu()
-// wipes #settingsMenu and rebuilds it from a hardcoded list that predates
-// the switcher) and/or the old settings-ui.local-first.patch.js, so the
-// button that injects/re-injects "Switch account" never runs — exactly the
-// same class of bug called out above for message-client.js/api.request.js.
-// Added both to NETWORK_FIRST_PATTERNS and bumped CACHE_NAME/SW_VERSION so
-// already-installed clients get the fix immediately instead of waiting out
-// the 7-day max age.
-// FIX (GROUP-PLACEHOLDER-REVERT): group-os.js and group-os-integration.js
-// (the group sub-panel renderer — tasks/polls/notes/events/split-expenses)
-// live under /group-os/ and are plain .js files, so with no entry of their
-// own here they fell through to STATIC_PATTERNS -> staticAsset(), which is
-// cache-first and never revalidates in the background while the cached
-// copy is under CACHE_MAX_AGE (7 days) — see staticAsset() below, it just
-// returns the cached response with no fetch at all when fresh-enough.
-// Net effect: after any deploy that fixes a group-os bug, browsers with an
-// existing cache entry kept serving the pre-fix copy for up to a week —
-// the exact "fixed, then it's back" pattern reported for the Groups tab.
-// Adding both files here forces network-first (always fetch, cache only
-// as an offline fallback) the same way group-ui.js/group-core-*.js already
-// are a few lines down. Bumped SW_VERSION/CACHE_NAME so existing clients
-// pick this up immediately instead of only after their cache ages out.
-const SW_VERSION = '19.15.0';
-const CACHE_NAME = 'nexopa-static-v38';
+// Runtime cache boundary update: app.cache.unified.js now owns account-scoped
+// IndexedDB access, so it must not be served from an older service-worker cache.
+// Bump both identifiers whenever this runtime boundary changes.
+const SW_VERSION = '19.16.0';
+const CACHE_NAME = 'nexopa-static-v39';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -102,7 +20,7 @@ const CORE_STATIC_ASSETS = [
   '/calls-ui.js','/calls.css','/callSession.manager.js','/callRetry.engine.js','/localStore.calls.js',
   '/js/api.core.js','/js/api.request.js','/js/api.auth.js','/js/api.messages.js',
   '/js/app.core.bootstrap.js','/js/app.core.session.js','/js/app.core.ui.js','/js/app.ui.auth.js',
-  '/js/app.cache.js','/js/authStorage.js','/js/app.offline.queue.js','/js/auth.session.manager.js',
+  '/js/app.cache.js','/js/app.cache.unified.js','/js/authStorage.js','/js/app.offline.queue.js','/js/auth.session.manager.js',
   '/js/app.runtime.authority.js','/js/auth.account.limit.js','/js/app.offline.bootstrap.js',
   '/friend.css','/css/suppress-webgl.css'
 ];
@@ -113,11 +31,6 @@ const NETWORK_FIRST_PATTERNS = [
   /\/js\/e2e-encryption\.js/i,
   /\/js\/e2e-session-init\.js/i,
   /\/js\/api\.request\.js/i,
-  // js/double-ratchet.js was deleted (obsolete private-message Double
-  // Ratchet generation); replaced this dead pattern with the two files that
-  // are now the actual canonical private-message crypto core, so a stale
-  // service-worker cache can't silently serve an old copy of them after a
-  // deploy — the same class of bug this audit exists to prevent.
   /\/js\/message-e2e-core\.js/i,
   /\/js\/e2e-identity-core\.js/i,
   /\/js\/api\.auth\.js/i,
@@ -125,6 +38,7 @@ const NETWORK_FIRST_PATTERNS = [
   /\/js\/app\.core\.bootstrap\.js/i,
   /\/js\/auth\.session\.manager\.js/i,
   /\/js\/authStorage\.js/i,
+  /\/js\/app\.cache\.unified\.js/i,
   /\/js\/app\.ui\.auth\.js/i,
   /\/js\/app\.realtime\.socket\.js/i,
   /\/js\/app\.runtime\.authority\.js/i,
