@@ -40,20 +40,13 @@
         catch (_) { return false; }
     }
 
-    function canRegisterNewAccount() {
-        return getAuthAccounts().length < MAX_ACCOUNTS;
-    }
+    function canRegisterNewAccount() { return getAuthAccounts().length < MAX_ACCOUNTS; }
 
     function registerDeviceAccount(userId, email, username) {
         const accounts = getAuthAccounts();
         const existing = accounts.find(acc => String(acc?.userId) === String(userId) || (email && acc?.email === email));
-        if (existing) {
-            renderLoginAccountSwitcher();
-            return { success: true, existing: true };
-        }
-        if (!canRegisterNewAccount()) {
-            return { success: false, error: `Maximum ${MAX_ACCOUNTS} accounts per device. Remove an existing saved account before adding another account.` };
-        }
+        if (existing) { renderLoginAccountSwitcher(); return { success: true, existing: true }; }
+        if (!canRegisterNewAccount()) return { success: false, error: `Maximum ${MAX_ACCOUNTS} accounts per device. Remove an existing saved account before adding another account.` };
         renderLoginAccountSwitcher();
         return { success: true };
     }
@@ -62,13 +55,9 @@
         try {
             if (window.AuthStorage?.removeSavedAccount) {
                 const result = window.AuthStorage.removeSavedAccount(userId);
-                if (result?.success) {
-                    renderLoginAccountSwitcher();
-                    return true;
-                }
+                if (result?.success) { renderLoginAccountSwitcher(); return true; }
             }
         } catch (_) {}
-
         let removed = false;
         try {
             const accounts = parse(localStorage.getItem(AUTH_STORAGE_KEY), []);
@@ -82,9 +71,7 @@
             if (next.length !== accounts.length) removed = true;
             localStorage.setItem(STORAGE_KEY, JSON.stringify(next.slice(0, MAX_ACCOUNTS)));
         } catch (_) {}
-        if (removed) {
-            try { window.dispatchEvent(new CustomEvent('auth:saved-account:removed', { detail: { userId } })); } catch (_) {}
-        }
+        if (removed) { try { window.dispatchEvent(new CustomEvent('auth:saved-account:removed', { detail: { userId } })); } catch (_) {} }
         renderLoginAccountSwitcher();
         return removed;
     }
@@ -93,9 +80,7 @@
         try {
             if (window.AuthStorage?.switchAccount) {
                 const result = window.AuthStorage.switchAccount(userId);
-                if (result?.success) {
-                    window.dispatchEvent(new CustomEvent('auth:saved-account:switched', { detail: result }));
-                }
+                if (result?.success) window.dispatchEvent(new CustomEvent('auth:saved-account:switched', { detail: result }));
                 return result;
             }
         } catch (error) { return { success: false, error: error.message }; }
@@ -112,13 +97,8 @@
         const panel = document.getElementById('authPanel');
         if (!panel) return;
         showAuthPanel();
-
         const accounts = getAuthAccounts();
         let switcher = document.getElementById('saved-account-switcher');
-
-        // index.html uses .login-container/.register-container/.forgot-container
-        // rather than the old id-based selectors. Hide those actual forms while
-        // saved accounts exist so the login page presents the account chooser.
         const normalForms = panel.querySelectorAll('.login-container, .register-container, .forgot-container');
 
         if (accounts.length === 0) {
@@ -156,33 +136,26 @@
             </div>
             <div style="text-align:center;margin-top:18px;font-size:12px;color:var(--text-secondary,#777);">Remove a saved account in Settings to make room for another account.</div>
         `;
-
-        switcher.querySelectorAll('.saved-account-login-item').forEach(button => {
-            button.addEventListener('click', () => switchSavedAccount(button.dataset.userId));
-        });
+        switcher.querySelectorAll('.saved-account-login-item').forEach(button => button.addEventListener('click', () => switchSavedAccount(button.dataset.userId)));
     }
 
-    window.AccountLimit = {
-        canRegisterNewAccount,
-        registerDeviceAccount,
-        removeDeviceAccount,
-        getDeviceAccounts,
-        saveDeviceAccounts,
-        switchSavedAccount,
-        renderLoginAccountSwitcher,
-        MAX_ACCOUNTS
-    };
+    window.AccountLimit = { canRegisterNewAccount, registerDeviceAccount, removeDeviceAccount, getDeviceAccounts, saveDeviceAccounts, switchSavedAccount, renderLoginAccountSwitcher, MAX_ACCOUNTS };
 
     function bootLoginSwitcher() {
         if (window.top !== window.self) return;
         renderLoginAccountSwitcher();
-        window.addEventListener('storage', event => {
-            if (event.key === AUTH_STORAGE_KEY || event.key === STORAGE_KEY) renderLoginAccountSwitcher();
-        });
+        window.addEventListener('storage', event => { if (event.key === AUTH_STORAGE_KEY || event.key === STORAGE_KEY) renderLoginAccountSwitcher(); });
         window.addEventListener('auth:saved-account:removed', renderLoginAccountSwitcher);
         window.addEventListener('auth:account:switched', () => setTimeout(renderLoginAccountSwitcher, 0));
         window.addEventListener('auth-login-success', () => setTimeout(renderLoginAccountSwitcher, 0));
         window.addEventListener('auth-register-success', () => setTimeout(renderLoginAccountSwitcher, 0));
+        window.addEventListener('auth:account-limit-reached', () => {
+            // The authentication request may already have succeeded server-side,
+            // but a third distinct account is never admitted as a device session.
+            try { window.AuthStorage?.clearAuth?.(); } catch (_) {}
+            try { alert(`This device already has ${MAX_ACCOUNTS} saved accounts. Remove one in Settings before logging in with another account.`); } catch (_) {}
+            try { window.location.replace('/index.html?accountLimit=1'); } catch (_) { window.location.href = '/index.html?accountLimit=1'; }
+        });
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bootLoginSwitcher, { once: true });
