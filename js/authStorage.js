@@ -1,5 +1,5 @@
 // authStorage.js - Persistent Authentication Storage
-// VERSION: 1.4.2 - Persistent two-account switching + explicit saved-account removal + non-expiring sessions
+// VERSION: 1.4.3 - Persistent two-account switching + explicit saved-account removal + non-expiring sessions
 (function () {
     'use strict';
 
@@ -9,10 +9,50 @@
     const LEGACY_USER_KEYS = ['currentUser','user','nexopa_user'];
     const ACCOUNT_LIST_KEY = 'kynecta_saved_accounts';
     const MAX_ACCOUNTS = 2;
+    const OFF_SESSION_FALLBACK_DAYS = 365000;
 
     function safeParse(raw, fallback = null) { try { return raw ? JSON.parse(raw) : fallback; } catch (_) { return fallback; } }
     function withAuthMutation(fn) { const previous = window.__allowAuthStorageMutation__; window.__allowAuthStorageMutation__ = true; try { return fn(); } finally { window.__allowAuthStorageMutation__ = previous === true; } }
     function getStoredUserId() { const auth = safeParse(localStorage.getItem(AUTH_STORAGE_KEY)); return auth?.user?.id ?? auth?.user?.userId ?? auth?.user?.uid ?? auth?.user?._id ?? null; }
+
+    function decodeJwtPayload(token) {
+        try {
+            if (!token || typeof token !== 'string') return null;
+            const parts = token.split('.');
+            if (parts.length !== 3) return null;
+            const normalized = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+            const padded = normalized + '='.repeat((4 - normalized.length % 4) % 4);
+            return JSON.parse(atob(padded));
+        } catch (_) { return null; }
+    }
+
+    // Existing auth.session.manager.js treats a zero sessionTimeoutMs as its
+    // legacy 30-day fallback. The backend's explicit Off mode intentionally
+    // uses sessionTimeoutMs=0 and a JWT with no exp, so keep the existing
+    // session manager's fallback effectively disabled without replacing its
+    // original file architecture.
+    function propagateOffSessionPolicy(token) {
+        const payload = decodeJwtPayload(token);
+        if (!payload || Number(payload.sessionTimeoutMs) !== 0) return false;
+        const apply = () => {
+            try {
+                if (window.SessionManager?.setSessionDurationDays) {
+                    window.SessionManager.setSessionDurationDays(OFF_SESSION_FALLBACK_DAYS);
+                    return true;
+                }
+            } catch (_) {}
+            return false;
+        };
+        if (apply()) return true;
+        try {
+            let attempts = 0;
+            const timer = setInterval(() => {
+                attempts += 1;
+                if (apply() || attempts >= 40) clearInterval(timer);
+            }, 250);
+        } catch (_) {}
+        return true;
+    }
 
     const NEVER_WIPE_INDEXEDDB = new Set(['nexopa_message_lifecycle_v1']);
     const WIPE_ALLOWLIST = new Set(['nexopa_theme','nexopa_nav_state',ACCOUNT_LIST_KEY]);
@@ -66,15 +106,13 @@
             lastUsed: Date.now()
         };
         const index = accounts.findIndex(a => String(a?.userId ?? a?.id ?? '') === id);
-        if (index >= 0) {
-            accounts[index] = { ...accounts[index], ...normalized };
-        } else {
-            if (accounts.length >= MAX_ACCOUNTS) {
-                return { success:false, error:`This device already has ${MAX_ACCOUNTS} saved accounts` };
-            }
+        if (index >= 0) accounts[index] = { ...accounts[index], ...normalized };
+        else {
+            if (accounts.length >= MAX_ACCOUNTS) return { success:false, error:`This device already has ${MAX_ACCOUNTS} saved accounts` };
             accounts.push(normalized);
         }
         withAuthMutation(() => localStorage.setItem(ACCOUNT_LIST_KEY, JSON.stringify(accounts.slice(0, MAX_ACCOUNTS))));
+        propagateOffSessionPolicy(data.token);
         return { success:true, accounts:accounts.slice(0, MAX_ACCOUNTS) };
     }
 
@@ -84,14 +122,11 @@
         const accounts = getSavedAccounts();
         const next = accounts.filter(account => String(account?.userId ?? account?.id ?? '') !== targetId);
         if (next.length === accounts.length) return { success:false, error:'Saved account not found', removed:false, accounts:accounts.slice(0, MAX_ACCOUNTS) };
-
         try {
             withAuthMutation(() => localStorage.setItem(ACCOUNT_LIST_KEY, JSON.stringify(next.slice(0, MAX_ACCOUNTS))));
             try {
                 const legacy = safeParse(localStorage.getItem('kynecta_device_accounts'), []);
-                if (Array.isArray(legacy)) {
-                    localStorage.setItem('kynecta_device_accounts', JSON.stringify(legacy.filter(account => String(account?.userId ?? account?.id ?? '') !== targetId).slice(0, MAX_ACCOUNTS)));
-                }
+                if (Array.isArray(legacy)) localStorage.setItem('kynecta_device_accounts', JSON.stringify(legacy.filter(account => String(account?.userId ?? account?.id ?? '') !== targetId).slice(0, MAX_ACCOUNTS)));
             } catch (_) {}
             try { window.dispatchEvent(new CustomEvent('auth:saved-account:removed', { detail:{ userId } })); } catch (_) {}
             return { success:true, removed:true, accounts:next.slice(0, MAX_ACCOUNTS) };
@@ -107,13 +142,14 @@
             const previousUserId = getStoredUserId();
             if (incomingUserId && previousUserId && String(previousUserId) !== String(incomingUserId)) wipePreviousAccountData();
             const expiresAt = Object.prototype.hasOwnProperty.call(data, 'expiresAt') ? data.expiresAt : (Date.now()+30*24*60*60*1000);
-            const payload = { token:data.token, refreshToken:data.refreshToken || null, user:data.user || null, expiresAt, issuedAt:data.issuedAt || Date.now(), savedAt:new Date().toISOString(), _version:'1.4.2' };
+            const payload = { token:data.token, refreshToken:data.refreshToken || null, user:data.user || null, expiresAt, issuedAt:data.issuedAt || Date.now(), savedAt:new Date().toISOString(), _version:'1.4.3' };
             withAuthMutation(() => {
                 localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(payload));
                 LEGACY_TOKEN_KEYS.forEach(k => { try { localStorage.setItem(k,payload.token); } catch (_) {} });
                 LEGACY_USER_KEYS.forEach(k => { try { localStorage.setItem(k,JSON.stringify(payload.user)); } catch (_) {} });
                 localStorage.setItem(LOGIN_STATE_KEY,'true');
             });
+            propagateOffSessionPolicy(payload.token);
             const registered = registerAccount(payload);
             if (!registered.success && registered.error?.includes('already has')) {
                 const existing = getSavedAccounts();
@@ -127,10 +163,11 @@
     function getAuth() {
         try {
             const parsed = safeParse(localStorage.getItem(AUTH_STORAGE_KEY));
-            if (parsed?.token) { if (!window.currentUser && parsed.user) window.currentUser=parsed.user; return parsed; }
+            if (parsed?.token) { if (!window.currentUser && parsed.user) window.currentUser=parsed.user; propagateOffSessionPolicy(parsed.token); return parsed; }
             const token = LEGACY_TOKEN_KEYS.map(k => { try { return localStorage.getItem(k); } catch (_) { return null; } }).find(Boolean);
             if (!token) return null;
             const user = safeParse(LEGACY_USER_KEYS.map(k => { try { return localStorage.getItem(k); } catch (_) { return null; } }).find(Boolean));
+            propagateOffSessionPolicy(token);
             return { token, refreshToken:null, user, expiresAt:null, issuedAt:null, _fallback:true };
         } catch (_) { return null; }
     }
@@ -162,13 +199,14 @@
         try {
             if (currentId != null) wipePreviousAccountData();
             const user = { id:target.userId, email:target.email, username:target.username, displayName:target.displayName || target.username, avatar:target.avatar };
-            const payload = { token:target.token, refreshToken:target.refreshToken || null, user, expiresAt:Object.prototype.hasOwnProperty.call(target,'expiresAt') ? target.expiresAt : null, issuedAt:Date.now(), savedAt:new Date().toISOString(), _version:'1.4.2' };
+            const payload = { token:target.token, refreshToken:target.refreshToken || null, user, expiresAt:Object.prototype.hasOwnProperty.call(target,'expiresAt') ? target.expiresAt : null, issuedAt:Date.now(), savedAt:new Date().toISOString(), _version:'1.4.3' };
             withAuthMutation(() => {
                 localStorage.setItem(AUTH_STORAGE_KEY,JSON.stringify(payload));
                 LEGACY_TOKEN_KEYS.forEach(k=>{try{localStorage.setItem(k,target.token);}catch(_){}});
                 LEGACY_USER_KEYS.forEach(k=>{try{localStorage.setItem(k,JSON.stringify(user));}catch(_){}});
                 localStorage.setItem(LOGIN_STATE_KEY,'true');
             });
+            propagateOffSessionPolicy(target.token);
             window.currentUser=user;
             window.__userToken=target.token;
             window.__accessToken=target.token;
@@ -194,4 +232,5 @@
 
     window.AuthStorage = { saveAuth,saveSession,getAuth,getSession,clearAuth,hasValidAuth,updateAuthTokens,getToken,getUser,isValidSession,wipeAccountData:wipePreviousAccountData,switchAccount,getSavedAccounts:getSavedAccountList,registerAccount,removeSavedAccount,getMaxAccounts:()=>MAX_ACCOUNTS };
     window.api=window.api||{}; window.api.storage=window.AuthStorage;
+    try { propagateOffSessionPolicy(safeParse(localStorage.getItem(AUTH_STORAGE_KEY))?.token || null); } catch (_) {}
 })();
