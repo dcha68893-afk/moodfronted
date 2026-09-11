@@ -18,6 +18,17 @@
     function getStoredUserId() { const auth = safeParse(localStorage.getItem(AUTH_STORAGE_KEY)); return auth?.user?.id ?? auth?.user?.userId ?? auth?.user?.uid ?? auth?.user?._id ?? null; }
     function getLastActiveAccountId() { try { return localStorage.getItem(LAST_ACTIVE_ACCOUNT_KEY) || null; } catch (_) { return null; } }
     function setLastActiveAccountId(id) { try { if (id == null || id === '') localStorage.removeItem(LAST_ACTIVE_ACCOUNT_KEY); else localStorage.setItem(LAST_ACTIVE_ACCOUNT_KEY, String(id)); } catch (_) {} }
+    // FIX-LOGIN-BOUNCE: this helper was dropped in the last edit while still
+    // being called from saveAuth()/registerAccount()/removeSavedAccount()/
+    // switchAccount() below, so every one of those threw a silent
+    // ReferenceError (caught by their own try/catch) and failed without
+    // ever persisting to AUTH_STORAGE_KEY. saveAuth() in particular returned
+    // false on every login with nothing written to localStorage, while the
+    // caller (app.ui.auth.js) redirects to chat.html regardless of that
+    // return value — so chat.html booted with zero session, emitted
+    // 'missing-session', and force-logged-out once render completed. This
+    // restores the function exactly as it existed before it was lost.
+    function getSavedAccounts(){const accounts=safeParse(localStorage.getItem(ACCOUNT_LIST_KEY),[]);return Array.isArray(accounts)?accounts:[];}
 
     function decodeJwtPayload(token) {
         try { if (!token || typeof token !== 'string') return null; const parts=token.split('.'); if(parts.length!==3)return null; const normalized=parts[1].replace(/-/g,'+').replace(/_/g,'/'); const padded=normalized+'='.repeat((4-normalized.length%4)%4); return JSON.parse(atob(padded)); } catch (_) { return null; }
