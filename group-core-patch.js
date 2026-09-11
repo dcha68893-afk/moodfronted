@@ -1,6 +1,15 @@
 // group-core-patch.js — lifecycle + group rendering stability guards
-import { LifecycleState } from './group-core-bootstrap.js';
+import { LifecycleState, GroupCore } from './group-core-bootstrap.js';
 import './group-core-patch.legacy.js';
+
+// FIX-GROUP-CORE-GLOBAL: groupEncryption.client.js runs as a classic script and
+// cannot see an ES-module export through window automatically. Publish the SAME
+// GroupCore object used by the module graph so the encryption boundary and UI
+// operate on one canonical instance instead of waiting forever for a nonexistent
+// window.GroupCore.
+if (GroupCore && !window.GroupCore) {
+  window.GroupCore = GroupCore;
+}
 
 // Once ACTIVE, redundant parent/session handshakes must not force the iframe
 // back into WAIT_PARENT. Account switching has its own explicit auth event.
@@ -10,7 +19,7 @@ if (LifecycleState && typeof LifecycleState.reenterWaitParent === 'function') {
   };
 }
 
-const GC = window.GroupCore;
+const GC = GroupCore || window.GroupCore;
 if (GC) {
   // Never let a transient empty / incomplete / unauthorized server payload
   // erase a group list that is already visible from local cache. The next
