@@ -48,16 +48,11 @@
         const accounts = getAuthAccounts();
         const existing = accounts.find(acc => String(acc?.userId) === String(userId) || (email && acc?.email === email));
         if (existing) {
-            try {
-                const all = parse(localStorage.getItem(AUTH_STORAGE_KEY), []);
-                const index = all.findIndex(acc => String(acc?.userId) === String(userId));
-                if (index >= 0) { all[index].lastUsed = Date.now(); localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(all.slice(0, MAX_ACCOUNTS))); }
-            } catch (_) {}
             renderLoginAccountSwitcher();
             return { success: true, existing: true };
         }
         if (!canRegisterNewAccount()) {
-            return { success: false, error: `Maximum ${MAX_ACCOUNTS} accounts per device. Remove an existing saved account before adding another.` };
+            return { success: false, error: `Maximum ${MAX_ACCOUNTS} accounts per device. Remove an existing saved account before adding another account.` };
         }
         renderLoginAccountSwitcher();
         return { success: true };
@@ -97,10 +92,6 @@
     function switchSavedAccount(userId) {
         try {
             if (window.AuthStorage?.switchAccount) {
-                // AuthStorage owns the complete identity transition, including
-                // tearing down the old page and reloading the current document.
-                // Do not schedule a competing href/navigation here: that can race
-                // the reload and leave some modules booting against the old account.
                 const result = window.AuthStorage.switchAccount(userId);
                 if (result?.success) {
                     window.dispatchEvent(new CustomEvent('auth:saved-account:switched', { detail: result }));
@@ -111,22 +102,6 @@
         return { success: false, error: 'Account switching is unavailable' };
     }
 
-    function setNormalLoginVisibility(show) {
-        const loginForm = document.getElementById('login-form');
-        const registerContainer = document.getElementById('register-container');
-        const forgotContainer = document.getElementById('forgot-container');
-        const authTabs = document.querySelector('.auth-tabs');
-        if (loginForm) loginForm.style.display = show ? '' : 'none';
-        if (authTabs) authTabs.style.display = show ? '' : 'none';
-        if (show) {
-            if (registerContainer) registerContainer.style.display = '';
-            if (forgotContainer) forgotContainer.style.display = '';
-        } else {
-            if (registerContainer) registerContainer.style.display = 'none';
-            if (forgotContainer) forgotContainer.style.display = 'none';
-        }
-    }
-
     function showAuthPanel() {
         const panel = document.getElementById('authPanel');
         if (panel) panel.classList.add('show-auth');
@@ -134,25 +109,32 @@
 
     function renderLoginAccountSwitcher() {
         if (window.top !== window.self) return;
-        const container = document.getElementById('login-container');
-        if (!container) return;
+        const panel = document.getElementById('authPanel');
+        if (!panel) return;
         showAuthPanel();
+
         const accounts = getAuthAccounts();
         let switcher = document.getElementById('saved-account-switcher');
 
+        // index.html uses .login-container/.register-container/.forgot-container
+        // rather than the old id-based selectors. Hide those actual forms while
+        // saved accounts exist so the login page presents the account chooser.
+        const normalForms = panel.querySelectorAll('.login-container, .register-container, .forgot-container');
+
         if (accounts.length === 0) {
-            setNormalLoginVisibility(true);
+            normalForms.forEach(el => { el.style.display = ''; });
             if (switcher) switcher.remove();
             return;
         }
 
-        setNormalLoginVisibility(false);
+        normalForms.forEach(el => { el.style.display = 'none'; });
         if (!switcher) {
             switcher = document.createElement('div');
             switcher.id = 'saved-account-switcher';
             switcher.className = 'auth-form';
             switcher.style.cssText = 'display:block;width:100%;';
-            container.appendChild(switcher);
+            const content = panel.querySelector('.auth-content') || panel.querySelector('.auth-panel-content') || panel;
+            content.prepend(switcher);
         }
 
         switcher.innerHTML = `
@@ -199,6 +181,8 @@
         });
         window.addEventListener('auth:saved-account:removed', renderLoginAccountSwitcher);
         window.addEventListener('auth:account:switched', () => setTimeout(renderLoginAccountSwitcher, 0));
+        window.addEventListener('auth-login-success', () => setTimeout(renderLoginAccountSwitcher, 0));
+        window.addEventListener('auth-register-success', () => setTimeout(renderLoginAccountSwitcher, 0));
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bootLoginSwitcher, { once: true });
