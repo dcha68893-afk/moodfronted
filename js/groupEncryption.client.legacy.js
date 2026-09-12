@@ -394,6 +394,50 @@
 
         const ownerUserId = message.senderId;
         const wantedGen = message.metadata.keyGeneration;
+
+        // FIX-ROOT-CAUSE-GROUP-SELF-DECRYPT: a Sender Key is only ever
+        // distributed to OTHER members — see _generateAndDistribute's
+        // `others = memberUserIds.filter(id => id !== myUserId)` above.
+        // The owner never encrypts a copy of their own key for
+        // themselves, since they already hold it locally in
+        // myKey/_liveKeys. Every path below this unconditionally searched
+        // _liveReceivedKeys / the received-key cache, which can NEVER
+        // contain an entry for ownerUserId === myUserId, so re-decrypting
+        // our own sent message (on group reload, or via the realtime
+        // echo right after sending) always fell through to a failure
+        // placeholder even though the correct key was sitting in the
+        // myKey cache the whole time. Use that cache directly first when
+        // the message is our own.
+        const myUserId = global.GroupCore?.currentUser?.id || global.currentUserId;
+        if (myUserId != null && String(ownerUserId) === String(myUserId)) {
+            let myEntry = _liveKeys.get(_liveKeyCacheKey(groupId, myUserId));
+            if (!myEntry || myEntry.gen !== wantedGen) {
+                const cache = _loadCache(groupId);
+                if (cache.myKey && cache.myKey.gen === wantedGen) {
+                    try {
+                        const rawB64 = await E2E().unwrapFromLocalStorage(cache.myKey.rawB64Wrapped);
+                        const key = await E2E().importSenderKey(rawB64);
+                        myEntry = { key, gen: wantedGen };
+                        _liveKeys.set(_liveKeyCacheKey(groupId, myUserId), myEntry);
+                    } catch (_) { myEntry = null; }
+                } else {
+                    myEntry = null;
+                }
+            }
+            if (myEntry) {
+                try {
+                    message.content = await E2E().decryptGroupMessage(message.content, myEntry.key);
+                } catch (e) {
+                    message.content = '[Decryption failed]';
+                }
+                return message;
+            }
+            // No local copy of that exact generation (e.g. it rotated on
+            // another device) — fall through to the shared received-key
+            // path below, which will correctly report unavailable rather
+            // than silently mis-decrypting.
+        }
+
         const cacheKey = _liveReceivedKeyCacheKey(groupId, ownerUserId, wantedGen);
 
         let entry = _liveReceivedKeys.get(cacheKey);

@@ -6,7 +6,28 @@
   function sessionPassword() { try { return sessionStorage.getItem('kyn_e2e_pw_session') || null; } catch (_) { return null; } }
   function sessionLegacyPassword() { try { return sessionStorage.getItem('kyn_e2e_pw_legacy_session') || null; } catch (_) { return null; } }
   async function prepareLegacyIdentity() {
-    await loadScript('/js/e2e-encryption.js'); const legacy = global.KynectaE2E; if (!legacy || typeof legacy.init !== 'function') return false;
+    // FIX-ROOT-CAUSE-E2E-DOUBLE-LOAD: every page that reaches this
+    // function (group.html, message.html, chat.html) already loads
+    // js/e2e-encryption.js up front via a plain <script src="js/e2e-
+    // encryption.js"> tag with no data-e2e-core attribute, so
+    // loadScript()'s `document.querySelector('script[data-e2e-
+    // core="/js/e2e-encryption.js"]')` dedup check never matched it (a
+    // relative src with no leading slash and no data attribute vs. the
+    // absolute-path-with-attribute tag this function injects) — it
+    // unconditionally appended a SECOND <script> tag and re-ran the
+    // entire file, replacing window.KynectaE2E with a brand-new,
+    // freshly-uninitialized object/closure (_enabled reset to false)
+    // every single page load, discarding whatever the first, already-
+    // running instance had already set up or was in the middle of doing.
+    // Only inject the script here for a page that genuinely hasn't
+    // loaded it yet (e.g. reached this module via some other entry
+    // point in the future); if window.KynectaE2E is already present
+    // with a real init() on it, reuse that instance instead of
+    // clobbering it.
+    if (!global.KynectaE2E || typeof global.KynectaE2E.init !== 'function') {
+      await loadScript('/js/e2e-encryption.js');
+    }
+    const legacy = global.KynectaE2E; if (!legacy || typeof legacy.init !== 'function') return false;
     const password = sessionPassword(); if (!password) return false;
     try { const ok = await legacy.init(password, sessionLegacyPassword() || undefined); return !!(ok && legacy.enabled && typeof legacy.getMyIdentityPrivateKey === 'function'); }
     catch (err) { console.warn('[MessageE2E] legacy identity recovery unavailable:', err?.message || err); return false; }
