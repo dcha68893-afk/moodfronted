@@ -2683,15 +2683,42 @@ function replyToMessage(messageId, senderName) {
     } catch (error) {}
 }
 
-function deleteMessage(messageId) {
+// ROOT-CAUSE FIX (GROUP-DELETE-NEVER-REACHES-SERVER): this only ever
+// removed the bubble's DOM element from the current view — it never called
+// the backend at all (DELETE /groups/:groupId/messages/:messageId already
+// exists and works server-side), so the message was never actually deleted:
+// it just vanished from THIS render until the next reload/relogin re-fetched
+// the untouched row from the server and it reappeared, exactly the reported
+// "deleted only on device, not on server" symptom. Now actually calls the
+// endpoint and, on success, mirrors the same cleanup the live
+// 'group:message:deleted' socket handler already does elsewhere in this file
+// (strip from GroupCore.groupMessages, the SafeStorage cache, and
+// LocalGroupStore) so a delete taken by this same tab is reflected
+// everywhere immediately, not just in the DOM.
+async function deleteMessage(messageId) {
     try {
-        if (confirm('Are you sure you want to delete this message?')) {
-            const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
-            if (messageElement) {
-                messageElement.remove();
-            }
+        if (!confirm('Are you sure you want to delete this message?')) return;
+        const groupId = currentChatGroup?.id;
+        if (!groupId) return;
+        const response = await secureApiCall(`/groups/${groupId}/messages/${messageId}`, { method: 'DELETE' });
+        if (!response || response.success !== true) {
+            try { window.showToast ? window.showToast(response?.message || 'Failed to delete message', 'error') : alert(response?.message || 'Failed to delete message'); } catch (_) {}
+            return;
         }
-    } catch (error) {}
+        const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
+        if (messageElement) messageElement.remove();
+        if (GroupCore && GroupCore.groupMessages && GroupCore.groupMessages[groupId]) {
+            GroupCore.groupMessages[groupId] = GroupCore.groupMessages[groupId].filter(m => String(m.id) !== String(messageId));
+            try { SafeStorage.setItem(`group_messages_${groupId}`, GroupCore.groupMessages[groupId]); } catch (_) {}
+        }
+        try {
+            if (window.LocalGroupStore && typeof window.LocalGroupStore.deleteMessage === 'function') {
+                window.LocalGroupStore.deleteMessage(messageId).catch(function () {});
+            }
+        } catch (_) {}
+    } catch (error) {
+        try { window.showToast ? window.showToast('Failed to delete message', 'error') : alert('Failed to delete message'); } catch (_) {}
+    }
 }
 
 let typingTimeout;

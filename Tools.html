@@ -1914,27 +1914,13 @@
                             <label for="physTitle">Product Name *</label>
                             <input type="text" class="text-input" id="physTitle" placeholder="e.g., Leather Office Chair – Adjustable Height" maxlength="120">
                         </div>
-                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-                            <div class="input-group">
-                                <label for="physBrand">Brand</label>
-                                <!-- FIX (category-specific brands, item 2 of the Create
-                                     Listing spec): was a free-text input showing the same
-                                     placeholder for every category. Now a <select>,
-                                     repopulated by _physCategoryChanged() from
-                                     window._JM_BRANDS (Tool-ui.js) with the brand list
-                                     for whichever category is selected — Phones gets
-                                     Samsung/Redmi/Tecno/etc., Fashion gets Nike/Adidas/etc. -->
-                                <select class="text-input" id="physBrand">
-                                    <option value="">Select category first…</option>
-                                </select>
-                            </div>
-                            <div class="input-group">
-                                <label for="physSku">SKU / Product Code</label>
-                                <input type="text" class="text-input" id="physSku" placeholder="e.g., CH-001-BLK">
-                            </div>
-                        </div>
-
                         <!-- Category & Subcategory -->
+                        <!-- FIX (item: Brand should follow Category, not precede
+                             it — Brand's own <select> is populated FROM the
+                             chosen Category via _physCategoryChanged(), so
+                             showing it first made no sense: sellers saw an
+                             empty "Select category first…" Brand dropdown
+                             above a Category field they hadn't touched yet). -->
                         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
                             <div class="input-group">
                                 <label for="physCategory">Category *</label>
@@ -1967,6 +1953,25 @@
                                 <select class="text-input" id="physSubcategory" onchange="window._physSubcategoryChanged(this.value)">
                                     <option value="">Select category first…</option>
                                 </select>
+                            </div>
+                        </div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                            <div class="input-group">
+                                <label for="physBrand">Brand</label>
+                                <!-- FIX (category-specific brands, item 2 of the Create
+                                     Listing spec): was a free-text input showing the same
+                                     placeholder for every category. Now a <select>,
+                                     repopulated by _physCategoryChanged() from
+                                     window._JM_BRANDS (Tool-ui.js) with the brand list
+                                     for whichever category is selected — Phones gets
+                                     Samsung/Redmi/Tecno/etc., Fashion gets Nike/Adidas/etc. -->
+                                <select class="text-input" id="physBrand">
+                                    <option value="">Select category first…</option>
+                                </select>
+                            </div>
+                            <div class="input-group">
+                                <label for="physSku">SKU / Product Code</label>
+                                <input type="text" class="text-input" id="physSku" placeholder="e.g., CH-001-BLK">
                             </div>
                         </div>
 

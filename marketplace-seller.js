@@ -175,7 +175,7 @@ window._physCategoryChanged = cat => {
     if(g && c){
         g.style.display=mats.length?'block':'none';
         _phys.materials=[];
-        c.innerHTML=mats.map(m=>`<span onclick="this.classList.toggle('on');_phys.materials=Array.from(document.querySelectorAll('#physMaterialOptions .on')).map(e=>e.textContent)" style="display:inline-flex;align-items:center;background:#f3f4f6;border:1.5px solid #e5e7eb;border-radius:20px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;margin:3px;transition:all .15s" class="">${m}</span>`).join('');
+        c.innerHTML=mats.map(m=>`<span onclick="const on=this.classList.toggle('on');this.style.background=on?'#111':'#f3f4f6';this.style.color=on?'#fff':'#111';this.style.borderColor=on?'#111':'#e5e7eb';_phys.materials=Array.from(document.querySelectorAll('#physMaterialOptions .on')).map(e=>e.textContent)" style="display:inline-flex;align-items:center;background:#f3f4f6;border:1.5px solid #e5e7eb;border-radius:20px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;margin:3px;transition:all .15s" class="">${m}</span>`).join('');
     }
     // Subcategory <select> — every category, driven by window._JM_CATS
     const subSel = document.getElementById('physSubcategory');
