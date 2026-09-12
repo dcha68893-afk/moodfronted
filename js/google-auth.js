@@ -3,10 +3,12 @@
     'use strict';
 
     const GOOGLE_CLIENT_ID = '523213927690-volo0p7mbbqjucrksv8vasfvcqqicall.apps.googleusercontent.com';
+    const CURRENT_API_ORIGIN = 'https://nexorah-xnv6.onrender.com';
 
     function getApiOrigin() {
-        if (typeof window.__getApiOrigin === 'function') return window.__getApiOrigin();
-        return window.location.hostname === 'localhost' ? 'http://localhost:4000' : 'https://noxopa.onrender.com';
+        // Google authentication must use the current backend directly. Do not
+        // inherit a stale API origin from an older global config module.
+        return CURRENT_API_ORIGIN;
     }
 
     function showError(message) {
@@ -55,7 +57,6 @@
 
             if (!token || !user.id) return showError('Google sign-in returned an incomplete account. Please try again.');
 
-            // Enforce the same two-account device limit before persisting a new identity.
             if (window.AccountLimit) {
                 const result = window.AccountLimit.registerDeviceAccount(user.id, user.email, user.username || user.displayName);
                 if (!result.success) return showError(result.error || 'This device already has two saved accounts.');
@@ -157,9 +158,6 @@
         window.addEventListener('resize', schedule);
         window.addEventListener('orientationchange', () => setTimeout(() => reRenderVisible(false), 300));
 
-        // ResizeObserver is intentionally width-only. GIS inserts an iframe and
-        // changes the container height during render; observing height caused
-        // render -> height change -> render -> blink loops on the login page.
         if (typeof ResizeObserver === 'function') {
             const ro = new ResizeObserver(entries => {
                 let changed = false;
