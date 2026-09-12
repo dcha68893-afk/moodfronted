@@ -3,11 +3,30 @@
  *
  * Audit findings replaced:
  *  - kyn_pinned_chats_v1 localStorage key used in messages-ui.js (lines 4310, 4497)
- *    → now syncs with PUT /api/messaging/chats/:chatId/pin on server
+ *    → now syncs with GET /api/conversations/pinned (chat-pin WRITE still has
+ *    no backend — see FIX-404 note on pinChat() below)
  *  - isMuted stored in localStorage only
- *    → now syncs with PUT /api/messaging/chats/:chatId/mute on server
+ *    → now syncs with PUT/DELETE /api/messages/:chatId/mute on server
  *  - Starred messages only in IndexedDB
- *    → now syncs with POST /api/messaging/messages/:id/star
+ *    → now syncs with POST/DELETE /api/messages/:id/star on server
+ *
+ * FIX-404 (2026-09): every path in this file originally pointed at
+ * /api/messaging/..., which 404'd for everything — routes/index.js
+ * (backend repo) maps a 'messagingFeatures.js' router to that prefix, but
+ * that file was never created; nothing is mounted at /api/messaging at all.
+ * Star and mute DO have real backend implementations, just under a
+ * different prefix (/api/messages/..., in routes/messages.js) — those two
+ * are fixed below to point there instead, with their response shapes
+ * adjusted to match what those routes actually return.
+ *
+ * Everything else in this file (chat-pin WRITE, message-pin, scheduled
+ * messages, disappearing-message timer, in-chat search, @mention
+ * suggestions, message report) has NO backend implementation anywhere in
+ * routes/ — not just a wrong prefix. Those calls are left pointing at
+ * /api/messaging/... (so they'll still 404 exactly as before) rather than
+ * silently redirected to something that doesn't actually implement the
+ * feature. Each is commented below. Building that backend module is a
+ * separate, larger piece of work.
  *
  * The module patches window.messagesUI.pinChat() and window.messagesUI.muteChat()
  * to also call the server. It also seeds the local cache from the server on boot.
@@ -50,20 +69,27 @@
 
   // ── Bootstrap: load pinned + starred from server ──────────────────────────
   async function _bootstrap() {
-    // Pinned chats
-    const pinRes = await _apiFetch('GET', '/api/messaging/chats/pinned');
-    if (pinRes && pinRes.data && Array.isArray(pinRes.data.pinned)) {
-      pinRes.data.pinned.forEach(id => _pinnedSet.add(String(id)));
+    // Pinned chats. FIX-404: /api/messaging/chats/pinned never existed;
+    // /api/conversations/pinned is the real (currently stub-only, always
+    // empty) route. Response shape is { success, data: [...] } — data is
+    // the array directly here, not { pinned: [...] } like the old code
+    // assumed.
+    const pinRes = await _apiFetch('GET', '/api/conversations/pinned');
+    if (pinRes && Array.isArray(pinRes.data)) {
+      pinRes.data.forEach(id => _pinnedSet.add(String(id)));
       // Seed localStorage so existing messages-ui.js code that reads kyn_pinned_chats_v1 still works
       try {
-        localStorage.setItem('kyn_pinned_chats_v1', JSON.stringify([...pinRes.data.pinned]));
+        localStorage.setItem('kyn_pinned_chats_v1', JSON.stringify([...pinRes.data]));
       } catch (_) {}
     }
 
-    // Starred messages
-    const starRes = await _apiFetch('GET', '/api/messaging/messages/starred');
-    if (starRes && starRes.data && Array.isArray(starRes.data.starred)) {
-      starRes.data.starred.forEach(m => _starredSet.add(String(m.messageId)));
+    // Starred messages. FIX-404: /api/messaging/messages/starred never
+    // existed; /api/messages/starred is the real route. Response shape is
+    // { success, data: [...] } — data is the array of starred-message rows
+    // directly, not { starred: [...] } like the old code assumed.
+    const starRes = await _apiFetch('GET', '/api/messages/starred');
+    if (starRes && Array.isArray(starRes.data)) {
+      starRes.data.forEach(m => _starredSet.add(String(m.messageId)));
     }
 
     console.log(`[ChatSync] ✅ Loaded ${_pinnedSet.size} pinned chats, ${_starredSet.size} starred messages`);
@@ -81,7 +107,11 @@
       localStorage.setItem('kyn_pinned_chats_v1', JSON.stringify([..._pinnedSet]));
     } catch (_) {}
 
-    // Sync to server
+    // FIX-404 (unresolved): there is no backend route to persist a pin at
+    // all — GET /api/conversations/pinned above is a read-only stub. This
+    // call is left as-is (still 404s) until a real PUT /pin endpoint
+    // exists; pin state only survives locally via the localStorage write
+    // above, not across devices/reloads from the server.
     await _apiFetch('PUT', `/api/messaging/chats/${chatId}/pin`, { pinned });
 
     // Trigger UI refresh
@@ -106,8 +136,10 @@
 
     _mutedMap.set(cid, { muted, until: mutedUntil });
 
-    // Sync to server
-    await _apiFetch('PUT', `/api/messaging/chats/${chatId}/mute`, { muted, duration });
+    // FIX-404: /api/messaging/chats/:chatId/mute never existed;
+    // /api/messages/:chatId/mute is the real route (same PUT body shape:
+    // { muted, duration }, so no other change needed here).
+    await _apiFetch('PUT', `/api/messages/${chatId}/mute`, { muted, duration });
 
     window.messagesUI?.refreshChatsList?.();
     return muted;
@@ -128,12 +160,14 @@
     if (starred === undefined) starred = !_starredSet.has(String(messageId));
     const mid = String(messageId);
 
+    // FIX-404: /api/messaging/messages/:id/star never existed;
+    // /api/messages/:id/star is the real route.
     if (starred) {
       _starredSet.add(mid);
-      await _apiFetch('POST', `/api/messaging/messages/${messageId}/star`, {});
+      await _apiFetch('POST', `/api/messages/${messageId}/star`, {});
     } else {
       _starredSet.delete(mid);
-      await _apiFetch('DELETE', `/api/messaging/messages/${messageId}/star`, null);
+      await _apiFetch('DELETE', `/api/messages/${messageId}/star`, null);
     }
 
     // Dispatch event so UI can update star indicator
@@ -146,16 +180,24 @@
   }
 
   async function getStarredMessages() {
-    const res = await _apiFetch('GET', '/api/messaging/messages/starred');
-    return res?.data?.starred || [];
+    // FIX-404 + response-shape fix — see _bootstrap() above.
+    const res = await _apiFetch('GET', '/api/messages/starred');
+    return res?.data || [];
   }
 
   // ── Report message ────────────────────────────────────────────────────────
+  // FIX-404 (unresolved): no backend route exists anywhere for reporting an
+  // individual message (there is /api/friends/:id/report and
+  // /api/groups/:id/report, but nothing message-level). Left pointing at
+  // /api/messaging/... so it still 404s rather than silently hitting the
+  // wrong resource.
   async function reportMessage(messageId, reason, details) {
     return await _apiFetch('POST', `/api/messaging/messages/${messageId}/report`, { reason, details });
   }
 
   // ── Pin message in chat ───────────────────────────────────────────────────
+  // FIX-404 (unresolved): no backend route exists for per-message pinning
+  // (distinct from chat pinning above). Left as-is.
   async function pinMessage(messageId, pin) {
     if (pin === false) {
       return await _apiFetch('DELETE', `/api/messaging/messages/${messageId}/pin`, null);
@@ -164,11 +206,13 @@
   }
 
   async function getPinnedMessages(chatId) {
-    const res = await _apiFetch('GET', `/api/messaging/chats/${chatId}/pinned`);
-    return res?.data?.pinned || [];
+    return (await _apiFetch('GET', `/api/messaging/chats/${chatId}/pinned`))?.data?.pinned || [];
   }
 
   // ── Scheduled messages ────────────────────────────────────────────────────
+  // FIX-404 (unresolved): no backend route exists for scheduling a message
+  // send (there IS /api/calls/scheduled and /api/status/scheduled, but no
+  // message equivalent). Left as-is.
   async function scheduleMessage(chatId, content, type, sendAt, options) {
     return await _apiFetch('POST', '/api/messaging/scheduled', {
       chatId, content, type: type || 'text', sendAt,
@@ -177,8 +221,7 @@
   }
 
   async function getScheduledMessages() {
-    const res = await _apiFetch('GET', '/api/messaging/scheduled');
-    return res?.data?.scheduled || [];
+    return (await _apiFetch('GET', '/api/messaging/scheduled'))?.data?.scheduled || [];
   }
 
   async function cancelScheduledMessage(id) {
@@ -186,20 +229,25 @@
   }
 
   // ── Disappearing messages ────────────────────────────────────────────────
+  // FIX-404 (unresolved): no backend route exists for a per-chat
+  // disappearing-message timer. Left as-is.
   async function setDisappearingTimer(chatId, timer) {
     return await _apiFetch('POST', `/api/messaging/chats/${chatId}/disappear`, { timer });
   }
 
   // ── Search ────────────────────────────────────────────────────────────────
+  // FIX-404 (unresolved): no backend route exists for in-chat message
+  // search (there is a global /api/search, but nothing scoped to one chat
+  // under messages/messaging). Left as-is.
   async function searchMessages(chatId, query, page) {
-    const res = await _apiFetch('GET', `/api/messaging/chats/${chatId}/search?q=${encodeURIComponent(query)}&page=${page||1}`);
-    return res?.data?.results || [];
+    return (await _apiFetch('GET', `/api/messaging/chats/${chatId}/search?q=${encodeURIComponent(query)}&page=${page||1}`))?.data?.results || [];
   }
 
   // ── Mention suggestions ───────────────────────────────────────────────────
+  // FIX-404 (unresolved): no backend route exists for @mention
+  // autocomplete. Left as-is.
   async function getMentionSuggestions(chatId, q) {
-    const res = await _apiFetch('GET', `/api/messaging/chats/${chatId}/mentions?q=${encodeURIComponent(q||'')}`);
-    return res?.data?.members || [];
+    return (await _apiFetch('GET', `/api/messaging/chats/${chatId}/mentions?q=${encodeURIComponent(q||'')}`))?.data?.members || [];
   }
 
   // ── Install patches on messagesUI ─────────────────────────────────────────

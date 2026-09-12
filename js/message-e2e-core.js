@@ -605,25 +605,24 @@
         v3Err = err;
         _diagLog('V3_DECRYPT_UNRECOVERABLE', { msgId: msgIdForLog, chatId, peerUserId, ..._errInfo(err) });
       }
-      // FIX (V2-FALLBACK-ONLY-WHEN-V2-COMPATIBLE, requested behavior): this
-      // used to unconditionally retry ANY v3-failure through the v2 static-
-      // key decryptor, even though a genuine v3 envelope ({v:3, hdr, iv,
-      // ct}) never carries the `spk` field a v2 envelope requires — v2 and
-      // v3 derive their AES key completely differently (static per-pair
-      // ECDH+HKDF vs. Double Ratchet chain keys), so that "fallback" was
-      // guaranteed to auth-fail and only produced a second, misleading
-      // error implying a real v2 attempt had been made. `spk` is present
-      // ONLY on a genuinely v2-shaped payload (see parseEnvelope's v2
-      // branch above) — including the edge case this fallback was
-      // actually meant to catch, a relay/proxy bug that corrupts the `v`
-      // field on an otherwise-real v2 message. Checking for it is what
-      // distinguishes "this might really be a mislabeled v2 message" from
-      // "this is unambiguously a v3 payload; v2 categorically cannot
-      // decrypt Double Ratchet ciphertext."
-      if (!env.spk) {
-        _diagLog('V2_FALLBACK_SKIPPED_NOT_V2_COMPATIBLE', { msgId: msgIdForLog, chatId, peerUserId });
-        throw v3Err;
-      }
+      // FIX (ALWAYS-ATTEMPT-V2-FALLBACK, requested behavior): this used to
+      // skip the v2 fallback entirely whenever the envelope had no `spk`
+      // field, on the reasoning that a genuine v3 envelope ({v:3, hdr, iv,
+      // ct}) never carries `spk` — true, but that reasoning missed that
+      // decryptEnvelope() (the v2 path) does NOT require `spk` to attempt
+      // decryption: `spk`/`rpk` are only its fastest candidate (a
+      // self-contained key with no lookup). When absent, it already falls
+      // through to `currently_cached_key` and `fresh_key_after_purge` —
+      // looking the peer's key up independently of the envelope — before
+      // giving up (see the candidates list in decryptEnvelope() above). So
+      // gating on `spk` was blocking the v2 fallback from EVER running for
+      // any real v3-shaped message — exactly the messages this fallback
+      // exists for — which is why messages that used to decrypt fine via
+      // v2 before the v3 switchover stopped falling back at all. Always
+      // attempt it now; decryptEnvelope() still fails cleanly (and cheaply
+      // — AES-GCM auth fails fast) on ciphertext it genuinely can't open,
+      // so this costs nothing extra when v2 truly cannot recover the
+      // message, and now actually gets a chance to succeed when it can.
       try {
         const v2Plaintext = await decryptEnvelope(env, peerUserId, isOwnMessage, msgIdForLog);
         _diagLog('V2_FALLBACK_SUCCEEDED_AFTER_V3_FAILURE', { msgId: msgIdForLog, chatId, peerUserId });

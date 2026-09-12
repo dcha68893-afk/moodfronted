@@ -4028,10 +4028,23 @@
          for from the start. -->
     <script src="js/core/recovery/ReconnectOrchestrator.js"></script>
     <script src="js/core/network/BackendWakeMonitor.js"></script>
-    <!-- OFFLINE-FIRST LAYER -->
-    <script src="js/localStore.messages.js"></script>
-    <script src="js/messageQueue.manager.js"></script>
-    <script src="js/messageSync.engine.js"></script>
+    <!-- OFFLINE-FIRST LAYER
+         FIX-404 (localStore.messages.js / messageQueue.manager.js /
+         messageSync.engine.js): these three script tags pointed at files
+         that were never created — every load 404'd, and each 404 body
+         (the host's HTML error page) then got refused by the browser's
+         strict MIME check on top of that. Their functionality already
+         exists under different filenames that ARE loaded: local message
+         persistence is js/message-local-db.js (window.KynectaMessageCache,
+         loaded via message-client.js), the offline send/edit/delete queue
+         is js/app.offline.queue.js just below, and per-chat message sync
+         is message-client.js's own hydrateFromCacheThenSync()/syncMissed()
+         (see openChat()) — app.sync.manager.js's _syncMessages() already
+         no-ops in favor of that. So the three tags were simply dead and
+         are removed. services.message.js is real (see js/services.message.js)
+         and stays: js/app.offline.queue.js and js/app.sync.manager.js both
+         call window.services.message.* directly and had no working
+         implementation to call into until now. -->
     <script src="js/services.message.js"></script>
     <script src="js/services.friend.js"></script>
     <script src="js/app.sync.manager.js"></script>
