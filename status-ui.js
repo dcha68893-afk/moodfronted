@@ -4759,7 +4759,8 @@ async function sendReply() {
             showNotification('Reply service unavailable', 'error');
             return;
         }
-        const result = await api.replyToStatus(currentViewerStatus.id, replyText);
+        const recipientUserId = currentViewerStatus.userId || currentViewerStatus.user?.id || null;
+        const result = await api.replyToStatus(currentViewerStatus.id, replyText, recipientUserId);
         if (result && result.success) {
                         replyInput.value = '';
             // Keep viewer open and refocus input so user can type again

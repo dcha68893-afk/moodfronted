@@ -11,7 +11,18 @@
   function me() { return I()?.userId ? String(I().userId) : null; }
   function pairContext(peerId) { const a = String(me() || ''), b = String(peerId || ''); return `kynecta-dm-v2:${[a, b].sort().join(':')}`; }
   function messageId(message) { return String(message?.id || message?.localId || message?.serverId || ''); }
-  function parseEnvelope(content) { if (typeof content !== 'string') return null; try { const o = JSON.parse(content); return o && o.v === 2 && o.iv && o.ct && o.spk ? o : null; } catch (_) { return null; } }
+  function parseEnvelope(content) {
+    if (typeof content !== 'string') return null;
+    try {
+      const o = JSON.parse(content);
+      if (o && o.v === 2 && o.iv && o.ct && o.spk) return o;
+      // v3 = Double Ratchet envelope (see js/e2e-ratchet-v3.js): header
+      // carries the current sending ratchet public key + chain bookkeeping
+      // instead of a self-contained static key pair.
+      if (o && o.v === 3 && o.hdr && o.iv && o.ct) return o;
+      return null;
+    } catch (_) { return null; }
+  }
   // ROOT-CAUSE FIX (old messages render as raw ciphertext JSON instead of a
   // placeholder): this engine only understands v2 envelopes. Older
   // conversation history encrypted by a previous protocol generation (v1/v3/
@@ -113,6 +124,78 @@
   async function init() { return ensureIdentity(); }
 
   async function encryptForChat(plaintext, chatId, recipientUserId) {
+    // FORWARD-SECRECY FIX (audit P0 — was: static per-pair key reused
+    // forever): try the new Double Ratchet path (js/e2e-ratchet-v3.js)
+    // first. Falls back to the original static-key v2 scheme only if the
+    // ratchet module isn't loaded or genuinely throws — v2 is still real
+    // encryption (just without forward secrecy), so falling back to it is
+    // a safe degradation, unlike the group-chat plaintext-fallback bug
+    // fixed elsewhere in this audit (failing open to WEAKER encryption is
+    // an acceptable safety net; failing open to NO encryption is not).
+    if (global.KynectaRatchet) {
+      try {
+        return await encryptForChatV3(plaintext, chatId, recipientUserId);
+      } catch (err) {
+        console.warn('[MessageE2E] v3 ratchet encrypt failed, falling back to static v2 for this message:', err?.message || err);
+      }
+    }
+    return encryptForChatV2Legacy(plaintext, chatId, recipientUserId);
+  }
+
+  // ── Double Ratchet (v3) integration ─────────────────────────────────────
+  // Session state is per (my user id, peer user id), persisted in
+  // localStorage — this is genuinely new, stateful crypto session data,
+  // unlike the old v2 scheme where every message was independently
+  // derivable with no memory of prior messages. See the multi-device
+  // caveat in the audit writeup: because this app's DM path doesn't yet do
+  // Signal-style per-device session fan-out, running the same identity on
+  // two devices simultaneously can make their local ratchet states
+  // diverge. That pre-dates this fix (the old v2 scheme also only had one
+  // identity per user, not per device) but matters more now because state
+  // is involved at all. Flagged for a proper per-device follow-up.
+  function ratchetStorageKey(peerId) { return `kyn_ratchet_v3_${me()}_${peerId}`; }
+  function loadRatchetSession(peerId) {
+    try { const raw = localStorage.getItem(ratchetStorageKey(peerId)); return raw ? JSON.parse(raw) : null; }
+    catch (_) { return null; }
+  }
+  function saveRatchetSession(peerId, session) {
+    try { localStorage.setItem(ratchetStorageKey(peerId), JSON.stringify(session)); } catch (_) {}
+  }
+
+  async function encryptForChatV3(plaintext, chatId, recipientUserId) {
+    const identity = await ensureIdentity();
+    if (!recipientUserId) throw new Error('Recipient is required for secure messaging');
+    const R = global.KynectaRatchet;
+    let session = loadRatchetSession(recipientUserId);
+    if (!session) {
+      const peer = await identity.publicKeyFor(recipientUserId);
+      const sharedBitsRaw = await crypto.subtle.deriveBits({ name: 'ECDH', public: peer.key }, identity.privateKey, 256);
+      const peerRawPub = await crypto.subtle.exportKey('raw', peer.key);
+      const peerRawPubB64 = btoa(String.fromCharCode(...new Uint8Array(peerRawPub)));
+      session = await R.initSessionAsSender(sharedBitsRaw, peerRawPubB64);
+    }
+    const { session: nextSession, envelope } = await R.ratchetEncrypt(session, String(plaintext));
+    saveRatchetSession(recipientUserId, nextSession);
+    return JSON.stringify(envelope);
+  }
+
+  async function decryptEnvelopeV3(envelope, peerUserId) {
+    const identity = await ensureIdentity();
+    const R = global.KynectaRatchet;
+    let session = loadRatchetSession(peerUserId);
+    if (!session) {
+      const peer = await identity.publicKeyFor(peerUserId);
+      const sharedBitsRaw = await crypto.subtle.deriveBits({ name: 'ECDH', public: peer.key }, identity.privateKey, 256);
+      const myPrivJwk = await crypto.subtle.exportKey('jwk', identity.privateKey);
+      session = await R.initSessionAsReceiver(sharedBitsRaw, myPrivJwk, envelope.hdr.dh);
+    }
+    const { session: nextSession, plaintext } = await R.ratchetDecrypt(session, envelope);
+    saveRatchetSession(peerUserId, nextSession);
+    return plaintext;
+  }
+  // ── end Double Ratchet integration ──────────────────────────────────────
+
+  async function encryptForChatV2Legacy(plaintext, chatId, recipientUserId) {
     const identity = await ensureIdentity();
     if (!recipientUserId) throw new Error('Recipient is required for secure messaging');
     const peer = await identity.publicKeyFor(recipientUserId);
@@ -191,7 +274,12 @@
     throw lastErr || new Error('Decryption failed');
   }
 
-  async function decryptFromChat(encContent, chatId, peerUserId, isOwnMessage) { const env = parseEnvelope(encContent); return env ? decryptEnvelope(env, peerUserId, isOwnMessage) : encContent; }
+  async function decryptFromChat(encContent, chatId, peerUserId, isOwnMessage) {
+    const env = parseEnvelope(encContent);
+    if (!env) return encContent;
+    if (env.v === 3) return decryptEnvelopeV3(env, peerUserId);
+    return decryptEnvelope(env, peerUserId, isOwnMessage);
+  }
   async function attempt(message, chatId, currentUserId, opts) {
     const peer = peerFor(message, currentUserId, opts?.activeConversation);
     if (!peer) throw new Error('Message peer is unavailable');

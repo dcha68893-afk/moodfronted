@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SECURITY FIX (audit-driven): no network_security_config.xml previously
+  existed. Android already defaults to blocking cleartext (plain HTTP)
+  traffic on API 28+ absent this file, so this is primarily about making
+  that intent explicit and future-proof rather than closing an active hole
+  on modern devices — but it also gives you one place to add certificate
+  pinning later (a real gap flagged separately in the audit: this app has
+  no pinning today, so a MITM holding a trusted-but-attacker-controlled CA
+  certificate can intercept traffic undetected). Pinning is NOT added here
+  automatically because it requires your actual server's certificate
+  pin hashes, which must come from you/your infra, not be guessed.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!--
+      TODO (not done automatically — needs your server's real pin hashes):
+      to add certificate pinning, uncomment and fill in with the SHA-256
+      pins of your backend's actual leaf/intermediate certificate(s), e.g.:
+
+      <domain-config>
+          <domain includeSubdomains="true">your-backend-domain.example.com</domain>
+          <pin-set expiration="2027-01-01">
+              <pin digest="SHA-256">AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=</pin>
+              <pin digest="SHA-256">BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=</pin>
+          </pin-set>
+      </domain-config>
+
+      Get real pin values with:
+      openssl s_client -connect your-backend-domain.example.com:443 < /dev/null 2>/dev/null | \
+        openssl x509 -pubkey -noout | openssl pkey -pubin -outform der | \
+        openssl dgst -sha256 -binary | openssl enc -base64
+
+      Always include at least two pins (current + backup/next cert) so a
+      routine certificate renewal doesn't lock out your own users.
+    -->
+</network-security-config>

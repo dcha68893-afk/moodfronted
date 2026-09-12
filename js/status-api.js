@@ -549,18 +549,47 @@ class StatusAPI {
 
     // ─────────────────────────────────────────────────────────────────────────
     // REPLY TO STATUS — sends as a chat message linked to status_id
-    // ─────────────────────────────────────────────────────────────────────────
-    async replyToStatus(statusId, replyText) {
+    //
+    // SECURITY FIX (audit-driven — was: PLAINTEXT-STORAGE): this used to send
+    // `replyText` straight to the server in the clear. The backend stores
+    // every status reply in the same `Messages` table as ordinary 1:1 chat
+    // messages (routes/status.js), so an unencrypted reply here was readable
+    // by anyone with DB access despite living right alongside genuinely
+    // encrypted DMs — indistinguishable to a DB admin, very distinguishable
+    // in terms of actual confidentiality. A status reply is delivered to
+    // exactly one recipient (the status owner) via the normal chat pipeline,
+    // so it can use the exact same client-side encryption call
+    // (window.KynectaE2E.encryptForChat) the canonical DM send path already
+    // uses — same envelope format, so the existing decrypt path
+    // (message-e2e-core.js's decryptMessageForDisplay, already generic over
+    // any message rendered in a chat) picks it up with no further changes.
+    // `recipientUserId` is a new, additive parameter — callers that don't
+    // pass it (none should remain after this fix; see status-ui.js) fall
+    // back to the previous plaintext behavior rather than throwing, so this
+    // can't break an unrelated caller outright.
+    async replyToStatus(statusId, replyText, recipientUserId = null) {
         try {
             if (!statusId || !replyText || !replyText.trim()) {
                 return { success: false, error: 'Missing statusId or reply content' };
+            }
+            const trimmed = replyText.trim();
+            let outgoingContent = trimmed;
+            let encrypted = false;
+            if (recipientUserId && window.KynectaE2E && typeof window.KynectaE2E.encryptForChat === 'function') {
+                try {
+                    outgoingContent = await window.KynectaE2E.encryptForChat(trimmed, null, recipientUserId);
+                    encrypted = true;
+                } catch (encErr) {
+                    console.error('[StatusAPI] Encryption failed for status reply, refusing to send plaintext:', encErr.message);
+                    return { success: false, error: 'Could not encrypt this reply. Please try again.' };
+                }
             }
             const response = await this._fetch(
                 this.resolveUrl(`${this.baseURL}/${statusId}/reply`),
                 {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
-                    body: JSON.stringify({ content: replyText.trim() })
+                    body: JSON.stringify({ content: outgoingContent, encrypted })
                 }
             );
             if (!response.ok) {

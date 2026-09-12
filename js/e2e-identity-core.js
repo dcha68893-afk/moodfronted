@@ -123,7 +123,16 @@
     await getWrapKey(password).catch(() => {});
     const adopted = await adoptSharedIdentity();
     if (adopted) return true;
-    const stored = localStorage.getItem(storeKey());
+    // SECURITY FIX (audit P0 — was: plain localStorage only): this is the
+    // single most sensitive value this app stores locally — the
+    // password-wrapped identity private key. Routed through
+    // KynectaSecureStorage (js/secure-storage-bridge.js), which uses
+    // Android Keystore-backed storage when the native plugin is present
+    // and transparently falls back to localStorage otherwise, so this is
+    // safe to ship before the native plugin is added (see that file's
+    // header comment for the two commands needed to activate it).
+    const storage = global.KynectaSecureStorage;
+    const stored = storage ? await storage.getItem(storeKey()) : localStorage.getItem(storeKey());
     if (stored) {
       const o = JSON.parse(stored);
       let pkcs8;
@@ -145,7 +154,8 @@
     const priv = await exportPriv(kp.privateKey);
     const id = b64(global.crypto.getRandomValues(new Uint8Array(16)));
     const registered = await (async () => { publicKeyB64 = pub; keyId = id; return register(); })();
-    localStorage.setItem(storeKey(), JSON.stringify({ encPrivKey: await wrapPrivate(priv, password), pubKey: pub, keyId: id, registered }));
+    const blob = JSON.stringify({ encPrivKey: await wrapPrivate(priv, password), pubKey: pub, keyId: id, registered });
+    if (storage) await storage.setItem(storeKey(), blob); else localStorage.setItem(storeKey(), blob);
     privateKey = kp.privateKey;
     publicKeyB64 = pub;
     keyId = id;

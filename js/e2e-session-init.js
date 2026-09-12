@@ -78,7 +78,9 @@
       // decrypted locally and is never sent to the server in plaintext.
       await prepareLegacyIdentity();
 
+      await loadScript('/js/secure-storage-bridge.js');
       await loadScript('/js/e2e-identity-core.js');
+      await loadScript('/js/e2e-ratchet-v3.js');
       await loadScript('/js/message-e2e-core.js');
       await loadScript('/js/message-e2e-compat.js');
       if (/\/message(?:\.html)?$/i.test(global.location?.pathname || '')) {

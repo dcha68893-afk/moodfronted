@@ -1671,6 +1671,40 @@
                             { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
                         ];
                         const serverTURN = window.__kynTURNServers;
+                        // VISIBILITY FIX (audit-driven): this fallback firing was
+                        // previously completely silent — no log, no metric, nothing
+                        // to distinguish "using your real TURN server" from "using a
+                        // public shared demo relay with well-known, publicly-posted
+                        // credentials that anyone's app can also be using at the same
+                        // time." Calls that need TURN (either peer behind a symmetric/
+                        // restrictive NAT) will *sometimes* still connect through the
+                        // demo relay and sometimes won't, depending on that shared
+                        // relay's load — which looks exactly like unpredictable,
+                        // unexplained call failures with nothing in the logs to point
+                        // at why. This one console.warn (plus a CustomEvent other code
+                        // — analytics, a debug panel — can subscribe to) makes it
+                        // immediately checkable: open devtools during a real call and
+                        // see which path was actually used. Fix the actual reliability
+                        // gap by setting TURN_URL/TURN_SECRET on the backend
+                        // (routes/calls.js already generates real time-limited
+                        // credentials once those are set) — this only makes the
+                        // problem visible, it doesn't solve it, because it can't:
+                        // that requires a real TURN server, which is a deployment/
+                        // infra decision, not something client code can supply.
+                        if (!serverTURN || !serverTURN.length) {
+                            console.warn(
+                                '[Calls] No server-provided TURN credentials — falling back to the ' +
+                                'public openrelay.metered.ca demo relay (shared, unreliable, not ' +
+                                'suitable for production). Calls between peers who both need TURN ' +
+                                '(restrictive/symmetric NAT on either side) may fail unpredictably. ' +
+                                'Set TURN_URL and TURN_SECRET on the backend to fix this.'
+                            );
+                            try {
+                                window.dispatchEvent(new CustomEvent('kyn:turn:fallback_used', {
+                                    detail: { reason: 'no_server_turn_credentials' }
+                                }));
+                            } catch (_) {}
+                        }
                         return serverTURN && serverTURN.length
                             ? [..._stun, ...serverTURN]
                             : [..._stun, ..._turnFallback];

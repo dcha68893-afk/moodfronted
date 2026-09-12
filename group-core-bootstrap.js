@@ -3572,21 +3572,57 @@ const GroupCore = {
     // FIX-GROUP-ENCRYPTION: encrypt with this group's Sender Key before
     // it ever leaves the browser. window.KynectaGroupE2E (js/groupEncryption.client.js)
     // handles generating/distributing a key if we don't have one yet for
-    // this group, and safely falls back to plaintext if E2E isn't active
-    // (e.g. KynectaE2E hasn't initialized) — anonymous posts always stay
-    // plaintext for now, since "anonymous" + "encrypted" interact in a
-    // way (who do you even distribute the key to/from?) that needs its
-    // own design, out of scope for this round.
+    // this group — anonymous posts always stay plaintext for now, since
+    // "anonymous" + "encrypted" interact in a way (who do you even
+    // distribute the key to/from?) that needs its own design, out of
+    // scope for this round. That is a deliberate, disclosed exception;
+    // it is NOT the same as the fail-open bug fixed below.
+    //
+    // SECURITY FIX (2026-09-11, audit-driven — was: SILENT-PLAINTEXT-FALLBACK):
+    // this used to catch ANY failure from encryptOutgoing() (module not
+    // loaded yet, sender key not distributed, a transient network error
+    // fetching a member's key, etc.) and fall through to sending
+    // `content` — the raw plaintext — to the server anyway, with no
+    // warning to the user and no way for them to ever know that specific
+    // message left the device unencrypted. A group shown as "🔒
+    // Encrypted" in the UI could silently ship individual plaintext
+    // messages. Fail CLOSED instead of open: on any encryption failure
+    // (thrown error, OR encryptOutgoing() returning encrypted:false
+    // without throwing — both are treated identically), the message is
+    // queued for retry via the same queueGroupAction() path already used
+    // above for the offline/session-not-ready cases, and the caller gets
+    // an explicit error instead of a false "sent" success. Nothing
+    // unencrypted reaches the network for a non-anonymous group message.
     let outgoingContent = content;
     let encMeta = {
       encrypted: false
     };
-    if (!anonymous && window.KynectaGroupE2E) {
+    if (!anonymous) {
+      if (!window.KynectaGroupE2E) {
+        debugLog('Group encryption module unavailable — refusing to send unencrypted');
+        queueGroupAction({ type: 'sendMessage', groupId, content, topic, anonymous });
+        return {
+          success: false,
+          queued: true,
+          error: 'encryption_unavailable',
+          message: 'Secure messaging is not ready yet. Your message has been queued and will send automatically once it is.'
+        };
+      }
       try {
         encMeta = await window.KynectaGroupE2E.encryptOutgoing(groupId, content);
         outgoingContent = encMeta.content;
+        if (!encMeta.encrypted) {
+          throw new Error('encryptOutgoing() did not return an encrypted result');
+        }
       } catch (e) {
-        debugLog('Group encryption failed, sending as plaintext:', e.message);
+        debugLog('Group encryption failed — refusing to send unencrypted:', e.message);
+        queueGroupAction({ type: 'sendMessage', groupId, content, topic, anonymous });
+        return {
+          success: false,
+          queued: true,
+          error: 'encryption_failed',
+          message: 'Could not encrypt this message, so it was not sent. It has been queued and will retry automatically.'
+        };
       }
     }
     try {
