@@ -35,6 +35,7 @@ import {
     formatFileSize,
     createServiceListing,
     createDigitalListing,
+    uploadListingImage,
     createPremiumServiceListing,
     createPremiumDigitalListing,
     updateAvailableListingsCount,
@@ -3024,7 +3025,7 @@ function resetCreateListingForm() {
     if (svcSubSel) svcSubSel.innerHTML = '<option value="">Select subcategory…</option>';
     const svcImgPrev = document.getElementById('serviceImagePreview');
     if (svcImgPrev) svcImgPrev.innerHTML = '';
-    window._svcImageDataUrl = null;
+    window._svcImageFile = null;
     if (DOM.digitalTitle) DOM.digitalTitle.value = '';
     if (DOM.digitalDescription) DOM.digitalDescription.value = '';
     if (DOM.digitalPrice) DOM.digitalPrice.value = '';
@@ -3183,24 +3184,44 @@ async function publishListingFromModal() {
                 return;
             }
 
-            // FIX (category-driven image, item 3 & 6 of the Create Listing
-            // spec): a service listing had no image field at all before, so
-            // nothing was ever sent — pass through whatever the seller
-            // uploaded (window._svcImageDataUrl, set by the new image picker
-            // in the Service tab) or fall back to that service category's
-            // own image (window._JM_SERVICE_CAT_IMG, from Tool-ui.js), never
-            // a generic product photo.
+            // FIX (PUBLISH-REQUIRE-REAL-IMAGE, requested behavior): a
+            // Service listing used to publish successfully with NO seller-
+            // provided image at all — falling back silently to a generic
+            // per-category stock photo (window._JM_SERVICE_CAT_IMG) — and
+            // even when the seller DID pick one, only a base64 data URL
+            // (window._svcImageFile's preview) sat in memory; it was never
+            // actually uploaded anywhere. The image picker's own state
+            // (window._svcImageFile, the authoritative real File object set
+            // by marketplace-seller.js's _svcAddImage — see there) is now
+            // required before publish, exactly like Physical/Digital
+            // already require their own primary asset.
+            const svcImageFile = window._svcImageFile || null;
+            if (!svcImageFile) {
+                console.log('[PUBLISH] service: no image selected, blocking publish');
+                showNotification('Please add an image', 'error');
+                return;
+            }
+
             const svcCategory = document.getElementById('serviceCategory')?.value || 'services';
             const svcSubcategory = document.getElementById('serviceSubcategory')?.value || '';
-            const svcImage = window._svcImageDataUrl
-                || (window._JM_SERVICE_CAT_IMG && window._JM_SERVICE_CAT_IMG[svcCategory])
-                || null;
+
+            let svcImageUrl;
+            try {
+                console.log('[PUBLISH] service: uploading image', { name: svcImageFile.name, size: svcImageFile.size });
+                svcImageUrl = await uploadListingImage(svcImageFile);
+                console.log('[PUBLISH] service: image uploaded', { url: svcImageUrl });
+            } catch (uploadErr) {
+                console.error('[PUBLISH] service: image upload failed', uploadErr.message);
+                showNotification(uploadErr.message || 'Image upload failed', 'error');
+                return;
+            }
+
             const opts = {
                 price:          price       || '0',
                 condition:      condition,
                 category:       svcCategory,
                 subcategory:    svcSubcategory,
-                image:          svcImage,
+                image:          svcImageUrl,
                 visibility:     UIState.selectedTrustCircle,
                 moodContext:    UIState.selectedMoodContext,
                 template:       UIState.selectedTemplate,
@@ -3213,6 +3234,7 @@ async function publishListingFromModal() {
                 allowedUsers:   UIState.selectedUsers,
             };
 
+            console.log('[PUBLISH] service: creating listing', { title, category: svcCategory });
             const listing = typeof createServiceListing === 'function'
                 ? await createServiceListing(title, description, opts)
                 : await marketplaceCore?.createListing({
@@ -3235,8 +3257,17 @@ async function publishListingFromModal() {
                 // Refresh seller dashboard if open
                 if (typeof window._sellerDash?.reload === 'function') window._sellerDash.reload();
             } else {
-                console.warn('[PUBLISH] createServiceListing returned null/undefined');
-                showNotification('Could not publish listing. Check console for details.', 'error');
+                // FIX (GENERIC-ERROR-MASKS-BACKEND-ERROR, requested
+                // behavior): createServiceListing() already shows a
+                // specific 'Failed to create listing: <real reason>'
+                // notification (or a specific auth notification) on every
+                // path that returns null/undefined — this used to ALSO show
+                // a second, vague 'Could not publish listing. Check console
+                // for details.' toast on top of it, which just buried the
+                // real reason under a less useful one. Log for the console
+                // only; the specific notification the user actually needs
+                // was already shown.
+                console.warn('[PUBLISH] service: createServiceListing returned null/undefined — see prior notification for the specific reason');
             }
             return;
         }
@@ -3263,6 +3294,26 @@ async function publishListingFromModal() {
                 return;
             }
 
+            // FIX (PUBLISH-IMAGE-NEVER-UPLOADED, requested behavior): this
+            // used to pass the raw File object (UIState.selectedDigitalFile)
+            // straight into createDigitalListing(), which reads
+            // `fileData.url` — a File has no such property, so the URL sent
+            // to the backend was always empty and the file itself was never
+            // actually uploaded anywhere. Upload it first (same
+            // /api/files/upload path Physical/Service now use — see
+            // uploadListingImage in Tool-core.part3.js) and only then call
+            // createDigitalListing with the resulting persistent URL.
+            let digitalFileUrl;
+            try {
+                console.log('[PUBLISH] digital: uploading file', { name: UIState.selectedDigitalFile.name, size: UIState.selectedDigitalFile.size });
+                digitalFileUrl = await uploadListingImage(UIState.selectedDigitalFile);
+                console.log('[PUBLISH] digital: file uploaded', { url: digitalFileUrl });
+            } catch (uploadErr) {
+                console.error('[PUBLISH] digital: file upload failed', uploadErr.message);
+                showNotification(uploadErr.message || 'File upload failed', 'error');
+                return;
+            }
+
             const opts = {
                 price:       price || '0',
                 condition:   condition,
@@ -3275,17 +3326,34 @@ async function publishListingFromModal() {
                 autoRenew:   DOM.autoRenewCheckbox?.checked       || false,
             };
 
+            const uploadedFileData = {
+                url:  digitalFileUrl,
+                name: UIState.selectedDigitalFile.name,
+                size: UIState.selectedDigitalFile.size,
+                type: UIState.selectedDigitalFile.type,
+            };
+
+            console.log('[PUBLISH] digital: creating listing', { title, category: opts.category });
             const listing = typeof createDigitalListing === 'function'
-                ? await createDigitalListing(title, description, UIState.selectedDigitalFile, opts)
+                ? await createDigitalListing(title, description, uploadedFileData, opts)
                 : await marketplaceCore?.createListing({
-                    title, description, type: 'digital', condition, ...opts
+                    title, description, type: 'digital', condition, images: [digitalFileUrl], ...opts
                   });
 
             if (listing) {
+                console.log('[PUBLISH] digital: listing created', { id: listing.id });
+                const isPending = listing.status === 'pending_review' || listing.approval_status === 'pending' || listing.approvalStatus === 'pending';
+                showNotification(isPending
+                    ? 'Listing submitted for review! 🎉 It will go live after admin approval.'
+                    : 'Listing published! 🎉', 'success');
                 hideCreateListingModal();
                 resetCreateListingForm();
                 UIPipeline.syncFromCoreGlobals();
                 UIPipeline.liveUpdate();
+            } else {
+                // See the matching SERVICE-tab comment above: createDigitalListing
+                // already surfaces the specific backend/auth error itself.
+                console.warn('[PUBLISH] digital: createDigitalListing returned null/undefined — see prior notification for the specific reason');
             }
             return;
         }

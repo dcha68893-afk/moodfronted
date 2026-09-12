@@ -3041,6 +3041,67 @@ export function getCentralToken() {
     }
 }
 
+// ROOT-CAUSE FIX (PUBLISH-IMAGE-NEVER-UPLOADED, requested behavior): every
+// listing-publish flow (Physical/Service/Digital) used to embed either a
+// raw base64 data URL (Physical, Service) or — for Digital — nothing at all
+// (createDigitalListing read `fileData.url`, but was always handed a raw
+// `File` object with no `.url` property, so `mediaUrl`/`fileUrl` sent to
+// the backend were silently empty strings) directly into the create-
+// listing request. Nothing was ever actually uploaded to persistent
+// storage. This uploads a single File/Blob through the SAME
+// `/api/files/upload` endpoint chat/status/group attachments already rely
+// on (see moodchat's src/routes/files.js) and returns the persistent URL
+// storage assigned it — that URL, never a data: URL and never a raw File,
+// is the only thing that should end up in a listing's `images` array.
+// Exposed on `window` (immediately, at module evaluation time — not
+// buried inside a later init function) so the non-module
+// marketplace-seller.js script (Physical tab) can call it too; Digital/
+// Service (in this same module) call the exported function directly.
+export async function uploadListingImage(file) {
+    if (!(file instanceof File) && !(file instanceof Blob)) {
+        throw new Error('No image file was provided to upload');
+    }
+    const token = getCentralToken() || window.__kynToken || window.currentUser?.token
+        || window.sessionData?.userToken || window.sessionData?.token;
+    if (!token) throw new Error('Not authenticated — cannot upload image');
+
+    const formData = new FormData();
+    formData.append('file', file, file.name || 'upload');
+
+    const requestUrl = resolveToolsApiUrl('/files/upload');
+    if (window.__TOOLS_DEBUG__) console.log('[uploadListingImage] →', requestUrl, { name: file.name, size: file.size, type: file.type });
+
+    let res;
+    try {
+        res = await fetch(requestUrl, {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token },
+            credentials: 'include',
+            body: formData,
+        });
+    } catch (networkErr) {
+        // Never wraps this in a generic "add an image" message — the
+        // caller (publishListingFromModal / _physPublish) must show this
+        // exact text to the seller.
+        throw new Error('Image upload failed: ' + (networkErr?.message || 'network error'));
+    }
+
+    let json = null;
+    try { json = await res.json(); } catch (_) {}
+
+    if (!res.ok || json?.success === false) {
+        const backendMsg = json?.message || json?.error;
+        throw new Error(backendMsg || `Image upload failed (HTTP ${res.status})`);
+    }
+
+    const url = json?.data?.url || json?.url || json?.fileUrl || json?.mediaUrl;
+    if (!url) throw new Error('Image upload succeeded but the server did not return a file URL');
+
+    if (window.__TOOLS_DEBUG__) console.log('[uploadListingImage] ← uploaded OK', { name: file.name, url });
+    return url;
+}
+if (typeof window !== 'undefined') window.uploadListingImage = uploadListingImage;
+
 export function setupConnectivityListeners() {
     try {
         window.addEventListener('online', () => {
@@ -4142,13 +4203,19 @@ export async function createDigitalListing(title, description, fileData, options
 
     // Backend call — safeApiCall now throws on failure
     try {
+        // FIX (PUBLISH-IMAGE-NEVER-UPLOADED — see uploadListingImage above):
+        // this used to hardcode images:[] unconditionally, even though the
+        // caller (publishListingFromModal) now uploads the digital file
+        // before calling this function and passes the resulting persistent
+        // URL in `fileData.url`. Forward it here so the backend actually
+        // has something to store/serve for this listing.
         const response = await safeApiCall('POST', '/api/marketplace/listings', {
             title: optimistic.title,
             description: optimistic.description,
             price: optimistic.price,
             category: 'digital',
             type: 'digital',
-            images: [],
+            images: fileData?.url ? [fileData.url] : [],
             available: true
         });
 

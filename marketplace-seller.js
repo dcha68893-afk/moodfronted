@@ -270,18 +270,42 @@ window._physPublish=async()=>{
     if(!cat){_toast('Select a category','error','⚠️');return null;}
     if(!_phys.images.length){_toast('Add at least one image','error','📸');return null;}
     const btn=document.getElementById('publishListingBtn');
-    if(btn){btn.disabled=true;btn.textContent='⏳ Submitting…';}
-    const imgs=await Promise.all(_phys.images.slice(0,8).map(img=>new Promise(res=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.readAsDataURL(img.file);})));
+    // Button stays disabled for the ENTIRE pipeline below — validation,
+    // image upload, AND the create-listing call — so the seller can never
+    // submit again mid-upload (see the FIX comment above _mpUploadImages).
+    if(btn){btn.disabled=true;btn.textContent='⏳ Uploading images…';}
+    console.log('[PUBLISH] physical: uploading images', {count:_phys.images.length});
+    // ROOT-CAUSE FIX (PUBLISH-IMAGE-NEVER-UPLOADED, requested behavior):
+    // this used to FileReader-encode every picked image to a base64 data
+    // URL and send THAT directly as the `images` array — nothing was ever
+    // uploaded to real storage, so `images` in the DB held raw base64
+    // blobs instead of URLs. Upload each real File first (same
+    // /api/files/upload path chat/status/group attachments already use —
+    // see uploadListingImage in Tool-core.part3.js, exposed on window) and
+    // only send the resulting persistent URLs.
+    let imgs;
+    try {
+        imgs = await Promise.all(_phys.images.slice(0,8).map(img => window.uploadListingImage(img.file)));
+    } catch (uploadErr) {
+        if(btn){btn.disabled=false;btn.textContent='Submit for Review';}
+        console.error('[PUBLISH] physical: image upload failed', uploadErr.message);
+        _toast(uploadErr.message||'Image upload failed','error','❌');
+        return null;
+    }
+    console.log('[PUBLISH] physical: images uploaded', {urls:imgs});
+    if(btn){btn.textContent='⏳ Submitting…';}
     // Payload shape is unchanged from before (same keys the backend already
     // expects) — category/subcategory/brand now come from the metadata-driven
     // selects instead of free text, but they're still plain strings, so
     // existing submission/API behavior (item 5 of the spec) keeps working.
     const payload={title,description:desc,short_description:document.getElementById('physShortDesc')?.value?.trim()||'',price,original_price:parseFloat(document.getElementById('physOriginalPrice')?.value||0)||null,category:cat,subcategory:sub,brand:document.getElementById('physBrand')?.value?.trim()||'',sku:document.getElementById('physSku')?.value?.trim()||'',stock_quantity:stock,weight:parseFloat(document.getElementById('physWeight')?.value||0)||null,images:imgs,type:'physical',condition:'new',available:false,status:'pending_review',approval_status:'pending',metadata:{materials:_phys.materials.slice(),variants:_phys.variants.filter(v=>v.name),specs:Object.fromEntries(_phys.specs.filter(s=>s.k&&s.v).map(s=>[s.k,s.v]))}};
+    console.log('[PUBLISH] physical: creating listing', {title,category:cat});
     const r=await _api('POST','/marketplace/products',payload);
     if(btn){btn.disabled=false;btn.textContent='Submit for Review';}
-    if(r?._error){_toast(r._error,'error','❌');return null;}
+    if(r?._error){console.error('[PUBLISH] physical: backend error', r._error);_toast(r._error,'error','❌');return null;}
     const product=r?.data?.product||r?.product;
     if(!product){_toast('Submission failed','error','❌');return null;}
+    console.log('[PUBLISH] physical: listing created', {id:product.id});
     _phys.images=[];_phys.variants=[];_phys.specs=[];_phys.materials=[];
     _toast('Submitted for review! Goes live after admin approval ✅','success','📋');
     if(typeof window.hideCreateListingModal==='function') window.hideCreateListingModal();
@@ -353,13 +377,24 @@ window._svcCategoryChanged = cat => {
     }
     subSel.innerHTML = '<option value="">Select subcategory…</option>' + subs.map(s=>`<option value="${_esc(s)}">${_esc(s)}</option>`).join('');
 };
+// FIX (IMAGE-PICKER-STATE-AUTHORITATIVE, requested behavior): this used to
+// keep ONLY a base64 preview data URL (window._svcImageDataUrl) as the
+// picker's state — that data URL was itself what got sent to the backend,
+// so the Service tab's "image" was never a real uploaded file, and nothing
+// here required one at all (publish silently fell back to a generic
+// per-category stock photo). window._svcImageFile is now the single
+// authoritative source of truth: the real File object the seller picked.
+// publishListingFromModal's SERVICE branch (Tool-ui.js) reads this exact
+// field, requires it to be non-null before publish, and uploads it through
+// uploadListingImage() to get a real persistent URL. The data URL is kept
+// ONLY for the on-screen thumbnail preview — it is never sent anywhere.
 window._svcAddImage = files => {
     const g = document.getElementById('serviceImagePreview'); if (!g) return;
     const f = files?.[0]; if (!f || !f.type.startsWith('image/')) return;
+    window._svcImageFile = f;
     const reader = new FileReader();
     reader.onload = e => {
-        window._svcImageDataUrl = e.target.result;
-        g.innerHTML = `<div style="position:relative;aspect-ratio:1;border-radius:8px;overflow:hidden;background:#f3f4f6"><img src="${e.target.result}" style="width:100%;height:100%;object-fit:cover"><button onclick="window._svcImageDataUrl=null;this.parentElement.remove()" style="position:absolute;top:3px;right:3px;width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;border:none;cursor:pointer;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center">✕</button></div>`;
+        g.innerHTML = `<div style="position:relative;aspect-ratio:1;border-radius:8px;overflow:hidden;background:#f3f4f6"><img src="${e.target.result}" style="width:100%;height:100%;object-fit:cover"><button onclick="window._svcImageFile=null;this.parentElement.remove()" style="position:absolute;top:3px;right:3px;width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;border:none;cursor:pointer;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center">✕</button></div>`;
     };
     reader.readAsDataURL(f);
 };

@@ -46,6 +46,24 @@
     return current;
   }
 
+  // FIX (V2V3-DECRYPT-DIAGNOSTICS, requested behavior): every decrypt branch
+  // below (v3 attempt, v3→v2 fallback decision, v2 attempt, session repair)
+  // used to be silent except for a couple of console.warn calls — a failure
+  // anywhere in the pipeline collapsed into one opaque "Decryption failed"
+  // with no way to tell, from the console, which envelope version was
+  // involved, whether a local ratchet session existed for this peer,
+  // whether its DH matched the incoming header, or what the underlying
+  // exception actually was. _diagLog gives every stage a single structured
+  // log line. It NEVER receives ciphertext, plaintext, or private key
+  // material: every call site below only ever passes message ids, envelope
+  // *version numbers*, user ids, booleans, and error name/message strings —
+  // by construction (those are the only things read off the envelope for
+  // logging purposes), not by after-the-fact filtering.
+  function _diagLog(stage, meta) {
+    try { console.log(`[MessageE2E:${stage}]`, meta || ''); } catch (_) {}
+  }
+  function _errInfo(e) { return { name: e?.name || 'Error', reason: e?.message || String(e || 'unknown error') }; }
+
   function me() { return I()?.userId ? String(I().userId) : null; }
   function pairContext(peerId) { const a = String(me() || ''), b = String(peerId || ''); return `kynecta-dm-v2:${[a, b].sort().join(':')}`; }
   function messageId(message) { return String(message?.id || message?.localId || message?.serverId || ''); }
@@ -199,6 +217,9 @@
   }
   function saveRatchetSession(peerId, session) {
     try { localStorage.setItem(ratchetStorageKey(peerId), JSON.stringify(session)); } catch (_) {}
+  }
+  function clearRatchetSession(peerId) {
+    try { localStorage.removeItem(ratchetStorageKey(peerId)); } catch (_) {}
   }
 
   // ROOT-CAUSE FIX (RATCHET-STATE-RACE — "Unable to decrypt this message"
@@ -366,23 +387,100 @@
   // chain (which — via the `header.dh !== session.DHr` branch — could
   // also needlessly burn a bogus DH computation against the local
   // session).
-  async function decryptEnvelopeV3(envelope, peerUserId, isOwnMessage) {
+  async function _initReceiverSessionFromHeader(identity, peerUserId, envelope) {
+    const peer = await identity.publicKeyFor(peerUserId);
+    const sharedBitsRaw = await crypto.subtle.deriveBits({ name: 'ECDH', public: peer.key }, identity.privateKey, 256);
+    const myPrivJwk = await crypto.subtle.exportKey('jwk', identity.privateKey);
+    return global.KynectaRatchet.initSessionAsReceiver(sharedBitsRaw, myPrivJwk, envelope.hdr.dh);
+  }
+
+  // ROOT-CAUSE FIX (V3-SESSION-REPAIR + RETRY-NEVER-RECOVERS): a
+  // structurally broken local ratchet session — one that's present in
+  // localStorage but missing the receiving-chain key material
+  // ratchetDecrypt() needs to process ANY incoming header (`Receiving
+  // ratchet is not initialized` / `Receiving chain is unavailable`) — used
+  // to fail this exact same way forever. retryDecrypt() (see below) only
+  // ever clears this module's message-level cache (decryptCache/pending/
+  // failed/inflight); it never touched the underlying persisted ratchet
+  // session, so hitting "Retry" replayed the identical broken session and
+  // produced the identical failure every time — permanently undecryptable,
+  // not just delayed.
+  //
+  // For a genuine v3 message this is safely recoverable: discard the
+  // broken local session and reinitialize as receiver directly from THIS
+  // envelope's own header (`envelope.hdr.dh`) — exactly what already
+  // happens for a brand-new peer with no session at all (see the `if
+  // (!session)` branch below) — then retry the decrypt once. This only
+  // fires for the specific structural errors above (the session exists but
+  // is unusable for receiving), never for a plain AES-GCM auth failure
+  // (OperationError/'Decryption failed'): an auth failure usually means
+  // this message simply doesn't belong to the current chain position
+  // (wrong key material), not a repairable structural gap, and resetting
+  // the session on every auth failure would mask real bugs and throw away
+  // forward-secrecy state for no benefit.
+  const REPAIRABLE_V3_ERRORS = new Set([
+    'Receiving ratchet is not initialized',
+    'Receiving chain is unavailable',
+  ]);
+
+  async function decryptEnvelopeV3(envelope, peerUserId, isOwnMessage, msgIdForLog) {
+    _diagLog('V3_DECRYPT_START', { msgId: msgIdForLog, peerUserId, isOwnMessage });
     if (isOwnMessage) {
+      // ROOT-CAUSE FIX (OWN-MESSAGE-MISROUTED-INTO-RECEIVE-CHAIN): see the
+      // full rationale above encryptFromChatV3's own-message guard further
+      // down this file — redisplaying your own sent v3 message must never
+      // be run through the receiving chain (CKr/DHr), because it would
+      // either desync the real receiving chain or (best case) fail
+      // pointlessly. There is no cryptographic way to recover this
+      // message's plaintext without the locally-cached copy made at send
+      // time, so fail fast and clearly instead of attempting a doomed
+      // ratchet step.
+      _diagLog('V3_DECRYPT_REFUSED_OWN_MESSAGE', { msgId: msgIdForLog, peerUserId });
       throw new Error('Cannot re-derive plaintext for your own Double Ratchet message (forward secrecy) — no locally cached copy is available');
     }
     const identity = await ensureIdentity();
     return withRatchetLock(peerUserId, async () => {
       const R = global.KynectaRatchet;
       let session = loadRatchetSession(peerUserId);
+      const hadSession = !!session;
+      const headerDh = envelope?.hdr?.dh || null;
+      _diagLog('V3_SESSION_STATE', {
+        msgId: msgIdForLog, peerUserId,
+        hadExistingSession: hadSession,
+        sessionHasReceivingChain: hadSession ? !!session.CKr : false,
+        headerDhMatchesSessionDHr: hadSession ? (session.DHr === headerDh) : null,
+      });
       if (!session) {
-        const peer = await identity.publicKeyFor(peerUserId);
-        const sharedBitsRaw = await crypto.subtle.deriveBits({ name: 'ECDH', public: peer.key }, identity.privateKey, 256);
-        const myPrivJwk = await crypto.subtle.exportKey('jwk', identity.privateKey);
-        session = await R.initSessionAsReceiver(sharedBitsRaw, myPrivJwk, envelope.hdr.dh);
+        session = await _initReceiverSessionFromHeader(identity, peerUserId, envelope);
       }
-      const { session: nextSession, plaintext } = await R.ratchetDecrypt(session, envelope);
-      saveRatchetSession(peerUserId, nextSession);
-      return plaintext;
+      try {
+        const { session: nextSession, plaintext } = await R.ratchetDecrypt(session, envelope);
+        saveRatchetSession(peerUserId, nextSession);
+        _diagLog('V3_DECRYPT_SUCCESS', { msgId: msgIdForLog, peerUserId, repaired: false });
+        return plaintext;
+      } catch (firstErr) {
+        const info = _errInfo(firstErr);
+        _diagLog('V3_DECRYPT_FAILED', { msgId: msgIdForLog, peerUserId, hadExistingSession: hadSession, ...info });
+
+        const repairable = hadSession && REPAIRABLE_V3_ERRORS.has(firstErr?.message);
+        if (!repairable) throw firstErr;
+
+        _diagLog('V3_SESSION_REPAIR_ATTEMPT', { msgId: msgIdForLog, peerUserId, reason: info.reason });
+        try {
+          clearRatchetSession(peerUserId);
+          const freshSession = await _initReceiverSessionFromHeader(identity, peerUserId, envelope);
+          const { session: nextSession, plaintext } = await R.ratchetDecrypt(freshSession, envelope);
+          saveRatchetSession(peerUserId, nextSession);
+          _diagLog('V3_SESSION_REPAIR_SUCCEEDED', { msgId: msgIdForLog, peerUserId });
+          return plaintext;
+        } catch (repairErr) {
+          _diagLog('V3_SESSION_REPAIR_FAILED', { msgId: msgIdForLog, peerUserId, ..._errInfo(repairErr) });
+          // Surface the ORIGINAL failure — the repair attempt was a
+          // best-effort recovery, and its own error is logged above but
+          // isn't more informative to the caller than the first one.
+          throw firstErr;
+        }
+      }
     });
   }
   // ── end Double Ratchet integration ──────────────────────────────────────
@@ -435,34 +533,44 @@
   //   4. purge the cache and force one fresh fetch of the current key, in
   //      case it's simply stale locally (self-heals a rotation the live
   //      key-push listener in e2e-identity-core.js hasn't caught up on).
-  async function decryptEnvelope(envelope, peerUserId, isOwnMessage) {
+  async function decryptEnvelope(envelope, peerUserId, isOwnMessage, msgIdForLog) {
     const identity = await ensureIdentity();
     if (!peerUserId) throw new Error('Message sender/recipient is missing');
 
     const selfContainedRaw = isOwnMessage ? envelope.rpk : envelope.spk;
     const historicalKeyId = isOwnMessage ? envelope.rkid : envelope.kid;
+    _diagLog('V2_DECRYPT_START', {
+      msgId: msgIdForLog, peerUserId, isOwnMessage,
+      hasSelfContainedKey: !!selfContainedRaw, hasHistoricalKeyId: !!historicalKeyId,
+    });
 
     const candidates = [];
-    if (selfContainedRaw) candidates.push(() => identity.importPeerKey(selfContainedRaw));
-    if (historicalKeyId) candidates.push(async () => {
+    if (selfContainedRaw) candidates.push(['self_contained_envelope_key', () => identity.importPeerKey(selfContainedRaw)]);
+    if (historicalKeyId) candidates.push(['historical_key_by_id', async () => {
       const historical = await identity.publicKeyForVersion(peerUserId, historicalKeyId);
       if (!historical) throw new Error('Historical key unavailable');
       return historical.key;
-    });
-    candidates.push(async () => (await identity.publicKeyFor(peerUserId)).key);
-    candidates.push(async () => { identity.purgePublicKey?.(peerUserId); return (await identity.publicKeyFor(peerUserId, true)).key; });
+    }]);
+    candidates.push(['currently_cached_key', async () => (await identity.publicKeyFor(peerUserId)).key]);
+    candidates.push(['fresh_key_after_purge', async () => { identity.purgePublicKey?.(peerUserId); return (await identity.publicKeyFor(peerUserId, true)).key; }]);
 
     let lastErr = null;
-    for (const getKey of candidates) {
+    for (const [label, getKey] of candidates) {
       let peerKey;
       try { peerKey = await getKey(); } catch (_) { continue; }
       if (!peerKey) continue;
       try {
         const shared = await identity.deriveShared(peerKey);
         const key = await identity.hkdf(shared, pairContext(peerUserId));
-        return await identity.aesDecrypt(envelope, key, pairContext(peerUserId));
-      } catch (err) { lastErr = err; }
+        const plaintext = await identity.aesDecrypt(envelope, key, pairContext(peerUserId));
+        _diagLog('V2_DECRYPT_SUCCESS', { msgId: msgIdForLog, peerUserId, keySource: label });
+        return plaintext;
+      } catch (err) {
+        lastErr = err;
+        _diagLog('V2_DECRYPT_CANDIDATE_FAILED', { msgId: msgIdForLog, peerUserId, keySource: label, ..._errInfo(err) });
+      }
     }
+    _diagLog('V2_DECRYPT_FAILED', { msgId: msgIdForLog, peerUserId, ..._errInfo(lastErr || new Error('Decryption failed')) });
     throw lastErr || new Error('Decryption failed');
   }
 
@@ -485,30 +593,57 @@
   // tooltip) and console can show exactly what was tried and why each
   // attempt failed, instead of just "🔒 Unable to decrypt this message"
   // with no further information.
-  async function decryptFromChat(encContent, chatId, peerUserId, isOwnMessage) {
+  async function decryptFromChat(encContent, chatId, peerUserId, isOwnMessage, msgIdForLog) {
     const env = parseEnvelope(encContent);
     if (!env) return encContent;
+    _diagLog('ENVELOPE_PARSED', { msgId: msgIdForLog, chatId, peerUserId, isOwnMessage, envVersion: env.v });
     if (env.v === 3) {
       let v3Err;
       try {
-        return await decryptEnvelopeV3(env, peerUserId, isOwnMessage);
+        return await decryptEnvelopeV3(env, peerUserId, isOwnMessage, msgIdForLog);
       } catch (err) {
         v3Err = err;
+        _diagLog('V3_DECRYPT_UNRECOVERABLE', { msgId: msgIdForLog, chatId, peerUserId, ..._errInfo(err) });
+      }
+      // FIX (V2-FALLBACK-ONLY-WHEN-V2-COMPATIBLE, requested behavior): this
+      // used to unconditionally retry ANY v3-failure through the v2 static-
+      // key decryptor, even though a genuine v3 envelope ({v:3, hdr, iv,
+      // ct}) never carries the `spk` field a v2 envelope requires — v2 and
+      // v3 derive their AES key completely differently (static per-pair
+      // ECDH+HKDF vs. Double Ratchet chain keys), so that "fallback" was
+      // guaranteed to auth-fail and only produced a second, misleading
+      // error implying a real v2 attempt had been made. `spk` is present
+      // ONLY on a genuinely v2-shaped payload (see parseEnvelope's v2
+      // branch above) — including the edge case this fallback was
+      // actually meant to catch, a relay/proxy bug that corrupts the `v`
+      // field on an otherwise-real v2 message. Checking for it is what
+      // distinguishes "this might really be a mislabeled v2 message" from
+      // "this is unambiguously a v3 payload; v2 categorically cannot
+      // decrypt Double Ratchet ciphertext."
+      if (!env.spk) {
+        _diagLog('V2_FALLBACK_SKIPPED_NOT_V2_COMPATIBLE', { msgId: msgIdForLog, chatId, peerUserId });
+        throw v3Err;
       }
       try {
-        const v2Plaintext = await decryptEnvelope(env, peerUserId, isOwnMessage);
+        const v2Plaintext = await decryptEnvelope(env, peerUserId, isOwnMessage, msgIdForLog);
+        _diagLog('V2_FALLBACK_SUCCEEDED_AFTER_V3_FAILURE', { msgId: msgIdForLog, chatId, peerUserId });
         console.warn('[MessageE2E] v3 ratchet decrypt failed, but the v2 legacy fallback succeeded for this message. v3 failure was:', v3Err?.message || v3Err);
         return v2Plaintext;
       } catch (v2Err) {
         const v3Reason = v3Err?.message || String(v3Err || 'unknown error');
         const v2Reason = v2Err?.message || String(v2Err || 'unknown error');
+        _diagLog('V2_FALLBACK_ALSO_FAILED', { msgId: msgIdForLog, chatId, peerUserId, v3Reason, v2Reason });
         const combined = new Error(`Double Ratchet (v3) decrypt failed: ${v3Reason} — legacy (v2) fallback also failed: ${v2Reason}`);
         combined.v3Reason = v3Reason;
         combined.v2Reason = v2Reason;
         throw combined;
       }
     }
-    return decryptEnvelope(env, peerUserId, isOwnMessage);
+    // env.v === 2 here (the only other shape parseEnvelope() accepts) — an
+    // old-format message is routed to the v2 decryptor exclusively, never
+    // through the v3 ratchet path.
+    _diagLog('V2_DECRYPT_ROUTE', { msgId: msgIdForLog, chatId, peerUserId, isOwnMessage });
+    return decryptEnvelope(env, peerUserId, isOwnMessage, msgIdForLog);
   }
   async function attempt(message, chatId, currentUserId, opts) {
     const peer = peerFor(message, currentUserId, opts?.activeConversation);
@@ -516,7 +651,7 @@
     const meId = currentUserId != null ? String(currentUserId) : me();
     const sender = message?.senderId != null ? String(message.senderId) : (message?.sender?.id != null ? String(message.sender.id) : null);
     const isOwnMessage = !!(sender && meId && sender === meId);
-    return decryptFromChat(message.content, chatId, peer, isOwnMessage);
+    return decryptFromChat(message.content, chatId, peer, isOwnMessage, messageId(message));
   }
   function notifyResolved(id, plaintext, entry) { decryptCache.set(id, plaintext); pending.delete(id); failed.delete(id); entry?.subscribers?.forEach(fn => { try { fn(plaintext); } catch (_) {} }); try { document.dispatchEvent(new CustomEvent('kyn:messageDecrypted', { detail: { messageId: id, chatId: entry?.chatId, plaintext } })); } catch (_) {} }
   function notifyFailed(id, error, entry) { pending.delete(id); failed.add(id); entry?.subscribers?.forEach(fn => { try { fn(null, error); } catch (_) {} }); try { document.dispatchEvent(new CustomEvent('kyn:messageDecryptFailed', { detail: { messageId: id, error: error?.message || String(error || 'Decryption failed') } })); } catch (_) {} }
