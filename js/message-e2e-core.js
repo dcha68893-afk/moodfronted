@@ -162,36 +162,99 @@
     try { localStorage.setItem(ratchetStorageKey(peerId), JSON.stringify(session)); } catch (_) {}
   }
 
+  // ROOT-CAUSE FIX (RATCHET-STATE-RACE — "Unable to decrypt this message"
+  // introduced by the v3 Double Ratchet switchover): unlike the old v2
+  // scheme (every message independently derivable, no memory of prior
+  // messages, so nothing to race on), a Double Ratchet session is mutable
+  // state that must be read, advanced, and written back on EVERY single
+  // encrypt/decrypt for a given peer. encryptForChatV3/decryptEnvelopeV3
+  // used to do that load->mutate->save with no locking at all. In real
+  // usage this races constantly: message-client.js's loadHistory() calls
+  // `res.data.forEach(m => applyIncomingMessage(m, ...))` — NOT awaited
+  // per item — so every undecrypted message in a chat's history begins
+  // decrypting in the same tick; likewise sending two messages back to
+  // back starts a second encrypt before the first has finished saving.
+  // Two overlapping calls for the same peer both read the SAME session
+  // snapshot, each independently advances its own in-memory copy, and
+  // whichever save() lands last silently overwrites the other's chain
+  // advance. The message that lost the race is not just delayed — it's
+  // PERMANENTLY undecryptable (confirmed by reproduction): the chain-key
+  // index it needed was already consumed deriving the other message's
+  // key, and that index is gone forever (a one-way KDF chain, by design,
+  // cannot be run backwards) — so the skipped-key cache never gets it
+  // either. Retrying does not help, which matches the reported behavior.
+  //
+  // Fix: serialize every ratchet operation for a given peer through a
+  // per-peer promise chain, so the load->mutate->save cycle is atomic —
+  // exactly the same invariant a mutex/critical-section gives you, just
+  // expressed as a queue of promises since JS has no real threads. This
+  // does NOT serialize different peers against each other (each gets its
+  // own queue key), so unrelated conversations are unaffected.
+  const ratchetLocks = new Map();
+  function withRatchetLock(peerId, fn) {
+    const key = ratchetStorageKey(peerId);
+    const prior = ratchetLocks.get(key) || Promise.resolve();
+    const settledPrior = prior.then(() => {}, () => {}); // don't let one failure jam the queue
+    const result = settledPrior.then(fn);
+    ratchetLocks.set(key, result.then(() => {}, () => {}));
+    return result;
+  }
+
   async function encryptForChatV3(plaintext, chatId, recipientUserId) {
     const identity = await ensureIdentity();
     if (!recipientUserId) throw new Error('Recipient is required for secure messaging');
-    const R = global.KynectaRatchet;
-    let session = loadRatchetSession(recipientUserId);
-    if (!session) {
-      const peer = await identity.publicKeyFor(recipientUserId);
-      const sharedBitsRaw = await crypto.subtle.deriveBits({ name: 'ECDH', public: peer.key }, identity.privateKey, 256);
-      const peerRawPub = await crypto.subtle.exportKey('raw', peer.key);
-      const peerRawPubB64 = btoa(String.fromCharCode(...new Uint8Array(peerRawPub)));
-      session = await R.initSessionAsSender(sharedBitsRaw, peerRawPubB64);
-    }
-    const { session: nextSession, envelope } = await R.ratchetEncrypt(session, String(plaintext));
-    saveRatchetSession(recipientUserId, nextSession);
-    return JSON.stringify(envelope);
+    return withRatchetLock(recipientUserId, async () => {
+      const R = global.KynectaRatchet;
+      let session = loadRatchetSession(recipientUserId);
+      if (!session) {
+        const peer = await identity.publicKeyFor(recipientUserId);
+        const sharedBitsRaw = await crypto.subtle.deriveBits({ name: 'ECDH', public: peer.key }, identity.privateKey, 256);
+        const peerRawPub = await crypto.subtle.exportKey('raw', peer.key);
+        const peerRawPubB64 = btoa(String.fromCharCode(...new Uint8Array(peerRawPub)));
+        session = await R.initSessionAsSender(sharedBitsRaw, peerRawPubB64);
+      }
+      const { session: nextSession, envelope } = await R.ratchetEncrypt(session, String(plaintext));
+      saveRatchetSession(recipientUserId, nextSession);
+      return JSON.stringify(envelope);
+    });
   }
 
-  async function decryptEnvelopeV3(envelope, peerUserId) {
-    const identity = await ensureIdentity();
-    const R = global.KynectaRatchet;
-    let session = loadRatchetSession(peerUserId);
-    if (!session) {
-      const peer = await identity.publicKeyFor(peerUserId);
-      const sharedBitsRaw = await crypto.subtle.deriveBits({ name: 'ECDH', public: peer.key }, identity.privateKey, 256);
-      const myPrivJwk = await crypto.subtle.exportKey('jwk', identity.privateKey);
-      session = await R.initSessionAsReceiver(sharedBitsRaw, myPrivJwk, envelope.hdr.dh);
+  // ROOT-CAUSE FIX (OWN-MESSAGE-MISROUTED-INTO-RECEIVE-CHAIN): decryptFromChat
+  // used to call this with no isOwnMessage awareness at all, so an attempt
+  // to redisplay your OWN sent v3 message (e.g. cache miss on a fresh
+  // device, or IndexedDB cleared) got fed into ratchetDecrypt() — which
+  // reads the RECEIVING chain (CKr/DHr), not the sending chain that
+  // actually produced this envelope. That's not just wrong, it's
+  // impossible by design: Double Ratchet's forward secrecy means the
+  // sending chain key used for a given message is overwritten/discarded
+  // immediately after use, so not even the original sender can re-derive
+  // it later. This app already keeps its own plaintext locally at send
+  // time (optimistic displayContent + local IndexedDB cache — see
+  // message-client.js/message-local-db.js) specifically so it never needs
+  // to re-decrypt its own messages; if that cache is genuinely missing,
+  // there is no cryptographic way to recover the text, so fail cleanly
+  // and immediately instead of running a doomed decrypt against the wrong
+  // chain (which — via the `header.dh !== session.DHr` branch — could
+  // also needlessly burn a bogus DH computation against the local
+  // session).
+  async function decryptEnvelopeV3(envelope, peerUserId, isOwnMessage) {
+    if (isOwnMessage) {
+      throw new Error('Cannot re-derive plaintext for your own Double Ratchet message (forward secrecy) — no locally cached copy is available');
     }
-    const { session: nextSession, plaintext } = await R.ratchetDecrypt(session, envelope);
-    saveRatchetSession(peerUserId, nextSession);
-    return plaintext;
+    const identity = await ensureIdentity();
+    return withRatchetLock(peerUserId, async () => {
+      const R = global.KynectaRatchet;
+      let session = loadRatchetSession(peerUserId);
+      if (!session) {
+        const peer = await identity.publicKeyFor(peerUserId);
+        const sharedBitsRaw = await crypto.subtle.deriveBits({ name: 'ECDH', public: peer.key }, identity.privateKey, 256);
+        const myPrivJwk = await crypto.subtle.exportKey('jwk', identity.privateKey);
+        session = await R.initSessionAsReceiver(sharedBitsRaw, myPrivJwk, envelope.hdr.dh);
+      }
+      const { session: nextSession, plaintext } = await R.ratchetDecrypt(session, envelope);
+      saveRatchetSession(peerUserId, nextSession);
+      return plaintext;
+    });
   }
   // ── end Double Ratchet integration ──────────────────────────────────────
 
@@ -277,7 +340,7 @@
   async function decryptFromChat(encContent, chatId, peerUserId, isOwnMessage) {
     const env = parseEnvelope(encContent);
     if (!env) return encContent;
-    if (env.v === 3) return decryptEnvelopeV3(env, peerUserId);
+    if (env.v === 3) return decryptEnvelopeV3(env, peerUserId, isOwnMessage);
     return decryptEnvelope(env, peerUserId, isOwnMessage);
   }
   async function attempt(message, chatId, currentUserId, opts) {
