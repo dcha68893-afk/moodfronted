@@ -1,14 +1,14 @@
-// js/google-auth.js — Google Identity Services login for Nexopa
+// js/google-auth.js — Google Identity Services login for Nexipa
 (function () {
     'use strict';
 
-    const GOOGLE_CLIENT_ID = '523213927690-volo0p7mbbqjucrksv8vasfvcqqicall.apps.googleusercontent.com';
-    const CURRENT_API_ORIGIN = 'https://nexorah-xnv6.onrender.com';
+    const GOOGLE_CLIENT_ID = String(window.GOOGLE_CLIENT_ID || '').trim();
 
     function getApiOrigin() {
-        // Google authentication must use the current backend directly. Do not
-        // inherit a stale API origin from an older global config module.
-        return CURRENT_API_ORIGIN;
+        if (typeof window.__getApiOrigin !== 'function') {
+            throw new Error('Frontend runtime configuration is not loaded.');
+        }
+        return window.__getApiOrigin();
     }
 
     function showError(message) {
@@ -112,6 +112,10 @@
 
     function renderButtons() {
         if (!window.google?.accounts?.id) return;
+        if (!GOOGLE_CLIENT_ID) {
+            console.error('[GoogleAuth] GOOGLE_CLIENT_ID is missing from frontend .env.');
+            return;
+        }
         if (!initialized) {
             window.google.accounts.id.initialize({ client_id: GOOGLE_CLIENT_ID, callback: handleCredentialResponse, auto_select: false });
             initialized = true;
