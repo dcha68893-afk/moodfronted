@@ -124,6 +124,45 @@
   function msgKey(accountId, chatId, id) { return `${accountId}::${chatId}::${id}`; }
   function convKey(accountId, chatId) { return `${accountId}::${chatId}`; }
 
+  // ROOT-CAUSE FIX (DOUBLE-RATCHET-PERMANENT-DECRYPT-FAILURE ON RELOAD/
+  // RELOGIN — "🔒 Unable to decrypt this message"): IndexedDB's
+  // index.getAll() returns rows ordered by (index key, then PRIMARY key) —
+  // it does NOT know or care about any numeric field inside the stored
+  // record. This store's primary key is the STRING `key` field built in
+  // msgKey() as `${accountId}::${chatId}::${id}`, so once a chat has more
+  // than 9 messages, getAll() hands them back in lexicographic STRING
+  // order, not chronological order: e.g. ids 9, 10, 11, 99, 100 come back
+  // as 10, 100, 11, 9, 99 — completely scrambled the moment digit-lengths
+  // differ. That was harmless for the old v2 static-key scheme (every
+  // message is independently decryptable, order never mattered) but is
+  // fatal for the real Double Ratchet (js/e2e-ratchet-v3.js): the sending/
+  // receiving chain keys are advanced one message at a time via a one-way
+  // KDF and immediately discarded, so processing message #11 before #9
+  // permanently burns the chain key #9 actually needed — there is no way
+  // to run a one-way hash backwards to recover it. This is exactly why the
+  // symptom appears on reload/relogin specifically: that's the one code
+  // path (hydrateFromCacheThenSync in message-client.js) that replays a
+  // chat's history from THIS cache, in whatever scrambled order getAll()
+  // handed back, straight through decryptForDisplay -> the ratchet. A
+  // message caught on the losing side of that scramble fails once and
+  // stays failed forever (retrying can't help — the key is gone), matching
+  // the reported behavior precisely. Fix: sort numerically by message id
+  // (falling back to createdAt for the rare non-numeric/optimistic id)
+  // before returning, so every consumer of this cache always sees true
+  // chronological order — the same invariant message-client.js's own
+  // getMessages() already enforces for in-memory state, now guaranteed at
+  // the disk-cache layer too.
+  function _chronologicalSort(rows) {
+    return rows.slice().sort((a, b) => {
+      const aNum = typeof a.id === 'number' ? a.id : null;
+      const bNum = typeof b.id === 'number' ? b.id : null;
+      if (aNum !== null && bNum !== null) return aNum - bNum;
+      const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      if (aTime !== bTime) return aTime - bTime;
+      return aNum !== null ? -1 : (bNum !== null ? 1 : 0);
+    });
+  }
   async function getMessages(chatId) {
     const accountId = currentUserId();
     if (!accountId) return [];
@@ -132,9 +171,11 @@
     try {
       const idx = ctx.store.index('chatId');
       const rows = await reqToPromise(idx.getAll(IDBKeyRange.only(String(chatId))));
-      return Array.isArray(rows)
-        ? rows.filter(r => String(r.accountId || '') === accountId).map(r => r.message)
-        : [];
+      if (!Array.isArray(rows)) return [];
+      const messages = rows
+        .filter(r => String(r.accountId || '') === accountId)
+        .map(r => r.message);
+      return _chronologicalSort(messages);
     } catch (_) { return []; }
   }
 

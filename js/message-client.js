@@ -445,13 +445,36 @@
         return `cm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
     }
 
+    // ROOT-CAUSE FIX (RATCHET-ORDER-SAFETY / defense in depth): every place
+    // that feeds a batch of messages into applyIncomingMessage()->
+    // decryptForDisplay() must guarantee strict chronological (ascending
+    // id/createdAt) order — the real Double Ratchet (js/e2e-ratchet-v3.js)
+    // advances a one-way KDF chain per message and permanently loses a
+    // message's key if a later message consumes the chain first (see the
+    // matching fix in js/message-local-db.js's getMessages() for the
+    // concrete IndexedDB bug this class of issue was actually caused by).
+    // The backend already sends these endpoints in ascending order, but
+    // sorting defensively here costs nothing and means a future backend
+    // change, proxy reordering, or new call site can never silently
+    // reintroduce a permanent decrypt-failure bug like that one.
+    function _chronological(list) {
+        return (Array.isArray(list) ? list.slice() : []).sort((a, b) => {
+            const aNum = typeof a.id === 'number' ? a.id : null;
+            const bNum = typeof b.id === 'number' ? b.id : null;
+            if (aNum !== null && bNum !== null) return aNum - bNum;
+            const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+            const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+            return aTime - bTime;
+        });
+    }
+
     async function loadHistory(chatId, { before = null, limit = 50 } = {}) {
         const qs = new URLSearchParams();
         if (before) qs.set('before', before);
         qs.set('limit', String(limit));
         const res = await api().get(`/messages/${chatId}?${qs.toString()}`);
         if (res && res.success && Array.isArray(res.data)) {
-            res.data.forEach(m => applyIncomingMessage(m, { fromSelf: false }));
+            _chronological(res.data).forEach(m => applyIncomingMessage(m, { fromSelf: false }));
             return { messages: res.data, hasMore: !!res.hasMore };
         }
         return { messages: [], hasMore: false };
@@ -460,7 +483,7 @@
     async function syncMissed(chatId, sinceId) {
         const res = await api().get(`/messages/${chatId}/sync?sinceId=${encodeURIComponent(sinceId || '')}`);
         if (res && res.success && Array.isArray(res.data)) {
-            res.data.forEach(m => applyIncomingMessage(m, { fromSelf: false }));
+            _chronological(res.data).forEach(m => applyIncomingMessage(m, { fromSelf: false }));
         }
         return res && res.data ? res.data : [];
     }
@@ -478,7 +501,7 @@
         if (cache) {
             try {
                 const cached = await cache.getMessages(chatId);
-                cached.forEach((m) => applyIncomingMessage(m, { fromSelf: false }));
+                _chronological(cached).forEach((m) => applyIncomingMessage(m, { fromSelf: false }));
                 cachedCount = cached.length;
             } catch (_) { /* cache is best-effort — falls through to a full network load below */ }
         }
