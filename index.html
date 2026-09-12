@@ -31,6 +31,14 @@
         } catch (_e) {}
     })();
     </script>
+    <!-- FIX (BACKEND_URL-MISSING / GOOGLE-BUTTON-NOT-DISPLAYING): this must load
+         BEFORE js/config.js. It sets window.__NEXIPA_RUNTIME_CONFIG__ (now served
+         dynamically by server.js from the live environment variables — see the
+         comment above app.get("/js/runtime-config.js", ...) in server.js). Without
+         this tag, config.js has nothing to read, BACKEND_URL stays empty, and
+         google-auth.js silently refuses to render its button since it depends on
+         window.GOOGLE_CLIENT_ID coming from this same config. -->
+    <script src="/js/runtime-config.js"></script>
     <script src="/js/config.js"></script>
     <script>
     // FIX (HARDCODED-BACKEND-URL-BYPASSES-DOTENV): this used to hardcode
@@ -2788,7 +2796,11 @@
                                 <span>or</span>
                                 <span style="flex:1;height:1px;background:currentColor;opacity:.25;"></span>
                             </div>
-                            <div id="googleSignInLoginContainer" style="display:flex;justify-content:center;margin-bottom:10px;"></div>
+                            <!-- FIX (sizing audit): explicit min-height/min-width so this never
+                                 collapses to 0x0 before Google's script populates it — keeps the
+                                 "or" divider and the space below it visually stable either way,
+                                 and rules out any accidental zero-size collapse as a cause. -->
+                            <div id="googleSignInLoginContainer" style="display:flex;justify-content:center;margin-bottom:10px;min-height:44px;min-width:240px;"></div>
 
                             <div class="text-center">
                                 <p class="mb-10">Don't have an account? <a href="#" class="footer-link" id="signup-button" data-form-toggle="register">Sign up here</a></p>
@@ -2888,7 +2900,7 @@
                                 <span>or</span>
                                 <span style="flex:1;height:1px;background:currentColor;opacity:.25;"></span>
                             </div>
-                            <div id="googleSignInRegisterContainer" style="display:flex;justify-content:center;margin-bottom:10px;"></div>
+                            <div id="googleSignInRegisterContainer" style="display:flex;justify-content:center;margin-bottom:10px;min-height:44px;min-width:240px;"></div>
                             
                             <div class="text-center">
                                 <p>Already have an account? <a href="#" class="footer-link" id="back-to-login-from-register" data-form-toggle="login">Login here</a></p>

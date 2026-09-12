@@ -104,7 +104,18 @@
     }
 
     function renderInto(container) {
-        if (!container || !isVisible(container) || rendered.has(container)) return;
+        if (!container) return;
+        if (rendered.has(container)) return;
+        if (!isVisible(container)) {
+            // FIX (sizing audit): log the actual measured box so a real future
+            // sizing regression is instantly diagnosable from the console instead
+            // of requiring another round of manual CSS auditing.
+            console.warn(
+                '[GoogleAuth] Container', container.id, 'is not visible yet — offsetParent:',
+                container.offsetParent, 'offsetWidth:', container.offsetWidth
+            );
+            return;
+        }
         // Never clear a live Google-rendered iframe. Clearing/replacing it during
         // resize or form switches causes the visible blink/spark and can leave
         // the user with an empty container while GIS is rebuilding its iframe.
@@ -126,7 +137,20 @@
     function renderButtons() {
         if (!window.google?.accounts?.id) return;
         if (!GOOGLE_CLIENT_ID) {
-            console.error('[GoogleAuth] GOOGLE_CLIENT_ID is missing from frontend .env.');
+            // FIX (sizing audit follow-up): this is the #1 real-world cause of the
+            // "Google button just doesn't appear" report — not CSS. If you see this
+            // line in your browser console, the container is fine; the runtime
+            // config simply never reached the browser with a client ID. Check:
+            //   1. Network tab → GET /js/runtime-config.js → does the response body
+            //      actually contain a non-empty GOOGLE_CLIENT_ID?
+            //   2. If that file 404s or is empty, your host's env vars (Render
+            //      dashboard, Netlify, etc.) are missing GOOGLE_CLIENT_ID — a
+            //      committed .env file is not enough for most hosts in production.
+            console.error(
+                '[GoogleAuth] GOOGLE_CLIENT_ID is missing. window.GOOGLE_CLIENT_ID =',
+                JSON.stringify(window.GOOGLE_CLIENT_ID),
+                '— check Network tab for /js/runtime-config.js and your host\'s environment variables.'
+            );
             return;
         }
         if (!initialized) {

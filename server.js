@@ -130,6 +130,52 @@ app.use("/api", (req, _res, next) => {
   next();
 });
 
+// FIX (BACKEND_URL-MISSING / GOOGLE-BUTTON-NOT-DISPLAYING): this server used
+// to serve the raw source tree with no runtime-config.js at all. The only
+// place that file ever got generated was scripts/build-config.js, which
+// writes it into dist/ — a folder this server never serves (see
+// `express.static(__dirname)` below, which serves the repo root). So in
+// production window.__NEXIPA_RUNTIME_CONFIG__ was always undefined, js/
+// config.js threw "BACKEND_URL is not configured", and google-auth.js
+// (which reads window.GOOGLE_CLIENT_ID, itself sourced from that same
+// runtime config) silently refused to render its button. Whether the
+// button "sometimes" appeared depended entirely on whether someone had
+// manually run the build and left a stale dist/ copy lying around.
+//
+// Fix: generate js/runtime-config.js dynamically, on every request, straight
+// from this server's actual process.env (the same env vars Render/whatever
+// host already injects). This is now the single source of truth — no build
+// step, no stale file, no drift between .env and what the browser gets.
+app.get("/js/runtime-config.js", (_req, res) => {
+  const backendUrl = String(process.env.BACKEND_URL || "").trim().replace(/\/+$/, "");
+  const frontendUrl = String(process.env.FRONTEND_URL || "").trim().replace(/\/+$/, "");
+  const googleClientId = String(process.env.GOOGLE_CLIENT_ID || "").trim();
+
+  if (!backendUrl) {
+    console.error(
+      "[Config] BACKEND_URL env var is missing on the server. Set it in .env (local) " +
+        "or in your hosting provider's environment variables (e.g. Render dashboard)."
+    );
+  }
+  if (!googleClientId) {
+    console.error(
+      "[Config] GOOGLE_CLIENT_ID env var is missing on the server. The Google sign-in " +
+        "button will not render until this is set."
+    );
+  }
+
+  res.type("application/javascript");
+  res.set("Cache-Control", "no-store");
+  res.send(
+    `// GENERATED AT REQUEST TIME — reflects this server's live environment variables.\n` +
+      `window.__NEXIPA_RUNTIME_CONFIG__ = Object.freeze(${JSON.stringify(
+        { BACKEND_URL: backendUrl, FRONTEND_URL: frontendUrl, GOOGLE_CLIENT_ID: googleClientId },
+        null,
+        2
+      )});\n`
+  );
+});
+
 // Serve static files
 app.use(express.static(__dirname));
 
