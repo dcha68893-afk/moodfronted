@@ -1006,9 +1006,32 @@ waitForToken = async function() {
 
 function normalizeResponse(result, isError = false) {
     if (isError || (result && result.__error === true)) {
+        // FIX (UNDEFINED-STATUS-MESSAGE): this branch used to return only
+        // {success, error, timestamp} — dropping status/statusText/data/url
+        // entirely. Every caller up the chain (apiPost/apiGet/etc. in
+        // api.request.js, and enhancedSecureFetch's own retry-on-5xx and
+        // 401/429 handling) reads result.status and result.message, so on
+        // every real HTTP error those were always undefined. That's the
+        // exact "[API] ❌ POST request failed: undefined - undefined" seen
+        // in the console, and it also silently defeated the 401 auto-logout
+        // path, the 429 retry-after handling, and the 5xx exponential-backoff
+        // retry (all gated on result.status, which was never populated).
+        // js/api.auth.js's register()/login() then fell back to
+        // `apiResponse.status || (apiResponse.success ? 200 : 400)`, so a
+        // real backend 500 was reported to the UI as a bare 400 with an
+        // empty body — masking the server's actual error message.
+        // Preserve every field the original error carried instead of
+        // collapsing it down to a single string.
         return {
             success: false,
             error: result?.message || result?.error || 'An unknown error occurred',
+            message: result?.message || result?.error || 'An unknown error occurred',
+            status: result?.status ?? 0,
+            statusText: result?.statusText || '',
+            data: result?.data,
+            url: result?.url,
+            code: result?.code,
+            requestId: result?.requestId,
             timestamp: new Date().toISOString()
         };
     }
