@@ -4,11 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Messages</title>
+<!-- FIX: load the shared runtime-config-driven config.js before anything
+     hardcodes the backend origin here — see chat.html for the full
+     explanation of why a literal in this spot breaks under the build. -->
+<script src="/js/runtime-config.js"></script>
+<script src="/js/config.js"></script>
 <script src="/js/theme.engine.js"></script>
 <script>
-  window.API_BASE_URL = "https://noxopa.onrender.com";
+  window.API_BASE_URL = window.__getApiOrigin();
   window.__kynAPI = window.__kynAPI || {};
-  window.__kynAPI.baseUrl = "https://noxopa.onrender.com/api";
+  window.__kynAPI.baseUrl = window.__getApiBase();
 </script>
 <style>
   :root { color-scheme: light dark; }

@@ -1,7 +1,26 @@
 ﻿<!DOCTYPE html>
 <html lang="en">
 <head>
-    <script>window.API_BASE_URL = "https://noxopa.onrender.com";</script>
+    <!-- FIX (recursive window.__getApiOrigin / "not a function" on load):
+         this page never loaded js/config.js. It used to define its own
+         copy of __isLocalEnvironment/__getApiOrigin/__getApiBase further
+         down the page (search "ENVIRONMENT DETECTION"), with the backend
+         origin hardcoded as literal strings inside those functions. The
+         production build (scripts/build-config.js) rewrites every
+         quoted onrender.com/localhost URL literal in every shipped file
+         into a call to window.__getApiOrigin()/__getApiBase() — which
+         also rewrote the literals INSIDE this page's own copy of those
+         functions, turning them into functions that call themselves and
+         blowing the call stack. It separately turned the hardcoded
+         window.API_BASE_URL assignment below into an __getApiOrigin()
+         call that ran before anything on this page had defined it.
+         Loading the shared, runtime-config-driven js/config.js first
+         (same pattern index.html already uses) means the origin comes
+         from configuration, not from literals the build step has to
+         rewrite, and it's ready before anything on this page needs it. -->
+    <script src="/js/runtime-config.js"></script>
+    <script src="/js/config.js"></script>
+    <script>window.API_BASE_URL = window.__getApiOrigin();</script>
     <script src="/js/theme.engine.js"></script>
     <script src="/js/panel-state-bridge.js"></script>
     <style id="kynCriticalHeaderFix">
@@ -1857,26 +1876,12 @@
 
     <script>
         // ======================================================================
-        // ENVIRONMENT DETECTION & SESSION PROTECTION
+        // SESSION PROTECTION
         // ======================================================================
-        window.__isLocalEnvironment = window.__isLocalEnvironment || function(hostname) {
-            const host = String(hostname || window.location.hostname || '').toLowerCase();
-            if (!host) return true;
-            if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0') return true;
-            if (host.endsWith('.local')) return true;
-            if (host.startsWith('192.168.') || host.startsWith('10.')) return true;
-            return /^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
-        };
-        window.__getApiOrigin = window.__getApiOrigin || function() {
-            const host = String(window.location?.hostname || '').toLowerCase();
-            if (window.__isLocalEnvironment(host)) return 'http://localhost:4000';
-            if (host.includes('nexipa.onrender.com')) return 'https://noxopa.onrender.com';
-            return 'https://noxopa.onrender.com';
-        };
-        window.__getApiBase = window.__getApiBase || function() {
-            return `${window.__getApiOrigin()}/api`;
-        };
-        // Expose __apiBaseUrl so group-ui.js panelFetch can resolve the backend origin
+        // __isLocalEnvironment / __getApiOrigin / __getApiBase are already
+        // defined by js/config.js, loaded at the top of <head> — see the FIX
+        // comment there for why this page no longer keeps its own hardcoded
+        // copy of them.
         window.__apiBaseUrl = window.__getApiBase();
 
         // Session protection - prevent clearing critical auth keys
