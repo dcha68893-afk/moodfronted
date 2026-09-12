@@ -69,40 +69,40 @@
       // empty, and a missing identity must never cause plaintext/ciphertext
       // UI to be rendered as a substitute for the actual chat state.
       //
-      // ROOT-CAUSE FIX (EVERY MESSAGE ON MOBILE FAILS TO DECRYPT): this
-      // `await` used to be unguarded. js/ does
-      // not exist anywhere in this repository (verified — grep across the
-      // whole tree finds zero matches for the filename outside this one
-      // reference), so loadScript()'s <script>.onerror always fired here on
-      // every load of message.html, REJECTING this promise. Because this
-      // whole function is a single top-to-bottom `await` chain, that
-      // rejection propagated straight out of loadNewCore() and was caught by
-      // its own outer catch — which resets loadPromise and re-throws — so
-      // NONE of the lines below this point (e2e-identity-core.js,
+      // ROOT-CAUSE FIX (EVERY MESSAGE ON MOBILE FAILS TO DECRYPT, now fully
+      // cleaned up): this block used to `await loadScript('/js/message-
+      // mobile-bootstrap-fix.js')` UNGUARDED. That file was deliberately
+      // deleted from this repo (see git history: "remove: delete message
+      // mobile bootstrap workaround causing main-thread hangs") but this
+      // reference to it was never removed, so loadScript()'s
+      // <script>.onerror fired here on every load of message.html,
+      // REJECTING this promise — and because this whole function is a
+      // single top-to-bottom `await` chain, that rejection propagated
+      // straight out of loadNewCore(), which reset loadPromise and
+      // re-threw. NONE of the lines below this point (e2e-identity-core.js,
       // e2e-ratchet-v3.js, message-e2e-core.js, message-e2e-compat.js) ever
-      // ran on message.html. window.KynectaMessageE2E was never created on
-      // that page, window.KynectaE2E was never given its
-      // decryptMessageForDisplay/encryptForChat surface there, and every
-      // single incoming message on the one page that actually renders chat
-      // bubbles (message.html) hit message-client.js's decrypt call against
-      // an engine that didn't exist — surfacing as "🔒 Unable to decrypt
-      // this message" on every message, unconditionally, mobile or desktop,
-      // any time message.html loaded this file. chat.html itself never
-      // matches the `/message` path test above, so its own copy of this
-      // bootstrap always completed fine — which is exactly why sending
-      // worked (chat.html's notification-preview decrypt calls this same
-      // core successfully) while the actual chat view kept failing.
-      // js/ has been restored alongside this
-      // fix; wrapping the call is kept anyway as defense in depth so a
-      // single missing/renamed non-critical script can never again take
-      // down the entire E2E bootstrap chain for the page that matters most.
-      if (/\/message(?:\.html)?$/i.test(global.location?.pathname || '')) {
-        try {
-          await loadScript('/js/');
-        } catch (err) {
-          console.warn('[MessageE2E]  failed to load (non-fatal, continuing E2E bootstrap):', err?.message || err);
-        }
-      }
+      // ran on message.html: window.KynectaMessageE2E was never created
+      // there, window.KynectaE2E never got its decryptMessageForDisplay/
+      // encryptForChat surface, and every incoming message on the one page
+      // that actually renders chat bubbles hit message-client.js's decrypt
+      // call against an engine that didn't exist — surfacing as "🔒 Unable
+      // to decrypt this message" on every message, unconditionally, any
+      // time message.html loaded this file. chat.html itself never matches
+      // the `/message` path test below, so its own copy of this bootstrap
+      // always completed fine — which is exactly why sending worked
+      // (chat.html's notification-preview decrypt calls this same core
+      // successfully) while the actual chat view kept failing.
+      //
+      // A previous pass wrapped the call in try/catch (correct instinct —
+      // a single missing/renamed non-critical script should never be able
+      // to take down the whole bootstrap chain) but, in the same edit, the
+      // filename itself got accidentally stripped down to an empty string,
+      // leaving `loadScript('/js/')` — a real request for a bare directory
+      // path that 404s on every load. It was non-fatal (the try/catch
+      // still caught it) but pointless and noisy. Since the referenced
+      // file is gone for good and nothing in this bootstrap chain needs
+      // it, the load attempt is removed outright rather than re-guessing a
+      // filename.
 
       // Prepare the existing password-wrapped identity before loading the
       // canonical layer. On a second device this can restore the exact

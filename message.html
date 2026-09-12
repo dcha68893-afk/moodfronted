@@ -506,7 +506,16 @@
       const decryptFailed = m.displayContent === '🔒 Encrypted message' || m.displayContent === '🔒 Unable to decrypt this message';
       const decryptPending = m.displayContent === 'Decrypting…';
       const content = isDeletedForEveryone ? 'This message was deleted' : (m.displayContent !== undefined ? m.displayContent : '…');
-      const contentAttrs = decryptFailed ? ` class="decrypt-retry" title="Tap to retry decryption" data-retry-message-id="${m.id}"`
+      // FIX (SHOW-WHY-V3-FAILED, requested behavior): message-client.js's
+      // kyn:messageDecryptFailed listener now stores the exact reason
+      // (which stage — Double Ratchet v3, legacy v2 fallback, or both —
+      // failed and why) on m.decryptFailureReason. Surface it as a tooltip
+      // instead of only "Tap to retry decryption", so a genuinely failed
+      // message tells you what actually went wrong, not just that it did.
+      const retryTitle = m.decryptFailureReason
+        ? `Tap to retry decryption — ${escapeHtml(m.decryptFailureReason)}`
+        : 'Tap to retry decryption';
+      const contentAttrs = decryptFailed ? ` class="decrypt-retry" title="${retryTitle}" data-retry-message-id="${m.id}"`
                           : decryptPending ? ` class="decrypt-pending"` : '';
       const canAct = !m.deleted && typeof m.id === 'number';
       // FIX (SELECT-MODE): while selecting, the per-bubble "..." menu is

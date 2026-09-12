@@ -294,7 +294,16 @@
             for (const [key, message] of bucket.entries()) {
                 if (String(key) !== String(failedId)) continue;
                 const displayValue = '🔒 Unable to decrypt this message';
-                bucket.set(key, Object.assign({}, message, { displayContent: displayValue }));
+                // FIX (SHOW-WHY-V3-FAILED, requested behavior): message-e2e-
+                // core.js's decryptFromChat now names exactly which stage
+                // failed and why (e.detail.error) — e.g. "Double Ratchet
+                // (v3) decrypt failed: ... — legacy (v2) fallback also
+                // failed: ...". Carry that through to the message object so
+                // the bubble's tooltip (see message.html's bubbleHtml) can
+                // show it instead of the failure reason being logged once
+                // and then lost.
+                const decryptFailureReason = e?.detail?.error || null;
+                bucket.set(key, Object.assign({}, message, { displayContent: displayValue, decryptFailureReason }));
                 syncLastMessageDisplay(chatId, key, displayValue, false);
                 notify('message:decrypted', { chatId, messageId: key });
                 // NOT persisted — see the matching comment in

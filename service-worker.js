@@ -1,10 +1,31 @@
-// Kynecta service worker — v19.19.0
+// Kynecta service worker — v19.21.0
 // Critical runtime/theme/encryption/account-isolation assets are network-first
 // so an installed PWA cannot silently execute week-old code after a deploy.
 'use strict';
 
-const SW_VERSION = '19.20.0';
-const CACHE_NAME = 'nexopa-static-v43';
+// ROOT-CAUSE FIX (FIXES LAND ON DESKTOP BUT NOT ON MOBILE — sidebar empty
+// on reload/relogin, "Unable to decrypt" persisting after a real fix was
+// already committed): message.html is the ONE page that actually renders
+// the conversation sidebar and chat bubbles (see e2e-session-init.js's own
+// comment on this), and js/message-e2e-compat.js is a required link in the
+// canonical E2E bootstrap chain (loaded right after message-e2e-core.js) —
+// yet neither was ever listed in NETWORK_FIRST_PATTERNS below, and
+// message.html isn't in CORE_STATIC_ASSETS either. A desktop browser
+// tab with no installed PWA/service worker (or one that's never been
+// granted an install) just fetches these fresh every time, so a genuine
+// fix appears immediately there. An installed mobile PWA is exactly the
+// case this file's own stale-while-revalidate default exists to protect
+// against: it serves the OLD cached copy of message.html/message-e2e-
+// compat.js on the very load that matters, and only fetches the new one
+// in the background for NEXT time — so a real fix to the sidebar or the
+// decrypt engine can sit deployed on the server for a session or more
+// before a mobile install ever runs it, while desktop testing the same
+// commit sees it work right away. Bumping CACHE_NAME alone does not close
+// this gap for future edits to these two files (it only forces one clean
+// break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
+// from recurring on every future deploy.
+const SW_VERSION = '19.21.0';
+const CACHE_NAME = 'nexopa-static-v44';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -25,6 +46,7 @@ const CORE_STATIC_ASSETS = [
 const NETWORK_FIRST_PATTERNS = [
   /\/js\/theme\.engine\.js/i,/\/theme\.colors\.css/i,/\/js\/e2e-encryption\.js/i,
   /\/js\/e2e-session-init\.js/i,/\/js\/api\.request\.js/i,/\/js\/message-e2e-core\.js/i,
+  /\/js\/message-e2e-compat\.js/i,/\/message\.html/i,
   /\/js\/e2e-identity-core\.js/i,/\/js\/e2e-ratchet-v3\.js/i,/\/js\/api\.auth\.js/i,/\/js\/app\.core\.session\.js/i,
   /\/js\/app\.core\.bootstrap\.js/i,/\/js\/auth\.session\.manager\.js/i,/\/js\/authStorage\.js/i,
   /\/js\/auth\.account\.limit\.js/i,/\/js\/google-auth\.js/i,/\/js\/app\.cache\.unified\.js/i,

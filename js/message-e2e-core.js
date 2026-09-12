@@ -466,10 +466,48 @@
     throw lastErr || new Error('Decryption failed');
   }
 
+  // FIX (V3-DECRYPT-FALLBACK + DIAGNOSTIC, requested behavior): a Double
+  // Ratchet (v3) message that fails to decrypt — e.g. a corrupted/out-of-
+  // sync local ratchet session, cross-device divergence (see the
+  // multi-device caveat above encryptForChatV3), or a proxy/relay bug that
+  // mislabeled an older v2 payload's version field — used to have exactly
+  // one decrypt attempt and no recovery path; the real cause was also
+  // swallowed into a single generic "Decryption failed". Per explicit
+  // product decision: on a v3 failure, ALSO attempt the legacy static-key
+  // v2 scheme as a last-resort fallback (real encryption, just without
+  // forward secrecy — the same "fail open to WEAKER encryption is
+  // acceptable, fail open to NO encryption is not" rule already applied to
+  // encryptForChat above). If the v2 fallback also fails (the normal case
+  // for a genuinely v3-encrypted message — v3 and v2 use different key
+  // material by design, so this is not expected to recover real Double
+  // Ratchet ciphertext), the resulting error names BOTH failure reasons
+  // instead of one opaque message, so the UI (see message.html's bubble
+  // tooltip) and console can show exactly what was tried and why each
+  // attempt failed, instead of just "🔒 Unable to decrypt this message"
+  // with no further information.
   async function decryptFromChat(encContent, chatId, peerUserId, isOwnMessage) {
     const env = parseEnvelope(encContent);
     if (!env) return encContent;
-    if (env.v === 3) return decryptEnvelopeV3(env, peerUserId, isOwnMessage);
+    if (env.v === 3) {
+      let v3Err;
+      try {
+        return await decryptEnvelopeV3(env, peerUserId, isOwnMessage);
+      } catch (err) {
+        v3Err = err;
+      }
+      try {
+        const v2Plaintext = await decryptEnvelope(env, peerUserId, isOwnMessage);
+        console.warn('[MessageE2E] v3 ratchet decrypt failed, but the v2 legacy fallback succeeded for this message. v3 failure was:', v3Err?.message || v3Err);
+        return v2Plaintext;
+      } catch (v2Err) {
+        const v3Reason = v3Err?.message || String(v3Err || 'unknown error');
+        const v2Reason = v2Err?.message || String(v2Err || 'unknown error');
+        const combined = new Error(`Double Ratchet (v3) decrypt failed: ${v3Reason} — legacy (v2) fallback also failed: ${v2Reason}`);
+        combined.v3Reason = v3Reason;
+        combined.v2Reason = v2Reason;
+        throw combined;
+      }
+    }
     return decryptEnvelope(env, peerUserId, isOwnMessage);
   }
   async function attempt(message, chatId, currentUserId, opts) {
