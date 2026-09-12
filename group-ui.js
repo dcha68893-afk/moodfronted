@@ -402,6 +402,9 @@ const _UI_STATE = {
     keyboardVisible: false,
     orientation: typeof window !== 'undefined' ? (window.innerHeight > window.innerWidth ? 'portrait' : 'landscape') : 'landscape',
     skeletonRendered: false,
+    // ROOT-CAUSE FIX (ALL-GROUPS-TAB-STUCK-ON-SKELETON-FOREVER): see
+    // renderAllGroupsSecure() below.
+    allGroupsFetchAttempted: false,
     initialRenderComplete: false,
     progressiveEnhancementComplete: false,
     liveUpdateEnabled: false,
@@ -2263,11 +2266,28 @@ export const renderAllGroupsSecure = createUIErrorBoundary('renderAllGroupsSecur
             _seenAll.add(String(g.id)); return true;
         });
         if (!_liveAll.length) {
-            if (_gcR && typeof _gcR.requestGroupList === 'function') {
+            // ROOT-CAUSE FIX (ALL-GROUPS-TAB-STUCK-ON-SKELETON-FOREVER): this
+            // used to treat "zero groups right now" as always meaning "not
+            // fetched yet," and unconditionally kicked off another
+            // requestGroupList().then(() => renderAllGroupsSecure()) — which,
+            // for an account that genuinely has zero groups, resolves with
+            // the list still empty and immediately re-enters this exact same
+            // branch, showing the spinner again and firing another fetch,
+            // forever. Unlike renderMyGroupsSecure/renderJoinedGroupsSecure/
+            // renderAdminGroupsSecure (which all render
+            // createSecureEmptyStateElement(...) immediately with no fetch
+            // loop), this was the one tab that could never settle into its
+            // real empty state. Now only performs the one-time refresh
+            // fetch, then always shows the real empty state afterward —
+            // matching how every other tab already behaves.
+            if (_gcR && typeof _gcR.requestGroupList === 'function' && !_UI_STATE.allGroupsFetchAttempted) {
+                _UI_STATE.allGroupsFetchAttempted = true;
                 allGroupsList.innerHTML = '<div class="empty-state"><i class="fas fa-spinner fa-spin"></i><p>Loading groups…</p></div>';
                 _gcR.requestGroupList().then(() => { _hydrateFromStore(); renderAllGroupsSecure(); })
                     .catch(() => { allGroupsList.innerHTML = ''; allGroupsList.appendChild(createSecureEmptyStateElement('groups')); });
-            } else { allGroupsList.appendChild(createSecureEmptyStateElement('groups')); }
+            } else {
+                allGroupsList.appendChild(createSecureEmptyStateElement('groups'));
+            }
             return;
         }
         const fragment=document.createDocumentFragment();
