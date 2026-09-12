@@ -20,18 +20,13 @@ jobs:
         node-version: '18'
 
     - name: Build frontend from .env
-      env:
-        BACKEND_URL: ${{ vars.BACKEND_URL || secrets.BACKEND_URL }}
-        FRONTEND_URL: ${{ vars.FRONTEND_URL || secrets.FRONTEND_URL }}
-        GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID || secrets.GOOGLE_CLIENT_ID }}
-      run: |
-        node scripts/build-config.js
+      run: node scripts/build-config.js
 
     - name: Verify generated runtime configuration
       run: |
         test -f dist/js/runtime-config.js
-        grep -q 'nexorah-xnv6.onrender.com' dist/js/runtime-config.js
-        echo "✓ Runtime backend configuration generated"
+        grep -q 'BACKEND_URL' dist/js/runtime-config.js
+        echo "✓ Runtime backend configuration generated from .env"
 
     - name: Deploy to Firebase
       if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
