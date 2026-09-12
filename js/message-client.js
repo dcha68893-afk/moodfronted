@@ -200,10 +200,18 @@
             const plaintext = await window.KynectaE2E.decryptMessageForDisplay(message, chatId, window._kynCurrentUserId, {
                 activeConversation: conv ? { otherUserId: conv.otherUser && conv.otherUser.id } : null,
                 fallbackText: DECRYPT_FALLBACK,
-                onResolved: (resolvedText) => {
+                // FEATURE (WHICH-VERSION-DECRYPTED-THIS, requested behavior):
+                // the canonical core now reports which decrypt path actually
+                // produced this plaintext ('v3' clean ratchet decrypt,
+                // 'v2-fallback' recovered after a v3 failure, or 'v2' for a
+                // message that was always v2) as a second onResolved arg.
+                // Stored on the message itself so message.html can render a
+                // small per-bubble indicator instead of leaving the person
+                // guessing which scheme actually protected a given message.
+                onResolved: (resolvedText, decryptVersion) => {
                     const bucket = state.messagesByConversation.get(chatId);
                     if (bucket && bucket.has(message.id)) {
-                        bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: resolvedText }));
+                        bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: resolvedText, decryptVersion: decryptVersion || bucket.get(message.id).decryptVersion || null }));
                         syncLastMessageDisplay(chatId, message.id, resolvedText);
                         notify('message:decrypted', { chatId, messageId: message.id });
                         persistMessage(chatId, bucket.get(message.id));
@@ -222,7 +230,13 @@
               : (isQueued && plaintext === DECRYPT_FALLBACK) ? 'Decrypting…' : plaintext;
             const bucket = state.messagesByConversation.get(chatId);
             if (bucket && bucket.has(message.id)) {
-                bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: displayValue }));
+                // Covers the cache-hit path above: decryptMessageForDisplay()
+                // returns straight from its internal cache without ever
+                // calling onResolved when a message was already decrypted
+                // earlier this session, so the version wasn't attached there.
+                // getDecryptVersion() reads the same id-keyed record either way.
+                const cachedVersion = typeof window.KynectaE2E.getDecryptVersion === 'function' ? window.KynectaE2E.getDecryptVersion(message.id) : null;
+                bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: displayValue, decryptVersion: bucket.get(message.id).decryptVersion || cachedVersion || null }));
                 const isGenuineSuccess = !isFailed && displayValue !== 'Decrypting…' && displayValue !== DECRYPT_FALLBACK;
                 syncLastMessageDisplay(chatId, message.id, displayValue, isGenuineSuccess);
                 notify('message:decrypted', { chatId, messageId: message.id });

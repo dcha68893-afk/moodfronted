@@ -22,7 +22,7 @@
       await loadScript('/js/message-e2e-compat.js');
       if (/\/message(?:\.html)?$/i.test(global.location?.pathname || '')) await loadScript('/js/message-realtime-bridge.js');
       const facade = global.KynectaE2E || {}; const dm = global.KynectaMessageE2E; if (!dm) throw new Error('Canonical message E2E core did not initialize');
-      const messageSurface = Object.freeze(['encryptForChat','decryptFromChat','decryptMessageForDisplay','retryDecrypt','prefetchRecipientKey','prefetchRecipientKeys','cacheRecipientKey','isMessageQueued','isMessageFailed','peekDecryptedText','forgetMessage','registerPendingDecrypt','encryptAttachment','decryptAttachment']);
+      const messageSurface = Object.freeze(['encryptForChat','decryptFromChat','decryptMessageForDisplay','retryDecrypt','prefetchRecipientKey','prefetchRecipientKeys','cacheRecipientKey','isMessageQueued','isMessageFailed','peekDecryptedText','getDecryptVersion','forgetMessage','registerPendingDecrypt','encryptAttachment','decryptAttachment']);
       if (typeof dm.getSafetyNumbers === 'function') facade.getSafetyNumbers = dm.getSafetyNumbers;
       const missing = messageSurface.filter(name => typeof dm[name] !== 'function'); if (missing.length) throw new Error(`Canonical message E2E surface incomplete: ${missing.join(', ')}`);
       for (const name of messageSurface) facade[name] = dm[name];

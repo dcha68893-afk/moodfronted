@@ -33,9 +33,12 @@
   }
   #newChatBtn {
     background: none; border: none; font-size: 18px; cursor: pointer;
-    width: 32px; height: 32px; border-radius: 50%;
+    width: 34px; height: 34px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    transition: background-color 0.15s ease, transform 0.1s ease;
   }
   #newChatBtn:hover { background: var(--kyn-bg-hover, #f0f0f0); }
+  #newChatBtn:active { transform: scale(0.92); }
   /* FIX (duplicate "New chat" button): chat.html's global header already
      shows a "New chat" pencil icon for the messages page (see
      headerActionConfigByPage.messages in chat.html) — clicking it just
@@ -48,8 +51,14 @@
      legitimate second entry point (it's only shown when there's nothing to
      look at yet), not a duplicate of this one. */
   #convListHeader #newChatBtn { display: none; }
-  #archivedLinkBtn { background: none; border: none; font-size: 16px; cursor: pointer; width: 32px; height: 32px; border-radius: 50%; }
+  #archivedLinkBtn {
+    background: none; border: none; font-size: 17px; cursor: pointer;
+    width: 34px; height: 34px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    transition: background-color 0.15s ease, transform 0.1s ease;
+  }
   #archivedLinkBtn:hover { background: var(--kyn-bg-hover, #f0f0f0); }
+  #archivedLinkBtn:active { transform: scale(0.92); }
   .unarchive-btn {
     background: var(--kyn-accent-primary, #22c55e); color: #fff; border: none; border-radius: 14px;
     padding: 5px 12px; font-size: 12px; cursor: pointer; flex-shrink: 0;
@@ -89,9 +98,38 @@
      back-button + collapsed-search-icon pattern in the WhatsApp screenshot,
      instead of an always-visible search box. */
   #newChatModal.modal-overlay { align-items: stretch; justify-content: stretch; background: var(--kyn-bg-panel, #fff); }
-  #newChatModal .modal-box { width: 100%; max-width: 100%; height: 100%; max-height: 100%; border-radius: 0; }
+  #newChatModal .modal-box { width: 100%; max-width: 100%; height: 100%; max-height: 100%; border-radius: 0; display: flex; flex-direction: column; }
   #newChatModal .modal-header { justify-content: flex-start; gap: 4px; }
   #newChatModal .modal-header span { flex: 1; }
+  /* FEATURE (MULTI-SEND / BROADCAST, requested behavior): the shell
+     (chat.html) already renders a real "Multi-send" 📡 header icon for the
+     Messages page and remote-clicks #multiSendToggleBtn inside this iframe
+     — see triggerIframeHeaderAction() in chat.html — but no element with
+     that id existed here, so the icon was a dead button doing nothing.
+     Reuses the New Chat / Forward picker's list and friend-loading logic
+     (broadcastMode just swaps single-tap-to-open for checkboxes + a
+     compose footer) rather than duplicating that whole picker a third time. */
+  .new-chat-result-item.broadcast-mode { cursor: pointer; }
+  .new-chat-result-item .broadcast-checkbox { width: 20px; height: 20px; margin-left: auto; flex-shrink: 0; cursor: pointer; }
+  #broadcastComposeBar {
+    border-top: 1px solid var(--kyn-border, #e2e2e2); padding: 10px 14px;
+    display: flex; flex-direction: column; gap: 8px; background: var(--kyn-bg-input, #f7f7f8);
+  }
+  #broadcastComposeBar.hidden { display: none; }
+  #broadcastSelectedCount { font-size: 12px; color: var(--kyn-text-secondary, #777); }
+  #broadcastComposeRow { display: flex; align-items: center; gap: 8px; }
+  #broadcastComposeInput {
+    flex: 1; border: 1px solid var(--kyn-border, #ddd); border-radius: 20px; padding: 9px 14px;
+    font-size: 14px; font-family: inherit; resize: none; max-height: 90px;
+    background: var(--kyn-bg-panel, #fff); color: var(--kyn-text-primary, #111b21);
+  }
+  #broadcastSendBtn {
+    background: var(--kyn-accent-primary, #22c55e); color: #fff; border: none; border-radius: 50%;
+    width: 40px; height: 40px; flex-shrink: 0; font-size: 16px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #broadcastSendBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+  #broadcastSendBtn:not(:disabled):hover { filter: brightness(1.08); }
   #closeNewChatModal, #newChatSearchToggleBtn {
     background: none; border: none; font-size: 18px; cursor: pointer;
     width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
@@ -115,7 +153,14 @@
     padding: 12px 16px; border-bottom: 1px solid var(--kyn-border, #e2e2e2);
     display: flex; align-items: center; gap: 10px;
   }
-  #backBtn { display: none; background: none; border: none; font-size: 20px; cursor: pointer; }
+  #backBtn {
+    display: none; background: none; border: none; font-size: 20px; cursor: pointer;
+    width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0;
+    align-items: center; justify-content: center;
+    transition: background-color 0.15s ease, transform 0.1s ease;
+  }
+  #backBtn:hover { background: var(--kyn-bg-hover, #f0f0f0); }
+  #backBtn:active { transform: scale(0.92); }
   #messageLog { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 6px; background: var(--kyn-bg-chat, #efeae2); }
   .bubble-row { display: flex; }
   .bubble-row.mine { justify-content: flex-end; }
@@ -140,12 +185,13 @@
     width: 32px; height: 32px; line-height: 1; border-radius: 50%;
     padding: 0; align-self: flex-start; margin-top: 4px;
     display: flex; align-items: center; justify-content: center;
-    flex-shrink: 0;
+    flex-shrink: 0; transition: background-color 0.15s ease, opacity 0.15s ease, transform 0.1s ease;
   }
   .bubble-row:hover .bubble-menu-btn,
   .bubble-menu-btn:hover,
   .bubble-menu-btn:focus-visible,
   .bubble-menu-btn:active { opacity: 1; background: rgba(0,0,0,0.06); }
+  .bubble-menu-btn:active { transform: scale(0.9); }
   /* Touch devices have no hover — always show at full baseline opacity
      there instead of relying on a hover state that will never fire. */
   @media (hover: none) {
@@ -169,12 +215,17 @@
   #chatHeaderActions.hidden { display: none; }
   .bubble-context-menu {
     position: fixed; z-index: 1500; background: var(--kyn-bg-panel, #fff);
-    border: 1px solid var(--kyn-border, #ddd); border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,0.18);
-    display: flex; flex-direction: column; min-width: 140px; overflow: hidden; padding: 4px 0;
+    border: 1px solid var(--kyn-border, #ddd); border-radius: 12px; box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+    display: flex; flex-direction: column; min-width: 170px; overflow: hidden; padding: 6px 0;
+    animation: kynMenuPop 0.12s ease-out;
+  }
+  @keyframes kynMenuPop {
+    from { opacity: 0; transform: scale(0.96) translateY(-3px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
   }
   .bubble-context-menu button {
-    background: none; border: none; text-align: left; padding: 8px 14px; font-size: 13px; cursor: pointer;
-    color: var(--kyn-text-primary, #111b21);
+    background: none; border: none; text-align: left; padding: 9px 16px; font-size: 13.5px; cursor: pointer;
+    color: var(--kyn-text-primary, #111b21); transition: background-color 0.12s ease;
   }
   .bubble-context-menu button:hover { background: var(--kyn-bg-hover, #f0f0f0); }
   .reply-quote {
@@ -192,6 +243,8 @@
   .bubble-reactions { margin-top: 2px; font-size: 14px; }
   .decrypt-retry { cursor: pointer; text-decoration: underline dotted; opacity: 0.8; }
   .decrypt-pending { opacity: 0.6; font-style: italic; }
+  .decrypt-version-badge { font-size: 9px; opacity: 0.55; cursor: default; margin-left: 3px; }
+  .decrypt-version-badge.legacy { opacity: 0.75; }
   #chatHeader { display: flex; align-items: center; justify-content: space-between; }
   #chatHeaderName { flex: 1; }
   #chatSearchBar {
@@ -212,38 +265,68 @@
   .chat-info-media-grid img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; cursor: pointer; }
   .chat-info-doc { display: block; padding: 6px 0; font-size: 13px; color: inherit; text-decoration: none; }
   .chat-info-empty { font-size: 13px; color: var(--kyn-text-secondary, #999); }
-  #chatHeaderActions { display: flex; gap: 4px; }
-  .header-icon-btn { background: none; border: none; font-size: 16px; cursor: pointer; width: 34px; height: 34px; border-radius: 50%; }
+  #chatHeaderActions { display: flex; gap: 2px; }
+  /* VISUAL POLISH (requested behavior): unified sizing/centering/transition
+     rules across every icon button in this module (header actions, emoji,
+     attach, send, back) so they read as one consistent, deliberately
+     designed control set instead of a grab-bag of ad-hoc buttons each with
+     their own slightly different size and no hover/press feedback. */
+  .header-icon-btn {
+    background: none; border: none; font-size: 17px; cursor: pointer;
+    width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    transition: background-color 0.15s ease, transform 0.1s ease;
+  }
   .header-icon-btn:hover { background: var(--kyn-bg-hover, #f0f0f0); }
+  .header-icon-btn:active { transform: scale(0.92); }
   .header-icon-btn:disabled { opacity: 0.35; cursor: default; }
   .header-icon-btn:disabled:hover { background: none; }
+  .header-icon-btn:disabled:active { transform: none; }
   #composeInput:disabled { opacity: 0.6; cursor: default; }
   #emojiBtn:disabled { opacity: 0.5; cursor: default; }
-  #emojiBtn { background: none; border: none; font-size: 18px; cursor: pointer; width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0; }
+  #emojiBtn {
+    background: none; border: none; font-size: 19px; cursor: pointer;
+    width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    transition: background-color 0.15s ease, transform 0.1s ease;
+  }
   #emojiBtn:hover { background: var(--kyn-bg-hover, #f0f0f0); }
+  #emojiBtn:active { transform: scale(0.92); }
   #emojiPicker {
     position: absolute; bottom: 60px; right: 10px; background: var(--kyn-bg-panel, #fff);
-    border: 1px solid var(--kyn-border, #ddd); border-radius: 10px; padding: 8px;
-    display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    border: 1px solid var(--kyn-border, #ddd); border-radius: 14px; padding: 10px;
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; box-shadow: 0 6px 20px rgba(0,0,0,0.16);
   }
   #emojiPicker.hidden { display: none; }
-  .emoji-option { background: none; border: none; font-size: 20px; cursor: pointer; padding: 4px; border-radius: 6px; }
-  .emoji-option:hover { background: var(--kyn-bg-hover, #f0f0f0); }
-  #composeBar { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--kyn-border, #e2e2e2); position: relative; }
-  #composeInput {
-    flex: 1; border-radius: 20px; border: 1px solid var(--kyn-border, #ddd);
-    padding: 10px 14px; font-size: 14px; resize: none; max-height: 120px;
+  .emoji-option {
+    background: none; border: none; font-size: 20px; cursor: pointer; padding: 6px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center; transition: background-color 0.15s ease, transform 0.1s ease;
   }
+  .emoji-option:hover { background: var(--kyn-bg-hover, #f0f0f0); transform: scale(1.12); }
+  #composeBar { display: flex; align-items: flex-end; gap: 6px; padding: 10px; border-top: 1px solid var(--kyn-border, #e2e2e2); position: relative; }
+  #composeInput {
+    flex: 1; border-radius: 22px; border: 1px solid var(--kyn-border, #ddd);
+    padding: 10px 16px; font-size: 14px; resize: none; max-height: 120px;
+    transition: border-color 0.15s ease;
+  }
+  #composeInput:focus { outline: none; border-color: var(--kyn-accent-primary, #22c55e); }
   #sendBtn {
     background: var(--kyn-accent-primary, #22c55e); color: #fff; border: none; border-radius: 50%;
-    width: 40px; height: 40px; cursor: pointer; flex-shrink: 0;
+    width: 42px; height: 42px; cursor: pointer; flex-shrink: 0; font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 6px rgba(34,197,94,0.35); transition: filter 0.15s ease, transform 0.1s ease;
   }
-  #sendBtn:disabled { opacity: 0.5; cursor: default; }
+  #sendBtn:hover:not(:disabled) { filter: brightness(1.08); }
+  #sendBtn:active:not(:disabled) { transform: scale(0.92); }
+  #sendBtn:disabled { opacity: 0.5; cursor: default; box-shadow: none; }
   #attachBtn {
-    background: none; border: none; font-size: 20px; cursor: pointer; flex-shrink: 0;
-    width: 36px; height: 36px; border-radius: 50%;
+    background: none; border: none; font-size: 21px; cursor: pointer; flex-shrink: 0;
+    width: 38px; height: 38px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    transition: background-color 0.15s ease, transform 0.1s ease;
   }
   #attachBtn:hover { background: var(--kyn-bg-hover, #f0f0f0); }
+  #attachBtn:active { transform: scale(0.92); }
   #attachBtn:disabled { opacity: 0.5; cursor: default; }
   .bubble-attachment-image { max-width: 220px; max-height: 220px; border-radius: 10px; display: block; margin-bottom: 4px; cursor: pointer; }
   #mediaViewer { background: rgba(0,0,0,0.9); flex-direction: column; }
@@ -282,7 +365,7 @@
     #convListPanel { width: 100%; }
     #convListPanel.hide-on-mobile { display: none; }
     #chatPanel.hide-on-mobile { display: none; }
-    #backBtn { display: inline-block; }
+    #backBtn { display: flex; }
   }
 </style>
 </head>
@@ -321,8 +404,22 @@
       </div>
       <input type="text" id="newChatSearchInput" class="hidden" placeholder="Search people...">
       <div id="newChatResults"></div>
+      <div id="broadcastComposeBar" class="hidden">
+        <div id="broadcastSelectedCount">0 selected</div>
+        <div id="broadcastComposeRow">
+          <textarea id="broadcastComposeInput" rows="1" placeholder="Type a message to send to everyone selected..."></textarea>
+          <button id="broadcastSendBtn" title="Send to selected" disabled>➤</button>
+        </div>
+      </div>
     </div>
   </div>
+
+  <!-- FIX: chat.html's shell "Multi-send" 📡 header icon (Messages page)
+       remote-clicks this exact id (triggerIframeHeaderAction ->
+       #multiSendToggleBtn) the same way its "New chat" ✎ icon remote-clicks
+       #newChatBtn above — kept in the DOM as a real, working button and just
+       not shown here, since the shell already renders the visible icon. -->
+  <button id="multiSendToggleBtn" style="display:none;"></button>
 
   <div id="chatPanel" class="hide-on-mobile"></div>
 
@@ -535,6 +632,18 @@
           : `<button class="bubble-menu-btn" data-menu-for="${m.id}" title="More">⋮</button>`;
       const reactionsHtml = (m.reactions && Object.keys(m.reactions).length > 0) ?
         `<div class="bubble-reactions">${Object.values(m.reactions).map(e => `<span>${e}</span>`).join('')}</div>` : '';
+      // FEATURE (WHICH-VERSION-DECRYPTED-THIS, requested behavior): a tiny
+      // badge next to the timestamp saying whether a received message was
+      // opened with the current Double Ratchet (v3) scheme or the legacy
+      // static-key (v2) fallback — see js/message-e2e-core.js's
+      // getDecryptVersion() for how m.decryptVersion gets populated. Own
+      // messages always send with the current scheme, so this only ever
+      // shows for received messages that were actually decrypted.
+      const decryptVersionBadge = (!isMine && m.decryptVersion)
+        ? (m.decryptVersion === 'v3'
+            ? `<span class="decrypt-version-badge" title="Decrypted with the current Double Ratchet (v3) encryption">🔐</span>`
+            : `<span class="decrypt-version-badge legacy" title="Decrypted with the legacy (v2) key fallback — did not use the current forward-secret encryption">🔓</span>`)
+        : '';
       return `
         <div class="bubble-row ${isMine ? 'mine' : ''}${m.status === 'failed' ? ' failed' : ''}${selectMode ? ' selecting' : ''}${isSelected ? ' selected' : ''}" data-message-id="${m.id}">
           ${menuBtn}
@@ -543,7 +652,7 @@
             ${!isDeletedForEveryone ? attachmentHtml(m) : ''}
             <span${contentAttrs}>${content ? escapeHtml(content) : ''}</span>${!isDeletedForEveryone ? editedTag : ''}
             ${reactionsHtml}
-            <div class="bubble-meta">${time} ${statusTick}${m.starred ? ' ⭐' : ''}</div>
+            <div class="bubble-meta">${time} ${statusTick}${m.starred ? ' ⭐' : ''}${decryptVersionBadge}</div>
 
           </div>
         </div>`;
@@ -692,9 +801,15 @@
       if (cancelSelectBtn) cancelSelectBtn.addEventListener('click', exitSelectMode);
       if (bulkDeleteBtn) bulkDeleteBtn.addEventListener('click', performBulkDelete);
 
-      document.getElementById('chatMoreBtn').addEventListener('click', async () => {
-        if (!hasChat) { alert('Select a conversation first.'); return; }
-        const action = prompt('Type "select" to select multiple messages to delete, "clear" to clear this chat, "archive" to archive it, or "block" to block this user');
+      // ROOT-CAUSE FIX (RESTRUCTURE-MORE-MENU, requested behavior): this
+      // used to be a single `prompt()` asking the person to TYPE the exact
+      // word "select"/"clear"/"archive"/"block" — no visible options, easy
+      // to mistype, and completely inaccessible on mobile where prompt()
+      // boxes are awkward to use at all. Replaced with a real clickable
+      // dropdown, reusing the same .bubble-context-menu look the per-
+      // message "⋮" menu already established, so the two menus in this
+      // app look and behave consistently.
+      async function runChatMoreAction(action) {
         if (action === 'select') {
           enterSelectMode(null);
         } else if (action === 'clear') {
@@ -734,6 +849,40 @@
             alert('Could not block user: ' + err.message);
           }
         }
+      }
+
+      function closeChatMoreMenu() {
+        const existing = document.getElementById('chatMoreMenu');
+        if (existing) existing.remove();
+      }
+
+      document.getElementById('chatMoreBtn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!hasChat) { alert('Select a conversation first.'); return; }
+        closeChatMoreMenu();
+        closeBubbleMenu();
+        const menu = document.createElement('div');
+        menu.id = 'chatMoreMenu';
+        menu.className = 'bubble-context-menu';
+        const items = [
+          { action: 'select', label: '☑ Select messages' },
+          { action: 'clear', label: '🧹 Clear chat' },
+          { action: 'archive', label: '🗄 Archive chat' },
+          { action: 'block', label: '🚫 Block user' },
+        ];
+        menu.innerHTML = items.map(it => `<button data-more-action="${it.action}">${it.label}</button>`).join('');
+        document.body.appendChild(menu);
+        const rect = e.currentTarget.getBoundingClientRect();
+        menu.style.top = `${rect.bottom + 4}px`;
+        menu.style.left = `${Math.max(8, rect.right - 180)}px`;
+        menu.querySelectorAll('button[data-more-action]').forEach(btn => {
+          btn.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            closeChatMoreMenu();
+            runChatMoreAction(btn.dataset.moreAction);
+          });
+        });
+        setTimeout(() => document.addEventListener('click', closeChatMoreMenu, { once: true }), 0);
       });
 
       const emojiBtn = document.getElementById('emojiBtn');
@@ -758,6 +907,21 @@
         document.getElementById('convListPanel').classList.remove('hide-on-mobile');
         document.getElementById('chatPanel').classList.add('hide-on-mobile');
         renderChatPanel(null);
+        // ROOT-CAUSE FIX (mobile bottom nav bar stays hidden after tapping
+        // back from a chat to the chat list): chat.html's shell already
+        // listens for CHAT_LIST_SHOWN/CHAT_CLOSED/GO_BACK_TO_CHAT_LIST to
+        // remove its own body.chat-panel-active class (which is what hides
+        // .mobile-nav-bar via CSS while a chat is open — see chat.html's
+        // window.addEventListener('message', ...) handler for those
+        // types) — the group module's back button already posts the
+        // equivalent GO_BACK_TO_LIST for that same reason. This back
+        // button never posted anything at all, so the shell had no way to
+        // know the person left the chat and the nav bar (and #globalHeader
+        // chat-mode styling) stayed stuck in "chat open" state until some
+        // other navigation happened to clear it.
+        try {
+          window.parent.postMessage({ type: 'CHAT_LIST_SHOWN', timestamp: Date.now() }, '*');
+        } catch (_) {}
       });
 
       document.getElementById('loadOlderBtn').addEventListener('click', async () => {
@@ -1230,11 +1394,83 @@
 
     function openForwardPicker(message) {
       forwardingMessage = message;
+      closeMultiSendPicker();
       document.getElementById('newChatModal').classList.remove('hidden');
       newChatSearchInput.value = '';
       newChatSearchInput.classList.add('hidden');
-      document.querySelector('.modal-header span').textContent = 'Forward to...';
+      document.querySelector('#newChatModal .modal-header span').textContent = 'Forward to...';
       runNewChatSearch('');
+    }
+
+    // ── Multi-send / Broadcast: same picker, checkbox multi-select + a
+    // compose footer instead of tap-to-open-one-chat. Sending loops the
+    // exact same window.MessageModule.sendMessage() call the working 1:1
+    // chat and the single-recipient Forward feature already use, once per
+    // selected recipient — no second/competing send pipeline. ──
+    let broadcastMode = false;
+    let broadcastSelectedIds = new Set();
+
+    function updateBroadcastComposeBar() {
+      const bar = document.getElementById('broadcastComposeBar');
+      const countEl = document.getElementById('broadcastSelectedCount');
+      const sendBtn = document.getElementById('broadcastSendBtn');
+      if (!bar) return;
+      if (!broadcastMode) { bar.classList.add('hidden'); return; }
+      bar.classList.remove('hidden');
+      const n = broadcastSelectedIds.size;
+      countEl.textContent = n === 0 ? 'Select people to send to' : `${n} selected`;
+      const input = document.getElementById('broadcastComposeInput');
+      sendBtn.disabled = n === 0 || !input.value.trim();
+    }
+
+    function openMultiSendPicker() {
+      forwardingMessage = null;
+      broadcastMode = true;
+      broadcastSelectedIds = new Set();
+      newChatModal.classList.remove('hidden');
+      newChatSearchInput.value = '';
+      newChatSearchInput.classList.add('hidden');
+      document.querySelector('#newChatModal .modal-header span').textContent = 'Send to multiple';
+      const input = document.getElementById('broadcastComposeInput');
+      if (input) input.value = '';
+      updateBroadcastComposeBar();
+      runNewChatSearch('');
+    }
+
+    function closeMultiSendPicker() {
+      broadcastMode = false;
+      broadcastSelectedIds = new Set();
+      updateBroadcastComposeBar();
+    }
+
+    async function sendBroadcast() {
+      const input = document.getElementById('broadcastComposeInput');
+      const content = (input?.value || '').trim();
+      const sendBtn = document.getElementById('broadcastSendBtn');
+      if (!content || broadcastSelectedIds.size === 0) return;
+      const targets = Array.from(broadcastSelectedIds);
+      sendBtn.disabled = true;
+      const originalLabel = sendBtn.textContent;
+      sendBtn.textContent = '…';
+      // FIX (SAME-PATH-FOR-EVERY-RECIPIENT, requested behavior): each
+      // recipient gets its own independent sendMessage() call — the exact
+      // path that already works for a normal 1:1 chat (per-recipient E2E
+      // encryption keyed to that recipient's own public key, its own
+      // delivery/ACK tracking, its own conversation row) — instead of one
+      // shared ciphertext or a single batched request. A failure sending to
+      // one person (blocked, key not ready, offline) never blocks or
+      // corrupts delivery to the others; failures are collected and
+      // reported together at the end instead of silently dropped.
+      const results = await Promise.allSettled(
+        targets.map(userId => window.MessageModule.sendMessage({ receiverId: userId, content }))
+      );
+      const failures = results.filter(r => r.status === 'rejected').length;
+      sendBtn.textContent = originalLabel;
+      newChatModal.classList.add('hidden');
+      closeMultiSendPicker();
+      if (failures > 0) {
+        alert(`Sent to ${targets.length - failures} of ${targets.length} people. ${failures} failed — check those chats and retry if needed.`);
+      }
     }
 
     const newChatModal = document.getElementById('newChatModal');
@@ -1324,12 +1560,30 @@
     // the later live-refreshed list can share the exact same rendering path.
     function renderNewChatResults(users) {
       newChatResults.innerHTML = users.map(u => `
-        <div class="new-chat-result-item" data-user-id="${u.id}" data-user-name="${escapeHtml(u.username || '')}" data-user-avatar="${escapeHtml(u.avatar || u.photoURL || '')}">
+        <div class="new-chat-result-item${broadcastMode ? ' broadcast-mode' : ''}" data-user-id="${u.id}" data-user-name="${escapeHtml(u.username || '')}" data-user-avatar="${escapeHtml(u.avatar || u.photoURL || '')}">
           <img src="${escapeHtml(u.avatar || u.photoURL || '/img/default-avatar.png')}" alt="">
           <span>${escapeHtml(u.username || u.firstName || u.displayName || 'User')}</span>
-          ${u.friendshipStatus && u.friendshipStatus !== 'friends' ? '<span style="margin-left:auto;font-size:11px;color:var(--kyn-text-secondary,#999);">Not a friend</span>' : ''}
+          ${broadcastMode
+            ? `<input type="checkbox" class="broadcast-checkbox" data-broadcast-id="${u.id}"${broadcastSelectedIds.has(Number(u.id)) ? ' checked' : ''}>`
+            : (u.friendshipStatus && u.friendshipStatus !== 'friends' ? '<span style="margin-left:auto;font-size:11px;color:var(--kyn-text-secondary,#999);">Not a friend</span>' : '')}
         </div>
       `).join('');
+      if (broadcastMode) {
+        // Multi-select mode: tapping anywhere on the row toggles its
+        // checkbox (mirrors the bubble-select-mode pattern already used for
+        // deleting multiple messages), rather than immediately opening a
+        // chat — nothing sends until the person taps the Send button below.
+        newChatResults.querySelectorAll('.new-chat-result-item').forEach(el => {
+          el.addEventListener('click', (e) => {
+            const cb = el.querySelector('.broadcast-checkbox');
+            if (e.target !== cb) cb.checked = !cb.checked;
+            const id = Number(el.dataset.userId);
+            if (cb.checked) broadcastSelectedIds.add(id); else broadcastSelectedIds.delete(id);
+            updateBroadcastComposeBar();
+          });
+        });
+        return;
+      }
       newChatResults.querySelectorAll('.new-chat-result-item').forEach(el => {
         el.addEventListener('click', async () => {
           newChatModal.classList.add('hidden');
@@ -1337,7 +1591,7 @@
           if (forwardingMessage) {
             const msg = forwardingMessage;
             forwardingMessage = null;
-            document.querySelector('.modal-header span').textContent = 'New chat';
+            document.querySelector('#newChatModal .modal-header span').textContent = 'New chat';
             const content = msg.displayContent || '';
             await window.MessageModule.sendMessage({
               receiverId: targetUserId, content,
@@ -1686,7 +1940,8 @@
 
     document.getElementById('newChatBtn').addEventListener('click', () => {
       forwardingMessage = null;
-      document.querySelector('.modal-header span').textContent = 'New chat';
+      closeMultiSendPicker();
+      document.querySelector('#newChatModal .modal-header span').textContent = 'New chat';
       newChatModal.classList.remove('hidden');
       newChatSearchInput.value = '';
       // WhatsApp-style (Image 1): the full contact list shows instantly —
@@ -1694,12 +1949,19 @@
       newChatSearchInput.classList.add('hidden');
       runNewChatSearch('');
     });
+    document.getElementById('multiSendToggleBtn').addEventListener('click', openMultiSendPicker);
+    document.getElementById('broadcastSendBtn').addEventListener('click', sendBroadcast);
+    document.getElementById('broadcastComposeInput').addEventListener('input', updateBroadcastComposeBar);
+    document.getElementById('broadcastComposeInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendBroadcast(); }
+    });
     document.getElementById('closeNewChatModal').addEventListener('click', () => {
       forwardingMessage = null;
+      closeMultiSendPicker();
       newChatModal.classList.add('hidden');
     });
     newChatModal.addEventListener('click', (e) => {
-      if (e.target === newChatModal) { forwardingMessage = null; newChatModal.classList.add('hidden'); }
+      if (e.target === newChatModal) { forwardingMessage = null; closeMultiSendPicker(); newChatModal.classList.add('hidden'); }
     });
     // WhatsApp-style collapsed search: tapping 🔍 reveals the input and
     // focuses it; tapping it again (now acting as a close) clears the query

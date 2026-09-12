@@ -7,6 +7,16 @@
   let failed = new Set();
   let inflight = new Map();
   let identityReady = null;
+  // FEATURE (WHICH-VERSION-DECRYPTED-THIS, requested behavior): the v3->v2
+  // fallback below can silently recover a message two different ways (a
+  // clean v3 Double Ratchet decrypt, or a v2 legacy-key fallback after v3
+  // failed), and until now nothing recorded which path actually succeeded
+  // for a given message — the UI and console had no way to tell them apart
+  // once the plaintext came back. Keyed by the same message id used
+  // everywhere else in this file (messageId(message)/msgIdForLog), so it
+  // stays in sync with decryptCache/failed/etc, including the account-
+  // switch wipe below.
+  let decryptVersionByMsgId = new Map();
 
   // ROOT-CAUSE FIX (ACCOUNT-SWITCH-STALE-STATE — "switch account A to B,
   // chat, switch back to A, sending/decrypting for A misbehaves"): every
@@ -35,6 +45,7 @@
     failed = new Set();
     inflight = new Map();
     identityReady = null;
+    decryptVersionByMsgId = new Map();
     ratchetLocks.clear();
   }
   function _syncAccountState() {
@@ -600,7 +611,9 @@
     if (env.v === 3) {
       let v3Err;
       try {
-        return await decryptEnvelopeV3(env, peerUserId, isOwnMessage, msgIdForLog);
+        const plaintext = await decryptEnvelopeV3(env, peerUserId, isOwnMessage, msgIdForLog);
+        if (msgIdForLog) decryptVersionByMsgId.set(String(msgIdForLog), 'v3');
+        return plaintext;
       } catch (err) {
         v3Err = err;
         _diagLog('V3_DECRYPT_UNRECOVERABLE', { msgId: msgIdForLog, chatId, peerUserId, ..._errInfo(err) });
@@ -625,6 +638,7 @@
       // message, and now actually gets a chance to succeed when it can.
       try {
         const v2Plaintext = await decryptEnvelope(env, peerUserId, isOwnMessage, msgIdForLog);
+        if (msgIdForLog) decryptVersionByMsgId.set(String(msgIdForLog), 'v2-fallback');
         _diagLog('V2_FALLBACK_SUCCEEDED_AFTER_V3_FAILURE', { msgId: msgIdForLog, chatId, peerUserId });
         console.warn('[MessageE2E] v3 ratchet decrypt failed, but the v2 legacy fallback succeeded for this message. v3 failure was:', v3Err?.message || v3Err);
         return v2Plaintext;
@@ -642,7 +656,18 @@
     // old-format message is routed to the v2 decryptor exclusively, never
     // through the v3 ratchet path.
     _diagLog('V2_DECRYPT_ROUTE', { msgId: msgIdForLog, chatId, peerUserId, isOwnMessage });
-    return decryptEnvelope(env, peerUserId, isOwnMessage, msgIdForLog);
+    const v2Plaintext = await decryptEnvelope(env, peerUserId, isOwnMessage, msgIdForLog);
+    if (msgIdForLog) decryptVersionByMsgId.set(String(msgIdForLog), 'v2');
+    return v2Plaintext;
+  }
+  // FEATURE: which decrypt path actually produced this message's plaintext
+  // — 'v3' (clean Double Ratchet decrypt), 'v2-fallback' (v3 envelope, v3
+  // decrypt failed, recovered via the legacy static-key fallback), 'v2'
+  // (message was a v2 envelope to begin with, no v3 involved), or null (not
+  // decrypted / not an encrypted envelope). See message.html for how this
+  // is surfaced as a small badge on the bubble.
+  function getDecryptVersion(messageIdValue) {
+    return decryptVersionByMsgId.get(String(messageIdValue || '')) || null;
   }
   async function attempt(message, chatId, currentUserId, opts) {
     const peer = peerFor(message, currentUserId, opts?.activeConversation);
@@ -652,7 +677,7 @@
     const isOwnMessage = !!(sender && meId && sender === meId);
     return decryptFromChat(message.content, chatId, peer, isOwnMessage, messageId(message));
   }
-  function notifyResolved(id, plaintext, entry) { decryptCache.set(id, plaintext); pending.delete(id); failed.delete(id); entry?.subscribers?.forEach(fn => { try { fn(plaintext); } catch (_) {} }); try { document.dispatchEvent(new CustomEvent('kyn:messageDecrypted', { detail: { messageId: id, chatId: entry?.chatId, plaintext } })); } catch (_) {} }
+  function notifyResolved(id, plaintext, entry) { decryptCache.set(id, plaintext); pending.delete(id); failed.delete(id); entry?.subscribers?.forEach(fn => { try { fn(plaintext); } catch (_) {} }); try { document.dispatchEvent(new CustomEvent('kyn:messageDecrypted', { detail: { messageId: id, chatId: entry?.chatId, plaintext, version: getDecryptVersion(id) } })); } catch (_) {} }
   function notifyFailed(id, error, entry) { pending.delete(id); failed.add(id); entry?.subscribers?.forEach(fn => { try { fn(null, error); } catch (_) {} }); try { document.dispatchEvent(new CustomEvent('kyn:messageDecryptFailed', { detail: { messageId: id, error: error?.message || String(error || 'Decryption failed') } })); } catch (_) {} }
   async function decryptMessageForDisplay(message, chatId, currentUserId, opts = {}) {
     _syncAccountState(); // must run before any cache lookup below — see _resetPerAccountState's comment
@@ -710,6 +735,7 @@
     failed.delete(id);
     decryptCache.delete(id);
     inflight.delete(id);
+    decryptVersionByMsgId.delete(id);
   }
   async function registerPendingDecrypt(messageIdValue, attemptFn, onResolved) { const id = String(messageIdValue || ''); if (!id || typeof attemptFn !== 'function') return { ok: false }; if (decryptCache.has(id)) return { ok: true, plaintext: decryptCache.get(id) }; if (pending.has(id)) { if (onResolved) pending.get(id).subscribers.add(onResolved); return { ok: false, queued: true }; } const entry = { subscribers: new Set(onResolved ? [onResolved] : []) }; pending.set(id, entry); try { const text = await attemptFn(); notifyResolved(id, text, entry); return { ok: true, plaintext: text }; } catch (e) { notifyFailed(id, e, entry); return { ok: false, queued: false }; } }
   async function encryptAttachment(arrayBuffer, chatId, recipientUserId) {
@@ -734,5 +760,5 @@
     return crypto.subtle.decrypt({ name: 'AES-GCM', iv: Uint8Array.from(atob(env.iv), c => c.charCodeAt(0)), tagLength: 128 }, key, Uint8Array.from(atob(env.ct), c => c.charCodeAt(0)));
   }
 
-  global.KynectaMessageE2E = { init, encryptForChat, decryptFromChat, decryptMessageForDisplay, retryDecrypt, prefetchRecipientKey, prefetchRecipientKeys, cacheRecipientKey, isMessageQueued, isMessageFailed, peekDecryptedText, forgetMessage, registerPendingDecrypt, encryptAttachment, decryptAttachment, getSafetyNumbers: (...args) => I()?.getSafetyNumbers?.(...args), get enabled() { return !!I()?.enabled; }, get publicKey() { return I()?.publicKey || null; }, get keyId() { return I()?.keyId || null; }, getMyUserId: () => I()?.userId || null, clearKeys: () => I()?.clear?.() };
+  global.KynectaMessageE2E = { init, encryptForChat, decryptFromChat, decryptMessageForDisplay, retryDecrypt, prefetchRecipientKey, prefetchRecipientKeys, cacheRecipientKey, isMessageQueued, isMessageFailed, peekDecryptedText, getDecryptVersion, forgetMessage, registerPendingDecrypt, encryptAttachment, decryptAttachment, getSafetyNumbers: (...args) => I()?.getSafetyNumbers?.(...args), get enabled() { return !!I()?.enabled; }, get publicKey() { return I()?.publicKey || null; }, get keyId() { return I()?.keyId || null; }, getMyUserId: () => I()?.userId || null, clearKeys: () => I()?.clear?.() };
 })(window);
