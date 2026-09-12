@@ -146,6 +146,29 @@
             background-color: rgba(255, 255, 255, 0.1);
         }
         
+        /* Friend Request bell badge — see #friendRequestBellBtn in friend.html.
+           Positioned relative to the button itself (rather than a wrapping
+           div) so it stays correctly placed regardless of header layout. */
+        #friendRequestBellBtn {
+            position: relative;
+        }
+        .friend-request-badge {
+            position: absolute;
+            top: -2px;
+            right: -2px;
+            min-width: 18px;
+            height: 18px;
+            padding: 0 4px;
+            border-radius: 9px;
+            background: #e53e3e;
+            color: #fff;
+            font-size: 11px;
+            font-weight: 700;
+            line-height: 18px;
+            text-align: center;
+            box-shadow: 0 0 0 2px var(--surface-color, #1a1a2e);
+        }
+
         .add-friend-btn:hover:not(:disabled) {
             background-color: rgba(255, 255, 255, 0.3);
             transform: scale(1.05);
@@ -945,7 +968,19 @@
             width: 100%;
             height: 100%;
             background: var(--bg-color);
-            z-index: 2000;
+            /* FIX (Sync Contacts "doesn't open like the other options"):
+               this screen can be opened two ways — (1) directly from the
+               sidebar's "More" menu, where nothing else is open and 2000
+               was plenty; and (2) from the "Sync Contacts" card inside the
+               Discover Friends modal (#addFriendModal), which sits at
+               z-index: 100000. In that second case this screen was still
+               rendering underneath the still-open modal, so clicking the
+               card appeared to do nothing — unlike the modal's other cards
+               (Username/QR/Nearby/Groups/All Users), which open as child
+               panels of that same modal and so always stack above it
+               automatically. Raising this above 100000 makes it come to
+               the front regardless of which entry point opened it. */
+            z-index: 100010;
             flex-direction: column;
         }
 

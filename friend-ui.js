@@ -383,34 +383,76 @@ async function loadGroupMembers(groupId, searchTerm) {
         '<div style="text-align:center;padding:20px;"><i class="fas fa-spinner fa-spin"></i> Loading members…</div>';
     try {
         const response = await authorizedRequest(`/api/groups/${groupId}/members`);
-        let members = (response && response.data && (response.data.members || response.data)) || [];
-        if (!Array.isArray(members)) members = [];
+        // FIX (add-friend-from-group sent requests to the wrong id / showed
+        // blank names): GET /api/groups/:groupId/members returns each row as
+        // a group-membership record — { id: <membership id>, userId, role,
+        // user: { id, username, avatar, status, firstName, lastName } }.
+        // This used to read m.id/m.username/m.displayName straight off the
+        // membership row, which meant `data-user-id` was actually the
+        // membership's own id (never the target user's id), so every
+        // "Add" click below silently sent a friend request to the wrong
+        // person (or failed outright), and the name/username shown was
+        // always blank since those fields don't exist at that level.
+        let rawMembers = (response && response.data && (response.data.members || response.data)) || [];
+        if (!Array.isArray(rawMembers)) rawMembers = [];
+        const selfId = String((currentUser && currentUser.id) || (window.currentUser && window.currentUser.id) || '');
+
+        const friendIds = new Set(
+            (Array.isArray(window.friends) ? window.friends : []).map(f => String(f && f.id))
+        );
+        const pendingIds = new Set(
+            (Array.isArray(window.sentRequests) ? window.sentRequests : [])
+                .map(r => r && r.receiverId != null ? String(r.receiverId) : null)
+                .filter(Boolean)
+        );
+
+        let members = rawMembers.map(m => {
+            const u = m.user || m; // fall back for any older/flat shape
+            const displayName = u.displayName ||
+                [u.firstName, u.lastName].filter(Boolean).join(' ').trim() ||
+                u.username || 'User';
+            return {
+                userId: String(u.id),
+                username: u.username || '',
+                displayName,
+                avatar: u.avatar || u.photoURL || '',
+                status: u.status || 'offline'
+            };
+        }).filter(m => m.userId && m.userId !== 'undefined');
+
+        // Never show yourself, and — per the "who's not already a friend"
+        // requirement — never show members who are already friends. People
+        // with an outgoing request already pending are still shown, just
+        // with a disabled "Pending" button instead of "Add".
+        members = members.filter(m => m.userId !== selfId && !friendIds.has(m.userId));
+
         if (searchTerm) {
             const s = searchTerm.toLowerCase();
             members = members.filter(m =>
-                (m.username || '').toLowerCase().includes(s) ||
-                (m.displayName || '').toLowerCase().includes(s)
+                m.username.toLowerCase().includes(s) ||
+                m.displayName.toLowerCase().includes(s)
             );
         }
+
         if (members.length === 0) {
             groupMembersList.innerHTML =
-                '<div style="text-align:center;padding:20px;color:var(--text-secondary);">No members found</div>';
+                '<div style="text-align:center;padding:20px;color:var(--text-secondary);">No members left to add — everyone in this group is already your friend.</div>';
             return;
         }
         groupMembersList.innerHTML = members.map(m => {
-            const isSelf = m.id === (currentUser && currentUser.id);
-            const avatarUrl = (window.Identity && window.Identity.resolveAvatar(m)) || m.photoURL || m.avatar; // IDENTITY-CENTRALIZATION
+            const isPending = pendingIds.has(m.userId);
+            const avatarUrl = (window.Identity && window.Identity.resolveAvatar(m)) || m.avatar;
             const avatarInner = avatarUrl
                 ? `<img src="${escapeHtml(avatarUrl)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">`
-                : escapeHtml(((m.displayName || m.username || '?')[0]).toUpperCase());
+                : escapeHtml((m.displayName[0] || '?').toUpperCase());
             return `<div style="display:flex;align-items:center;gap:12px;padding:10px;border-bottom:1px solid var(--border-color);">
                 <div style="width:36px;height:36px;border-radius:50%;background:var(--primary-color);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:bold;flex-shrink:0;overflow:hidden;">${avatarInner}</div>
                 <div style="flex:1;min-width:0;">
-                    <div style="font-weight:600;">${escapeHtml(m.displayName || m.username)}</div>
-                    <div style="font-size:12px;color:var(--text-secondary);">@${escapeHtml(m.username || '')}</div>
+                    <div style="font-weight:600;">${escapeHtml(m.displayName)}</div>
+                    <div style="font-size:12px;color:var(--text-secondary);">@${escapeHtml(m.username)}</div>
                 </div>
-                <button class="action-btn primary group-add-btn" data-user-id="${m.id}" data-username="${escapeHtml(m.username || '')}" style="padding:6px 14px;font-size:13px;"${isSelf ? ' disabled' : ''}>
-                    ${isSelf ? 'You' : '<i class="fas fa-user-plus"></i> Add'}
+                <button class="action-btn primary group-add-btn" data-user-id="${escapeHtml(m.userId)}" data-username="${escapeHtml(m.username)}" style="padding:6px 14px;font-size:13px;"${isPending ? ' disabled' : ''}>
+                    ${isPending ? '<i class="fas fa-clock"></i> Pending' : '<i class="fas fa-user-plus"></i> Add'}
                 </button>
             </div>`;
         }).join('');
@@ -2097,6 +2139,30 @@ export const updateFriendCounts = function() {
         set('sentRequestsCount', sentArray.length);
         set('temporaryCount', temporaryArray.length);
 
+        // FIX (no visible "you have a friend request" indicator anywhere):
+        // the incoming-requests count was already tracked here, but nothing
+        // ever surfaced it. Show/hide the bell badge in this module's own
+        // header, and let the parent shell (chat.html) mirror it on the
+        // Friends entry points outside this iframe too.
+        const bellBadge = document.getElementById('friendRequestBadge');
+        if (bellBadge) {
+            if (requestArray.length > 0) {
+                bellBadge.textContent = requestArray.length > 99 ? '99+' : String(requestArray.length);
+                bellBadge.style.display = '';
+            } else {
+                bellBadge.style.display = 'none';
+            }
+        }
+        try {
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({
+                    type: 'kyn:friendRequestCount',
+                    count: requestArray.length,
+                    source: 'friend.html'
+                }, '*');
+            }
+        } catch (_) {}
+
         // SETTINGS WIRING: friends.friendLimitWarning — default true. There was previously no
         // limit defined anywhere to warn about; FRIEND_SOFT_LIMIT is a client-side soft ceiling
         // (not backend-enforced) used purely to give the user a heads-up. Warn once per session
@@ -3389,6 +3455,118 @@ function setupAllUsersSearch() {
             // Render filtered results from cache
             const filteredUsers = getFilteredUsers(searchTerm);
             renderFilteredUsersList(filteredUsers, searchTerm);
+        }
+    });
+}
+
+// =============================================
+// LIVE USERNAME SEARCH (Add Friend → Search by Username tab)
+// =============================================
+// FIX (search-by-username wasn't "well structured" — no live results at
+// all): this tab used to be a bare input + a submit button; nothing showed
+// up until the user typed a full username and hit "Send Friend Request".
+// This wires the same input to a debounced call against the real backend
+// directory (GET /api/users/search?q=), same endpoint message.html already
+// uses for its own live "New chat" search, so results reflect the actual
+// database — not just whatever happens to already be cached locally — and
+// starts rendering matches the moment the user types a letter.
+let _usernameSearchDebounceTimer = null;
+let _usernameSearchRequestSeq = 0;
+
+function setupUsernameLiveSearch() {
+    const input = document.getElementById('usernameInput');
+    const resultsEl = document.getElementById('usernameSearchResults');
+    if (!input || !resultsEl) return;
+
+    // Avoid double-binding if this runs more than once
+    if (input.dataset.liveSearchBound === '1') return;
+    input.dataset.liveSearchBound = '1';
+
+    input.addEventListener('input', function () {
+        const term = this.value.replace(/^@/, '').trim();
+        clearTimeout(_usernameSearchDebounceTimer);
+
+        if (!term) {
+            resultsEl.innerHTML = '';
+            resultsEl.style.display = 'none';
+            return;
+        }
+
+        resultsEl.style.display = '';
+        resultsEl.innerHTML = '<div style="text-align:center;padding:14px;color:var(--text-secondary);font-size:13px;"><i class="fas fa-spinner fa-spin"></i> Searching…</div>';
+
+        _usernameSearchDebounceTimer = setTimeout(async () => {
+            const mySeq = ++_usernameSearchRequestSeq;
+            try {
+                const response = await authorizedRequest(`/api/users/search?q=${encodeURIComponent(term)}&limit=15`);
+                // Ignore stale responses if the user kept typing
+                if (mySeq !== _usernameSearchRequestSeq) return;
+
+                const users = (response && response.data && response.data.users) || [];
+                if (!Array.isArray(users) || users.length === 0) {
+                    resultsEl.innerHTML = `
+                        <div style="text-align:center;padding:16px;color:var(--text-secondary);font-size:13px;">
+                            No users found for "${escapeHtml(term)}"
+                        </div>`;
+                    return;
+                }
+
+                resultsEl.innerHTML = '';
+                const fragment = document.createDocumentFragment();
+                users.forEach(u => {
+                    // createUserSearchItemElement reads window.friends/sentRequests/
+                    // friendRequests itself, so Add/Pending/Friends/Incoming states
+                    // come out correct automatically — same as All Users/Sync Contacts.
+                    const item = createUserSearchItemElement({
+                        id: u.id,
+                        username: u.username,
+                        displayName: u.displayName || [u.firstName, u.lastName].filter(Boolean).join(' ').trim(),
+                        avatar: u.avatar,
+                        bio: u.bio
+                    });
+                    if (item && item.nodeType === Node.ELEMENT_NODE) fragment.appendChild(item);
+                });
+                resultsEl.appendChild(fragment);
+            } catch (e) {
+                if (mySeq !== _usernameSearchRequestSeq) return;
+                resultsEl.innerHTML = `
+                    <div style="text-align:center;padding:16px;color:var(--danger-color);font-size:13px;">
+                        Search failed. Check your connection and try again.
+                    </div>`;
+            }
+        }, 300);
+    });
+
+    // ── Wire the same "Add" (and cancel-pending) actions as the All Users
+    //    list, via event delegation on the results container. ──
+    resultsEl.addEventListener('click', async function (e) {
+        const addBtn = e.target.closest('.friend-action-btn[data-action="add"]');
+        if (addBtn) {
+            if (!isUIActive()) {
+                showNotification('Please wait while module initializes…', 'info');
+                return;
+            }
+            const rawId = addBtn.dataset.userId;
+            const parsedInt = parseInt(rawId, 10);
+            const userId = (!isNaN(parsedInt) && String(parsedInt) === rawId) ? parsedInt : rawId;
+            const userName = addBtn.dataset.userName || '';
+            if (!userId) return;
+
+            addBtn.disabled = true;
+            const origHtml = addBtn.innerHTML;
+            addBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+            const result = await sendFriendRequest(userId, 'friend', 'Added via username search');
+            if (result && result.success) {
+                addBtn.innerHTML = '<i class="fas fa-check"></i>';
+                addBtn.style.background = 'var(--success-color)';
+                showNotification(`Friend request sent to ${userName}`, 'success');
+            } else {
+                addBtn.disabled = false;
+                addBtn.innerHTML = origHtml;
+                showNotification((result && result.error) || 'Failed to send friend request', 'error');
+            }
+            return;
         }
     });
 }
@@ -5929,6 +6107,9 @@ function bindAllEvents() {
     
     // Setup real-time search for All Users
     setupAllUsersSearch();
+
+    // Setup real-time (as-you-type) search for the Search-by-Username tab
+    setupUsernameLiveSearch();
     
     // Add Friend button - FIXED with multiple handlers for reliability
     if (domElements.addFriendBtn) {

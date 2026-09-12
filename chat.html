@@ -3049,6 +3049,12 @@
                 var _fabPages = ['messages', 'calls'];
                 _fab.style.display = _fabPages.includes(page) ? 'flex' : 'none';
             }
+            // FIX: clear the mirrored friend-request badge once the user
+            // actually opens the Friends module — same "seen it, clear it"
+            // pattern already used for the messages unread badge below.
+            if (page === 'friends') {
+                document.querySelectorAll('.friend-req-nav-badge').forEach(b => b.remove());
+            }
             const fromHistory = !!options.fromHistory;
             if (window.__currentPage !== page) {
                 // PHASE15 FIX: Maintain a proper navigation history stack
@@ -3922,6 +3928,38 @@
             icon.addEventListener('click', function() {
                 const badge = icon.querySelector('.nav-badge');
                 if (badge) badge.remove();
+            });
+        });
+
+        // FIX (no external "you have a friend request" indicator): friend.html
+        // has no icon of its own in the bottom nav — Friends is only reachable
+        // via the FAB and the center "+" menu's "Friends" item — so a request
+        // arriving while that iframe isn't open was previously invisible until
+        // the user happened to open it. Mirrors the same count the iframe
+        // already broadcasts on every update (see updateFriendCounts() in
+        // friend-ui.js) onto both of those entry points.
+        window.addEventListener('message', function(evt) {
+            if (!isTrustedOrigin(evt.origin)) return;
+            const d = evt.data || {};
+            if (d.type !== 'kyn:friendRequestCount') return;
+            const count = Number(d.count) || 0;
+            const targets = document.querySelectorAll('.center-menu-friends, #fabAddFriend');
+            targets.forEach(function(el) {
+                let badge = el.querySelector('.friend-req-nav-badge');
+                if (count > 0) {
+                    if (!badge) {
+                        badge = document.createElement('span');
+                        badge.className = 'nav-badge friend-req-nav-badge';
+                        badge.style.position = 'absolute';
+                        badge.style.top = '-2px';
+                        badge.style.right = '-2px';
+                        el.style.position = el.style.position || 'relative';
+                        el.appendChild(badge);
+                    }
+                    badge.textContent = count > 99 ? '99+' : String(count);
+                } else if (badge) {
+                    badge.remove();
+                }
             });
         });
 

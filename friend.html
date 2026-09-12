@@ -2495,6 +2495,18 @@
                     <button class="add-friend-btn" id="startNewChatBtn" title="Start New Chat">
                         <i class="fas fa-comments"></i>
                     </button>
+                    <!-- Friend Request bell — shows a badge the moment a request
+                         comes in (updateFriendCounts() in friend-ui.js keeps the
+                         count live) and opens the incoming-requests list. -->
+                    <div style="position:relative;" id="friendRequestBellWrap">
+                        <button class="add-friend-btn" id="friendRequestBellBtn" title="Friend Requests" onclick="
+                            var t = document.getElementById('requestsTab');
+                            if (t) t.click();
+                        ">
+                            <i class="fas fa-bell"></i>
+                            <span id="friendRequestBadge" class="friend-request-badge" style="display:none;">0</span>
+                        </button>
+                    </div>
                     <!-- Three-dot More menu -->
                     <div style="position:relative;" id="friendMoreMenuWrap">
                         <button class="add-friend-btn" id="friendMoreBtn" title="More options" onclick="
@@ -2894,7 +2906,11 @@
                             Usernames start with @ and can contain letters, numbers, and underscores.
                         </div>
                     </div>
-                    
+
+                    <!-- Live results — populated instantly as the user types,
+                         via setupUsernameLiveSearch() in friend-ui.js. -->
+                    <div id="usernameSearchResults" style="display:none; max-height: 320px; overflow-y: auto; margin: 4px 0 16px; border: 1px solid var(--border-color); border-radius: 8px;"></div>
+
                     <div class="input-group">
                         <label class="input-label">Friend Category (Optional)</label>
                         <select class="text-input" id="friendCategorySelect">
