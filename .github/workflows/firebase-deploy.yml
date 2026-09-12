@@ -1,4 +1,4 @@
-name: Deploy UniConnect to Firebase Hosting
+name: Deploy Nexipa to Firebase Hosting
 
 on:
   push:
@@ -9,34 +9,29 @@ on:
 jobs:
   test_and_deploy:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Setup Node.js
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
         node-version: '18'
-        cache: 'npm'
 
-    - name: Install dependencies
+    - name: Build frontend from .env
+      env:
+        BACKEND_URL: ${{ vars.BACKEND_URL || secrets.BACKEND_URL }}
+        FRONTEND_URL: ${{ vars.FRONTEND_URL || secrets.FRONTEND_URL }}
+        GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID || secrets.GOOGLE_CLIENT_ID }}
       run: |
-        if [ -f package.json ]; then
-          npm ci
-        else
-          echo "No package.json found, skipping npm install"
-        fi
+        node scripts/build-config.js
 
-    - name: Verify Firebase Config
+    - name: Verify generated runtime configuration
       run: |
-        echo "Verifying Firebase configuration for UniConnect..."
-        if [ -f firebase.js ]; then
-          echo "✓ firebase.js found"
-        else
-          echo "✗ firebase.js missing"
-          exit 1
-        fi
+        test -f dist/js/runtime-config.js
+        grep -q 'nexorah-xnv6.onrender.com' dist/js/runtime-config.js
+        echo "✓ Runtime backend configuration generated"
 
     - name: Deploy to Firebase
       if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
@@ -46,8 +41,8 @@ jobs:
         firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_UNICONNECT }}'
         channelId: live
         projectId: 'uniconnect-ee95c'
-        entryPoint: './'
-        
+        entryPoint: './dist'
+
     - name: Deploy to Preview Channel
       if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master'
       uses: FirebaseExtended/action-hosting-deploy@v0
@@ -56,4 +51,4 @@ jobs:
         firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_UNICONNECT }}'
         channelId: preview-${{ github.head_ref || github.ref_name }}
         projectId: 'uniconnect-ee95c'
-        entryPoint: './'
+        entryPoint: './dist'
