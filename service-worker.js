@@ -3,8 +3,8 @@
 // so an installed PWA cannot silently execute week-old code after a deploy.
 'use strict';
 
-const SW_VERSION = '19.19.0';
-const CACHE_NAME = 'nexopa-static-v42';
+const SW_VERSION = '19.20.0';
+const CACHE_NAME = 'nexopa-static-v43';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -25,7 +25,7 @@ const CORE_STATIC_ASSETS = [
 const NETWORK_FIRST_PATTERNS = [
   /\/js\/theme\.engine\.js/i,/\/theme\.colors\.css/i,/\/js\/e2e-encryption\.js/i,
   /\/js\/e2e-session-init\.js/i,/\/js\/api\.request\.js/i,/\/js\/message-e2e-core\.js/i,
-  /\/js\/e2e-identity-core\.js/i,/\/js\/api\.auth\.js/i,/\/js\/app\.core\.session\.js/i,
+  /\/js\/e2e-identity-core\.js/i,/\/js\/e2e-ratchet-v3\.js/i,/\/js\/api\.auth\.js/i,/\/js\/app\.core\.session\.js/i,
   /\/js\/app\.core\.bootstrap\.js/i,/\/js\/auth\.session\.manager\.js/i,/\/js\/authStorage\.js/i,
   /\/js\/auth\.account\.limit\.js/i,/\/js\/google-auth\.js/i,/\/js\/app\.cache\.unified\.js/i,
   /\/js\/app\.cache\.js/i,/\/js\/app\.ui\.auth\.js/i,/\/js\/app\.realtime\.socket\.js/i,
