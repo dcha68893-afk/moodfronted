@@ -287,7 +287,44 @@ window._physPublish=async()=>{
     if(typeof window.hideCreateListingModal==='function') window.hideCreateListingModal();
     return product;
 };
-(()=>{const t=()=>{const b=document.getElementById('publishListingBtn');if(!b){setTimeout(t,800);return;}const o=b.onclick;b.onclick=async e=>{const tab=document.querySelector('.create-listing-tab.active')?.dataset?.tab;if(tab==='physical') await window._physPublish();else o?.call(b,e);};};setTimeout(t,600);})();
+// ROOT-CAUSE FIX (PHYSICAL-LISTING-PUBLISH-NO-OP): the previous approach
+// captured `button.onclick` once and wrapped it — but Tool-ui.js and
+// Tool-core.part3.js each reassign publishListingBtn.onclick multiple times
+// at multiple delays (immediately at load, again ~300ms later via
+// forceBindAllUIEvents, again on a "tools:active" event, again on
+// DOMContentLoaded). Every one of those reassignments replaces the .onclick
+// property outright, including whatever wrap this file had installed on it —
+// whichever reassignment happened to run last silently deleted the
+// physical-tab handling. Once that happened, clicking Publish on the
+// Physical tab fell through to publishListingFromModal()'s generic handler,
+// which has no branch for activeTab === 'physical' and just shows a
+// "Tab not yet supported" toast — indistinguishable from the button doing
+// nothing. A capture-phase addEventListener is a completely separate
+// mechanism from the .onclick property: it is never removed or replaced by
+// a later `button.onclick = ...` assignment, and capture-phase listeners
+// always fire before the element's own onclick handler, so this reliably
+// intercepts the physical-tab case no matter how many times something else
+// rewrites .onclick afterward, and needs no fragile "capture the old
+// handler and call it later" fallback for the other tabs — their own
+// .onclick (whichever script last set it) still runs normally since we only
+// preventDefault/stopImmediatePropagation for the physical case.
+(() => {
+    function bindPhysPublishIntercept() {
+        const b = document.getElementById('publishListingBtn');
+        if (!b) { setTimeout(bindPhysPublishIntercept, 800); return; }
+        if (b.__physInterceptBound) return;
+        b.__physInterceptBound = true;
+        b.addEventListener('click', e => {
+            const tab = document.querySelector('.create-listing-tab.active')?.dataset?.tab;
+            if (tab === 'physical') {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                window._physPublish();
+            }
+        }, true);
+    }
+    setTimeout(bindPhysPublishIntercept, 600);
+})();
 
 // ─── Service tab: subcategory + photo (see Tools.html for the fields) ───────
 window._svcCategoryChanged = cat => {

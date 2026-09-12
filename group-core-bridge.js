@@ -261,8 +261,24 @@ function renderAllGroups() {
         allGroupsList.innerHTML = '';
 
         if (liveAll.length === 0) {
-            if (GC && typeof GC.requestGroupList === 'function' && !GC._allGroupsFetchInFlight) {
+            // ROOT-CAUSE FIX (BACKEND-GETUSERGROUPS-SPAM / GROUPS-TAB-STUCK):
+            // this legacy fallback path (only reached when
+            // window.__renderAllGroupsSecure isn't defined yet — see the
+            // comment above renderAllGroups()) used `_allGroupsFetchInFlight`
+            // as its only guard, which resets to false as soon as one fetch
+            // resolves. For an account with genuinely zero groups, the
+            // response always comes back with liveAll still empty, so this
+            // branch re-enters itself via `renderAllGroups()`, sees the
+            // flight flag cleared, and fires another requestGroupList() —
+            // forever, once per round trip, which is exactly the repeated
+            // "getUserGroups: userId=X has 0 memberships" lines flooding the
+            // backend log. Add a one-time fetch-attempted flag (mirroring
+            // the fix in group-ui.js's renderAllGroupsSecure) so this only
+            // ever fetches once, then always falls through to the real
+            // empty state below instead of looping.
+            if (GC && typeof GC.requestGroupList === 'function' && !GC._allGroupsFetchInFlight && !GC._allGroupsFetchAttempted) {
                 GC._allGroupsFetchInFlight = true;
+                GC._allGroupsFetchAttempted = true;
                 allGroupsList.innerHTML = `
                     <div class="empty-state">
                         <i class="fas fa-spinner fa-spin"></i>
