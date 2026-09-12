@@ -91,20 +91,33 @@
 
     let initialized = false;
     const rendered = new WeakSet();
-    const lastWidths = new WeakMap();
 
     function isVisible(el) {
         return !!el && el.offsetParent !== null && el.offsetWidth > 0;
     }
 
+    function getContainers() {
+        return [
+            document.getElementById('googleSignInLoginContainer'),
+            document.getElementById('googleSignInRegisterContainer')
+        ].filter(Boolean);
+    }
+
     function renderInto(container) {
         if (!container || !isVisible(container) || rendered.has(container)) return;
-        container.innerHTML = '';
+        // Never clear a live Google-rendered iframe. Clearing/replacing it during
+        // resize or form switches causes the visible blink/spark and can leave
+        // the user with an empty container while GIS is rebuilding its iframe.
         const width = Math.max(200, Math.min(320, container.clientWidth || 280));
         try {
-            window.google.accounts.id.renderButton(container, { theme: 'outline', size: 'large', width, text: 'continue_with', shape: 'pill' });
+            window.google.accounts.id.renderButton(container, {
+                theme: 'outline',
+                size: 'large',
+                width,
+                text: 'continue_with',
+                shape: 'pill'
+            });
             rendered.add(container);
-            lastWidths.set(container, width);
         } catch (e) {
             console.warn('[GoogleAuth] renderButton failed:', e.message);
         }
@@ -117,37 +130,38 @@
             return;
         }
         if (!initialized) {
-            window.google.accounts.id.initialize({ client_id: GOOGLE_CLIENT_ID, callback: handleCredentialResponse, auto_select: false });
+            window.google.accounts.id.initialize({
+                client_id: GOOGLE_CLIENT_ID,
+                callback: handleCredentialResponse,
+                auto_select: false
+            });
             initialized = true;
         }
-        [document.getElementById('googleSignInLoginContainer'), document.getElementById('googleSignInRegisterContainer')]
-            .filter(Boolean).forEach(renderInto);
+        getContainers().forEach(renderInto);
     }
 
-    function reRenderVisible(force) {
-        [document.getElementById('googleSignInLoginContainer'), document.getElementById('googleSignInRegisterContainer')]
-            .filter(Boolean).forEach(container => {
-                if (!isVisible(container)) return;
-                const width = Math.max(200, Math.min(320, container.clientWidth || 280));
-                if (!force && rendered.has(container) && lastWidths.get(container) === width) return;
-                rendered.delete(container);
-                renderInto(container);
-            });
+    function renderVisibleContainersOnce() {
+        if (!window.google?.accounts?.id || !GOOGLE_CLIENT_ID) return;
+        renderButtons();
     }
 
     function showFallback(container) {
-        if (!container || rendered.has(container)) return;
+        if (!container || rendered.has(container) || container.dataset.googleFallbackShown === 'true') return;
+        container.dataset.googleFallbackShown = 'true';
         container.innerHTML = '<div style="font-size:13px;color:rgba(255,255,255,0.6);text-align:center;padding:8px 0;">Google sign-in is unavailable right now — please use email/password instead.</div>';
     }
 
     function init() {
         const tryRender = () => {
             if (!window.google?.accounts?.id) return false;
-            renderButtons();
+            renderVisibleContainersOnce();
             return true;
         };
+
         if (!tryRender()) {
-            const interval = setInterval(() => { if (tryRender()) clearInterval(interval); }, 200);
+            const interval = setInterval(() => {
+                if (tryRender()) clearInterval(interval);
+            }, 200);
             setTimeout(() => {
                 clearInterval(interval);
                 if (!window.google?.accounts?.id) {
@@ -156,31 +170,18 @@
                 }
             }, 15000);
         }
-        window.addEventListener('auth-form-switched', () => reRenderVisible(true));
-        let resizeTimer;
-        const schedule = () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => reRenderVisible(false), 250); };
-        window.addEventListener('resize', schedule);
-        window.addEventListener('orientationchange', () => setTimeout(() => reRenderVisible(false), 300));
 
-        if (typeof ResizeObserver === 'function') {
-            const ro = new ResizeObserver(entries => {
-                let changed = false;
-                entries.forEach(entry => {
-                    const el = entry.target;
-                    const width = Math.round(entry.contentRect.width);
-                    if (width > 0 && lastWidths.get(el) !== width) {
-                        changed = true;
-                        lastWidths.set(el, width);
-                        rendered.delete(el);
-                    }
-                });
-                if (changed) schedule();
-            });
-            [document.getElementById('googleSignInLoginContainer'), document.getElementById('googleSignInRegisterContainer')]
-                .filter(Boolean).forEach(el => ro.observe(el));
-        }
+        // The login/register forms are toggled with display:none. Render only
+        // when a container first becomes visible. Do not force a re-render of an
+        // already-live Google iframe when switching forms.
+        window.addEventListener('auth-form-switched', () => {
+            setTimeout(renderVisibleContainersOnce, 0);
+        });
     }
 
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
-    else init();
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init, { once: true });
+    } else {
+        init();
+    }
 })();
