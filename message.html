@@ -1313,6 +1313,7 @@
         <div class="new-chat-result-item" data-user-id="${u.id}" data-user-name="${escapeHtml(u.username || '')}" data-user-avatar="${escapeHtml(u.avatar || u.photoURL || '')}">
           <img src="${escapeHtml(u.avatar || u.photoURL || '/img/default-avatar.png')}" alt="">
           <span>${escapeHtml(u.username || u.firstName || u.displayName || 'User')}</span>
+          ${u.friendshipStatus && u.friendshipStatus !== 'friends' ? '<span style="margin-left:auto;font-size:11px;color:var(--kyn-text-secondary,#999);">Not a friend</span>' : ''}
         </div>
       `).join('');
       newChatResults.querySelectorAll('.new-chat-result-item').forEach(el => {
@@ -1559,12 +1560,86 @@
       const filtered = _knownUsers.filter(u => matchesSearch(u, q));
       if (filtered.length > 0) {
         renderNewChatResults(filtered);
-      } else if (_knownUsers.length === 0) {
-        newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary,#999);font-size:13px;">No friends yet — add some friends to start chatting.</div>';
+      } else if (!q && _knownUsers.length === 0) {
+        newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary,#999);font-size:13px;">No friends yet — search above to message anyone on Kynecta.</div>';
+      } else if (q) {
+        // A query is active — a global search is either in flight or about
+        // to be (see runGlobalUserSearch below), so don't claim "no
+        // matches" yet; that call replaces this with real results or a
+        // real empty state once it resolves.
+        newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary,#999);font-size:13px;">Searching…</div>';
       } else {
         newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary,#999);font-size:13px;">No matches</div>';
       }
       return filtered;
+    }
+
+    // ROOT-CAUSE FIX (CAN-ONLY-MESSAGE-EXISTING-FRIENDS): filterKnownUsersNow
+    // only ever filters _knownUsers, which _loadKnownUsers() populates
+    // exclusively from GET /friends (see its own comment above) — so typing
+    // a name here could only ever narrow the friends list, never find
+    // anyone else. The backend has never required a friendship to open a
+    // direct chat or send a message (moodchat's directChatResolver.js only
+    // blocks users who've explicitly blocked each other — see its own
+    // ENFORCE-BLOCK-ON-CONVERSATION-CREATION comment — and GET
+    // /api/users/search already returns and paginates every user on the
+    // platform with a friendshipStatus flag). This restores that: once the
+    // person types something, also query the real directory in the
+    // background and merge in anyone not already shown as a friend, so
+    // friend-to-non-friend and non-friend-to-non-friend messaging both work
+    // again, exactly as they did before the v3 Message Module rebuild
+    // introduced the friends-only-list regression. The default, empty-query
+    // view stays friends-first (WhatsApp-style contact list) — this only
+    // activates once the person actually searches for someone by name.
+    let _globalSearchToken = 0;
+    async function runGlobalUserSearch(query, knownFilteredCount) {
+      const q = (query || '').trim();
+      if (!q) return; // empty query: friends-first default list only, no directory-wide dump
+      const myToken = ++_globalSearchToken;
+      try {
+        const res = await window.MessageModule.request().get(`/users/search?q=${encodeURIComponent(q)}&limit=25`);
+        if (myToken !== _globalSearchToken) return; // a newer keystroke's search superseded this one
+        if (newChatSearchInput.value.trim() !== q) return; // input changed while this was in flight
+        // FIX (RESPONSE-SHAPE-UNCERTAINTY): the actual backend body is
+        // {status:'success', data:{users:[...], pagination:{...}}}, but this
+        // relay (message-client.js's _directRequest -> chat.html's
+        // API_REQUEST handler -> the real fetch) can hand back that body at
+        // one of several nesting depths depending on how much unwrapping
+        // happened upstream — the exact same uncertainty _loadKnownUsers()
+        // above already defends against for GET /friends (see its own
+        // 3-shape check a few dozen lines up). _directRequest's own
+        // unwrap-one-level logic specifically looks for a `success` boolean
+        // key to decide whether to unwrap, but this endpoint's envelope key
+        // is named `status`, not `success` — so that auto-unwrap may or may
+        // not fire here. Check every depth from "still fully wrapped" down
+        // to "already a bare array" instead of assuming one.
+        const body = res && res.data;
+        const users = Array.isArray(body) ? body
+          : (body && body.data && Array.isArray(body.data.users)) ? body.data.users
+          : (Array.isArray(body?.users)) ? body.users
+          : (body && body.data && Array.isArray(body.data)) ? body.data
+          : [];
+        const knownIds = new Set(_knownUsers.filter(u => matchesSearch(u, q.toLowerCase())).map(u => String(u.id)));
+        const extra = users.filter(u => u && u.id != null && !knownIds.has(String(u.id)));
+        const combined = _knownUsers.filter(u => matchesSearch(u, q.toLowerCase())).concat(extra);
+        if (combined.length > 0) {
+          renderNewChatResults(combined);
+        } else {
+          newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary,#999);font-size:13px;">No matches</div>';
+        }
+      } catch (err) {
+        if (myToken !== _globalSearchToken) return;
+        console.warn('[Messages] Directory search failed, showing friends-only matches:', err && err.message);
+        if (knownFilteredCount === 0) {
+          newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary,#999);font-size:13px;">No matches</div>';
+        }
+      }
+    }
+
+    let _globalSearchDebounce = null;
+    function scheduleGlobalUserSearch(query, knownFilteredCount) {
+      if (_globalSearchDebounce) clearTimeout(_globalSearchDebounce);
+      _globalSearchDebounce = setTimeout(() => runGlobalUserSearch(query, knownFilteredCount), 300);
     }
 
     // Called when the picker opens (and once in the background to refresh),
@@ -1572,6 +1647,7 @@
     async function runNewChatSearch(query) {
       await _loadKnownUsers();
       filterKnownUsersNow(query);
+      if ((query || '').trim()) scheduleGlobalUserSearch(query, 0);
     }
 
     document.getElementById('closeChatInfoModal').addEventListener('click', () => {
@@ -1633,7 +1709,12 @@
       // then "de", then "den" progressively narrows the same list instead
       // of round-tripping to the server (and possibly showing "Searching…"
       // or a different result set) on every letter.
-      filterKnownUsersNow(newChatSearchInput.value);
+      const q = newChatSearchInput.value;
+      const filtered = filterKnownUsersNow(q);
+      // On top of the instant local narrow above, also check the real user
+      // directory (debounced) so a name that isn't already a friend can
+      // still be found and messaged — see runGlobalUserSearch's comment.
+      if (q.trim()) scheduleGlobalUserSearch(q, filtered.length);
     });
 
     window.MessageModule.subscribe((event, data) => {

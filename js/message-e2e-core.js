@@ -2,11 +2,49 @@
 (function (global) {
   'use strict';
   const I = () => global.KynectaE2EIdentity;
-  const decryptCache = new Map();
-  const pending = new Map();
-  const failed = new Set();
-  const inflight = new Map();
+  let decryptCache = new Map();
+  let pending = new Map();
+  let failed = new Set();
+  let inflight = new Map();
   let identityReady = null;
+
+  // ROOT-CAUSE FIX (ACCOUNT-SWITCH-STALE-STATE — "switch account A to B,
+  // chat, switch back to A, sending/decrypting for A misbehaves"): every
+  // cache above is a bare module-level Map/Set keyed ONLY by message id or
+  // peer id — never by which account is currently active. This app
+  // supports switching between two logged-in accounts in the SAME window
+  // (see auth.account.limit.js), which calls KynectaE2EIdentity.clear() and
+  // re-inits for the new account, but nothing ever cleared THIS module's
+  // caches. Two concrete failure modes result: (1) decryptCache/pending/
+  // failed/inflight are keyed by raw message id with no account
+  // namespacing — if account A's message id 123 was cached (decrypted or
+  // failed) and account B also has a message id 123 (entirely plausible
+  // with per-row autoincrement ids), switching to B can silently return A's
+  // stale cached result instead of ever attempting B's actual decrypt; (2)
+  // identityReady, once resolved for A, is never reset on switch, so a
+  // caller that hits the `if (!identityReady)` fast path can be handed a
+  // promise that already resolved against A's identity object before B's
+  // init call ever ran. Track the active account id and flush every one of
+  // these on change, so switching accounts always starts every cache from a
+  // clean slate for the newly active user — exactly like a fresh page load
+  // would.
+  let _lastKnownUserId = undefined;
+  function _resetPerAccountState() {
+    decryptCache = new Map();
+    pending = new Map();
+    failed = new Set();
+    inflight = new Map();
+    identityReady = null;
+    ratchetLocks.clear();
+  }
+  function _syncAccountState() {
+    const current = me();
+    if (current !== _lastKnownUserId) {
+      if (_lastKnownUserId !== undefined) _resetPerAccountState();
+      _lastKnownUserId = current;
+    }
+    return current;
+  }
 
   function me() { return I()?.userId ? String(I().userId) : null; }
   function pairContext(peerId) { const a = String(me() || ''), b = String(peerId || ''); return `kynecta-dm-v2:${[a, b].sort().join(':')}`; }
@@ -102,6 +140,7 @@
     try { return sessionStorage.getItem('kyn_e2e_pw_legacy_session') || null; } catch (_) { return null; }
   }
   async function ensureIdentity() {
+    _syncAccountState();
     if (I()?.enabled && I()?.privateKey) return I();
     if (!identityReady) {
       identityReady = (async () => {
@@ -191,11 +230,101 @@
   // does NOT serialize different peers against each other (each gets its
   // own queue key), so unrelated conversations are unaffected.
   const ratchetLocks = new Map();
+  // ROOT-CAUSE FIX (CROSS-CONTEXT-RATCHET-RACE — intermittent "Unable to
+  // decrypt this message" that started with the v3 Double Ratchet
+  // switchover and doesn't happen on retry): the per-peer promise-chain
+  // queue above only ever serialized calls made from WITHIN this one script
+  // context. But e2e-session-init.js's bootstrap runs independently in
+  // EVERY window that loads it — and it's loaded by both chat.html (the
+  // parent shell, which calls decryptMessageForDisplay for every incoming
+  // message to build its own notification preview — see chat.html's
+  // MESSAGE_RECEIVED handler) and message.html (its iframe, which decrypts
+  // the exact same incoming messages to render the chat bubbles, plus every
+  // undecrypted message in history on load). Those are two separate
+  // `window` objects with two separate copies of this file's module scope —
+  // two separate `ratchetLocks` Maps that know nothing about each other —
+  // both reading, advancing, and writing back the SAME shared
+  // localStorage-persisted ratchet session for the same peer. A Double
+  // Ratchet session is exactly the kind of one-way, non-replayable state
+  // this app's own audit comments already flagged as unsafe to
+  // load->mutate->save without a lock (see the comment above this
+  // function) — the fix there just didn't reach far enough. Concretely,
+  // this reproduces whenever chat.html's notification decrypt and
+  // message.html's display decrypt/encrypt race for the same peer: both
+  // load the same on-disk session, both advance it independently
+  // (encryptForChatV3's `if (!session.CKs)` branch is the worst case — it
+  // mints a brand-new random ephemeral DH keypair, so two racing sends
+  // don't even converge on the same result the way two racing decrypts of
+  // the same message key usually do), and whichever save() lands last
+  // silently discards the other side's chain advance. The message on the
+  // losing side is not delayed, it's PERMANENTLY undecryptable, matching
+  // the reported symptom exactly (this is new behavior introduced by v3;
+  // the old static-key v2 scheme had no shared mutable state to race on).
+  //
+  // Fix: back the lock with the platform's actual cross-context primitive.
+  // navigator.locks (the Web Locks API) is shared by every same-origin
+  // browsing context — top-level window AND same-origin iframes — so a
+  // lock named after the same key used for localStorage below is honored
+  // across chat.html and message.html automatically, with the browser
+  // handling queuing/ordering/release-on-crash for us. Where it's
+  // unavailable (older WebView builds without Web Locks support), fall back
+  // to a localStorage-backed spin-lock using the exact same
+  // claim/TTL/steal-if-stale pattern this codebase already ships in
+  // js/phase15.delivery.patch.js's cross-context claim registry, so a
+  // crashed/reloaded tab can never leave the lock stuck forever. Either
+  // path still runs `fn` through the existing in-window promise queue too,
+  // so ordering within a single window is unaffected.
+  const XCTX_LOCK_PREFIX = 'kyn_ratchet_xlock_';
+  const XCTX_LOCK_TTL_MS = 8000;
+  const XCTX_LOCK_POLL_MS = 40;
+  function _xctxLockKey(key) { return XCTX_LOCK_PREFIX + key; }
+  async function _acquireStorageLock(key) {
+    const storageKey = _xctxLockKey(key);
+    const token = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const deadline = Date.now() + XCTX_LOCK_TTL_MS * 2;
+    for (;;) {
+      let raw = null;
+      try { raw = localStorage.getItem(storageKey); } catch (_) { return null; } // storage unavailable — fail open, nothing to synchronize against anyway
+      if (raw) {
+        let rec = null;
+        try { rec = JSON.parse(raw); } catch (_) {}
+        const stale = !rec || (Date.now() - rec.ts) > XCTX_LOCK_TTL_MS;
+        if (!stale) {
+          if (Date.now() > deadline) { try { localStorage.removeItem(storageKey); } catch (_) {} } // held far too long (crashed tab) — steal it
+          else { await new Promise(r => setTimeout(r, XCTX_LOCK_POLL_MS)); continue; }
+        }
+      }
+      try { localStorage.setItem(storageKey, JSON.stringify({ ts: Date.now(), token })); } catch (_) { return null; }
+      // Re-read to guard the tiny window where two contexts both saw no
+      // lock and both wrote — whoever's token is actually stored won.
+      let confirm = null;
+      try { confirm = JSON.parse(localStorage.getItem(storageKey) || 'null'); } catch (_) {}
+      if (confirm && confirm.token === token) return { storageKey, token };
+      await new Promise(r => setTimeout(r, XCTX_LOCK_POLL_MS));
+    }
+  }
+  function _releaseStorageLock(handle) {
+    if (!handle) return;
+    try {
+      const raw = localStorage.getItem(handle.storageKey);
+      const rec = raw ? JSON.parse(raw) : null;
+      if (rec && rec.token === handle.token) localStorage.removeItem(handle.storageKey);
+    } catch (_) {}
+  }
+  function withCrossContextLock(key, fn) {
+    if (typeof navigator !== 'undefined' && navigator.locks && typeof navigator.locks.request === 'function') {
+      return navigator.locks.request(_xctxLockKey(key), fn);
+    }
+    return (async () => {
+      const handle = await _acquireStorageLock(key);
+      try { return await fn(); } finally { _releaseStorageLock(handle); }
+    })();
+  }
   function withRatchetLock(peerId, fn) {
     const key = ratchetStorageKey(peerId);
     const prior = ratchetLocks.get(key) || Promise.resolve();
     const settledPrior = prior.then(() => {}, () => {}); // don't let one failure jam the queue
-    const result = settledPrior.then(fn);
+    const result = settledPrior.then(() => withCrossContextLock(key, fn));
     ratchetLocks.set(key, result.then(() => {}, () => {}));
     return result;
   }
@@ -354,6 +483,7 @@
   function notifyResolved(id, plaintext, entry) { decryptCache.set(id, plaintext); pending.delete(id); failed.delete(id); entry?.subscribers?.forEach(fn => { try { fn(plaintext); } catch (_) {} }); try { document.dispatchEvent(new CustomEvent('kyn:messageDecrypted', { detail: { messageId: id, chatId: entry?.chatId, plaintext } })); } catch (_) {} }
   function notifyFailed(id, error, entry) { pending.delete(id); failed.add(id); entry?.subscribers?.forEach(fn => { try { fn(null, error); } catch (_) {} }); try { document.dispatchEvent(new CustomEvent('kyn:messageDecryptFailed', { detail: { messageId: id, error: error?.message || String(error || 'Decryption failed') } })); } catch (_) {} }
   async function decryptMessageForDisplay(message, chatId, currentUserId, opts = {}) {
+    _syncAccountState(); // must run before any cache lookup below — see _resetPerAccountState's comment
     const id = messageId(message) || `${chatId}:${message?.content || ''}`;
     if (!parseEnvelope(message?.content)) {
       if (isUnsupportedEnvelope(message?.content)) {
