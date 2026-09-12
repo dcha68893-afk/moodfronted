@@ -319,9 +319,34 @@ function resolveBaseURL() {
         
         if (env === ENVIRONMENTS.LOCAL || env === ENVIRONMENTS.DEVELOPMENT) {
             return 'http://localhost:4000/api';  
-        } else {
-            return 'https://noxopa.onrender.com/api';  
         }
+        // FIX (HARDCODED-BACKEND-URL-BYPASSES-DOTENV): this used to
+        // unconditionally return a hardcoded 'https://noxopa.onrender.com/api'
+        // for every non-local environment, completely bypassing the
+        // .env-driven runtime config (js/config.js + scripts/build-config.js
+        // + moodfronted/.env's BACKEND_URL). getBaseUrl() (below) is what
+        // coreFetch() uses for literally every request that goes through
+        // secureApiFetch/enhancedSecureFetch/apiPost/apiGet — i.e. most of
+        // the app, including login/register — so no matter what BACKEND_URL
+        // was set to in .env, real requests were silently still going to
+        // noxopa.onrender.com. window.__getApiBase()/window.BACKEND_URL are
+        // set by js/config.js from the build-time-generated
+        // window.__NEXIPA_RUNTIME_CONFIG__ (see runtime-config.js) — prefer
+        // those, and only fall back to the old hardcoded literal if config.js
+        // genuinely hasn't loaded yet (e.g. this file executed out of order).
+        if (typeof window !== 'undefined') {
+            try {
+                if (typeof window.__getApiBase === 'function') {
+                    return window.__getApiBase();
+                }
+                if (window.BACKEND_URL) {
+                    return String(window.BACKEND_URL).replace(/\/+$/, '') + '/api';
+                }
+            } catch (_) {
+                // fall through to the last-resort literal below
+            }
+        }
+        return 'https://noxopa.onrender.com/api';
     } catch (error) {
         console.error('[ENV] Base URL resolution error:', error);
         return 'https://noxopa.onrender.com/api';
