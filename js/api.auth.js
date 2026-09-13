@@ -405,8 +405,8 @@
     const CONFIG = {
         // CRITICAL: Single source of truth for auth storage
         AUTH_STORAGE_KEY: 'kynecta_auth',
-        TOKEN_KEYS: ['USER_TOKEN', 'accessToken', 'nexopa_token', 'token'],
-        USER_DATA_KEYS: ['USER_DATA', 'authUser', 'nexopa_auth_user', 'userData'],
+        TOKEN_KEYS: ['USER_TOKEN', 'accessToken', 'necpa_token', 'token'],
+        USER_DATA_KEYS: ['USER_DATA', 'authUser', 'necpa_auth_user', 'userData'],
         REFRESH_TOKEN_KEY: 'REFRESH_TOKEN',
         TOKEN_EXPIRY_KEY: 'TOKEN_EXPIRY',
         AUTH_STATE_KEY: 'AUTH_STATE',
@@ -668,7 +668,7 @@
             // PATCH v1.3: Client-side expiry check REMOVED.
             // Previously: if (Date.now() > timestamp + expiresIn) → clear session.
             // This wiped kynecta_auth silently after 1 hour while other keys
-            // (kynecta_session, nexopa_accessToken) survived, creating a corrupted
+            // (kynecta_session, necpa_accessToken) survived, creating a corrupted
             // partial state that caused the reopen loop on every device.
             // Server enforces expiry via 401. Background validator handles that case.
             
@@ -758,8 +758,8 @@
         if (window.__API_REQUEST) {
             return window.__API_REQUEST;
         }
-        if (window.NexopaRequest) {
-            return window.NexopaRequest;
+        if (window.NecpaRequest) {
+            return window.NecpaRequest;
         }
         return null;
     }
@@ -1230,14 +1230,14 @@
             });
         };
         
-        if (!window.NexopaAuth) {
-            window.NexopaAuth = {};
+        if (!window.NecpaAuth) {
+            window.NecpaAuth = {};
         }
         
         const requiredLegacyMethods = ['login', 'register', 'logout', 'getCurrentUser', 'getUser'];
         requiredLegacyMethods.forEach(methodName => {
-            if (!window.NexopaAuth[methodName] && publicApi[methodName]) {
-                window.NexopaAuth[methodName] = publicApi[methodName];
+            if (!window.NecpaAuth[methodName] && publicApi[methodName]) {
+                window.NecpaAuth[methodName] = publicApi[methodName];
             }
         });
         
@@ -1912,7 +1912,7 @@
             }
             
             // Priority 3: Direct localStorage keys (in order)
-            const keys = ['token', 'accessToken', 'nexopa_token', 'USER_TOKEN', 'jwt'];
+            const keys = ['token', 'accessToken', 'necpa_token', 'USER_TOKEN', 'jwt'];
             for (const key of keys) {
                 const token = localStorage.getItem(key);
                 if (token && token.length > 20 && token !== 'undefined' && token !== 'null') {
@@ -2160,8 +2160,8 @@
                         localStorage.removeItem('kynecta_auth');
                     }
                     // Clear ALL parallel session keys so no stale state survives
-                    ['kynecta_session','accessToken','nexopa_token','USER_TOKEN','token',
-                     'nexopa_accessToken','nexopa_user','nexopa_tokenExpiry',
+                    ['kynecta_session','accessToken','necpa_token','USER_TOKEN','token',
+                     'necpa_accessToken','necpa_user','necpa_tokenExpiry',
                      'auth_token','auth_user','currentUser','user','REFRESH_TOKEN','TOKEN_EXPIRY']
                         .forEach(k => { try { localStorage.removeItem(k); } catch(_) {} });
                     window.__SESSION__ = null;
@@ -2253,7 +2253,7 @@
                 // PATCH v1.4: Atomically clear every old token location BEFORE writing
                 // the new token so no stale copy can survive alongside the fresh one.
                 // Previously the new token was simply written on top, leaving legacy keys
-                // (authToken, nexopa_token, etc.) holding the expired value.
+                // (authToken, necpa_token, etc.) holding the expired value.
                 // api_core.js and iframes reading those keys would then send the old,
                 // rejected token and receive 401s even though the refresh succeeded.
                 try {
@@ -2804,7 +2804,7 @@
             window.currentUser = null;
             
             _safeStorageRemove('authUser');
-            _safeStorageRemove('nexopa_auth_user');
+            _safeStorageRemove('necpa_auth_user');
             _safeStorageRemove('userData');
             // FIX-E2E-WIRING: clear the password handoff (see index.html login
             // success handler) on logout — it should never outlive the
@@ -2905,7 +2905,7 @@
         localStorage.setItem('auth_token', token);
         localStorage.setItem('authToken', token);
         localStorage.setItem('accessToken', token);
-        localStorage.setItem('nexopa_token', token);
+        localStorage.setItem('necpa_token', token);
         localStorage.setItem('auth_user', JSON.stringify(user));
 
         const tokenStored = setUserToken(token, expiresIn);
@@ -3317,7 +3317,7 @@
                     const _authStorageHandled = !!(window.AuthStorage && typeof window.AuthStorage.saveAuth === 'function');
                     if (_authStorageHandled) {
                         // AuthStorage.saveAuth() already writes token/accessToken/
-                        // USER_TOKEN/nexopa_token (see LEGACY_TOKEN_KEYS in
+                        // USER_TOKEN/necpa_token (see LEGACY_TOKEN_KEYS in
                         // authStorage.js) — the 4 lines below were re-writing the
                         // exact same keys with the exact same value a second time
                         // on this path. Removed as dead-weight duplication; kept
@@ -3329,7 +3329,7 @@
                         localStorage.setItem('token', token);
                         localStorage.setItem('accessToken', token);
                         localStorage.setItem('USER_TOKEN', token);
-                        localStorage.setItem('nexopa_token', token);
+                        localStorage.setItem('necpa_token', token);
                     }
                     window.token = token;
                     window.accessToken = token;
@@ -3827,7 +3827,7 @@
             const legacyUser = localStorage.getItem('auth_user') ||
                                localStorage.getItem('currentUser') ||
                                localStorage.getItem('user') ||
-                               localStorage.getItem('nexopa_user');
+                               localStorage.getItem('necpa_user');
             return legacyUser ? JSON.parse(legacyUser) : null;
         } catch {
             return null;

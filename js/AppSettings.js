@@ -122,7 +122,7 @@
         account: {
             displayName: 'User',
             username: 'user',
-            bio: "Hello! I'm using Nexopa",
+            bio: "Hello! I'm using Necpa",
             profileVisibility: 'everyone',
             photoVisibility: 'everyone',
             lastSeen: 'everyone',
@@ -511,7 +511,7 @@
 
         target.clearUserSettings = function () {
             try {
-                localStorage.removeItem('nexopa_settings');
+                localStorage.removeItem('necpa_settings');
             } catch (_) {}
             AppSettings.reset();
         };
@@ -773,7 +773,7 @@
             try {
                 token = localStorage.getItem('authToken')
                     || localStorage.getItem('token')
-                    || localStorage.getItem('nexopa_token')
+                    || localStorage.getItem('necpa_token')
                     || localStorage.getItem('accessToken')
                     || null;
             } catch (_) {}
@@ -984,8 +984,8 @@
         } catch (_) {}
 
         try {
-            if (global.NexopaSettingsManager && global.NexopaSettingsManager.currentSettings) {
-                global.NexopaSettingsManager.currentSettings = clone(_data);
+            if (global.NecpaSettingsManager && global.NecpaSettingsManager.currentSettings) {
+                global.NecpaSettingsManager.currentSettings = clone(_data);
             }
         } catch (_) {}
 

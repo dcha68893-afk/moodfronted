@@ -33,7 +33,7 @@ async function _api(method, endpoint, body=null) {
         const token = window.__kynToken||window.__accessToken||
             window.__PARENT_SESSION__?.token||
             localStorage.getItem('authToken')||localStorage.getItem('token')||
-            localStorage.getItem('nexopa_token')||localStorage.getItem('accessToken')||'';
+            localStorage.getItem('necpa_token')||localStorage.getItem('accessToken')||'';
         // FIX (Audit #19 - one source of truth for API config): removed the hardcoded
         // 'http://localhost:4000' fallback. This is the checkout/payment module — silently
         // pointing payment calls at localhost instead of failing loudly is the worst place

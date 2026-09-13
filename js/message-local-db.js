@@ -2,13 +2,13 @@
 (function (global) {
   'use strict';
   if (global.KynectaMessageCache) return;
-  const DB_NAME = 'nexopa_message_lifecycle_v1'; const DB_VERSION = 2; const MESSAGES_STORE = 'messages'; const CONVERSATIONS_STORE = 'conversations';
+  const DB_NAME = 'necpa_message_lifecycle_v1'; const DB_VERSION = 2; const MESSAGES_STORE = 'messages'; const CONVERSATIONS_STORE = 'conversations';
   let dbPromise = null; let closed = false;
   function currentUserId() {
     try {
       if (global.currentUser && (global.currentUser.id || global.currentUser.userId || global.currentUser._id)) { const u = global.currentUser; return String(u.id || u.userId || u._id); }
       if (global.AuthStorage && typeof global.AuthStorage.getUser === 'function') { const u = global.AuthStorage.getUser(); const id = u && (u.id || u.userId || u.uid || u._id); if (id != null) return String(id); }
-      for (const key of ['kynecta_auth','currentUser','nexopa_user','user']) { try { const raw = localStorage.getItem(key); if (!raw) continue; const parsed = JSON.parse(raw); const u = parsed && parsed.user ? parsed.user : parsed; const id = u && (u.id || u.userId || u.uid || u._id); if (id != null) return String(id); } catch (_) {} }
+      for (const key of ['kynecta_auth','currentUser','necpa_user','user']) { try { const raw = localStorage.getItem(key); if (!raw) continue; const parsed = JSON.parse(raw); const u = parsed && parsed.user ? parsed.user : parsed; const id = u && (u.id || u.userId || u.uid || u._id); if (id != null) return String(id); } catch (_) {} }
     } catch (_) {}
     return null;
   }

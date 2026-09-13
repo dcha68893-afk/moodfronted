@@ -243,7 +243,7 @@
         new Notification(message.senderName || message.sender || 'New message', {
           body,
           tag: `kynecta-message-${message.id || message.localId || detail.chatId || 'new'}`,
-          icon: '/icons/nexopa-192.png',
+          icon: '/icons/necpa-192.png',
         });
       } catch (_) {}
     });

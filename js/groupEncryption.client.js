@@ -75,6 +75,16 @@
 
       const message = body?.data?.message || body?.data?.data?.message || body?.data || body?.message;
       if (message?.id) {
+        // FIX (group-self-message-shows-encrypted): the server echoes back
+        // the just-sent message with .content still ciphertext (that's what
+        // got stored) — this HTTP-response path never runs it through
+        // decryptIncoming(), unlike the socket-receive path, so the sender
+        // saw raw encrypted content in their own chat. We already have the
+        // real plaintext right here; use it directly instead of asking the
+        // server, and mark the message so no later handler tries to
+        // re-decrypt (and overwrite) it.
+        message.content = plaintext;
+        message.__alreadyDecrypted = true;
         this.addGroupMessage?.(groupId, message);
         this.emit?.('group:message-received', { groupId, message });
         this.emit?.('group:message-sent', { groupId, message });

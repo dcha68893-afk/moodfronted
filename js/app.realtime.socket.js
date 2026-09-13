@@ -143,7 +143,7 @@
     // ── FIX #1: Token acquisition — check globals FIRST (set right after login) ──
     function acquireToken() {
         const TOKEN_KEYS = [
-            'nexopa_token', 'kynecta_token', 'auth_token', 'token', 'jwt',
+            'necpa_token', 'kynecta_token', 'auth_token', 'token', 'jwt',
             'access_token', '__kyn_token', 'kyn_access_token',
             'kynecta_access_token', 'kyn_token', 'userToken', 'accessToken',
             'authToken', 'USER_TOKEN'
@@ -169,7 +169,7 @@
         }
 
         // ── Priority 4: kynecta_auth object (FIX: tolerant parse) ────────────
-        for (const key of ['kynecta_auth', 'kynecta_session', 'kyn_session', 'auth_session', 'nexopa_auth']) {
+        for (const key of ['kynecta_auth', 'kynecta_session', 'kyn_session', 'auth_session', 'necpa_auth']) {
             try {
                 const raw = localStorage.getItem(key) || sessionStorage.getItem(key);
                 if (!raw) continue;
@@ -873,7 +873,7 @@
                     if (id) return id;
                 }
                 // Try common localStorage keys
-                for (const key of ['nexopa_user', 'kynecta_auth', 'authUser', 'user']) {
+                for (const key of ['necpa_user', 'kynecta_auth', 'authUser', 'user']) {
                     const raw = localStorage.getItem(key);
                     if (raw) {
                         const parsed = JSON.parse(raw);
@@ -882,7 +882,7 @@
                     }
                 }
                 // Try token decode (last resort)
-                const token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('nexopa_token');
+                const token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('necpa_token');
                 if (token) {
                     const parts = token.split('.');
                     if (parts.length === 3) {
@@ -1356,7 +1356,7 @@
                         // get their own path via kyn:group:message, so this only covers
                         // 1:1 DMs. Skip echoes of the current user's own messages.
                         try {
-                            var _myAuthRaw = localStorage.getItem('kynecta_auth') || localStorage.getItem('nexopa_auth');
+                            var _myAuthRaw = localStorage.getItem('kynecta_auth') || localStorage.getItem('necpa_auth');
                             var _myId = _myAuthRaw ? (JSON.parse(_myAuthRaw).user || {}).id : null;
                             var _senderId = payload && (payload.senderId || payload.userId || payload.fromId);
                             if (_senderId && String(_senderId) !== String(_myId)) {

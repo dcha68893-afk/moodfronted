@@ -1,5 +1,5 @@
 
-// app.core.ui.js - Nexopa UI Navigation & Rendering Engine
+// app.core.ui.js - Necpa UI Navigation & Rendering Engine
 // UPDATED: Safe config loader with defensive initialization
 // UPDATED: APP_CONFIG dependency protection - NO CRASH if missing
 // UPDATED: Non-blocking UI policy - no global event prevention
@@ -43,8 +43,8 @@
   // Ensures APP_CONFIG is never undefined - prevents ReferenceError crashes
   // Waits for delayed config, merges without overwriting, never throws
   
-  if (typeof window.__NEXOPA_CONFIG_STATE === 'undefined') {
-    window.__NEXOPA_CONFIG_STATE = {
+  if (typeof window.__NECPA_CONFIG_STATE === 'undefined') {
+    window.__NECPA_CONFIG_STATE = {
       initialized: false,
       pendingCallbacks: [],
       fallbackActive: false,
@@ -70,29 +70,29 @@
       version: 'fallback',
       _isFallback: true
     };
-    window.__NEXOPA_CONFIG_STATE.fallbackActive = true;
+    window.__NECPA_CONFIG_STATE.fallbackActive = true;
   }
 
   // Store original config reference
   const ORIGINAL_CONFIG = window.APP_CONFIG;
   
   // Config ready promise for async initialization
-  window.__NEXOPA_CONFIG_READY = new Promise((resolve) => {
+  window.__NECPA_CONFIG_READY = new Promise((resolve) => {
     // If config already has pages and not just fallback, resolve immediately
     if (Object.keys(ORIGINAL_CONFIG.pages || {}).length > 0 && !ORIGINAL_CONFIG._isFallback) {
-      window.__NEXOPA_CONFIG_STATE.initialized = true;
+      window.__NECPA_CONFIG_STATE.initialized = true;
       resolve(ORIGINAL_CONFIG);
     } else {
       // Store resolver for later use
-      window.__NEXOPA_CONFIG_STATE.resolveReady = resolve;
+      window.__NECPA_CONFIG_STATE.resolveReady = resolve;
     }
   });
 
   // Watch for real config to load (if we're in fallback mode)
-  if (window.__NEXOPA_CONFIG_STATE.fallbackActive) {
+  if (window.__NECPA_CONFIG_STATE.fallbackActive) {
     const configWatcher = setInterval(() => {
       // Increment attempt counter
-      window.__NEXOPA_CONFIG_STATE.configLoadAttempts++;
+      window.__NECPA_CONFIG_STATE.configLoadAttempts++;
       
       // Check if real config has been loaded (has pages and not our fallback)
       if (window.APP_CONFIG && 
@@ -109,26 +109,26 @@
         window.APP_CONFIG = ORIGINAL_CONFIG;
         
         // Mark as initialized and resolve promise
-        window.__NEXOPA_CONFIG_STATE.initialized = true;
-        window.__NEXOPA_CONFIG_STATE.fallbackActive = false;
+        window.__NECPA_CONFIG_STATE.initialized = true;
+        window.__NECPA_CONFIG_STATE.fallbackActive = false;
         
-        if (window.__NEXOPA_CONFIG_STATE.resolveReady) {
-          window.__NEXOPA_CONFIG_STATE.resolveReady(ORIGINAL_CONFIG);
+        if (window.__NECPA_CONFIG_STATE.resolveReady) {
+          window.__NECPA_CONFIG_STATE.resolveReady(ORIGINAL_CONFIG);
         }
         
         // Execute pending callbacks that were waiting for config
-        window.__NEXOPA_CONFIG_STATE.pendingCallbacks.forEach(cb => {
+        window.__NECPA_CONFIG_STATE.pendingCallbacks.forEach(cb => {
           try { cb(ORIGINAL_CONFIG); } catch (e) { console.warn('Config callback error:', e); }
         });
-        window.__NEXOPA_CONFIG_STATE.pendingCallbacks = [];
+        window.__NECPA_CONFIG_STATE.pendingCallbacks = [];
         
         clearInterval(configWatcher);
-      } else if (window.__NEXOPA_CONFIG_STATE.configLoadAttempts > window.__NEXOPA_CONFIG_STATE.maxConfigLoadAttempts) {
+      } else if (window.__NECPA_CONFIG_STATE.configLoadAttempts > window.__NECPA_CONFIG_STATE.maxConfigLoadAttempts) {
         // Timeout after max attempts - stop watching but keep using fallback
         console.warn('⚠️ [CONFIG SAFETY] Real APP_CONFIG timeout - continuing with fallback');
-        window.__NEXOPA_CONFIG_STATE.initialized = true;
-        if (window.__NEXOPA_CONFIG_STATE.resolveReady) {
-          window.__NEXOPA_CONFIG_STATE.resolveReady(ORIGINAL_CONFIG);
+        window.__NECPA_CONFIG_STATE.initialized = true;
+        if (window.__NECPA_CONFIG_STATE.resolveReady) {
+          window.__NECPA_CONFIG_STATE.resolveReady(ORIGINAL_CONFIG);
         }
         clearInterval(configWatcher);
       }
@@ -161,10 +161,10 @@
     },
     
     waitForReady: function(callback) {
-      if (window.__NEXOPA_CONFIG_STATE.initialized) {
+      if (window.__NECPA_CONFIG_STATE.initialized) {
         callback(this.get());
       } else {
-        window.__NEXOPA_CONFIG_STATE.pendingCallbacks.push(callback);
+        window.__NECPA_CONFIG_STATE.pendingCallbacks.push(callback);
       }
     },
     
@@ -568,7 +568,7 @@
         
         // Dispatch module failure event
         try {
-          const event = new CustomEvent('nexopa-module-failed', {
+          const event = new CustomEvent('necpa-module-failed', {
             detail: {
               module: moduleName,
               error: error.message,
@@ -648,14 +648,14 @@
       }
       
       // Check if event already attached (prevent duplicate listeners)
-      if (element.__nexopaEvents && element.__nexopaEvents.has(eventKey)) {
+      if (element.__necpaEvents && element.__necpaEvents.has(eventKey)) {
         console.warn(`⚠️ Event ${event} already attached to element, skipping`);
         return () => {};
       }
       
       // Initialize events tracking
-      if (!element.__nexopaEvents) {
-        element.__nexopaEvents = new Set();
+      if (!element.__necpaEvents) {
+        element.__necpaEvents = new Set();
       }
       
       const safeHandler = (e) => {
@@ -680,7 +680,7 @@
       };
       
       element.addEventListener(event, safeHandler, options);
-      element.__nexopaEvents.add(eventKey);
+      element.__necpaEvents.add(eventKey);
       
       // Register globally
       if (window.__UI_EVENTS_BOUND) {
@@ -690,7 +690,7 @@
       // Return removal function
       return () => {
         element.removeEventListener(event, safeHandler, options);
-        element.__nexopaEvents.delete(eventKey);
+        element.__necpaEvents.delete(eventKey);
         if (window.__UI_EVENTS_BOUND) {
           window.__UI_EVENTS_BOUND.delete(eventKey);
         }
@@ -898,10 +898,10 @@
           () => window.AUTH_STATE && window.AUTH_STATE.getToken && window.AUTH_STATE.getToken(),
           () => window.api && window.api.auth && window.api.auth.getToken && window.api.auth.getToken(),
           () => {
-            try { return localStorage.getItem('nexopa_token'); } catch(e) { return null; }
+            try { return localStorage.getItem('necpa_token'); } catch(e) { return null; }
           },
           () => {
-            try { return sessionStorage.getItem('nexopa_token'); } catch(e) { return null; }
+            try { return sessionStorage.getItem('necpa_token'); } catch(e) { return null; }
           }
         ];
         
@@ -1410,7 +1410,7 @@
     // MODIFIED: No global preventDefault/stopPropagation - non-blocking UI policy
     bindNavItem: function(item, pageKey) {
       // Check if already bound
-      if (item.__nexopaNavBound) {
+      if (item.__necpaNavBound) {
         return;
       }
       
@@ -1422,7 +1422,7 @@
       }
       
       // Mark as bound
-      item.__nexopaNavBound = true;
+      item.__necpaNavBound = true;
       
       // Register globally
       if (window.__UI_EVENTS_BOUND) {
@@ -1443,8 +1443,8 @@
         // Handle navigation through PAGE_ROUTER
         if (window.PageRouter && typeof window.PageRouter.loadPageByKey === 'function') {
           window.PageRouter.loadPageByKey(pageKey, true);
-        } else if (window.NexopaUI && typeof window.NexopaUI.navigate === 'function') {
-          window.NexopaUI.navigate(pageKey);
+        } else if (window.NecpaUI && typeof window.NecpaUI.navigate === 'function') {
+          window.NecpaUI.navigate(pageKey);
         } else {
           console.error('❌ Navigation controller not available');
         }
@@ -1515,8 +1515,8 @@
     // Save mode to localStorage
     saveMode: function(mode) {
       try {
-        localStorage.setItem('nexopa_nav_mode', mode);
-        localStorage.setItem('nexopa_nav_mode_timestamp', new Date().toISOString());
+        localStorage.setItem('necpa_nav_mode', mode);
+        localStorage.setItem('necpa_nav_mode_timestamp', new Date().toISOString());
       } catch (error) {
         console.warn('⚠️ Failed to save navigation mode:', error);
       }
@@ -1525,7 +1525,7 @@
     // Load saved mode
     loadSavedMode: function() {
       try {
-        const savedMode = localStorage.getItem('nexopa_nav_mode');
+        const savedMode = localStorage.getItem('necpa_nav_mode');
         if (savedMode && Object.values(this.MODES).includes(savedMode)) {
           return savedMode;
         }
@@ -1538,7 +1538,7 @@
     // Dispatch mode change event
     dispatchModeChange: function(mode) {
       try {
-        const event = new CustomEvent('nexopa-nav-mode-change', {
+        const event = new CustomEvent('necpa-nav-mode-change', {
           detail: {
             mode: mode,
             timestamp: new Date().toISOString(),
@@ -1586,7 +1586,7 @@
       
       // Clean up bound events
       this.navItems.forEach(item => {
-        item.__nexopaNavBound = false;
+        item.__necpaNavBound = false;
       });
     }
   };
@@ -1674,7 +1674,7 @@
         console.log(`🔄 UI State: ${this.previousState} → ${newState} (${reason})`);
         
         // Dispatch state change event
-        const event = new CustomEvent('nexopa-ui-state-change', {
+        const event = new CustomEvent('necpa-ui-state-change', {
           detail: {
             previousState: this.previousState,
             currentState: this.currentState,
@@ -2672,7 +2672,7 @@
       
       // Dispatch error event
       try {
-        const event = new CustomEvent('nexopa-route-error', {
+        const event = new CustomEvent('necpa-route-error', {
           detail: {
             pageUrl: pageUrl,
             error: error.message,
@@ -2731,7 +2731,7 @@
           // Priority 2: Session storage
           () => {
             try {
-              const savedPage = sessionStorage.getItem('nexopa_last_page');
+              const savedPage = sessionStorage.getItem('necpa_last_page');
               if (savedPage) {
                 const validation = this.validatePageExists(savedPage);
                 if (validation.valid) {
@@ -2746,7 +2746,7 @@
               }
             } catch (error) {
               console.warn('⚠️ Failed to read session storage:', error);
-              try { sessionStorage.removeItem('nexopa_last_page'); } catch(e) {}
+              try { sessionStorage.removeItem('necpa_last_page'); } catch(e) {}
             }
             return null;
           },
@@ -2865,10 +2865,10 @@
       
       try {
         // Save only the page key, not the object
-        sessionStorage.setItem('nexopa_last_page', this.currentPage.key);
+        sessionStorage.setItem('necpa_last_page', this.currentPage.key);
         
         // Also save in localStorage for cross-tab sync
-        localStorage.setItem('nexopa_current_page', this.currentPage.key);
+        localStorage.setItem('necpa_current_page', this.currentPage.key);
         
         console.log('💾 Navigation state saved:', this.currentPage.key);
       } catch (error) {
@@ -3043,7 +3043,7 @@
               
               // Dispatch iframe ready event
               try {
-                const event = new CustomEvent('nexopa-iframe-ready', {
+                const event = new CustomEvent('necpa-iframe-ready', {
                   detail: {
                     iframeId: pageConfig.id,
                     pageKey: iframeData.pageKey,
@@ -3056,7 +3056,7 @@
               // Send ready message to iframe
               try {
                 iframe.contentWindow.postMessage({
-                  type: 'nexopa-parent-ready',
+                  type: 'necpa-parent-ready',
                   timestamp: new Date().toISOString(),
                   pageConfig: pageConfig
                 }, '*');
@@ -3148,7 +3148,7 @@
         if (!iframe.contentWindow) return;
         
         const authData = {
-          type: 'nexopa-sync-auth',
+          type: 'necpa-sync-auth',
           user: window.currentUser || (window.AUTH_STATE && window.AUTH_STATE.getUser ? window.AUTH_STATE.getUser() : null) || (window.api && window.api.auth && window.api.auth.getUser ? window.api.auth.getUser() : null),
           isAuthenticated: !!(window.currentUser || (window.AUTH_STATE && window.AUTH_STATE.isAuthenticated && window.AUTH_STATE.isAuthenticated()) || (window.api && window.api.auth && window.api.auth.isAuthenticated && window.api.auth.isAuthenticated())),
           token: (window.AUTH_STATE && window.AUTH_STATE.getToken ? window.AUTH_STATE.getToken() : null) || (window.api && window.api.auth && window.api.auth.getToken ? window.api.auth.getToken() : null),
@@ -3167,9 +3167,9 @@
       try {
         if (!iframe.contentWindow) return;
         
-        const theme = (() => { try { return localStorage.getItem('nexopa_theme') || 'dark'; } catch(e) { return 'dark'; } })();
+        const theme = (() => { try { return localStorage.getItem('necpa_theme') || 'dark'; } catch(e) { return 'dark'; } })();
         const themeData = {
-          type: 'nexopa-sync-theme',
+          type: 'necpa-sync-theme',
           theme: theme,
           timestamp: new Date().toISOString()
         };
@@ -3284,7 +3284,7 @@
       
       // Dispatch error event
       try {
-        const event = new CustomEvent('nexopa-iframe-error', {
+        const event = new CustomEvent('necpa-iframe-error', {
           detail: {
             pageId: pageId,
             error: error.message,
@@ -3321,7 +3321,7 @@
         try {
           if (iframeData.window) {
             iframeData.window.postMessage({
-              type: 'nexopa-health-check',
+              type: 'necpa-health-check',
               timestamp: new Date().toISOString()
             }, '*');
           }
@@ -3346,25 +3346,25 @@
         if (!data || !data.type) return;
         
         switch(data.type) {
-          case 'nexopa-iframe-ready':
+          case 'necpa-iframe-ready':
             console.log(`🖼️ Iframe ready: ${data.iframeId}`);
             break;
             
-          case 'nexopa-auth-request':
+          case 'necpa-auth-request':
             this.syncIframeAuth(event.source.frameElement);
             break;
             
-          case 'nexopa-theme-request':
+          case 'necpa-theme-request':
             this.syncIframeTheme(event.source.frameElement);
             break;
             
-          case 'nexopa-navigate-request':
+          case 'necpa-navigate-request':
             if (data.pageKey) {
               this.loadPageByKey(data.pageKey, true);
             }
             break;
             
-          case 'nexopa-health-response':
+          case 'necpa-health-response':
             // Update iframe health
             const iframe = event.source.frameElement;
             if (iframe) {
@@ -3388,8 +3388,8 @@
           currentOrigin,
           'http://localhost',
           'http://127.0.0.1',
-          'https://nexopa.app',
-          'https://*.nexopa.app'
+          'https://necpa.app',
+          'https://*.necpa.app'
         ];
         
         return trustedOrigins.some(trusted => {
@@ -3981,7 +3981,7 @@
       
       // Get saved state
       try {
-        const savedState = localStorage.getItem('nexopa_sidebar_state');
+        const savedState = localStorage.getItem('necpa_sidebar_state');
         if (savedState) {
           const state = JSON.parse(savedState);
           if (state.collapsed) {
@@ -4000,7 +4000,7 @@
       const observer = new MutationObserver(() => {
         const collapsed = sidebar.classList.contains('collapsed');
         try {
-          localStorage.setItem('nexopa_sidebar_state', JSON.stringify({
+          localStorage.setItem('necpa_sidebar_state', JSON.stringify({
             collapsed: collapsed,
             timestamp: new Date().toISOString()
           }));
@@ -4123,7 +4123,7 @@
       try {
         const pageConfig = SafeConfig.getPage(pageKey);
         if (pageConfig && pageConfig.title) {
-          document.title = `${pageConfig.title} - Nexopa`;
+          document.title = `${pageConfig.title} - Necpa`;
         }
       } catch (error) {
         console.warn('⚠️ Error updating document title:', error);
@@ -4810,7 +4810,7 @@
     // Setup error boundaries
     setupErrorBoundaries: function() {
       // Global error handler for navigation errors
-      UI_SAFETY.safeEventListener(window, 'nexopa-route-error', (event) => {
+      UI_SAFETY.safeEventListener(window, 'necpa-route-error', (event) => {
         UI_SAFETY.guard(this._componentId, () => {
           console.error('🛑 Route error caught:', event.detail);
           
@@ -5051,7 +5051,7 @@
       const sidebar = document.querySelector('.sidebar');
       if (sidebar) {
         try {
-          localStorage.setItem('nexopa_sidebar_state', JSON.stringify({
+          localStorage.setItem('necpa_sidebar_state', JSON.stringify({
             collapsed: !event.detail.open,
             timestamp: new Date().toISOString()
           }));
@@ -5088,7 +5088,7 @@
   window.NavigationLock = NavigationLock; // UI RESILIENCE PATCH: Expose navigation lock
   
   // Expose public API
-  window.NexopaUI = {
+  window.NecpaUI = {
     // Navigation
     navigate: PAGE_ROUTER.api.navigate,
     navigateToUrl: PAGE_ROUTER.api.navigateToUrl,
@@ -5170,10 +5170,10 @@
           
           // Initialize UI
           PAGE_ROUTER.init().then(() => {
-            console.log('🎉 Nexopa UI Navigation Engine Ready!');
+            console.log('🎉 Necpa UI Navigation Engine Ready!');
             
             // Dispatch ready event
-            window.dispatchEvent(new CustomEvent('nexopa-ui-ready', {
+            window.dispatchEvent(new CustomEvent('necpa-ui-ready', {
               detail: {
                 timestamp: new Date().toISOString(),
                 router: 'initialized',
@@ -5216,7 +5216,7 @@
       SafeConfig: SafeConfig,
       UIErrorBoundary: UIErrorBoundary,
       NavigationLock: NavigationLock,
-      NexopaUI: window.NexopaUI
+      NecpaUI: window.NecpaUI
     };
   }
   

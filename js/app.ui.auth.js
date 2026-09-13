@@ -113,8 +113,8 @@ const AUTH_GATEWAY_CONFIG = {
     API_TIMEOUT: 30000,
     
     // Storage
-    AUTH_STATE_KEY: 'nexopa_auth_state',
-    SESSION_SYNC_KEY: 'nexopa_auth_sync',
+    AUTH_STATE_KEY: 'necpa_auth_state',
+    SESSION_SYNC_KEY: 'necpa_auth_sync',
     
     // Session Management
     SESSION_CHECK_INTERVAL: 30000,
@@ -545,7 +545,7 @@ class ApiAuthReadinessManager {
                 'window.api': !!window.api,
                 'window.api.auth': !!window.api?.auth,
                 'window.api.auth type': typeof window.api?.auth,
-                'window.NexopaAuth': !!window.NexopaAuth,
+                'window.NecpaAuth': !!window.NecpaAuth,
                 'window.auth': !!window.auth,
                 'window.app?.api?.auth': !!window.app?.api?.auth,
                 'window.__authModule': !!window.__authModule
@@ -644,7 +644,7 @@ class ApiAuthReadinessManager {
             
             // Fallback: Check other possible locations
             const fallbackPaths = [
-                () => window.NexopaAuth,
+                () => window.NecpaAuth,
                 () => window.auth,
                 () => window.app?.api?.auth,
                 () => window.__authModule
@@ -1327,7 +1327,7 @@ class ApiAuthProxy {
             // Get the real api.auth module
             const possibleAuthModules = [
                 window.api?.auth,
-                window.NexopaAuth,
+                window.NecpaAuth,
                 window.auth,
                 window.app?.api?.auth,
                 window.__authModule
@@ -1436,7 +1436,7 @@ class ApiAuthProxy {
                 if (result.fullyInitialized) {
                     console.log('✅ api.auth.js fully initialized confirmed');
                     this._isFallbackMode = false;
-                    this._realApiAuth = window.api?.auth || window.NexopaAuth;
+                    this._realApiAuth = window.api?.auth || window.NecpaAuth;
                     return true;
                 } else {
                     console.warn('⚠️ api.auth.js full initialization timeout, checking current state');
@@ -2296,7 +2296,7 @@ try {
                         localStorage.setItem('token', token);
                         localStorage.setItem('accessToken', token);
                         localStorage.setItem('USER_TOKEN', token);
-                        localStorage.setItem('nexopa_token', token);
+                        localStorage.setItem('necpa_token', token);
                         // REMOVED: localStorage.setItem('jwt', token) — traced every
                         // localStorage.getItem() call across the whole frontend;
                         // nothing anywhere reads the 'jwt' key. Confirmed dead write,
@@ -2371,7 +2371,7 @@ try {
                     try {
                         sessionStorage.setItem('token', token);
                         sessionStorage.setItem('accessToken', token);
-                        sessionStorage.setItem('nexopa_token', token);
+                        sessionStorage.setItem('necpa_token', token);
                         console.log('✅ Token stored in sessionStorage');
                     } catch (e) {
                         console.warn('⚠️ Failed to store token in sessionStorage:', e);
@@ -2383,7 +2383,7 @@ try {
                         window.accessToken = token;
                         window.__userToken = token;
                         window.__accessToken = token;
-                        window.nexopaToken = token;
+                        window.necpaToken = token;
                         console.log('✅ Token stored on window object');
                     } catch (e) {
                         console.warn('⚠️ Failed to store token on window object:', e);
@@ -2488,7 +2488,7 @@ if (window.SessionManager && token && user) {
                     // Also store user in localStorage
                     try {
                         localStorage.setItem('currentUser', JSON.stringify(user));
-                        localStorage.setItem('nexopa_user', JSON.stringify(user));
+                        localStorage.setItem('necpa_user', JSON.stringify(user));
                         localStorage.setItem('user', JSON.stringify(user));
                     } catch (e) {
                         console.warn('⚠️ Failed to store user data:', e);
@@ -2513,7 +2513,7 @@ if (window.SessionManager && token && user) {
                     // Force store again
                     localStorage.setItem('token', token);
                     localStorage.setItem('accessToken', token);
-                    localStorage.setItem('nexopa_token', token);
+                    localStorage.setItem('necpa_token', token);
                     
                     const _retryNow = Date.now();
                     const retryUnified = {
@@ -2824,7 +2824,7 @@ if (window.SessionManager && token && user) {
                     try {
                         localStorage.setItem('token', token);
                         localStorage.setItem('accessToken', token);
-                        localStorage.setItem('nexopa_token', token);
+                        localStorage.setItem('necpa_token', token);
                         localStorage.setItem('USER_TOKEN', token);
                         const _authNow = Date.now();
                         // FIX-DUPLICATE-TOKEN-STORAGE: route through AuthStorage.saveAuth()
@@ -2935,14 +2935,14 @@ if (window.SessionManager && token && user) {
             const token = localStorage.getItem('token') ||
                           localStorage.getItem('accessToken') ||
                           localStorage.getItem('authToken') ||
-                          localStorage.getItem('nexopa_token') ||
+                          localStorage.getItem('necpa_token') ||
                           localStorage.getItem('kynecta_token') ||
                           localStorage.getItem('USER_TOKEN');
             if (!token || token.length < 20) return null;
             try {
                 const userRaw = localStorage.getItem('currentUser') ||
                                 localStorage.getItem('user') ||
-                                localStorage.getItem('nexopa_user');
+                                localStorage.getItem('necpa_user');
                 const user = userRaw ? JSON.parse(userRaw) : null;
                 return user ? { token, user } : null;
             } catch(e) { return null; }
@@ -3045,7 +3045,7 @@ if (window.SessionManager && token && user) {
             storedToken = localStorage.getItem('token') || 
                          localStorage.getItem('accessToken') || 
                          localStorage.getItem('USER_TOKEN') ||
-                         localStorage.getItem('nexopa_token');
+                         localStorage.getItem('necpa_token');
         }
         
         if (!storedToken || !this._isTokenValid(storedToken)) {
@@ -4624,7 +4624,7 @@ if (window.SessionManager) {
     
     _loadLoginAttempts() {
         try {
-            const stored = localStorage.getItem('nexopa_login_attempts');
+            const stored = localStorage.getItem('necpa_login_attempts');
             if (stored) {
                 const data = JSON.parse(stored);
                 // Check if data is not too old (24 hours)
@@ -4651,7 +4651,7 @@ if (window.SessionManager) {
                 blockedUsers: Array.from(this._blockedUsers.entries()),
                 timestamp: Date.now()
             };
-            localStorage.setItem('nexopa_login_attempts', JSON.stringify(data));
+            localStorage.setItem('necpa_login_attempts', JSON.stringify(data));
         } catch (error) {
             window.__authSafetyGuards._logOnce(`_saveLoginAttempts failed: ${error.message}`, 'SAVE_LOGIN_ATTEMPTS');
         }

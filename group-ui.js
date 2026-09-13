@@ -4749,14 +4749,14 @@ export async function loadDiscoverGroups(query, purpose, scope) {
                     try{
                         var memData=await panelFetch('/api/groups/'+gid2+'/members');
                         var members=(memData&&(memData.data&&memData.data.members||memData.members))||[];
-                        var myId=localStorage.getItem('userId')||localStorage.getItem('nexopa_userId')||'';
+                        var myId=localStorage.getItem('userId')||localStorage.getItem('necpa_userId')||'';
                         var myM=members.find(function(m){return String(m.userId||m.id||m.uid)===String(myId);});
                         if(myM&&found){found.role=myM.role||'member';found.isAdmin=['owner','admin'].includes(found.role);found.isCreator=found.role==='owner'||String(found.createdBy||'')===String(myId);}
                     }catch(me){}
                 }catch(e){}
             }
             if(found){
-                var myId2=localStorage.getItem('userId')||localStorage.getItem('nexopa_userId')||'';
+                var myId2=localStorage.getItem('userId')||localStorage.getItem('necpa_userId')||'';
                 if(found.role===undefined)found.role='member';
                 if(found.isCreator===undefined)found.isCreator=String(found.createdBy||'')===String(myId2)||found.role==='owner';
                 if(found.isAdmin===undefined)found.isAdmin=found.isCreator||['owner','admin'].includes(found.role);
@@ -4772,7 +4772,7 @@ export async function loadDiscoverGroups(query, purpose, scope) {
         var myGroups=(GC&&(GC.myGroups&&GC.myGroups.length?GC.myGroups:GC.groups))||[];
         var myIds=new Set(myGroups.map(function(g){return String(g.id);}));
         // Also filter by current user as owner/creator
-        var myUserId=String(localStorage.getItem('userId')||localStorage.getItem('nexopa_userId')||'');
+        var myUserId=String(localStorage.getItem('userId')||localStorage.getItem('necpa_userId')||'');
         var others=grps.filter(function(g){
             if(myIds.has(String(g.id)))return false;
             if(myUserId&&(String(g.createdBy||'')===myUserId||String(g.ownerId||'')===myUserId||String(g.userId||'')===myUserId))return false;

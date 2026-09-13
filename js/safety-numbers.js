@@ -1,5 +1,5 @@
 /**
- * safety-numbers.js — Key verification / Safety numbers screen for Nexopa
+ * safety-numbers.js — Key verification / Safety numbers screen for Necpa
  *
  * Phase 3 feature: Safety numbers screen
  *

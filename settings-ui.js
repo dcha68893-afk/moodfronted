@@ -4482,7 +4482,7 @@ export function loadBackupSection(container) {
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `nexopa-settings-backup-${Date.now()}.json`;
+            a.download = `necpa-settings-backup-${Date.now()}.json`;
             document.body.appendChild(a);
             a.click();
             a.remove();
@@ -4596,8 +4596,8 @@ export function loadDangerSection(container) {
                         // localStorage.clear() and indexedDB.deleteDatabase('settingsDB') —
                         // 'settingsDB' is not a real database anywhere in this app (the
                         // actual local stores are KnectaToolsDB, kynectaMesh, AppDB,
-                        // calls-db, KnectaStatusDB, kyn_offline_queue, nexopa_repair_v1,
-                        // kyn_stories_v1, nexopa_dq_v1 — see authStorage.js's own
+                        // calls-db, KnectaStatusDB, kyn_offline_queue, necpa_repair_v1,
+                        // kyn_stories_v1, necpa_dq_v1 — see authStorage.js's own
                         // KNOWN_INDEXEDDB_NAMES list), so this button deleted a database
                         // that never existed and left every real cache untouched. It also
                         // never touched the Cache Storage API used by the service worker.
@@ -4613,7 +4613,7 @@ export function loadDangerSection(container) {
                                 if (typeof indexedDB !== 'undefined') {
                                     const knownNames = [
                                         'KnectaToolsDB', 'kynectaMesh', 'AppDB', 'calls-db', 'KnectaStatusDB',
-                                        'kyn_offline_queue', 'nexopa_repair_v1', 'kyn_stories_v1', 'nexopa_dq_v1',
+                                        'kyn_offline_queue', 'necpa_repair_v1', 'kyn_stories_v1', 'necpa_dq_v1',
                                         'settingsDB'
                                     ];
                                     if (typeof indexedDB.databases === 'function') {

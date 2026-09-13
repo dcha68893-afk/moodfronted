@@ -381,7 +381,7 @@
 
     _getMyUserId() {
       try {
-        const raw = localStorage.getItem('kynecta_auth') || localStorage.getItem('nexopa_auth');
+        const raw = localStorage.getItem('kynecta_auth') || localStorage.getItem('necpa_auth');
         return raw ? JSON.parse(raw)?.user?.id : null;
       } catch (_) { return null; }
     }

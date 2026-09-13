@@ -1,4 +1,4 @@
-// app.core.bootstrap.js - Nexopa Bootstrap & Core Initialization Layer
+// app.core.bootstrap.js - Necpa Bootstrap & Core Initialization Layer
 // COMPLETE REWRITE WITH DETERMINISTIC BOOT SEQUENCE
 // ALL ORIGINAL FUNCTIONALITY PRESERVED
 // Session-first initialization, parent authority handshake, no race conditions
@@ -103,7 +103,7 @@
     
     // Fire completion event
     try {
-      window.dispatchEvent(new CustomEvent('nexopa-bootstrap-complete', {
+      window.dispatchEvent(new CustomEvent('necpa-bootstrap-complete', {
         detail: { timestamp: Date.now(), reason: reason }
       }));
     } catch (e) {}
@@ -306,7 +306,7 @@
       
       // Fire session invalid event
       try {
-        window.dispatchEvent(new CustomEvent('nexopa-session-invalid', {
+        window.dispatchEvent(new CustomEvent('necpa-session-invalid', {
           detail: { timestamp: Date.now(), reason: 'background_validation_failed' }
         }));
       } catch (e) {}
@@ -399,7 +399,7 @@
       }
 
       window.dispatchEvent(
-        new CustomEvent(`nexopa-${component}-ready`, {
+        new CustomEvent(`necpa-${component}-ready`, {
           detail: { timestamp: Date.now() },
         })
       );
@@ -901,7 +901,7 @@
 
     emitStateChange: function (oldState, newState) {
       try {
-        const event = new CustomEvent("nexopa-bootstrap-state-change", {
+        const event = new CustomEvent("necpa-bootstrap-state-change", {
           detail: {
             oldState: oldState,
             newState: newState,
@@ -949,7 +949,7 @@
       } catch (_) {}
 
       // Legacy token keys fallback
-      const legacyKeys = ["authToken", "accessToken", "token", "nexopa_token", "USER_TOKEN", "kynecta_token", "nexopa_jwt_token"];
+      const legacyKeys = ["authToken", "accessToken", "token", "necpa_token", "USER_TOKEN", "kynecta_token", "necpa_jwt_token"];
       for (const key of legacyKeys) {
         if (localStorage.getItem(key)) return true;
       }
@@ -1066,7 +1066,7 @@
 
     simplifiedAuthCheck: function () {
       try {
-        const token = localStorage.getItem("accessToken") || localStorage.getItem("nexopa_jwt_token");
+        const token = localStorage.getItem("accessToken") || localStorage.getItem("necpa_jwt_token");
         const hasToken = !!token;
 
         if (hasToken) {
@@ -1104,7 +1104,7 @@
           return result.valid === true;
         }
 
-        const token = localStorage.getItem("accessToken") || localStorage.getItem("nexopa_jwt_token");
+        const token = localStorage.getItem("accessToken") || localStorage.getItem("necpa_jwt_token");
         if (!token) return false;
 
         const parts = token.split(".");
@@ -1164,7 +1164,7 @@
 
       if (!isLoginPage) {
         try {
-          sessionStorage.setItem("nexopa_return_path", currentPath);
+          sessionStorage.setItem("necpa_return_path", currentPath);
         } catch (error) {
           console.warn("[BOOT] ⚠️ Failed to store return path:", error);
         }
@@ -1203,7 +1203,7 @@
       this._locked = true;
 
       window.dispatchEvent(
-        new CustomEvent("nexopa-navigation-lock", {
+        new CustomEvent("necpa-navigation-lock", {
           detail: { reason, timestamp: Date.now() },
         })
       );
@@ -1225,7 +1225,7 @@
       this._unlockCallbacks = [];
 
       window.dispatchEvent(
-        new CustomEvent("nexopa-navigation-unlock", {
+        new CustomEvent("necpa-navigation-unlock", {
           detail: { reason, timestamp: Date.now() },
         })
       );
@@ -1967,7 +1967,7 @@
         navigation: {
           container: "#nav-container, .navigation-container, nav",
           persistState: true,
-          storageKey: "nexopa_nav_state",
+          storageKey: "necpa_nav_state",
           validateBeforeLoad: true,
           sessionFirst: true,
         },
@@ -2346,7 +2346,7 @@
     },
 
     trackProgress: function (event) {
-      const progressEvent = new CustomEvent("nexopa-bootstrap-progress", {
+      const progressEvent = new CustomEvent("necpa-bootstrap-progress", {
         detail: {
           event: event,
           phase: this.currentPhase,
@@ -2361,7 +2361,7 @@
     },
 
     broadcastPhaseChange: function (newPhase, oldPhase) {
-      const phaseChangeEvent = new CustomEvent("nexopa-bootstrap-phase-change", {
+      const phaseChangeEvent = new CustomEvent("necpa-bootstrap-phase-change", {
         detail: {
           newPhase: newPhase,
           oldPhase: oldPhase,
@@ -2379,7 +2379,7 @@
       const finalPhase = success ? (this.isDegraded() ? this.PHASES.DEGRADED : this.PHASES.READY) : this.PHASES.FAILED;
       this.setPhase(finalPhase);
 
-      const completionEvent = new CustomEvent("nexopa-bootstrap-complete", {
+      const completionEvent = new CustomEvent("necpa-bootstrap-complete", {
         detail: {
           success: success,
           message: message,
@@ -2671,7 +2671,7 @@
       window.__EXPECTED_MODULES = new Set(window.APP_CONFIG.modules);
 
       window.dispatchEvent(
-        new CustomEvent("nexopa-modules-registered", {
+        new CustomEvent("necpa-modules-registered", {
           detail: {
             modules: Array.from(window.__EXPECTED_MODULES),
             timestamp: Date.now(),
@@ -3251,9 +3251,9 @@
           () => window.api && window.api.core && window.api.core.initialize,
           () => window.api && window.api.auth && window.api.auth.getUser,
           () => window.api && window.api.request && window.api.request.secureFetch,
-          () => window.__NEXOPA_API_READY === true,
-          () => window.NexopaConfig && window.NexopaConfig.api,
-          () => window.__NEXOPA_API_EVENTS && window.__NEXOPA_API_EVENTS.includes("ready"),
+          () => window.__NECPA_API_READY === true,
+          () => window.NecpaConfig && window.NecpaConfig.api,
+          () => window.__NECPA_API_EVENTS && window.__NECPA_API_EVENTS.includes("ready"),
         ];
 
         for (const method of detectionMethods) {
@@ -3302,7 +3302,7 @@
           window.app._dependencyGraph.apiWait.immediateDetectionFailed = true;
         }
 
-        const eventTypes = ["api-ready", "apiready", "apiReady", "nexopa-api-ready", "api.core-ready"];
+        const eventTypes = ["api-ready", "apiready", "apiReady", "necpa-api-ready", "api.core-ready"];
         let eventReceived = false;
 
         const eventHandler = () => {
@@ -3481,7 +3481,7 @@
           return;
         }
 
-        const eventTypes = ["auth-ready", "authReady", "nexopa-auth-ready"];
+        const eventTypes = ["auth-ready", "authReady", "necpa-auth-ready"];
         let eventReceived = false;
 
         const eventHandler = () => {
@@ -3714,7 +3714,7 @@
         }
       } else {
         try {
-          const token = localStorage.getItem("accessToken") || localStorage.getItem("nexopa_jwt_token");
+          const token = localStorage.getItem("accessToken") || localStorage.getItem("necpa_jwt_token");
           authState.hasToken = !!token;
 
           if (authState.hasToken) {
@@ -3975,7 +3975,7 @@
     },
 
     validateWithDirectCall: async function () {
-      const token = localStorage.getItem("accessToken") || localStorage.getItem("nexopa_jwt_token");
+      const token = localStorage.getItem("accessToken") || localStorage.getItem("necpa_jwt_token");
       if (!token) {
         return { valid: false, reason: "No token found" };
       }
@@ -4196,8 +4196,8 @@
         events: {
           on: function (eventName, callback) {
             try {
-              if (typeof NexopaEvents !== "undefined") {
-                NexopaEvents.on(eventName, callback);
+              if (typeof NecpaEvents !== "undefined") {
+                NecpaEvents.on(eventName, callback);
               } else {
                 window.addEventListener(eventName, (event) => {
                   callback(event.detail);
@@ -4209,8 +4209,8 @@
           },
           off: function (eventName, callback) {
             try {
-              if (typeof NexopaEvents !== "undefined") {
-                NexopaEvents.off(eventName, callback);
+              if (typeof NecpaEvents !== "undefined") {
+                NecpaEvents.off(eventName, callback);
               } else {
                 window.removeEventListener(eventName, callback);
               }
@@ -4220,8 +4220,8 @@
           },
           emit: function (eventName, data) {
             try {
-              if (typeof NexopaEvents !== "undefined") {
-                NexopaEvents.emit(eventName, data);
+              if (typeof NecpaEvents !== "undefined") {
+                NecpaEvents.emit(eventName, data);
               } else {
                 const event = new CustomEvent(eventName, {
                   detail: data,
@@ -4236,8 +4236,8 @@
           },
           once: function (eventName, callback) {
             try {
-              if (typeof NexopaEvents !== "undefined") {
-                NexopaEvents.once(eventName, callback);
+              if (typeof NecpaEvents !== "undefined") {
+                NecpaEvents.once(eventName, callback);
               } else {
                 const onceCallback = (event) => {
                   callback(event.detail);
@@ -4320,10 +4320,10 @@
               loadExternalTab: typeof window.loadExternalTab === "function",
             };
           },
-          getNexopaCoreStatus: function () {
+          getNecpaCoreStatus: function () {
             return {
-              exists: typeof window.NexopaCore !== "undefined",
-              components: window.NexopaCore ? Object.keys(window.NexopaCore) : [],
+              exists: typeof window.NecpaCore !== "undefined",
+              components: window.NecpaCore ? Object.keys(window.NecpaCore) : [],
             };
           },
         },
@@ -4417,7 +4417,7 @@
         authContainer.classList.remove("hidden");
       }
 
-      const event = new CustomEvent("nexopa-auth-ui-required", {
+      const event = new CustomEvent("necpa-auth-ui-required", {
         detail: {
           timestamp: new Date().toISOString(),
           reason: "Public page or no valid session",
@@ -4445,7 +4445,7 @@
         appContainer.classList.remove("hidden");
       }
 
-      const event = new CustomEvent("nexopa-dashboard-ui-required", {
+      const event = new CustomEvent("necpa-dashboard-ui-required", {
         detail: {
           timestamp: new Date().toISOString(),
           user:
@@ -4470,7 +4470,7 @@
       if (!isAuthPage) {
         const returnPath = currentPath + window.location.search;
         try {
-          sessionStorage.setItem("nexopa_return_path", returnPath);
+          sessionStorage.setItem("necpa_return_path", returnPath);
         } catch (error) {
           console.warn("⚠️ Failed to store return path:", error);
         }
@@ -4598,7 +4598,7 @@
             e.stopPropagation();
             sidebar.classList.toggle("collapsed");
 
-            const event = new CustomEvent("nexopa-sidebar-toggle", {
+            const event = new CustomEvent("necpa-sidebar-toggle", {
               detail: {
                 collapsed: sidebar.classList.contains("collapsed"),
                 timestamp: new Date().toISOString(),
@@ -4697,7 +4697,7 @@
         window.history.pushState({ page: page }, "", page);
       }
 
-      const event = new CustomEvent("nexopa-navigation", {
+      const event = new CustomEvent("necpa-navigation", {
         detail: {
           page: page,
           timestamp: new Date().toISOString(),
@@ -4742,11 +4742,11 @@
 
       try {
         // FIX (theme flash / competing-theme audit): same issue as
-        // js/app.core.js — a private 'nexopa_theme' key, dark-by-default,
+        // js/app.core.js — a private 'necpa_theme' key, dark-by-default,
         // classes-only (no data-theme attribute), plus a dead matchMedia
         // 'auto' listener. Unified with the shared 'app_theme' key/attribute.
         const html = document.documentElement;
-        const savedTheme = (localStorage.getItem("app_theme") || localStorage.getItem("nexopa_theme")) === "dark" ? "dark" : "light";
+        const savedTheme = (localStorage.getItem("app_theme") || localStorage.getItem("necpa_theme")) === "dark" ? "dark" : "light";
 
         html.classList.remove("theme-dark", "theme-light", "theme-auto");
         html.classList.add(`theme-${savedTheme}`);
@@ -4943,7 +4943,7 @@
           }
         }
 
-        const event = new CustomEvent("nexopa-responsive-change", {
+        const event = new CustomEvent("necpa-responsive-change", {
           detail: {
             isMobile: isMobile,
             isTablet: isTablet,
@@ -4990,7 +4990,7 @@
       try {
         const user =
           window.currentUser || (typeof AUTH_STATE !== "undefined" && AUTH_STATE.getUser ? AUTH_STATE.getUser() : null);
-        const event = new CustomEvent("nexopa-content-loading", {
+        const event = new CustomEvent("necpa-content-loading", {
           detail: {
             timestamp: new Date().toISOString(),
             user: user,
@@ -5150,7 +5150,7 @@
         }
 
         window.dispatchEvent(
-          new CustomEvent("nexopa-navigation-ready", {
+          new CustomEvent("necpa-navigation-ready", {
             detail: {
               timestamp: new Date().toISOString(),
               isDegraded: BOOTSTRAP_STATE.isDegraded(),
@@ -5167,7 +5167,7 @@
 
       let savedPageKey = null;
       try {
-        const savedValue = sessionStorage.getItem("nexopa_last_page");
+        const savedValue = sessionStorage.getItem("necpa_last_page");
 
         if (savedValue) {
           if (
@@ -5176,7 +5176,7 @@
             savedValue.trim() === ""
           ) {
             console.warn("⚠️ Invalid session storage value detected, removing:", savedValue);
-            sessionStorage.removeItem("nexopa_last_page");
+            sessionStorage.removeItem("necpa_last_page");
             savedPageKey = null;
           } else if (APP_CONFIG.pages && APP_CONFIG.pages[savedValue]) {
             savedPageKey = savedValue;
@@ -5195,7 +5195,7 @@
         }
       } catch (error) {
         console.error("❌ Error reading session storage:", error);
-        sessionStorage.removeItem("nexopa_last_page");
+        sessionStorage.removeItem("necpa_last_page");
       }
 
       if (!savedPageKey && APP_CONFIG.defaultPageKey && APP_CONFIG.pages) {
@@ -5267,7 +5267,7 @@
       safeLoadPageResources(pageKey);
 
       try {
-        sessionStorage.setItem("nexopa_last_page", pageKey);
+        sessionStorage.setItem("necpa_last_page", pageKey);
         console.log("💾 Saved page key to session storage:", pageKey);
       } catch (error) {
         console.error("❌ Failed to save to session storage:", error);
@@ -5366,7 +5366,7 @@
         this.propagateSessionToIframe(iframe, pageConfig);
 
         window.dispatchEvent(
-          new CustomEvent("nexopa-page-loaded", {
+          new CustomEvent("necpa-page-loaded", {
             detail: {
               pageId: pageConfig.id,
               pageKey: Object.keys(APP_CONFIG.pages).find((key) => APP_CONFIG.pages[key].id === pageConfig.id),
@@ -5397,7 +5397,7 @@
         const sendSession = () => {
           if (iframe.contentWindow) {
             const sessionData = {
-              type: "nexopa-session-data",
+              type: "necpa-session-data",
               user:
                 window.currentUser ||
                 (typeof AUTH_STATE !== "undefined" && AUTH_STATE.getUser ? AUTH_STATE.getUser() : null),
@@ -5433,7 +5433,7 @@
         this.updateActiveNavigation(Object.keys(APP_CONFIG.pages).find((key) => APP_CONFIG.pages[key].id === pageConfig.id));
 
         window.dispatchEvent(
-          new CustomEvent("nexopa-page-loaded", {
+          new CustomEvent("necpa-page-loaded", {
             detail: {
               pageId: pageConfig.id,
               pageKey: Object.keys(APP_CONFIG.pages).find((key) => APP_CONFIG.pages[key].id === pageConfig.id),
@@ -5612,7 +5612,7 @@
         });
       }
 
-      window.NexopaIframes = new Map();
+      window.NecpaIframes = new Map();
 
       const safeGetAuthData = () => {
         try {
@@ -5646,23 +5646,23 @@
           if (!data || typeof data !== "object") return;
 
           switch (data?.type) {
-            case "nexopa-iframe-ready":
+            case "necpa-iframe-ready":
               this.handleIframeReady(event.source, data);
               break;
 
-            case "nexopa-iframe-auth-request":
+            case "necpa-iframe-auth-request":
               this.handleIframeAuthRequest(event.source, data);
               break;
 
-            case "nexopa-iframe-data-request":
+            case "necpa-iframe-data-request":
               this.handleIframeDataRequest(event.source, data);
               break;
 
-            case "nexopa-iframe-action":
+            case "necpa-iframe-action":
               this.handleIframeAction(event.source, data);
               break;
 
-            case "nexopa-iframe-navigate":
+            case "necpa-iframe-navigate":
               this.handleIframeNavigate(data);
               break;
           }
@@ -5673,14 +5673,14 @@
 
       window.addEventListener("message", messageHandler);
 
-      window.NexopaIframeAPI = {
+      window.NecpaIframeAPI = {
         sendToParent: function (type, data) {
           try {
             window.parent.postMessage(
               {
                 type: type,
                 data: data,
-                source: "nexopa-iframe",
+                source: "necpa-iframe",
                 timestamp: new Date().toISOString(),
               },
               "*"
@@ -5694,7 +5694,7 @@
           return new Promise((resolve) => {
             const listener = (event) => {
               try {
-                if (event.data?.type === "nexopa-auth-state-response") {
+                if (event.data?.type === "necpa-auth-state-response") {
                   window.removeEventListener("message", listener);
                   resolve(event.data.data);
                 }
@@ -5705,7 +5705,7 @@
             };
             window.addEventListener("message", listener);
 
-            this.sendToParent("nexopa-iframe-auth-request");
+            this.sendToParent("necpa-iframe-auth-request");
 
             setTimeout(() => {
               window.removeEventListener("message", listener);
@@ -5719,7 +5719,7 @@
           return new Promise((resolve) => {
             const listener = (event) => {
               try {
-                if (event.data?.type === "nexopa-data-response" && event.data.key === key) {
+                if (event.data?.type === "necpa-data-response" && event.data.key === key) {
                   window.removeEventListener("message", listener);
                   resolve(event.data.data);
                 }
@@ -5730,7 +5730,7 @@
             };
             window.addEventListener("message", listener);
 
-            this.sendToParent("nexopa-iframe-data-request", { key: key });
+            this.sendToParent("necpa-iframe-data-request", { key: key });
 
             setTimeout(() => {
               window.removeEventListener("message", listener);
@@ -5758,8 +5758,8 @@
     createMinimalIframeAPI: function () {
       console.log("🛠️ Creating minimal iframe API stub...");
 
-      window.NexopaIframes = new Map();
-      window.NexopaIframeAPI = {
+      window.NecpaIframes = new Map();
+      window.NecpaIframeAPI = {
         sendToParent: function () {
           console.warn("⚠️ Iframe API limited - sendToParent not available");
         },
@@ -5776,7 +5776,7 @@
       try {
         console.log("🖼️ Iframe ready:", data.iframeId);
 
-        window.NexopaIframes.set(data.iframeId, {
+        window.NecpaIframes.set(data.iframeId, {
           window: iframeWindow,
           id: data.iframeId,
           ready: true,
@@ -5797,7 +5797,7 @@
 
         iframeWindow.postMessage(
           {
-            type: "nexopa-auth-state-response",
+            type: "necpa-auth-state-response",
             data: {
               user: authData.user,
               isAuthenticated: authData.isAuthenticated,
@@ -5834,7 +5834,7 @@
                 typeof API_COORDINATION !== "undefined" && API_COORDINATION.getNetworkStatus
                   ? API_COORDINATION.getNetworkStatus()
                   : "unknown",
-              backendReachable: window.NexopaConfig?.backendReachable,
+              backendReachable: window.NecpaConfig?.backendReachable,
               isOnline:
                 typeof API_COORDINATION !== "undefined" && API_COORDINATION.getNetworkStatus
                   ? API_COORDINATION.getNetworkStatus() === "online"
@@ -5849,7 +5849,7 @@
 
         iframeWindow.postMessage(
           {
-            type: "nexopa-data-response",
+            type: "necpa-data-response",
             key: data.key,
             data: responseData,
             timestamp: new Date().toISOString(),
@@ -5912,7 +5912,7 @@
         const authData = this.safeGetAuthData();
 
         const initialState = {
-          type: "nexopa-initial-state",
+          type: "necpa-initial-state",
           auth: {
             user: authData.user,
             isAuthenticated: authData.isAuthenticated,
@@ -5923,7 +5923,7 @@
               typeof API_COORDINATION !== "undefined" && API_COORDINATION.getNetworkStatus
                 ? API_COORDINATION.getNetworkStatus()
                 : "unknown",
-            backendReachable: window.NexopaConfig?.backendReachable,
+            backendReachable: window.NecpaConfig?.backendReachable,
             isOnline:
               typeof API_COORDINATION !== "undefined" && API_COORDINATION.getNetworkStatus
                 ? API_COORDINATION.getNetworkStatus() === "online"
@@ -5969,7 +5969,7 @@
         });
       }
 
-      window.NexopaEvents = {
+      window.NecpaEvents = {
         listeners: new Map(),
 
         on: function (eventName, callback) {
@@ -6031,7 +6031,7 @@
         try {
           const originalDispatch = window.dispatchEvent;
           window.dispatchEvent = function (event) {
-            if (event.type.startsWith("nexopa-")) {
+            if (event.type.startsWith("necpa-")) {
               console.log(`📡 Event: ${event.type}`, event.detail || "");
             }
             return originalDispatch.call(this, event);
@@ -6107,7 +6107,7 @@
 
           this.showErrorToUser("An unexpected error occurred. The app will continue to work in limited mode.");
 
-          const errorEvent = new CustomEvent("nexopa-global-error", {
+          const errorEvent = new CustomEvent("necpa-global-error", {
             detail: {
               error: event.error,
               message: event.message,
@@ -6128,7 +6128,7 @@
 
           this.showErrorToUser("An operation failed. Please try again.");
 
-          const errorEvent = new CustomEvent("nexopa-unhandled-rejection", {
+          const errorEvent = new CustomEvent("necpa-unhandled-rejection", {
             detail: {
               reason: event.reason,
               promise: event.promise,
@@ -6244,7 +6244,7 @@
           window.showNotification("You have been inactive for 30 minutes. Session will expire soon.", "warning", 10000);
         }
 
-        const event = new CustomEvent("nexopa-user-inactivity", {
+        const event = new CustomEvent("necpa-user-inactivity", {
           detail: {
             duration: "30m",
             timestamp: new Date().toISOString(),

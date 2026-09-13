@@ -4535,13 +4535,22 @@ export async function fetchUserDataDirectly() {
         }
         
         const response = await authorizedFetch('/api/profile', { method: 'GET' });
-        
-        if (response && response.user) {
+
+        // FIX (admin-role-never-hydrated): GET /api/profile actually responds
+        // with { success, message, data: { profile } }, never a top-level
+        // `user` key — so this always threw and silently gave up, which meant
+        // Tools.html could never learn the real user/role via this fallback
+        // (only via the parent's SESSION_DATA postMessage, if and when it
+        // arrived). Unwrap the real shape (falling back to older/flatter
+        // shapes too, in case a future endpoint version changes again).
+        const profileData = response?.data?.profile || response?.data || response?.profile || response?.user;
+
+        if (profileData && profileData.id != null) {
             __set_directAPILoaded(true);
             __set_parentDataLoaded(false);
             __set_dataFetchInProgress(false);
-            processUserData(response.user, 'api');
-            safeSend('USER_DATA_LOADED', { source: 'direct_api', userId: response.user.id });
+            processUserData(profileData, 'api');
+            safeSend('USER_DATA_LOADED', { source: 'direct_api', userId: profileData.id });
         } else {
             throw new Error('Invalid response from user profile API');
         }

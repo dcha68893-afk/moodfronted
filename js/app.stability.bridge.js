@@ -98,8 +98,8 @@
 
     function readAllSettings() {
         try {
-            if (window.NexopaSettingsManager && typeof window.NexopaSettingsManager.getAllSettings === 'function') {
-                return window.NexopaSettingsManager.getAllSettings();
+            if (window.NecpaSettingsManager && typeof window.NecpaSettingsManager.getAllSettings === 'function') {
+                return window.NecpaSettingsManager.getAllSettings();
             }
         } catch (_) {}
         try {
@@ -191,11 +191,11 @@
     }
 
     function bridgeSettingsManager() {
-        if (!window.NexopaSettingsManager || window.NexopaSettingsManager.__stabilityBridgeInstalled__) {
+        if (!window.NecpaSettingsManager || window.NecpaSettingsManager.__stabilityBridgeInstalled__) {
             return;
         }
 
-        const manager = window.NexopaSettingsManager;
+        const manager = window.NecpaSettingsManager;
         manager.__stabilityBridgeInstalled__ = true;
 
         if (typeof manager.addChangeListener === 'function') {

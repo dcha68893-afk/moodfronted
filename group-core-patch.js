@@ -164,7 +164,7 @@ if (GC) {
     try {
       const dispatcher = window.GroupRealtimeDispatcher;
       if (!dispatcher || typeof dispatcher.dispatch !== 'function') return false;
-      if (dispatcher.__nexopaTypingRecursionGuard) return true;
+      if (dispatcher.__necpaTypingRecursionGuard) return true;
 
       const originalDispatch = dispatcher.dispatch;
       let dispatchDepth = 0;
@@ -200,7 +200,7 @@ if (GC) {
         }
       };
 
-      dispatcher.__nexopaTypingRecursionGuard = true;
+      dispatcher.__necpaTypingRecursionGuard = true;
       return true;
     } catch (_) {
       return false;

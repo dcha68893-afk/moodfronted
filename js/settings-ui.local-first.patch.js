@@ -78,7 +78,7 @@
       const id=b.dataset.remove;
       const account=rows.find(a=>String(a.userId)===String(id));
       const name=account?.displayName||account?.username||account?.email||'this account';
-      if(!confirm(`Remove ${name} from saved accounts on this device? This does not delete the account from Nexopa.`)) return;
+      if(!confirm(`Remove ${name} from saved accounts on this device? This does not delete the account from Necpa.`)) return;
       const result=window.AuthStorage?.removeSavedAccount?.(id);
       if(!result?.success){ alert(result?.error||'Unable to remove saved account'); return; }
       renderAccounts();

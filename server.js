@@ -933,7 +933,7 @@ function defaultSettings(userId) {
     account: {
       displayName: "User",
       username: String(userId),
-      bio: "Hello! I'm using Nexopa",
+      bio: "Hello! I'm using Necpa",
       profileVisibility: "everyone",
       photoVisibility: "everyone",
       lastSeen: "everyone",

@@ -1,6 +1,6 @@
 {
-  "name": "Kynecta Nexopa",
-  "short_name": "Nexopa",
+  "name": "Kynecta Necpa",
+  "short_name": "Necpa",
   "description": "Real-time mood-based chat and marketplace platform",
   "start_url": "/index.html",
   "scope": "/",
@@ -11,13 +11,13 @@
   "lang": "en",
   "icons": [
     {
-      "src": "/icons/nexopa-192.png",
+      "src": "/icons/necpa-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/icons/nexopa-512.png",
+      "src": "/icons/necpa-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"

@@ -1,5 +1,5 @@
 /**
- * call-waiting.js — Call waiting and call hold for Nexopa
+ * call-waiting.js — Call waiting and call hold for Necpa
  *
  * Phase remaining: Call waiting / call on hold
  *

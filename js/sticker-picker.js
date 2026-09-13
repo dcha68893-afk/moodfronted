@@ -1,5 +1,5 @@
 /**
- * sticker-picker.js — Sticker packs for Nexopa
+ * sticker-picker.js — Sticker packs for Necpa
  *
  * Phase 2 feature: Sticker packs
  *

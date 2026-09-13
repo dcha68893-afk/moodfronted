@@ -13,7 +13,7 @@
   var ICON_KEY = 'app_icon_scale';
   var SETTINGS_CACHE_KEY = 'knecta_settings_cache';
   var LEGACY_SETTINGS_KEY = 'app_settings_global';
-  var LEGACY_DEFAULT_KEY = 'nexopa_settings_default';
+  var LEGACY_DEFAULT_KEY = 'necpa_settings_default';
   var VALID = { light: true, dark: true };
   var FONT_MIN = 10, FONT_MAX = 28, FONT_DEFAULT = 16;
   var ICONS = { small: 0.85, medium: 1, large: 1.2, xl: 1.4 };

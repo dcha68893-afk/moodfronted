@@ -1,5 +1,5 @@
 /**
- * sealed-groups.js — Sealed group membership for Nexopa
+ * sealed-groups.js — Sealed group membership for Necpa
  *
  * Phase 4 feature: Server cannot determine group membership from metadata
  *

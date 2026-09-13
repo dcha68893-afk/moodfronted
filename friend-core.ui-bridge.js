@@ -1461,7 +1461,7 @@ function savePrivateNote(friendId, note) {
                 const _token = (typeof __session !== 'undefined' && __session?.token)
                     || localStorage.getItem('token')
                     || localStorage.getItem('authToken')
-                    || localStorage.getItem('nexopa_token')
+                    || localStorage.getItem('necpa_token')
                     || '';
                 fetch(`${_apiBase}/friends/${friendId}/notes`, {
                     method: 'PUT',
@@ -3473,10 +3473,10 @@ async function importPhoneContacts() {
         const data = await res.json().catch(() => ({}));
 
         if (res.ok && data.success && data.data?.matches?.length > 0) {
-            showNotification?.(`Found ${data.data.matches.length} contact${data.data.matches.length > 1 ? 's' : ''} on Nexopa`, 'success');
+            showNotification?.(`Found ${data.data.matches.length} contact${data.data.matches.length > 1 ? 's' : ''} on Necpa`, 'success');
             window.dispatchEvent(new CustomEvent('contactMatchesFound', { detail: data.data }));
         } else {
-            showNotification?.('No contacts found on Nexopa', 'info');
+            showNotification?.('No contacts found on Necpa', 'info');
         }
         return data;
     } catch (e) {

@@ -124,7 +124,7 @@
   }
 
   async function bootstrap() {
-    console.log(`[Phase6Bootstrap] 🚀 Nexopa loading ${MODULES.length} modules from ${BASE}`);
+    console.log(`[Phase6Bootstrap] 🚀 Necpa loading ${MODULES.length} modules from ${BASE}`);
 
     for (const m of MODULES) await loadScript(BASE + m);
 
@@ -154,14 +154,14 @@
     _wireCrossModuleListeners();
     _wirePhase10();  // Phase 10: connect all transport/deletion systems
 
-    window.dispatchEvent(new CustomEvent('nexopa:ready', {
+    window.dispatchEvent(new CustomEvent('necpa:ready', {
       detail: { phase: 10, elapsed, loaded, modules: MODULES.length }
     }));
 
     const bus = window.KynectaEventBus;
     if (bus) bus.emit('SYNC_STARTED', { reason: 'phase10_boot' }, { async: true });
 
-    console.log('[Phase6Bootstrap] 🎉 Nexopa Phase 10 fully initialized — __NexopaDiag() for diagnostics');
+    console.log('[Phase6Bootstrap] 🎉 Necpa Phase 10 fully initialized — __NecpaDiag() for diagnostics');
   }
 
   function _wireOfflineQueue() {

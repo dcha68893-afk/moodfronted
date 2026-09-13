@@ -5,8 +5,8 @@
 
     const AUTH_STORAGE_KEY = 'kynecta_auth';
     const LOGIN_STATE_KEY = 'isLoggedIn';
-    const LEGACY_TOKEN_KEYS = ['authToken','accessToken','token','nexopa_token','USER_TOKEN','kynecta_token','auth_token','kyn_token','kyn_access_token'];
-    const LEGACY_USER_KEYS = ['currentUser','user','nexopa_user'];
+    const LEGACY_TOKEN_KEYS = ['authToken','accessToken','token','necpa_token','USER_TOKEN','kynecta_token','auth_token','kyn_token','kyn_access_token'];
+    const LEGACY_USER_KEYS = ['currentUser','user','necpa_user'];
     const ACCOUNT_LIST_KEY = 'kynecta_saved_accounts';
     const ACCOUNT_STATE_KEY = 'kynecta_account_state_v1';
     const LAST_ACTIVE_ACCOUNT_KEY = 'kynecta_last_active_account';
@@ -39,8 +39,8 @@
         if(apply())return true; try{let attempts=0;const timer=setInterval(()=>{attempts++;if(apply()||attempts>=40)clearInterval(timer);},250);}catch(_){} return true;
     }
 
-    const GLOBAL_STORAGE_KEYS = new Set(['nexopa_theme','nexopa_nav_state',ACCOUNT_LIST_KEY,ACCOUNT_STATE_KEY,LAST_ACTIVE_ACCOUNT_KEY]);
-    const AUTH_KEYS = new Set([AUTH_STORAGE_KEY,LOGIN_STATE_KEY,...LEGACY_TOKEN_KEYS,...LEGACY_USER_KEYS,'refreshToken','REFRESH_TOKEN','TOKEN_EXPIRY','AUTH_STATE','nexopa_auth_state','nexopa_auth_sync','auth_cross_tab_sync','cross-tab-logout-trigger']);
+    const GLOBAL_STORAGE_KEYS = new Set(['necpa_theme','necpa_nav_state',ACCOUNT_LIST_KEY,ACCOUNT_STATE_KEY,LAST_ACTIVE_ACCOUNT_KEY]);
+    const AUTH_KEYS = new Set([AUTH_STORAGE_KEY,LOGIN_STATE_KEY,...LEGACY_TOKEN_KEYS,...LEGACY_USER_KEYS,'refreshToken','REFRESH_TOKEN','TOKEN_EXPIRY','AUTH_STATE','necpa_auth_state','necpa_auth_sync','auth_cross_tab_sync','cross-tab-logout-trigger']);
     function getAccountStateMap(){return safeParse(localStorage.getItem(ACCOUNT_STATE_KEY),{})||{};}
     function captureAccountState(accountId){
         if(accountId==null||String(accountId)==='')return; const id=String(accountId),state={localStorage:{},sessionStorage:{}};
@@ -66,7 +66,7 @@
     // cache (which does its own per-account scoped purge in
     // js/message-local-db.js via the kyn:accountSwitchWipe event below)
     // should stay out of this blanket wipe.
-    const NEVER_WIPE_INDEXEDDB=new Set(['nexopa_message_lifecycle_v1']);
+    const NEVER_WIPE_INDEXEDDB=new Set(['necpa_message_lifecycle_v1']);
     // FIX-ACCOUNT-SWITCH-STALE-MODULE-DATA: indexedDB.databases() (used to
     // discover every DB to wipe) is not implemented in every browser/WebView
     // (notably older Safari/iOS). When it's missing, the code below used to
@@ -79,8 +79,8 @@
     // data but were missing from the wipe list, so browsers without
     // indexedDB.databases() support (or where enumeration is flaky) never
     // cleared them on switch/relogin.
-    const KNOWN_ACCOUNT_SCOPED_INDEXEDDB=['AppDB','calls-db','KnectaStatusDB','KnectaToolsDB','kynectaMesh','kyn_stories_v1','kyn_offline_queue','nexopa_dq_v1','nexopa_repair_v1'];
-    const WIPE_ALLOWLIST=new Set(['nexopa_theme','nexopa_nav_state',ACCOUNT_LIST_KEY,ACCOUNT_STATE_KEY,LAST_ACTIVE_ACCOUNT_KEY]);
+    const KNOWN_ACCOUNT_SCOPED_INDEXEDDB=['AppDB','calls-db','KnectaStatusDB','KnectaToolsDB','kynectaMesh','kyn_stories_v1','kyn_offline_queue','necpa_dq_v1','necpa_repair_v1'];
+    const WIPE_ALLOWLIST=new Set(['necpa_theme','necpa_nav_state',ACCOUNT_LIST_KEY,ACCOUNT_STATE_KEY,LAST_ACTIVE_ACCOUNT_KEY]);
     function deleteOneDB(name){return new Promise(resolve=>{if(NEVER_WIPE_INDEXEDDB.has(name))return resolve(true);try{const req=indexedDB.deleteDatabase(name);let settled=false;const finish=ok=>{if(!settled){settled=true;resolve(ok);}};req.onsuccess=()=>finish(true);req.onerror=()=>finish(false);req.onblocked=()=>setTimeout(()=>finish(false),1500);}catch(_){resolve(false);}});}
 
     // FIX-ACCOUNT-SWITCH-RACE (root cause of stale calls/messages/friends/

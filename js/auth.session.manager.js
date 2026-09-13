@@ -255,7 +255,7 @@
         }
         const userId = currentSession?.userId;
         destroySession();
-        ['token', 'accessToken', 'nexopa_token', 'USER_TOKEN', 'currentUser', 'user', 'kynecta_auth'].forEach(k => {
+        ['token', 'accessToken', 'necpa_token', 'USER_TOKEN', 'currentUser', 'user', 'kynecta_auth'].forEach(k => {
             try { localStorage.removeItem(k); } catch (_) {}
         });
         window.currentUser = null;
@@ -305,7 +305,7 @@
             if (!data.success || !newToken) return false;
             const newRefresh = data.refreshToken || storedRefresh;
 
-            ['authToken', 'accessToken', 'token', 'nexopa_token', 'USER_TOKEN', 'kynecta_token', 'auth_token'].forEach(k => {
+            ['authToken', 'accessToken', 'token', 'necpa_token', 'USER_TOKEN', 'kynecta_token', 'auth_token'].forEach(k => {
                 try { localStorage.removeItem(k); } catch (_) {}
             });
             window.__userToken = null;
@@ -326,7 +326,7 @@
             if (window.AuthStorage?.saveAuth) window.AuthStorage.saveAuth(authPayload);
             else localStorage.setItem('kynecta_auth', JSON.stringify(authPayload));
 
-            ['authToken', 'accessToken', 'token', 'nexopa_token', 'USER_TOKEN', 'kynecta_token'].forEach(k => {
+            ['authToken', 'accessToken', 'token', 'necpa_token', 'USER_TOKEN', 'kynecta_token'].forEach(k => {
                 try { localStorage.setItem(k, newToken); } catch (_) {}
             });
             ['REFRESH_TOKEN', 'refreshToken'].forEach(k => {

@@ -114,7 +114,7 @@ async function _api(method, endpoint, body = null) {
         const token = window.__kynToken || window.__accessToken ||
             window.__PARENT_SESSION__?.token ||
             localStorage.getItem('authToken') || localStorage.getItem('token') ||
-            localStorage.getItem('nexopa_token') || localStorage.getItem('accessToken') || '';
+            localStorage.getItem('necpa_token') || localStorage.getItem('accessToken') || '';
         if (!token) return null; // No token — skip, don't error
         // FIX (Audit #19): removed hardcoded 'http://localhost:4000' fallback — this file
         // must use the single centralized window.API_BASE_URL, not decide its own backend.

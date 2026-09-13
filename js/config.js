@@ -213,7 +213,7 @@
                             if (token) return token;
                         }
                     } catch (_) {}
-                    for (const key of ['authToken', 'accessToken', 'token', 'jwt', 'USER_TOKEN', 'nexopa_token']) {
+                    for (const key of ['authToken', 'accessToken', 'token', 'jwt', 'USER_TOKEN', 'necpa_token']) {
                         try {
                             const token = localStorage.getItem(key) || sessionStorage.getItem(key);
                             if (token && !token.startsWith('{')) return token;

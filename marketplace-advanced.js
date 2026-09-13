@@ -46,7 +46,7 @@ const _toast = (msg,type='info',icon='ℹ️') => {
 };
 
 function _mktToken() {
-    return window.__kynToken||window.__accessToken||localStorage.getItem('authToken')||localStorage.getItem('token')||localStorage.getItem('nexopa_token')||localStorage.getItem('accessToken')||'';
+    return window.__kynToken||window.__accessToken||localStorage.getItem('authToken')||localStorage.getItem('token')||localStorage.getItem('necpa_token')||localStorage.getItem('accessToken')||'';
 }
 
 // FIX (auth-cascade): this used to grab whatever token was in storage once and

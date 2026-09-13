@@ -643,12 +643,12 @@ getBackendBaseUrl = getBaseUrl;
 const AUTH_STORAGE_KEY = 'kynecta_auth';
 const TOKEN_PRIORITY_KEYS = [
     'token',
-    'nexopa_token',
+    'necpa_token',
     'accessToken',
     'jwt',
     'authToken',
     'userToken',
-    'nexopa_auth_token'
+    'necpa_auth_token'
 ];
 
 function getStorageBridge() {
@@ -748,7 +748,7 @@ function _saveAuthToStorage(token, user = null) {
         getStorageBridge().set(AUTH_STORAGE_KEY, authData);
         
         // Also store in legacy location for compatibility
-        getStorageBridge().set('nexopa_token', token);
+        getStorageBridge().set('necpa_token', token);
         
         return true;
     } catch (error) {
@@ -766,7 +766,7 @@ function _clearAuthFromStorage() {
     
     try {
         getStorageBridge().remove(AUTH_STORAGE_KEY);
-        getStorageBridge().remove('nexopa_token');
+        getStorageBridge().remove('necpa_token');
         
         // Clear legacy keys
         for (const key of TOKEN_PRIORITY_KEYS) {
@@ -1235,7 +1235,7 @@ if (requiresAuth) {
     
     if (!token) {
         token = localStorage.getItem('token') || 
-                localStorage.getItem('nexopa_token') || 
+                localStorage.getItem('necpa_token') || 
                 localStorage.getItem('accessToken');
     }
     
@@ -2548,7 +2548,7 @@ window.addEventListener('message', async (event) => {
 // ============================================================================
 
 SecureStorage = {
-    _encryptionKey: 'nexopa_secure_v24_2026',
+    _encryptionKey: 'necpa_secure_v24_2026',
     _prefix: 'sc_v24_',
     _version: '24.0.4',
     _salt: Math.random().toString(36).substring(2, 15),
@@ -2992,7 +2992,7 @@ TokenManager = {
     migrateLegacyTokens: function() {
         try {
             const legacyKeys = [
-                'accessToken', 'nexopa_token', 'token', 'nexopa_auth_token',
+                'accessToken', 'necpa_token', 'token', 'necpa_auth_token',
                 'authToken', 'userToken', 'jwt', 'access_token'
             ];
             
@@ -3974,7 +3974,7 @@ getAuthHeaders = function(endpoint) {
         // Also try other keys
         if (!token) {
             token = localStorage.getItem('token') || 
-                    localStorage.getItem('nexopa_token') || 
+                    localStorage.getItem('necpa_token') || 
                     localStorage.getItem('accessToken');
         }
         
@@ -4459,7 +4459,7 @@ SAIC.initialize();
             
             if (!skipLegacy) {
                 try {
-                    localStorage.setItem('nexopa_auth_user', JSON.stringify(safeData));
+                    localStorage.setItem('necpa_auth_user', JSON.stringify(safeData));
                     
                     const authUserStr = localStorage.getItem('authUser');
                     if (authUserStr) {
@@ -4505,8 +4505,8 @@ SAIC.initialize();
             }
             
             const legacyKeys = [
-                'accessToken', 'nexopa_token', 'token', 'nexopa_auth_token',
-                'authToken', 'authUser', 'nexopa_auth_user', 'userData',
+                'accessToken', 'necpa_token', 'token', 'necpa_auth_token',
+                'authToken', 'authUser', 'necpa_auth_user', 'userData',
                 'currentUser', 'user', 'jwt', 'access_token'
             ];
             

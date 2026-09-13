@@ -29,11 +29,11 @@ const SW_VERSION = '19.22.0';
 // deploy — anyone with a stale friend-ui.js (or anything else) cached under
 // the old name gets a clean break on next load, instead of waiting on the
 // 7-day CACHE_MAX_AGE staleness check or a lucky reinstall.
-const CACHE_NAME = 'nexopa-static-v45';
+const CACHE_NAME = 'necpa-static-v45';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
-  '/index.html','/manifest.json','/icons/nexopa-192.png','/icons/nexopa-512.png',
+  '/index.html','/manifest.json','/icons/necpa-192.png','/icons/necpa-512.png',
   '/Tool.css','/Tool-ui.js','/Tool-core.part1.js','/Tool-core.part2.js','/Tool-core.part3.js',
   '/group-ui.js','/group-core-bootstrap.js','/group-core-operations.js','/group-core-bridge.js',
   '/friend.html','/chat.html','/calls.html',
@@ -97,7 +97,7 @@ function isNetworkFirst(url){return NETWORK_FIRST_PATTERNS.some(p=>p.test(url));
 function isStatic(url){return STATIC_PATTERNS.some(p=>p.test(url));}
 function local(url){try{return new URL(url,self.location.origin).origin===self.location.origin;}catch(_){return false;}}
 function stale(res){try{const d=res.headers.get('date');return d&&(Date.now()-new Date(d).getTime()>CACHE_MAX_AGE);}catch(_){return false;}}
-const OFFLINE_SHELL='<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Nexopa - Offline</title></head><body><main style="font-family:system-ui;text-align:center;padding:4rem"><h1>Nexopa</h1><p>You are offline.</p><button onclick="location.reload()">Try again</button></main></body></html>';
+const OFFLINE_SHELL='<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Necpa - Offline</title></head><body><main style="font-family:system-ui;text-align:center;padding:4rem"><h1>Necpa</h1><p>You are offline.</p><button onclick="location.reload()">Try again</button></main></body></html>';
 
 async function navigation(request){
   const cache=await caches.open(CACHE_NAME);
@@ -147,9 +147,9 @@ self.addEventListener('sync',event=>{
 });
 function encryptedBody(s){if(typeof s!=='string')return false;const t=s.trim();if(!t||t[0]!=='{')return false;try{const o=JSON.parse(t);return !!o&&typeof o==='object'&&(['v','kid','ct','iv','eph','sid','n'].some(k=>Object.prototype.hasOwnProperty.call(o,k)));}catch(_){return false;}}
 self.addEventListener('push',event=>{
-  if(!event.data)return;let data={};try{data=event.data.json();}catch(_){try{data={title:'Nexopa',body:event.data.text()};}catch(__){return;}}
-  const raw=String(data.body||data.message||'');const safe=encryptedBody(raw)?'You have a new message':(raw||'You have a new notification');const title=data.title||'Nexopa';
-  const options={body:data.senderName?data.senderName+': '+safe:safe,icon:data.icon||'/icons/nexopa-192.png',badge:data.badge||'/icons/nexopa-192.png',tag:data.type==='message'||data.type==='new_message'?'msg-'+(data.chatId||'chat'):(data.tag||'nexopa-notification'),data:data.data||{url:data.url||'/chat.html'},silent:data.silent===true,requireInteraction:data.requireInteraction||false,vibrate:Array.isArray(data.vibrate)?data.vibrate:(data.vibrate===false?[]:[200,100,200])};
+  if(!event.data)return;let data={};try{data=event.data.json();}catch(_){try{data={title:'Necpa',body:event.data.text()};}catch(__){return;}}
+  const raw=String(data.body||data.message||'');const safe=encryptedBody(raw)?'You have a new message':(raw||'You have a new notification');const title=data.title||'Necpa';
+  const options={body:data.senderName?data.senderName+': '+safe:safe,icon:data.icon||'/icons/necpa-192.png',badge:data.badge||'/icons/necpa-192.png',tag:data.type==='message'||data.type==='new_message'?'msg-'+(data.chatId||'chat'):(data.tag||'necpa-notification'),data:data.data||{url:data.url||'/chat.html'},silent:data.silent===true,requireInteraction:data.requireInteraction||false,vibrate:Array.isArray(data.vibrate)?data.vibrate:(data.vibrate===false?[]:[200,100,200])};
   event.waitUntil((async()=>{if(data.type==='message'||data.type==='new_message'){try{const chat=String(data.chatId||(data.data&&data.data.chatId)||''),map=self.__kynActiveChatByClient,cs=await self.clients.matchAll({type:'window',includeUncontrolled:true});if(chat&&cs.some(c=>c.focused&&map&&map.get(c.id)===chat))return;}catch(_){} }return self.registration.showNotification(title,options);})());
 });
 self.addEventListener('notificationclick',event=>{event.notification.close();const url=(event.notification.data&&event.notification.data.url)||'/chat.html';event.waitUntil(self.clients.matchAll({type:'window',includeUncontrolled:true}).then(cs=>{for(const c of cs){if(c.url.includes(url)&&c.focus)return c.focus();}return self.clients.openWindow?self.clients.openWindow(url):null;}));});

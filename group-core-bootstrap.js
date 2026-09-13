@@ -659,7 +659,7 @@ function sendChildReady() {
                     // app.core.session.js writes on login rather than
                     // waiting on a postMessage that may never arrive.
                     const token = localStorage.getItem('accessToken');
-                    const userStr = localStorage.getItem('nexopa_user');
+                    const userStr = localStorage.getItem('necpa_user');
                     if (token && userStr) {
                         const user = JSON.parse(userStr);
                         const cachedSession = { token, user, userId: user?.id };
@@ -2755,7 +2755,17 @@ const GroupCore = {
         participationModes: groupData.participationModes || {}
       });
       if (response && response.success && response.data) {
-        const newGroup = response.data;
+        // FIX (group-member-count-zero): response.data is
+        // { group: {...}, _localSync: {...} } (see withLocalSyncMeta on the
+        // backend), not the group itself. Reading response.data directly
+        // pushed an object with no id/memberCount/createdBy into local
+        // storage whenever this fallback path ran (createGroupAsync's
+        // primary _directCreateGroup path already unwraps this correctly;
+        // this bridge is only used when that faster path fails — e.g. a
+        // Render cold start — which is exactly when a newly created group
+        // showed "0 members" despite the server having returned the real
+        // count).
+        const newGroup = response.data.group || response.data;
 
         // Add to local stores
         this.groups.push(newGroup);

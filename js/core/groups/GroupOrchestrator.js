@@ -256,7 +256,7 @@
 
     _getMyUserId() {
       try {
-        const raw = localStorage.getItem('kynecta_auth') || localStorage.getItem('nexopa_auth');
+        const raw = localStorage.getItem('kynecta_auth') || localStorage.getItem('necpa_auth');
         return raw ? JSON.parse(raw)?.user?.id : null;
       } catch (_) { return null; }
     }
@@ -473,9 +473,9 @@
             const inviteId = payload.inviteId || ('inv_' + Date.now());
             const invite = { ...payload, inviteId, receivedAt: Date.now() };
             try {
-              const stored = JSON.parse(localStorage.getItem('nexopa_group_invites_v1') || '{}');
+              const stored = JSON.parse(localStorage.getItem('necpa_group_invites_v1') || '{}');
               stored[inviteId] = invite;
-              localStorage.setItem('nexopa_group_invites_v1', JSON.stringify(stored));
+              localStorage.setItem('necpa_group_invites_v1', JSON.stringify(stored));
             } catch (_) {}
             this._dispatcher.dispatch('group:invite_received', invite);
             break;

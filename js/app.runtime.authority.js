@@ -135,7 +135,7 @@
             localStorage.getItem('authToken') ||
             localStorage.getItem('accessToken') ||
             localStorage.getItem('token') ||
-            localStorage.getItem('nexopa_token');
+            localStorage.getItem('necpa_token');
 
         if (!fallbackToken) return null;
 
@@ -145,7 +145,7 @@
             user:
                 safeJsonParse(localStorage.getItem('currentUser')) ||
                 safeJsonParse(localStorage.getItem('user')) ||
-                safeJsonParse(localStorage.getItem('nexopa_user')),
+                safeJsonParse(localStorage.getItem('necpa_user')),
             expiresAt: null
         });
     }
@@ -172,14 +172,14 @@
         if (!auth || !auth.token) return;
 
         const userJson = auth.user ? JSON.stringify(auth.user) : null;
-        const tokenKeys = ['authToken', 'token', 'accessToken', 'USER_TOKEN', 'nexopa_token'];
+        const tokenKeys = ['authToken', 'token', 'accessToken', 'USER_TOKEN', 'necpa_token'];
 
         tokenKeys.forEach((key) => localStorage.setItem(key, auth.token));
         if (auth.refreshToken) localStorage.setItem('refreshToken', auth.refreshToken);
         localStorage.setItem('isLoggedIn', 'true');
         if (auth.userId) localStorage.setItem('currentUserId', auth.userId);
         if (userJson) {
-            ['currentUser', 'user', 'nexopa_user'].forEach((key) => localStorage.setItem(key, userJson));
+            ['currentUser', 'user', 'necpa_user'].forEach((key) => localStorage.setItem(key, userJson));
             window.currentUser = auth.user;
         }
     }
@@ -190,12 +190,12 @@
             'token',
             'accessToken',
             'USER_TOKEN',
-            'nexopa_token',
+            'necpa_token',
             'refreshToken',
             'isLoggedIn',
             'currentUser',
             'user',
-            'nexopa_user',
+            'necpa_user',
             'currentUserId'
         ].forEach((key) => localStorage.removeItem(key));
 

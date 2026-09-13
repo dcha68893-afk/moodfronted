@@ -1,4 +1,4 @@
-// app.core.session.js - Nexopa Session Coordination & Authentication System
+// app.core.session.js - Necpa Session Coordination & Authentication System
 // HARDENED VERSION - Single Source of Truth for Authentication & Session Management
 // VERSION: 3.0 - CENTRALIZED SESSION AUTHORITY WITH FULL BACKWARD COMPATIBILITY
 // 
@@ -301,7 +301,7 @@
             window.Session._validated = true;
           }
           try {
-            window.dispatchEvent(new CustomEvent('nexopa-session-validated', {
+            window.dispatchEvent(new CustomEvent('necpa-session-validated', {
               detail: { session: sessionData, timestamp: Date.now(), source: 'background_validation' }
             }));
           } catch (e) {}
@@ -338,7 +338,7 @@
       
       // Fire session invalid event
       try {
-        window.dispatchEvent(new CustomEvent('nexopa-session-invalid', {
+        window.dispatchEvent(new CustomEvent('necpa-session-invalid', {
           detail: { 
             timestamp: Date.now(), 
             reason: reason,
@@ -472,10 +472,10 @@
       // causing userLoggedIn() to return true on the next boot despite no valid session.
       const PARALLEL_KEYS = [
         'kynecta_session', 'accessToken', 'refreshToken',
-        'nexopa_token', 'USER_TOKEN', 'token',
-        'nexopa_accessToken', 'nexopa_refreshToken', 'nexopa_user',
-        'nexopa_tokenExpiry', 'nexopa_issuedAt', 'nexopa_validated',
-        'nexopa_validationTimestamp', 'auth_token', 'auth_user',
+        'necpa_token', 'USER_TOKEN', 'token',
+        'necpa_accessToken', 'necpa_refreshToken', 'necpa_user',
+        'necpa_tokenExpiry', 'necpa_issuedAt', 'necpa_validated',
+        'necpa_validationTimestamp', 'auth_token', 'auth_user',
         'currentUser', 'user', 'REFRESH_TOKEN', 'TOKEN_EXPIRY',
         'isLoggedIn', 'kynecta_token'
       ];
@@ -619,7 +619,7 @@
       __SESSION_READY_FORCE_TIMEOUT = null;
     }
     
-    window.dispatchEvent(new CustomEvent('nexopa-session-ready', {
+    window.dispatchEvent(new CustomEvent('necpa-session-ready', {
       detail: {
         forced: true,
         reason: reason,
@@ -661,7 +661,7 @@
         __SESSION_READY_FORCE_TIMEOUT = null;
       }
       
-      window.dispatchEvent(new CustomEvent('nexopa-session-ready', {
+      window.dispatchEvent(new CustomEvent('necpa-session-ready', {
         detail: {
           forced: false,
           authStateInitialized: authStateInitialized,
@@ -1075,7 +1075,7 @@
           _refreshExpiry: null,
           _validated: false,
           _validationTimestamp: null,
-          _storageKeyPrefix: 'nexopa_',
+          _storageKeyPrefix: 'necpa_',
           _sessionState: SESSION_STATES.UNINITIALIZED,
           _stateTransitionLock: false,
           _tabId: 'tab_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
@@ -1118,7 +1118,7 @@
             this._sessionState = newState;
             
             setTimeout(() => {
-              window.dispatchEvent(new CustomEvent('nexopa-session-state-changed', {
+              window.dispatchEvent(new CustomEvent('necpa-session-state-changed', {
                 detail: {
                   previousState: currentState,
                   newState: newState,
@@ -1222,8 +1222,8 @@
               
               if (!this._user) {
                 const userStr = localStorage.getItem(this._storageKeyPrefix + 'user') || 
-                               localStorage.getItem('nexopa_user') || 
-                               sessionStorage.getItem('nexopa_user');
+                               localStorage.getItem('necpa_user') || 
+                               sessionStorage.getItem('necpa_user');
                 if (userStr) {
                   try {
                     this._user = JSON.parse(userStr);
@@ -1324,11 +1324,11 @@
               if (this._user) {
                 const userStr = JSON.stringify(this._user);
                 localStorage.setItem(this._storageKeyPrefix + 'user', userStr);
-                localStorage.setItem('nexopa_user', userStr);
+                localStorage.setItem('necpa_user', userStr);
               } else {
                 localStorage.removeItem(this._storageKeyPrefix + 'user');
-                localStorage.removeItem('nexopa_user');
-                sessionStorage.removeItem('nexopa_user');
+                localStorage.removeItem('necpa_user');
+                sessionStorage.removeItem('necpa_user');
               }
               
               if (this._tokenExpiry) {
@@ -1355,7 +1355,7 @@
               
               this._saveToKynectaAuth();
               
-              const storageEvent = new CustomEvent('nexopa-storage-update', {
+              const storageEvent = new CustomEvent('necpa-storage-update', {
                 detail: {
                   sourceTab: this._tabId,
                   timestamp: new Date().toISOString(),
@@ -1408,7 +1408,7 @@
               if (event.key === this._storageKeyPrefix + 'accessToken' || 
                   event.key === 'accessToken' ||
                   event.key === this._storageKeyPrefix + 'user' ||
-                  event.key === 'nexopa_user' ||
+                  event.key === 'necpa_user' ||
                   event.key === STORAGE_KEY) {
                 
                 setTimeout(() => {
@@ -1418,14 +1418,14 @@
                     
                     if (event.key.includes('accessToken') || event.key === STORAGE_KEY) {
                       if (this._token) {
-                        window.dispatchEvent(new CustomEvent('nexopa-token-synced', {
+                        window.dispatchEvent(new CustomEvent('necpa-token-synced', {
                           detail: {
                             source: 'storage_event',
                             timestamp: new Date().toISOString()
                           }
                         }));
                       } else {
-                        window.dispatchEvent(new CustomEvent('nexopa-token-cleared', {
+                        window.dispatchEvent(new CustomEvent('necpa-token-cleared', {
                           detail: {
                             source: 'storage_event',
                             timestamp: new Date().toISOString()
@@ -1436,7 +1436,7 @@
                     
                     if (event.key.includes('user') || event.key === STORAGE_KEY) {
                       if (this._user) {
-                        window.dispatchEvent(new CustomEvent('nexopa-user-synced', {
+                        window.dispatchEvent(new CustomEvent('necpa-user-synced', {
                           detail: {
                             source: 'storage_event',
                             user: this._user,
@@ -1444,7 +1444,7 @@
                           }
                         }));
                       } else {
-                        window.dispatchEvent(new CustomEvent('nexopa-user-cleared', {
+                        window.dispatchEvent(new CustomEvent('necpa-user-cleared', {
                           detail: {
                             source: 'storage_event',
                             timestamp: new Date().toISOString()
@@ -1457,7 +1457,7 @@
               }
             });
             
-            window.addEventListener('nexopa-storage-update', (event) => {
+            window.addEventListener('necpa-storage-update', (event) => {
               if (event.detail.sourceTab !== this._tabId) {
                 executeSafely('AUTH_STATE.customStorageEvent', this._loadFromStorage, this);
               }
@@ -1485,10 +1485,10 @@
             this._issuedAt = null;
 
             // PATCH v1.3: Wipe AUTH_STATE's own parallel localStorage keys.
-            // These keys (nexopa_accessToken, nexopa_user etc.) survived logout
+            // These keys (necpa_accessToken, necpa_user etc.) survived logout
             // and were read back on reopen, creating a ghost session that conflicted
             // with the main kynecta_auth state and caused the reopen loop.
-            const prefix = this._storageKeyPrefix || 'nexopa_';
+            const prefix = this._storageKeyPrefix || 'necpa_';
             ['accessToken','refreshToken','user','tokenExpiry','issuedAt','validated','validationTimestamp']
                 .forEach(k => { try { localStorage.removeItem(prefix + k); } catch(_) {} });
             // Also clear the accessToken shadow key that AUTH_STATE writes without prefix
@@ -1576,7 +1576,7 @@
               }
             }));
             
-            window.dispatchEvent(new CustomEvent('nexopa-auth-state-changed', {
+            window.dispatchEvent(new CustomEvent('necpa-auth-state-changed', {
               detail: {
                 user: user,
                 hasToken: !!token,
@@ -1617,13 +1617,13 @@
                 localStorage.removeItem(this._storageKeyPrefix + 'issuedAt');
                 
                 localStorage.removeItem('accessToken');
-                localStorage.removeItem('nexopa_jwt_token');
+                localStorage.removeItem('necpa_jwt_token');
                 localStorage.removeItem('refreshToken');
-                localStorage.removeItem('nexopa_user');
+                localStorage.removeItem('necpa_user');
                 localStorage.removeItem('tokenExpiresAt');
-                localStorage.removeItem('nexopa-auth-state');
+                localStorage.removeItem('necpa-auth-state');
                 localStorage.removeItem(STORAGE_KEY);
-                sessionStorage.removeItem('nexopa_user');
+                sessionStorage.removeItem('necpa_user');
               }
             } catch (error) {
               // Silent
@@ -1641,7 +1641,7 @@
               }
             }));
             
-            window.dispatchEvent(new CustomEvent('nexopa-auth-state-cleared', {
+            window.dispatchEvent(new CustomEvent('necpa-auth-state-cleared', {
               detail: {
                 timestamp: new Date().toISOString(),
                 sessionState: this._sessionState,
@@ -2852,61 +2852,61 @@
         },
         
         setupEventListeners: function() {
-          window.addEventListener('nexopa-login-success', (event) => {
+          window.addEventListener('necpa-login-success', (event) => {
             executeSafely('SESSION_COORDINATOR.handleLoginSuccess', () => {
               this.handleLoginSuccess(event.detail);
             });
           });
           
-          window.addEventListener('nexopa-login-failed', (event) => {
+          window.addEventListener('necpa-login-failed', (event) => {
             executeSafely('SESSION_COORDINATOR.handleLoginFailed', () => {
               this.handleLoginFailed(event.detail);
             });
           });
           
-          window.addEventListener('nexopa-logout', (event) => {
+          window.addEventListener('necpa-logout', (event) => {
             executeSafely('SESSION_COORDINATOR.handleLogout', () => {
               this.handleLogout(event.detail);
             });
           });
           
-          window.addEventListener('nexopa-token-expired', (event) => {
+          window.addEventListener('necpa-token-expired', (event) => {
             executeSafely('SESSION_COORDINATOR.handleTokenExpired', () => {
               this.handleTokenExpired(event.detail);
             });
           });
           
-          window.addEventListener('nexopa-session-invalid', (event) => {
+          window.addEventListener('necpa-session-invalid', (event) => {
             executeSafely('SESSION_COORDINATOR.handleSessionInvalid', () => {
               this.handleSessionInvalid(event.detail);
             });
           });
           
-          window.addEventListener('nexopa-session-refreshed', (event) => {
+          window.addEventListener('necpa-session-refreshed', (event) => {
             executeSafely('SESSION_COORDINATOR.handleSessionRefreshed', () => {
               this.handleSessionRefreshed(event.detail);
             });
           });
           
-          window.addEventListener('nexopa-auth-state-changed', (event) => {
+          window.addEventListener('necpa-auth-state-changed', (event) => {
             executeSafely('SESSION_COORDINATOR.handleAuthStateChanged', () => {
               this.handleAuthStateChanged(event.detail);
             });
           });
           
-          window.addEventListener('nexopa-auth-state-cleared', (event) => {
+          window.addEventListener('necpa-auth-state-cleared', (event) => {
             executeSafely('SESSION_COORDINATOR.handleAuthStateCleared', () => {
               this.handleAuthStateCleared(event.detail);
             });
           });
           
-          window.addEventListener('nexopa-token-synced', (event) => {
+          window.addEventListener('necpa-token-synced', (event) => {
             executeSafely('SESSION_COORDINATOR.broadcastSynced', () => {
               this.broadcastSessionChange('synced', AUTH_STATE && typeof AUTH_STATE.getUser === 'function' ? AUTH_STATE.getUser() : null);
             });
           });
           
-          window.addEventListener('nexopa-user-synced', (event) => {
+          window.addEventListener('necpa-user-synced', (event) => {
             executeSafely('SESSION_COORDINATOR.updateUISynced', () => {
               if (event.detail && event.detail.user) {
                 this.updateUIForAuthenticatedState(event.detail.user);
@@ -2914,7 +2914,7 @@
             });
           });
           
-          window.addEventListener('nexopa-session-state-changed', (event) => {
+          window.addEventListener('necpa-session-state-changed', (event) => {
             if (event.detail.newState === SESSION_STATES.RECOVERY) {
               this.enterRecoveryMode();
             }
@@ -3128,7 +3128,7 @@
             this.attemptTokenRefresh().then(refreshResult => {
               if (refreshResult && refreshResult.success) {
                 executeSafely('SESSION_COORDINATOR.dispatchRefreshed', () => {
-                  window.dispatchEvent(new CustomEvent('nexopa-session-refreshed', {
+                  window.dispatchEvent(new CustomEvent('necpa-session-refreshed', {
                     detail: { 
                       token: refreshResult.token,
                       timestamp: new Date().toISOString()
@@ -3160,7 +3160,7 @@
                 });
                 
                 executeSafely('SESSION_COORDINATOR.dispatchReauthRequired', () => {
-                  window.dispatchEvent(new CustomEvent('nexopa-reauthentication-required', {
+                  window.dispatchEvent(new CustomEvent('necpa-reauthentication-required', {
                     detail: {
                       reason: 'Token refresh failed',
                       timestamp: new Date().toISOString()
@@ -3286,7 +3286,7 @@
               executeSafely(`pauseIframe.${iframeId}`, () => {
                 try {
                   iframe.window.postMessage({
-                    type: 'nexopa-session-pause',
+                    type: 'necpa-session-pause',
                     reason: 'recovery_mode',
                     timestamp: new Date().toISOString()
                   }, '*');
@@ -3477,7 +3477,7 @@
           document.body.appendChild(warning);
           
           document.getElementById('reauth-now').addEventListener('click', () => {
-            window.dispatchEvent(new CustomEvent('nexopa-reauthentication-required', {
+            window.dispatchEvent(new CustomEvent('necpa-reauthentication-required', {
               detail: { reason: 'User requested re-authentication' }
             }));
             warning.remove();
@@ -3695,7 +3695,7 @@
                 TOKEN_VALIDATION.validateWithBackend().then(result => {
                   if (!result || !result.valid) {
                     executeSafely('SESSION_COORDINATOR.dispatchSessionInvalid', () => {
-                      window.dispatchEvent(new CustomEvent('nexopa-session-invalid', {
+                      window.dispatchEvent(new CustomEvent('necpa-session-invalid', {
                         detail: {
                           reason: 'Session validation failed',
                           timestamp: new Date().toISOString()
@@ -3714,7 +3714,7 @@
           if (timeToExpiry !== null) {
             if (timeToExpiry <= 0) {
               executeSafely('SESSION_COORDINATOR.dispatchTokenExpired', () => {
-                window.dispatchEvent(new CustomEvent('nexopa-token-expired', {
+                window.dispatchEvent(new CustomEvent('necpa-token-expired', {
                   detail: {
                     reason: 'Token has expired',
                     timestamp: new Date().toISOString()
@@ -3819,7 +3819,7 @@
         //     one place that could actually act on it.
         //  2. Even at the fixed 30 minutes, `handleUserInactivity` only ever
         //     showed a "session will expire soon" toast and dispatched a
-        //     `nexopa-user-inactivity` event that nothing in the codebase
+        //     `necpa-user-inactivity` event that nothing in the codebase
         //     ever listens for — no logout ever actually happened.
         //  3. app.core.bootstrap.js runs a second, fully independent,
         //     also-hardcoded 30-minute inactivity timer in parallel (see
@@ -3903,7 +3903,7 @@
           }
           
           executeSafely('SESSION_COORDINATOR.dispatchInactivity', () => {
-            window.dispatchEvent(new CustomEvent('nexopa-user-inactivity', {
+            window.dispatchEvent(new CustomEvent('necpa-user-inactivity', {
               detail: {
                 minutesUntilLogout: minutesLeft,
                 timestamp: new Date().toISOString()
@@ -3929,7 +3929,7 @@
         setupCrossTabSync: function() {
           if (typeof BroadcastChannel !== 'undefined') {
             try {
-              this._broadcastChannel = new BroadcastChannel('nexopa_session');
+              this._broadcastChannel = new BroadcastChannel('necpa_session');
               
               this._broadcastChannel.addEventListener('message', (event) => {
                 executeSafely('SESSION_COORDINATOR.broadcastMessage', () => {
@@ -3996,19 +3996,19 @@
                 return;
               }
               
-              if (data && data.type === 'nexopa-iframe-ready') {
+              if (data && data.type === 'necpa-iframe-ready') {
                 this._handleIframeReadySecure(event.source, data);
               }
               
-              if (data && data.type === 'nexopa-iframe-auth-request') {
+              if (data && data.type === 'necpa-iframe-auth-request') {
                 this.handleIframeAuthRequest(event.source, data);
               }
               
-              if (data && data.type === 'nexopa-iframe-data-request') {
+              if (data && data.type === 'necpa-iframe-data-request') {
                 this.handleIframeDataRequest(event.source, data);
               }
               
-              if (data && data.type === 'nexopa-handshake-response') {
+              if (data && data.type === 'necpa-handshake-response') {
                 this._handleHandshakeResponse(event.source, data);
               }
             });
@@ -4029,8 +4029,8 @@
             currentOrigin,
             'http://localhost',
             'http://127.0.0.1',
-            'https://nexopa.app',
-            'https://*.nexopa.app'
+            'https://necpa.app',
+            'https://*.necpa.app'
           ];
           
           return trustedOrigins.some(trusted => {
@@ -4046,7 +4046,7 @@
           if (!data || typeof data !== 'object') return false;
           if (!data.type || typeof data.type !== 'string') return false;
           
-          const typesRequiringId = ['nexopa-handshake-response', 'nexopa-iframe-auth-request', 'nexopa-iframe-data-request'];
+          const typesRequiringId = ['necpa-handshake-response', 'necpa-iframe-auth-request', 'necpa-iframe-data-request'];
           if (typesRequiringId.includes(data.type) && (!data.messageId || typeof data.messageId !== 'string')) {
             return false;
           }
@@ -4110,7 +4110,7 @@
           }
           
           const handshakeMessage = {
-            type: 'nexopa-handshake-request',
+            type: 'necpa-handshake-request',
             messageId: messageId,
             iframeId: iframeId,
             pageKey: pageKey,
@@ -4165,7 +4165,7 @@
           const safeSession = window.app?.session?.getSession ? window.app.session.getSession() : null;
           
           const sessionData = {
-            type: 'nexopa-complete-session-data',
+            type: 'necpa-complete-session-data',
             messageId: MESSAGE_REGISTRY.generateMessageId(),
             auth: safeSession ? {
               isAuthenticated: true,
@@ -4186,7 +4186,7 @@
             },
             network: {
               status: API_COORDINATION && typeof API_COORDINATION.getNetworkStatus === 'function' ? API_COORDINATION.getNetworkStatus() : 'unknown',
-              backendReachable: window.NexopaConfig ? window.NexopaConfig.backendReachable : null,
+              backendReachable: window.NecpaConfig ? window.NecpaConfig.backendReachable : null,
               isOnline: API_COORDINATION && typeof API_COORDINATION.getNetworkStatus === 'function' ? API_COORDINATION.getNetworkStatus() === 'online' : false
             },
             ui: typeof UI_ORCHESTRATOR !== 'undefined' && UI_ORCHESTRATOR !== null && typeof UI_ORCHESTRATOR.getState === 'function' ? UI_ORCHESTRATOR.getState() : null,
@@ -4256,7 +4256,7 @@
           const safeSession = window.app?.session?.getSession ? window.app.session.getSession() : null;
           
           const response = {
-            type: 'nexopa-auth-state-response',
+            type: 'necpa-auth-state-response',
             messageId: MESSAGE_REGISTRY.generateMessageId(),
             requestId: data.requestId,
             data: safeSession ? {
@@ -4302,7 +4302,7 @@
             case 'networkStatus':
               responseData = {
                 status: API_COORDINATION && typeof API_COORDINATION.getNetworkStatus === 'function' ? API_COORDINATION.getNetworkStatus() : 'unknown',
-                backendReachable: window.NexopaConfig ? window.NexopaConfig.backendReachable : null,
+                backendReachable: window.NecpaConfig ? window.NecpaConfig.backendReachable : null,
                 isOnline: API_COORDINATION && typeof API_COORDINATION.getNetworkStatus === 'function' ? API_COORDINATION.getNetworkStatus() === 'online' : false
               };
               break;
@@ -4313,7 +4313,7 @@
           }
           
           const response = {
-            type: 'nexopa-data-response',
+            type: 'necpa-data-response',
             messageId: MESSAGE_REGISTRY.generateMessageId(),
             requestId: data.requestId,
             key: data.key,
@@ -4457,7 +4457,7 @@
         
         propagateLogoutToIframes: function() {
           const logoutMessage = {
-            type: 'nexopa-session-change',
+            type: 'necpa-session-change',
             messageId: MESSAGE_REGISTRY.generateMessageId(),
             data: {
               type: 'logged_out',
@@ -4791,7 +4791,7 @@
           const safeSession = window.app?.session?.getSession ? window.app.session.getSession() : null;
           const isValidSession = safeSession && (type === 'authenticated' || type === 'refreshed' || type === 'synced');
           
-          const event = new CustomEvent('nexopa-session-change', {
+          const event = new CustomEvent('necpa-session-change', {
             detail: {
               type: type,
               user: isValidSession ? {
@@ -4839,7 +4839,7 @@
           }
           this._listeners.get(eventType).push(callback);
           
-          window.addEventListener(`nexopa-${eventType}`, (event) => {
+          window.addEventListener(`necpa-${eventType}`, (event) => {
             executeSafely(`sessionListener.${eventType}`, () => {
               if (callback && typeof callback === 'function') {
                 callback(event.detail);

@@ -1,22 +1,22 @@
 /**
  * settingsManager.js  (Local-First Edition)
- * Centralized settings management for Nexopa.
+ * Centralized settings management for Necpa.
  *
  * FIXES applied:
  *   ✅  saveSetting() now calls saveSettingsLocal() + LocalStoreSettings.set()
  *   ✅  loadSettings() reads from LocalStoreSettings (knecta_settings_cache) first,
- *       then falls back to legacy nexopa_settings_<userId> key and migrates it
+ *       then falls back to legacy necpa_settings_<userId> key and migrates it
  *   ✅  saveToLocalStorage() writes to BOTH legacy key AND LocalStoreSettings
  *   ✅  broadcastChange() reset branch fixed (was sending wrong type wrapper)
  *   ✅  initialize() accepts null/undefined userId gracefully
  *   ✅  queueBackendSync() now delegates to SettingsSyncEngine if available
- *   ✅  Coordinates with NexopaSettingsManager ↔ LocalStoreSettings ↔ KynectaStore
+ *   ✅  Coordinates with NecpaSettingsManager ↔ LocalStoreSettings ↔ KynectaStore
  */
 
 (function () {
     'use strict';
 
-    if (window.NexopaSettingsManager) {
+    if (window.NecpaSettingsManager) {
         console.warn('[SettingsManager] Already loaded — skipping');
         return;
     }
@@ -25,7 +25,7 @@
     const UNIFIED_KEY = 'knecta_settings_cache';  // LocalStoreSettings canonical key
 
     function _legacyKey(userId) {
-        return 'nexopa_settings_' + (userId || 'default');
+        return 'necpa_settings_' + (userId || 'default');
     }
 
     class SettingsManager {
@@ -34,7 +34,7 @@
                 account: {
                     displayName: 'User',
                     username: 'user123',
-                    bio: "Hello! I'm using Nexopa",
+                    bio: "Hello! I'm using Necpa",
                     profileVisibility: 'friends',
                     lastSeen: true,
                     onlineStatus: true,
@@ -202,7 +202,7 @@
                 }
 
                 // Subscribe to AppSettings so external changes (other modules, iframes)
-                // flow back into NexopaSettingsManager without infinite loops.
+                // flow back into NecpaSettingsManager without infinite loops.
                 if (window.AppSettings && !this._appSettingsUnsub) {
                     this._appSettingsUnsub = window.AppSettings.subscribe((settings, path) => {
                         if (!path) return; // skip the initial full-call we just did
@@ -227,8 +227,8 @@
             if (store) {
                 const local = store.load();
                 if (local && Object.keys(local).length > 1) {
-                    // Map LocalStoreSettings flat schema → full Nexopa settings schema
-                    const mapped = _localToNexopa(local, this.defaultSettings);
+                    // Map LocalStoreSettings flat schema → full Necpa settings schema
+                    const mapped = _localToNecpa(local, this.defaultSettings);
                     this.currentSettings = this.mergeDeep(
                         this.cloneDeep(this.defaultSettings),
                         mapped
@@ -255,7 +255,7 @@
                 }
             } catch (e) { /* ignore */ }
 
-            // Priority 3: Legacy nexopa_settings_<userId> key
+            // Priority 3: Legacy necpa_settings_<userId> key
             const legacyKey = _legacyKey(this.userId);
             try {
                 const saved = localStorage.getItem(legacyKey);
@@ -482,7 +482,7 @@
         applyAccentColor(color) {
             this.setCssVariable('--primary-color', color);
             this.setCssVariable('--primary-dark', this.shadeColor(color, -20));
-            try { localStorage.setItem('nexopa_accent_color', color); } catch (_) {}
+            try { localStorage.setItem('necpa_accent_color', color); } catch (_) {}
         }
 
         applyFontSize(size) {
@@ -574,7 +574,7 @@
             const store = window.LocalStoreSettings;
             if (store) {
                 try {
-                    const flat = _nexopaChatToLocal(this.currentSettings);
+                    const flat = _necpaChatToLocal(this.currentSettings);
                     store.merge(flat);
                 } catch (e) { console.warn('[SettingsManager] LocalStoreSettings merge failed:', e.message); }
             }
@@ -617,7 +617,7 @@
             const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
             for (let i = localStorage.length - 1; i >= 0; i--) {
                 const k = localStorage.key(i);
-                if (k && k.startsWith('nexopa_')) {
+                if (k && k.startsWith('necpa_')) {
                     const ts = parseInt(localStorage.getItem(k + '_updated') || '0', 10);
                     if (ts < weekAgo) {
                         localStorage.removeItem(k);
@@ -667,7 +667,7 @@
             const kStore = window.KynectaStore;
             if (!kStore) return;
             try {
-                const flat = _nexopaChatToKynectaStore(this.currentSettings);
+                const flat = _necpaChatToKynectaStore(this.currentSettings);
                 kStore.set('settings', flat, { persist: true, silent: false });
             } catch (e) { /* KynectaStore may not be ready */ }
         }
@@ -677,7 +677,7 @@
         setupBroadcastChannel() {
             if (typeof BroadcastChannel === 'undefined') return;
             try {
-                this.broadcastChannel = new BroadcastChannel('nexopa_settings');
+                this.broadcastChannel = new BroadcastChannel('necpa_settings');
                 this.broadcastChannel.onmessage = (event) => {
                     const msg = event.data || {};
 
@@ -811,8 +811,8 @@
 
     // ─── Schema translation helpers ───────────────────────────────────────────────
 
-    /** LocalStoreSettings flat schema → Nexopa nested schema */
-    function _localToNexopa(local, defaults) {
+    /** LocalStoreSettings flat schema → Necpa nested schema */
+    function _localToNecpa(local, defaults) {
         const out = {};
         if (local.theme || local.language) {
             out.appearance = {};
@@ -846,8 +846,8 @@
         return out;
     }
 
-    /** Nexopa nested schema → LocalStoreSettings flat schema */
-    function _nexopaChatToLocal(s) {
+    /** Necpa nested schema → LocalStoreSettings flat schema */
+    function _necpaChatToLocal(s) {
         const out = {};
         if (s.appearance) {
             if (s.appearance.theme)    out.theme    = s.appearance.theme;
@@ -883,8 +883,8 @@
         return out;
     }
 
-    /** Nexopa settings → KynectaStore settings shape */
-    function _nexopaChatToKynectaStore(s) {
+    /** Necpa settings → KynectaStore settings shape */
+    function _necpaChatToKynectaStore(s) {
         return {
             theme:         (s.appearance && s.appearance.theme)    || 'light',
             fontSize:      (s.appearance && s.appearance.fontSize) || 16,
@@ -893,7 +893,7 @@
             soundEnabled:  (s.notifications && s.notifications.notificationSound)    !== false,
             wallpaper:     (s.chat && s.chat.wallpaper) || null,
             privacy:       s.privacy || {},
-            // Preserve any existing KynectaStore settings keys not in Nexopa schema
+            // Preserve any existing KynectaStore settings keys not in Necpa schema
         };
     }
 
@@ -902,7 +902,7 @@
         try {
             const auth = localStorage.getItem('kynecta_auth');
             if (auth) { const p = JSON.parse(auth); if (p.userId || p.id) return String(p.userId || p.id); }
-            const uid = localStorage.getItem('nexopa_user_id') || localStorage.getItem('currentUserId');
+            const uid = localStorage.getItem('necpa_user_id') || localStorage.getItem('currentUserId');
             if (uid && uid !== 'null') return uid;
         } catch (_) {}
         return 'default';
@@ -911,8 +911,8 @@
     // ─── Bootstrap ────────────────────────────────────────────────────────────────
 
     const instance = new SettingsManager();
-    window.NexopaSettingsManager      = instance;
-    window.NexopaSettingsManagerClass = SettingsManager;
+    window.NecpaSettingsManager      = instance;
+    window.NecpaSettingsManagerClass = SettingsManager;
     // BUGFIX (Uncaught QuotaExceededError at settingsManager.js save()):
     // save() previously called localStorage.setItem() with zero error
     // handling. When a large base64 photo data: URL (from settings-ui.js's

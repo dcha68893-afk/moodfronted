@@ -91,7 +91,7 @@
   }
 
   async function bootstrap() {
-    console.log(`[Phase5Bootstrap] 🚀 Nexopa Phase 1-5 loading from: ${BASE}`);
+    console.log(`[Phase5Bootstrap] 🚀 Necpa Phase 1-5 loading from: ${BASE}`);
 
     for (const m of MODULES) await loadScript(BASE + m);
 
@@ -103,7 +103,7 @@
     _wireGroupEventForwarding();
     _wireCrossModuleListeners();
 
-    window.dispatchEvent(new CustomEvent('nexopa:ready', {
+    window.dispatchEvent(new CustomEvent('necpa:ready', {
       detail: { phase: 5, elapsed, loaded, modules: MODULES.length }
     }));
 
@@ -112,7 +112,7 @@
       bus.emit('SYNC_STARTED', { reason: 'phase5_boot' }, { async: true });
     }
 
-    console.log('[Phase5Bootstrap] 🎉 Nexopa fully initialized — __NexopaDiag() for diagnostics');
+    console.log('[Phase5Bootstrap] 🎉 Necpa fully initialized — __NecpaDiag() for diagnostics');
   }
 
   function _wireOfflineQueue() {

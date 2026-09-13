@@ -68,7 +68,7 @@
                 localStorage.getItem('token') ||
                 localStorage.getItem('accessToken') ||
                 localStorage.getItem('USER_TOKEN') ||
-                localStorage.getItem('nexopa_token') ||
+                localStorage.getItem('necpa_token') ||
                 sessionStorage.getItem('authToken') ||
                 sessionStorage.getItem('auth_token') ||
                 sessionStorage.getItem('token') ||

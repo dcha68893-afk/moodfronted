@@ -189,7 +189,7 @@ function ensureUIActive(actionName) {
     // FIX: Also allow if we have any valid session data stored (handles timing issues)
     try {
         const storedToken = localStorage.getItem('kynecta_auth') || localStorage.getItem('token') ||
-                            localStorage.getItem('nexopa_token') || localStorage.getItem('accessToken');
+                            localStorage.getItem('necpa_token') || localStorage.getItem('accessToken');
         if (storedToken) return true;
     } catch(e) {}
     
@@ -408,7 +408,7 @@ function syncDataFromCore() {
             readLocalJson('kynecta_auth', null)?.user ||
             null;
         userData = currentUser;
-        isTokenReady = !!(localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('nexopa_token'));
+        isTokenReady = !!(localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('necpa_token'));
     }
     
     // Sync parent ready
@@ -1175,7 +1175,7 @@ const UIFailsafe_StatusUI = {
             if (forceEnabled) return;
             try {
                 const hasToken = !!(localStorage.getItem('kynecta_auth') || localStorage.getItem('token') ||
-                                   localStorage.getItem('nexopa_token') || localStorage.getItem('accessToken'));
+                                   localStorage.getItem('necpa_token') || localStorage.getItem('accessToken'));
                 if (hasToken) {
                     forceEnabled = true;
                     this._enableUI();
@@ -4543,7 +4543,7 @@ function handleCreateStatusClick() {
     const hasToken = (() => {
         try {
             return !!(localStorage.getItem('kynecta_auth') || localStorage.getItem('token') ||
-                      localStorage.getItem('nexopa_token') || localStorage.getItem('accessToken'));
+                      localStorage.getItem('necpa_token') || localStorage.getItem('accessToken'));
         } catch(e) { return false; }
     })();
     if (!ensureUIActive('createStatus') && !hasToken) {
@@ -9375,7 +9375,77 @@ window.handlePostStatus = handlePostStatus;
                 }
             } catch (_) {}
         };
-        
+
+        // ── FIX (status-live-update-bridge): StatusWebSocket's real-time
+        // handlers (_handleStatusCreated/_handleStatusExpired/_handleStatusUpdated/
+        // _handleStatusDeleted in js/status-websocket.js) have always looked for
+        // window.addStatus / window.removeStatus / window.updateStatusInUI —
+        // comments there say these are "exported from status-core.js", but no
+        // such file was ever loaded by status.html, so all three were silently
+        // undefined. A friend's new status, an edit, or an expiry/delete arriving
+        // over the socket therefore never touched the Recent/Viewed lists at all
+        // until the page was reloaded (which re-runs _fetchFriendStatusesDirect
+        // and rebuilds everything from scratch). Implementing them here — using
+        // the same friendsStatuses/myStatuses arrays and renderStatusListInstantlyUI()
+        // already used everywhere else in this file — closes that gap without
+        // introducing a second, competing state store.
+        window.addStatus = function(status) {
+            try {
+                if (!status || status.id == null) return;
+                const sid = String(status.id);
+                status = { ...status, id: sid };
+                const uid = String((currentUser && (currentUser.id || currentUser.userId))
+                    || (window.currentUser && (window.currentUser.id || window.currentUser.userId)) || '');
+                const ownerId = String(status.userId || status.user_id || (status.user && status.user.id) || '');
+                if (uid && ownerId === uid) {
+                    const idx = myStatuses.findIndex(s => String(s.id) === sid);
+                    if (idx >= 0) myStatuses[idx] = { ...myStatuses[idx], ...status };
+                    else myStatuses.unshift(status);
+                } else {
+                    const idx = friendsStatuses.findIndex(s => String(s.id) === sid);
+                    if (idx >= 0) friendsStatuses[idx] = { ...friendsStatuses[idx], ...status };
+                    else friendsStatuses.unshift(status);
+                    // A brand-new status from a friend is by definition unviewed —
+                    // make sure a stale viewedStatuses entry (e.g. a reused id from
+                    // a previous session) doesn't shove it straight into "Viewed".
+                    try { viewedStatuses?.delete(sid); } catch (_) {}
+                }
+                if (typeof renderStatusListInstantlyUI === 'function') renderStatusListInstantlyUI();
+                if (typeof updateMyStatusPreviewUI === 'function' && uid && ownerId === uid) updateMyStatusPreviewUI();
+            } catch (e) { console.error('[UI] addStatus failed:', e); }
+        };
+
+        window.removeStatus = function(statusId) {
+            try {
+                const sid = String(statusId);
+                friendsStatuses = friendsStatuses.filter(s => String(s.id) !== sid);
+                myStatuses      = myStatuses.filter(s => String(s.id) !== sid);
+                if (currentViewerStatus && String(currentViewerStatus.id) === sid) {
+                    if (typeof closeViewer === 'function') { try { closeViewer(); } catch (_) {} }
+                }
+                if (typeof renderStatusListInstantlyUI === 'function') renderStatusListInstantlyUI();
+            } catch (e) { console.error('[UI] removeStatus failed:', e); }
+        };
+
+        window.updateStatusInUI = function(statusId, updates) {
+            try {
+                if (!updates) return;
+                const sid = String(statusId);
+                const apply = (list) => {
+                    const idx = list.findIndex(s => String(s.id) === sid);
+                    if (idx >= 0) list[idx] = { ...list[idx], ...updates, id: sid };
+                    return idx >= 0;
+                };
+                apply(friendsStatuses);
+                apply(myStatuses);
+                if (currentViewerStatus && String(currentViewerStatus.id) === sid) {
+                    currentViewerStatus = { ...currentViewerStatus, ...updates, id: sid };
+                    if (typeof displayStatusSlide === 'function') { try { displayStatusSlide(currentViewerStatus); } catch (_) {} }
+                }
+                if (typeof renderStatusListInstantlyUI === 'function') renderStatusListInstantlyUI();
+            } catch (e) { console.error('[UI] updateStatusInUI failed:', e); }
+        };
+
     } catch (e) {
         console.error('[UI] Failed to expose globals:', e);
     }

@@ -61,8 +61,8 @@
 </script>
     <link rel="manifest" href="../manifest.json">
     <!-- theme-color is now set dynamically by theme.engine.js to match the saved theme -->
-    <link rel="icon" href="../icons/nexopa-192.png">
-    <link rel="icon" href="../icons/nexopa-512.png">
+    <link rel="icon" href="../icons/necpa-192.png">
+    <link rel="icon" href="../icons/necpa-512.png">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Friends | Knecta Chat</title>
@@ -3389,7 +3389,7 @@
             const nativeRemoveItem = storageProto.removeItem;
             const nativeClear = storageProto.clear;
             const nativeSetItem = storageProto.setItem;
-            const protectedKeys = new Set(['kynecta_auth', 'token', 'nexopa_token', 'accessToken', 'USER_TOKEN']);
+            const protectedKeys = new Set(['kynecta_auth', 'token', 'necpa_token', 'accessToken', 'USER_TOKEN']);
 
             localStorage.removeItem = function(key) {
                 if (window.__allowAuthStorageMutation__ === true) {

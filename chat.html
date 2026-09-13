@@ -57,8 +57,8 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <meta name="apple-mobile-web-app-title" content="Nexopa">
-    <link rel="apple-touch-icon" href="/icons/nexopa-192.png">
+    <meta name="apple-mobile-web-app-title" content="Necpa">
+    <link rel="apple-touch-icon" href="/icons/necpa-192.png">
     <link rel="icon" type="image/png" sizes="192x192" href="/icons/necpa-192.png">
     <link rel="icon" type="image/png" sizes="512x512" href="/icons/necpa-512.png">
     <style>
@@ -4056,7 +4056,7 @@
                 const token = auth?.token ||
                     localStorage.getItem('authToken') ||
                     localStorage.getItem('token') ||
-                    localStorage.getItem('nexopa_token') ||
+                    localStorage.getItem('necpa_token') ||
                     localStorage.getItem('accessToken') ||
                     window.Session?.getToken?.() ||
                     null;
@@ -4743,7 +4743,7 @@
                               window.Session?.getToken?.() ||
                               localStorage.getItem('authToken') ||
                               localStorage.getItem('token') ||
-                              localStorage.getItem('nexopa_token') ||
+                              localStorage.getItem('necpa_token') ||
                               localStorage.getItem('accessToken');
                 if (!token) return null;
 
@@ -4816,7 +4816,17 @@
                         headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }
                     });
                     if (res.ok) {
-                        const profile = await res.json();
+                        const json = await res.json();
+                        // FIX (admin-role-never-hydrated): GET /api/profile responds with
+                        // { success, message, data: { profile } } — this used to read
+                        // profile.role / profile.user.role directly off the top-level
+                        // JSON, which is always undefined for that shape, so it silently
+                        // fell back to 'user' every single time this ran (including for
+                        // real admin accounts), overwriting any correct role that had
+                        // already been cached from login. Unwrap all the shapes the
+                        // backend has used (data.profile, data, or a flat body) instead
+                        // of assuming one.
+                        const profile = json?.data?.profile || json?.data || json?.profile || json;
                         const role = profile?.role || profile?.user?.role || 'user';
                         const isAdmin = role === 'admin' || role === 'moderator' || profile?.isAdmin === true;
                         // P1 FIX: Do NOT persist role in localStorage — keeps role in memory only
@@ -4973,7 +4983,7 @@
                 try {
                     const t = localStorage.getItem('authToken') ||
                               localStorage.getItem('token') ||
-                              localStorage.getItem('nexopa_token') ||
+                              localStorage.getItem('necpa_token') ||
                               localStorage.getItem('accessToken');
                     if (t && !cachedToken) {
                         cachedToken = t;
@@ -5030,7 +5040,7 @@
                 if (!settings || Object.keys(settings).length === 0) {
                     // Try raw localStorage key written by settingsManager
                     try {
-                        const raw = localStorage.getItem('knecta_settings_cache') || localStorage.getItem('nexopa_settings_default');
+                        const raw = localStorage.getItem('knecta_settings_cache') || localStorage.getItem('necpa_settings_default');
                         if (raw) { const p = JSON.parse(raw); settings = p?.data || p; }
                     } catch(e) {}
                 }
@@ -5223,7 +5233,7 @@
                         if (newToken) {
                             localStorage.setItem('authToken', newToken);
                             localStorage.setItem('token', newToken);
-                            localStorage.setItem('nexopa_token', newToken);
+                            localStorage.setItem('necpa_token', newToken);
                             localStorage.setItem('accessToken', newToken);
                             const authData = localStorage.getItem('kynecta_auth');
                             if (authData) {
@@ -5256,7 +5266,7 @@
             setInterval(scheduleSessionCacheUpdate, 30000);
 
             window.addEventListener('storage', function(e) {
-                if (e.key === 'authToken' || e.key === 'token' || e.key === 'nexopa_token' || e.key === 'kynecta_auth' || e.key === 'accessToken') {
+                if (e.key === 'authToken' || e.key === 'token' || e.key === 'necpa_token' || e.key === 'kynecta_auth' || e.key === 'accessToken') {
                     scheduleSessionCacheUpdate();
                     if (window.safeTimeout) {
                         window.safeTimeout(() => sendToAllModulesIfNeeded(true), 100);
@@ -6593,7 +6603,7 @@
                         if (!msgId || !emoji) return;
                         let token = cachedToken;
                         if (!token) {
-                            try { token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('nexopa_token') || localStorage.getItem('accessToken'); } catch(e) {}
+                            try { token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('necpa_token') || localStorage.getItem('accessToken'); } catch(e) {}
                         }
                         try {
                             const resp = await fetch(`/api/messages/${msgId}/react`, {
@@ -6625,7 +6635,7 @@
                         if (!messageId || !targetConversationIds || !targetConversationIds.length) return;
                         let token = cachedToken;
                         if (!token) {
-                            try { token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('nexopa_token') || localStorage.getItem('accessToken'); } catch(e) {}
+                            try { token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('necpa_token') || localStorage.getItem('accessToken'); } catch(e) {}
                         }
                         try {
                             await fetch(`/api/messages/${messageId}/forward`, {
@@ -6680,7 +6690,7 @@
                     };
                     try {
                         const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:4000/api';
-                        let token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('nexopa_token') || localStorage.getItem('accessToken');
+                        let token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('necpa_token') || localStorage.getItem('accessToken');
                         const [meta, b64] = base64Data.split(',');
                         const mime = (meta.match(/:(.*?);/) || [])[1] || fileType || 'application/octet-stream';
                         const binary = atob(b64);
@@ -6761,7 +6771,7 @@
                         } catch(e) {}
                     }
                     if (!token) {
-                        try { token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('nexopa_token') || localStorage.getItem('accessToken'); } catch(e) {}
+                        try { token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('necpa_token') || localStorage.getItem('accessToken'); } catch(e) {}
                     }
 
                     try {
@@ -7251,7 +7261,7 @@
                     window.__pendingCallOrigin = callOriginPage;
                     const baseUrl = window.__getApiBase();
                     let token = cachedToken;
-                    try { if (!token) token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('nexopa_token') || localStorage.getItem('accessToken'); } catch(e) {}
+                    try { if (!token) token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('necpa_token') || localStorage.getItem('accessToken'); } catch(e) {}
                     try {
                         const body = { callType: callType === 'voice' ? 'audio' : callType, isGroupCall: isGroupCall };
                         if (isGroupCall && groupId) body.groupId = parseInt(groupId, 10);
@@ -7313,7 +7323,7 @@
                     const baseUrl = window.__getApiBase();
                     let token = cachedToken;
                     try {
-                        if (!token) token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('nexopa_token') || localStorage.getItem('accessToken');
+                        if (!token) token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('necpa_token') || localStorage.getItem('accessToken');
                     } catch(e) {}
 
                     if (!resolvedCallId) {
@@ -7419,7 +7429,7 @@
                     const baseUrl = window.__getApiBase();
                     let token = cachedToken;
                     try {
-                        if (!token) token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('nexopa_token') || localStorage.getItem('accessToken');
+                        if (!token) token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('necpa_token') || localStorage.getItem('accessToken');
                     } catch(e) {}
 
                     _chatLog('[Parent] Adding participant to call', payload);
@@ -7519,7 +7529,7 @@
                     const limit = data.payload?.limit || 20;
                     const baseUrl = window.__getApiBase();
                     let token = cachedToken;
-                    if (!token) { try { token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('nexopa_token') || localStorage.getItem('accessToken'); } catch(e) {} }
+                    if (!token) { try { token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('necpa_token') || localStorage.getItem('accessToken'); } catch(e) {} }
                     if (!token) { if (event.source) event.source.postMessage({ type: 'FETCH_LISTINGS_RESPONSE', requestId, payload: { data: { listings: [], total: 0 } } }, '*'); return; }
                     fetch(`${baseUrl}/marketplace/listings?page=${page}&limit=${limit}`, { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, credentials: 'include' })
                         .then(r => r.json())
@@ -9544,8 +9554,8 @@ window.__groupHdrHide = hideGroupHeader;
         _showEl('pwaInstallBanner',
             '<div style="position:fixed;bottom:0;left:0;right:0;z-index:999999;background:#fff;border-top:2px solid #667eea;box-shadow:0 -4px 20px rgba(0,0,0,.15);padding:14px 16px;display:flex;align-items:center;gap:12px;font-family:-apple-system,sans-serif;animation:_pslide .35s ease">' +
             '<style>@keyframes _pslide{from{transform:translateY(100%)}to{transform:translateY(0)}}</style>' +
-            '<img src="/nexopa-192.png" style="width:44px;height:44px;border-radius:10px;flex-shrink:0" onerror="this.style.display=\'none\'">' +
-            '<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:14px;color:#111">Install Nexopa</div>' +
+            '<img src="/necpa-192.png" style="width:44px;height:44px;border-radius:10px;flex-shrink:0" onerror="this.style.display=\'none\'">' +
+            '<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:14px;color:#111">Install Necpa</div>' +
             '<div style="font-size:12px;color:#6b7280;margin-top:1px">Faster &amp; works offline</div></div>' +
             '<button onclick="window._pwaInstall()" style="background:#667eea;color:#fff;border:none;border-radius:10px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0">Install</button>' +
             '<button onclick="window._pwaDismiss()" style="background:none;border:none;color:#9ca3af;font-size:22px;line-height:1;cursor:pointer;padding:2px;flex-shrink:0">&times;</button></div>'

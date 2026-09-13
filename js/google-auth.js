@@ -69,7 +69,7 @@
                 localStorage.setItem('token', token);
                 localStorage.setItem('accessToken', token);
                 localStorage.setItem('authToken', token);
-                localStorage.setItem('nexopa_token', token);
+                localStorage.setItem('necpa_token', token);
                 localStorage.setItem('USER_TOKEN', token);
                 localStorage.setItem('currentUser', JSON.stringify(user));
                 localStorage.setItem('user', JSON.stringify(user));
