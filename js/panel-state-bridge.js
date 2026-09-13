@@ -46,9 +46,6 @@
         return true;
     }
 
-    // ------------------------------------------------------------------
-    // CHILD SIDE
-    // ------------------------------------------------------------------
     if (window.parent && window.parent !== window) {
         function send(type, panelId, extra) {
             try {
@@ -131,9 +128,6 @@
         setTimeout(function () { clearInterval(childPresenceTimer); }, 15000);
     }
 
-    // ------------------------------------------------------------------
-    // PARENT SIDE
-    // ------------------------------------------------------------------
     if (window.parent === window) {
         window.__kynPanelState = window.__kynPanelState || {};
 
@@ -301,9 +295,6 @@
         }, 500);
         setTimeout(function () { clearInterval(presenceTimer); }, 15000);
 
-        // ------------------------------------------------------------------
-        // EXACT APP BACK STACK
-        // ------------------------------------------------------------------
         var NAV_VERSION = 2;
         var exactStack = window.__kynExactNavStack = window.__kynExactNavStack || [];
         var exactCurrent = window.__kynExactNavCurrent || null;
@@ -336,6 +327,33 @@
             try { return JSON.stringify(a) === JSON.stringify(b); } catch (_) { return false; }
         }
 
+        function visibleFriendState(doc) {
+            if (!doc) return 'sidebar';
+            var panel = doc.querySelector('.discover-fullscreen-panel.open');
+            if (panel) {
+                var map = {
+                    discoverAllUsersPanel:'browse-all',
+                    discoverUsernamePanel:'search-username',
+                    discoverQrPanel:'qr',
+                    discoverNearbyPanel:'nearby',
+                    discoverGroupsPanel:'groups'
+                };
+                return map[panel.id] || panel.id || 'panel';
+            }
+            var modal = doc.getElementById('addFriendModal');
+            if (modal && modal.classList.contains('active')) return 'add-friend';
+            return 'sidebar';
+        }
+
+        function visibleGroupState(doc) {
+            if (!doc) return 'sidebar';
+            var details = doc.getElementById('groupDetailsPanel');
+            if (details && (details.classList.contains('active') || details.style.display === 'flex')) return 'details';
+            var sub = doc.getElementById('gcSubPanel');
+            if (sub && (sub.classList.contains('open') || (sub.style.display && sub.style.display !== 'none'))) return 'settings';
+            return document.body.classList.contains('group-panel-active') ? 'chat' : 'sidebar';
+        }
+
         function readCurrentState() {
             var page = normalizeModule(window.__currentPage || 'messages');
             var screen = 'sidebar';
@@ -351,13 +369,20 @@
                     if (window.__lastOpenChatName) data.name = window.__lastOpenChatName;
                 }
             } else if (page === 'group') {
-                if (document.body.classList.contains('group-panel-active')) {
+                var gframe = document.getElementById('groupIframe');
+                var gdoc = null;
+                try { gdoc = gframe && gframe.contentDocument; } catch (_) {}
+                screen = visibleGroupState(gdoc);
+                if (screen !== 'sidebar') {
                     var gp = window.__gcCurrentGroup || {};
-                    screen = (window.__kynPanelState.group && window.__kynPanelState.group.panel) || 'chat';
-                    if (screen === true) screen = 'chat';
                     if (gp.id != null) data.groupId = gp.id;
                     if (gp.name) data.name = gp.name;
                 }
+            } else if (page === 'friends') {
+                var fframe = document.getElementById('friendsIframe');
+                var fdoc = null;
+                try { fdoc = fframe && fframe.contentDocument; } catch (_) {}
+                screen = visibleFriendState(fdoc);
             } else if (page === 'status') {
                 if (document.body.classList.contains('status-panel-active')) {
                     screen = (window.__kynPanelState.status && window.__kynPanelState.status.panel) || 'view';
@@ -409,7 +434,6 @@
                 if (typeof window.toolsNavTo === 'function') window.toolsNavTo(toolPage);
                 return;
             }
-
             if (module === 'messages') {
                 if (screen === 'chat') {
                     document.body.classList.add('chat-panel-active');
@@ -419,7 +443,6 @@
                 document.body.classList.remove('chat-panel-active');
                 return;
             }
-
             if (module === 'group') {
                 if (screen === 'sidebar') {
                     postToIframe('group', { type:'GO_BACK_TO_LIST', source:'exact-nav', timestamp:Date.now() });
@@ -449,7 +472,6 @@
                 document.body.classList.add('group-panel-active');
                 return;
             }
-
             if (module === 'status') {
                 if (screen === 'sidebar') {
                     postToIframe('status', { type:'GO_BACK_TO_LIST', source:'exact-nav', timestamp:Date.now() });
@@ -457,14 +479,12 @@
                 } else document.body.classList.add('status-panel-active');
                 return;
             }
-
             if (module === 'calls' && screen === 'sidebar') {
                 postToIframe('calls', { type:'CLOSE_CALL_SCREEN', source:'exact-nav', timestamp:Date.now() });
                 document.body.classList.remove('call-screen-active');
                 window.__activeCallInProgress = false;
                 return;
             }
-
             if (module === 'friends') {
                 try {
                     var ff = document.getElementById('friendsIframe');
@@ -522,43 +542,14 @@
             pushExactState(nextState);
         }
 
-        function visibleFriendState(doc) {
-            if (!doc) return 'sidebar';
-            var panel = doc.querySelector('.discover-fullscreen-panel.open');
-            if (panel) {
-                var map = {
-                    discoverAllUsersPanel:'browse-all',
-                    discoverUsernamePanel:'search-username',
-                    discoverQrPanel:'qr',
-                    discoverNearbyPanel:'nearby',
-                    discoverGroupsPanel:'groups'
-                };
-                return map[panel.id] || panel.id || 'panel';
-            }
-            var modal = doc.getElementById('addFriendModal');
-            if (modal && modal.classList.contains('active')) return 'add-friend';
-            return 'sidebar';
-        }
-
-        function visibleGroupState(doc) {
-            if (!doc) return 'sidebar';
-            var details = doc.getElementById('groupDetailsPanel');
-            if (details && (details.classList.contains('active') || details.style.display === 'flex')) return 'details';
-            var sub = doc.getElementById('gcSubPanel');
-            if (sub && (sub.classList.contains('open') || (sub.style.display && sub.style.display !== 'none'))) return 'settings';
-            return document.body.classList.contains('group-panel-active') ? 'chat' : 'sidebar';
-        }
-
         function observeChildPanel(module, iframe) {
             if (!iframe || iframe.__kynExactObserverBound) return;
             iframe.__kynExactObserverBound = true;
-
             var attach = function () {
                 var doc;
                 try { doc = iframe.contentDocument; } catch (_) { return; }
                 if (!doc || !doc.body || doc.__kynExactPanelObserverBound) return;
                 doc.__kynExactPanelObserverBound = true;
-
                 var read = function () {
                     if (module !== normalizeModule(window.__currentPage || '')) return;
                     var state = module === 'friends' ? visibleFriendState(doc) : visibleGroupState(doc);
@@ -568,14 +559,12 @@
                     observedChildStates[module] = state;
                     captureAndPush({ v:NAV_VERSION, module:module, screen:state, data:{} });
                 };
-
                 try {
                     var observer = new MutationObserver(function () { read(); });
                     observer.observe(doc.body, { subtree:true, childList:true, attributes:true, attributeFilter:['class','style'] });
                 } catch (_) {}
                 read();
             };
-
             iframe.addEventListener('load', attach);
             attach();
         }
@@ -623,12 +612,9 @@
                 if (exactRestoring) return;
                 var d = event && event.data;
                 if (!d || typeof d !== 'object') return;
-
                 var mod = normalizeModule(d.module || '');
                 if (d.type === 'PanelOpened' && mod) {
-                    var panel = d.panel || 'panel';
-                    var next = { v:NAV_VERSION, module:mod, screen:String(panel), data:{} };
-                    captureAndPush(next);
+                    captureAndPush({ v:NAV_VERSION, module:mod, screen:String(d.panel || 'panel'), data:{} });
                     return;
                 }
                 if (d.type === 'PanelClosed' && mod) {
@@ -668,10 +654,6 @@
                 }
             }, true);
 
-            // Friend and Group pages are long-lived iframes and do not all emit
-            // standardized panel events. Observe their actual DOM state instead,
-            // but only while that module is visible so background updates cannot
-            // create fake navigation entries.
             observeChildPanel('friends', document.getElementById('friendsIframe'));
             observeChildPanel('group', document.getElementById('groupIframe'));
 
@@ -688,8 +670,7 @@
             document.addEventListener('backbutton', function (event) {
                 event.preventDefault();
                 event.stopImmediatePropagation();
-                if (exactStack.length) history.back();
-                else { try { history.back(); } catch (_) {} }
+                try { history.back(); } catch (_) {}
             }, true);
 
             exactInstalled = true;
