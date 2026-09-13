@@ -1,4 +1,4 @@
-// Kynecta service worker — v19.21.0
+// Kynecta service worker — v19.22.0
 // Critical runtime/theme/encryption/account-isolation assets are network-first
 // so an installed PWA cannot silently execute week-old code after a deploy.
 'use strict';
@@ -24,8 +24,12 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.21.0';
-const CACHE_NAME = 'nexopa-static-v44';
+const SW_VERSION = '19.22.0';
+// FIX: bumped so activate() drops every existing cache immediately on this
+// deploy — anyone with a stale friend-ui.js (or anything else) cached under
+// the old name gets a clean break on next load, instead of waiting on the
+// 7-day CACHE_MAX_AGE staleness check or a lucky reinstall.
+const CACHE_NAME = 'nexopa-static-v45';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -61,6 +65,21 @@ const NETWORK_FIRST_PATTERNS = [
   /\/group-os\/group-os\.js/i,/\/group-os\/group-os-integration\.js/i,/\/group-core-patch\.js/i,
   /\/group-core-patch\.legacy\.js/i,/\/js\/groupEncryption\.client\.js/i,
   /\/js\/groupEncryption\.client\.legacy\.js/i,/\/friend-core\.ui-bridge\.js/i,
+  // ROOT-CAUSE FIX (fixes to the friend module silently not appearing after
+  // deploy — "some changes show, others don't"): friend.html and friend.css
+  // were already precached fresh on every SW install (CORE_STATIC_ASSETS
+  // above) and friend-core.ui-bridge.js was already network-first, but
+  // friend-ui.js, friend-core.bootstrap.js, friend-core.operations.js,
+  // friendSync.engine.js, friendQueue.manager.js, and localStore.friends.js
+  // — where almost all of the actual friend-module logic lives — were in
+  // neither list. They fell through to staticAsset()'s cache-first
+  // strategy below, which only re-checks the network once every
+  // CACHE_MAX_AGE (7 days) or on a full CACHE_NAME bump. A browser/PWA
+  // that had already cached an old copy of friend-ui.js kept running it
+  // untouched for up to a week after a real server-side fix shipped,
+  // regardless of how many times the page was reloaded.
+  /\/friend-ui\.js/i,/\/friend-core\.bootstrap\.js/i,/\/friend-core\.operations\.js/i,
+  /\/friendSync\.engine\.js/i,/\/friendQueue\.manager\.js/i,/\/localStore\.friends\.js/i,
   /\/Tool-core\.part3\.js/i,/\/Tool-ui\.js/i,/\/pwa-manager\.js/i,/\/js\/kynecta\.safety\.layer\.js/i,
   /\/calls-core\.part[1-8]\.js/i,/\/calls-ui\.js/i,/\/callSession\.manager\.js/i,
   /\/callRetry\.engine\.js/i,/\/settings-ui\.js/i,/\/js\/settings-ui\.local-first\.patch\.js/i,

@@ -2999,9 +2999,20 @@
                         
                         <div class="input-group">
                             <label class="input-label">Select Group</label>
-                            <select class="text-input" id="groupSelect">
+                            <!-- FIX (groups never appeared as you typed — was a
+                                 plain <select> with no filtering at all): now a
+                                 live search box, same pattern as the Search by
+                                 Username tab. #groupSelect is kept (hidden) so
+                                 the existing change-driven loadGroupMembers()
+                                 wiring in friend-ui.js needs no rework — picking
+                                 a result below just sets its value and fires
+                                 the same 'change' event that used to come from
+                                 choosing a dropdown option. -->
+                            <input type="text" class="text-input" id="groupSearchInput" placeholder="Type a group name…" autocomplete="off">
+                            <select id="groupSelect" style="display:none;">
                                 <option value="">Loading groups...</option>
                             </select>
+                            <div id="groupSearchResults" style="margin-top:6px; max-height:220px; overflow-y:auto; border:1px solid var(--border-color); border-radius:8px; display:none;"></div>
                         </div>
                         
                         <div id="groupMembersList" style="max-height: 300px; overflow-y: auto; margin-top: 20px; border: 1px solid var(--border-color); border-radius: 8px; padding: 10px;">

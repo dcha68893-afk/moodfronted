@@ -361,19 +361,117 @@ async function loadGroupsIntoSelect() {
     const groupSelect = document.getElementById('groupSelect');
     if (!groupSelect) return;
     groupSelect.innerHTML = '<option value="">Loading groups…</option>';
+    renderGroupSearchState('loading');
     try {
         await loadGroupsFromBackend();
         const groupsArr = Array.isArray(groups) ? groups : [];
         if (groupsArr.length === 0) {
             groupSelect.innerHTML = '<option value="">No groups found</option>';
+            renderGroupSearchState('empty');
             return;
         }
         groupSelect.innerHTML =
             '<option value="">— Select a group —</option>' +
             groupsArr.map(g => `<option value="${g.id}">${escapeHtml(g.name)}</option>`).join('');
+        renderGroupSearchState('ready', groupsArr);
     } catch (e) {
         groupSelect.innerHTML = '<option value="">Failed to load groups</option>';
+        renderGroupSearchState('error');
     }
+}
+
+// FIX (Select Group never finished loading / groups didn't filter as you
+// typed): loadGroupsIntoSelect() above already fetches into the hidden
+// #groupSelect; this renders the same data as an instant, as-you-type
+// filtered list in #groupSearchResults. "loading"/"empty"/"error" states
+// are shown immediately so the box never gets stuck on a bare spinner with
+// no explanation the way the old <select> could.
+let _groupSearchState = { status: 'loading', groups: [] };
+
+function renderGroupSearchState(status, groupsArr) {
+    _groupSearchState = { status, groups: Array.isArray(groupsArr) ? groupsArr : [] };
+    const input = document.getElementById('groupSearchInput');
+    // Only repaint the results list if the user has already typed something
+    // (otherwise stay collapsed until they start searching) — but if a
+    // fetch just finished (or failed) while results were open, refresh them.
+    const resultsEl = document.getElementById('groupSearchResults');
+    if (resultsEl && resultsEl.style.display !== 'none') {
+        filterAndRenderGroupResults(input ? input.value : '');
+    }
+}
+
+function filterAndRenderGroupResults(term) {
+    const resultsEl = document.getElementById('groupSearchResults');
+    const groupSelect = document.getElementById('groupSelect');
+    if (!resultsEl) return;
+    const trimmed = (term || '').trim();
+
+    if (_groupSearchState.status === 'loading') {
+        resultsEl.style.display = '';
+        resultsEl.innerHTML = '<div style="text-align:center;padding:14px;color:var(--text-secondary);font-size:13px;"><i class="fas fa-spinner fa-spin"></i> Loading your groups…</div>';
+        return;
+    }
+    if (_groupSearchState.status === 'error') {
+        resultsEl.style.display = '';
+        resultsEl.innerHTML = '<div style="text-align:center;padding:14px;color:var(--danger-color);font-size:13px;">Couldn\'t load your groups. Tap to retry.</div>';
+        resultsEl.onclick = () => loadGroupsIntoSelect();
+        return;
+    }
+    resultsEl.onclick = null;
+    if (_groupSearchState.groups.length === 0) {
+        resultsEl.style.display = '';
+        resultsEl.innerHTML = '<div style="text-align:center;padding:14px;color:var(--text-secondary);font-size:13px;">You\'re not in any groups yet.</div>';
+        return;
+    }
+
+    const matches = trimmed
+        ? _groupSearchState.groups.filter(g => (g.name || '').toLowerCase().includes(trimmed.toLowerCase()))
+        : _groupSearchState.groups;
+
+    resultsEl.style.display = '';
+    if (matches.length === 0) {
+        resultsEl.innerHTML = `<div style="text-align:center;padding:14px;color:var(--text-secondary);font-size:13px;">No groups match "${escapeHtml(trimmed)}"</div>`;
+        return;
+    }
+    resultsEl.innerHTML = matches.map(g => `
+        <div class="group-search-result-item" data-group-id="${escapeHtml(String(g.id))}" style="display:flex;align-items:center;gap:10px;padding:10px;cursor:pointer;border-bottom:1px solid var(--border-color);">
+            <div style="width:32px;height:32px;border-radius:8px;background:var(--primary-color);display:flex;align-items:center;justify-content:center;color:#fff;flex-shrink:0;overflow:hidden;">
+                ${g.avatar ? `<img src="${escapeHtml(g.avatar)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">` : `<i class="fas fa-users"></i>`}
+            </div>
+            <div style="flex:1;min-width:0;font-weight:600;">${escapeHtml(g.name || 'Group')}</div>
+        </div>
+    `).join('');
+    resultsEl.querySelectorAll('.group-search-result-item').forEach(el => {
+        el.addEventListener('click', function () {
+            const gid = this.dataset.groupId;
+            const group = _groupSearchState.groups.find(g => String(g.id) === String(gid));
+            const input = document.getElementById('groupSearchInput');
+            if (input) input.value = group ? group.name : '';
+            resultsEl.style.display = 'none';
+            if (groupSelect) {
+                groupSelect.value = gid;
+                groupSelect.dispatchEvent(new Event('change'));
+            }
+        });
+    });
+}
+
+function setupGroupLiveSearch() {
+    const input = document.getElementById('groupSearchInput');
+    if (!input || input.dataset.liveSearchBound === '1') return;
+    input.dataset.liveSearchBound = '1';
+    input.addEventListener('focus', function () {
+        filterAndRenderGroupResults(this.value);
+    });
+    input.addEventListener('input', function () {
+        filterAndRenderGroupResults(this.value);
+    });
+    document.addEventListener('click', function (e) {
+        const resultsEl = document.getElementById('groupSearchResults');
+        if (!resultsEl || resultsEl.style.display === 'none') return;
+        if (e.target === input || resultsEl.contains(e.target)) return;
+        resultsEl.style.display = 'none';
+    });
 }
 
 async function loadGroupMembers(groupId, searchTerm) {
@@ -6110,6 +6208,9 @@ function bindAllEvents() {
 
     // Setup real-time (as-you-type) search for the Search-by-Username tab
     setupUsernameLiveSearch();
+
+    // Setup real-time (as-you-type) search for the Select Group box
+    setupGroupLiveSearch();
     
     // Add Friend button - FIXED with multiple handlers for reliability
     if (domElements.addFriendBtn) {
