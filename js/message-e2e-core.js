@@ -613,6 +613,13 @@
       try {
         const plaintext = await decryptEnvelopeV3(env, peerUserId, isOwnMessage, msgIdForLog);
         if (msgIdForLog) decryptVersionByMsgId.set(String(msgIdForLog), 'v3');
+        // FEATURE (SHOW-WHICH-VERSION-DECRYPTED, requested behavior,
+        // repeated request): one unambiguous, single-line console summary
+        // per message — the granular _diagLog('V3_DECRYPT_SUCCESS', ...)
+        // above already fires, but it's one line among many stage logs and
+        // easy to miss; this is the one line meant to answer "which one
+        // decrypted this, and if one failed, why" at a glance.
+        console.log(`[MessageE2E] Message ${msgIdForLog ?? '(unknown id)'}: ✅ decrypted with V3 (Double Ratchet)`);
         return plaintext;
       } catch (err) {
         v3Err = err;
@@ -641,11 +648,13 @@
         if (msgIdForLog) decryptVersionByMsgId.set(String(msgIdForLog), 'v2-fallback');
         _diagLog('V2_FALLBACK_SUCCEEDED_AFTER_V3_FAILURE', { msgId: msgIdForLog, chatId, peerUserId });
         console.warn('[MessageE2E] v3 ratchet decrypt failed, but the v2 legacy fallback succeeded for this message. v3 failure was:', v3Err?.message || v3Err);
+        console.log(`[MessageE2E] Message ${msgIdForLog ?? '(unknown id)'}: ⚠️ V3 FAILED (${v3Err?.message || v3Err}) — recovered via V2 legacy fallback`);
         return v2Plaintext;
       } catch (v2Err) {
         const v3Reason = v3Err?.message || String(v3Err || 'unknown error');
         const v2Reason = v2Err?.message || String(v2Err || 'unknown error');
         _diagLog('V2_FALLBACK_ALSO_FAILED', { msgId: msgIdForLog, chatId, peerUserId, v3Reason, v2Reason });
+        console.log(`[MessageE2E] Message ${msgIdForLog ?? '(unknown id)'}: ❌ FAILED — V3: ${v3Reason} | V2 fallback: ${v2Reason}`);
         const combined = new Error(`Double Ratchet (v3) decrypt failed: ${v3Reason} — legacy (v2) fallback also failed: ${v2Reason}`);
         combined.v3Reason = v3Reason;
         combined.v2Reason = v2Reason;
@@ -656,8 +665,16 @@
     // old-format message is routed to the v2 decryptor exclusively, never
     // through the v3 ratchet path.
     _diagLog('V2_DECRYPT_ROUTE', { msgId: msgIdForLog, chatId, peerUserId, isOwnMessage });
-    const v2Plaintext = await decryptEnvelope(env, peerUserId, isOwnMessage, msgIdForLog);
+    let v2Plaintext;
+    try {
+      v2Plaintext = await decryptEnvelope(env, peerUserId, isOwnMessage, msgIdForLog);
+    } catch (v2Err) {
+      console.log(`[MessageE2E] Message ${msgIdForLog ?? '(unknown id)'}: ❌ FAILED — V2 (only; no V3 envelope): ${v2Err?.message || v2Err}`);
+      throw v2Err;
+    }
     if (msgIdForLog) decryptVersionByMsgId.set(String(msgIdForLog), 'v2');
+    console.log(`[MessageE2E] Message ${msgIdForLog ?? '(unknown id)'}: ✅ decrypted with V2 (legacy envelope, no V3 involved)`);
+
     return v2Plaintext;
   }
   // FEATURE: which decrypt path actually produced this message's plaintext
