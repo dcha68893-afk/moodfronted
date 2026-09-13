@@ -149,7 +149,7 @@
 
         let resp;
         try {
-            resp = await fetch(`${baseUrl}/api/group-encryption/${groupId}/keys`, {
+            resp = await fetch(`${baseUrl}/group-encryption/${groupId}/keys`, {
                 headers: token ? { Authorization: `Bearer ${token}` } : {},
                 credentials: 'include',
             });
@@ -188,7 +188,7 @@
         try {
             const baseUrl = (typeof global.__getApiBase === 'function' && global.__getApiBase()) || global.__API_BASE_URL || global.API_BASE_URL || '';
             const token = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
-            const resp = await fetch(`${baseUrl}/api/group-members/${groupId}/members`, {
+            const resp = await fetch(`${baseUrl}/group-members/${groupId}/members`, {
                 headers: token ? { Authorization: `Bearer ${token}` } : {},
                 credentials: 'include',
             });
@@ -243,7 +243,7 @@
             try {
                 const baseUrl = (typeof global.__getApiBase === 'function' && global.__getApiBase()) || global.__API_BASE_URL || global.API_BASE_URL || '';
                 const token = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
-                const resp = await fetch(`${baseUrl}/api/group-encryption/${groupId}/distribute`, {
+                const resp = await fetch(`${baseUrl}/group-encryption/${groupId}/distribute`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
                     credentials: 'include',
@@ -353,7 +353,7 @@
         try {
             const baseUrl = (typeof global.__getApiBase === 'function' && global.__getApiBase()) || global.__API_BASE_URL || global.API_BASE_URL || '';
             const token = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
-            await fetch(`${baseUrl}/api/group-encryption/${groupId}/rotate-notify`, {
+            await fetch(`${baseUrl}/group-encryption/${groupId}/rotate-notify`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
                 credentials: 'include',
