@@ -28,10 +28,6 @@
         return value.trim().slice(0, 240);
     }
 
-    // Patch the presence engine's known offline-event bug without replacing
-    // the engine. The original _markOffline mutates prev.status before testing
-    // whether it changed, so the offline transition can be silently swallowed.
-    // This wrapper emits the missing transition after the original bookkeeping.
     function installPresenceEnginePatch() {
         var engine = window.PresenceEngine;
         if (!engine || engine.__kynPresenceBridgePatched) return !!engine;
@@ -308,14 +304,6 @@
         // ------------------------------------------------------------------
         // EXACT APP BACK STACK
         // ------------------------------------------------------------------
-        // The shell previously kept only page names in __navHistory while
-        // chat/group/status/tools also have nested screens. That made Back
-        // jump across module boundaries or collapse several UI levels at once.
-        // Keep browser history entries as complete UI states instead: every
-        // meaningful transition gets one exact entry, and popstate restores
-        // precisely that entry. Existing iframe DOM is deliberately preserved
-        // when moving between modules so a previously open chat/group/settings
-        // panel comes back exactly as it was.
         var NAV_VERSION = 2;
         var exactStack = window.__kynExactNavStack = window.__kynExactNavStack || [];
         var exactCurrent = window.__kynExactNavCurrent || null;
@@ -324,6 +312,7 @@
         var originalNavigateToPage = null;
         var originalToolsNavTo = null;
         var originalSyncBrowserHistoryState = null;
+        var observedChildStates = {};
 
         function normalizeModule(page) {
             page = String(page || '').toLowerCase();
@@ -375,9 +364,7 @@
                     if (screen === true) screen = 'view';
                 }
             } else if (page === 'calls') {
-                if (document.body.classList.contains('call-screen-active') || window.__activeCallInProgress) {
-                    screen = 'call';
-                }
+                if (document.body.classList.contains('call-screen-active') || window.__activeCallInProgress) screen = 'call';
             } else {
                 var ps = window.__kynPanelState[page];
                 if (ps && ps.panel) screen = ps.panel === true ? 'panel' : String(ps.panel);
@@ -390,9 +377,7 @@
             if (exactCurrent) return;
             exactCurrent = readCurrentState();
             window.__kynExactNavCurrent = exactCurrent;
-            try {
-                history.replaceState({ appNav: true, exactNav: true, navVersion: NAV_VERSION, nav: cloneState(exactCurrent) }, '', window.location.href);
-            } catch (_) {}
+            try { history.replaceState({ appNav:true, exactNav:true, navVersion:NAV_VERSION, nav:cloneState(exactCurrent) }, '', window.location.href); } catch (_) {}
         }
 
         function pushExactState(nextState) {
@@ -401,9 +386,7 @@
             if (exactCurrent) exactStack.push(cloneState(exactCurrent));
             exactCurrent = nextState;
             window.__kynExactNavCurrent = exactCurrent;
-            try {
-                history.pushState({ appNav: true, exactNav: true, navVersion: NAV_VERSION, nav: cloneState(nextState) }, '', window.location.href);
-            } catch (_) {}
+            try { history.pushState({ appNav:true, exactNav:true, navVersion:NAV_VERSION, nav:cloneState(nextState) }, '', window.location.href); } catch (_) {}
             return true;
         }
 
@@ -443,9 +426,6 @@
                     document.body.classList.remove('group-panel-active');
                     return;
                 }
-                // Group settings/details live on top of the existing group chat.
-                // When returning to the chat state, close only the nested sub-panel
-                // rather than using GO_BACK_TO_LIST (which would skip the chat).
                 if (screen === 'chat') {
                     try {
                         var gf = document.getElementById('groupIframe');
@@ -474,9 +454,7 @@
                 if (screen === 'sidebar') {
                     postToIframe('status', { type:'GO_BACK_TO_LIST', source:'exact-nav', timestamp:Date.now() });
                     document.body.classList.remove('status-panel-active');
-                } else {
-                    document.body.classList.add('status-panel-active');
-                }
+                } else document.body.classList.add('status-panel-active');
                 return;
             }
 
@@ -492,14 +470,28 @@
                     var ff = document.getElementById('friendsIframe');
                     var fd = ff && ff.contentDocument;
                     if (fd) {
-                        // Full-screen Discover panels (Browse All, QR, Nearby, etc.)
-                        // each expose the same back control. Closing it reveals the
-                        // underlying Add Friend screen, exactly one level back.
+                        var openDiscover = fd.querySelector('.discover-fullscreen-panel.open');
+                        if (screen === 'browse-all' || screen === 'search-username' || screen === 'qr' || screen === 'nearby' || screen === 'groups') {
+                            var ids = { 'browse-all':'discoverAllUsersPanel', 'search-username':'discoverUsernamePanel', 'qr':'discoverQrPanel', 'nearby':'discoverNearbyPanel', 'groups':'discoverGroupsPanel' };
+                            var wanted = fd.getElementById(ids[screen]);
+                            if (wanted && !wanted.classList.contains('open')) wanted.classList.add('open');
+                            return;
+                        }
+                        if (screen === 'add-friend') {
+                            if (openDiscover) {
+                                var discoverBack = openDiscover.querySelector('.discover-panel-back');
+                                if (discoverBack) discoverBack.click();
+                            }
+                            return;
+                        }
                         if (screen === 'sidebar') {
-                            var back = fd.querySelector('.discover-fullscreen-panel.open .discover-panel-back');
-                            if (back) { back.click(); return; }
+                            if (openDiscover) {
+                                var back = openDiscover.querySelector('.discover-panel-back');
+                                if (back) back.click();
+                            }
                             var cancel = fd.getElementById('cancelAddFriendBtn');
-                            if (cancel && fd.getElementById('addFriendModal')?.classList.contains('active')) { cancel.click(); return; }
+                            var modal = fd.getElementById('addFriendModal');
+                            if (cancel && modal && modal.classList.contains('active')) cancel.click();
                         }
                     }
                 } catch (_) {}
@@ -512,7 +504,7 @@
             try {
                 var page = normalizeModule(target.module);
                 if (window.__currentPage !== page && typeof window.navigateToPage === 'function') {
-                    window.navigateToPage(page, { fromHistory: true, exactRestore: true });
+                    window.navigateToPage(page, { fromHistory:true, exactRestore:true });
                 }
                 restoreNestedTarget(target);
                 exactCurrent = cloneState(target);
@@ -530,6 +522,64 @@
             pushExactState(nextState);
         }
 
+        function visibleFriendState(doc) {
+            if (!doc) return 'sidebar';
+            var panel = doc.querySelector('.discover-fullscreen-panel.open');
+            if (panel) {
+                var map = {
+                    discoverAllUsersPanel:'browse-all',
+                    discoverUsernamePanel:'search-username',
+                    discoverQrPanel:'qr',
+                    discoverNearbyPanel:'nearby',
+                    discoverGroupsPanel:'groups'
+                };
+                return map[panel.id] || panel.id || 'panel';
+            }
+            var modal = doc.getElementById('addFriendModal');
+            if (modal && modal.classList.contains('active')) return 'add-friend';
+            return 'sidebar';
+        }
+
+        function visibleGroupState(doc) {
+            if (!doc) return 'sidebar';
+            var details = doc.getElementById('groupDetailsPanel');
+            if (details && (details.classList.contains('active') || details.style.display === 'flex')) return 'details';
+            var sub = doc.getElementById('gcSubPanel');
+            if (sub && (sub.classList.contains('open') || (sub.style.display && sub.style.display !== 'none'))) return 'settings';
+            return document.body.classList.contains('group-panel-active') ? 'chat' : 'sidebar';
+        }
+
+        function observeChildPanel(module, iframe) {
+            if (!iframe || iframe.__kynExactObserverBound) return;
+            iframe.__kynExactObserverBound = true;
+
+            var attach = function () {
+                var doc;
+                try { doc = iframe.contentDocument; } catch (_) { return; }
+                if (!doc || !doc.body || doc.__kynExactPanelObserverBound) return;
+                doc.__kynExactPanelObserverBound = true;
+
+                var read = function () {
+                    if (module !== normalizeModule(window.__currentPage || '')) return;
+                    var state = module === 'friends' ? visibleFriendState(doc) : visibleGroupState(doc);
+                    var previous = observedChildStates[module];
+                    if (previous == null) { observedChildStates[module] = state; return; }
+                    if (previous === state) return;
+                    observedChildStates[module] = state;
+                    captureAndPush({ v:NAV_VERSION, module:module, screen:state, data:{} });
+                };
+
+                try {
+                    var observer = new MutationObserver(function () { read(); });
+                    observer.observe(doc.body, { subtree:true, childList:true, attributes:true, attributeFilter:['class','style'] });
+                } catch (_) {}
+                read();
+            };
+
+            iframe.addEventListener('load', attach);
+            attach();
+        }
+
         function installExactNavigation() {
             if (exactInstalled) return true;
             if (typeof window.navigateToPage !== 'function' || typeof window.syncBrowserHistoryState !== 'function') return false;
@@ -540,9 +590,7 @@
                 options = options || {};
                 var nextPage = normalizeModule(page);
                 if (!options.fromHistory && !options.exactRestore && !exactRestoring) {
-                    var current = readCurrentState();
-                    var next = { v:NAV_VERSION, module:nextPage, screen:(nextPage === 'tools' ? 'sidebar' : 'sidebar'), data:{} };
-                    captureAndPush(next);
+                    captureAndPush({ v:NAV_VERSION, module:nextPage, screen:(nextPage === 'tools' ? 'sidebar' : 'sidebar'), data:{} });
                 }
                 return originalNavigateToPage.apply(this, arguments);
             };
@@ -551,7 +599,6 @@
             if (typeof originalToolsNavTo === 'function') {
                 window.toolsNavTo = function (page) {
                     if (!exactRestoring) {
-                        ensureInitialState();
                         var nextScreen = String(page || 'home');
                         if (nextScreen === 'home') nextScreen = 'sidebar';
                         captureAndPush({ v:NAV_VERSION, module:'tools', screen:nextScreen, data:{} });
@@ -561,16 +608,10 @@
             }
 
             originalSyncBrowserHistoryState = window.syncBrowserHistoryState;
-            // navigateToPage(), chat/group/status panel events and several call
-            // paths still invoke the legacy helper. Once exact navigation owns
-            // browser history, allowing those extra pushes would create duplicate
-            // Back steps. Keep replaceState available but suppress legacy pushState.
             window.syncBrowserHistoryState = function (page, replaceOnly) {
                 if (exactRestoring || window.__kynExactNavLegacySuppressed !== false) {
                     if (replaceOnly) {
-                        try {
-                            history.replaceState({ appNav:true, exactNav:true, navVersion:NAV_VERSION, nav:cloneState(exactCurrent || readCurrentState()) }, '', window.location.href);
-                        } catch (_) {}
+                        try { history.replaceState({ appNav:true, exactNav:true, navVersion:NAV_VERSION, nav:cloneState(exactCurrent || readCurrentState()) }, '', window.location.href); } catch (_) {}
                     }
                     return;
                 }
@@ -586,22 +627,14 @@
                 var mod = normalizeModule(d.module || '');
                 if (d.type === 'PanelOpened' && mod) {
                     var panel = d.panel || 'panel';
-                    var current = readCurrentState();
                     var next = { v:NAV_VERSION, module:mod, screen:String(panel), data:{} };
-                    if (mod === 'group' && window.__gcCurrentGroup && window.__gcCurrentGroup.id != null) next.data.groupId = window.__gcCurrentGroup.id;
                     captureAndPush(next);
                     return;
                 }
-
                 if (d.type === 'PanelClosed' && mod) {
-                    // A child-side back/close is itself a real transition. Record
-                    // the resulting module/list state as a browser entry so the
-                    // next hardware Back continues to the previous module exactly.
-                    var closedNext = { v:NAV_VERSION, module:mod, screen:'sidebar', data:{} };
-                    captureAndPush(closedNext);
+                    captureAndPush({ v:NAV_VERSION, module:mod, screen:'sidebar', data:{} });
                     return;
                 }
-
                 if (d.type === 'CHAT_OPENED' || d.type === 'CONVERSATION_OPENED') {
                     var ci = d.payload || {};
                     captureAndPush({ v:NAV_VERSION, module:'messages', screen:'chat', data:{ userId:ci.userId || ci.chatId || null, name:ci.name || null } });
@@ -635,6 +668,13 @@
                 }
             }, true);
 
+            // Friend and Group pages are long-lived iframes and do not all emit
+            // standardized panel events. Observe their actual DOM state instead,
+            // but only while that module is visible so background updates cannot
+            // create fake navigation entries.
+            observeChildPanel('friends', document.getElementById('friendsIframe'));
+            observeChildPanel('group', document.getElementById('groupIframe'));
+
             window.addEventListener('popstate', function (event) {
                 if (!event || !event.state || !event.state.exactNav || !event.state.nav) return;
                 event.stopImmediatePropagation();
@@ -649,11 +689,7 @@
                 event.preventDefault();
                 event.stopImmediatePropagation();
                 if (exactStack.length) history.back();
-                else if (typeof originalNavigateToPage === 'function') {
-                    // No in-app entry remains; leave the app's current screen alone
-                    // rather than jumping to an arbitrary module.
-                    try { history.back(); } catch (_) {}
-                }
+                else { try { history.back(); } catch (_) {} }
             }, true);
 
             exactInstalled = true;
