@@ -397,7 +397,15 @@
 
     lowerHand() {
       this._handRaised = false;
-      this._sendGroupEvent('group:call:hand_lowered', {
+      // FIX-LOWER-HAND-WRONG-EVENT-NAME: this sent 'group:call:hand_lowered' —
+      // but the backend (CallSignalingService) only listens for the *inbound*
+      // action name 'group:call:lower_hand'; 'group:call:hand_lowered' is only
+      // the name it relays *outward* to other participants after receiving the
+      // correct inbound event. Sending the outbound name inbound meant the
+      // backend never saw this event at all, so lowering your own hand never
+      // reached anyone else in the call — raiseHand() above already uses the
+      // correct matching pair ('group:call:hand_raised' in both directions).
+      this._sendGroupEvent('group:call:lower_hand', {
         groupId: this._groupId, callId: this._callId,
         userId: this._localUserId, timestamp: Date.now(),
       });

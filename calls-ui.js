@@ -101,6 +101,7 @@ const UIState = {
     selectedContacts: [],
     selectedGroupContacts: [],
     groupCallOption: null,
+    groupCallType: 'voice', // FIX-GROUP-CALL-TYPE: default matches the toggle's default-selected button
     callLink: null,
     
     // Chat and collaboration
@@ -1222,11 +1223,57 @@ window.showInCallScreen   = showInCallScreen;
              (window.callCore.isCoreReady && window.callCore.isCoreReady()));
         
         if (isCoreActive) {
-            startCallWithUser(callData.userId, callData.userName, callData.callType, callData.groupContext || null);
+            if (callData.joinCallId) {
+                joinCallById(callData.joinCallId, callData.callType, callData.userName);
+            } else {
+                startCallWithUser(callData.userId, callData.userName, callData.callType, callData.groupContext || null);
+            }
         } else {
             console.log('[Calls UI] Core not ready, waiting...');
             pendingOpenCall = callData;
             setTimeout(processPendingCall, 500);
+        }
+    }
+
+    // FIX-CALL-LINK-JOIN: joining a call created via a secure call link is not
+    // "dial this user" (there's no single recipient — it's an existing
+    // in-progress room). Registers with the backend (POST /:callId/join —
+    // already existed but nothing in the frontend ever called it) and hands
+    // off to GroupCallEngine.joinGroupCall(), the same real mesh-building
+    // path used when accepting a normal group call invite (see its C-08 FIX
+    // comments in calls-core.part7.js).
+    async function joinCallById(callId, callType, hostName) {
+        try {
+            const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) || (window.config && window.config.apiUrl) || '';
+            const authTok = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
+            const res = await fetch(apiBase + '/api/calls/' + encodeURIComponent(callId) + '/join', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + authTok }
+            });
+            const data = await res.json().catch(() => null);
+            if (!res.ok || !data || data.status !== 'success') {
+                showNotificationInCalls((data && data.message) || 'Could not join this call', 'error');
+                return;
+            }
+
+            window.__callActive = true;
+            if (window.UIState) { window.UIState.callActive = true; window.UIState.callState = 'connected'; }
+            showInCallScreen({ userName: hostName || 'Group Call', callType: callType || 'voice', isGroupCall: true });
+
+            const myUserId = (window.AppState && window.AppState.currentUser && window.AppState.currentUser.id) ||
+                              window.__currentUserId || null;
+            if (!window.__GroupCallEngine) {
+                showNotificationInCalls('Call system not ready — please try again', 'error');
+                return;
+            }
+            await window.__GroupCallEngine.joinGroupCall(callId, callId, myUserId, {
+                isHost: false,
+                video: callType === 'video',
+                displayName: (window.AppState && window.AppState.currentUser && window.AppState.currentUser.username) || 'You',
+            });
+        } catch (err) {
+            console.error('[Calls UI] joinCallById failed:', err);
+            showNotificationInCalls('Could not join this call', 'error');
         }
     }
     
@@ -1280,8 +1327,13 @@ window.showInCallScreen   = showInCallScreen;
         const groupContext = (data.isGroupCall && Array.isArray(data.participantIds) && data.participantIds.length > 0)
             ? { participantIds: data.participantIds, groupId: data.groupId || userId, groupName: data.groupName || userName }
             : null;
-        
-        console.log('[Calls UI][Early] Received OPEN_CALL_WITH_USER:', { userId, userName, callType, returnTo, chatUserId, groupContext });
+
+        // FIX-CALL-LINK-JOIN: distinguishes "join this existing in-progress
+        // call" (came from a secure call link, already admitted) from
+        // "dial this user" — both ride the same OPEN_CALL_WITH_USER message.
+        const joinCallId = data.joinCallId || null;
+
+        console.log('[Calls UI][Early] Received OPEN_CALL_WITH_USER:', { userId, userName, callType, returnTo, chatUserId, groupContext, joinCallId });
         
         if (!userId) return;
         
@@ -1291,7 +1343,7 @@ window.showInCallScreen   = showInCallScreen;
         window.__callOriginChatUserId = chatUserId || userId;
         window.__callOriginChatUserName = userName || null;
         
-        pendingOpenCall = { userId, userName, callType, groupContext };
+        pendingOpenCall = { userId, userName, callType, groupContext, joinCallId };
         
         const isCoreActive = window.callCore && 
             ((window.callCore.getLifecycleState && window.callCore.getLifecycleState() === 'ACTIVE') ||
@@ -3039,10 +3091,14 @@ async function initiateCallWithPendingUser() {
                 startVoiceCallBtn: '#startVoiceCallBtn',
                 startVideoCallBtn: '#startVideoCallBtn',
                 startGroupCallBtn: '#startGroupCallBtn',
+                startGroupCallBtnLabel: '#startGroupCallBtnLabel',
                 instantGroupOption: '#instantGroupOption',
                 scheduledGroupOption: '#scheduledGroupOption',
+                groupCallTypeVoice: '#groupCallTypeVoice',
+                groupCallTypeVideo: '#groupCallTypeVideo',
                 
                 copyLinkBtn: '#copyLinkBtn',
+                copyPasscodeBtn: '#copyPasscodeBtn',
                 shareLinkBtn: '#shareLinkBtn',
                 generateVoiceLinkBtn: '#generateVoiceLinkBtn',
                 generateVideoLinkBtn: '#generateVideoLinkBtn',
@@ -7317,6 +7373,15 @@ handleContactItemClick: function(e) {
             if (elements.copyLinkBtn) {
                 this.addListener(elements.copyLinkBtn, 'click', UIEventHandlers.copyCallLink);
             }
+            if (elements.copyPasscodeBtn) {
+                this.addListener(elements.copyPasscodeBtn, 'click', function () {
+                    var el = document.getElementById('callLinkPasscode');
+                    var code = el && el.textContent;
+                    if (code && navigator.clipboard) {
+                        navigator.clipboard.writeText(code).then(function () { showNotification('Passcode copied!', 'success'); });
+                    }
+                });
+            }
             
             if (elements.shareLinkBtn) {
                 this.addListener(elements.shareLinkBtn, 'click', UIEventHandlers.shareCallLink);
@@ -7328,6 +7393,16 @@ handleContactItemClick: function(e) {
             
             if (elements.scheduledGroupOption) {
                 this.addListener(elements.scheduledGroupOption, 'click', UIEventHandlers.selectGroupOption);
+            }
+
+            // FIX-GROUP-CALL-TYPE: wire the new Voice/Video toggle in the group-call
+            // modal. Previously there was no way to choose — startGroupCall() always
+            // hardcoded 'voice'.
+            if (elements.groupCallTypeVoice) {
+                this.addListener(elements.groupCallTypeVoice, 'click', () => UIEventHandlers.selectGroupCallType('voice'));
+            }
+            if (elements.groupCallTypeVideo) {
+                this.addListener(elements.groupCallTypeVideo, 'click', () => UIEventHandlers.selectGroupCallType('video'));
             }
             
             if (elements.muteBtn) {
@@ -7701,6 +7776,21 @@ handleContactItemClick: function(e) {
             if (elements.startGroupCallBtn) {
                 elements.startGroupCallBtn.disabled = false;
             }
+            // FIX-GROUP-CALL-SCHEDULE: reflect the chosen mode in the button label so
+            // it's clear "Schedule" won't start the call immediately.
+            if (elements.startGroupCallBtnLabel) {
+                elements.startGroupCallBtnLabel.textContent =
+                    option.id === 'scheduledGroupOption' ? 'Schedule Group Call' : 'Start Group Call';
+            }
+        },
+
+        // FIX-GROUP-CALL-TYPE: tracks which call type (voice/video) the group-call
+        // modal's toggle currently has selected. Defaults to 'voice' to match the
+        // toggle's default-selected button.
+        selectGroupCallType: function(type) {
+            UIState.groupCallType = type;
+            if (elements.groupCallTypeVoice) elements.groupCallTypeVoice.classList.toggle('selected', type === 'voice');
+            if (elements.groupCallTypeVideo) elements.groupCallTypeVideo.classList.toggle('selected', type === 'video');
         },
         
         getSelectedContacts: function() {
@@ -7794,6 +7884,16 @@ handleContactItemClick: function(e) {
                 showNotification('Please select at least one contact', 'warning');
                 return;
             }
+
+            const callType = UIState.groupCallType || 'voice';
+
+            // FIX-GROUP-CALL-SCHEDULE-BRANCH: previously both "Instant" and "Schedule"
+            // fell through to the exact same start-now code path below — selecting
+            // "Schedule Group Call" had no distinct effect at all. Branch here.
+            if (UIState.groupCallOption === 'scheduledGroupOption') {
+                UIEventHandlers.openScheduleGroupCallModal(selectedContacts, callType);
+                return;
+            }
             
             // Check for active call
             if (coreInstance && coreInstance.isInCall && coreInstance.isInCall()) {
@@ -7804,7 +7904,7 @@ handleContactItemClick: function(e) {
             if (coreInstance && coreInstance.startGroupCall) {
                 showNotification('Starting group call...', 'info');
                 
-                coreInstance.startGroupCall(selectedContacts, 'voice')
+                coreInstance.startGroupCall(selectedContacts, callType)
                     .then(result => {
                         if (result.success) {
                             showNotification('Group call started', 'success');
@@ -7821,6 +7921,72 @@ handleContactItemClick: function(e) {
             }
             
             UIEventHandlers.closeNewCallModal();
+        },
+
+        // FIX-GROUP-CALL-SCHEDULE: collects a date/time + title and POSTs to the
+        // real backend endpoint (POST /api/calls/schedule) with the selected
+        // contacts as participantIds. The older _openScheduleCallModal (calls.html,
+        // used for the single-recipient "+Schedule" button in Recent Calls) posted
+        // to '/api/calls/scheduled' — a URL the backend never defines (the actual
+        // route is '/api/calls/schedule', singular) — and never sent participantIds
+        // at all, so scheduling silently 404'd. This one calls the real endpoint
+        // with the real required fields.
+        openScheduleGroupCallModal: function(selectedContacts, callType) {
+            UIEventHandlers.closeNewCallModal();
+
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;';
+            modal.innerHTML = '<div style="background:#1e293b;border-radius:20px;padding:24px;width:320px;color:#fff;">' +
+                '<h3 style="margin:0 0 16px;font-size:16px;">Schedule Group Call</h3>' +
+                '<input id="gSchedTitle" placeholder="Title (optional)" style="width:100%;padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.06);color:#fff;font-size:13px;box-sizing:border-box;margin-bottom:10px;">' +
+                '<input id="gSchedTime" type="datetime-local" style="width:100%;padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.06);color:#fff;font-size:13px;box-sizing:border-box;margin-bottom:16px;">' +
+                '<div style="display:flex;gap:8px;">' +
+                '<button id="gSchedCancel" style="flex:1;padding:10px;border-radius:10px;border:none;background:rgba(255,255,255,0.08);color:#9ca3af;cursor:pointer;">Cancel</button>' +
+                '<button id="gSchedOk" style="flex:1;padding:10px;border-radius:10px;border:none;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;font-weight:700;cursor:pointer;">Schedule</button>' +
+                '</div></div>';
+            document.body.appendChild(modal);
+            modal.querySelector('#gSchedCancel').onclick = function () { modal.remove(); };
+            modal.querySelector('#gSchedOk').onclick = async function () {
+                const title = modal.querySelector('#gSchedTitle').value || 'Group Call';
+                const time  = modal.querySelector('#gSchedTime').value;
+                if (!time) { showNotification('Please pick a date & time', 'warning'); return; }
+                const scheduledAt = new Date(time);
+                if (isNaN(scheduledAt.getTime()) || scheduledAt <= new Date()) {
+                    showNotification('Scheduled time must be in the future', 'warning');
+                    return;
+                }
+                const participantIds = selectedContacts.map(c => c.id || c.userId || c);
+                try {
+                    const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) || (window.config && window.config.apiUrl) || '';
+                    const token = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
+                    const res = await fetch(apiBase + '/api/calls/schedule', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                        body: JSON.stringify({ participantIds, callType, scheduledAt: scheduledAt.toISOString(), title })
+                    });
+                    const data = await res.json().catch(() => null);
+                    if (res.ok && data && data.success) {
+                        showNotification('Group call scheduled', 'success');
+                        if (typeof window._addScheduledCall === 'function' && data.data && data.data.call) {
+                            const c = data.data.call;
+                            window._addScheduledCall({
+                                id: c.id,
+                                scheduledAt: c.scheduledAt,
+                                title: c.scheduledTitle || title,
+                                callType: c.type || callType,
+                                isGroupCall: true,
+                                participantIds: participantIds
+                            });
+                        }
+                    } else {
+                        showNotification((data && data.message) || 'Failed to schedule call', 'error');
+                    }
+                } catch (err) {
+                    showNotification('Failed to schedule call', 'error');
+                    UILogger.error('Schedule group call failed', err);
+                }
+                modal.remove();
+            };
         },
         
         showCallUI: function() {
@@ -8115,15 +8281,12 @@ handleContactItemClick: function(e) {
                 });
             };
 
-            // Use DeviceMediaManager.AudioOutputManager if available
-            if (window.__DeviceMediaManager && window.__DeviceMediaManager.audioOutput &&
-                typeof window.__DeviceMediaManager.audioOutput.getDevices === 'function') {
-                window.__DeviceMediaManager.audioOutput.getDevices()
-                    .then(_routeAudio)
-                    .catch(function() {
-                        audioEls.forEach(function(el) { el.volume = UIState.isSpeakerOn ? 1.0 : 0.7; });
-                    });
-            } else if (navigator.mediaDevices && typeof navigator.mediaDevices.enumerateDevices === 'function') {
+            // FIX-DEAD-DEVICEMEDIAMANAGER-BRANCH: window.__DeviceMediaManager is the
+            // unused "Phase 3" shadow engine (see calls-core.part4.js's comment on its
+            // sibling PeerConnectionManager for the root cause) — it's never populated,
+            // so this branch never actually ran; the real device list always came from
+            // the standard browser API below. Call it directly.
+            if (navigator.mediaDevices && typeof navigator.mediaDevices.enumerateDevices === 'function') {
                 navigator.mediaDevices.enumerateDevices()
                     .then(_routeAudio)
                     .catch(function(){});
@@ -9224,24 +9387,57 @@ declineIncomingCall: async function() {
             UIEventHandlers.generateCallLink('video');
         },
         
-        generateCallLink: function(type) {
+        // FIX-CALL-LINK-NOT-REAL: this used to build a purely client-side,
+        // never-persisted "link" (`call-<6 random base36 chars>`) — nothing on
+        // the backend ever recorded it, so it never actually admitted anyone,
+        // wasn't unique in any meaningful/collision-safe sense, and had no
+        // passcode or approval gate at all. Now backed by POST /api/calls/link:
+        // the backend mints a fresh crypto-random token every single call (so
+        // two different generations — by the same or different users — always
+        // get two different links), optionally hashes a passcode, and defaults
+        // to requiring host approval before anyone is actually admitted.
+        generateCallLink: async function(type) {
             if (!canPerformAction('generateCallLink')) return;
-            
-            const callId = 'call-' + Math.random().toString(36).substr(2, 9);
-            const baseUrl = window.location.origin + window.location.pathname;
-            const callUrl = `${baseUrl}?call=${callId}&type=${type}`;
-            
-            UIState.callLink = callUrl;
-            
-            if (elements.callLinkInput) {
-                elements.callLinkInput.value = callUrl;
+
+            const requirePasscode = !!(document.getElementById('linkPasscodeToggle') && document.getElementById('linkPasscodeToggle').checked);
+            const requireApproval = !!(document.getElementById('linkApprovalToggle') && document.getElementById('linkApprovalToggle').checked);
+            // Simple 6-digit passcode — easy to read aloud/type, still a real
+            // server-side-checked gate on top of the unguessable link token.
+            const passcode = requirePasscode ? String(Math.floor(100000 + Math.random() * 900000)) : null;
+
+            try {
+                const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) || (window.config && window.config.apiUrl) || '';
+                const token = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
+                const res = await fetch(apiBase + '/api/calls/link', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                    body: JSON.stringify({ callType: type === 'video' ? 'video' : 'audio', passcode, requireApproval })
+                });
+                const data = await res.json().catch(() => null);
+                if (!res.ok || !data || !data.success) {
+                    showNotification((data && data.message) || 'Failed to generate call link', 'error');
+                    return;
+                }
+
+                const callUrl = window.location.origin + data.data.joinPath;
+                UIState.callLink = callUrl;
+                UIState.callLinkCallId = data.data.callId;
+
+                if (elements.callLinkInput) elements.callLinkInput.value = callUrl;
+                const passRow = document.getElementById('callLinkPasscodeRow');
+                const passEl = document.getElementById('callLinkPasscode');
+                if (passcode && passRow && passEl) {
+                    passEl.textContent = passcode;
+                    passRow.style.display = 'flex';
+                } else if (passRow) {
+                    passRow.style.display = 'none';
+                }
+
+                showNotification(`${type === 'voice' ? 'Voice' : 'Video'} call link generated`, 'success');
+            } catch (err) {
+                showNotification('Failed to generate call link', 'error');
+                UILogger.error('generateCallLink failed', err);
             }
-            
-            if (coreInstance && coreInstance.createCallLink) {
-                coreInstance.createCallLink(type);
-            }
-            
-            showNotification(`${type === 'voice' ? 'Voice' : 'Video'} call link generated`, 'success');
         },
         
         copyCallLink: function() {
@@ -12474,21 +12670,27 @@ var _KynScreenAnnotation = (function() {
     if (_blurActive) {
       // Stop blur — restore original track
       _stopBlur();
-      if (_origStream && window.__DeviceMediaManager) {
+      if (_origStream) {
         try {
           var origTrack = _origStream.getVideoTracks()[0];
-          if (origTrack && window.__PeerConnectionManager) {
-            var senders = [];
-            if (window.__PeerConnectionManager._peers) {
-              window.__PeerConnectionManager._peers.forEach(function(session) {
-                if (session._pc) {
-                  session._pc.getSenders().filter(function(s) {
-                    return s.track && s.track.kind === 'video';
-                  }).forEach(function(s) { senders.push(s); });
-                }
-              });
+          // FIX-BLUR-NEVER-REACHES-REMOTE: covers both call shapes —
+          // 1:1 calls use the single WebRTCManager peer connection
+          // (window.callsCoreReplaceVideoTrack, same helper proven for screen
+          // share/camera switching); group calls use N mesh connections
+          // managed by PeerConnectionManager (real and populated once
+          // GroupCallEngine.joinGroupCall() has run — see its
+          // replaceTrackForAll(), already used for the equivalent
+          // camera-switch-in-group-calls fix). Previously this only ever
+          // tried to manually walk window.__PeerConnectionManager._peers,
+          // which is empty during a 1:1 call, so on 1:1 calls it was a no-op;
+          // now both paths are covered explicitly.
+          if (origTrack) {
+            if (typeof window.callsCoreReplaceVideoTrack === 'function') {
+              window.callsCoreReplaceVideoTrack(origTrack);
             }
-            await Promise.all(senders.map(function(s) { return s.replaceTrack(origTrack).catch(function(){}); }));
+            if (window.__PeerConnectionManager && typeof window.__PeerConnectionManager.replaceTrackForAll === 'function') {
+              window.__PeerConnectionManager.replaceTrackForAll('video', origTrack);
+            }
           }
         } catch(e) {}
       }
@@ -12506,9 +12708,14 @@ var _KynScreenAnnotation = (function() {
     var localVideo = document.getElementById('localVideo') || document.getElementById('pipVideo');
     var localStream = localVideo && localVideo.srcObject;
     if (!localStream) {
-      // Try to get from DeviceMediaManager
-      if (window.__DeviceMediaManager && window.__DeviceMediaManager.getStream) {
-        localStream = window.__DeviceMediaManager.getStream();
+      // FIX-BLUR-DEAD-FALLBACK: the old fallback called
+      // window.__DeviceMediaManager.getStream() — that method doesn't exist on
+      // DeviceMediaManager at all (its real method is getLocalStream()), so this
+      // branch was always silently skipped regardless of call state. Use the
+      // real method name as the fallback instead of dropping it entirely, since
+      // DeviceMediaManager genuinely does hold the live stream during group calls.
+      if (window.__DeviceMediaManager && typeof window.__DeviceMediaManager.getLocalStream === 'function') {
+        localStream = window.__DeviceMediaManager.getLocalStream();
       }
     }
     if (!localStream) {
@@ -12523,21 +12730,14 @@ var _KynScreenAnnotation = (function() {
     _origStream = localStream;
     var blurredTrack = _startBlur(videoTrack, level || _blurLevel);
 
-    // Replace track in all peer connections
-    if (blurredTrack && window.__PeerConnectionManager) {
-      try {
-        var senders = [];
-        if (window.__PeerConnectionManager._peers) {
-          window.__PeerConnectionManager._peers.forEach(function(session) {
-            if (session._pc) {
-              session._pc.getSenders().filter(function(s) {
-                return s.track && s.track.kind === 'video';
-              }).forEach(function(s) { senders.push(s); });
-            }
-          });
-        }
-        await Promise.all(senders.map(function(s) { return s.replaceTrack(blurredTrack).catch(function(){}); }));
-      } catch(e) { console.warn('[BackgroundBlur] replaceTrack error:', e.message); }
+    // Replace track in the real peer connection(s) — see fix note above.
+    if (blurredTrack) {
+      if (typeof window.callsCoreReplaceVideoTrack === 'function') {
+        try { window.callsCoreReplaceVideoTrack(blurredTrack); } catch(e) { console.warn('[BackgroundBlur] replaceTrack error:', e.message); }
+      }
+      if (window.__PeerConnectionManager && typeof window.__PeerConnectionManager.replaceTrackForAll === 'function') {
+        try { window.__PeerConnectionManager.replaceTrackForAll('video', blurredTrack); } catch(e) {}
+      }
     }
 
     if (btn) {
@@ -12715,18 +12915,19 @@ registerProcessor('noise-gate-processor', NoiseGateProcessor);
 
     if (_noiseActive) {
       _stopNoiseCancellation();
-      // Restore original audio track
-      if (_origAudioTrack && window.__PeerConnectionManager) {
-        var origTrack = _origAudioTrack;
-        if (window.__PeerConnectionManager._peers) {
-          window.__PeerConnectionManager._peers.forEach(function(session) {
-            if (session._pc) {
-              session._pc.getSenders()
-                .filter(function(s) { return s.track && s.track.kind === 'audio'; })
-                .forEach(function(s) { s.replaceTrack(origTrack).catch(function(){}); });
-            }
-          });
-        }
+      // FIX-NOISE-CANCEL-NEVER-REACHES-REMOTE: same dual-path fix as background
+      // blur above — restore on the 1:1 peer connection AND on every group-call
+      // mesh session (PeerConnectionManager.replaceTrackForAll is genuinely
+      // populated once GroupCallEngine.joinGroupCall() has run).
+      if (_origAudioTrack) {
+        try {
+          var pc = window.__CallsCoreShared && window.__CallsCoreShared.WebRTCManager && window.__CallsCoreShared.WebRTCManager._peerConnection;
+          var audioSender = pc && pc.getSenders().find(function(s) { return s.track && s.track.kind === 'audio'; });
+          if (audioSender) audioSender.replaceTrack(_origAudioTrack).catch(function(){});
+          if (window.__PeerConnectionManager && typeof window.__PeerConnectionManager.replaceTrackForAll === 'function') {
+            window.__PeerConnectionManager.replaceTrackForAll('audio', _origAudioTrack);
+          }
+        } catch(_) {}
       }
       if (btn) {
         btn.classList.remove('active');
@@ -12739,13 +12940,15 @@ registerProcessor('noise-gate-processor', NoiseGateProcessor);
     }
 
     // Get current local audio track
-    var localStream = null;
-    if (window.__DeviceMediaManager && window.__DeviceMediaManager.getStream) {
-      localStream = window.__DeviceMediaManager.getStream();
-    }
-    if (!localStream) {
-      var lv = document.getElementById('localVideo');
-      localStream = lv && lv.srcObject;
+    // FIX-NOISE-CANCEL-DEAD-FALLBACK: the old fallback called
+    // window.__DeviceMediaManager.getStream() — that method doesn't exist
+    // (real name is getLocalStream()) — use the real method name instead of
+    // dropping the fallback, since it genuinely holds the live stream in a
+    // group call.
+    var localVideo2 = document.getElementById('localVideo');
+    var localStream = localVideo2 && localVideo2.srcObject;
+    if (!localStream && window.__DeviceMediaManager && typeof window.__DeviceMediaManager.getLocalStream === 'function') {
+      localStream = window.__DeviceMediaManager.getLocalStream();
     }
     if (!localStream) return;
 
@@ -12758,16 +12961,15 @@ registerProcessor('noise-gate-processor', NoiseGateProcessor);
 
     _noiseActive = true;
 
-    // Replace audio track in all peer connections
-    if (window.__PeerConnectionManager && window.__PeerConnectionManager._peers) {
-      window.__PeerConnectionManager._peers.forEach(function(session) {
-        if (session._pc) {
-          session._pc.getSenders()
-            .filter(function(s) { return s.track && s.track.kind === 'audio'; })
-            .forEach(function(s) { s.replaceTrack(processedTrack).catch(function(){}); });
-        }
-      });
-    }
+    // Replace audio track in the real peer connection(s) — see fix note above.
+    try {
+      var pc2 = window.__CallsCoreShared && window.__CallsCoreShared.WebRTCManager && window.__CallsCoreShared.WebRTCManager._peerConnection;
+      var audioSender2 = pc2 && pc2.getSenders().find(function(s) { return s.track && s.track.kind === 'audio'; });
+      if (audioSender2) audioSender2.replaceTrack(processedTrack).catch(function(){});
+      if (window.__PeerConnectionManager && typeof window.__PeerConnectionManager.replaceTrackForAll === 'function') {
+        window.__PeerConnectionManager.replaceTrackForAll('audio', processedTrack);
+      }
+    } catch(_) {}
 
     if (btn) {
       btn.classList.add('active');

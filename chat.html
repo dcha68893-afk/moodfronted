@@ -5927,6 +5927,11 @@
                     const p = data.payload || {};
                     const _swReturnTo = p.returnTo || window.__currentPage || 'messages';
                     const _swExtra = p.groupId ? { groupId: p.groupId, groupName: p.groupName || p.userName, isGroupCall: true } : {};
+                    // FIX-CALL-LINK-JOIN: forward joinCallId through so calls-ui.js can
+                    // tell "join this existing in-progress call" apart from "start a new
+                    // outgoing call to userId" — both currently ride the same
+                    // OPEN_CALL_WITH_USER message, distinguished only by this field.
+                    if (p.joinCallId) { _swExtra.joinCallId = p.joinCallId; }
                     __dispatchCallToIframe(p.userId, p.userName || 'User', p.callType || 'voice', _swReturnTo, p.chatUserId || p.userId, 'messages-module', _swExtra);
                     return;
                 }
@@ -9244,13 +9249,37 @@ window.__groupHdrHide = hideGroupHeader;
                 hideChatHeader();
             });
         }
+        // FIX-DEAD-CALL-BUTTONS: these used to postToMessage('PARENT_CHAT_ACTION', ...)
+        // into #messagesIframe (message.html). Nothing in message.html — or anywhere
+        // else in the app — ever listened for 'PARENT_CHAT_ACTION', so clicking these
+        // icons silently did nothing. message.html's OWN in-conversation call buttons
+        // (voiceCallBtn/videoCallBtn) already dispatch a call correctly by posting
+        // 'SWITCH_MODULE' to this same top-level window (handled at the
+        // "SWITCH_MODULE && module === 'calls'" listener further down this file,
+        // which calls __dispatchCallToIframe — the single real call-dispatch path).
+        // Reuse that exact mechanism here instead of a second, dead one, using the
+        // currently-open chat's user id/name that CHAT_OPENED already records on
+        // window.__lastOpenChatUserId / window.__lastOpenChatName.
+        function _dispatchHeaderCall(callType) {
+            var userId = window.__lastOpenChatUserId;
+            if (!userId) {
+                console.warn('[chat.html] Call button clicked but no chat is currently open');
+                return;
+            }
+            var userName = window.__lastOpenChatName || 'User';
+            window.postMessage({
+                type: 'SWITCH_MODULE',
+                module: 'calls',
+                payload: { userId: userId, userName: userName, callType: callType, returnTo: 'messages' }
+            }, '*');
+        }
         var call = document.getElementById('hdrChatCall');
         if (call && !call._chw) { call._chw = true;
-            call.addEventListener('click', function () { postToMessage('PARENT_CHAT_ACTION', { action: 'call' }); });
+            call.addEventListener('click', function () { _dispatchHeaderCall('voice'); });
         }
         var vid = document.getElementById('hdrChatVideo');
         if (vid && !vid._chw) { vid._chw = true;
-            vid.addEventListener('click', function () { postToMessage('PARENT_CHAT_ACTION', { action: 'video' }); });
+            vid.addEventListener('click', function () { _dispatchHeaderCall('video'); });
         }
         var more = document.getElementById('hdrChatMore');
         if (more && !more._chw) { more._chw = true;
@@ -9508,5 +9537,140 @@ window.__groupHdrHide = hideGroupHeader;
     <!-- Push notifications + multi-device sync (main shell) -->
     <script src="js/push-init.js" defer></script>
     <script src="js/multi-device-sync.js" defer></script>
+
+    <!-- FIX-CALL-LINK-SECURITY: handles the handoff from join-call.html (a
+         secure call link's landing page). Resolves the link token, prompts
+         for a passcode if the host set one, submits the join request, and —
+         if the host requires approval — shows a waiting screen and listens
+         for the real admit/reject events before actually opening the call.
+         This is the piece that makes "only people I gave the link to, who
+         also know the passcode, and who I've approved" actually true instead
+         of just a UI label. -->
+    <script>
+    (function () {
+        function getParam(name) {
+            try { return new URLSearchParams(window.location.search).get(name); } catch (_) { return null; }
+        }
+        var joinToken = getParam('joinCallToken');
+        if (!joinToken) {
+            try {
+                joinToken = localStorage.getItem('pendingJoinCallToken');
+                if (joinToken) localStorage.removeItem('pendingJoinCallToken');
+            } catch (_) {}
+        }
+        if (!joinToken) return;
+
+        // Strip the token from the URL immediately so refreshing the page
+        // doesn't re-trigger this flow.
+        try {
+            var url = new URL(window.location.href);
+            if (url.searchParams.has('joinCallToken')) {
+                url.searchParams.delete('joinCallToken');
+                window.history.replaceState({}, '', url.toString());
+            }
+        } catch (_) {}
+
+        var authTok = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
+
+        function showModal(html) {
+            var old = document.getElementById('joinCallLinkModal');
+            if (old) old.remove();
+            var modal = document.createElement('div');
+            modal.id = 'joinCallLinkModal';
+            modal.style.cssText = 'position:fixed;inset:0;z-index:999999;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;';
+            modal.innerHTML = '<div style="background:#1e293b;border-radius:20px;padding:28px;width:320px;max-width:90vw;color:#fff;text-align:center;font-family:inherit;">' + html + '</div>';
+            document.body.appendChild(modal);
+            return modal;
+        }
+
+        function openCall(callId, hostName, callType) {
+            window.postMessage({
+                type: 'SWITCH_MODULE',
+                module: 'calls',
+                payload: { userId: callId, userName: hostName || 'Call', callType: callType, returnTo: 'messages', joinCallId: callId }
+            }, '*');
+        }
+
+        fetch('/api/calls/link/' + encodeURIComponent(joinToken), { headers: { 'Authorization': 'Bearer ' + authTok } })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d || !d.success) {
+                    var m = showModal('<p>This call link is no longer valid.</p><button id="jclClose" style="margin-top:14px;padding:9px 18px;border-radius:10px;border:none;background:#667eea;color:#fff;font-weight:600;cursor:pointer;">OK</button>');
+                    document.getElementById('jclClose').onclick = function () { m.remove(); };
+                    return;
+                }
+                var info = d.data;
+                if (info.alreadyJoined) { openCall(info.callId, info.hostName, info.callType); return; }
+
+                var passField = info.requiresPasscode
+                    ? '<input id="jclPasscode" type="text" inputmode="numeric" placeholder="Enter passcode" style="width:100%;padding:11px;border-radius:10px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.06);color:#fff;font-size:16px;text-align:center;letter-spacing:3px;box-sizing:border-box;margin:14px 0;">'
+                    : '<div style="height:6px;"></div>';
+
+                var modal = showModal(
+                    '<div style="width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#667eea,#764ba2);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;font-size:22px;">' +
+                    (info.callType === 'video' ? '📹' : '📞') + '</div>' +
+                    '<h3 style="margin:0 0 4px;font-size:17px;">' + String(info.hostName || 'Someone').replace(/</g, '&lt;') + '</h3>' +
+                    '<p style="color:#9ca3af;font-size:13px;margin:0;">invited you to a ' + (info.callType === 'video' ? 'video' : 'voice') + ' call</p>' +
+                    passField +
+                    '<div style="display:flex;gap:8px;margin-top:8px;">' +
+                    '<button id="jclCancel" style="flex:1;padding:11px;border-radius:10px;border:none;background:rgba(255,255,255,0.08);color:#9ca3af;font-weight:600;cursor:pointer;">Cancel</button>' +
+                    '<button id="jclJoin" style="flex:1;padding:11px;border-radius:10px;border:none;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;font-weight:700;cursor:pointer;">Join</button>' +
+                    '</div>'
+                );
+
+                document.getElementById('jclCancel').onclick = function () { modal.remove(); };
+                document.getElementById('jclJoin').onclick = function () {
+                    var passcode = info.requiresPasscode ? ((document.getElementById('jclPasscode') || {}).value || '') : undefined;
+                    fetch('/api/calls/link/' + encodeURIComponent(joinToken) + '/join', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + authTok },
+                        body: JSON.stringify({ passcode: passcode })
+                    }).then(function (r) { return r.json(); }).then(function (jd) {
+                        if (!jd || !jd.success) { alert((jd && jd.message) || 'Could not join this call'); return; }
+
+                        if (jd.data.status === 'approved') {
+                            modal.remove();
+                            openCall(jd.data.callId, info.hostName, info.callType);
+                            return;
+                        }
+
+                        // Waiting for host approval — reuses the same
+                        // waiting-room admit/reject events the host's
+                        // Admit/Deny buttons in calls.html trigger.
+                        var callIdToWatch = jd.data.callId;
+                        modal.innerHTML =
+                            '<h3 style="margin:0 0 14px;">Waiting for ' + String(info.hostName || 'the host').replace(/</g, '&lt;') + ' to let you in…</h3>' +
+                            '<div style="width:30px;height:30px;border:3px solid rgba(255,255,255,0.2);border-top-color:#667eea;border-radius:50%;margin:0 auto;animation:jclspin 0.8s linear infinite;"></div>' +
+                            '<style>@keyframes jclspin{to{transform:rotate(360deg)}}</style>' +
+                            '<button id="jclCancelWait" style="margin-top:18px;padding:9px 18px;border-radius:10px;border:none;background:rgba(255,255,255,0.08);color:#9ca3af;font-weight:600;cursor:pointer;">Cancel</button>';
+
+                        function cleanup() {
+                            if (window.wsService && typeof window.wsService.off === 'function') {
+                                try { window.wsService.off('call:admitted', onAdmitted); } catch (_) {}
+                                try { window.wsService.off('call:rejected_from_waiting_room', onRejected); } catch (_) {}
+                            }
+                        }
+                        function onAdmitted(payload) {
+                            if (String((payload || {}).callId) !== String(callIdToWatch)) return;
+                            cleanup(); modal.remove();
+                            openCall(callIdToWatch, info.hostName, info.callType);
+                        }
+                        function onRejected(payload) {
+                            if (String((payload || {}).callId) !== String(callIdToWatch)) return;
+                            cleanup();
+                            var m2 = showModal('<p>' + String(info.hostName || 'The host').replace(/</g, '&lt;') + ' declined your request to join.</p><button id="jclClose2" style="margin-top:14px;padding:9px 18px;border-radius:10px;border:none;background:#667eea;color:#fff;font-weight:600;cursor:pointer;">OK</button>');
+                            document.getElementById('jclClose2').onclick = function () { m2.remove(); };
+                        }
+                        document.getElementById('jclCancelWait').onclick = function () { cleanup(); modal.remove(); };
+                        if (window.wsService && typeof window.wsService.on === 'function') {
+                            window.wsService.on('call:admitted', onAdmitted);
+                            window.wsService.on('call:rejected_from_waiting_room', onRejected);
+                        }
+                    }).catch(function () { alert('Could not join this call'); });
+                };
+            })
+            .catch(function () {});
+    })();
+    </script>
 </body>
 </html>

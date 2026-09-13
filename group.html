@@ -2855,7 +2855,16 @@ function hookRT(){
             // explicit-navigation message from status/messages-style back flows.
             if(d.type==='GO_BACK_TO_LIST'||d.type==='GROUP_LIST_SHOWN'){closePanel();return;}
             if(d.type==='PARENT_GROUP_ACTION'){var a=d.payload&&d.payload.action;if(a==='leave')doLeave();else if(a==='delete')doDelete();else if(a)openSub(a);return;}
-            if(d.type==='PARENT_GROUP_CALL'){var ct=(d.payload&&d.payload.type)||'voice';var grp=window.__gcCurGroup;if(!grp)return;try{if(window.parent&&window.parent.__dispatchCallToIframe){window.parent.__dispatchCallToIframe(grp.id,grp.name,ct,'group',grp.id,'group-hdr');return;}}catch(e){}try{window.parent.postMessage({type:'INITIATE_CALL',payload:{userId:grp.id,userName:grp.name,callType:ct,isGroup:true,groupId:grp.id,returnTo:'group'}},'*');}catch(e){}return;}
+            // FIX-GROUP-CALL-DEAD-CLICKS: this used to read window.__gcCurGroup directly
+            // and silently `return` if it wasn't set yet (same bug class already fixed
+            // for the menu items below via _gcResolveGroupThen — see the comment there).
+            // It also tried window.parent.__dispatchCallToIframe, a function chat.html
+            // never actually exposes on window — that branch always threw, was caught,
+            // and fell through to the postMessage below anyway, so it was dead code.
+            // Use the shared resolver (falls back to URL param / GroupCore / a fresh
+            // /groups/:id fetch) so the call buttons work even on first paint, and drop
+            // the dead branch.
+            if(d.type==='PARENT_GROUP_CALL'){var ct=(d.payload&&d.payload.type)||'voice';_gcResolveGroupThen(function(grp){if(!grp)return;try{window.parent.postMessage({type:'INITIATE_CALL',payload:{userId:grp.id,userName:grp.name,callType:ct,isGroup:true,groupId:grp.id,returnTo:'group'}},'*');}catch(e){}});return;}
             if(d.type==='PARENT_REFRESH_GROUPS'){var gc3=gc();if(gc3&&typeof gc3.requestGroupList==='function')gc3.requestGroupList().catch(function(){});return;}
             // FIX (VERIFIED-MISSING-DEEP-LINK: group push notification never
             // opened a group): counterpart to chat.html's 'kyn:openGroup'

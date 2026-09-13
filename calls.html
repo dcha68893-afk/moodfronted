@@ -2903,10 +2903,21 @@ window.__CALLS_IFRAME__ = {
                     <div class="contacts-list" id="groupContactsList" style="max-height: 200px;">
                         <!-- Group contacts will be loaded dynamically -->
                     </div>
+                    <!-- FIX-GROUP-CALL-TYPE: the group call flow previously had no way to pick
+                         voice vs video — startGroupCall() silently hardcoded 'voice' regardless
+                         of what the person wanted. Mirrors the Direct tab's voice/video choice. -->
+                    <div class="group-call-type-toggle" style="display:flex;gap:8px;margin-top:14px;">
+                        <button type="button" class="option-item group-call-type-btn selected" id="groupCallTypeVoice" data-call-type="voice" style="flex:1;text-align:center;">
+                            <i class="fas fa-phone"></i> Voice
+                        </button>
+                        <button type="button" class="option-item group-call-type-btn" id="groupCallTypeVideo" data-call-type="video" style="flex:1;text-align:center;">
+                            <i class="fas fa-video"></i> Video
+                        </button>
+                    </div>
                     <div class="quick-actions" style="margin-top: 20px; padding: 0;">
                         <button class="quick-action-btn" id="startGroupCallBtn" disabled>
                             <i class="fas fa-users quick-action-icon"></i>
-                            <span class="quick-action-text">Start Group Call</span>
+                            <span class="quick-action-text" id="startGroupCallBtnLabel">Start Group Call</span>
                         </button>
                     </div>
                 </div>
@@ -2918,8 +2929,24 @@ window.__CALLS_IFRAME__ = {
                             <i class="fas fa-link"></i>
                         </div>
                         <h3>Create a Call Link</h3>
-                        <p style="margin-bottom: 20px; color: var(--text-secondary);">Generate a shareable link that anyone can use to join your call</p>
-                        <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+                        <p style="margin-bottom: 20px; color: var(--text-secondary);">Generate a secure, one-time link. Only people you send it to can join — and only after you approve them.</p>
+                        <!-- FIX-CALL-LINK-SECURITY: previously this tab just built
+                             `${origin}?call=call-<random6chars>` entirely client-side —
+                             no backend record, no passcode, no approval, and nothing
+                             stopped anyone from guessing/editing the `call=` query
+                             param to land in someone else's call. Now backed by a real
+                             per-link token, an optional passcode, and host approval. -->
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+                            <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-secondary);flex:1;">
+                                <input type="checkbox" id="linkPasscodeToggle" checked style="width:16px;height:16px;">
+                                Require a passcode
+                            </label>
+                            <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-secondary);flex:1;">
+                                <input type="checkbox" id="linkApprovalToggle" checked style="width:16px;height:16px;">
+                                Require my approval to join
+                            </label>
+                        </div>
+                        <div style="display: flex; gap: 10px; margin-bottom: 12px;">
                             <input type="text" class="search-input" id="callLinkInput" readonly placeholder="Call link will appear here...">
                             <button class="quick-action-btn" id="copyLinkBtn" style="width: 50px; padding: 10px;">
                                 <i class="fas fa-copy"></i>
@@ -2927,6 +2954,11 @@ window.__CALLS_IFRAME__ = {
                             <button class="quick-action-btn" id="shareLinkBtn" style="width: 50px; padding: 10px;">
                                 <i class="fas fa-share-alt"></i>
                             </button>
+                        </div>
+                        <div id="callLinkPasscodeRow" style="display:none;align-items:center;gap:10px;margin-bottom:20px;">
+                            <span style="font-size:13px;color:var(--text-secondary);">Passcode (share this separately):</span>
+                            <code id="callLinkPasscode" style="background:rgba(255,255,255,0.08);padding:4px 10px;border-radius:8px;font-size:15px;letter-spacing:2px;font-weight:700;"></code>
+                            <button class="quick-action-btn" id="copyPasscodeBtn" style="width:36px;height:36px;padding:0;"><i class="fas fa-copy"></i></button>
                         </div>
                         <div class="quick-actions" style="padding: 0;">
                             <button class="quick-action-btn" id="generateVoiceLinkBtn">
@@ -2938,6 +2970,8 @@ window.__CALLS_IFRAME__ = {
                                 <span class="quick-action-text">Video Link</span>
                             </button>
                         </div>
+                        <!-- Pending join requests appear here when someone uses the link -->
+                        <div id="linkJoinRequests" style="margin-top:20px;"></div>
                     </div>
                 </div>
             </div>
@@ -5299,24 +5333,79 @@ window.__CALLS_IFRAME__ = {
         function _joinScheduledCall(schedId) {
             var sched = _scheduledCallsList.find(function(s){ return s.id === schedId; });
             if (!sched) return;
-            window.parent && window.parent.postMessage({ type:'JOIN_SCHEDULED_CALL', payload:{ schedId:schedId, callType:sched.callType||'audio' } }, '*');
+            // FIX-JOIN-SCHEDULED-CALL-DEAD-MESSAGE: this used to postMessage
+            // 'JOIN_SCHEDULED_CALL' to window.parent (chat.html) — a message type
+            // chat.html never listened for, so clicking "Join" silently did nothing.
+            if (sched.isGroupCall && Array.isArray(sched.participantIds) && sched.participantIds.length) {
+                if (window.callCore && typeof window.callCore.startGroupCall === 'function') {
+                    window.callCore.startGroupCall(sched.participantIds.map(function(id){ return { id: id }; }), sched.callType === 'video' ? 'video' : 'voice');
+                } else {
+                    alert('Call system not ready. Please try again.');
+                    return;
+                }
+            } else if (sched.withUserId) {
+                // calls.html is itself the iframe chat.html already knows how to dispatch
+                // calls into (see __dispatchCallToIframe), so drive it through the same
+                // real 'SWITCH_MODULE' mechanism every other working call button uses.
+                try {
+                    window.parent && window.parent.postMessage({
+                        type: 'SWITCH_MODULE',
+                        module: 'calls',
+                        payload: { userId: sched.withUserId, userName: sched.withUserName || 'User', callType: sched.callType === 'video' ? 'video' : 'voice', returnTo: 'calls' }
+                    }, '*');
+                } catch (_) {}
+            } else {
+                alert('Missing recipient for this scheduled call — please reschedule.');
+                return;
+            }
+            // The scheduled row's job is done once the real call is dispatched —
+            // cancel it server-side (reuses the same route the "Cancel" button uses)
+            // so it doesn't linger as a stale 'initiated' row.
+            try {
+                var tok = localStorage.getItem('authToken')||localStorage.getItem('token')||'';
+                fetch('/api/calls/'+schedId+'/cancel', { method:'POST', headers:{'Authorization':'Bearer '+tok} }).catch(function(){});
+            } catch(_) {}
+            _scheduledCallsList = _scheduledCallsList.filter(function(s){ return s.id !== schedId; });
+            if (_scheduledCallTimers[schedId]) { clearTimeout(_scheduledCallTimers[schedId]); delete _scheduledCallTimers[schedId]; }
+            _renderScheduledCalls();
         }
 
+        // FIX-SCHEDULE-CANCEL-404: there is no DELETE /api/calls/scheduled/:id route
+        // on the backend — this always 404'd silently (caught and ignored), so the
+        // call stayed 'initiated' server-side and could still ring/notify later even
+        // though it had vanished from this list. The backend's existing
+        // POST /:callId/cancel route already matches scheduled calls (they're created
+        // with status:'initiated' and the current user as callerId), so use that.
         function _cancelScheduledCall(schedId) {
             _scheduledCallsList = _scheduledCallsList.filter(function(s){ return s.id !== schedId; });
             if (_scheduledCallTimers[schedId]) { clearTimeout(_scheduledCallTimers[schedId]); delete _scheduledCallTimers[schedId]; }
             try {
                 var tok = localStorage.getItem('authToken')||localStorage.getItem('token')||'';
-                fetch('/api/calls/scheduled/'+schedId, { method:'DELETE', headers:{'Authorization':'Bearer '+tok} }).catch(function(){});
+                fetch('/api/calls/'+schedId+'/cancel', { method:'POST', headers:{'Authorization':'Bearer '+tok} }).catch(function(){});
             } catch(_) {}
             _renderScheduledCalls();
         }
 
+        // FIX-SCHEDULE-NO-RECIPIENT: this modal previously had no way to pick who the
+        // call was with, yet the backend's POST /schedule requires a non-empty
+        // participantIds array — every submission failed with 400 "participantIds is
+        // required" (silently swallowed by the .catch below, so it looked like
+        // nothing happened at all). Add a recipient picker sourced from whatever
+        // contact list this page already has loaded.
         function _openScheduleCallModal() {
+            var contacts = (window.AppState && window.AppState.contacts) || window.friends || [];
+            var optionsHtml = contacts.map(function(c) {
+                var id = c.id || c.userId;
+                var name = c.name || c.displayName || c.username || ('User ' + id);
+                return '<option value="' + id + '">' + name.replace(/</g,'&lt;') + '</option>';
+            }).join('');
+
             var modal = document.createElement('div');
             modal.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;';
             modal.innerHTML = '<div style="background:#1e293b;border-radius:20px;padding:24px;width:320px;color:#fff;">' +
                 '<h3 style="margin:0 0 16px;font-size:16px;">Schedule a Call</h3>' +
+                '<select id="schedWith" style="width:100%;padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.15);background:#1e293b;color:#fff;font-size:13px;box-sizing:border-box;margin-bottom:10px;">' +
+                '<option value="">Select a contact…</option>' + optionsHtml + '</select>' +
                 '<input id="schedTitle" placeholder="Title (optional)" style="width:100%;padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.06);color:#fff;font-size:13px;box-sizing:border-box;margin-bottom:10px;">' +
                 '<input id="schedTime" type="datetime-local" style="width:100%;padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.06);color:#fff;font-size:13px;box-sizing:border-box;margin-bottom:10px;">' +
                 '<select id="schedType" style="width:100%;padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.15);background:#1e293b;color:#fff;font-size:13px;box-sizing:border-box;margin-bottom:16px;"><option value="audio">Audio Call</option><option value="video">Video Call</option></select>' +
@@ -5327,16 +5416,32 @@ window.__CALLS_IFRAME__ = {
             document.body.appendChild(modal);
             modal.querySelector('#schedCancel').onclick = function(){ modal.remove(); };
             modal.querySelector('#schedOk').onclick = function() {
+                var withUserId = modal.querySelector('#schedWith').value;
+                var withSelect = modal.querySelector('#schedWith');
+                var withUserName = withSelect.options[withSelect.selectedIndex] ? withSelect.options[withSelect.selectedIndex].textContent : 'User';
                 var title = modal.querySelector('#schedTitle').value || 'Scheduled Call';
                 var time  = modal.querySelector('#schedTime').value;
                 var type  = modal.querySelector('#schedType').value;
+                if (!withUserId) { alert('Please select who to call'); return; }
                 if (!time) { alert('Please pick a date & time'); return; }
+                var scheduledAt = new Date(time);
+                if (isNaN(scheduledAt.getTime()) || scheduledAt <= new Date()) { alert('Scheduled time must be in the future'); return; }
                 var tok = localStorage.getItem('authToken')||localStorage.getItem('token')||'';
-                fetch('/api/calls/scheduled', { method:'POST',
+                // FIX-SCHEDULE-URL: was '/api/calls/scheduled' (POST) — the backend only
+                // defines POST /api/calls/schedule (singular). The plural path 404'd.
+                fetch('/api/calls/schedule', { method:'POST',
                     headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok},
-                    body: JSON.stringify({ title:title, scheduledAt: new Date(time).toISOString(), callType:type })
+                    body: JSON.stringify({ participantIds:[parseInt(withUserId,10)], title:title, scheduledAt: scheduledAt.toISOString(), callType:type })
                 }).then(function(r){ return r.json(); }).then(function(d) {
-                    if (d && d.data && d.data.scheduled) _addScheduledCall(d.data.scheduled);
+                    // FIX-SCHEDULE-RESPONSE-SHAPE: backend replies with data.call
+                    // (call.toJSON()), never data.scheduled — that field never existed,
+                    // so a successful schedule never actually got added to this list.
+                    if (d && d.success && d.data && d.data.call) {
+                        var c = d.data.call;
+                        _addScheduledCall({ id: c.id, scheduledAt: c.scheduledAt, title: c.scheduledTitle || title, callType: c.type || type, withUserId: parseInt(withUserId,10), withUserName: withUserName });
+                    } else {
+                        alert((d && d.message) || 'Failed to schedule call');
+                    }
                     modal.remove();
                 }).catch(function(){ modal.remove(); });
             };
@@ -5351,8 +5456,26 @@ window.__CALLS_IFRAME__ = {
                 fetch('/api/calls/scheduled', { headers:{'Authorization':'Bearer '+tok} })
                     .then(function(r){ return r.json(); })
                     .then(function(d) {
-                        var list = (d && d.data && d.data.scheduled) || (d && d.data) || [];
-                        if (Array.isArray(list)) list.forEach(_addScheduledCall);
+                        // FIX-SCHEDULE-LOAD-SHAPE: backend returns data.calls (array of raw
+                        // Call rows: type/scheduledTitle/scheduledAt/id/receiverId), never
+                        // data.scheduled. Map field names to what _addScheduledCall/
+                        // _renderScheduledCalls/_joinScheduledCall expect, including the
+                        // recipient (receiverId) so "Join" has someone to actually call.
+                        var list = (d && d.data && d.data.calls) || [];
+                        var contacts = (window.AppState && window.AppState.contacts) || window.friends || [];
+                        if (Array.isArray(list)) {
+                            list.forEach(function(c) {
+                                var contact = contacts.find(function(ct){ return String(ct.id || ct.userId) === String(c.receiverId); });
+                                _addScheduledCall({
+                                    id: c.id,
+                                    scheduledAt: c.scheduledAt,
+                                    title: c.scheduledTitle || 'Scheduled Call',
+                                    callType: c.type || 'audio',
+                                    withUserId: c.receiverId || null,
+                                    withUserName: (contact && (contact.name || contact.displayName || contact.username)) || 'User'
+                                });
+                            });
+                        }
                     }).catch(function(){});
             } catch(_) {}
         }, 3000);
@@ -5800,11 +5923,17 @@ window.__CALLS_IFRAME__ = {
       btn.style.color = _handRaised ? '#fff' : '';
       btn.setAttribute('title', _handRaised ? 'Lower hand (H)' : 'Raise hand (H)');
       btn.setAttribute('aria-label', _handRaised ? 'Lower hand' : 'Raise hand');
+      // window.__GroupCallEngine is the real, live mesh engine for group calls
+      // (joined via joinGroupCall() in calls-core — see its C-08 FIX comments);
+      // its raiseHand()/lowerHand() correctly update this participant's own
+      // tile indicator as well as signal the backend. (lowerHand() used to send
+      // the wrong event name and never reached anyone — fixed at the source in
+      // GroupCallEngine.js.) The old 'kyn:ui:raise_hand' CustomEvent dispatch
+      // that used to sit here is removed: nothing in calls-core or calls-ui
+      // ever listened for it, so it never did anything.
       if (window.__GroupCallEngine) {
         _handRaised ? window.__GroupCallEngine.raiseHand() : window.__GroupCallEngine.lowerHand();
       }
-      // Also dispatch for calls-core to handle via data channel
-      window.dispatchEvent(new CustomEvent('kyn:ui:raise_hand', { detail: { raised: _handRaised } }));
     });
   }
   // Show raise hand button only in group calls
@@ -5816,16 +5945,13 @@ window.__CALLS_IFRAME__ = {
     var btn = document.getElementById('raiseHandBtn');
     if (btn) { btn.style.display = 'none'; _handRaised = false; }
   });
-  // Also listen for hand raises from peers — show notification
-  window.addEventListener('kyn:group:call:hand_raised', function(e) {
-    var uid = e.detail && e.detail.userId;
-    if (!uid) return;
-    var toast = document.createElement('div');
-    toast.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#1e1e2e;color:#fff;padding:10px 18px;border-radius:10px;z-index:99999;font-size:14px;box-shadow:0 4px 16px rgba(0,0,0,0.4);pointer-events:none;';
-    toast.textContent = '✋ A participant raised their hand';
-    document.body.appendChild(toast);
-    setTimeout(function() { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 4000);
-  });
+  // FIX-DOUBLE-HAND-RAISE-TOAST: this generic toast used to fire alongside a
+  // second, name-aware toast added later in this file (search
+  // "Override the existing hand-raise toast to use the name") — that second
+  // block's comment says it's meant to *replace* this one, but
+  // addEventListener doesn't work that way: both listeners fired on every
+  // hand-raise, so users saw two overlapping toasts at once. Removed here;
+  // the name-aware version (further down this file) is the one that stays.
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', _wireHand);
   } else {
@@ -6326,6 +6452,52 @@ window.__CALLS_IFRAME__ = {
     document.addEventListener('DOMContentLoaded', _tryHook);
   } else {
     setTimeout(_tryHook, 100);
+  }
+
+  // FIX-CALL-LINK-APPROVAL-UI: the backend's waiting-room admit/reject flow
+  // (and the new /link/:token/join route that feeds into it) already existed
+  // and worked, but nothing in the UI ever showed the host an incoming
+  // request to approve or deny — so "admin approval" had no way to actually
+  // happen from this screen. Uses the same bridge-aware KynectaEventBus
+  // pattern as screen-share notifications above (this page runs as an
+  // iframe, so it must not open its own socket connection).
+  var _tryHookJoinRequests = function () {
+    var bus = window.KynectaEventBus;
+    if (!bus) { setTimeout(_tryHookJoinRequests, 1000); return; }
+    bus.on('REALTIME_call:waiting_room_join', function (d) {
+      _renderJoinRequest((d || {}).callId, (d || {}).participant);
+    });
+  };
+  function _renderJoinRequest(callId, participant) {
+    if (!callId || !participant) return;
+    var box = document.getElementById('linkJoinRequests');
+    if (!box) return;
+    var id = 'joinReq_' + participant.userId;
+    if (document.getElementById(id)) return; // already showing this request
+    var card = document.createElement('div');
+    card.id = id;
+    card.style.cssText = 'display:flex;align-items:center;gap:10px;background:rgba(255,255,255,0.06);border-radius:12px;padding:10px 14px;margin-bottom:8px;';
+    card.innerHTML =
+      '<img src="' + (participant.avatar || '/img/default-avatar.png') + '" style="width:32px;height:32px;border-radius:50%;object-fit:cover;">' +
+      '<span style="flex:1;font-size:13px;">' + String(participant.username || 'Someone').replace(/</g,'&lt;') + ' wants to join</span>' +
+      '<button class="quick-action-btn" data-act="admit" style="width:auto;padding:6px 12px;background:#22c55e;">Admit</button>' +
+      '<button class="quick-action-btn" data-act="reject" style="width:auto;padding:6px 12px;background:#ef4444;">Deny</button>';
+    box.appendChild(card);
+    card.querySelector('[data-act="admit"]').onclick = function () { _respondJoinRequest(callId, participant.userId, 'admit', card); };
+    card.querySelector('[data-act="reject"]').onclick = function () { _respondJoinRequest(callId, participant.userId, 'reject', card); };
+  }
+  function _respondJoinRequest(callId, participantId, action, card) {
+    var tok = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
+    fetch('/api/calls/' + callId + '/waiting-room/' + action, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
+      body: JSON.stringify({ participantId: participantId })
+    }).catch(function () {}).finally(function () { if (card && card.parentNode) card.remove(); });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _tryHookJoinRequests);
+  } else {
+    setTimeout(_tryHookJoinRequests, 100);
   }
 
   // Emit socket event when CallManager starts/stops screen share
