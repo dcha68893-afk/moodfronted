@@ -146,3 +146,72 @@ if (GC) {
     };
   }
 }
+
+// FIX-GROUP-REALTIME-RECURSION: the production console trace showed a
+// synchronous cycle of GroupRealtimeDispatcher.dispatch -> GroupSyncEngine.onTyping
+// -> GroupOrchestrator._handleGroupSocketEvent -> the window socket listener ->
+// GroupRealtimeDispatcher.dispatch again. That recursion is independent of the
+// actual group message payload, but once it overflows the stack the browser can
+// no longer reliably process subsequent realtime events on that iframe.
+// Do not create a second dispatcher or replace the orchestrator. Guard the
+// existing dispatcher at its boundary so a nested dispatch of the SAME realtime
+// event is dropped while the outer dispatch is still running. This is deliberately
+// narrow: unrelated events and sequential typing events are still delivered.
+(function installGroupRealtimeRecursionGuard() {
+  if (typeof window === 'undefined') return;
+
+  function install() {
+    try {
+      const dispatcher = window.GroupRealtimeDispatcher;
+      if (!dispatcher || typeof dispatcher.dispatch !== 'function') return false;
+      if (dispatcher.__nexopaTypingRecursionGuard) return true;
+
+      const originalDispatch = dispatcher.dispatch;
+      let dispatchDepth = 0;
+      const activeEventKeys = new Set();
+
+      function eventKey(event, args) {
+        if (typeof event === 'string') return event;
+        if (!event || typeof event !== 'object') return '';
+        const type = event.type || event.event || event.name || event.kind || '';
+        const groupId = event.groupId ?? event.group?.id ?? '';
+        const userId = event.userId ?? event.senderId ?? event.user?.id ?? '';
+        return `${type}:${groupId}:${userId}`;
+      }
+
+      dispatcher.dispatch = function guardedGroupDispatch(event, ...args) {
+        const key = eventKey(event, args);
+        const type = typeof event === 'string'
+          ? event
+          : (event?.type || event?.event || event?.name || event?.kind || '');
+        const isTyping = String(type).toLowerCase().includes('typing');
+
+        if (isTyping && dispatchDepth > 0 && key && activeEventKeys.has(key)) {
+          return undefined;
+        }
+
+        dispatchDepth += 1;
+        if (key) activeEventKeys.add(key);
+        try {
+          return originalDispatch.call(this, event, ...args);
+        } finally {
+          if (key) activeEventKeys.delete(key);
+          dispatchDepth = Math.max(0, dispatchDepth - 1);
+        }
+      };
+
+      dispatcher.__nexopaTypingRecursionGuard = true;
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  if (install()) return;
+
+  let attempts = 0;
+  const timer = setInterval(() => {
+    attempts += 1;
+    if (install() || attempts >= 20) clearInterval(timer);
+  }, 250);
+})();
