@@ -304,5 +304,366 @@
             if (bindPresenceBus()) clearInterval(presenceTimer);
         }, 500);
         setTimeout(function () { clearInterval(presenceTimer); }, 15000);
+
+        // ------------------------------------------------------------------
+        // EXACT APP BACK STACK
+        // ------------------------------------------------------------------
+        // The shell previously kept only page names in __navHistory while
+        // chat/group/status/tools also have nested screens. That made Back
+        // jump across module boundaries or collapse several UI levels at once.
+        // Keep browser history entries as complete UI states instead: every
+        // meaningful transition gets one exact entry, and popstate restores
+        // precisely that entry. Existing iframe DOM is deliberately preserved
+        // when moving between modules so a previously open chat/group/settings
+        // panel comes back exactly as it was.
+        var NAV_VERSION = 2;
+        var exactStack = window.__kynExactNavStack = window.__kynExactNavStack || [];
+        var exactCurrent = window.__kynExactNavCurrent || null;
+        var exactRestoring = false;
+        var exactInstalled = false;
+        var originalNavigateToPage = null;
+        var originalToolsNavTo = null;
+        var originalSyncBrowserHistoryState = null;
+
+        function normalizeModule(page) {
+            page = String(page || '').toLowerCase();
+            if (page === 'groups' || page === 'group-core') return 'group';
+            if (page === 'friend' || page === 'friend-core') return 'friends';
+            if (page === 'message') return 'messages';
+            if (page === 'tool' || page === 'marketplace') return 'tools';
+            if (page === 'setting') return 'settings';
+            if (page === 'call' || page === 'calls-core') return 'calls';
+            if (page === 'game') return 'games';
+            return page || 'messages';
+        }
+
+        function cloneState(state) {
+            if (!state) return null;
+            try { return JSON.parse(JSON.stringify(state)); } catch (_) { return Object.assign({}, state); }
+        }
+
+        function sameState(a, b) {
+            if (!a || !b) return false;
+            try { return JSON.stringify(a) === JSON.stringify(b); } catch (_) { return false; }
+        }
+
+        function readCurrentState() {
+            var page = normalizeModule(window.__currentPage || 'messages');
+            var screen = 'sidebar';
+            var data = {};
+
+            if (page === 'tools') {
+                screen = String(window.__toolsCurrentPage || 'home');
+                if (screen === 'home') screen = 'sidebar';
+            } else if (page === 'messages') {
+                if (document.body.classList.contains('chat-panel-active')) {
+                    screen = 'chat';
+                    if (window.__lastOpenChatUserId != null) data.userId = window.__lastOpenChatUserId;
+                    if (window.__lastOpenChatName) data.name = window.__lastOpenChatName;
+                }
+            } else if (page === 'group') {
+                if (document.body.classList.contains('group-panel-active')) {
+                    var gp = window.__gcCurrentGroup || {};
+                    screen = (window.__kynPanelState.group && window.__kynPanelState.group.panel) || 'chat';
+                    if (screen === true) screen = 'chat';
+                    if (gp.id != null) data.groupId = gp.id;
+                    if (gp.name) data.name = gp.name;
+                }
+            } else if (page === 'status') {
+                if (document.body.classList.contains('status-panel-active')) {
+                    screen = (window.__kynPanelState.status && window.__kynPanelState.status.panel) || 'view';
+                    if (screen === true) screen = 'view';
+                }
+            } else if (page === 'calls') {
+                if (document.body.classList.contains('call-screen-active') || window.__activeCallInProgress) {
+                    screen = 'call';
+                }
+            } else {
+                var ps = window.__kynPanelState[page];
+                if (ps && ps.panel) screen = ps.panel === true ? 'panel' : String(ps.panel);
+            }
+
+            return { v: NAV_VERSION, module: page, screen: screen, data: data };
+        }
+
+        function ensureInitialState() {
+            if (exactCurrent) return;
+            exactCurrent = readCurrentState();
+            window.__kynExactNavCurrent = exactCurrent;
+            try {
+                history.replaceState({ appNav: true, exactNav: true, navVersion: NAV_VERSION, nav: cloneState(exactCurrent) }, '', window.location.href);
+            } catch (_) {}
+        }
+
+        function pushExactState(nextState) {
+            nextState = cloneState(nextState);
+            if (!nextState || sameState(nextState, exactCurrent)) return false;
+            if (exactCurrent) exactStack.push(cloneState(exactCurrent));
+            exactCurrent = nextState;
+            window.__kynExactNavCurrent = exactCurrent;
+            try {
+                history.pushState({ appNav: true, exactNav: true, navVersion: NAV_VERSION, nav: cloneState(nextState) }, '', window.location.href);
+            } catch (_) {}
+            return true;
+        }
+
+        function postToIframe(module, message) {
+            try {
+                var map = { messages:'messagesIframe', group:'groupIframe', status:'statusIframe', calls:'callsIframe', friends:'friendsIframe', tools:'toolsIframe' };
+                var iframe = document.getElementById(map[module]);
+                if (iframe && iframe.contentWindow) iframe.contentWindow.postMessage(message, '*');
+                return !!iframe;
+            } catch (_) { return false; }
+        }
+
+        function restoreNestedTarget(target) {
+            if (!target) return;
+            var module = target.module;
+            var screen = String(target.screen || 'sidebar');
+
+            if (module === 'tools') {
+                var toolPage = screen === 'sidebar' ? 'home' : screen;
+                if (typeof window.toolsNavTo === 'function') window.toolsNavTo(toolPage);
+                return;
+            }
+
+            if (module === 'messages') {
+                if (screen === 'chat') {
+                    document.body.classList.add('chat-panel-active');
+                    return;
+                }
+                postToIframe('messages', { type:'GO_BACK_TO_CHAT_LIST', source:'exact-nav', timestamp:Date.now() });
+                document.body.classList.remove('chat-panel-active');
+                return;
+            }
+
+            if (module === 'group') {
+                if (screen === 'sidebar') {
+                    postToIframe('group', { type:'GO_BACK_TO_LIST', source:'exact-nav', timestamp:Date.now() });
+                    document.body.classList.remove('group-panel-active');
+                    return;
+                }
+                // Group settings/details live on top of the existing group chat.
+                // When returning to the chat state, close only the nested sub-panel
+                // rather than using GO_BACK_TO_LIST (which would skip the chat).
+                if (screen === 'chat') {
+                    try {
+                        var gf = document.getElementById('groupIframe');
+                        var gd = gf && gf.contentDocument;
+                        if (gd) {
+                            var sub = gd.getElementById('gcSubPanel');
+                            if (sub && (sub.classList.contains('open') || sub.style.display !== 'none')) {
+                                var subBack = gd.getElementById('gcSubBack');
+                                if (subBack) subBack.click();
+                            }
+                            var details = gd.getElementById('groupDetailsPanel');
+                            if (details && (details.classList.contains('active') || details.style.display === 'flex')) {
+                                var db = gd.getElementById('backBtn');
+                                if (db) db.click();
+                            }
+                        }
+                    } catch (_) {}
+                    document.body.classList.add('group-panel-active');
+                    return;
+                }
+                document.body.classList.add('group-panel-active');
+                return;
+            }
+
+            if (module === 'status') {
+                if (screen === 'sidebar') {
+                    postToIframe('status', { type:'GO_BACK_TO_LIST', source:'exact-nav', timestamp:Date.now() });
+                    document.body.classList.remove('status-panel-active');
+                } else {
+                    document.body.classList.add('status-panel-active');
+                }
+                return;
+            }
+
+            if (module === 'calls' && screen === 'sidebar') {
+                postToIframe('calls', { type:'CLOSE_CALL_SCREEN', source:'exact-nav', timestamp:Date.now() });
+                document.body.classList.remove('call-screen-active');
+                window.__activeCallInProgress = false;
+                return;
+            }
+
+            if (module === 'friends') {
+                try {
+                    var ff = document.getElementById('friendsIframe');
+                    var fd = ff && ff.contentDocument;
+                    if (fd) {
+                        // Full-screen Discover panels (Browse All, QR, Nearby, etc.)
+                        // each expose the same back control. Closing it reveals the
+                        // underlying Add Friend screen, exactly one level back.
+                        if (screen === 'sidebar') {
+                            var back = fd.querySelector('.discover-fullscreen-panel.open .discover-panel-back');
+                            if (back) { back.click(); return; }
+                            var cancel = fd.getElementById('cancelAddFriendBtn');
+                            if (cancel && fd.getElementById('addFriendModal')?.classList.contains('active')) { cancel.click(); return; }
+                        }
+                    }
+                } catch (_) {}
+            }
+        }
+
+        function restoreExactState(target) {
+            if (!target) return;
+            exactRestoring = true;
+            try {
+                var page = normalizeModule(target.module);
+                if (window.__currentPage !== page && typeof window.navigateToPage === 'function') {
+                    window.navigateToPage(page, { fromHistory: true, exactRestore: true });
+                }
+                restoreNestedTarget(target);
+                exactCurrent = cloneState(target);
+                window.__kynExactNavCurrent = exactCurrent;
+            } finally {
+                setTimeout(function () { exactRestoring = false; }, 0);
+            }
+        }
+
+        function captureAndPush(nextState) {
+            if (exactRestoring) return;
+            ensureInitialState();
+            nextState = cloneState(nextState);
+            if (!nextState || sameState(nextState, exactCurrent)) return;
+            pushExactState(nextState);
+        }
+
+        function installExactNavigation() {
+            if (exactInstalled) return true;
+            if (typeof window.navigateToPage !== 'function' || typeof window.syncBrowserHistoryState !== 'function') return false;
+            ensureInitialState();
+
+            originalNavigateToPage = window.navigateToPage;
+            window.navigateToPage = function (page, options) {
+                options = options || {};
+                var nextPage = normalizeModule(page);
+                if (!options.fromHistory && !options.exactRestore && !exactRestoring) {
+                    var current = readCurrentState();
+                    var next = { v:NAV_VERSION, module:nextPage, screen:(nextPage === 'tools' ? 'sidebar' : 'sidebar'), data:{} };
+                    captureAndPush(next);
+                }
+                return originalNavigateToPage.apply(this, arguments);
+            };
+
+            originalToolsNavTo = window.toolsNavTo;
+            if (typeof originalToolsNavTo === 'function') {
+                window.toolsNavTo = function (page) {
+                    if (!exactRestoring) {
+                        ensureInitialState();
+                        var nextScreen = String(page || 'home');
+                        if (nextScreen === 'home') nextScreen = 'sidebar';
+                        captureAndPush({ v:NAV_VERSION, module:'tools', screen:nextScreen, data:{} });
+                    }
+                    return originalToolsNavTo.apply(this, arguments);
+                };
+            }
+
+            originalSyncBrowserHistoryState = window.syncBrowserHistoryState;
+            // navigateToPage(), chat/group/status panel events and several call
+            // paths still invoke the legacy helper. Once exact navigation owns
+            // browser history, allowing those extra pushes would create duplicate
+            // Back steps. Keep replaceState available but suppress legacy pushState.
+            window.syncBrowserHistoryState = function (page, replaceOnly) {
+                if (exactRestoring || window.__kynExactNavLegacySuppressed !== false) {
+                    if (replaceOnly) {
+                        try {
+                            history.replaceState({ appNav:true, exactNav:true, navVersion:NAV_VERSION, nav:cloneState(exactCurrent || readCurrentState()) }, '', window.location.href);
+                        } catch (_) {}
+                    }
+                    return;
+                }
+                return originalSyncBrowserHistoryState.apply(this, arguments);
+            };
+            window.__kynExactNavLegacySuppressed = true;
+
+            window.addEventListener('message', function (event) {
+                if (exactRestoring) return;
+                var d = event && event.data;
+                if (!d || typeof d !== 'object') return;
+
+                var mod = normalizeModule(d.module || '');
+                if (d.type === 'PanelOpened' && mod) {
+                    var panel = d.panel || 'panel';
+                    var current = readCurrentState();
+                    var next = { v:NAV_VERSION, module:mod, screen:String(panel), data:{} };
+                    if (mod === 'group' && window.__gcCurrentGroup && window.__gcCurrentGroup.id != null) next.data.groupId = window.__gcCurrentGroup.id;
+                    captureAndPush(next);
+                    return;
+                }
+
+                if (d.type === 'PanelClosed' && mod) {
+                    // A child-side back/close is itself a real transition. Record
+                    // the resulting module/list state as a browser entry so the
+                    // next hardware Back continues to the previous module exactly.
+                    var closedNext = { v:NAV_VERSION, module:mod, screen:'sidebar', data:{} };
+                    captureAndPush(closedNext);
+                    return;
+                }
+
+                if (d.type === 'CHAT_OPENED' || d.type === 'CONVERSATION_OPENED') {
+                    var ci = d.payload || {};
+                    captureAndPush({ v:NAV_VERSION, module:'messages', screen:'chat', data:{ userId:ci.userId || ci.chatId || null, name:ci.name || null } });
+                    return;
+                }
+                if (d.type === 'CHAT_LIST_SHOWN' || d.type === 'CHAT_CLOSED' || d.type === 'GO_BACK_TO_CHAT_LIST') {
+                    captureAndPush({ v:NAV_VERSION, module:'messages', screen:'sidebar', data:{} });
+                    return;
+                }
+                if (d.type === 'GROUP_PANEL_OPENED' || d.type === 'GROUP_CHAT_OPENED' || d.type === 'GROUP_DETAIL_OPENED' || d.type === 'GROUP_PANEL_OPEN') {
+                    var gp = d.payload || d.group || d.data || {};
+                    captureAndPush({ v:NAV_VERSION, module:'group', screen:(d.type === 'GROUP_DETAIL_OPENED' ? 'details' : 'chat'), data:{ groupId:gp.id || gp.groupId || null, name:gp.name || null } });
+                    return;
+                }
+                if (d.type === 'GROUP_PANEL_CLOSED' || d.type === 'GROUP_LIST_SHOWN' || d.type === 'GO_BACK_TO_LIST' || d.type === 'GROUP_PANEL_CLOSE') {
+                    captureAndPush({ v:NAV_VERSION, module:'group', screen:'sidebar', data:{} });
+                    return;
+                }
+                if (d.type === 'STATUS_VIEW_OPENED' || d.type === 'STATUS_CREATE_OPENED' || d.type === 'STATUS_PANEL_OPENED') {
+                    captureAndPush({ v:NAV_VERSION, module:'status', screen:(d.type === 'STATUS_CREATE_OPENED' ? 'create' : 'view'), data:{} });
+                    return;
+                }
+                if (d.type === 'STATUS_PANEL_CLOSED' || d.type === 'STATUS_LIST_SHOWN') {
+                    captureAndPush({ v:NAV_VERSION, module:'status', screen:'sidebar', data:{} });
+                    return;
+                }
+                if (d.type === 'TOOLS_PAGE_CHANGED' && d.source === 'tools-iframe' && d.payload) {
+                    var ts = String(d.payload.page || 'home');
+                    if (ts === 'home') ts = 'sidebar';
+                    captureAndPush({ v:NAV_VERSION, module:'tools', screen:ts, data:{} });
+                }
+            }, true);
+
+            window.addEventListener('popstate', function (event) {
+                if (!event || !event.state || !event.state.exactNav || !event.state.nav) return;
+                event.stopImmediatePropagation();
+                var target = cloneState(event.state.nav);
+                if (exactStack.length) exactStack.pop();
+                exactCurrent = target;
+                window.__kynExactNavCurrent = target;
+                restoreExactState(target);
+            }, true);
+
+            document.addEventListener('backbutton', function (event) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                if (exactStack.length) history.back();
+                else if (typeof originalNavigateToPage === 'function') {
+                    // No in-app entry remains; leave the app's current screen alone
+                    // rather than jumping to an arbitrary module.
+                    try { history.back(); } catch (_) {}
+                }
+            }, true);
+
+            exactInstalled = true;
+            console.info('[ExactNavigation] exact UI back-stack enabled');
+            return true;
+        }
+
+        var exactNavTimer = setInterval(function () {
+            if (installExactNavigation()) clearInterval(exactNavTimer);
+        }, 50);
+        setTimeout(function () { clearInterval(exactNavTimer); }, 20000);
     }
 })();
