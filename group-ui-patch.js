@@ -82,15 +82,20 @@
         const token = getToken();
         // FIX: resolve against backend origin — not the iframe's own origin
         const base = (
-            window.__apiBaseUrl ||
-            (window.parent && window.parent.__apiBaseUrl) ||
             (typeof window.__getApiBase === 'function' ? window.__getApiBase() : null) ||
             (window.parent && typeof window.parent.__getApiBase === 'function' ? window.parent.__getApiBase() : null) ||
+            window.__apiBaseUrl ||
+            (window.parent && window.parent.__apiBaseUrl) ||
             window.__API_BASE_URL || window.API_BASE_URL ||
             'https://noxopa.onrender.com/api'
         );
         // base ends in /api — strip leading /api from path to avoid double
-        const cleanPath = path.replace(/^\/api\//, '/').replace(/^\/api$/, '/');
+        let cleanPath = path.replace(/^\/api\//, '/').replace(/^\/api$/, '/');
+        // FIX-ROOT-CAUSE-CORRUPTED-GROUP-ID: see the matching fix in
+        // group-core-bootstrap.js's apiRequest() — this is a second,
+        // independent fetch path (bypasses apiRequest entirely) that hit
+        // the same /groups/1::1-style 500s in production. Same narrow fix.
+        cleanPath = cleanPath.replace(/(\/groups\/\d+)::\d+(?=[/?]|$)/, '$1');
         const url = base.replace(/\/$/, '') + (cleanPath.startsWith('/') ? cleanPath : '/' + cleanPath);
         const res   = await fetch(url, {
             ...opts,

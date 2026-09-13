@@ -289,7 +289,11 @@
 
             const storedRefresh = getStoredRefreshToken(session);
             if (!storedRefresh) return false;
-            const baseUrl = (window.API && window.API.baseUrl) || (window._API_CONFIG && window._API_CONFIG.baseUrl) || 'https://noxopa.onrender.com/api';
+            const baseUrl = (typeof window.__getApiBase === 'function' && window.__getApiBase())
+                || (window.API && window.API.baseUrl)
+                || (window._API_CONFIG && window._API_CONFIG.baseUrl)
+                || (typeof window.__getApiOrigin === 'function' ? window.__getApiOrigin() + '/api' : null)
+                || 'https://noxopa.onrender.com/api';
             const response = await fetch(`${baseUrl}/auth/refresh`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },

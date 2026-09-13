@@ -15,10 +15,10 @@
     // Now resolves the backend API base from the window context (set by group.html)
     // or falls back to the known production backend URL.
     const _apiOrigin = (
+        (window.__getApiBase && window.__getApiBase()) ||
         window.__API_BASE_URL ||
         window.__kynApiBase ||
         window.__API_BASE ||
-        (window.__getApiBase && window.__getApiBase()) ||
         'https://noxopa.onrender.com/api'
     ).replace(/\/$/, '');
     const BASE = _apiOrigin.endsWith('/api')

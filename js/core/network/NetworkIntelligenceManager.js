@@ -29,6 +29,15 @@
   // FIX: Multi-URL probe with fallbacks. Render free-tier HEAD requests return 405/503.
   // WiFi-connected users were falsely marked OFFLINE because the single probe failed.
   const _backendBase = (() => {
+    try {
+      if (typeof window.__getApiOrigin === 'function') {
+        const origin = window.__getApiOrigin();
+        if (origin) return String(origin).replace(/\/+$/, '');
+      }
+    } catch (_) {}
+    if (window.BACKEND_URL) {
+      return String(window.BACKEND_URL).replace(/\/+$/, '');
+    }
     if (window.__kynAPI && window.__kynAPI.baseUrl) {
       return window.__kynAPI.baseUrl.replace(/\/+$/, '').replace(/\/api\/?$/, '');
     }

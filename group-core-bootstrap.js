@@ -497,7 +497,24 @@ function apiRequest(endpoint, method = 'GET', body = null, timeoutMs = 12000, _r
         }
         // FIX: Prevent double slashes
         normalizedEndpoint = normalizedEndpoint.replace(/\/+/g, '/');
-        
+
+        // FIX-ROOT-CAUSE-CORRUPTED-GROUP-ID: some group objects end up with
+        // an id like "1::1" or "4::1" by the time a caller builds a
+        // `/groups/${groupId}` URL from them (confirmed in production logs —
+        // GET/POST /groups/1::1[...] failing with "invalid input syntax for
+        // type integer: \"1::1\"" on every group-detail, members, messages
+        // and typing-indicator call for that group, which is what produced
+        // the empty group screen, "0 members", and messages never arriving).
+        // The exact spot that first attaches the "::1" suffix to a group's
+        // id wasn't pinned down despite tracing every renderer, cache and
+        // merge path that touches group.id — so this strips it at the one
+        // choke point every apiRequest()-based group call funnels through,
+        // rather than leaving the corruption free to 500/404/timeout every
+        // group endpoint for the rest of the session. Only touches a
+        // /groups/<digits>::<digits> segment; anything else passes through
+        // unchanged.
+        normalizedEndpoint = normalizedEndpoint.replace(/(\/groups\/\d+)::\d+(?=[/?]|$)/, '$1');
+
         const requestId = generateRequestId();
         
         // Set up timeout with retry on first failure

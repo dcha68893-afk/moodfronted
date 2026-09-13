@@ -2387,7 +2387,12 @@ function api(path,opts){
     if(opts&&opts.body&&typeof opts.body==='object')h['Content-Type']='application/json';
     if(opts&&opts.headers)Object.assign(h,opts.headers);
     var body=opts&&opts.body?(typeof opts.body==='object'?JSON.stringify(opts.body):opts.body):undefined;
-    return fetch(BASE+path,Object.assign({},opts||{},{headers:h,body:body})).then(function(r){return r.json();});
+    // FIX-ROOT-CAUSE-CORRUPTED-GROUP-ID: third independent fetch path in
+    // this file that hit the same /groups/1::1-style 500s seen in
+    // production logs. Same narrow fix as apiRequest() in
+    // group-core-bootstrap.js and apiFetch() in group-ui-patch.js.
+    var cleanPath=String(path||'').replace(/(\/groups\/\d+)::\d+(?=[/?]|$)/,'$1');
+    return fetch(BASE+cleanPath,Object.assign({},opts||{},{headers:h,body:body})).then(function(r){return r.json();});
 }
 function fmt(iso){if(!iso)return '';try{return new Date(iso).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});}catch(e){return '';}}
 function ntf(m,t){if(typeof showNotification==='function')showNotification(m,t||'success');else console.log('[GCP]',m);}
@@ -3974,7 +3979,9 @@ window._openSmartGroupOSFromSidebar = function() {
                 var session = {};
                 try { session = JSON.parse(localStorage.getItem('kyn_session') || '{}'); } catch(_) {}
                 var token = session.token || localStorage.getItem('kyn_token') || '';
-                var apiBase = (window.__kynAPI && window.__kynAPI.baseUrl) || 'https://noxopa.onrender.com/api';
+                var apiBase = (typeof window.__getApiBase === 'function' && window.__getApiBase())
+                    || (window.__kynAPI && window.__kynAPI.baseUrl)
+                    || 'https://noxopa.onrender.com/api';
                 fetch(apiBase + '/groups', { headers: token ? { 'Authorization': 'Bearer ' + token } : {} })
                     .then(function(r) { return r.ok ? r.json() : { groups: [] }; })
                     .then(function(d) { _renderGroupPicker(d.groups || d || []); })

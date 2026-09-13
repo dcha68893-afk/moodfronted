@@ -5285,10 +5285,10 @@ if (typeof document !== 'undefined') {
 async function _directCreateGroup(groupData) {
     console.log('[GroupUI] _directCreateGroup: direct fetch to backend');
     const backendBase = (
-        window.__apiBaseUrl ||
-        (window.parent && window.parent.__apiBaseUrl) ||
         (typeof window.__getApiBase === 'function' ? window.__getApiBase() : null) ||
         (window.parent && typeof window.parent.__getApiBase === 'function' ? window.parent.__getApiBase() : null) ||
+        window.__apiBaseUrl ||
+        (window.parent && window.parent.__apiBaseUrl) ||
         'https://noxopa.onrender.com/api'
     );
     const token = (

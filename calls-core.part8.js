@@ -6604,11 +6604,12 @@ clearActiveCall: function() {
             if (window.__kynTURNServers && window.__kynTURNServers.length) return;
             try {
                 var baseUrl = (
+                    (typeof window.__getApiBase === 'function' && window.__getApiBase()) ||
+                    (window.parent && typeof window.parent.__getApiBase === 'function' && window.parent.__getApiBase()) ||
                     window.__API_BASE_URL ||
                     window.__kynApiBase ||
                     window.__apiBaseUrl ||
                     (window.parent && window.parent.__apiBaseUrl) ||
-                    (window.parent && window.parent.__getApiBase && window.parent.__getApiBase()) ||
                     'https://noxopa.onrender.com'
                 ).replace(/\/+$/, '');
                 fetch(baseUrl + '/api/calls/ice-config', {

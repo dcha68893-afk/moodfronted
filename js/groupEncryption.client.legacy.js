@@ -67,6 +67,21 @@
     function _liveKeyCacheKey(groupId, ownerUserId) { return `${groupId}:${ownerUserId}`; }
     function _liveReceivedKeyCacheKey(groupId, ownerUserId, gen) { return `${groupId}:${ownerUserId}:${gen}`; }
 
+    // FIX-ROOT-CAUSE-CORRUPTED-GROUP-ID: mirrors the defensive fix applied
+    // to apiRequest()/apiFetch()/api() elsewhere in the frontend — group
+    // objects have been observed with an id like "1::1" by the time
+    // encryption code receives them, which would otherwise get baked into
+    // every key-sync/distribute/member-lookup URL AND into these cache
+    // keys (silently splitting one group's keys across two different
+    // cache-key namespaces depending on which caller passed the clean vs
+    // corrupted id). Every public entry point below normalizes groupId
+    // through this first.
+    function _cleanGroupId(groupId) {
+        const s = String(groupId ?? '');
+        const idx = s.indexOf('::');
+        return idx === -1 ? s : s.slice(0, idx);
+    }
+
     async function _persistMyKey(groupId, gen, rawB64) {
         const wrapped = await E2E().wrapForLocalStorage(rawB64);
         const cache = _loadCache(groupId);
@@ -126,8 +141,9 @@
     // populate the in-memory live-key cache. Called on group open and on
     // 'group:sender_key_distributed' notifications.
     async function syncReceivedKeys(groupId) {
+        groupId = _cleanGroupId(groupId);
         if (!E2E()?.enabled) return;
-        const baseUrl = global.__API_BASE_URL || global.API_BASE_URL || '';
+        const baseUrl = (typeof global.__getApiBase === 'function' && global.__getApiBase()) || global.__API_BASE_URL || global.API_BASE_URL || '';
         const token = localStorage.getItem('authToken') || localStorage.getItem('token') ||
                       sessionStorage.getItem('authToken') || sessionStorage.getItem('token') || '';
 
@@ -168,8 +184,9 @@
     // source. Used both before sending (to know who to distribute a fresh
     // Sender Key to) and on a rotation-required notification.
     async function _fetchGroupMemberIds(groupId) {
+        groupId = _cleanGroupId(groupId);
         try {
-            const baseUrl = global.__API_BASE_URL || global.API_BASE_URL || '';
+            const baseUrl = (typeof global.__getApiBase === 'function' && global.__getApiBase()) || global.__API_BASE_URL || global.API_BASE_URL || '';
             const token = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
             const resp = await fetch(`${baseUrl}/api/group-members/${groupId}/members`, {
                 headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -188,6 +205,7 @@
     // Generate a brand-new Sender Key for this group and distribute it to
     // every other current member via their existing 1:1 ECDH channel.
     async function _generateAndDistribute(groupId, memberUserIds) {
+        groupId = _cleanGroupId(groupId);
         const myUserId = global.GroupCore?.currentUser?.id || global.currentUserId;
         if (!memberUserIds || memberUserIds.length === 0) {
             memberUserIds = await _fetchGroupMemberIds(groupId);
@@ -223,7 +241,7 @@
         let assignedGen = null;
         if (distributions.length > 0) {
             try {
-                const baseUrl = global.__API_BASE_URL || global.API_BASE_URL || '';
+                const baseUrl = (typeof global.__getApiBase === 'function' && global.__getApiBase()) || global.__API_BASE_URL || global.API_BASE_URL || '';
                 const token = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
                 const resp = await fetch(`${baseUrl}/api/group-encryption/${groupId}/distribute`, {
                     method: 'POST',
@@ -322,6 +340,7 @@
     }
 
     async function rotateSenderKey(groupId, memberUserIds) {
+        groupId = _cleanGroupId(groupId);
         const result = await _generateAndDistribute(groupId, memberUserIds);
         if (!result) {
             console.warn(`[GroupE2E] Rotation for group ${groupId} did not complete — distribution failed; will retry on next send.`);
@@ -332,7 +351,7 @@
         // Tell the server our previous-generation distribution rows are now
         // superseded, so GET /keys stops serving them to anyone.
         try {
-            const baseUrl = global.__API_BASE_URL || global.API_BASE_URL || '';
+            const baseUrl = (typeof global.__getApiBase === 'function' && global.__getApiBase()) || global.__API_BASE_URL || global.API_BASE_URL || '';
             const token = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
             await fetch(`${baseUrl}/api/group-encryption/${groupId}/rotate-notify`, {
                 method: 'POST',
@@ -347,6 +366,7 @@
     }
 
     async function encryptOutgoing(groupId, plaintext, memberUserIds) {
+        groupId = _cleanGroupId(groupId);
         if (!E2E()?.enabled) return { content: plaintext, encrypted: false };
         try {
             const { key, gen } = await ensureSenderKey(groupId, memberUserIds);
@@ -382,6 +402,7 @@
     // and a message that once decrypted successfully can never regress to
     // a failure placeholder on a later reload.
     async function decryptIncoming(groupId, message) {
+        groupId = _cleanGroupId(groupId);
         if (message && message.__alreadyDecrypted) {
             delete message.__alreadyDecrypted;
             return message;
@@ -468,6 +489,7 @@
     }
 
     async function decryptIncomingBatch(groupId, messages) {
+        groupId = _cleanGroupId(groupId);
         if (!Array.isArray(messages) || messages.length === 0) return messages;
         // FIX (REDUNDANT-REDECRYPT): if the caller already marked every
         // message __alreadyDecrypted (see loadGroupMessages's previousById

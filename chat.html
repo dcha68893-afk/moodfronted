@@ -9360,7 +9360,15 @@ window.__groupHdrHide = hideGroupHeader;
   // background-tab/throttled-timer slip (common on mobile) won't single-
   // handedly cause it anymore.
   function keepBackendAwake() {
-    fetch('https://noxopa.onrender.com/api/health', {
+    // FIX-KEEPALIVE-STALE-HOST: this was hardcoded to noxopa.onrender.com,
+    // an old renamed backend host — it kept pinging a backend that isn't
+    // the one actually serving this session (see window.__getApiBase /
+    // config.js's "Runtime configuration loaded. Backend: ..." log for the
+    // real host), so the ping was silently keeping the wrong dyno awake
+    // and doing nothing for the real one. Use the same runtime-resolved
+    // base every other API call in this file uses.
+    const base = (window.__getApiBase ? window.__getApiBase() : null) || 'https://noxopa.onrender.com/api';
+    fetch(base.replace(/\/$/, '') + '/health', {
       method: 'GET',
       cache: 'no-cache'
     })
