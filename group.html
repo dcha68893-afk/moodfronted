@@ -3082,6 +3082,33 @@ function setupMenu(){
         // module went hidden and became visible again. Re-render whatever
         // section is currently active rather than assuming it's "All".
         if (d.type === 'MODULE_FOCUSED') {
+            // FIX (BACK-STACK-EXACT-RESTORE): chat.html now leaves this
+            // iframe's own #groupChatPanel (and its nested settings/members/
+            // theme sub-panel) completely untouched when the back button
+            // unwinds through 'group' — it only force-closes it on a
+            // deliberate switch away, never mid-back-navigation — so
+            // whatever panel was open is genuinely still open here, in the
+            // DOM, right now. What the parent lost on its own side is the
+            // group-panel-active body class + #headerGroupCtx (both get
+            // cleared the instant focus left). Re-announce the exact same
+            // GROUP_PANEL_OPEN message openPanel() already sends when a
+            // group chat first opens, so the parent's own chrome catches up
+            // to match — reusing that one existing, working code path
+            // instead of a second one just for this case.
+            // NOTE: deliberately a distinct 'GROUP_PANEL_RESTORE' type, not
+            // the same 'GROUP_PANEL_OPEN' openPanel() sends — that listener
+            // also pushes a new browser history entry on every message
+            // (correct for an actual fresh open, wrong here: MODULE_FOCUSED
+            // can fire repeatedly for the same still-open panel and would
+            // spam the back stack with duplicate entries otherwise).
+            var _gcPanel = document.getElementById('groupChatPanel');
+            if (_gcPanel && _gcPanel.classList.contains('active') && window.__gcCurGroup) {
+                var g = window.__gcCurGroup;
+                var mc = Math.max((g.createdBy?1:0), parseInt(g.memberCount)||parseInt(g.member_count)||parseInt(g.stats&&g.stats.totalMembers)||parseInt(g._count&&g._count.members)||0);
+                try {
+                    window.parent.postMessage({ type: 'GROUP_PANEL_RESTORE', payload: { id: g.id, name: g.name, memberCount: mc, stats: g.stats, purpose: g.purpose, isPublic: g.isPublic }, source: 'group-module', timestamp: Date.now() }, '*');
+                } catch (ex) {}
+            }
             if (typeof window.__rerenderActiveGroupSection === 'function') {
                 window.__rerenderActiveGroupSection();
             }

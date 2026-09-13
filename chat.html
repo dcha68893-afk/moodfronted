@@ -1316,14 +1316,35 @@
         #globalHeader.chat-active #headerChatCtx    { display: flex !important; }
 
         /* ── Group header buttons — clean dark style, NO colored bar ── */
+        /* REDESIGN (professional/attractive header icon set): the plain
+           borderless ghost buttons below are now a consistent circular
+           "chip" — subtle background + hairline border at rest (so the
+           icon set reads clearly against light and dark header
+           gradients alike, not just on hover) with a soft lift and
+           color shift on press/hover, matching the polish already
+           established by .header-action-btn (list-header icons) so the
+           chat-detail header and the chat-list header feel like one
+           design system instead of two different icon styles. */
         .hgm-btn {
-            background: none; border: none;
+            background: rgba(255,255,255,.08);
+            border: 1px solid rgba(255,255,255,.14);
             color: #e5e7eb;
-            cursor: pointer; padding: 7px; border-radius: 50%;
-            font-size: 16px; display: flex; align-items: center;
-            justify-content: center; transition: background .15s; flex-shrink: 0;
+            width: 36px; height: 36px;
+            cursor: pointer; padding: 0; border-radius: 50%;
+            font-size: 15px; display: flex; align-items: center;
+            justify-content: center; flex-shrink: 0;
+            transition: background .15s ease, border-color .15s ease, transform .1s ease;
         }
-        .hgm-btn:hover { background: rgba(255,255,255,.10); }
+        .hgm-btn:hover { background: rgba(255,255,255,.16); border-color: rgba(255,255,255,.24); }
+        .hgm-btn:active { transform: scale(.92); }
+        /* Voice/video call icons get a light brand-green tint so they read
+           as the "primary" actions in the row, distinct from back/more. */
+        #hdrChatCall, #hdrChatVideo, #hdrGroupCall, #hdrGroupVideo {
+            background: rgba(34,197,94,.14); border-color: rgba(34,197,94,.22); color: #4ade80;
+        }
+        #hdrChatCall:hover, #hdrChatVideo:hover, #hdrGroupCall:hover, #hdrGroupVideo:hover {
+            background: rgba(34,197,94,.24); border-color: rgba(34,197,94,.34);
+        }
         /* Override any color the header gradient might add */
         #globalHeader.group-chat-active {
             background:
@@ -2991,6 +3012,20 @@
                 return true;
             }
 
+            // FIX (BACK-STACK-EXACT-RESTORE, Tools module): Tools' sub-tabs
+            // (home/categories/cart/wishlist/account) are parent-driven via
+            // toolsNavTo()/TOOLS_NAV, not a local panel back-nav.js already
+            // knows how to close — so pressing back while on any tab other
+            // than 'home' fell straight through to the generic cross-module
+            // step below and jumped to a whole different module, skipping
+            // "return to the Tools home tab first" the same one-step-at-a-
+            // time behavior every other module already gets.
+            if (window.__currentPage === 'tools' && window.__toolsCurrentPage && window.__toolsCurrentPage !== 'home') {
+                toolsNavTo('home');
+                logProcessStatus('back-navigation', true, 'returned-tools-home');
+                return true;
+            }
+
             if (window.__currentPage !== 'messages') {
                 // PHASE15 FIX: Pop from history stack for correct back navigation
                 var _backPage = 'messages';
@@ -3120,7 +3155,22 @@
                 // #groupChatPanel — so #sidebar (holding the All/My/Joined/Invites/
                 // Admin tabs and #allGroupsList) stayed hidden on mobile exactly like
                 // the GO_BACK_TO_LIST case above. Mirror that same notification here.
-                if (document.body.classList.contains('group-panel-active')) {
+                // FIX (BACK-STACK-EXACT-RESTORE): this used to fire
+                // unconditionally — including while the back button was
+                // unwinding history through 'group' on its way to an
+                // earlier module. That forced groupIframe to close its
+                // open chat/settings panel every single time, so by the
+                // time the user actually pressed back far enough to
+                // return TO group, its own internal panel had already
+                // been wiped and it could only ever show the bare list —
+                // never the exact group chat/settings panel the user was
+                // last on. groupChatPanel and its settings sub-panel live
+                // entirely inside this iframe, which is never destroyed,
+                // so simply NOT force-closing it here is enough to
+                // preserve exact state; only reset it on a genuine
+                // deliberate switch away (tapping a different nav icon),
+                // never while fromHistory is unwinding the back stack.
+                if (!fromHistory && document.body.classList.contains('group-panel-active')) {
                     const _groupIframeAway = document.getElementById('groupIframe');
                     if (_groupIframeAway && _groupIframeAway.contentWindow) {
                         _groupIframeAway.contentWindow.postMessage({ type: 'GO_BACK_TO_LIST', source: 'parent', timestamp: Date.now() }, '*');
@@ -3159,7 +3209,17 @@
             // (or even just glancing at the tab) showed the same open chat
             // instead of the chat list. Tell it to reset, mirroring exactly
             // what clicking its own back button already does.
-            if (page !== 'messages' && window.__lastActivePage === 'messages') {
+            // FIX (BACK-STACK-EXACT-RESTORE): same class of bug as the
+            // group GO_BACK_TO_LIST fix above — MODULE_BLURRED used to
+            // fire even while the back button was unwinding history
+            // through 'messages', forcing the open chat closed before the
+            // user ever actually pressed back far enough to return to it.
+            // chatPanelEl's DOM lives inside messagesIframe, which is
+            // never destroyed, so leaving it alone during a fromHistory
+            // transition is what actually preserves "exactly the chat the
+            // user was last on" instead of always landing back on the
+            // chat list. Still reset on any deliberate switch away.
+            if (!fromHistory && page !== 'messages' && window.__lastActivePage === 'messages') {
                 const _msgIframeBlur = document.getElementById('messagesIframe');
                 if (_msgIframeBlur && _msgIframeBlur.contentWindow) {
                     _msgIframeBlur.contentWindow.postMessage({ type: 'MODULE_BLURRED', source: 'parent', timestamp: Date.now() }, '*');
@@ -3632,6 +3692,20 @@
                     window.__gcCurrentGroup = _gpData;
                     // Update globalHeader to show group context (all screen sizes)
                     if (window.__groupHdrShow) window.__groupHdrShow(_gpData);
+                }
+                // FIX (BACK-STACK-EXACT-RESTORE): re-sync only — group.html
+                // sends this on MODULE_FOCUSED when its own panel was never
+                // actually closed (see the fromHistory-gated skip of
+                // GO_BACK_TO_LIST above). Mirrors the GROUP_PANEL_OPEN
+                // handling above minus syncBrowserHistoryState, which must
+                // NOT run again here or every re-focus would push another
+                // duplicate browser history entry for a panel that was
+                // already open before the user navigated away.
+                if (data.type === 'GROUP_PANEL_RESTORE') {
+                    document.body.classList.add('group-panel-active');
+                    var _gprData = data.payload || {};
+                    window.__gcCurrentGroup = _gprData;
+                    if (window.__groupHdrShow) window.__groupHdrShow(_gprData);
                 }
                 if (data.type === 'GROUP_PANEL_CLOSED' || data.type === 'GROUP_LIST_SHOWN' || data.type === 'GO_BACK_TO_LIST' || data.type === 'GROUP_PANEL_CLOSE') {
                     document.body.classList.remove('group-panel-active');
@@ -9172,6 +9246,25 @@ window.__groupHdrHide = hideGroupHeader;
         if (f && f.contentWindow)
             f.contentWindow.postMessage({ type: type, payload: payload || {}, source: 'parent-chat-hdr', timestamp: Date.now() }, '*');
     }
+    // FIX-DEAD-BACK/MORE-BUTTONS: these used to postToMessage('PARENT_CHAT_ACTION',
+    // ...) — nothing in message.html (or anywhere else) ever listened for that
+    // type, so the mirrored header's back arrow and "more" button silently did
+    // nothing once message.html's own header was hidden (see
+    // PARENT-HEADER-CONSOLIDATION in message.html). Those real buttons
+    // (#backBtn, #chatMoreBtn) still exist in message.html's DOM with their
+    // original, working click handlers — remote-click them directly, the same
+    // proven pattern chat.html already uses for #newChatBtn/#multiSendToggleBtn
+    // (see triggerIframeHeaderAction) instead of a second, dead signal path.
+    function remoteClickMessage(elementId) {
+        try {
+            var f = messageIframe();
+            var doc = f && f.contentWindow && f.contentWindow.document;
+            var btn = doc && doc.getElementById(elementId);
+            if (btn && typeof btn.click === 'function') btn.click();
+        } catch (e) {
+            console.warn('[chat.html] Unable to remote-click message.html #' + elementId, e && e.message ? e.message : e);
+        }
+    }
 
     /* ── Show 1:1 chat context in globalHeader ───────────────────── */
     var _lastChatHeaderInfo = null; // {chatId, seq}
@@ -9245,7 +9338,7 @@ window.__groupHdrHide = hideGroupHeader;
         var back = document.getElementById('hdrChatBack');
         if (back && !back._chw) { back._chw = true;
             back.addEventListener('click', function () {
-                postToMessage('PARENT_CHAT_ACTION', { action: 'back' });
+                remoteClickMessage('backBtn');
                 hideChatHeader();
             });
         }
@@ -9285,12 +9378,12 @@ window.__groupHdrHide = hideGroupHeader;
         if (more && !more._chw) { more._chw = true;
             more.addEventListener('click', function (e) {
                 e.stopPropagation();
-                postToMessage('PARENT_CHAT_ACTION', { action: 'menu' });
+                remoteClickMessage('chatMoreBtn');
             });
         }
         var info = document.getElementById('hdrChatInfo');
         if (info && !info._chw) { info._chw = true;
-            info.addEventListener('click', function () { postToMessage('PARENT_CHAT_ACTION', { action: 'profile' }); });
+            info.addEventListener('click', function () { remoteClickMessage('chatHeaderName'); });
         }
     }
 
@@ -9315,7 +9408,19 @@ window.__groupHdrHide = hideGroupHeader;
         if (d.source === 'message-iframe') {
             if (d.type === 'CHAT_HEADER_UPDATE') {
                 if (_chatHeaderCloseTimer) { clearTimeout(_chatHeaderCloseTimer); _chatHeaderCloseTimer = null; }
-                if (window.__currentPage === 'messages') showChatHeader(d.payload || {});
+                if (window.__currentPage === 'messages') {
+                    // FIX (BACK-STACK-EXACT-RESTORE): this now also arrives
+                    // from message.html's MODULE_FOCUSED re-announcement
+                    // when an already-open chat becomes visible again after
+                    // the user backs out of a different module. Re-apply
+                    // chat-panel-active here too (previously only CHAT_OPENED
+                    // did), or the mirrored header would show correctly
+                    // while the body class — and everything CSS keys off it
+                    // (mobile nav bar, iframe layout) — stayed stuck in the
+                    // "no chat open" state.
+                    document.body.classList.add('chat-panel-active');
+                    showChatHeader(d.payload || {});
+                }
                 return;
             }
             if (d.type === 'CHAT_PANEL_CLOSED') {

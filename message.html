@@ -213,6 +213,25 @@
   }
   #selectionActions button:hover { background: rgba(0,0,0,0.06); }
   #chatHeaderActions.hidden { display: none; }
+  /* FIX (PARENT-HEADER-CONSOLIDATION): chat.html's global header already
+     renders a full 1:1 chat header (back arrow, avatar, name, voice/video
+     call, more menu — see #headerChatCtx / showChatHeader() in chat.html)
+     that mirrors exactly what this in-iframe #chatHeader used to show on
+     its own, causing the duplicate header row reported (two rows: the
+     parent's default "Messages" bar plus this iframe's own back/name/
+     call/video/more row underneath it). This block hides #chatHeader's
+     own visible presentation only — every element inside it (backBtn,
+     chatHeaderName, searchInChatBtn, voiceCallBtn, videoCallBtn,
+     chatMoreBtn) stays in the DOM, fully functional, with its existing
+     click handlers untouched, because chat.html remote-clicks these exact
+     elements the same way it already does for #newChatBtn/
+     #multiSendToggleBtn (see triggerIframeHeaderAction in chat.html).
+     The one exception is the multi-select action bar (#selectionActions,
+     "N selected / cancel / delete") — that has no equivalent in the
+     parent header and stays as an in-panel contextual toolbar, shown via
+     the .selection-active override below exactly while selectMode is on. */
+  #chatHeader { display: none; }
+  #chatHeader.selection-active { display: flex; }
   .bubble-context-menu {
     position: fixed; z-index: 1500; background: var(--kyn-bg-panel, #fff);
     border: 1px solid var(--kyn-border, #ddd); border-radius: 12px; box-shadow: 0 6px 20px rgba(0,0,0,0.2);
@@ -738,6 +757,31 @@
 
       if (hasChat) renderMessages(chatId);
 
+      // FIX (PARENT-HEADER-CONSOLIDATION): with #chatHeader now hidden
+      // (chat.html's mirrored #headerChatCtx is the only visible chat
+      // header), the parent needs real data to populate it. chat.html
+      // already knows how to render this (showChatHeader(), fed today by
+      // CHAT_OPENED/CHAT_OPENING payloads) but had a second, dead
+      // CHAT_HEADER_UPDATE listener that nothing ever posted to. Feed it
+      // here too, on every header-relevant render, as the authoritative,
+      // always-current source — cheap and keeps the mirrored header in
+      // sync with search/typing/select-mode changes that don't go through
+      // CHAT_OPENED at all.
+      try {
+        window.parent.postMessage({
+          source: 'message-iframe',
+          type: (hasChat || pending) ? 'CHAT_HEADER_UPDATE' : 'CHAT_PANEL_CLOSED',
+          payload: (hasChat || pending) ? {
+            chatId: chatId || (pending && pending.userId) || null,
+            seq: (window.__kynChatHdrSeq = (window.__kynChatHdrSeq || 0) + 1),
+            name: headerName,
+            avatarUrl: (conv && conv.otherUser && conv.otherUser.avatar) || (pending && pending.avatar) || null,
+            online: !!(conv && conv.otherUser && conv.otherUser.online),
+          } : {},
+          timestamp: Date.now(),
+        }, '*');
+      } catch (_) {}
+
       if (options.retryBanner) {
         const retryBtn = document.getElementById('retryOpenChatBtn');
         if (retryBtn) {
@@ -810,7 +854,9 @@
       // message "⋮" menu already established, so the two menus in this
       // app look and behave consistently.
       async function runChatMoreAction(action) {
-        if (action === 'select') {
+        if (action === 'search') {
+          document.getElementById('searchInChatBtn').click();
+        } else if (action === 'select') {
           enterSelectMode(null);
         } else if (action === 'clear') {
           if (confirm('Clear this conversation for you? This cannot be undone.')) {
@@ -865,6 +911,12 @@
         menu.id = 'chatMoreMenu';
         menu.className = 'bubble-context-menu';
         const items = [
+          // FIX (PARENT-HEADER-CONSOLIDATION): the standalone 🔍 search
+          // icon this menu's parent header used to show lives here now —
+          // chat.html's mirrored header only surfaces back/name/call/
+          // video/more per spec, so "search in chat" moved under More
+          // instead of being dropped. searchInChatBtn itself is unchanged.
+          { action: 'search', label: '🔍 Search in chat' },
           { action: 'select', label: '☑ Select messages' },
           { action: 'clear', label: '🧹 Clear chat' },
           { action: 'archive', label: '🗄 Archive chat' },
@@ -921,6 +973,7 @@
         // other navigation happened to clear it.
         try {
           window.parent.postMessage({ type: 'CHAT_LIST_SHOWN', timestamp: Date.now() }, '*');
+          window.parent.postMessage({ source: 'message-iframe', type: 'CHAT_PANEL_CLOSED', timestamp: Date.now() }, '*');
         } catch (_) {}
       });
 
@@ -1189,16 +1242,23 @@
     function updateSelectionBar() {
       const actions = document.getElementById('chatHeaderActions');
       const selectionBar = document.getElementById('selectionActions');
-      const headerName = document.getElementById('chatHeaderName');
+      const headerEl = document.getElementById('chatHeader');
       if (!actions || !selectionBar) return;
       if (selectMode) {
         actions.classList.add('hidden');
         selectionBar.classList.remove('hidden');
         const count = document.getElementById('selectionCount');
         if (count) count.textContent = `${selectedIds.size} selected`;
+        // FIX (PARENT-HEADER-CONSOLIDATION): #chatHeader is hidden by
+        // default now (chat.html's mirrored header owns the normal
+        // back/name/call/video/more row) — but the multi-select bar has no
+        // parent-side equivalent, so surface it locally for exactly as
+        // long as selection mode is active.
+        if (headerEl) headerEl.classList.add('selection-active');
       } else {
         actions.classList.remove('hidden');
         selectionBar.classList.add('hidden');
+        if (headerEl) headerEl.classList.remove('selection-active');
       }
     }
 
@@ -1506,9 +1566,45 @@
         lastName: f.lastName || '',
       };
     }
+    // FIX (BACK-STACK-EXACT-RESTORE, messages side): chat.html used to
+    // force this iframe back to its chat list every time the user
+    // navigated to a different module (MODULE_BLURRED), even when that
+    // navigation was the back button unwinding history and should have
+    // preserved exactly which chat was open. chat.html now only sends
+    // that forced-reset on a genuine deliberate switch (not
+    // fromHistory) — so an open chat's DOM here is simply left alone and
+    // is still showing correctly when this module becomes visible again.
+    // What's missing without this listener: the PARENT's own chrome
+    // (chat-panel-active body class + the mirrored header) was still
+    // reset the moment focus left, and nothing told it to catch back up.
+    // Re-announce the still-open chat on every MODULE_FOCUSED so the
+    // parent re-syncs — reusing the exact same CHAT_HEADER_UPDATE feed
+    // renderChatPanel() already sends on open, not a new code path.
     window.addEventListener('message', (event) => {
       const data = event.data;
       if (!data || typeof data !== 'object') return;
+      if (data.type === 'MODULE_FOCUSED') {
+        const activeId = window.MessageModule && window.MessageModule.getActiveChatId && window.MessageModule.getActiveChatId();
+        const panelVisible = chatPanelEl && !chatPanelEl.classList.contains('hide-on-mobile');
+        if (activeId && panelVisible) {
+          const conv = window.MessageModule.getConversations().find(c => c.chatId === activeId);
+          try {
+            window.parent.postMessage({
+              source: 'message-iframe',
+              type: 'CHAT_HEADER_UPDATE',
+              payload: {
+                chatId: activeId,
+                seq: (window.__kynChatHdrSeq = (window.__kynChatHdrSeq || 0) + 1),
+                name: conv?.otherUser?.username || 'Conversation',
+                avatarUrl: conv?.otherUser?.avatar || null,
+                online: !!(conv && conv.otherUser && conv.otherUser.online),
+              },
+              timestamp: Date.now(),
+            }, '*');
+          } catch (_) {}
+        }
+        return;
+      }
       if (data.type !== 'FRIENDS_LIST_UPDATE' && data.type !== 'FRIENDS_LIST_RESPONSE' &&
           data.type !== 'FRIENDS_DATA' && data.type !== 'FRIENDS_SYNC') return;
       const rawFriends = (data.payload && data.payload.friends) || data.friends || [];
