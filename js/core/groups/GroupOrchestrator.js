@@ -22,37 +22,33 @@
 
   if (window.__GroupOrchestrator) return;
 
-  // ─── Group Role Hierarchy ─────────────────────────────────────────────────
-
   const GROUP_ROLE = Object.freeze({
-    OWNER:      5,
-    ADMIN:      4,
-    MODERATOR:  3,
-    MEMBER:     2,
-    GUEST:      1,
+    OWNER: 5,
+    ADMIN: 4,
+    MODERATOR: 3,
+    MEMBER: 2,
+    GUEST: 1,
     RESTRICTED: 0,
-    BANNED:     -1,
+    BANNED: -1,
   });
 
   const ROLE_NAMES = Object.fromEntries(Object.entries(GROUP_ROLE).map(([k, v]) => [v, k]));
 
-  // ─── GroupPermissionEngine ────────────────────────────────────────────────
-
   class GroupPermissionEngine {
     can(userRole, action) {
       const permissions = {
-        send_message:   GROUP_ROLE.MEMBER,
+        send_message: GROUP_ROLE.MEMBER,
         delete_message: GROUP_ROLE.MODERATOR,
-        kick_member:    GROUP_ROLE.MODERATOR,
-        ban_member:     GROUP_ROLE.ADMIN,
-        mute_member:    GROUP_ROLE.MODERATOR,
-        update_group:   GROUP_ROLE.ADMIN,
-        manage_roles:   GROUP_ROLE.ADMIN,
-        delete_group:   GROUP_ROLE.OWNER,
-        pin_message:    GROUP_ROLE.MODERATOR,
-        send_invite:    GROUP_ROLE.MEMBER,
-        approve_join:   GROUP_ROLE.MODERATOR,
-        make_announce:  GROUP_ROLE.ADMIN,
+        kick_member: GROUP_ROLE.MODERATOR,
+        ban_member: GROUP_ROLE.ADMIN,
+        mute_member: GROUP_ROLE.MODERATOR,
+        update_group: GROUP_ROLE.ADMIN,
+        manage_roles: GROUP_ROLE.ADMIN,
+        delete_group: GROUP_ROLE.OWNER,
+        pin_message: GROUP_ROLE.MODERATOR,
+        send_invite: GROUP_ROLE.MEMBER,
+        approve_join: GROUP_ROLE.MODERATOR,
+        make_announce: GROUP_ROLE.ADMIN,
       };
       const required = permissions[action] ?? GROUP_ROLE.MEMBER;
       return userRole >= required;
@@ -64,25 +60,22 @@
     }
   }
 
-  // ─── GroupStateRegistry ───────────────────────────────────────────────────
-
   class GroupStateRegistry {
     constructor() {
-      // groupId → { id, name, members: Map, unread, typing: Set, online: Set, lastMessageAt }
       this._groups = new Map();
     }
 
     ensure(groupId) {
       if (!this._groups.has(groupId)) {
         this._groups.set(groupId, {
-          id:            groupId,
-          name:          null,
-          members:       new Map(),
-          unread:        0,
-          typing:        new Set(),
-          online:        new Set(),
+          id: groupId,
+          name: null,
+          members: new Map(),
+          unread: 0,
+          typing: new Set(),
+          online: new Set(),
           lastMessageAt: null,
-          joinedRoom:    false,
+          joinedRoom: false,
         });
       }
       return this._groups.get(groupId);
@@ -128,32 +121,16 @@
     size() { return this._groups.size; }
   }
 
-  // ─── GroupRealtimeDispatcher ──────────────────────────────────────────────
-
   class GroupRealtimeDispatcher {
-    /**
-     * Broadcast a group event to all iframes + EventBus + kyn: CustomEvent.
-     * Uses the same postMessage pattern as app.realtime.socket.js.
-     */
     dispatch(eventType, payload) {
-      // FIX-INFINITE-LOOP: tag every CustomEvent we emit as "already handled by
-      // the orchestrator". _attachKynEventListeners() below listens for these
-      // exact same 'kyn:group:*' event names to catch events coming from OTHER
-      // sources (app.realtime.socket.js's raw socket → kyn: bridge). Without this
-      // flag, the CustomEvent we fire here would immediately re-trigger that same
-      // listener, which calls _handleGroupSocketEvent → GroupSyncEngine.onX() →
-      // dispatch() again → another CustomEvent → forever (RangeError: Maximum
-      // call stack size exceeded, seen on every group:typing/message/etc event).
       const detail = (payload && typeof payload === 'object')
         ? { ...payload, __gobEcho: true }
         : { __gobEcho: true, value: payload };
 
-      // 1. kyn: CustomEvent (for same-frame listeners like group.html)
       try {
         window.dispatchEvent(new CustomEvent('kyn:' + eventType, { detail }));
       } catch (_) {}
 
-      // 2. REALTIME_EVENT postMessage to all iframes (same as existing socket bridge)
       const iframes = document.querySelectorAll('iframe');
       if (iframes.length) {
         const msg = { type: 'REALTIME_EVENT:' + eventType, payload: payload || {} };
@@ -162,33 +139,39 @@
         });
       }
 
-      // 3. Post to parent if we're inside an iframe
       if (window !== window.top) {
         try { window.parent.postMessage({ type: 'REALTIME_EVENT:' + eventType, payload }, '*'); } catch (_) {}
       }
 
-      // 4. KynectaEventBus
       const bus = window.KynectaEventBus;
       if (bus) bus.emit('REALTIME_' + eventType, payload, { async: true });
     }
   }
 
-  // ─── GroupSyncEngine ──────────────────────────────────────────────────────
-
   class GroupSyncEngine {
     constructor(registry, dispatcher) {
-      this._registry   = registry;
+      this._registry = registry;
       this._dispatcher = dispatcher;
-      this._dedupIds   = new Map(); // messageId → ts
+      this._dedupIds = new Map();
       this._dedupWindowMs = 5000;
     }
 
     onMessage(groupId, message) {
-      if (this._isDuplicate(message.id || message.localId)) return;
+      if (this._isDuplicate(message.id || message.localId || message.clientMessageId)) return;
       const g = this._registry.ensure(groupId);
       g.lastMessageAt = Date.now();
       const myId = this._getMyUserId();
-      if (message.senderId && String(message.senderId) !== String(myId)) {
+
+      // The group send path already renders the sender's optimistic message and
+      // reconciles it with the REST response. Do NOT feed the same user's socket
+      // echo back into the sender's renderer: the server broadcast is intended
+      // for the other group members. This prevents the creator's single message
+      // from appearing twice when the socket echo races the REST response.
+      if (message.senderId && myId && String(message.senderId) === String(myId)) {
+        return;
+      }
+
+      if (message.senderId) {
         this._registry.incrementUnread(groupId);
       }
       this._dispatcher.dispatch('group:message', { groupId, message });
@@ -244,7 +227,7 @@
 
     _isDuplicate(id) {
       if (!id) return false;
-      const now  = Date.now();
+      const now = Date.now();
       const last = this._dedupIds.get(id);
       for (const [k, ts] of this._dedupIds) {
         if (now - ts > this._dedupWindowMs) this._dedupIds.delete(k);
@@ -262,16 +245,13 @@
     }
   }
 
-  // ─── GroupRecoveryEngine ──────────────────────────────────────────────────
-
   class GroupRecoveryEngine {
     constructor(registry, dispatcher) {
-      this._registry   = registry;
+      this._registry = registry;
       this._dispatcher = dispatcher;
     }
 
     attach() {
-      // Reconnect — re-join all known group rooms
       const bus = window.KynectaEventBus;
       if (bus) {
         bus.on('SOCKET_CONNECTED', () => this._rejoinRooms());
@@ -280,7 +260,6 @@
         });
       }
 
-      // Hidden-tab recovery
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
           setTimeout(() => this._requestDeltaSync(), 500);
@@ -293,11 +272,8 @@
       if (!rt) return;
       for (const g of this._registry.all()) {
         if (g.joinedRoom) {
-          // Re-announce membership so server re-adds socket to group room
           const socket = rt._socket;
-          if (socket?.connected) {
-            socket.emit('group:rejoin', { groupId: g.id });
-          }
+          if (socket?.connected) socket.emit('group:rejoin', { groupId: g.id });
         }
       }
       this._requestDeltaSync();
@@ -312,16 +288,14 @@
     }
   }
 
-  // ─── GroupOrchestrator (main) ─────────────────────────────────────────────
-
   class GroupOrchestrator {
     constructor() {
-      this._registry   = new GroupStateRegistry();
+      this._registry = new GroupStateRegistry();
       this._dispatcher = new GroupRealtimeDispatcher();
-      this._sync       = new GroupSyncEngine(this._registry, this._dispatcher);
-      this._recovery   = new GroupRecoveryEngine(this._registry, this._dispatcher);
-      this._perms      = new GroupPermissionEngine();
-      this._started    = false;
+      this._sync = new GroupSyncEngine(this._registry, this._dispatcher);
+      this._recovery = new GroupRecoveryEngine(this._registry, this._dispatcher);
+      this._perms = new GroupPermissionEngine();
+      this._started = false;
     }
 
     start() {
@@ -333,15 +307,11 @@
       console.log('[GroupOrchestrator] ✅ Started');
     }
 
-    // ── Public API ──────────────────────────────────────────────────────────
-
     joinGroup(groupId) {
       const g = this._registry.ensure(groupId);
       g.joinedRoom = true;
       const rt = window.KynectaRealtime;
-      if (rt?._socket?.connected) {
-        rt._socket.emit('group:join_room', { groupId });
-      }
+      if (rt?._socket?.connected) rt._socket.emit('group:join_room', { groupId });
     }
 
     leaveGroup(groupId) {
@@ -356,17 +326,10 @@
     }
 
     getDiagnostics() {
-      return {
-        groups:  this._registry.size(),
-        started: this._started,
-      };
+      return { groups: this._registry.size(), started: this._started };
     }
 
-    // ── Private — Register missing socket events ──────────────────────────
-
     _registerMissingSocketEvents() {
-      // The existing allEvents array is missing group: and status: events.
-      // We add them here via KynectaRealtime.on() without touching app.realtime.socket.js.
       const rt = window.KynectaRealtime;
       if (!rt) {
         setTimeout(() => this._registerMissingSocketEvents(), 1000);
@@ -381,9 +344,7 @@
         'group:call', 'group:announcement', 'group:media',
         'group:membership_change', 'group:updated',
         'group:read_receipt', 'group:member_joined', 'group:member_left',
-        // FIX #11 — group creation event so creator is auto-inserted as owner
         'group:created', 'group_created',
-        // FIX #12 — invite lifecycle events
         'group:invite', 'group:invite_created', 'group:invite_received',
         'group:invite_accepted', 'group:invite_declined',
       ];
@@ -393,17 +354,6 @@
           rt.on(evt, (payload) => this._handleGroupSocketEvent(evt, payload));
         }
       }
-
-      // FIX-DOUBLE-PROCESSING: the wildcard rt.on('*', ...) hook that used to
-      // live here fired _handleGroupSocketEvent a SECOND time for every event
-      // already covered by the named-event loop directly above (every socket
-      // message with a `group:` type). That meant each real incoming event
-      // (message/typing/join/leave/etc.) was processed twice — double unread
-      // counts, duplicate dispatch() fan-out to iframes, duplicate 'kyn:'
-      // CustomEvents. Removed; the named-event registrations above already
-      // cover every event in `groupEvents`, and app.realtime.socket.js's own
-      // 'kyn:group:*' bridge (handled in _attachKynEventListeners) covers
-      // anything else.
     }
 
     _handleGroupSocketEvent(eventType, payload) {
@@ -451,11 +401,10 @@
           this._sync.onGroupUpdate(groupId, payload);
           break;
         default:
-          // FIX #11 — group:created: ensure creator is owner+member immediately
           if (eventType === 'group:created' || eventType === 'group_created') {
             const gId = groupId;
             const creatorId = payload.creatorId || payload.userId ||
-              (() => { try { const s = window.__PARENT_SESSION__ || {}; return s.userId || (s.user && s.user.id); } catch(_){return null;} })();
+              (() => { try { const s = window.__PARENT_SESSION__ || {}; return s.userId || (s.user && s.user.id); } catch (_) { return null; } })();
             if (gId && creatorId) {
               this._registry.addMember(String(gId), String(creatorId), {
                 userId: String(creatorId), role: 'owner', joinedAt: Date.now(), isCreator: true
@@ -463,12 +412,11 @@
               if (!window.__groupMembershipCache) window.__groupMembershipCache = {};
               window.__groupMembershipCache[String(gId)] = { groupId: String(gId), userId: String(creatorId), role: 'owner', joinedAt: Date.now() };
               this._dispatcher.dispatch('group:membership_change', { groupId: gId, userId: creatorId, role: 'owner', action: 'joined' });
-              console.log('[GroupOrchestrator] FIX#11 — Creator', creatorId, 'added as owner of group', gId);
+              console.log('[GroupOrchestrator] Creator added as owner of group', gId);
             }
             break;
           }
 
-          // FIX #12 — group invites: persist and dispatch
           if (eventType === 'group:invite' || eventType === 'group:invite_created') {
             const inviteId = payload.inviteId || ('inv_' + Date.now());
             const invite = { ...payload, inviteId, receivedAt: Date.now() };
@@ -486,14 +434,11 @@
             break;
           }
 
-          // Fan out any other group event
           this._dispatcher.dispatch(eventType, payload);
       }
     }
 
     _attachKynEventListeners() {
-      // Listen to kyn: events already dispatched by existing socket layer
-      // (app.realtime.socket.js dispatches kyn:group:* for group: events)
       const groupEvents = [
         'group:message', 'group:reaction', 'group:typing', 'group:edit',
         'group:delete', 'group:join', 'group:leave', 'group:kick',
@@ -504,11 +449,7 @@
       for (const evt of groupEvents) {
         window.addEventListener('kyn:' + evt, e => {
           const payload = e.detail || {};
-          // FIX-INFINITE-LOOP: skip CustomEvents that WE dispatched ourselves
-          // (see GroupRealtimeDispatcher.dispatch()) — otherwise every incoming
-          // event re-triggers itself forever via this same listener.
           if (payload.__gobEcho) return;
-          // Avoid double-processing from _registerMissingSocketEvents
           const groupId = payload.groupId || payload.group_id;
           if (!groupId) return;
           this._handleGroupSocketEvent(evt, payload);
@@ -517,22 +458,17 @@
     }
   }
 
-  // ─── Singleton ───────────────────────────────────────────────────────────
-
   const orchestrator = new GroupOrchestrator();
 
   const tryStart = () => {
-    if (window.KynectaRealtime) {
-      orchestrator.start();
-    } else {
-      setTimeout(tryStart, 500);
-    }
+    if (window.KynectaRealtime) orchestrator.start();
+    else setTimeout(tryStart, 500);
   };
   tryStart();
 
   window.__GroupOrchestrator = orchestrator;
-  window.GroupOrchestrator   = orchestrator;
-  window.GROUP_ROLE          = GROUP_ROLE;
+  window.GroupOrchestrator = orchestrator;
+  window.GROUP_ROLE = GROUP_ROLE;
 
   console.log('[GroupOrchestrator] ✅ Ready');
 })();
