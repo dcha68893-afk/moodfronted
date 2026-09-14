@@ -305,6 +305,13 @@ let isBackgroundInitialized = false;
 let isTokenReady = false;
 let parentReady = false;
 
+// FIX (status counted as viewed too early/inconsistently): a status must only
+// be recorded as viewed — locally AND on the server — after the viewer has
+// actually remained on that slide for ~2 seconds, not the instant the slide
+// opens. See _loadSlot()/_clearSlideTimer() below.
+const STATUS_VIEW_THRESHOLD = 2000;
+let _viewRecordTimerHandle = null;
+
 // FIX (viewing a status makes it disappear from BOTH "Recent" and "Viewed
 // updates" instead of moving to "Viewed"): friendsStatuses gets replaced
 // wholesale in several places below (syncDataFromCore, the core.subscribe
@@ -321,8 +328,42 @@ let parentReady = false;
 // refresh's snapshot happened not to include it; merge by id instead of
 // replacing outright so the newest replaces the old where present, but
 // nothing already known just disappears.
+// FIX (Recently Updated/Recently Viewed relying too heavily on localStorage):
+// the backend's /status/friends endpoint now returns `viewedByMe`/`viewedAt`
+// per status, computed from the StatusView table (see moodchat's
+// src/routes/status.js). Whenever a status arrives WITH that field present,
+// the server is authoritative — reconcile the local `viewedStatuses` cache to
+// match it (both adding newly-confirmed views and removing entries stale
+// localStorage claimed were viewed but the server says were not, e.g. after
+// a status expired/rotated or on a fresh device). Statuses without the field
+// (older/other code paths not yet updated) are left untouched so existing
+// optimistic-UI behavior for those paths is unaffected.
+function _reconcileViewedFromServer(list) {
+    if (!Array.isArray(list) || !viewedStatuses) return;
+    let changed = false;
+    list.forEach(s => {
+        if (!s || s.id == null || typeof s.viewedByMe !== 'boolean') return;
+        const sid = String(s.id);
+        if (s.viewedByMe) {
+            if (!viewedStatuses.has(sid)) { viewedStatuses.add(sid); changed = true; }
+        } else if (viewedStatuses.has(sid)) {
+            viewedStatuses.delete(sid);
+            viewedStatuses.delete(Number(s.id));
+            changed = true;
+        }
+    });
+    if (changed) {
+        try {
+            const arr = JSON.stringify(Array.from(viewedStatuses).map(String));
+            localStorage.setItem('kyn_viewed_statuses', arr);
+            localStorage.setItem('knecta_viewed_statuses', arr);
+        } catch (_) {}
+    }
+}
+
 function _mergeStatusesById(existing, incoming) {
     if (!Array.isArray(incoming)) return existing;
+    _reconcileViewedFromServer(incoming);
     if (!Array.isArray(existing) || existing.length === 0) return incoming;
     const _delReg = window.__PHASE10_DeletionRegistry;
     const byId = new Map();
@@ -3279,6 +3320,11 @@ function _startSlideTimer(isOwner, group) {
 
 function _clearSlideTimer() {
     if (_slideTimerHandle) { clearTimeout(_slideTimerHandle); _slideTimerHandle = null; }
+    // Also cancel any pending "mark as viewed" threshold timer (see
+    // _loadSlot/_recordStatusViewed) — this function is already called on
+    // back/close/next/prev/pause/destroy, so a status left before
+    // STATUS_VIEW_THRESHOLD elapses is correctly never recorded as viewed.
+    if (_viewRecordTimerHandle) { clearTimeout(_viewRecordTimerHandle); _viewRecordTimerHandle = null; }
     // Reset fill transitions
     document.querySelectorAll('.progress-segment .fill').forEach(f => {
         f.style.transition = 'none';
@@ -3404,25 +3450,18 @@ function _isCurrentOwner() {
     return myId && String(myId) === String(currentViewerStatus.userId || currentViewerStatus.user?.id);
 }
 
-function _loadSlot(index, isOwner, group) {
-    const status = group[index];
-    currentViewerStatus = status;
-
-    // FIX (viewed status reverts to "recently updated" after refresh/relogin):
-    // this write used to happen AFTER loadViewerContent()/_applyViewerMode()
-    // ran. Those can fail for a given status (missing media, race with a
-    // still-loading iframe, a slow network) without throwing anything the
-    // user notices — the slide still visually appears to open — but any
-    // exception there aborted the rest of this function, so the
-    // localStorage write below never executed and the status stayed
-    // "unviewed" for the next render/reload even though the user clearly
-    // saw it. Recording the view is now the very first thing this function
-    // does, wrapped in its own try/catch, so content-loading problems can
-    // never prevent it from persisting.
+// Called once STATUS_VIEW_THRESHOLD has elapsed with the viewer still on
+// `status`'s slide. Marks it viewed locally (immediate UI feedback) AND
+// records the view on the server — every individual status/slide id is
+// tracked independently (never just userId), and duplicate calls are safe
+// since the server side (StatusView unique constraint + findOrCreate) only
+// ever counts one view per user per status.
+function _recordStatusViewed(status, isOwner) {
+    if (isOwner || !status) return;
     try {
         const _sid = String(status.id);
         const _alreadyViewed = viewedStatuses?.has(_sid) || viewedStatuses?.has(status.id);
-        if (!isOwner && !_alreadyViewed && viewedStatuses) {
+        if (!_alreadyViewed && viewedStatuses) {
             viewedStatuses.add(_sid);
             viewedStatuses.add(status.id);
             if (!isNaN(_sid)) viewedStatuses.add(Number(_sid));
@@ -3431,6 +3470,70 @@ function _loadSlot(index, isOwner, group) {
             localStorage.setItem('knecta_viewed_statuses', arr);
         }
     } catch (_) {}
+
+    // Re-render immediately so the viewed section shows instantly
+    setTimeout(() => {
+        if (typeof renderStatusListInstantlyUI === 'function') {
+            renderStatusListInstantlyUI();
+        }
+    }, 50);
+
+    // Update ring state in sidebar
+    const groupItem = document.querySelector(`[data-status-ids*="${status.id}"]`);
+    if (groupItem) {
+        const ids = groupItem.dataset.statusIds.split(',');
+        const viewed = ids.filter(id => viewedStatuses?.has(id)).length;
+        const ring = groupItem.querySelector('.status-group-ring');
+        if (ring && viewed === ids.length) ring.classList.add('viewed');
+    }
+
+    // 1. call the existing view API, 2. wait for/handle the response
+    const api = window.StatusAPI;
+    if (api && api.viewStatus) {
+        api.viewStatus(status.id).then(result => {
+            if (result?.success && result.viewCount !== undefined) {
+                const el = document.getElementById('seenCountNum');
+                if (el) el.textContent = result.viewCount;
+                try {
+                    document.dispatchEvent(new CustomEvent('viewerUpdate', {
+                        detail: {
+                            statusId:    String(status.id),
+                            viewCount:   result.viewCount,
+                            viewerCount: result.viewCount
+                        }
+                    }));
+                } catch (_) {}
+            }
+        }).catch(() => {});
+    }
+}
+
+function _loadSlot(index, isOwner, group) {
+    const status = group[index];
+    currentViewerStatus = status;
+
+    // FIX (status counted as viewed too early/inconsistently): recording a
+    // view — both the local `viewedStatuses` cache and the server call — now
+    // only happens after the viewer has remained on THIS slide for
+    // STATUS_VIEW_THRESHOLD (~2s), not the instant the slide loads. The
+    // previous version wrote the "viewed" state synchronously here, so a
+    // user who opened a status and immediately backed out still had it
+    // counted. `_viewRecordTimerHandle` is cleared by `_clearSlideTimer()`
+    // (already called on next/prev/close/pause/destroy), so navigating away
+    // before the threshold elapses cancels the pending view — and because
+    // the timer is captured per-call via `status.id`/`isOwner` closure and
+    // guarded by an identity check against `currentViewerStatus` when it
+    // fires, a stale timer from a slide the user has already left can never
+    // record a view for the wrong status.
+    if (_viewRecordTimerHandle) { clearTimeout(_viewRecordTimerHandle); _viewRecordTimerHandle = null; }
+    if (!isOwner) {
+        _viewRecordTimerHandle = setTimeout(() => {
+            _viewRecordTimerHandle = null;
+            // Guard: only proceed if the viewer is still on this exact status.
+            if (!currentViewerStatus || String(currentViewerStatus.id) !== String(status.id)) return;
+            _recordStatusViewed(status, isOwner);
+        }, STATUS_VIEW_THRESHOLD);
+    }
 
     // Expose current status ID to window (for viewers panel + hold-reveal)
     window.__currentViewingStatusId = status.id;
@@ -3446,50 +3549,6 @@ function _loadSlot(index, isOwner, group) {
 
     // Apply owner/friend mode
     _applyViewerMode(isOwner, status);
-
-    // Re-render lists/rings/badges to reflect the view recorded above.
-    // (The actual localStorage write already happened at the top of this
-    // function — this block is now just the UI-refresh side effect.)
-    const _sidForUI = String(status.id);
-    if (!isOwner) {
-        // FIX: Re-render immediately after marking viewed so viewed section shows instantly
-        setTimeout(() => {
-            if (typeof renderStatusListInstantlyUI === 'function') {
-                renderStatusListInstantlyUI();
-            }
-        }, 50);
-        // Update ring state in sidebar
-        const groupItem = document.querySelector(`[data-status-ids*="${status.id}"]`);
-        if (groupItem) {
-            const ids = groupItem.dataset.statusIds.split(',');
-            const viewed = ids.filter(id => viewedStatuses?.has(id)).length;
-            const ring = groupItem.querySelector('.status-group-ring');
-            if (ring && viewed === ids.length) ring.classList.add('viewed');
-        }
-        // Record view on server — fire for non-owners only
-        if (!isOwner) {
-            const api = window.StatusAPI;
-            if (api && api.viewStatus) {
-                api.viewStatus(status.id).then(result => {
-                    if (result?.success && result.viewCount !== undefined) {
-                        // Update creator's seenCountNum (belt-and-suspenders — socket also fires)
-                        const el = document.getElementById('seenCountNum');
-                        if (el) el.textContent = result.viewCount;
-                        // Dispatch viewerUpdate so all listeners (sidebar, VBS) sync
-                        try {
-                            document.dispatchEvent(new CustomEvent('viewerUpdate', {
-                                detail: {
-                                    statusId:    String(status.id),
-                                    viewCount:   result.viewCount,
-                                    viewerCount: result.viewCount
-                                }
-                            }));
-                        } catch (_) {}
-                    }
-                }).catch(() => {});
-            }
-        }
-    }
 
     // Update seen count for owner
     if (isOwner) {

@@ -6628,6 +6628,20 @@ function _renderCatContent(cat, container) {
 }
 
 // ── PRODUCTS LIST PAGE ─────────────────────────────────────────────────────
+// FIX (clicking a category doesn't reliably show its products, item 10):
+// this used to call ecom.ProductEngine.search('', {category}), which only
+// searches a CLIENT-SIDE cache (_store.searchIndex) populated once, at app
+// init, with just the 40 most-recent products across ALL categories
+// (ProductEngine.loadProducts({limit:40}) in marketplace-ecommerce.js). Any
+// category whose matching products weren't in that first-40 snapshot came
+// back empty or incomplete — and the intended fallback, `window.
+// currentListings`, was never assigned anywhere in this codebase (dead
+// code), so it could never actually rescue a bad result. Now this fetches
+// directly from the backend with the category filter applied server-side
+// (GET /api/marketplace/products?category=..., which the Tool model
+// validates against a fixed canonical category enum — see moodchat's
+// Tool.js), so results are always complete and current for the clicked
+// category, using the same category value used when a listing was created.
 function _renderProductsPage(subpage) {
     const container = document.getElementById('jmProductsContent');
     const title     = document.getElementById('jmProductsTitle');
@@ -6637,14 +6651,12 @@ function _renderProductsPage(subpage) {
     if (title) title.innerHTML = `← ${subcat||catId||'Products'}`;
 
     const ecom = window.EcomMarketplace;
-    let products = ecom ? ecom.ProductEngine.search('', { category: catId||'' }) : [];
+    if (!ecom) { _renderGrid(container, []); return; }
 
-    if (!products.length) {
-        // Fall back to existing listings data
-        if (window.currentListings) products = window.currentListings.filter(l => !catId || l.category===catId);
-    }
-
-    _renderGrid(container, products);
+    container.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:#9ca3af">Loading…</div>`;
+    ecom.ProductEngine.loadProducts({ category: catId || '', limit: 100 })
+        .then(products => { _renderGrid(container, products || []); })
+        .catch(() => { _renderGrid(container, []); });
 }
 
 // ── CART PAGE ──────────────────────────────────────────────────────────────

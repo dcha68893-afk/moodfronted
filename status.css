@@ -2223,7 +2223,12 @@ input:checked + .toggle-slider:before {
 }
 
 .viewer-item:hover {
-    background-color: #e4e6e9;
+    /* FIX (Who Viewed names invisible in one theme): this was hardcoded to
+       a light gray (#e4e6e9), which is fine in light mode but produces
+       near-invisible contrast against light theme text colors when the
+       dark theme variables are active. Use the same theme-aware surface
+       color every other list-item hover in this file uses. */
+    background-color: var(--secondary-color);
 }
 
 .viewer-avatar {
