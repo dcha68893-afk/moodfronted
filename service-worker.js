@@ -24,12 +24,12 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.22.0';
+const SW_VERSION = '19.23.0';
 // FIX: bumped so activate() drops every existing cache immediately on this
 // deploy — anyone with a stale friend-ui.js (or anything else) cached under
 // the old name gets a clean break on next load, instead of waiting on the
 // 7-day CACHE_MAX_AGE staleness check or a lucky reinstall.
-const CACHE_NAME = 'necpa-static-v45';
+const CACHE_NAME = 'necpa-static-v46';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -83,7 +83,22 @@ const NETWORK_FIRST_PATTERNS = [
   /\/Tool-core\.part3\.js/i,/\/Tool-ui\.js/i,/\/pwa-manager\.js/i,/\/js\/kynecta\.safety\.layer\.js/i,
   /\/calls-core\.part[1-8]\.js/i,/\/calls-ui\.js/i,/\/callSession\.manager\.js/i,
   /\/callRetry\.engine\.js/i,/\/settings-ui\.js/i,/\/js\/settings-ui\.local-first\.patch\.js/i,
-  /\/chat\.html/i
+  /\/chat\.html/i,
+  // ROOT-CAUSE FIX (Product Management admin page showing raw JS/template-literal
+  // source as visible page text; wrong/mismatched product images on marketplace
+  // cards; "Add Images"/checkout fields silently broken after a real fix shipped):
+  // Tools.html itself is a navigation and goes through navigation()'s network-first
+  // path, and Tool-core.part3.js/Tool-ui.js were already network-first, but every
+  // classic marketplace-*.js script — where the admin panel, product cards, seller
+  // tools, and checkout actually live — fell through to staticAsset()'s cache-first
+  // strategy below. That only re-checks the network once every CACHE_MAX_AGE
+  // (7 days) or on a full CACHE_NAME bump, so a browser that had already cached an
+  // older, buggy copy of these files kept running it for up to a week after a real
+  // fix was deployed, regardless of how many times the page was reloaded — the
+  // same failure mode already fixed for the friend module and group-os files above.
+  /\/Tools\.html/i,/\/Tool\.css/i,/\/marketplace-ui-fix\.js/i,/\/marketplace-ecommerce\.js/i,
+  /\/marketplace-admin\.js/i,/\/marketplace-seller\.js/i,/\/marketplace-checkout\.js/i,
+  /\/marketplace-advanced\.js/i
 ];
 
 const BYPASS_PATTERNS = [

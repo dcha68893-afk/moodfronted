@@ -5405,6 +5405,15 @@ function _stars(r, sm=false) {
 function _esc(s) {
     return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+// FIX (onclick SyntaxError "Unexpected end of input" on titles/names containing an apostrophe):
+// _esc() only HTML-escapes & < > " ; it left single quotes untouched. Every card in this
+// file embeds _esc()'d text inside a single-quoted JS argument in an inline onclick="..."
+// attribute (e.g. onclick="foo('${_escJsAttr(p.title)}')"). A real-world title like "Men's Watch"
+// closes that JS string early, so the browser's lazy onclick-attribute JS parser throws
+// "Unexpected end of input" the moment the button is clicked. _escJsAttr() is for exactly
+// those call sites: it backslash-escapes \ and ' for safe JS-string embedding, then still
+// HTML-escapes & < > " so the value is also safe inside the double-quoted HTML attribute.
+function _escJsAttr(s){return String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/\r?\n/g,' ');}
 
 function _price(listing) {
     return parseFloat(String(listing.price||listing.price_display||0).replace(/[^0-9.]/g,'')) || 0;
@@ -6654,8 +6663,26 @@ function _renderProductsPage(subpage) {
     if (!ecom) { _renderGrid(container, []); return; }
 
     container.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:#9ca3af">Loading…</div>`;
+    // FIX (drilling into a subcategory, e.g. Phones & Tablets → Mobile Phones →
+    // Smartphones, silently showed the WHOLE parent category or nothing): this
+    // destructured `subpage` into catId/subcat above but only ever passed
+    // `category: catId` to loadProducts() — subcat was computed and then never
+    // used, so ProductEngine.loadProducts() (which only accepts a `category`
+    // param, no `subcategory`) had no way to narrow the results. Filter the
+    // category results down to the chosen subcategory client-side; if that
+    // yields nothing (e.g. casing/whitespace mismatch between the picker's
+    // label and what got saved on the listing), fall back to the full
+    // category list rather than showing an empty page.
     ecom.ProductEngine.loadProducts({ category: catId || '', limit: 100 })
-        .then(products => { _renderGrid(container, products || []); })
+        .then(products => {
+            let list = products || [];
+            if (subcat) {
+                const target = subcat.trim().toLowerCase();
+                const narrowed = list.filter(p => (p.subcategory || '').trim().toLowerCase() === target);
+                if (narrowed.length) list = narrowed;
+            }
+            _renderGrid(container, list);
+        })
         .catch(() => { _renderGrid(container, []); });
 }
 
@@ -7112,7 +7139,7 @@ function _renderVouchers() {
                     <div style="font-size:12px;color:#6b7280;margin-top:2px">${_esc(c.description || (c.type==='percent' ? c.value+'% off' : 'KES '+c.value+' off'))}</div>
                     ${c.minOrderAmt ? `<div style="font-size:11px;color:#9ca3af;margin-top:2px">Min. order KES ${c.minOrderAmt.toLocaleString()}</div>` : ''}
                 </div>
-                <button class="jm-orange-btn" style="padding:8px 14px;font-size:12px" onclick="navigator.clipboard?.writeText('${_esc(c.code)}');window._jmToast?.('Code copied!','success','📋')">Copy</button>
+                <button class="jm-orange-btn" style="padding:8px 14px;font-size:12px" onclick="navigator.clipboard?.writeText('${_escJsAttr(c.code)}');window._jmToast?.('Code copied!','success','📋')">Copy</button>
             </div>`).join('')}
         </div>` : emptyBlock;
 

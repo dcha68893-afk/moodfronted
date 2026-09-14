@@ -21,6 +21,12 @@
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 const _esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+// FIX (onclick SyntaxError "Unexpected end of input" on names/titles containing an apostrophe):
+// _esc() never escaped single quotes, but it's used to fill single-quoted JS args inside
+// inline onclick="...('${_escJsAttr(x)}')" attributes. A value like "Men's Watch" closes that
+// JS string early and breaks the click handler. _escJsAttr() escapes \ and ' for safe JS-
+// string embedding on top of the usual HTML escaping, for exactly those call sites.
+const _escJsAttr = s => String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/\r?\n/g,' ');
 const _fmt = n => 'KES ' + parseFloat(n||0).toLocaleString('en-KE',{minimumFractionDigits:0,maximumFractionDigits:0});
 const _ls = {
     save:(k,v)=>{ try{localStorage.setItem(k,JSON.stringify(v))}catch(_){} },
@@ -780,7 +786,15 @@ async function _doMpesaPayment(order) {
     _closeModal();
     _showMpesaWaiting(order);
 
-    const total = parseFloat(order.total_price || 0);
+    // FIX (M-Pesa 400 "phone, amount, order_id required" on every real
+    // checkout): POST /marketplace/checkout's response shape returns the
+    // server-computed total as `order.total` (see createOrder's final
+    // ok(res,...) in marketplace.controller.js) — it has never included a
+    // `total_price` field. Reading order.total_price here always evaluated
+    // to undefined -> 0, so `amount` was always 0 and the backend's own
+    // `if (!phone || !amount || !order_id)` guard rejected the request
+    // every single time, regardless of what the buyer actually owed.
+    const total = parseFloat(order.total ?? order.total_price ?? 0);
     const phone = _state.mpesaPhone.replace(/^0/,'254').replace(/^\+/,'');
 
     const r = await _api('POST','/marketplace/payment/mpesa',{
@@ -897,7 +911,7 @@ function _showOrderSuccess(order) {
             <div style="display:flex;justify-content:space-between;font-weight:800;font-size:15px;margin-top:6px;padding-top:6px;border-top:1px solid #e5e7eb"><span>Total Paid</span><span style="color:#f57224">${_fmt(total)}</span></div>
         </div>
         <div class="co-success-btn-row">
-            <button class="co-btn" onclick="window._jmViewOrder('${_esc(String(order.id||''))}'); document.getElementById('coSuccessScreen')?.remove()">
+            <button class="co-btn" onclick="window._jmViewOrder('${_escJsAttr(String(order.id||''))}'); document.getElementById('coSuccessScreen')?.remove()">
                 📦 Track My Order
             </button>
             <button class="co-btn co-btn-outline" onclick="document.getElementById('coSuccessScreen')?.remove(); window._jmNav?.('home')">
@@ -1020,15 +1034,15 @@ function _showTrackingScreen(order, tracking) {
         <!-- Actions -->
         <div class="co-track-action-row">
             ${currentStatus==='delivered'?`
-            <button class="co-track-action-btn primary" onclick="window._jmOpenReview('${_esc(String(o.id||''))}','${_esc(items[0]?.product_id||'')}','${_esc(items[0]?.title||'Product')}','${_esc(items[0]?.image||'')}')">⭐ Rate & Review</button>
+            <button class="co-track-action-btn primary" onclick="window._jmOpenReview('${_escJsAttr(String(o.id||''))}','${_escJsAttr(items[0]?.product_id||'')}','${_escJsAttr(items[0]?.title||'Product')}','${_escJsAttr(items[0]?.image||'')}')">⭐ Rate & Review</button>
             `:''}
             ${['pending','confirmed'].includes(currentStatus)?`
-            <button class="co-track-action-btn secondary" onclick="window._jmCancelOrderConfirm('${_esc(String(o.id||''))}')">Cancel Order</button>
+            <button class="co-track-action-btn secondary" onclick="window._jmCancelOrderConfirm('${_escJsAttr(String(o.id||''))}')">Cancel Order</button>
             `:''}
             ${['paid','shipped','delivered'].includes(currentStatus)?`
-            <button class="co-track-action-btn secondary" onclick="window._jmRequestRefund('${_esc(String(o.id||''))}')">Refund / Return</button>
+            <button class="co-track-action-btn secondary" onclick="window._jmRequestRefund('${_escJsAttr(String(o.id||''))}')">Refund / Return</button>
             `:''}
-            <button class="co-track-action-btn secondary" onclick="window._jmContactSupport('${_esc(String(o.id||''))}')">🎧 Support</button>
+            <button class="co-track-action-btn secondary" onclick="window._jmContactSupport('${_escJsAttr(String(o.id||''))}')">🎧 Support</button>
         </div>
         <div style="height:24px"></div>
     </div>`;
@@ -1107,7 +1121,7 @@ window._jmOpenReview = function(orderId, productId, productTitle, productImage) 
         </div>
         <div id="coStarLabel" style="text-align:center;font-size:13px;color:#9ca3af;margin-bottom:12px">Tap to rate</div>
         <textarea class="co-review-textarea" id="coReviewText" placeholder="Share your experience with this product (optional)…"></textarea>
-        <button class="co-review-submit" id="coReviewSubmit" disabled onclick="window._jmSubmitReview('${_esc(String(orderId))}','${_esc(String(productId))}')">
+        <button class="co-review-submit" id="coReviewSubmit" disabled onclick="window._jmSubmitReview('${_escJsAttr(String(orderId))}','${_escJsAttr(String(productId))}')">
             Submit Review
         </button>
     </div>`;
@@ -1278,7 +1292,7 @@ function _renderOrderListPatch(container, orders) {
         const dateStr = date ? new Date(date).toLocaleDateString('en-KE',{day:'2-digit',month:'2-digit',year:'numeric'}) : '';
         const sMap = {delivered:'delivered',paid:'delivered',shipped:'shipped',pending:'pending',processing:'pending',confirmed:'pending',cancelled:'cancelled',refunded:'cancelled'};
         const sc = sMap[o.status]||'pending';
-        return `<div class="jm-order-item" onclick="window._jmViewOrder('${_esc(String(o.id||''))}')">
+        return `<div class="jm-order-item" onclick="window._jmViewOrder('${_escJsAttr(String(o.id||''))}')">
             ${img?`<img class="jm-order-img" src="${_esc(img)}" loading="lazy">`:`<div class="jm-order-img" style="background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:24px">📦</div>`}
             <div class="jm-order-body">
                 <div class="jm-order-title">${_esc(title)}</div>
