@@ -499,13 +499,135 @@
       return c ?? '';
     }
 
+    // ── Chat list: Lock chat / Favourites / Mark as unread ─────────────────
+    // NEW (requested behavior — chat-list long-press menu + locked chats,
+    // matching WhatsApp): none of this existed anywhere in the app before.
+    // Locking is device-local, like WhatsApp's own chat lock (it's gated by
+    // a PIN on THIS device, not a server-verified account secret) — no
+    // backend change needed. Everything here is namespaced per signed-in
+    // user (`_kynCLKey`) so a shared/public device doesn't leak one
+    // account's locked/favourited chat list to the next person who logs in.
+    function _kynCLUserId() { return window._kynCurrentUserId || 'anon'; }
+    function _kynCLKey(name) { return `kyn_${name}_${_kynCLUserId()}`; }
+    function _kynCLGetSet(name) {
+      try {
+        const raw = localStorage.getItem(_kynCLKey(name));
+        return new Set(raw ? JSON.parse(raw) : []);
+      } catch (_) { return new Set(); }
+    }
+    function _kynCLSaveSet(name, set) {
+      try { localStorage.setItem(_kynCLKey(name), JSON.stringify(Array.from(set))); } catch (_) {}
+    }
+    // Locked-chats section starts hidden every time the chats screen is
+    // (re)opened — it must be unlocked again each visit, same as WhatsApp.
+    let _kynLockedRevealed = false;
+
+    async function _kynHashPin(pin) {
+      const enc = new TextEncoder().encode('kyn-chatlock:' + _kynCLUserId() + ':' + pin);
+      const buf = await crypto.subtle.digest('SHA-256', enc);
+      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    function _kynPinModal(title, subtitle) {
+      return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;';
+        overlay.innerHTML = `
+          <div style="background:var(--kyn-bg-panel,#fff);border-radius:16px;padding:22px;width:100%;max-width:320px;text-align:center;">
+            <div style="font-size:15px;font-weight:700;margin-bottom:4px;">${escapeHtml(title)}</div>
+            <div style="font-size:12px;color:var(--kyn-text-secondary,#888);margin-bottom:14px;">${escapeHtml(subtitle)}</div>
+            <input type="password" inputmode="numeric" maxlength="6" placeholder="••••••"
+              style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;font-size:20px;text-align:center;letter-spacing:8px;
+                     border:1px solid var(--kyn-border,#ddd);outline:none;margin-bottom:10px;" id="kynPinModalInput">
+            <div id="kynPinModalErr" style="font-size:12px;color:#ef4444;min-height:16px;margin-bottom:8px;"></div>
+            <div style="display:flex;gap:8px;">
+              <button id="kynPinModalCancel" style="flex:1;padding:11px;border-radius:10px;border:none;background:var(--kyn-bg-hover,#eee);cursor:pointer;">Cancel</button>
+              <button id="kynPinModalOk" style="flex:1;padding:11px;border-radius:10px;border:none;background:var(--kyn-accent-primary,#22c55e);color:#fff;font-weight:700;cursor:pointer;">OK</button>
+            </div>
+          </div>`;
+        document.body.appendChild(overlay);
+        const input = overlay.querySelector('#kynPinModalInput');
+        const err = overlay.querySelector('#kynPinModalErr');
+        setTimeout(() => input.focus(), 50);
+        const close = (val) => { overlay.remove(); resolve(val); };
+        overlay.querySelector('#kynPinModalCancel').addEventListener('click', () => close(null));
+        overlay.addEventListener('click', e => { if (e.target === overlay) close(null); });
+        const submit = () => {
+          const v = input.value.trim();
+          if (!/^\d{4,6}$/.test(v)) { err.textContent = 'Enter a 4–6 digit PIN'; return; }
+          close(v);
+        };
+        overlay.querySelector('#kynPinModalOk').addEventListener('click', submit);
+        input.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+      });
+    }
+
+    // Returns true once a chat-lock PIN exists on this device for this user.
+    function _kynHasChatLockPin() { return !!localStorage.getItem(_kynCLKey('chatlock_pin')); }
+
+    async function _kynSetupChatLockPin() {
+      const pin = await _kynPinModal('Set a Lock Chat PIN', 'You\u2019ll need this PIN to view locked chats on this device.');
+      if (!pin) return false;
+      const confirmPin = await _kynPinModal('Confirm PIN', 'Enter the same PIN again.');
+      if (confirmPin !== pin) { alert('PINs did not match. Try again from the chat menu.'); return false; }
+      localStorage.setItem(_kynCLKey('chatlock_pin'), await _kynHashPin(pin));
+      return true;
+    }
+
+    async function _kynVerifyChatLockPin() {
+      const stored = localStorage.getItem(_kynCLKey('chatlock_pin'));
+      if (!stored) return true; // nothing to verify against — treat as unlocked
+      // Try device biometrics first when the platform offers it (Face/Touch
+      // ID, Windows Hello, Android fingerprint) — falls straight through to
+      // the PIN below on any unsupported/declined/failed attempt, so the
+      // PIN always remains a working fallback.
+      try {
+        if (window.PublicKeyCredential && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable?.()) {
+          try {
+            await navigator.credentials.get({
+              publicKey: { challenge: crypto.getRandomValues(new Uint8Array(32)), userVerification: 'required', timeout: 30000 }
+            });
+            return true;
+          } catch (_) { /* declined/unavailable/no credential — fall back to PIN */ }
+        }
+      } catch (_) {}
+      const pin = await _kynPinModal('Enter PIN', 'Unlock your locked chats.');
+      if (!pin) return false;
+      return (await _kynHashPin(pin)) === stored;
+    }
+
     function renderConversationList() {
       if (viewingArchived) return; // don't let realtime updates overwrite the archived view
-      const convs = window.MessageModule.getConversations()
+      const lockedIds = _kynCLGetSet('locked_chats');
+      const favIds = _kynCLGetSet('fav_chats');
+      const forcedUnread = _kynCLGetSet('forced_unread');
+      const allConvs = window.MessageModule.getConversations()
         .slice()
         .sort((a, b) => new Date(b.lastMessage?.createdAt || 0) - new Date(a.lastMessage?.createdAt || 0));
 
-      if (convs.length === 0) {
+      // Locked chats are pulled out of the normal list instantly — they only
+      // ever render inside the separate Locked chats section below, which
+      // itself only shows real rows once unlocked for this visit.
+      const convs = allConvs.filter(c => !lockedIds.has(String(c.chatId)));
+      const lockedConvs = allConvs.filter(c => lockedIds.has(String(c.chatId)));
+      // Favourites float to the top of the normal (unlocked) list.
+      convs.sort((a, b) => {
+        const af = favIds.has(String(a.chatId)) ? 1 : 0, bf = favIds.has(String(b.chatId)) ? 1 : 0;
+        if (af !== bf) return bf - af;
+        return new Date(b.lastMessage?.createdAt || 0) - new Date(a.lastMessage?.createdAt || 0);
+      });
+
+      const rowHtml = (c) => `
+        <div class="conv-item${c.chatId === window.MessageModule.getActiveChatId() ? ' active' : ''}" data-chat-id="${c.chatId}">
+          <img class="conv-avatar" src="${escapeHtml(c.otherUser?.avatar || '/img/default-avatar.png')}" alt="">
+          <div class="conv-meta">
+            <div class="conv-name">${favIds.has(String(c.chatId)) ? '\u2b50 ' : ''}${escapeHtml(c.otherUser?.username || 'Conversation')}</div>
+            <div class="conv-preview">${escapeHtml(safeConvPreview(c.lastMessage))}</div>
+          </div>
+          ${(c.unreadCount > 0 || forcedUnread.has(String(c.chatId))) ? `<span class="unread-badge">${c.unreadCount > 99 ? '99+' : (c.unreadCount || '')}</span>` : ''}
+        </div>`;
+
+      if (convs.length === 0 && lockedConvs.length === 0) {
         convListEl.innerHTML = `
           <div class="empty-conv-list">
             <div class="empty-conv-icon">💬</div>
@@ -518,22 +640,130 @@
         return;
       }
 
-      convListEl.innerHTML = convs.map(c => `
-        <div class="conv-item${c.chatId === window.MessageModule.getActiveChatId() ? ' active' : ''}" data-chat-id="${c.chatId}">
-          <img class="conv-avatar" src="${escapeHtml(c.otherUser?.avatar || '/img/default-avatar.png')}" alt="">
-          <div class="conv-meta">
-            <div class="conv-name">${escapeHtml(c.otherUser?.username || 'Conversation')}</div>
-            <div class="conv-preview">${escapeHtml(safeConvPreview(c.lastMessage))}</div>
-          </div>
-          ${c.unreadCount > 0 ? `<span class="unread-badge">${c.unreadCount > 99 ? '99+' : c.unreadCount}</span>` : ''}
+      const lockedSectionHtml = lockedConvs.length ? `
+        <div class="conv-locked-header" id="kynLockedHeader" style="display:flex;align-items:center;gap:8px;padding:10px 14px;font-size:12px;font-weight:700;color:var(--kyn-text-secondary,#888);cursor:pointer;">
+          <span>🔒 Locked chats (${lockedConvs.length})</span>
+          <span style="margin-left:auto;">${_kynLockedRevealed ? '▾ Hide' : '▸ Unlock'}</span>
         </div>
-      `).join('');
+        ${_kynLockedRevealed ? lockedConvs.map(rowHtml).join('') : ''}
+      ` : '';
+
+      convListEl.innerHTML = convs.map(rowHtml).join('') + lockedSectionHtml;
+
+      const openRow = (chatId) => {
+        if (forcedUnread.has(String(chatId))) {
+          forcedUnread.delete(String(chatId));
+          _kynCLSaveSet('forced_unread', forcedUnread);
+        }
+        window.MessageModule.openChat({ conversationId: Number(chatId) });
+      };
 
       convListEl.querySelectorAll('.conv-item').forEach(el => {
-        el.addEventListener('click', () => {
-          window.MessageModule.openChat({ conversationId: Number(el.dataset.chatId) });
-        });
+        el.addEventListener('click', () => openRow(el.dataset.chatId));
+        _kynWireConvContextMenu(el, Number(el.dataset.chatId), lockedIds.has(el.dataset.chatId));
       });
+
+      const lockedHeader = document.getElementById('kynLockedHeader');
+      if (lockedHeader) {
+        lockedHeader.addEventListener('click', async () => {
+          if (_kynLockedRevealed) { _kynLockedRevealed = false; renderConversationList(); return; }
+          if (!_kynHasChatLockPin()) { if (!(await _kynSetupChatLockPin())) return; }
+          if (await _kynVerifyChatLockPin()) { _kynLockedRevealed = true; renderConversationList(); }
+        });
+      }
+    }
+
+    function _kynCloseConvMenu() {
+      const existing = document.getElementById('convContextMenu');
+      if (existing) existing.remove();
+    }
+
+    // Long-press (touch) / right-click (mouse) a conversation row for the
+    // WhatsApp-style chat-list menu: Favourite, Mute, Mark as unread, Lock,
+    // Archive, Delete. ("Add chat shortcut" — a home-screen icon for one
+    // specific chat — is an OS-level PWA integration with no equivalent
+    // here, so it's intentionally left out rather than faked; "Select all"
+    // bulk-selection of conversations is likewise not included yet.)
+    function _kynWireConvContextMenu(row, chatId, isLocked) {
+      const openMenu = async (anchorRect) => {
+        _kynCloseConvMenu();
+        const favIds = _kynCLGetSet('fav_chats');
+        const isFav = favIds.has(String(chatId));
+        const conv = window.MessageModule.getConversations().find(c => c.chatId === chatId);
+        const isMuted = !!conv?.muted;
+        const menu = document.createElement('div');
+        menu.id = 'convContextMenu';
+        menu.className = 'bubble-context-menu';
+        const items = [
+          { action: 'fav',    label: isFav ? '\u2b50 Remove from Favourites' : '\u2b50 Add to Favourites' },
+          { action: 'unread', label: '\u2709 Mark as unread' },
+          { action: 'mute',   label: isMuted ? '\ud83d\udd14 Unmute' : '\ud83d\udd15 Mute' },
+          { action: 'lock',   label: isLocked ? '\ud83d\udd13 Unlock chat' : '\ud83d\udd12 Lock chat' },
+          { action: 'archive', label: '\ud83d\uddc4 Archive chat' },
+          { action: 'delete', label: '\ud83d\uddd1 Delete chat' },
+        ];
+        menu.innerHTML = items.map(i => `<button data-conv-action="${i.action}">${i.label}</button>`).join('');
+        document.body.appendChild(menu);
+        menu.style.top = `${anchorRect.bottom + 4}px`;
+        menu.style.left = `${Math.max(8, anchorRect.left)}px`;
+        menu.querySelectorAll('button').forEach(btn => {
+          btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            _kynCloseConvMenu();
+            await _kynRunConvAction(btn.dataset.convAction, chatId, isLocked);
+          });
+        });
+        setTimeout(() => document.addEventListener('click', _kynCloseConvMenu, { once: true }), 0);
+      };
+      let pressTimer = null;
+      row.addEventListener('touchstart', () => {
+        pressTimer = setTimeout(() => openMenu(row.getBoundingClientRect()), 500);
+      }, { passive: true });
+      ['touchend', 'touchmove', 'touchcancel'].forEach(evt => {
+        row.addEventListener(evt, () => { if (pressTimer) clearTimeout(pressTimer); }, { passive: true });
+      });
+      row.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        openMenu(row.getBoundingClientRect());
+      });
+    }
+
+    async function _kynRunConvAction(action, chatId, isLocked) {
+      const sid = String(chatId);
+      if (action === 'fav') {
+        const favIds = _kynCLGetSet('fav_chats');
+        favIds.has(sid) ? favIds.delete(sid) : favIds.add(sid);
+        _kynCLSaveSet('fav_chats', favIds);
+        renderConversationList();
+      } else if (action === 'unread') {
+        const forced = _kynCLGetSet('forced_unread');
+        forced.add(sid);
+        _kynCLSaveSet('forced_unread', forced);
+        renderConversationList();
+      } else if (action === 'mute') {
+        const conv = window.MessageModule.getConversations().find(c => c.chatId === chatId);
+        if (conv?.muted) await window.MessageModule.unmuteChat(chatId);
+        else await window.MessageModule.muteChat(chatId);
+        renderConversationList();
+      } else if (action === 'lock') {
+        const lockedIds = _kynCLGetSet('locked_chats');
+        if (isLocked) {
+          lockedIds.delete(sid);
+        } else {
+          if (!_kynHasChatLockPin()) { if (!(await _kynSetupChatLockPin())) return; }
+          lockedIds.add(sid);
+        }
+        _kynCLSaveSet('locked_chats', lockedIds);
+        renderConversationList();
+      } else if (action === 'archive') {
+        if (!confirm('Archive this conversation? This archives it for both people in the chat, not just you.')) return;
+        await window.MessageModule.archiveChat(chatId);
+        renderConversationList();
+      } else if (action === 'delete') {
+        if (!confirm('Delete this conversation for you? This cannot be undone.')) return;
+        await window.MessageModule.deleteChat(chatId);
+        renderConversationList();
+      }
     }
 
     let viewingArchived = false;
@@ -1154,17 +1384,30 @@
         });
       }
 
-      // Long-press (touch) or right-click (mouse) a bubble to enter
-      // selection mode starting with that message — the discoverable
-      // entry point on touch devices, where there's no hover to reveal
-      // the "..." button in the first place.
+      // Long-press (touch) or right-click (mouse) a bubble to open the
+      // per-message action menu (Reply/Forward/Copy/React/Star/Edit/
+      // Delete/Select) — the discoverable entry point on touch devices,
+      // where there's no hover to reveal the "..." button in the first
+      // place. "Select" is one of that menu's own items, so multi-select
+      // is still one tap away from here, matching WhatsApp/Telegram: a
+      // hold opens the action menu, not bulk-select directly.
+      // ROOT-CAUSE FIX (long-press/right-click did nothing but enter
+      // multi-select — none of Reply/Forward/Copy/React/Star/Edit/Delete
+      // were reachable without first hunting for the small "..." button):
+      // this used to call enterSelectMode(id) directly, which only ever
+      // shows checkboxes — it never opened openBubbleMenu() at all, so a
+      // person holding a message never saw any of the actual message
+      // actions, only "N selected". Route the hold/right-click to the
+      // same openBubbleMenu() the "..." button already uses, anchored on
+      // the row itself since there's no dedicated button under a finger
+      // mid-press.
       if (!selectMode) {
         log.querySelectorAll('.bubble-row').forEach(row => {
           const id = Number(row.dataset.messageId);
           if (!Number.isFinite(id)) return;
           let pressTimer = null;
           row.addEventListener('touchstart', () => {
-            pressTimer = setTimeout(() => enterSelectMode(id), 500);
+            pressTimer = setTimeout(() => openBubbleMenu(row, chatId, id), 500);
           }, { passive: true });
           // FIX (TOUCHMOVE-SCROLL-VIOLATION): these handlers never call
           // preventDefault(), so there was no reason for the browser to keep
@@ -1180,7 +1423,7 @@
           });
           row.addEventListener('contextmenu', (e) => {
             e.preventDefault();
-            enterSelectMode(id);
+            openBubbleMenu(row, chatId, id);
           });
         });
       }

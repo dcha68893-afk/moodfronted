@@ -283,6 +283,22 @@ let viewedStatuses = (() => {
     } catch (_) {}
     return new Set();
 })();
+// FIX (viewed status reverts back to "Recently updated" instead of staying
+// in "Viewed updates"): _recordStatusViewed() marks a status viewed locally
+// (instant UI move) and fires api.viewStatus() to tell the server, but that
+// POST is fire-and-forget — its .catch() swallows failures, and even on
+// success it's not awaited before anything else can run. Meanwhile any
+// background refresh of friend statuses (periodic poll, socket update, tab
+// re-focus) calls _reconcileViewedFromServer(), which treats that snapshot
+// as authoritative and REMOVES a status from viewedStatuses the instant the
+// server's `viewedByMe` still reads false — which it will, every time that
+// refresh lands before the view POST has actually been recorded server-
+// side. The status was really viewed by this user in this session; the
+// server just hadn't caught up yet. Track ids this session has itself
+// confirmed as viewed so reconciliation can still ADD server-confirmed
+// views (a status viewed on another device) but never DOWNGRADES one this
+// session already marked viewed out from under the user.
+let _selfConfirmedViewedIds = new Set();
 let mutedUsers = new Set();
 let currentViewerStatus = null;
 let currentSlideIndex = 0;
@@ -346,7 +362,7 @@ function _reconcileViewedFromServer(list) {
         const sid = String(s.id);
         if (s.viewedByMe) {
             if (!viewedStatuses.has(sid)) { viewedStatuses.add(sid); changed = true; }
-        } else if (viewedStatuses.has(sid)) {
+        } else if (viewedStatuses.has(sid) && !_selfConfirmedViewedIds.has(sid)) {
             viewedStatuses.delete(sid);
             viewedStatuses.delete(Number(s.id));
             changed = true;
@@ -3461,6 +3477,11 @@ function _recordStatusViewed(status, isOwner) {
     try {
         const _sid = String(status.id);
         const _alreadyViewed = viewedStatuses?.has(_sid) || viewedStatuses?.has(status.id);
+        // Mark this id as self-confirmed for THIS session regardless of
+        // whether it was already in viewedStatuses — protects it from
+        // _reconcileViewedFromServer() reverting it while the server catches
+        // up, even across the (rare) case this function fires twice.
+        _selfConfirmedViewedIds.add(_sid);
         if (!_alreadyViewed && viewedStatuses) {
             viewedStatuses.add(_sid);
             viewedStatuses.add(status.id);
@@ -3488,9 +3509,17 @@ function _recordStatusViewed(status, isOwner) {
     }
 
     // 1. call the existing view API, 2. wait for/handle the response
+    // FIX (companion to _selfConfirmedViewedIds above): a failed
+    // api.viewStatus() call used to be swallowed silently (empty .catch),
+    // so the server would never learn about the view at all — the local
+    // "viewed" mark was safe from reconciliation now, but on a fresh device/
+    // browser (no localStorage) that status would show as unviewed forever.
+    // One retry after a short delay covers ordinary transient failures
+    // (a blip, a request that raced ahead of auth being ready) without
+    // retrying indefinitely.
     const api = window.StatusAPI;
     if (api && api.viewStatus) {
-        api.viewStatus(status.id).then(result => {
+        const _sendView = (isRetry) => api.viewStatus(status.id).then(result => {
             if (result?.success && result.viewCount !== undefined) {
                 const el = document.getElementById('seenCountNum');
                 if (el) el.textContent = result.viewCount;
@@ -3504,7 +3533,11 @@ function _recordStatusViewed(status, isOwner) {
                     }));
                 } catch (_) {}
             }
-        }).catch(() => {});
+        }).catch(err => {
+            if (!isRetry) setTimeout(() => _sendView(true), 3000);
+            else console.warn('[status-ui] view record failed twice for status', status.id, err?.message);
+        });
+        _sendView(false);
     }
 }
 

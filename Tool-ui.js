@@ -6651,39 +6651,100 @@ function _renderCatContent(cat, container) {
 // validates against a fixed canonical category enum — see moodchat's
 // Tool.js), so results are always complete and current for the clicked
 // category, using the same category value used when a listing was created.
+// FIX (category → subcategory → brand drill-down, requested behavior): a
+// subcategory tile used to jump straight to the product grid with no brand
+// step at all — there was nowhere in the whole app for a shopper (or a
+// seller checking their own listing is placed correctly) to narrow by
+// brand. `subpage` can now carry a 3rd, brand, segment
+// ("catId:subcatName:brandName"); with only 2 segments this renders a
+// brand-picker (derived from the real brands present among that
+// subcategory's own approved listings — no separate backend endpoint
+// needed) instead of the grid, and clicking a brand re-renders this same
+// page with the 3rd segment added. If a subcategory has no listings with a
+// brand set at all (brand is an optional field at listing creation), the
+// picker step is skipped and the grid shows directly, so "no listings have
+// a brand yet" never becomes a dead-end screen.
 function _renderProductsPage(subpage) {
     const container = document.getElementById('jmProductsContent');
     const title     = document.getElementById('jmProductsTitle');
     if (!container) return;
 
-    const [catId, subcat] = (subpage||'').split(':');
-    if (title) title.innerHTML = `← ${subcat||catId||'Products'}`;
+    const [catId, subcat, brand] = (subpage||'').split(':');
+    if (title) title.innerHTML = `← ${brand || subcat || catId || 'Products'}`;
 
     const ecom = window.EcomMarketplace;
     if (!ecom) { _renderGrid(container, []); return; }
 
     container.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:#9ca3af">Loading…</div>`;
-    // FIX (drilling into a subcategory, e.g. Phones & Tablets → Mobile Phones →
-    // Smartphones, silently showed the WHOLE parent category or nothing): this
-    // destructured `subpage` into catId/subcat above but only ever passed
-    // `category: catId` to loadProducts() — subcat was computed and then never
-    // used, so ProductEngine.loadProducts() (which only accepts a `category`
-    // param, no `subcategory`) had no way to narrow the results. Filter the
-    // category results down to the chosen subcategory client-side; if that
-    // yields nothing (e.g. casing/whitespace mismatch between the picker's
-    // label and what got saved on the listing), fall back to the full
-    // category list rather than showing an empty page.
+    // FIX (wrong-category listings/images showing under a subcategory —
+    // e.g. a Phones listing's photo appearing under Cleaning): the previous
+    // version filtered the category results down to the chosen subcategory,
+    // but when that filter matched ZERO listings it silently fell back to
+    // showing the WHOLE parent category's listings instead — so a
+    // subcategory with no approved listings yet displayed random unrelated
+    // items (and their unrelated images) from elsewhere in that category,
+    // which is exactly the "wrong image in the wrong place" symptom being
+    // reported. A subcategory drill-down must only ever show listings that
+    // actually belong to it; an empty subcategory now shows an honest empty
+    // state (via _renderGrid's own "No products found" state) instead of
+    // silently substituting listings the user didn't ask for. The
+    // case-insensitive/trimmed match against `subcategory` is kept — it
+    // still forgives minor casing/whitespace differences between the
+    // category-picker's label and what got saved on the listing — it just
+    // no longer masks a genuine mismatch by falling back.
     ecom.ProductEngine.loadProducts({ category: catId || '', limit: 100 })
         .then(products => {
             let list = products || [];
             if (subcat) {
                 const target = subcat.trim().toLowerCase();
-                const narrowed = list.filter(p => (p.subcategory || '').trim().toLowerCase() === target);
-                if (narrowed.length) list = narrowed;
+                list = list.filter(p => (p.subcategory || '').trim().toLowerCase() === target);
             }
-            _renderGrid(container, list);
+            if (brand) {
+                const bTarget = brand.trim().toLowerCase();
+                list = list.filter(p => (p.brand || '').trim().toLowerCase() === bTarget);
+                _renderGrid(container, list);
+                return;
+            }
+            // No brand chosen yet — offer a brand picker only if this
+            // subcategory actually has listings with a brand set.
+            const brands = Array.from(new Set(
+                list.map(p => (p.brand || '').trim()).filter(Boolean)
+            )).sort((a, b) => a.localeCompare(b));
+            if (!subcat || !brands.length) { _renderGrid(container, list); return; }
+            _renderBrandPicker(container, catId, subcat, brands, list.length);
         })
         .catch(() => { _renderGrid(container, []); });
+}
+
+function _renderBrandPicker(container, catId, subcat, brands, totalCount) {
+    const esc = (typeof _esc === 'function') ? _esc : (s => String(s||''));
+    container.innerHTML = `
+        <div style="grid-column:1/-1">
+            <div class="jm-cat-all-bar" data-brand-all="1" style="cursor:pointer">
+                <span>All ${esc(subcat)} (${totalCount})</span>
+                <span class="jm-cat-all-bar-arrow">›</span>
+            </div>
+            <div class="jm-subcat-grid" style="margin-top:8px">
+                ${brands.map(b => `
+                <div class="jm-subcat-item" data-brand="${esc(b)}" style="cursor:pointer">
+                    <div class="jm-subcat-name" style="font-weight:700">${esc(b)}</div>
+                </div>`).join('')}
+            </div>
+        </div>`;
+    const goto = (brandSeg) => {
+        const subpage = `${catId}:${subcat}${brandSeg ? ':' + brandSeg : ''}`;
+        // Update the current nav-stack entry in place rather than pushing a
+        // new one, so the back button still returns to the subcategory
+        // grid (Categories page), not to this intermediate brand picker.
+        if (Array.isArray(_navStack) && _navStack.length) {
+            _navStack[_navStack.length - 1].subpage = subpage;
+        }
+        _renderProductsPage(subpage);
+    };
+    container.querySelector('[data-brand-all]')?.addEventListener('click', () => goto(''));
+    container.querySelectorAll('[data-brand]').forEach(el => {
+        el.addEventListener('click', () => goto(el.dataset.brand));
+    });
 }
 
 // ── CART PAGE ──────────────────────────────────────────────────────────────
