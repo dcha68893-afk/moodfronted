@@ -1838,11 +1838,21 @@ const openGroupChat = async function (groupData) {
       hideAllPanels();
       if (groupChatPanel) groupChatPanel.classList.add('active');
     }
+    // FIX: `resolvedGroup` used to be declared with `const` INSIDE this
+    // try block, so it fell out of scope the moment the block ended — every
+    // step after it (the socket room join, loadGroupChatMessages,
+    // setupTypingListener, checkPostingRules) had no choice but to keep
+    // using the original, possibly-stale `groupData` argument (e.g. a
+    // cached sidebar entry with an outdated id) instead of the server-
+    // confirmed group. Declaring it here, defaulting to groupData, and
+    // reassigning it below makes the server-resolved id the one canonical
+    // id used for everything that follows.
+    let resolvedGroup = groupData;
     try {
       const [groupDetailsResponse, membersResponse] = await Promise.all([GroupCore.getGroupDetails(groupData.id).catch(() => null), secureApiCall(`/groups/${groupData.id}/members`, {
         silent: true
       }).catch(() => null)]);
-      const resolvedGroup = groupDetailsResponse?.data || GroupCore.getGroupById(groupData.id) || groupData;
+      resolvedGroup = groupDetailsResponse?.data || GroupCore.getGroupById(groupData.id) || groupData;
       const membersPayload = normalizeMembersPayload(membersResponse?.data);
       resolvedGroup.memberCount = getGroupMemberCount(resolvedGroup, membersPayload);
       setCurrentChatGroup(resolvedGroup);
@@ -1887,26 +1897,47 @@ const openGroupChat = async function (groupData) {
     // FIX-024: Join the socket room BEFORE fetching message history.
     // Without this, messages that arrive during the ~500ms API load window are missed forever.
     // The room join is idempotent on the server — safe to call every time.
+    // FIX: join the CANONICAL room (`group:${resolvedGroup.id}`, the
+    // server-confirmed id) rather than the room built from the raw
+    // `groupData` argument that was passed in. If the caller passed a
+    // stale/cached group object with a different id, the old code would
+    // join the wrong room entirely and every message for the real,
+    // currently-open group would silently never arrive. Also emit the
+    // dedicated 'group:join' event — unlike the generic 'join' event, the
+    // server verifies active membership (leftAt IS NULL) before adding the
+    // socket to the room, so this join path is enforced the same way as
+    // every other membership check in the app.
+    const canonicalGroupId = resolvedGroup.id;
     try {
       const rt = window.KynectaRealtime;
       if (rt && typeof rt.emit === 'function') {
-        rt.emit('join', {
-          room: `group:${groupData.id}`
+        rt.emit('group:join', {
+          groupId: canonicalGroupId
         });
         rt.emit('join', {
-          room: `group_${groupData.id}`
+          room: `group:${canonicalGroupId}`
+        });
+        rt.emit('join', {
+          room: `group_${canonicalGroupId}`
         });
       } else if (rt && rt._socket && typeof rt._socket.emit === 'function') {
-        rt._socket.emit('join', {
-          room: `group:${groupData.id}`
+        rt._socket.emit('group:join', {
+          groupId: canonicalGroupId
         });
         rt._socket.emit('join', {
-          room: `group_${groupData.id}`
+          room: `group:${canonicalGroupId}`
+        });
+        rt._socket.emit('join', {
+          room: `group_${canonicalGroupId}`
         });
       }
     } catch (_) {}
-    await loadGroupChatMessages(groupData.id);
-    setupTypingListener(groupData.id);
+    // FIX: load history and wire up typing for the same canonical id used
+    // to join the room above — previously these used `groupData.id`, which
+    // could diverge from the id the room join and header actually resolved
+    // to (see resolvedGroup above).
+    await loadGroupChatMessages(canonicalGroupId);
+    setupTypingListener(canonicalGroupId);
     // FIX (duplicate-screen bug): loadUniqueFeaturesPanels() renders the
     // legacy Notes / Event Countdown / Transparency panels as extra
     // blocks stacked directly underneath the chat panel every time a
@@ -1917,7 +1948,7 @@ const openGroupChat = async function (groupData) {
     // systems read/write the same group notes/events, so nothing is
     // lost — this just stops it from auto-rendering on top of the chat.
     // loadUniqueFeaturesPanels(groupData.id);
-    checkPostingRules(currentChatGroup || groupData);
+    checkPostingRules(currentChatGroup || resolvedGroup);
   } catch (error) {}
 };
 
@@ -2433,7 +2464,21 @@ function addMessageToChat(messageData, isNew = true) {
         const existingPlaceholder = chatMessages.querySelector('.group-chat-placeholder');
         if (existingPlaceholder) existingPlaceholder.remove();
         
-        const tempId = messageData?._tempId || messageData?.tempId || null;
+        // FIX (sender-echo double bubble): when a message is sent, an
+        // optimistic bubble is added immediately with a client-generated
+        // id (clientMessageId — see sendGroupMessage). Normally the HTTP
+        // response renames that bubble's id to the server-confirmed id
+        // before the socket echo of the same message arrives. But if the
+        // socket echo wins that race and arrives first, this function only
+        // ever looked for `_tempId`/`tempId` fields — which nothing actually
+        // sets — so it never found the pending bubble, left it in place,
+        // AND created a second element for the confirmed message. The
+        // server broadcast (see messageBroadcast.js) does carry the
+        // original clientMessageId back, so match on that (and the
+        // metadata.localId it also gets merged into server-side) as well,
+        // so whichever delivery path arrives first correctly reuses the
+        // same bubble instead of leaving a duplicate behind.
+        const tempId = messageData?._tempId || messageData?.tempId || messageData?.clientMessageId || messageData?.metadata?.localId || null;
         if (tempId) {
             const tempElement = chatMessages.querySelector(`[data-message-id="${tempId}"]`);
             if (tempElement) tempElement.remove();

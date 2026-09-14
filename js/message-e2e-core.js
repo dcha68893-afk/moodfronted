@@ -398,8 +398,8 @@
   // chain (which — via the `header.dh !== session.DHr` branch — could
   // also needlessly burn a bogus DH computation against the local
   // session).
-  async function _initReceiverSessionFromHeader(identity, peerUserId, envelope) {
-    const peer = await identity.publicKeyFor(peerUserId);
+  async function _initReceiverSessionFromHeader(identity, peerUserId, envelope, forceRefresh = false) {
+    const peer = await identity.publicKeyFor(peerUserId, forceRefresh);
     const sharedBitsRaw = await crypto.subtle.deriveBits({ name: 'ECDH', public: peer.key }, identity.privateKey, 256);
     const myPrivJwk = await crypto.subtle.exportKey('jwk', identity.privateKey);
     return global.KynectaRatchet.initSessionAsReceiver(sharedBitsRaw, myPrivJwk, envelope.hdr.dh);
@@ -472,6 +472,44 @@
       } catch (firstErr) {
         const info = _errInfo(firstErr);
         _diagLog('V3_DECRYPT_FAILED', { msgId: msgIdForLog, peerUserId, hadExistingSession: hadSession, ...info });
+
+        // FIX (FIRST-CONTACT-DECRYPT-NEVER-RECOVERS): the repair path below
+        // only ever covered a structurally-broken EXISTING session
+        // (REPAIRABLE_V3_ERRORS) — it deliberately never retried on a plain
+        // AES-GCM auth failure (OperationError), on the reasoning that an
+        // auth failure on an established session usually means genuinely
+        // wrong key material and blindly resetting would mask real bugs.
+        // That reasoning doesn't hold for the very first message from a
+        // brand-new peer (hadSession === false): there is no established
+        // session to mask a bug in, and identity.publicKeyFor() serves the
+        // peer's key from its local cache/localStorage (PUB_STORE) FIRST,
+        // before ever hitting the network (see e2e-identity-core.js). If
+        // that cached copy is stale — e.g. the peer rotated their identity
+        // key server-side after this device last cached it, or this is a
+        // shared/reused browser profile with a leftover cached entry for
+        // this peer id — the ECDH shared secret computed above is silently
+        // wrong and decryption of the FIRST message from that peer fails
+        // this exact way (OperationError on both V3 and the V2 fallback,
+        // since both derive from the same bad key), with no way to ever
+        // self-heal: every retry keeps re-reading the same stale cache
+        // entry. This is the one case where a one-time forced key refresh
+        // is safe: it only fires when no session existed yet, so there is
+        // no forward-secrecy state to lose and no established session to
+        // desync — reinitializing from a freshly-fetched, genuinely-current
+        // key is strictly a repair, never a downgrade.
+        if (!hadSession && !REPAIRABLE_V3_ERRORS.has(firstErr?.message)) {
+          _diagLog('V3_FIRST_CONTACT_KEY_REFRESH_ATTEMPT', { msgId: msgIdForLog, peerUserId, reason: info.reason });
+          try {
+            const freshSession = await _initReceiverSessionFromHeader(identity, peerUserId, envelope, /* forceRefresh */ true);
+            const { session: nextSession, plaintext } = await R.ratchetDecrypt(freshSession, envelope);
+            saveRatchetSession(peerUserId, nextSession);
+            _diagLog('V3_FIRST_CONTACT_KEY_REFRESH_SUCCEEDED', { msgId: msgIdForLog, peerUserId });
+            return plaintext;
+          } catch (refreshErr) {
+            _diagLog('V3_FIRST_CONTACT_KEY_REFRESH_FAILED', { msgId: msgIdForLog, peerUserId, ..._errInfo(refreshErr) });
+            throw firstErr;
+          }
+        }
 
         const repairable = hadSession && REPAIRABLE_V3_ERRORS.has(firstErr?.message);
         if (!repairable) throw firstErr;

@@ -1619,27 +1619,38 @@
         });
 
         // ── group:message-received → render in open chat or bump badge ──────
-        GC.on('group:message-received', function (data) {
-            const { groupId, message } = data || {};
-            if (!groupId || !message) return;
-            // (log suppressed)
-            try {
-                const isOpen = typeof currentChatGroup !== 'undefined' && currentChatGroup?.id === groupId;
-                if (isOpen) {
-                    if (typeof addMessageToChat === 'function') addMessageToChat(message, true);
-                } else {
-                    // Increment unread badge in the group list card
-                    const card = document.querySelector(`[data-group-id="${groupId}"]`);
-                    const badge = card?.querySelector('.group-unread-badge');
-                    if (badge) {
-                        const n = (parseInt(badge.textContent || '0') || 0) + 1;
-                        badge.textContent = n;
-                        badge.style.display = '';
+        // FIX (duplicate delivery path): group-ui.js already registers a
+        // 'group:message-received' handler that does this same job. Both
+        // files are loaded together in group.html, so GroupCore used to
+        // invoke both handlers for every incoming message — every message
+        // got rendered twice (relying on addMessageToChat's id-based dedup
+        // to hide it) and every unread badge got incremented twice. Skip
+        // registering this duplicate handler if the canonical one (from
+        // group-ui.js) already claimed the event.
+        if (!window.__groupMessageReceivedCanonical) {
+            window.__groupMessageReceivedCanonical = true;
+            GC.on('group:message-received', function (data) {
+                const { groupId, message } = data || {};
+                if (!groupId || !message) return;
+                // (log suppressed)
+                try {
+                    const isOpen = typeof currentChatGroup !== 'undefined' && currentChatGroup?.id === groupId;
+                    if (isOpen) {
+                        if (typeof addMessageToChat === 'function') addMessageToChat(message, true);
+                    } else {
+                        // Increment unread badge in the group list card
+                        const card = document.querySelector(`[data-group-id="${groupId}"]`);
+                        const badge = card?.querySelector('.group-unread-badge');
+                        if (badge) {
+                            const n = (parseInt(badge.textContent || '0') || 0) + 1;
+                            badge.textContent = n;
+                            badge.style.display = '';
+                        }
+                        if (typeof incrementGroupUnreadCount === 'function') incrementGroupUnreadCount(groupId);
                     }
-                    if (typeof incrementGroupUnreadCount === 'function') incrementGroupUnreadCount(groupId);
-                }
-            } catch (_) {}
-        });
+                } catch (_) {}
+            });
+        }
 
         // ── group:message-sent → confirm the optimistic message in chat ─────
         GC.on('group:message-sent', function (data) {

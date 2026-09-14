@@ -4554,22 +4554,34 @@ export function registerUICoreEvents() {
         });
 
         // group:message-received — message arrived for a group the user is in
-        GC.on('group:message-received', ({ groupId, message }) => {
-            if (typeof currentChatGroup !== 'undefined' && currentChatGroup && String(currentChatGroup.id) === String(groupId)) {
-                // Chat is open — append inline
-                if (typeof addMessageToChat === 'function') {
-                    try { addMessageToChat(message, true); } catch(_) {}
+        // FIX (duplicate delivery path): group-ui-patch.js registers its OWN
+        // 'group:message-received' handler that does the same job (render
+        // inline if the chat is open, else bump the unread badge). Since
+        // group.html loads both group-ui.js and group-ui-patch.js, GroupCore
+        // used to call BOTH handlers for every single incoming message —
+        // double-rendering work and double-incrementing unread counts. The
+        // `__groupMessageReceivedCanonical` guard below ensures only the
+        // first handler to register (this one) actually runs; group-ui-patch.js
+        // checks the same flag and skips its own registration.
+        if (!window.__groupMessageReceivedCanonical) {
+            window.__groupMessageReceivedCanonical = true;
+            GC.on('group:message-received', ({ groupId, message }) => {
+                if (typeof currentChatGroup !== 'undefined' && currentChatGroup && String(currentChatGroup.id) === String(groupId)) {
+                    // Chat is open — append inline
+                    if (typeof addMessageToChat === 'function') {
+                        try { addMessageToChat(message, true); } catch(_) {}
+                    }
+                } else {
+                    // Chat not open — increment badge + refresh sidebar
+                    if (typeof incrementGroupUnreadCount === 'function') {
+                        try { incrementGroupUnreadCount(groupId); } catch(_) {}
+                    }
+                    if (typeof renderGroupsListSecure === 'function') {
+                        try { renderGroupsListSecure(); } catch(_) {}
+                    }
                 }
-            } else {
-                // Chat not open — increment badge + refresh sidebar
-                if (typeof incrementGroupUnreadCount === 'function') {
-                    try { incrementGroupUnreadCount(groupId); } catch(_) {}
-                }
-                if (typeof renderGroupsListSecure === 'function') {
-                    try { renderGroupsListSecure(); } catch(_) {}
-                }
-            }
-        });
+            });
+        }
 
         // group:updated — group settings/name changed
         GC.on('group:updated', () => {

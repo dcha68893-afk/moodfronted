@@ -123,10 +123,30 @@
             lastMessage: message,
             unreadCount: fromSelf ? (state.conversations.get(chatId)?.unreadCount || 0)
                                   : (chatId === state.activeChatId ? 0 : (state.conversations.get(chatId)?.unreadCount || 0) + 1),
+            // FIX (RECEIVER-SEES-"User"-INSTEAD-OF-REAL-NAME): for a chat that
+            // already existed, otherUser.username was already populated by
+            // loadConversations() from GET /chats, which computes
+            // `displayName = [firstName, lastName].join(' ') || username`
+            // (see chatService.js) — so it never hit this fallback. But for a
+            // BRAND-NEW chat (e.g. the receiver's very first message from
+            // someone who just "started a chat" with them), state.conversations
+            // has no entry yet, so this fallback to `message.sender.username`
+            // was the ONLY source of the name — and it only ever read the raw
+            // `username` column, skipping the firstName/lastName combination
+            // /chats uses. Any account with an empty `username` (common for
+            // accounts that only set firstName/lastName) rendered as the
+            // literal string "User" the moment a new conversation started.
+            // Prefer the server-computed `sender.displayName` (now sent by
+            // messageBroadcast.js's payload — see messageDeliveryService.js),
+            // and fall back to combining firstName+lastName client-side too,
+            // in case an older cached/offline payload predates that field.
             otherUser: (!fromSelf && message.senderId)
                 ? Object.assign({}, state.conversations.get(chatId)?.otherUser, {
                     id: message.senderId,
-                    username: (state.conversations.get(chatId)?.otherUser?.username) || (message.sender && message.sender.username),
+                    username: (state.conversations.get(chatId)?.otherUser?.username)
+                        || (message.sender && (message.sender.displayName
+                            || [message.sender.firstName, message.sender.lastName].filter(Boolean).join(' ').trim()
+                            || message.sender.username)),
                     avatar: (state.conversations.get(chatId)?.otherUser?.avatar) || (message.sender && message.sender.avatar),
                   })
                 : state.conversations.get(chatId)?.otherUser,
