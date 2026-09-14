@@ -3567,14 +3567,15 @@ const GroupCore = {
     }
   },
   // Send group message using apiRequest
-  async sendGroupMessage(groupId, content, topic = null, anonymous = false) {
+  async sendGroupMessage(groupId, content, topic = null, anonymous = false, clientMessageId = null) {
     if (!LifecycleState.ensureActive()) {
       queueGroupAction({
         type: 'sendMessage',
         groupId,
         content,
         topic,
-        anonymous
+        anonymous,
+        clientMessageId
       });
       return {
         queued: true
@@ -3586,7 +3587,8 @@ const GroupCore = {
         groupId,
         content,
         topic,
-        anonymous
+        anonymous,
+        clientMessageId
       });
       requestSession();
       return {
@@ -3625,9 +3627,24 @@ const GroupCore = {
       encrypted: false
     };
     if (!anonymous) {
+      // FIX-GROUP-E2E-LOAD-RACE: window.KynectaGroupE2E is only set once
+      // js/groupEncryption.client.js's dynamic import of
+      // groupEncryption.client.legacy.js resolves. That's a real network
+      // fetch, and this function can legitimately be called (a member
+      // opens a group and sends a reply right away) before it has
+      // finished — especially on a cold Render dyno or a slow connection.
+      // The previous instant, one-shot check treated "not ready yet" the
+      // same as "will never be ready", permanently queuing that member's
+      // send. Give it a real, bounded grace period before giving up.
+      if (!window.KynectaGroupE2E) {
+        const waitStarted = Date.now();
+        while (!window.KynectaGroupE2E && Date.now() - waitStarted < 8000) {
+          await new Promise(r => setTimeout(r, 150));
+        }
+      }
       if (!window.KynectaGroupE2E) {
         debugLog('Group encryption module unavailable — refusing to send unencrypted');
-        queueGroupAction({ type: 'sendMessage', groupId, content, topic, anonymous });
+        queueGroupAction({ type: 'sendMessage', groupId, content, topic, anonymous, clientMessageId });
         return {
           success: false,
           queued: true,
@@ -3643,7 +3660,7 @@ const GroupCore = {
         }
       } catch (e) {
         debugLog('Group encryption failed — refusing to send unencrypted:', e.message);
-        queueGroupAction({ type: 'sendMessage', groupId, content, topic, anonymous });
+        queueGroupAction({ type: 'sendMessage', groupId, content, topic, anonymous, clientMessageId });
         return {
           success: false,
           queued: true,
@@ -3658,13 +3675,25 @@ const GroupCore = {
         content: outgoingContent,
         topic,
         anonymous,
+        clientMessageId,
         metadata: {
           encrypted: !!encMeta.encrypted,
-          keyGeneration: encMeta.keyGeneration || null
+          keyGeneration: encMeta.keyGeneration || null,
+          ...(clientMessageId ? { localId: String(clientMessageId) } : {})
         }
       });
-      if (response && response.success && response.data) {
-        const messageData = response.data;
+      // FIX-GROUP-RESPONSE-SHAPE: the server responds with
+      // { success, data: { message: {...} } } — response.data is the
+      // WRAPPER, not the message. This previously read response.data
+      // directly as the message, so messageData.id was always undefined,
+      // meaning the caller's confirmedId always fell back to the client's
+      // own temp id and the optimistic bubble's id was never actually
+      // replaced with the real server id — it also meant the locally
+      // cached copy of every sent message was filed under the wrong id
+      // forever. Unwrap the real shape (defensively, in case it's ever
+      // flattened server-side).
+      const messageData = response?.data?.message || response?.data?.data?.message || response?.data || null;
+      if (response && response.success && messageData) {
         // FIX-GROUP-ENCRYPTION: messageData.content here is whatever
         // the server echoed back — i.e. still the ciphertext we just
         // sent, if this message was encrypted. We already have the
@@ -3674,6 +3703,7 @@ const GroupCore = {
         if (encMeta.encrypted) {
           messageData.content = content;
         }
+        messageData.__alreadyDecrypted = true;
         this.saveGroupMessages(groupId, [messageData]);
         this.emit('group:message-sent', {
           groupId,

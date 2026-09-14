@@ -37,63 +37,17 @@
       return result;
     };
 
-    const GC = await waitFor(() => window.GroupCore);
-    if (!GC) throw new Error('GroupCore did not initialize');
+    // NOTE: sending itself (including clientMessageId handling and response
+    // unwrapping) is now owned solely by GroupCore.sendGroupMessage in
+    // group-core-bootstrap.js, which calls window.KynectaGroupE2E.encryptOutgoing
+    // (wrapped above) directly. This file used to also install its own
+    // competing copy of the whole send path here — whichever of the two
+    // finished installing last silently won, and the losing implementation's
+    // behavior (including its own clientMessageId handling) was invisibly
+    // discarded. Keeping exactly one canonical send implementation removes
+    // that race entirely.
 
-    await waitFor(() => typeof GC.sendGroupMessage === 'function');
-    const originalSend = GC.sendGroupMessage.bind(GC);
-    if (GC.sendGroupMessage.__groupE2ESecureBoundary) return;
-
-    GC.sendGroupMessage = async function secureGroupSend(groupId, plaintext, topic = null, anonymous = false, clientMessageId = null) {
-      if (!groupId || !String(plaintext || '').trim()) return { success: false, error: 'Missing groupId or content' };
-
-      const members = await (typeof window.KynectaGroupE2E._fetchGroupMemberIds === 'function'
-        ? window.KynectaGroupE2E._fetchGroupMemberIds(groupId)
-        : undefined);
-      const encrypted = await window.KynectaGroupE2E.encryptOutgoing(groupId, plaintext, members);
-
-      const cid = clientMessageId || (window.crypto?.randomUUID?.() || `cid_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
-      const baseRaw = window.__kynAPI?.baseUrl || window.__API_BASE_URL || window.API_BASE_URL || 'https://noxopa.onrender.com/api';
-      const base = String(baseRaw).replace(/\/$/, '').endsWith('/api') ? String(baseRaw).replace(/\/$/, '') : `${String(baseRaw).replace(/\/$/, '')}/api`;
-      const token = window.AuthStorage?.getToken?.() || localStorage.getItem('accessToken') || localStorage.getItem('authToken') || localStorage.getItem('token') || '';
-
-      const response = await fetch(`${base}/groups/${groupId}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        credentials: 'include',
-        body: JSON.stringify({
-          content: encrypted.content,
-          type: 'text',
-          topic,
-          anonymous,
-          clientMessageId: cid,
-          metadata: { encrypted: true, keyGeneration: encrypted.keyGeneration }
-        })
-      });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok || body?.success === false) throw new Error(body?.message || body?.error || `Group send failed (${response.status})`);
-
-      const message = body?.data?.message || body?.data?.data?.message || body?.data || body?.message;
-      if (message?.id) {
-        // FIX (group-self-message-shows-encrypted): the server echoes back
-        // the just-sent message with .content still ciphertext (that's what
-        // got stored) — this HTTP-response path never runs it through
-        // decryptIncoming(), unlike the socket-receive path, so the sender
-        // saw raw encrypted content in their own chat. We already have the
-        // real plaintext right here; use it directly instead of asking the
-        // server, and mark the message so no later handler tries to
-        // re-decrypt (and overwrite) it.
-        message.content = plaintext;
-        message.__alreadyDecrypted = true;
-        this.addGroupMessage?.(groupId, message);
-        this.emit?.('group:message-received', { groupId, message });
-        this.emit?.('group:message-sent', { groupId, message });
-      }
-      return { success: true, data: message };
-    };
-    GC.sendGroupMessage.__groupE2ESecureBoundary = true;
-
-    console.log('[GroupE2E] Secure send boundary installed — plaintext fallback blocked');
+    console.log('[GroupE2E] Secure encrypt boundary installed — plaintext fallback blocked');
   } catch (err) {
     console.error('[GroupE2E] Secure boundary initialization failed:', err?.message || err);
   }

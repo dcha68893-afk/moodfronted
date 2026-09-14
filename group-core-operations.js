@@ -1813,6 +1813,19 @@ const openGroupChat = async function (groupData) {
     GroupCore.resetGroupUnreadCount(groupData.id);
     updateGroupChatHeader(groupData);
     renderGroupChatLoadingState('Loading messages...');
+    // FIX (typing-blocked-while-loading): the composer's enabled/disabled
+    // state was previously only ever touched by checkPostingRules(), which
+    // doesn't run until after group details AND message history have both
+    // finished loading — so opening a group chat could leave the textarea
+    // in whatever state it was left in by the PREVIOUSLY open chat (e.g.
+    // disabled from a read-only group) for the entire load window, and
+    // typed keystrokes during that window were simply ignored. Reset it to
+    // usable immediately; checkPostingRules() below will correctly
+    // re-disable it afterward if this specific group actually requires that.
+    const _earlyChatInput = safeGetElement('#chatInput');
+    const _earlyChatSendBtn = safeGetElement('#chatSendBtn');
+    if (_earlyChatInput) { _earlyChatInput.disabled = false; _earlyChatInput.placeholder = 'Type a message...'; }
+    if (_earlyChatSendBtn) _earlyChatSendBtn.disabled = false;
     setupGroupAttachmentControls();
     const sidebar = safeGetElement('#sidebar');
     const groupChatPanel = safeGetElement('#groupChatPanel');
@@ -1848,6 +1861,32 @@ const openGroupChat = async function (groupData) {
     // reassigning it below makes the server-resolved id the one canonical
     // id used for everything that follows.
     let resolvedGroup = groupData;
+
+    // FIX-024: Join the socket room BEFORE fetching message history, using
+    // the id we already have — in virtually every case this is the same id
+    // the details fetch below resolves to (a stale-cached-id mismatch is
+    // the rare exception FIX-024's own comment below already guards by
+    // joining again with the server-confirmed id once resolved). Joining
+    // here, rather than after the details+members round trip, lets message
+    // history load in parallel with that round trip instead of after it.
+    const earlyGroupId = groupData.id;
+    try {
+      const rt = window.KynectaRealtime;
+      const joinPayloads = [
+        ['group:join', { groupId: earlyGroupId }],
+        ['join', { room: `group:${earlyGroupId}` }],
+        ['join', { room: `group_${earlyGroupId}` }]
+      ];
+      const emitter = (rt && typeof rt.emit === 'function') ? rt : (rt && rt._socket && typeof rt._socket.emit === 'function' ? rt._socket : null);
+      if (emitter) joinPayloads.forEach(([evt, payload]) => emitter.emit(evt, payload));
+    } catch (_) {}
+
+    // FIX (serial-load-latency): message history no longer waits for the
+    // group-details/members round trip to finish first — both start here,
+    // concurrently, roughly halving the time before messages are visible
+    // and the composer is fully ready (see checkPostingRules at the end).
+    const messagesLoadPromise = loadGroupChatMessages(earlyGroupId).catch(() => {});
+
     try {
       const [groupDetailsResponse, membersResponse] = await Promise.all([GroupCore.getGroupDetails(groupData.id).catch(() => null), secureApiCall(`/groups/${groupData.id}/members`, {
         silent: true
@@ -1894,49 +1933,32 @@ const openGroupChat = async function (groupData) {
       } catch (_) {}
     } catch (headerError) {}
 
-    // FIX-024: Join the socket room BEFORE fetching message history.
-    // Without this, messages that arrive during the ~500ms API load window are missed forever.
-    // The room join is idempotent on the server — safe to call every time.
     // FIX: join the CANONICAL room (`group:${resolvedGroup.id}`, the
-    // server-confirmed id) rather than the room built from the raw
-    // `groupData` argument that was passed in. If the caller passed a
-    // stale/cached group object with a different id, the old code would
-    // join the wrong room entirely and every message for the real,
-    // currently-open group would silently never arrive. Also emit the
-    // dedicated 'group:join' event — unlike the generic 'join' event, the
-    // server verifies active membership (leftAt IS NULL) before adding the
-    // socket to the room, so this join path is enforced the same way as
-    // every other membership check in the app.
+    // server-confirmed id) if — and only if — it turned out to differ from
+    // `earlyGroupId` (the id we already joined and started loading
+    // messages with, above). If the caller passed a stale/cached group
+    // object with a different id, this catches it; in the normal case
+    // resolvedGroup.id === earlyGroupId and this is a no-op.
     const canonicalGroupId = resolvedGroup.id;
-    try {
-      const rt = window.KynectaRealtime;
-      if (rt && typeof rt.emit === 'function') {
-        rt.emit('group:join', {
-          groupId: canonicalGroupId
-        });
-        rt.emit('join', {
-          room: `group:${canonicalGroupId}`
-        });
-        rt.emit('join', {
-          room: `group_${canonicalGroupId}`
-        });
-      } else if (rt && rt._socket && typeof rt._socket.emit === 'function') {
-        rt._socket.emit('group:join', {
-          groupId: canonicalGroupId
-        });
-        rt._socket.emit('join', {
-          room: `group:${canonicalGroupId}`
-        });
-        rt._socket.emit('join', {
-          room: `group_${canonicalGroupId}`
-        });
-      }
-    } catch (_) {}
-    // FIX: load history and wire up typing for the same canonical id used
-    // to join the room above — previously these used `groupData.id`, which
-    // could diverge from the id the room join and header actually resolved
-    // to (see resolvedGroup above).
-    await loadGroupChatMessages(canonicalGroupId);
+    if (String(canonicalGroupId) !== String(earlyGroupId)) {
+      try {
+        const rt = window.KynectaRealtime;
+        const emitter = (rt && typeof rt.emit === 'function') ? rt : (rt && rt._socket && typeof rt._socket.emit === 'function' ? rt._socket : null);
+        if (emitter) {
+          emitter.emit('group:join', { groupId: canonicalGroupId });
+          emitter.emit('join', { room: `group:${canonicalGroupId}` });
+          emitter.emit('join', { room: `group_${canonicalGroupId}` });
+        }
+      } catch (_) {}
+      // The in-flight message load above was for the wrong (stale) id —
+      // fetch the correct history for the resolved id instead.
+      await loadGroupChatMessages(canonicalGroupId);
+    } else {
+      // Common case: wait for the load that's already been running in
+      // parallel with the details/members fetch since before this try
+      // block started, instead of only starting it now.
+      await messagesLoadPromise;
+    }
     setupTypingListener(canonicalGroupId);
     // FIX (duplicate-screen bug): loadUniqueFeaturesPanels() renders the
     // legacy Notes / Event Countdown / Transparency panels as extra
