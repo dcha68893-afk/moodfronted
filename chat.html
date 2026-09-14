@@ -8298,14 +8298,21 @@
                     });
                 }
 
+                // FIX-GROUP-TRIPLE-RENDER: this used to forward ONE incoming
+                // group message to the group iframe via THREE separate
+                // postMessage envelopes ('GROUP_MESSAGE', 'group:message',
+                // and a synthetic 'group:localSync' action:'message'). The
+                // iframe's generic bridge handler treats every postMessage
+                // as an independent event and re-emits 'group:message-received'
+                // for each one it recognises — so a single server-side send
+                // was rendered up to 3 times in both the sender's and other
+                // members' message lists. Forward it exactly once now, via
+                // the one canonical type; 'group:localSync' is reserved for
+                // group/membership metadata sync elsewhere and must not
+                // double as a message-delivery event (same rule already
+                // enforced on the backend's socket emit for this reason).
                 function _fwdGroupMessage(data) {
-                    _fwdToGroupIframe('GROUP_MESSAGE',   data);
-                    _fwdToGroupIframe('group:message',   data);
-                    _fwdToGroupIframe('group:localSync', {
-                        action:  'message',
-                        groupId: data && data.groupId,
-                        message: (data && data.message) || data
-                    });
+                    _fwdToGroupIframe('GROUP_MESSAGE', data);
                 }
 
                 function _fwdGroupLocalSync(data) {

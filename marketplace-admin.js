@@ -26,6 +26,83 @@
 (function _AdminModule() {
 'use strict';
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
+// FIX (admin panel has no styling): none of the .adm-* classes used throughout
+// this file (including .adm-back, the header's back/cancel button) had any
+// matching CSS anywhere in the app. Every admin screen rendered as bare,
+// unstyled HTML, which is why the back arrow was effectively invisible and
+// the whole section looked unbuilt. Injecting the stylesheet once here keeps
+// the fix self-contained (no other file needs to change to pick it up).
+(function _injectAdminStyles() {
+    if (document.getElementById('adm-admin-styles')) return;
+    const css = `
+    .adm-page{background:#f8f9fb;height:100%;font-family:inherit}
+    .adm-header{display:flex;align-items:center;gap:10px;padding:14px 16px;background:#111827;color:#fff;position:sticky;top:0;z-index:5}
+    .adm-back{flex-shrink:0;width:34px;height:34px;border-radius:50%;border:none;background:rgba(255,255,255,.12);color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1}
+    .adm-back:hover{background:rgba(255,255,255,.22)}
+    .adm-title{flex:1;min-width:0;font-size:15px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .adm-badge-live{flex-shrink:0;background:#22c55e;color:#fff;font-size:10px;font-weight:800;letter-spacing:.04em;padding:3px 8px;border-radius:20px}
+    .adm-body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
+    .adm-no-access{padding:60px 24px;text-align:center}
+    .adm-btn{border:none;border-radius:8px;padding:8px 14px;font-size:12.5px;font-weight:700;cursor:pointer;background:#e5e7eb;color:#111827}
+    .adm-btn-full{width:100%;padding:12px}
+    .adm-btn-primary{background:#3b82f6;color:#fff}
+    .adm-btn-secondary{background:#e5e7eb;color:#111827}
+    .adm-btn-success{background:#22c55e;color:#fff}
+    .adm-btn-danger{background:#ef4444;color:#fff}
+    .adm-btn-warning{background:#f59e0b;color:#fff}
+    .adm-nav{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:14px}
+    .adm-nav-item{display:flex;flex-direction:column;align-items:center;gap:6px;background:#fff;border:1px solid #eef0f3;border-radius:14px;padding:14px 8px;cursor:pointer;position:relative}
+    .adm-nav-item:active{background:#f3f4f6}
+    .adm-nav-icon{font-size:22px}
+    .adm-nav-label{font-size:11.5px;font-weight:600;color:#374151;text-align:center}
+    .adm-nav-badge{position:absolute;top:6px;right:8px;background:#ef4444;color:#fff;font-size:10px;font-weight:800;border-radius:10px;padding:1px 6px}
+    .adm-kpi-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding:14px}
+    .adm-kpi{background:#fff;border:1px solid #eef0f3;border-radius:14px;padding:14px}
+    .adm-kpi-label{font-size:11px;color:#6b7280;font-weight:600}
+    .adm-kpi-val{font-size:19px;font-weight:800;color:#111827;margin-top:4px}
+    .adm-kpi-sub{font-size:11px;color:#9ca3af;margin-top:2px}
+    .adm-section{margin:14px;background:#fff;border:1px solid #eef0f3;border-radius:14px;padding:14px}
+    .adm-section-title{font-size:13px;font-weight:800;color:#111827;margin-bottom:10px}
+    .adm-search-bar{padding:12px}
+    .adm-search-input{width:100%;box-sizing:border-box;border:1px solid #e5e7eb;border-radius:10px;padding:10px 12px;font-size:13.5px}
+    .adm-filter-btn{border:1px solid #e5e7eb;background:#fff;color:#374151;border-radius:20px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;margin-right:6px}
+    .adm-filter-btn.active,.adm-filter-btn:active{background:#111827;color:#fff;border-color:#111827}
+    .adm-row{display:flex;align-items:center;gap:10px;padding:12px;background:#fff;border:1px solid #eef0f3;border-radius:12px;margin-bottom:8px}
+    .adm-row-placeholder{flex-shrink:0;width:38px;height:38px;border-radius:10px;background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:18px}
+    .adm-row-title{font-size:13.5px;font-weight:700;color:#111827;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .adm-row-sub{font-size:11.5px;color:#6b7280;margin-top:2px}
+    .adm-row-price{font-size:13px;font-weight:800;color:#111827}
+    .adm-badge{display:inline-block;font-size:10px;font-weight:800;padding:2px 8px;border-radius:20px;margin-top:4px}
+    .adm-badge.green{background:#dcfce7;color:#15803d}
+    .adm-badge.yellow{background:#fef9c3;color:#a16207}
+    .adm-badge.red{background:#fee2e2;color:#b91c1c}
+    .adm-badge.blue{background:#dbeafe;color:#1d4ed8}
+    .adm-badge.purple{background:#f3e8ff;color:#7e22ce}
+    .adm-badge.gray{background:#f3f4f6;color:#4b5563}
+    .adm-product-card{background:#fff;border:1px solid #eef0f3;border-radius:14px;overflow:hidden;margin:0 12px 10px}
+    .adm-product-card-img{width:100%;height:140px;object-fit:cover;background:#f3f4f6}
+    .adm-product-card-body{padding:10px 12px}
+    .adm-product-card-title{font-size:13.5px;font-weight:700;color:#111827}
+    .adm-product-card-meta{font-size:11.5px;color:#6b7280;margin-top:2px}
+    .adm-product-card-actions{display:flex;gap:8px;padding:0 12px 12px}
+    .adm-payout-row{display:flex;justify-content:space-between;align-items:center;padding:12px;background:#fff;border:1px solid #eef0f3;border-radius:12px;margin-bottom:8px}
+    .adm-settings-row{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #f1f2f4}
+    .adm-settings-label{font-size:13px;font-weight:600;color:#111827}
+    .adm-settings-val{font-size:12.5px;color:#6b7280}
+    .adm-bar{height:8px;border-radius:4px;background:#e5e7eb;overflow:hidden}
+    .adm-chart{display:flex;align-items:flex-end;gap:4px;height:120px;padding:10px 0}
+    .adm-chart-labels{display:flex;justify-content:space-between}
+    .adm-chart-label{font-size:9.5px;color:#9ca3af}
+    .adm-modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:99999;padding:20px}
+    .adm-modal-title{font-size:15px;font-weight:800;margin-bottom:12px}
+    `;
+    const style = document.createElement('style');
+    style.id = 'adm-admin-styles';
+    style.textContent = css;
+    document.head.appendChild(style);
+})();
+
 // ─── Utilities ────────────────────────────────────────────────────────────────
 const _esc  = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const _fmt  = n  => 'KES ' + parseFloat(n||0).toLocaleString('en-KE',{minimumFractionDigits:0,maximumFractionDigits:0});
@@ -366,9 +443,18 @@ async function renderAdminProducts(container) {
         const total = r?.data?.total || 0;
 
         const statusMap = {pending:'yellow',approved:'green',rejected:'red',suspended:'gray'};
+        // FIX (Product Management showing raw JS as page text): the filter
+        // buttons used to embed load.toString() -- the ENTIRE function's
+        // source code, backticks and all -- directly inside onclick="...".
+        // The function body's own double quotes closed the onclick
+        // attribute immediately, so everything after that point in the
+        // function's source spilled out as literal, visible page content.
+        // Exposing `load` as a real global and calling it by reference is
+        // the correct way to make it reachable from an inline handler.
+        window._admProductsLoad = load;
         container.innerHTML = _pageShell('Product Management', `
         <div class="adm-search-bar">
-            ${['pending','approved','rejected','suspended'].map(s=>`<button class="adm-filter-btn ${filter===s?'active':''}" onclick="(${load.toString()})('${s}')">${s.charAt(0).toUpperCase()+s.slice(1)}</button>`).join('')}
+            ${['pending','approved','rejected','suspended'].map(s=>`<button class="adm-filter-btn ${filter===s?'active':''}" onclick="window._admProductsLoad('${s}')">${s.charAt(0).toUpperCase()+s.slice(1)}</button>`).join('')}
         </div>
         <div style="padding:10px 12px;font-size:12px;color:#6b7280">${total} products</div>
         <div style="padding:0 12px">

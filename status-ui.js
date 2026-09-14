@@ -7952,45 +7952,44 @@ function renderStatusListInstantlyUI() {
     recentGroups.sort(byDate);
     viewedGroups.sort(byDate);
 
+    const filterActive = !!activeTopicFilter;
+    const _emptyState = (icon, title, sub) => `
+            <div class="empty-state" style="padding:20px 16px;text-align:center;color:var(--text-secondary);">
+                <i class="fas ${icon}" style="font-size:26px;margin-bottom:8px;opacity:0.35;display:block;"></i>
+                <p style="margin:0 0 2px;font-size:13px;">${title}</p>
+                <p style="margin:0;font-size:11.5px;opacity:0.7;">${sub}</p>
+            </div>`;
+
     // ── Render Recent updates ─────────────────────────────────────────────
+    // FIX (sections disappearing instead of always showing): this used to
+    // hide the "Recent updates" label AND clear the whole container
+    // whenever there were zero unviewed statuses, and likewise for
+    // "Viewed updates" below. That meant the two-section layout only ever
+    // appeared once each side happened to have content — a freshly created
+    // status had nowhere visible to land until something else was already
+    // in "Recent", and a freshly viewed status had nowhere visible to move
+    // into if "Viewed" was still empty. Both labels and both containers
+    // are now always shown; an empty section just shows its own small
+    // placeholder instead of vanishing entirely.
     const recentLabel = document.getElementById('recentUpdatesLabel');
+    if (recentLabel) recentLabel.style.display = '';
     if (recentGroups.length) {
-        if (recentLabel) recentLabel.style.display = '';
         renderStatusesListUI(recentContainer, recentGroups, false);
     } else {
-        if (recentLabel) recentLabel.style.display = 'none';
-        recentContainer.innerHTML = '';
+        recentContainer.innerHTML = filterActive
+            ? _emptyState('fa-hashtag', `No statuses tagged #${UISanitizer.sanitizeHTML(activeTopicFilter)}`, 'Tap the topic again to clear the filter')
+            : _emptyState('fa-comment-dots', 'No new updates', 'Status updates from your contacts appear here');
     }
 
     // ── Render Viewed updates ─────────────────────────────────────────────
     const viewedLabel = document.getElementById('viewedUpdatesLabel');
+    if (viewedLabel) viewedLabel.style.display = '';
     if (viewedContainer) {
         if (viewedGroups.length) {
-            if (viewedLabel) viewedLabel.style.display = '';
             renderStatusesListUI(viewedContainer, viewedGroups, true); // true = dim/viewed style
         } else {
-            if (viewedLabel) viewedLabel.style.display = 'none';
-            viewedContainer.innerHTML = '';
+            viewedContainer.innerHTML = _emptyState('fa-eye', 'No viewed updates yet', 'Statuses you open move here');
         }
-    }
-
-    // Show empty state if nothing at all
-    if (!recentGroups.length && !viewedGroups.length) {
-        if (recentLabel) recentLabel.style.display = 'none';
-        const filterActive = !!activeTopicFilter;
-        recentContainer.innerHTML = filterActive
-            ? `
-            <div class="empty-state" style="padding:24px 16px;text-align:center;color:var(--text-secondary);">
-                <i class="fas fa-hashtag" style="font-size:32px;margin-bottom:10px;opacity:0.4;display:block;"></i>
-                <p style="margin:0 0 4px;font-size:14px;">No statuses tagged #${UISanitizer.sanitizeHTML(activeTopicFilter)}</p>
-                <p style="margin:0;font-size:12px;opacity:0.7;">Tap the topic again to clear the filter</p>
-            </div>`
-            : `
-            <div class="empty-state" style="padding:24px 16px;text-align:center;color:var(--text-secondary);">
-                <i class="fas fa-comment-dots" style="font-size:32px;margin-bottom:10px;opacity:0.4;display:block;"></i>
-                <p style="margin:0 0 4px;font-size:14px;">No recent updates</p>
-                <p style="margin:0;font-size:12px;opacity:0.7;">Status updates from your contacts appear here</p>
-            </div>`;
     }
 }
 

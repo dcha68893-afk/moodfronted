@@ -2232,9 +2232,6 @@
                             GC.groups.push(grp); GC.saveGroups && GC.saveGroups();
                             GC.emit && GC.emit('group:created', grp);
                         }
-                    } else if (action === 'message' && payload.groupId && payload.message) {
-                        GC.addGroupMessage && GC.addGroupMessage(payload.groupId, payload.message);
-                        GC.emit && GC.emit('group:message-received', { groupId: payload.groupId, message: payload.message });
                     } else if (action === 'member_add') {
                         GC.emit && GC.emit('group:member-added', payload);
                     } else if (action === 'member_remove' || action === 'member_leave') {
@@ -2843,7 +2840,13 @@ function hookRT(){
         window.addEventListener('message',function(ev){
             var d=ev.data;if(!d||typeof d!=='object')return;
             if(d.source==='parent-hdr'||d.source==='group-module')return;
-            if(d.type==='GROUP_MESSAGE'||d.type==='group:message'||d.type==='group_message'){var gid2=d.payload&&(d.payload.groupId||d.payload.group_id);var msg2=d.payload&&(d.payload.message||d.payload);if(gid2&&msg2)_handle(gid2,msg2);return;}
+            // FIX-GROUP-TRIPLE-RENDER: GROUP_MESSAGE/group:message/group_message
+            // postMessages are already fully handled by _groupBridgeHandler above
+            // (GC.addGroupMessage + GC.emit('group:message-received'), which this
+            // module's hookRT() listener turns into a single _handle() call).
+            // Calling _handle() directly here too was a second, redundant render
+            // of the exact same incoming message. Removed — do not re-add a
+            // direct _handle() call for these types here.
             if(d.type==='PARENT_GROUP_CLOSE'){closePanel();return;}
             // FIX (All Groups list not showing after navigating away and back):
             // chat.html's app/hardware back-button handler (handleAppBackNavigation)
@@ -2914,8 +2917,14 @@ function hookRT(){
     }
     if(window.KynectaRealtime&&typeof window.KynectaRealtime.on==='function'){
         var RT=window.KynectaRealtime;if(typeof RT.off==='function'){RT.off('group:message');RT.off('group_message');RT.off('group:call-started');}
-        RT.on('group:message',function(d){if(g.emit)g.emit('group:message-received',{groupId:d.groupId||d.group_id,message:d.message||d});});
-        RT.on('group_message',function(d){if(g.emit)g.emit('group:message-received',{groupId:d.groupId||d.group_id,message:d.message||d});});
+        // FIX-GROUP-TRIPLE-RENDER: this used to also relay 'group:message'/
+        // 'group_message' straight from the socket into 'group:message-received',
+        // in parallel with the SAME event already arriving via chat.html's
+        // postMessage forward (_groupBridgeHandler → GC.addGroupMessage/emit,
+        // handled above). Every incoming group message was rendered twice.
+        // The postMessage path already covers delivery (this module always
+        // runs as an iframe under chat.html), so only 'group:call-started'
+        // — which has no other delivery path — is wired here now.
         RT.on('group:call-started',function(d){if(g.emit)g.emit('group:call-started',d);});
     }
 }

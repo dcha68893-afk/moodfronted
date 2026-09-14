@@ -1362,14 +1362,21 @@ function normalizeMembersPayload(raw) {
         };
     }
     
-    return { members: [], pagination: { totalMembers: 0 } };
+    // FIX-GROUP-ZERO-MEMBERS: previously returned pagination.totalMembers: 0
+    // here, which getGroupMemberCount() then treated as a real, authoritative
+    // count (0 !== undefined) and returned immediately -- even when the /members
+    // request had simply failed (e.g. a transient membership-check error) and
+    // the group's own known memberCount/stats.totalMembers were perfectly
+    // valid. Leaving pagination undefined lets getGroupMemberCount() fall
+    // through to those real fields instead of reporting a false "0 members".
+    return { members: [], pagination: undefined };
 }
 
 function getGroupMemberCount(groupData, membersPayload = null) {
     if (membersPayload?.pagination?.totalMembers !== undefined) {
         return Number(membersPayload.pagination.totalMembers) || 0;
     }
-    if (Array.isArray(groupData?.members)) {
+    if (Array.isArray(groupData?.members) && groupData.members.length > 0) {
         return groupData.members.length;
     }
     if (groupData?.memberCount !== undefined) {
@@ -1377,6 +1384,9 @@ function getGroupMemberCount(groupData, membersPayload = null) {
     }
     if (groupData?.stats?.totalMembers !== undefined) {
         return Number(groupData.stats.totalMembers) || 0;
+    }
+    if (Array.isArray(groupData?.members)) {
+        return groupData.members.length;
     }
     return 0;
 }
