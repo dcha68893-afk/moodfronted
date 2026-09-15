@@ -277,6 +277,18 @@
         script.async = false;
         script.dataset.groupMessageIsolation = 'true';
         (document.head || document.documentElement).appendChild(script);
+
+        // Multipart message uploads must not use the iframe API_REQUEST bridge:
+        // FormData cannot be structured-cloned by window.postMessage. Install
+        // the direct upload override early; it waits for MessageModule because
+        // message-client.js itself is loaded later by message.html.
+        if (!document.querySelector('script[data-message-upload-transport]')) {
+            const uploadScript = document.createElement('script');
+            uploadScript.src = '/js/message-upload-transport.js';
+            uploadScript.async = false;
+            uploadScript.dataset.messageUploadTransport = 'true';
+            (document.head || document.documentElement).appendChild(uploadScript);
+        }
     }
 
     // The parent chat shell owns the visible group header/actions. Keep the
