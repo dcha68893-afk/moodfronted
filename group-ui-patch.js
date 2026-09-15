@@ -1291,7 +1291,24 @@
             const count = g.memberCount || 0;
             const card = document.createElement('div');
             card.style.cssText = 'display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border-color)';
-            const actionBtn = isMine
+            // FIX (Discover "2 then 1" — Join shown before flipping to Open for
+            // groups the user already belongs to): this used to decide the
+            // button purely from the `isMine` param, which callers hardcode to
+            // `false` for the Discover tab (since /groups/search intentionally
+            // returns ALL public groups, including ones the caller already
+            // joined — see "Public groups visible to all users" below). The
+            // ONLY thing that was supposed to correct a "Join" button back to
+            // "Open" for an already-joined group was patchDiscoverButtons()'s
+            // upgradeCard(), watching for `[data-action="join"], [data-id]` —
+            // but the buttons actually built here use `data-join-gid`/
+            // `data-open-gid`, not `data-action`/`data-id`. That selector never
+            // matches these cards, so the correction silently never fires and
+            // "Join" just stays showing indefinitely for groups you're already
+            // in. Checking real membership up front removes the dependency on
+            // that mismatched correction pass entirely.
+            const role = _myRoleInGroup(g);
+            const alreadyMember = isMine || !!role;
+            const actionBtn = alreadyMember
                 ? '<button data-open-gid="' + g.id + '" style="padding:7px 14px;border-radius:8px;border:none;background:#43a047;color:#fff;font-weight:700;cursor:pointer;white-space:nowrap;font-size:13px">▶ Open</button>'
                 : '<button data-join-gid="' + g.id + '" style="padding:7px 14px;border-radius:8px;border:none;background:var(--primary-color);color:#fff;font-weight:700;cursor:pointer;white-space:nowrap;font-size:13px">Join</button>';
             card.innerHTML =
@@ -1797,9 +1814,9 @@
         function upgradeCard(card) {
             if (!card || card.dataset.discoverPatched) return;
             card.dataset.discoverPatched = '1';
-            const btn = card.querySelector('[data-action="join"], [data-id]');
+            const btn = card.querySelector('[data-action="join"], [data-id], [data-join-gid], [data-open-gid]');
             if (!btn) return;
-            const gid = btn.dataset.id || btn.dataset.gid;
+            const gid = btn.dataset.id || btn.dataset.gid || btn.dataset.joinGid || btn.dataset.openGid;
             if (!gid) return;
             const gc = window.GroupCore;
             const gData = gc && gc.getGroupById ? gc.getGroupById(parseInt(gid) || gid) : null;
@@ -1851,9 +1868,9 @@
             for (const m of muts) {
                 for (const n of m.addedNodes) {
                     if (n.nodeType !== 1) continue;
-                    const btn = qs('[data-action="join"], [data-id]', n);
+                    const btn = qs('[data-action="join"], [data-id], [data-join-gid], [data-open-gid]', n);
                     if (btn) upgradeCard(n.closest('.group-item') || n);
-                    else qsa('[data-action="join"], [data-id]', n).forEach(b => upgradeCard(b.closest('.group-item') || b.parentElement));
+                    else qsa('[data-action="join"], [data-id], [data-join-gid], [data-open-gid]', n).forEach(b => upgradeCard(b.closest('.group-item') || b.parentElement));
                 }
             }
         });

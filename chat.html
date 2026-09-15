@@ -5767,30 +5767,24 @@
                 // ==================================================================
                 // CALL SCREEN ACTIVE - Control icon visibility
                 // ==================================================================
+                // FIX-CALL-DUPLICATE-STATE-MACHINE: this handler used to be a full
+                // second, independently-written copy of the CALL_SCREEN_ACTIVE
+                // handler that already lives in the FIRST window.addEventListener
+                // ('message', ...) registered above (search for "CRITICAL FOR ICON
+                // HIDING" in this file). Because this file has that many separate
+                // top-level message listeners, BOTH ran on every single
+                // CALL_SCREEN_ACTIVE postMessage — each independently reading and
+                // writing the SAME window.__activeCallInProgress flag and the same
+                // 'call-screen-active' body class, and each with its own copy of
+                // the stale-idle-reset guard. That's the literal cause of the
+                // paired "CALL_SCREEN_ACTIVE(false) ignored" / "...#2 ignored"
+                // console lines, and made "no active call to end" more likely,
+                // since it left two independently-timed copies of the same state
+                // able to disagree with each other and with calls-ui.js's own
+                // UIState.activeCallId. The first listener's handler is now the
+                // single canonical implementation; this one just returns so the
+                // event isn't processed twice.
                 if (data.type === 'CALL_SCREEN_ACTIVE') {
-                    if (data.payload && data.payload.active === true) {
-                        window.__activeCallInProgress = true;
-                        document.body.classList.add('call-screen-active');
-                        // ── FIX: remove .hidden so callsContent is actually visible ──
-                        var _cc2 = document.getElementById('callsContent');
-                        if (_cc2) _cc2.classList.remove('hidden');
-                        if (typeof logProcessStatus === 'function') {
-                            logProcessStatus('call-screen', true, 'active');
-                        }
-                    } else {
-                        // Guard: suppress stale idle-reset within 15s of call dispatch
-                        var _sinceDispatchCSA2 = window.__callDispatchedAt ? Date.now() - window.__callDispatchedAt : 99999;
-                        if (_sinceDispatchCSA2 < 4000) {
-                            console.warn('[Parent] CALL_SCREEN_ACTIVE(false) #2 ignored — call dispatched only ' + Math.round(_sinceDispatchCSA2/1000) + 's ago');
-                            _kynDeferStaleCallEvent(data, 4000 - _sinceDispatchCSA2);
-                        } else {
-                            window.__activeCallInProgress = false;
-                            document.body.classList.remove('call-screen-active');
-                            if (typeof logProcessStatus === 'function') {
-                                logProcessStatus('call-screen', true, 'inactive');
-                            }
-                        }
-                    }
                     return;
                 }
 

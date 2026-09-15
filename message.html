@@ -264,7 +264,16 @@
   .decrypt-pending { opacity: 0.6; font-style: italic; }
   .decrypt-version-badge { font-size: 9px; opacity: 0.55; cursor: default; margin-left: 3px; }
   .decrypt-version-badge.legacy { opacity: 0.75; }
-  #chatHeader { display: flex; align-items: center; justify-content: space-between; }
+  /* FIX (PARENT-HEADER-CONSOLIDATION regression): this rule used to declare
+     `display: flex` again here, appearing later in the stylesheet than the
+     `#chatHeader { display: none; }` hide-fix above (line ~233) — since both
+     rules have equal specificity, this LATER one silently won the cascade
+     and re-showed the duplicate header row (the exact "two rows: parent's
+     header + this iframe's own back/name/call/video row" bug the fix above
+     was written to prevent). Dropped `display` from this rule; alignment
+     properties only apply once `.selection-active` (or any future override)
+     sets display back to flex. */
+  #chatHeader { align-items: center; justify-content: space-between; }
   #chatHeaderName { flex: 1; }
   #chatSearchBar {
     display: flex; align-items: center; gap: 8px; padding: 8px 14px;
@@ -304,12 +313,12 @@
   #composeInput:disabled { opacity: 0.6; cursor: default; }
   #emojiBtn:disabled { opacity: 0.5; cursor: default; }
   #emojiBtn {
-    background: none; border: none; font-size: 19px; cursor: pointer;
+    background: none; border: none; cursor: pointer;
     width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
-    transition: background-color 0.15s ease, transform 0.1s ease;
+    transition: background-color 0.15s ease, transform 0.1s ease, color 0.15s ease;
   }
-  #emojiBtn:hover { background: var(--kyn-bg-hover, #f0f0f0); }
+  #emojiBtn:hover { background: var(--kyn-bg-hover, #f0f0f0); color: var(--kyn-accent-primary, #22c55e); }
   #emojiBtn:active { transform: scale(0.92); }
   #emojiPicker {
     position: absolute; bottom: 60px; right: 10px; background: var(--kyn-bg-panel, #fff);
@@ -330,21 +339,27 @@
   }
   #composeInput:focus { outline: none; border-color: var(--kyn-accent-primary, #22c55e); }
   #sendBtn {
-    background: var(--kyn-accent-primary, #22c55e); color: #fff; border: none; border-radius: 50%;
-    width: 42px; height: 42px; cursor: pointer; flex-shrink: 0; font-size: 16px;
+    background: linear-gradient(135deg, var(--kyn-accent-primary, #22c55e), var(--kyn-accent-secondary, #16a34a));
+    color: #fff; border: none; border-radius: 50%;
+    width: 42px; height: 42px; cursor: pointer; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 2px 6px rgba(34,197,94,0.35); transition: filter 0.15s ease, transform 0.1s ease;
+    box-shadow: 0 2px 8px rgba(34,197,94,0.4); transition: filter 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
   }
-  #sendBtn:hover:not(:disabled) { filter: brightness(1.08); }
-  #sendBtn:active:not(:disabled) { transform: scale(0.92); }
-  #sendBtn:disabled { opacity: 0.5; cursor: default; box-shadow: none; }
+  #sendBtn svg { transform: translateX(1px); }
+  #sendBtn:hover:not(:disabled) { filter: brightness(1.08); box-shadow: 0 3px 10px rgba(34,197,94,0.5); }
+  #sendBtn:active:not(:disabled) { transform: scale(0.9); }
+  #sendBtn:disabled { opacity: 0.45; cursor: default; box-shadow: none; }
+  #attachBtn, #emojiBtn {
+    color: var(--kyn-text-secondary, #667781);
+  }
   #attachBtn {
-    background: none; border: none; font-size: 21px; cursor: pointer; flex-shrink: 0;
+    background: none; border: none; cursor: pointer; flex-shrink: 0;
     width: 38px; height: 38px; border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
-    transition: background-color 0.15s ease, transform 0.1s ease;
+    transition: background-color 0.15s ease, transform 0.1s ease, color 0.15s ease;
   }
-  #attachBtn:hover { background: var(--kyn-bg-hover, #f0f0f0); }
+  #attachBtn svg { transform: rotate(45deg); }
+  #attachBtn:hover { background: var(--kyn-bg-hover, #f0f0f0); color: var(--kyn-accent-primary, #22c55e); }
   #attachBtn:active { transform: scale(0.92); }
   #attachBtn:disabled { opacity: 0.5; cursor: default; }
   .bubble-attachment-image { max-width: 220px; max-height: 220px; border-radius: 10px; display: block; margin-bottom: 4px; cursor: pointer; }
@@ -475,6 +490,16 @@
     function escapeHtml(s) {
       return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     }
+
+    // VISUAL POLISH: crisp inline-SVG icons (currentColor-based, so they pick
+    // up the surrounding button's color/theme automatically) replacing the
+    // plain emoji glyphs (📎 🙂 ▶) the composer used to render — those look
+    // inconsistent across platforms/fonts and read as a placeholder rather
+    // than a designed control, unlike the header's own icon set.
+    const ICON_ATTACH = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>';
+    const ICON_EMOJI = '<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>';
+    const ICON_SEND = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>';
+    const ICON_ATTACH_BUSY = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/><animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.8s" repeatCount="indefinite"/></svg>';
 
     // ROOT-CAUSE FIX (chat list shows raw ciphertext JSON instead of a
     // preview — screenshot showed a "denis" row with
@@ -976,11 +1001,11 @@
           <style>@keyframes kyn-spin{to{transform:rotate(360deg)}}</style>
         ` : ''}</div>
         <div id="composeBar">
-          <button id="attachBtn" title="Attach file">📎</button>
+          <button id="attachBtn" title="Attach file">${ICON_ATTACH}</button>
           <input type="file" id="attachInput" style="display:none" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt">
-          <button id="emojiBtn" title="Emoji">🙂</button>
+          <button id="emojiBtn" title="Emoji">${ICON_EMOJI}</button>
           <textarea id="composeInput" rows="1" placeholder="${hasChat ? 'Message...' : (pending ? 'Connecting…' : 'Pick a conversation to start typing…')}"></textarea>
-          <button id="sendBtn"${hasChat ? '' : ' disabled'}>&#9658;</button>
+          <button id="sendBtn"${hasChat ? '' : ' disabled'}>${ICON_SEND}</button>
         </div>
         <div id="emojiPicker" class="hidden"></div>
       `;
@@ -1261,7 +1286,7 @@
         const file = attachInput.files[0];
         if (!file) return;
         attachBtn.disabled = true;
-        attachBtn.textContent = '⏳';
+        attachBtn.innerHTML = ICON_ATTACH_BUSY;
         try {
           const attachment = await window.MessageModule.uploadAttachment(file);
           const caption = input.value.trim();
@@ -1271,7 +1296,7 @@
           alert('Upload failed: ' + err.message);
         } finally {
           attachBtn.disabled = false;
-          attachBtn.textContent = '📎';
+          attachBtn.innerHTML = ICON_ATTACH;
           attachInput.value = '';
         }
       });

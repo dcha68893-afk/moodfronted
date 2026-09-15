@@ -1891,7 +1891,40 @@ const openGroupChat = async function (groupData) {
       const [groupDetailsResponse, membersResponse] = await Promise.all([GroupCore.getGroupDetails(groupData.id).catch(() => null), secureApiCall(`/groups/${groupData.id}/members`, {
         silent: true
       }).catch(() => null)]);
-      resolvedGroup = groupDetailsResponse?.data || GroupCore.getGroupById(groupData.id) || groupData;
+      // FIX (silent "Group not found" / "You are not a member" with no
+      // indication why): getGroupDetails() never throws on a 404/403 — it
+      // resolves to { success:false, ... } — so the .catch(() => null) above
+      // never fires for that case, and this line's fallback chain
+      // (server data → local cache → the ORIGINAL, unverified groupData)
+      // used to silently accept whichever of those three existed, with no
+      // way to tell which one it actually got. When the server explicitly
+      // said the group couldn't be resolved (id renamed/merged/deleted,
+      // or the current user genuinely isn't a member) AND there was no
+      // local cache to fall back on either, this proceeded anyway using
+      // the caller's original, already-known-bad groupData — joining the
+      // socket room and requesting message history for an id the server
+      // had just told us was invalid. The resulting "Group not found" /
+      // "You are not a member of this group" then surfaced from deep in
+      // the message-load/socket-join call, with nothing here having told
+      // the user their tap on that group card couldn't actually be
+      // resolved. Track whether resolution really succeeded and stop
+      // instead of proceeding on a known-bad id.
+      const _detailsOk = !!(groupDetailsResponse && groupDetailsResponse.success && groupDetailsResponse.data);
+      const _cachedFallback = !_detailsOk ? GroupCore.getGroupById(groupData.id) : null;
+      resolvedGroup = groupDetailsResponse?.data || _cachedFallback || groupData;
+      if (!_detailsOk && !_cachedFallback) {
+        // Server explicitly could not resolve this group for this user
+        // (or the request failed outright) and we have no cached copy to
+        // fall back on — there is nothing legitimate left to open.
+        renderGroupChatLoadingState && renderGroupChatLoadingState('');
+        try {
+          const errMsg = (groupDetailsResponse && groupDetailsResponse.error) || 'This group is unavailable — it may have been deleted, or you may no longer be a member.';
+          if (typeof showGroupError === 'function') showGroupError(errMsg);
+          else if (typeof showNotification === 'function') showNotification(errMsg, 'error');
+          else console.error('[group] openGroupChat: could not resolve group', groupData.id, errMsg);
+        } catch (_) {}
+        return;
+      }
       const membersPayload = normalizeMembersPayload(membersResponse?.data);
       resolvedGroup.memberCount = getGroupMemberCount(resolvedGroup, membersPayload);
       setCurrentChatGroup(resolvedGroup);

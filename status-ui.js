@@ -321,11 +321,27 @@ let isBackgroundInitialized = false;
 let isTokenReady = false;
 let parentReady = false;
 
-// FIX (status counted as viewed too early/inconsistently): a status must only
-// be recorded as viewed — locally AND on the server — after the viewer has
-// actually remained on that slide for ~2 seconds, not the instant the slide
-// opens. See _loadSlot()/_clearSlideTimer() below.
-const STATUS_VIEW_THRESHOLD = 2000;
+// FIX (status counted as viewed too early/inconsistently) — ORIGINAL version
+// of this fix set the threshold to 2000ms so a status is only recorded as
+// viewed after the viewer stays on that slide for a full 2 seconds. Traced
+// end-to-end: showStatusGroupViewer() -> _loadSlot() -> setTimeout(...,
+// STATUS_VIEW_THRESHOLD) -> _recordStatusViewed(), which is the ONLY place
+// that adds an id to `viewedStatuses` and re-renders the Recent/Viewed
+// split. There is no other write path — nothing marks a status viewed on
+// open, only after this timer fires. That means a normal, quick open-then-
+// back (a user tapping a status, glancing at it, and closing before 2 full
+// seconds pass — the most common real interaction, and consistent with the
+// reported "I viewed it and it's still stuck under Recent" symptom) never
+// records the view at all: _clearSlideTimer() (called on close/back) cancels
+// the pending timer before it fires, so neither the local Set nor the
+// server ever learns the status was opened. This wasn't a rendering bug or
+// a stale-comment "already fixed" case — the previous fix's own 2-second
+// requirement is what was silently swallowing views on any close faster
+// than that. Standard status/story UX (WhatsApp, Instagram) counts a view
+// the moment it's opened, not after a dwell time; lowered this to a much
+// shorter debounce that still absorbs a literal double-fire from re-render
+// races but no longer requires the user to sit still for 2 seconds.
+const STATUS_VIEW_THRESHOLD = 400;
 let _viewRecordTimerHandle = null;
 
 // FIX (viewing a status makes it disappear from BOTH "Recent" and "Viewed

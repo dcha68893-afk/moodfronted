@@ -752,6 +752,7 @@
 
 
                 let errorMessage = 'Could not access media devices';
+                let persistentlyBlocked = false;
 
 
 
@@ -760,6 +761,25 @@
 
 
                     errorMessage = 'Microphone or camera access denied';
+
+                    // FIX (generic message doesn't distinguish a fresh decline
+                    // from a permanently-blocked site permission — see the
+                    // matching fix in calls-ui.js's requestMediaPermissions()):
+                    // a permanently blocked permission NotAllowedErrors on
+                    // every future attempt with no browser prompt ever showing
+                    // again, so "access denied" is a dead end; point the user
+                    // at the browser's site settings instead when we can tell
+                    // that's actually the case.
+                    try {
+                        if (navigator.permissions && navigator.permissions.query) {
+                            var _permName = (constraints && constraints.video) ? 'camera' : 'microphone';
+                            var _permStatus = await navigator.permissions.query({ name: _permName });
+                            if (_permStatus.state === 'denied') {
+                                persistentlyBlocked = true;
+                                errorMessage = 'Microphone/camera access is blocked for this site — open your browser\'s site settings to allow it, then try calling again.';
+                            }
+                        }
+                    } catch (_) { /* Permissions API unsupported for this name — keep the generic message */ }
 
 
 
@@ -787,7 +807,7 @@
 
 
 
-                this._notifyListeners('stream_error', { error: errorMessage });
+                this._notifyListeners('stream_error', { error: errorMessage, persistentlyBlocked });
 
 
 

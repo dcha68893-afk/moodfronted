@@ -371,7 +371,19 @@
 
     async _syncSettings() {
       if (!navigator.onLine) return;
+      // FIX (settings request storm): this fires from syncAll(), which runs
+      // independently in every window that loads this file (chat.html's own
+      // window AND friend.html's iframe window each have their own timer —
+      // see KynSyncGuard being in-memory/per-window, not cross-context) plus
+      // on 'online'/focus/visibility events. Share the same cross-context
+      // cooldown settings-core.js uses so these don't stack into a request
+      // storm when several windows sync around the same moment.
       try {
+        const _lastFetch = parseInt(localStorage.getItem('kyn_settings_last_fetch') || '0', 10);
+        if ((Date.now() - _lastFetch) < 4000) return { success: true, skipped: 'recent-fetch' };
+      } catch (_) {}
+      try {
+        try { localStorage.setItem('kyn_settings_last_fetch', String(Date.now())); } catch (_) {}
         const response = await this._makeRequest('GET', '/api/settings');
         const settings = (response && (response.data && (response.data.settings || response.data)) || response.settings) || null;
         if (settings) {

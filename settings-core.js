@@ -831,7 +831,7 @@ const SettingsState = {
     },
     
     // FIX #8: Allow loading from cache even when module is not ACTIVE
-    async load() {
+    async load(force) {
         // Allow load from cache even if not authenticated
         const cached = this._loadFromCache();
         if (cached && Object.keys(cached).length > 0) {
@@ -853,6 +853,26 @@ const SettingsState = {
             return this.data;
         }
         
+        // FIX (settings request storm — dozens of "Loaded settings for user"
+        // backend log lines within seconds): load() had no TTL at all, so
+        // every independent caller (this module's own init, status module's
+        // copy of the same pattern, js/app.sync.manager.js's periodic
+        // syncAll() running in BOTH chat.html's window and friend.html's
+        // iframe window, js/settingsSync.engine.js on settings.html) re-hit
+        // GET /api/settings on every call, serialized only against calls
+        // that happened to overlap in-flight (the `this.loading` check
+        // below) — calls spaced even 50ms apart each fired their own
+        // request. Short shared TTL, cross-context via localStorage so
+        // separate iframe/window instances of this same file share it too.
+        if (!force) {
+            try {
+                const _lastFetch = parseInt(localStorage.getItem('kyn_settings_last_fetch') || '0', 10);
+                if (this.loaded && (Date.now() - _lastFetch) < 4000) {
+                    return this.data;
+                }
+            } catch (_) {}
+        }
+
         // Don't block on state check for reading
         if (this.loading) {
             return new Promise((resolve) => {
@@ -868,7 +888,8 @@ const SettingsState = {
         }
         
         this.loading = true;
-        
+        try { localStorage.setItem('kyn_settings_last_fetch', String(Date.now())); } catch (_) {}
+
         try {
             const response = await this._fetchFromBackend();
             

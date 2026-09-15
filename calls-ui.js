@@ -620,7 +620,33 @@ const GlobalCallHistory = {
         } catch (error) {
             console.error('[Calls UI] Permission request failed:', error);
             if (error.name === 'NotAllowedError') {
-                showNotificationInCalls('Please allow microphone access to make calls', 'error');
+                // FIX (generic "Please allow microphone access" dead-end): this
+                // message was shown identically whether the browser had just
+                // shown the prompt and the user declined it (retrying the call
+                // will show the prompt again — tapping "allow" fixes it) or the
+                // permission was already PERMANENTLY blocked at the browser's
+                // site-settings level from an earlier decline (retrying the
+                // call will silently NotAllowedError forever — no prompt shows
+                // again, and nothing in-app can re-trigger one; only the user
+                // manually re-enabling it in the browser's site settings can
+                // fix it). Those need different instructions. Where the
+                // Permissions API is available, check which case this is and
+                // say so explicitly instead of repeating the same dead-end
+                // message on every retry.
+                let persistentlyBlocked = false;
+                try {
+                    if (navigator.permissions && navigator.permissions.query) {
+                        const name = callType === 'video' ? 'camera' : 'microphone';
+                        const status = await navigator.permissions.query({ name });
+                        persistentlyBlocked = status.state === 'denied';
+                    }
+                } catch (_) { /* Permissions API unsupported for this name (e.g. Firefox) — fall back to the generic message */ }
+                showNotificationInCalls(
+                    persistentlyBlocked
+                        ? 'Microphone/camera access is blocked for this site. Open your browser\'s site settings to allow it, then try calling again.'
+                        : 'Please allow microphone access to make calls',
+                    'error'
+                );
             }
             return false;
         }

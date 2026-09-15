@@ -207,11 +207,24 @@
     }
 
     // ─── Pull ─────────────────────────────────────────────────────────────────────
-    async function pullFromServer() {
+    async function pullFromServer(force) {
         if (!_online) { _setState(SYNC_STATE.OFFLINE); throw new Error('offline'); }
+
+        // FIX (settings request storm): settings.html loads BOTH this engine
+        // and settings-core.js, each independently fetching GET /api/settings
+        // on load — share the same cross-context cooldown key so the two
+        // don't double-fetch on the same page load (and don't pile on top of
+        // other windows' fetches either).
+        if (!force) {
+            try {
+                const _lastFetch = parseInt(localStorage.getItem('kyn_settings_last_fetch') || '0', 10);
+                if ((Date.now() - _lastFetch) < 4000) { _setState(SYNC_STATE.SYNCED); return { skipped: 'recent-fetch' }; }
+            } catch (_) {}
+        }
 
         _setState(SYNC_STATE.SYNCING);
         try {
+            try { localStorage.setItem('kyn_settings_last_fetch', String(Date.now())); } catch (_) {}
             const res = await _parentRequest('/api/settings', 'GET', null);
             const remote = res.data?.settings || res.data?.data || res.data || {};
 
