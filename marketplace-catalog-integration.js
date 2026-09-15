@@ -1,31 +1,21 @@
 /*
  * Canonical marketplace bridge.
  * Keeps the existing Tool UI/state shape while routing marketplace data through
- * Product -> Variant -> Seller Listing. This is deliberately an adapter so the
- * legacy UI can be migrated without breaking unrelated Tool features.
+ * Product -> Variant -> Seller Listing without changing unrelated Tool features.
  */
 import { marketplace } from './Tool-core.part3.js';
 import { marketplaceCatalog } from './marketplace-catalog-api.js';
 
 const original = {
   loadListings: marketplace.loadListings.bind(marketplace),
-  createListing: marketplace.createListing.bind(marketplace),
-  updateListing: marketplace.updateListing.bind(marketplace),
-  deleteListing: marketplace.deleteListing.bind(marketplace),
 };
 
-const state = {
-  categories: [],
-  brands: [],
-  loaded: false,
-};
-
+const state = { categories: [], brands: [], loaded: false };
 const unwrap = payload => payload?.data ?? payload ?? {};
 
 function flattenCategories(rows) {
-  const categories = Array.isArray(rows) ? rows : [];
   const byParent = new Map();
-  categories.forEach(c => {
+  (Array.isArray(rows) ? rows : []).forEach(c => {
     const key = c.parentId || c.parent_id || null;
     if (!byParent.has(key)) byParent.set(key, []);
     byParent.get(key).push(c);
@@ -33,8 +23,9 @@ function flattenCategories(rows) {
   const result = [];
   const walk = (parentId, prefix = '') => {
     (byParent.get(parentId) || []).forEach(c => {
-      result.push({ ...c, displayPath: prefix ? `${prefix} > ${c.name}` : c.name });
-      walk(c.id, prefix ? `${prefix} > ${c.name}` : c.name);
+      const displayPath = prefix ? `${prefix} > ${c.name}` : c.name;
+      result.push({ ...c, displayPath });
+      walk(c.id, displayPath);
     });
   };
   walk(null);
@@ -48,10 +39,8 @@ async function loadTaxonomy() {
       marketplaceCatalog.getCategories(),
       marketplaceCatalog.getBrands(),
     ]);
-    const categoryRows = unwrap(categoryResult).categories || [];
-    const brandRows = unwrap(brandResult).brands || [];
-    state.categories = flattenCategories(categoryRows);
-    state.brands = brandRows;
+    state.categories = flattenCategories(unwrap(categoryResult).categories || []);
+    state.brands = unwrap(brandResult).brands || [];
     state.loaded = true;
     window.marketplaceCatalogState = state;
     window.dispatchEvent(new CustomEvent('marketplace:taxonomyLoaded', { detail: state }));
@@ -63,22 +52,18 @@ async function loadTaxonomy() {
 
 function productType(value) {
   const type = String(value || '').toLowerCase();
-  if (type === 'digital') return 'digital';
-  if (type === 'service') return 'service';
-  return 'physical';
+  return type === 'digital' ? 'digital' : type === 'service' ? 'service' : 'physical';
 }
 
 function findCategory(value, type) {
   if (!value) return null;
   const wanted = String(value).trim().toLowerCase();
-  return state.categories.find(c =>
-    c.kind === type && (
-      String(c.id).toLowerCase() === wanted ||
-      String(c.name).toLowerCase() === wanted ||
-      String(c.slug || '').toLowerCase() === wanted ||
-      String(c.displayPath || '').toLowerCase() === wanted
-    )
-  ) || null;
+  return state.categories.find(c => c.kind === type && (
+    String(c.id).toLowerCase() === wanted ||
+    String(c.name).toLowerCase() === wanted ||
+    String(c.slug || '').toLowerCase() === wanted ||
+    String(c.displayPath || '').toLowerCase() === wanted
+  )) || null;
 }
 
 function mapListing(row) {
@@ -105,9 +90,7 @@ function mapListing(row) {
     type,
     productType: type,
     condition: row.condition,
-    images: Array.isArray(row.images) && row.images.length
-      ? row.images
-      : (product.defaultImageUrl ? [product.defaultImageUrl] : []),
+    images: Array.isArray(row.images) && row.images.length ? row.images : (product.defaultImageUrl ? [product.defaultImageUrl] : []),
     variantId: row.variantId || null,
     productId: row.productId,
     fulfillmentType: row.fulfillmentType,
@@ -140,7 +123,16 @@ marketplace.loadListings = async function canonicalLoadListings() {
     this.pagination.total = Number(result.total || this.listings.length);
     this.pagination.hasMore = this.listings.length >= this.pagination.limit;
     window.allListings = this.listings;
-    await safeMyListings(this);
+
+    try {
+      const mine = unwrap(await marketplaceCatalog.getMyListings());
+      this.myListings = (mine.listings || []).map(mapListing);
+      window.myListings = this.myListings;
+    } catch (mineError) {
+      console.warn('[MarketplaceCatalog] seller workspace unavailable:', mineError?.message || mineError);
+      this.loadMyListings?.();
+    }
+
     this.notifyUI('data-updated', { listings: this.listings, total: this.pagination.total, source: 'canonical-catalog' });
   } catch (error) {
     console.warn('[MarketplaceCatalog] canonical read failed; using legacy compatibility path:', error?.message || error);
@@ -152,53 +144,20 @@ marketplace.loadListings = async function canonicalLoadListings() {
   }
 };
 
-async function safeMyListings(instance) {
-  try {
-    const result = unwrap(await fetchMine());
-    const rows = Array.isArray(result.listings) ? result.listings : [];
-    instance.myListings = rows.map(mapListing);
-    window.myListings = instance.myListings;
-  } catch (_) {
-    instance.loadMyListings?.();
-  }
-}
-
-async function fetchMine() {
-  const base = typeof window.__API_BASE_URL__ === 'string' ? window.__API_BASE_URL__.replace(/\/$/, '') : '';
-  const token = localStorage.getItem('token') || localStorage.getItem('accessToken') || localStorage.getItem('authToken');
-  const response = await fetch(`${base}/api/marketplace-catalog/mine`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    credentials: 'include',
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.message || `Mine request failed (${response.status})`);
-  return body;
-}
-
 marketplace.createListing = async function canonicalCreateListing(listingData = {}) {
-  if (!this.currentUser && !this.isAuthenticated()) throw new Error('User not authenticated');
+  if (!this.isAuthenticated()) throw new Error('User not authenticated');
   if (!listingData.title || !listingData.description) throw new Error('Title and description are required');
 
   await loadTaxonomy();
   const type = productType(listingData.type);
   const category = findCategory(listingData.categoryId || listingData.category, type);
-  if (!category) {
-    throw new Error(`Select a valid ${type} marketplace category`);
-  }
+  if (!category) throw new Error(`Select a valid ${type} marketplace category`);
 
-  const productResult = unwrap(await marketplaceCatalog.getProducts({
-    q: listingData.title,
-    category_id: category.id,
-    type,
-    limit: 10,
+  const resolved = unwrap(await marketplaceCatalog.resolveProduct({
+    name: listingData.title.trim(), category_id: category.id, type,
   }));
-  const existing = (productResult.products || []).find(p =>
-    String(p.name || '').trim().toLowerCase() === String(listingData.title).trim().toLowerCase() &&
-    String(p.categoryId || p.category_id) === String(category.id)
-  );
-
   const images = Array.isArray(listingData.images) ? listingData.images.filter(Boolean) : [];
-  const product = existing || unwrap(await marketplaceCatalog.createProduct({
+  const product = resolved.product || unwrap(await marketplaceCatalog.createProduct({
     name: listingData.title.trim(),
     category_id: category.id,
     brand_id: listingData.brandId || null,
@@ -228,12 +187,7 @@ marketplace.createListing = async function canonicalCreateListing(listingData = 
     variantId = variant?.id || null;
   }
 
-  const fulfillment = type === 'digital'
-    ? 'instant_download'
-    : type === 'service'
-      ? (listingData.fulfillmentType || 'appointment')
-      : (listingData.fulfillmentType || 'delivery');
-
+  const fulfillment = type === 'digital' ? 'instant_download' : type === 'service' ? (listingData.fulfillmentType || 'appointment') : (listingData.fulfillmentType || 'delivery');
   const listing = unwrap(await marketplaceCatalog.createListing({
     product_id: product.id,
     variant_id: variantId,
