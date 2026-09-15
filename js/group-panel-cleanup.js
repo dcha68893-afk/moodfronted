@@ -32,6 +32,7 @@
     if (chatbar) chatbar.remove();
     load('/js/group-chat-features.js', 'groupChatFeatures');
     load('/js/group-message-cache.js', 'groupMessageCache');
+    load('/js/group-media-render.js', 'groupMediaRender');
     installParentCallBridge();
   }
 
