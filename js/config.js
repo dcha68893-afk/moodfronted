@@ -43,8 +43,6 @@
     window.GOOGLE_CLIENT_ID = String(runtime.GOOGLE_CLIENT_ID || '').trim();
     window.FRONTEND_URL = String(runtime.FRONTEND_URL || '').trim().replace(/\/+$/, '');
 
-    // Canonical public application brand. Keep legacy internal namespace names
-    // intact because storage keys and compatibility code may depend on them.
     window.NECPRA_APP_NAME = 'Necpra';
     window.NECPRA_APP_SHORT_NAME = 'Necpra';
 
@@ -61,14 +59,12 @@
     function applyNecpraBrand(root) {
         const target = root || document;
         if (!target) return;
-
         if (target.nodeType === Node.TEXT_NODE) {
             const next = normalizeBrandText(target.nodeValue);
             if (next !== target.nodeValue) target.nodeValue = next;
             return;
         }
         if (target.nodeType !== Node.ELEMENT_NODE && target !== document) return;
-
         if (target === document) {
             if (document.title) document.title = normalizeBrandText(document.title);
         } else {
@@ -81,7 +77,6 @@
                 }
             });
         }
-
         const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT);
         const nodes = [];
         let node;
@@ -90,7 +85,6 @@
             const next = normalizeBrandText(textNode.nodeValue);
             if (next !== textNode.nodeValue) textNode.nodeValue = next;
         });
-
         if (target.querySelectorAll) {
             target.querySelectorAll('[aria-label],[title],[placeholder],[alt],[content],[data-app-name],title').forEach(function (element) {
                 ['aria-label', 'title', 'placeholder', 'alt', 'content', 'data-app-name'].forEach(function (attribute) {
@@ -102,8 +96,6 @@
                 if (element.tagName === 'TITLE') element.textContent = normalizeBrandText(element.textContent);
             });
         }
-
-        // Canonical favicon/icon for every page that loads the shared config.
         if (target === document || target === document.documentElement || target === document.head) {
             document.querySelectorAll('link[rel~="icon"]').forEach(function (link) {
                 link.setAttribute('href', '/icons/necpra-192.svg');
@@ -135,41 +127,21 @@
         } catch (_) {}
     }
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initializeNecpraBranding, { once: true });
-    } else {
-        initializeNecpraBranding();
-    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initializeNecpraBranding, { once: true });
+    else initializeNecpraBranding();
 
     window.__kynShouldFilterConsole = window.__kynShouldFilterConsole || function (level, args) {
         if (!window.__isProductionConsoleHost || !window.__isProductionConsoleHost()) return false;
         if (window.__ALLOW_VERBOSE_CONSOLE__ === true) return false;
-
         const first = args && args.length ? String(args[0] ?? '') : '';
         const second = args && args.length > 1 ? String(args[1] ?? '') : '';
         const joined = `${first} ${second}`.trim();
         const noisyPatterns = [
-            /^\[SW\] Cache hit:/,
-            /^\[LOCAL SAVE]/,
-            /^\[LOCAL LOAD]/,
-            /^\[SAIC] Stage /,
-            /^\[ENV] /,
-            /^\[PARENT-SYNC]/,
-            /^\[Navigation]/,
-            /^\[authorizedRequest]/,
-            /^\[DirectListener]/,
-            /^\[Tool-ui]/,
-            /^\[ToolPatch]/,
-            /^\[Calls UI]/,
-            /^\[SessionManager]/,
-            /^\[Lifecycle]/,
-            /^\[KeepAlive]/,
-            /^\[UI] allUsersLoaded event/,
-            /^\[Init] /,
-            /^\[FriendSync]/,
-            /^\[messagesUI]/,
-            /^\[ChatManager]/,
-            /^\[FriendManager]/
+            /^\[SW\] Cache hit:/, /^\[LOCAL SAVE]/, /^\[LOCAL LOAD]/, /^\[SAIC] Stage /, /^\[ENV] /,
+            /^\[PARENT-SYNC]/, /^\[Navigation]/, /^\[authorizedRequest]/, /^\[DirectListener]/, /^\[Tool-ui]/,
+            /^\[ToolPatch]/, /^\[Calls UI]/, /^\[SessionManager]/, /^\[Lifecycle]/, /^\[KeepAlive]/,
+            /^\[UI] allUsersLoaded event/, /^\[Init] /, /^\[FriendSync]/, /^\[messagesUI]/,
+            /^\[ChatManager]/, /^\[FriendManager]/
         ];
         return noisyPatterns.some((pattern) => pattern.test(joined));
     };
@@ -177,11 +149,8 @@
     if (!window.__KYNECTA_CONSOLE_FILTER_PATCHED__) {
         window.__KYNECTA_CONSOLE_FILTER_PATCHED__ = true;
         window.__kynOriginalConsole = {
-            log: console.log.bind(console),
-            info: console.info.bind(console),
-            warn: console.warn.bind(console),
-            error: console.error.bind(console),
-            debug: console.debug ? console.debug.bind(console) : console.log.bind(console)
+            log: console.log.bind(console), info: console.info.bind(console), warn: console.warn.bind(console),
+            error: console.error.bind(console), debug: console.debug ? console.debug.bind(console) : console.log.bind(console)
         };
         ['log', 'info', 'warn', 'debug'].forEach(function (level) {
             const original = window.__kynOriginalConsole[level];
@@ -196,21 +165,15 @@
     function isBackendApiPath(url) {
         try {
             const parsed = new URL(url, window.location.origin);
-            return /^\/api(?:\/|$)/i.test(parsed.pathname) ||
-                /^\/socket\.io(?:\/|$)/i.test(parsed.pathname) ||
-                /^\/ws(?:\/|$)/i.test(parsed.pathname);
-        } catch (_) {
-            return false;
-        }
+            return /^\/api(?:\/|$)/i.test(parsed.pathname) || /^\/socket\.io(?:\/|$)/i.test(parsed.pathname) || /^\/ws(?:\/|$)/i.test(parsed.pathname);
+        } catch (_) { return false; }
     }
 
     window.__rewriteApiUrl = function (input) {
         const apiOrigin = requireBackendOrigin();
         const normalize = function (rawUrl) {
             if (!rawUrl || typeof rawUrl !== 'string') return rawUrl;
-            if (/^\/api(?:\/|$)/i.test(rawUrl) || /^\/socket\.io(?:\/|$)/i.test(rawUrl) || /^\/ws(?:\/|$)/i.test(rawUrl)) {
-                return `${apiOrigin}${rawUrl}`;
-            }
+            if (/^\/api(?:\/|$)/i.test(rawUrl) || /^\/socket\.io(?:\/|$)/i.test(rawUrl) || /^\/ws(?:\/|$)/i.test(rawUrl)) return `${apiOrigin}${rawUrl}`;
             try {
                 const parsed = new URL(rawUrl, window.location.origin);
                 if (isBackendApiPath(parsed.href)) return `${apiOrigin}${parsed.pathname}${parsed.search}${parsed.hash}`;
@@ -278,34 +241,32 @@
 
     if (!Object.getOwnPropertyDescriptor(window, 'authToken') || Object.getOwnPropertyDescriptor(window, 'authToken').configurable) {
         let legacyToken = null;
-        try {
-            const current = Object.getOwnPropertyDescriptor(window, 'authToken');
-            if (current && 'value' in current) legacyToken = current.value;
-        } catch (_) {}
+        try { const current = Object.getOwnPropertyDescriptor(window, 'authToken'); if (current && 'value' in current) legacyToken = current.value; } catch (_) {}
         try {
             Object.defineProperty(window, 'authToken', {
-                configurable: true,
-                enumerable: true,
+                configurable: true, enumerable: true,
                 get: function () {
                     try { if (window.__kynToken) return window.__kynToken; } catch (_) {}
                     try { if (window.__accessToken) return window.__accessToken; } catch (_) {}
-                    try {
-                        if (window.AuthSessionManager && typeof window.AuthSessionManager.getToken === 'function') {
-                            const token = window.AuthSessionManager.getToken();
-                            if (token) return token;
-                        }
-                    } catch (_) {}
+                    try { if (window.AuthSessionManager && typeof window.AuthSessionManager.getToken === 'function') { const token = window.AuthSessionManager.getToken(); if (token) return token; } } catch (_) {}
                     for (const key of ['authToken', 'accessToken', 'token', 'jwt', 'USER_TOKEN', 'necpa_token']) {
-                        try {
-                            const token = localStorage.getItem(key) || sessionStorage.getItem(key);
-                            if (token && !token.startsWith('{')) return token;
-                        } catch (_) {}
+                        try { const token = localStorage.getItem(key) || sessionStorage.getItem(key); if (token && !token.startsWith('{')) return token; } catch (_) {}
                     }
                     return legacyToken || '';
                 },
                 set: function (value) { legacyToken = value || null; }
             });
         } catch (_) {}
+    }
+
+    // Group OS is loaded from the same origin; it uses __getApiBase() above,
+    // so no backend hostname is embedded in the feature bundle.
+    if (/\/group\.html$/i.test(window.location.pathname) && !document.querySelector('script[data-group-platform]')) {
+        const script = document.createElement('script');
+        script.src = '/js/group-platform.js';
+        script.async = false;
+        script.dataset.groupPlatform = 'true';
+        (document.head || document.documentElement).appendChild(script);
     }
 
     console.log('[Config] Runtime configuration loaded. Backend:', configuredOrigin || '(missing)');
