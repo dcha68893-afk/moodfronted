@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://necpra.co.ke/sitemap.xml
