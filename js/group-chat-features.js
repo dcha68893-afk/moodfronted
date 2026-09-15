@@ -2,12 +2,27 @@
   'use strict';
   const state = { chatId: null, editingId: null, uploadBusy: false };
   const $ = (id) => document.getElementById(id);
-  const token = () => localStorage.getItem('authToken') || localStorage.getItem('accessToken') || localStorage.getItem('token') || '';
+  const token = () => {
+    try { if (window.__kynToken) return window.__kynToken; } catch (_) {}
+    try { if (window.__accessToken) return window.__accessToken; } catch (_) {}
+    try { if (window.AuthSessionManager && typeof window.AuthSessionManager.getToken === 'function') { const t = window.AuthSessionManager.getToken(); if (t) return t; } } catch (_) {}
+    try { if (window.authToken && !String(window.authToken).startsWith('{')) return window.authToken; } catch (_) {}
+    try { return localStorage.getItem('authToken') || localStorage.getItem('accessToken') || localStorage.getItem('token') || ''; } catch (_) { return ''; }
+  };
   const base = () => String(typeof window.__getApiBase === 'function' ? window.__getApiBase() : '').replace(/\/$/, '');
   const api = async (path, options = {}) => {
-    const headers = { ...(options.headers || {}) }; const t = token(); if (t) headers.Authorization = `Bearer ${t}`;
-    const r = await fetch(`${base()}${path}`, { ...options, headers }); const d = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(d.message || d.error || `Request failed (${r.status})`); return d;
+    const headers = { ...(options.headers || {}) };
+    const t = token();
+    if (t) headers.Authorization = `Bearer ${t}`;
+    // IMPORTANT: never force application/json for FormData. The browser must
+    // generate the multipart boundary or multer will see no uploaded file.
+    const bodyIsFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+    if (bodyIsFormData) delete headers['Content-Type'];
+    else if (options.body != null && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+    const r = await fetch(`${base()}${path}`, { ...options, headers });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.message || d.error || `Request failed (${r.status})`);
+    return d;
   };
   function injectStyles(){if($('groupChatFeatureStyles'))return;const s=document.createElement('style');s.id='groupChatFeatureStyles';s.textContent=`
 .group-feature-tools{display:flex;gap:5px;align-items:center;flex:0 0 auto}.group-feature-btn{width:38px;height:38px;border:1px solid var(--border,#e2e8f0);border-radius:11px;background:var(--surface2,#f1f5f9);color:var(--text,#0f172a);cursor:pointer}.group-feature-btn:hover{filter:brightness(.97);transform:translateY(-1px)}
@@ -16,13 +31,13 @@
   function currentChatId(){return state.chatId||window.__GROUP_CHAT_ID||null}
   function buildTools(){const composer=document.querySelector('#chat .composer');if(!composer||composer.dataset.groupFeatures==='1')return!!composer;composer.dataset.groupFeatures='1';composer.style.position='relative';const input=$('input');if(!input)return false;
     const tools=document.createElement('div');tools.className='group-feature-tools';tools.innerHTML='<button type="button" class="group-feature-btn" id="groupEmojiBtn" title="Emoji" aria-label="Emoji">😊</button><button type="button" class="group-feature-btn" id="groupAttachBtn" title="Attach file" aria-label="Attach file">📎</button><input id="groupAttachInput" type="file" hidden accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip">';composer.insertBefore(tools,input);
-    const picker=document.createElement('div');picker.id='groupEmojiPicker';picker.className='group-emoji-picker';picker.hidden=true;['😀','😂','😍','😊','😢','😡','🙏','❤️','👍','👎','🔥','🎉','👏','💯','🤣','😎','🥰','😘','😭','🤔','😮','😴','🙌','✨','💔','❤️‍🔥','🎂','🎁','✅','❌','👀','💪','🤝','😇','🥳','🤗','😅','😉','🤩','😌','🫶','🚀','🌟','💙','💚','💛','💜','🖤','🤍','🤎','☀️','🌹','🎵','📸','😋','😜','🤭','🫡','🙏🏽'].forEach(e=>{const b=document.createElement('button');b.type='button';b.textContent=e;b.onclick=()=>{input.value+=e;input.focus();picker.hidden=true}});picker.querySelectorAll('button').length;composer.appendChild(picker);
-    picker.innerHTML='';['😀','😂','😍','😊','😢','😡','🙏','❤️','👍','👎','🔥','🎉','👏','💯','🤣','😎','🥰','😘','😭','🤔','😮','😴','🙌','✨','💔','❤️‍🔥','🎂','🎁','✅','❌','👀','💪','🤝','😇','🥳','🤗','😅','😉','🤩','😌','🫶','🚀','🌟','💙','💚','💛','💜','🖤','🤍','🤎','☀️','🌹','🎵','📸','😋','😜','🤭','🫡','🙏🏽'].forEach(e=>{const b=document.createElement('button');b.type='button';b.textContent=e;b.onclick=()=>{input.value+=e;input.focus();picker.hidden=true};picker.appendChild(b)});
+    const picker=document.createElement('div');picker.id='groupEmojiPicker';picker.className='group-emoji-picker';picker.hidden=true;composer.appendChild(picker);
+    ['😀','😂','😍','😊','😢','😡','🙏','❤️','👍','👎','🔥','🎉','👏','💯','🤣','😎','🥰','😘','😭','🤔','😮','😴','🙌','✨','💔','❤️‍🔥','🎂','🎁','✅','❌','👀','💪','🤝','😇','🥳','🤗','😅','😉','🤩','😌','🫶','🚀','🌟','💙','💚','💛','💜','🖤','🤍','🤎','☀️','🌹','🎵','📸','😋','😜','🤭','🫡','🙏🏽'].forEach(e=>{const b=document.createElement('button');b.type='button';b.textContent=e;b.onclick=()=>{input.value+=e;input.focus();picker.hidden=true};picker.appendChild(b)});
     const banner=document.createElement('div');banner.id='groupEditBanner';banner.className='group-edit-banner';banner.hidden=true;banner.innerHTML='<span id="groupEditText">Editing message</span><button type="button" id="groupEditCancel">Cancel</button>';composer.parentElement.insertBefore(banner,composer);
     const preview=document.createElement('div');preview.id='groupAttachmentPreview';preview.className='group-attachment-preview';composer.parentElement.insertBefore(preview,composer);
     $('groupEmojiBtn').onclick=e=>{e.stopPropagation();picker.hidden=!picker.hidden};$('groupAttachBtn').onclick=()=>$('groupAttachInput').click();$('groupEditCancel').onclick=cancelEdit;$('groupAttachInput').onchange=handleAttachment;
     document.addEventListener('click',e=>{if(!picker.contains(e.target)&&e.target!==$('groupEmojiBtn'))picker.hidden=true},{passive:true});input.addEventListener('keydown',e=>{if(e.key==='Escape'&&state.editingId)cancelEdit()});return true}
-  async function handleAttachment(e){const file=e.target.files?.[0];e.target.value='';const chatId=currentChatId();if(!file||!chatId||state.uploadBusy)return;state.uploadBusy=true;const preview=$('groupAttachmentPreview');if(preview){preview.style.display='block';preview.textContent=`Uploading ${file.name}…`};try{const fd=new FormData();fd.append('file',file);const uploaded=await api('/cloudinary/direct-upload',{method:'POST',body:fd});const media=uploaded.cloudinary||uploaded;const type=file.type.startsWith('image/')?'image':file.type.startsWith('video/')?'video':file.type.startsWith('audio/')?'audio':'file';await api('/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chatId:Number(chatId),type,content:file.name,clientMessageId:`grp_media_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,metadata:{media:{url:media.url,publicId:media.public_id||media.publicId||null,name:file.name,mimeType:file.type,size:file.size}}})});if(preview){preview.textContent=`${file.name} sent`;setTimeout(()=>{preview.style.display='none'},1800)}}catch(err){if(preview)preview.textContent=`Upload failed: ${err.message}`;console.error('[GroupChat] attachment upload failed:',err)}finally{state.uploadBusy=false}}
+  async function handleAttachment(e){const file=e.target.files?.[0];e.target.value='';const chatId=currentChatId();if(!file||!chatId||state.uploadBusy)return;state.uploadBusy=true;const preview=$('groupAttachmentPreview');if(preview){preview.style.display='block';preview.textContent=`Uploading ${file.name}…`};try{const fd=new FormData();fd.append('file',file,file.name||'upload');const uploaded=await api('/cloudinary/direct-upload',{method:'POST',body:fd});const media=uploaded.cloudinary||uploaded;if(!media?.url)throw new Error('Media storage did not return a URL');const type=file.type.startsWith('image/')?'image':file.type.startsWith('video/')?'video':file.type.startsWith('audio/')?'audio':'file';await api('/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chatId:Number(chatId),type,content:file.name,clientMessageId:`grp_media_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,metadata:{media:{url:media.url,publicId:media.public_id||media.publicId||null,name:file.name,mimeType:file.type,size:file.size}}})});if(preview){preview.textContent=`${file.name} sent`;setTimeout(()=>{preview.style.display='none'},1800)}}catch(err){if(preview)preview.textContent=`Upload failed: ${err.message}`;console.error('[GroupChat] attachment upload failed:',err)}finally{state.uploadBusy=false}}
   function cancelEdit(){state.editingId=null;if($('groupEditBanner'))$('groupEditBanner').hidden=true;if($('input'))$('input').value=''}
   async function editMessage(id,text){await api(`/messages/${encodeURIComponent(id)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:text})});cancelEdit();if(typeof window.__GROUP_REFRESH_MESSAGES==='function')await window.__GROUP_REFRESH_MESSAGES()}
   async function deleteMessage(id){if(!confirm('Delete this message for everyone?'))return;try{await api(`/messages/${encodeURIComponent(id)}`,{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({deleteForEveryone:true})});if(typeof window.__GROUP_REFRESH_MESSAGES==='function')await window.__GROUP_REFRESH_MESSAGES()}catch(err){alert(err.message)}}
