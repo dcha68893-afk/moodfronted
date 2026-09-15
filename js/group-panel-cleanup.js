@@ -13,18 +13,12 @@
     if (chatbar) chatbar.remove();
   }
 
+  // Wait until group.html's own inline wiring has finished. Removing the
+  // legacy buttons earlier would make its old local event-binding code see
+  // missing elements and throw before the parent has a chance to take over.
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', removeDuplicateHeader, { once: true });
   } else {
     removeDuplicateHeader();
   }
-
-  // group.html can recreate its chat DOM when a group is opened. Keep the
-  // parent header as the only visible header even after those transitions.
-  const observer = new MutationObserver(removeDuplicateHeader);
-  const start = () => {
-    if (document.body) observer.observe(document.body, { childList: true, subtree: true });
-  };
-  if (document.body) start();
-  else document.addEventListener('DOMContentLoaded', start, { once: true });
 })();
