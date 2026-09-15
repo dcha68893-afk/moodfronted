@@ -1,8 +1,7 @@
 /*
  * Canonical marketplace catalog client.
  * Keeps Product/Variant/Listing separate from the legacy Tool marketplace while
- * exposing a small API surface that existing marketplace UI can adopt without
- * duplicating URL construction or category/brand logic.
+ * exposing one API surface for taxonomy, canonical products and seller listings.
  */
 
 const getCatalogBase = () => {
@@ -27,8 +26,10 @@ export const marketplaceCatalog = {
   getCategories: () => request('/categories'),
   getBrands: (limit = 200) => request(`/brands?limit=${encodeURIComponent(limit)}`),
   getProducts: (params = {}) => request(`/products?${new URLSearchParams(params).toString()}`),
+  resolveProduct: (params = {}) => request(`/products/resolve?${new URLSearchParams(params).toString()}`),
   getProduct: id => request(`/products/${encodeURIComponent(id)}`),
   getListings: (params = {}) => request(`/listings?${new URLSearchParams(params).toString()}`),
+  getMyListings: () => request('/mine'),
   createProduct: body => request('/products', { method: 'POST', body: JSON.stringify(body) }),
   createVariant: (productId, body) => request(`/products/${encodeURIComponent(productId)}/variants`, { method: 'POST', body: JSON.stringify(body) }),
   createListing: body => request('/listings', { method: 'POST', body: JSON.stringify(body) }),
