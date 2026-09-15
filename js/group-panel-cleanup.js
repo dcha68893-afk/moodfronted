@@ -1,8 +1,8 @@
-/*
- * Group panel header consolidation + group chat feature loaders.
- */
+/* Group panel consolidation. The parent chat shell owns the visible group header/actions. */
 (function () {
   'use strict';
+  if (window.__NECPRA_GROUP_PANEL_CLEANUP__) return;
+  window.__NECPRA_GROUP_PANEL_CLEANUP__ = true;
 
   function load(src, attr) {
     if (document.querySelector(`script[${attr}]`)) return;
@@ -10,7 +10,26 @@
     s.src = src;
     s.async = false;
     s.dataset[attr] = 'true';
+    s.onload = () => console.log('[Groups] loaded', src);
+    s.onerror = () => console.error('[Groups] failed to load', src);
     (document.head || document.documentElement).appendChild(s);
+  }
+
+  function removeDuplicateShell() {
+    // chat.html is the single owner of the group header, title, member count,
+    // create/add-group action, call controls and back button. group.html must
+    // only provide the embedded group content.
+    document.querySelector('.top')?.remove();
+    document.querySelector('#create')?.remove();
+    document.querySelector('#chat .chatbar')?.remove();
+  }
+
+  function initialize() {
+    removeDuplicateShell();
+    load('/js/group-chat-features.js', 'groupChatFeatures');
+    load('/js/group-message-cache.js', 'groupMessageCache');
+    load('/js/group-media-render.js', 'groupMediaRender');
+    installParentCallBridge();
   }
 
   function installParentCallBridge() {
@@ -27,18 +46,8 @@
     }
   }
 
-  function initialize() {
-    const chatbar = document.querySelector('#chat .chatbar');
-    if (chatbar) chatbar.remove();
-    load('/js/group-chat-features.js', 'groupChatFeatures');
-    load('/js/group-message-cache.js', 'groupMessageCache');
-    load('/js/group-media-render.js', 'groupMediaRender');
-    installParentCallBridge();
-  }
-
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initialize, { once: true });
   else initialize();
-
   window.addEventListener('beforeunload', () => {
     try { window.parent?.postMessage({ type: 'GROUP_PANEL_CLOSE', source: 'groups' }, '*'); } catch (_) {}
   });
