@@ -106,6 +106,30 @@
         try { window.KynectaMessageCache && window.KynectaMessageCache.putConversation(chatId, conv); } catch (_) {}
     }
 
+    // FIX-ROOT-CAUSE-STUCK-OFFLINE: chat.html already relays live
+    // 'user:online'/'user:offline'/'presence:update' socket events into this
+    // iframe as FRIEND_ONLINE/FRIEND_OFFLINE postMessages (see
+    // _fwdPresenceToMessages in chat.html) — but nothing here ever listened
+    // for them, so a conversation's otherUser.online never updated after the
+    // initial load, no matter how long the tab stayed open. message.html's
+    // postMessage listener calls this on every FRIEND_ONLINE/FRIEND_OFFLINE.
+    // Reuses upsertConversationMeta so both the 'conversation:updated' event
+    // and the local cache pick it up the same way every other patch does.
+    function updatePresence(userId, online, lastSeen) {
+        if (userId == null) return;
+        const uid = String(userId);
+        state.conversations.forEach((conv, chatId) => {
+            if (conv && conv.otherUser && String(conv.otherUser.id) === uid) {
+                upsertConversationMeta(chatId, {
+                    otherUser: Object.assign({}, conv.otherUser, {
+                        online: !!online,
+                        lastSeen: lastSeen || conv.otherUser.lastSeen || null,
+                    }),
+                });
+            }
+        });
+    }
+
     // The ONE place a message (from any source) enters client state.
     // Handles: dedup by id, dedup by clientMessageId (optimistic reconciliation),
     // ordering by id (server-authoritative — spec §36), and decryption.
@@ -123,10 +147,30 @@
             lastMessage: message,
             unreadCount: fromSelf ? (state.conversations.get(chatId)?.unreadCount || 0)
                                   : (chatId === state.activeChatId ? 0 : (state.conversations.get(chatId)?.unreadCount || 0) + 1),
+            // FIX (RECEIVER-SEES-"User"-INSTEAD-OF-REAL-NAME): for a chat that
+            // already existed, otherUser.username was already populated by
+            // loadConversations() from GET /chats, which computes
+            // `displayName = [firstName, lastName].join(' ') || username`
+            // (see chatService.js) — so it never hit this fallback. But for a
+            // BRAND-NEW chat (e.g. the receiver's very first message from
+            // someone who just "started a chat" with them), state.conversations
+            // has no entry yet, so this fallback to `message.sender.username`
+            // was the ONLY source of the name — and it only ever read the raw
+            // `username` column, skipping the firstName/lastName combination
+            // /chats uses. Any account with an empty `username` (common for
+            // accounts that only set firstName/lastName) rendered as the
+            // literal string "User" the moment a new conversation started.
+            // Prefer the server-computed `sender.displayName` (now sent by
+            // messageBroadcast.js's payload — see messageDeliveryService.js),
+            // and fall back to combining firstName+lastName client-side too,
+            // in case an older cached/offline payload predates that field.
             otherUser: (!fromSelf && message.senderId)
                 ? Object.assign({}, state.conversations.get(chatId)?.otherUser, {
                     id: message.senderId,
-                    username: (state.conversations.get(chatId)?.otherUser?.username) || (message.sender && message.sender.username),
+                    username: (state.conversations.get(chatId)?.otherUser?.username)
+                        || (message.sender && (message.sender.displayName
+                            || [message.sender.firstName, message.sender.lastName].filter(Boolean).join(' ').trim()
+                            || message.sender.username)),
                     avatar: (state.conversations.get(chatId)?.otherUser?.avatar) || (message.sender && message.sender.avatar),
                   })
                 : state.conversations.get(chatId)?.otherUser,
@@ -200,10 +244,18 @@
             const plaintext = await window.KynectaE2E.decryptMessageForDisplay(message, chatId, window._kynCurrentUserId, {
                 activeConversation: conv ? { otherUserId: conv.otherUser && conv.otherUser.id } : null,
                 fallbackText: DECRYPT_FALLBACK,
-                onResolved: (resolvedText) => {
+                // FEATURE (WHICH-VERSION-DECRYPTED-THIS, requested behavior):
+                // the canonical core now reports which decrypt path actually
+                // produced this plaintext ('v3' clean ratchet decrypt,
+                // 'v2-fallback' recovered after a v3 failure, or 'v2' for a
+                // message that was always v2) as a second onResolved arg.
+                // Stored on the message itself so message.html can render a
+                // small per-bubble indicator instead of leaving the person
+                // guessing which scheme actually protected a given message.
+                onResolved: (resolvedText, decryptVersion) => {
                     const bucket = state.messagesByConversation.get(chatId);
                     if (bucket && bucket.has(message.id)) {
-                        bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: resolvedText }));
+                        bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: resolvedText, decryptVersion: decryptVersion || bucket.get(message.id).decryptVersion || null }));
                         syncLastMessageDisplay(chatId, message.id, resolvedText);
                         notify('message:decrypted', { chatId, messageId: message.id });
                         persistMessage(chatId, bucket.get(message.id));
@@ -222,7 +274,13 @@
               : (isQueued && plaintext === DECRYPT_FALLBACK) ? 'Decrypting…' : plaintext;
             const bucket = state.messagesByConversation.get(chatId);
             if (bucket && bucket.has(message.id)) {
-                bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: displayValue }));
+                // Covers the cache-hit path above: decryptMessageForDisplay()
+                // returns straight from its internal cache without ever
+                // calling onResolved when a message was already decrypted
+                // earlier this session, so the version wasn't attached there.
+                // getDecryptVersion() reads the same id-keyed record either way.
+                const cachedVersion = typeof window.KynectaE2E.getDecryptVersion === 'function' ? window.KynectaE2E.getDecryptVersion(message.id) : null;
+                bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: displayValue, decryptVersion: bucket.get(message.id).decryptVersion || cachedVersion || null }));
                 const isGenuineSuccess = !isFailed && displayValue !== 'Decrypting…' && displayValue !== DECRYPT_FALLBACK;
                 syncLastMessageDisplay(chatId, message.id, displayValue, isGenuineSuccess);
                 notify('message:decrypted', { chatId, messageId: message.id });
@@ -294,7 +352,16 @@
             for (const [key, message] of bucket.entries()) {
                 if (String(key) !== String(failedId)) continue;
                 const displayValue = '🔒 Unable to decrypt this message';
-                bucket.set(key, Object.assign({}, message, { displayContent: displayValue }));
+                // FIX (SHOW-WHY-V3-FAILED, requested behavior): message-e2e-
+                // core.js's decryptFromChat now names exactly which stage
+                // failed and why (e.detail.error) — e.g. "Double Ratchet
+                // (v3) decrypt failed: ... — legacy (v2) fallback also
+                // failed: ...". Carry that through to the message object so
+                // the bubble's tooltip (see message.html's bubbleHtml) can
+                // show it instead of the failure reason being logged once
+                // and then lost.
+                const decryptFailureReason = e?.detail?.error || null;
+                bucket.set(key, Object.assign({}, message, { displayContent: displayValue, decryptFailureReason }));
                 syncLastMessageDisplay(chatId, key, displayValue, false);
                 notify('message:decrypted', { chatId, messageId: key });
                 // NOT persisted — see the matching comment in
@@ -445,13 +512,36 @@
         return `cm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
     }
 
+    // ROOT-CAUSE FIX (RATCHET-ORDER-SAFETY / defense in depth): every place
+    // that feeds a batch of messages into applyIncomingMessage()->
+    // decryptForDisplay() must guarantee strict chronological (ascending
+    // id/createdAt) order — the real Double Ratchet (js/e2e-ratchet-v3.js)
+    // advances a one-way KDF chain per message and permanently loses a
+    // message's key if a later message consumes the chain first (see the
+    // matching fix in js/message-local-db.js's getMessages() for the
+    // concrete IndexedDB bug this class of issue was actually caused by).
+    // The backend already sends these endpoints in ascending order, but
+    // sorting defensively here costs nothing and means a future backend
+    // change, proxy reordering, or new call site can never silently
+    // reintroduce a permanent decrypt-failure bug like that one.
+    function _chronological(list) {
+        return (Array.isArray(list) ? list.slice() : []).sort((a, b) => {
+            const aNum = typeof a.id === 'number' ? a.id : null;
+            const bNum = typeof b.id === 'number' ? b.id : null;
+            if (aNum !== null && bNum !== null) return aNum - bNum;
+            const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+            const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+            return aTime - bTime;
+        });
+    }
+
     async function loadHistory(chatId, { before = null, limit = 50 } = {}) {
         const qs = new URLSearchParams();
         if (before) qs.set('before', before);
         qs.set('limit', String(limit));
         const res = await api().get(`/messages/${chatId}?${qs.toString()}`);
         if (res && res.success && Array.isArray(res.data)) {
-            res.data.forEach(m => applyIncomingMessage(m, { fromSelf: false }));
+            _chronological(res.data).forEach(m => applyIncomingMessage(m, { fromSelf: false }));
             return { messages: res.data, hasMore: !!res.hasMore };
         }
         return { messages: [], hasMore: false };
@@ -460,7 +550,7 @@
     async function syncMissed(chatId, sinceId) {
         const res = await api().get(`/messages/${chatId}/sync?sinceId=${encodeURIComponent(sinceId || '')}`);
         if (res && res.success && Array.isArray(res.data)) {
-            res.data.forEach(m => applyIncomingMessage(m, { fromSelf: false }));
+            _chronological(res.data).forEach(m => applyIncomingMessage(m, { fromSelf: false }));
         }
         return res && res.data ? res.data : [];
     }
@@ -478,7 +568,7 @@
         if (cache) {
             try {
                 const cached = await cache.getMessages(chatId);
-                cached.forEach((m) => applyIncomingMessage(m, { fromSelf: false }));
+                _chronological(cached).forEach((m) => applyIncomingMessage(m, { fromSelf: false }));
                 cachedCount = cached.length;
             } catch (_) { /* cache is best-effort — falls through to a full network load below */ }
         }
@@ -662,47 +752,20 @@
         try { await api().post('/messages/read', { messageIds }); } catch (_) {}
     }
 
-    // FIX (DELETED-MESSAGE-STILL-SHOWN-AS-PLACEHOLDER): deleting a message
-    // (either path — "for me" or "for everyone") used to just mutate the
-    // message object in place (content -> 'This message was deleted',
-    // deleted: true) and keep it sitting in state/the DOM as a placeholder
-    // bubble forever. The request is for the object to actually be gone
-    // from the active conversation once deleted, not linger as a
-    // placeholder — so this removes it from the in-memory bucket, the
-    // persisted IndexedDB cache (or it would just come back on the next
-    // reload's hydrateFromCacheThenSync), and repairs the conversation's
-    // lastMessage/sidebar preview if the deleted message was it.
-    function removeMessageFromState(chatId, messageId) {
-        const bucket = state.messagesByConversation.get(chatId);
-        if (!bucket || !bucket.has(messageId)) return;
-        bucket.delete(messageId);
-        try { window.KynectaMessageCache && window.KynectaMessageCache.deleteMessage(chatId, messageId); } catch (_) {}
-        // FIX: also drop any pending/failed/cached decrypt-queue state for
-        // this id — see message-e2e-core.js's forgetMessage() comment for
-        // why a deleted message's queue entry needs to be cleaned up too,
-        // not just its entry in this bucket.
-        try { window.KynectaE2E && typeof window.KynectaE2E.forgetMessage === 'function' && window.KynectaE2E.forgetMessage(messageId); } catch (_) {}
-
-        const conv = state.conversations.get(chatId);
-        if (conv && conv.lastMessage && conv.lastMessage.id === messageId) {
-            // Fall back to the new most-recent remaining message (by id,
-            // same server-authoritative ordering the rest of the module
-            // uses), or null if the conversation is now empty.
-            let newest = null;
-            for (const m of bucket.values()) {
-                if (typeof m.id !== 'number') continue;
-                if (!newest || m.id > newest.id) newest = m;
-            }
-            upsertConversationMeta(chatId, { lastMessage: newest || null });
-        }
-        notify('message:deleted', { chatId, messageId });
-    }
-
     async function deleteMessage(chatId, messageId, { forEveryone = false } = {}) {
         try {
             const res = await api().delete(`/messages/${messageId}?deleteForEveryone=${forEveryone}`);
             if (res && res.success) {
-                removeMessageFromState(chatId, messageId);
+                const bucket = state.messagesByConversation.get(chatId);
+                if (bucket && bucket.has(messageId)) {
+                    const existing = bucket.get(messageId);
+                    bucket.set(messageId, Object.assign({}, existing, {
+                        content: forEveryone ? 'This message was deleted' : existing.content,
+                        deleted: true, deleteForEveryone: forEveryone,
+                    }));
+                    notify('message:deleted', { chatId, messageId });
+                    persistMessage(chatId, bucket.get(messageId));
+                }
                 return { success: true };
             }
             return { success: false, error: res && res.message };
@@ -948,8 +1011,13 @@
                 const p = data.payload || {};
                 const bucket = state.messagesByConversation.get(p.chatId);
                 if (bucket && p.messageId != null && bucket.has(p.messageId)) {
+                    const existing = bucket.get(p.messageId);
                     if (p.deleteForEveryone || (p.deletedFor || []).includes(window._kynCurrentUserId)) {
-                        removeMessageFromState(p.chatId, p.messageId);
+                        bucket.set(p.messageId, Object.assign({}, existing, {
+                            content: p.deleteForEveryone ? 'This message was deleted' : existing.content,
+                            deleted: true, deleteForEveryone: !!p.deleteForEveryone,
+                        }));
+                        notify('message:deleted', { chatId: p.chatId, messageId: p.messageId });
                     }
                 }
                 return;
@@ -1418,17 +1486,46 @@
     // still authorized individually server-side (see routes/messages.js
     // POST /bulk-delete) so a mixed selection degrades gracefully rather
     // than failing outright.
+    //
+    // ROOT-CAUSE FIX (SELECT-MODE-DELETE-DOES-NOTHING): this used to read
+    // res.deleted / res.failed straight off the _directRequest() wrapper
+    // object. That wrapper's actual shape is
+    // {ok, success, status, data, message} — the backend's real JSON body
+    // (POST /bulk-delete returns {success, deleted, failed}) is nested
+    // under .data (see _directRequest's `resolve({..., data: d ?? {}, ...})`
+    // above; same pattern loadConversations() etc. already read correctly
+    // via res.data.chats). res.deleted / res.failed were therefore always
+    // undefined, so `deleted` was always [] here — the backend genuinely
+    // deleted every message (confirmed: the single-message deleteMessage()
+    // path and this one both call the identical server-side
+    // _deleteOneMessage()), but this function never updated local state and
+    // never fired 'message:deleted', so message.html never re-rendered.
+    // The selection bar still cleared (performBulkDelete() calls
+    // exitSelectMode() unconditionally after this resolves) so it LOOKED
+    // like the action ran, but the selected bubbles just sat there — while
+    // the single-delete "..." menu path, which only ever checked
+    // `res.success` (a real top-level field), worked every time. Read
+    // res.data.deleted / res.data.failed instead.
     async function bulkDeleteMessages(chatId, messageIds, { forEveryone = false } = {}) {
         if (!Array.isArray(messageIds) || messageIds.length === 0) return { success: false, error: 'No messages selected' };
         try {
             const res = await api().post('/messages/bulk-delete', { messageIds, deleteForEveryone: forEveryone });
-            const deleted = (res && Array.isArray(res.deleted)) ? res.deleted : [];
-            // removeMessageFromState already notifies 'message:deleted' once
-            // per id (each triggers the same cheap re-render message.html
-            // already does for a single delete) — no separate summary
-            // notify needed on top of that.
-            deleted.forEach((messageId) => removeMessageFromState(chatId, messageId));
-            return { success: !!(res && res.success), deleted, failed: (res && res.failed) || [] };
+            const body = (res && res.data) || {};
+            const deleted = Array.isArray(body.deleted) ? body.deleted : [];
+            const failed = Array.isArray(body.failed) ? body.failed : [];
+            const bucket = state.messagesByConversation.get(chatId);
+            deleted.forEach((messageId) => {
+                if (bucket && bucket.has(messageId)) {
+                    const existing = bucket.get(messageId);
+                    bucket.set(messageId, Object.assign({}, existing, {
+                        content: forEveryone ? 'This message was deleted' : existing.content,
+                        deleted: true, deleteForEveryone: forEveryone,
+                    }));
+                    persistMessage(chatId, bucket.get(messageId));
+                }
+            });
+            if (deleted.length) notify('message:deleted', { chatId, messageIds: deleted });
+            return { success: !!(res && res.success) && deleted.length > 0, deleted, failed };
         } catch (err) { return { success: false, error: err.message }; }
     }
 
@@ -1440,7 +1537,14 @@
                 const lastRaw = Array.isArray(c.chatMessages) && c.chatMessages[0] ? c.chatMessages[0] : null;
                 return {
                     chatId: c.id,
-                    otherUser: { id: c.otherParticipant.id, username: c.otherParticipant.displayName || c.otherParticipant.username, avatar: c.otherParticipant.avatar },
+                    // FIX-ROOT-CAUSE-STUCK-OFFLINE: the backend's /chats endpoint
+                    // already returns otherParticipant.status/lastSeen (see
+                    // routes/chats.js) but this used to drop both when building
+                    // otherUser, so `online` was always undefined here — the chat
+                    // header always fell back to showing "Offline" regardless of
+                    // real presence. Carry the initial status through; live
+                    // updates are wired separately via MessageModule.updatePresence.
+                    otherUser: { id: c.otherParticipant.id, username: c.otherParticipant.displayName || c.otherParticipant.username, avatar: c.otherParticipant.avatar, online: c.otherParticipant.status === 'online', lastSeen: c.otherParticipant.lastSeen || null },
                     lastMessage: lastRaw ? { id: lastRaw.id, content: lastRaw.content, createdAt: lastRaw.createdAt } : null,
                 };
             });
@@ -1495,10 +1599,15 @@
             chats.filter(c => c.type === 'direct' && c.otherParticipant).forEach(c => {
                 const lastRaw = Array.isArray(c.chatMessages) && c.chatMessages[0] ? c.chatMessages[0] : null;
                 upsertConversationMeta(c.id, {
+                    // FIX-ROOT-CAUSE-STUCK-OFFLINE: see the matching comment in
+                    // loadArchivedConversations() above — carry the backend's
+                    // initial status/lastSeen through instead of dropping it.
                     otherUser: {
                         id: c.otherParticipant.id,
                         username: c.otherParticipant.displayName || c.otherParticipant.username,
                         avatar: c.otherParticipant.avatar,
+                        online: c.otherParticipant.status === 'online',
+                        lastSeen: c.otherParticipant.lastSeen || null,
                     },
                     unreadCount: c.unreadCount || 0,
                     lastMessage: lastRaw ? { id: lastRaw.id, content: lastRaw.content, type: lastRaw.type, createdAt: lastRaw.createdAt, senderId: lastRaw.senderId, chatId: c.id } : null,
@@ -1543,6 +1652,7 @@
         clearChatHistory,
         loadArchivedConversations,
         loadHistory,
+        updatePresence,
         // Exposes the same self-contained request api() uses internally (see
         // the TRANSPORT comment above) so message.html's own two direct
         // window.api.request.* calls (the New Chat picker's people list, the

@@ -2389,7 +2389,30 @@ function api(path,opts){
     // production logs. Same narrow fix as apiRequest() in
     // group-core-bootstrap.js and apiFetch() in group-ui-patch.js.
     var cleanPath=String(path||'').replace(/(\/groups\/\d+)::\d+(?=[/?]|$)/,'$1');
-    return fetch(BASE+cleanPath,Object.assign({},opts||{},{headers:h,body:body})).then(function(r){return r.json();});
+    // FIX-ROOT-CAUSE-SILENT-GROUP-ERRORS: this never checked r.ok before —
+    // fetch() only rejects on a network failure, never on an HTTP error
+    // status, so every 4xx/5xx from the backend (e.g. "Group not found",
+    // "You are not a member of this group") was being resolved as if it
+    // were a normal successful response body. Every .then(d=>...) call site
+    // in this file was written assuming d is real group/member data, so an
+    // error payload like {success:false,message:'Group not found'} fell
+    // through their `d.data||d.group||d` fallbacks and was silently
+    // misread as "no data" (dead clicks, false "No members found", etc.)
+    // instead of ever reaching the .catch() handlers already written to
+    // handle exactly this. group-ui-patch.js's apiFetch() already does this
+    // correctly — mirroring that here so the existing .catch() blocks
+    // throughout this file actually fire on real backend errors.
+    return fetch(BASE+cleanPath,Object.assign({},opts||{},{headers:h,body:body})).then(function(r){
+        return r.json().catch(function(){return {};}).then(function(d){
+            if(!r.ok){
+                var err=new Error((d&&d.message)||('HTTP '+r.status));
+                err.status=r.status;
+                err.data=d;
+                throw err;
+            }
+            return d;
+        });
+    });
 }
 function fmt(iso){if(!iso)return '';try{return new Date(iso).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});}catch(e){return '';}}
 function ntf(m,t){if(typeof showNotification==='function')showNotification(m,t||'success');else console.log('[GCP]',m);}
@@ -2889,7 +2912,7 @@ function hookRT(){
                 var all4=gco4?(gco4.groups||[]).concat(gco4.myGroups||[]).concat(gco4.joinedGroups||[]).concat(gco4.adminGroups||[]):[];
                 var found4=null;all4.forEach(function(g4){if(g4&&String(g4.id)===String(gid4))found4=g4;});
                 if(found4){openPanel(found4);}
-                else{api('/groups/'+gid4).then(function(d4){var gr4=d4.data||d4.group||d4;if(gr4&&gr4.id)openPanel(gr4);}).catch(function(){});}
+                else{api('/groups/'+gid4).then(function(d4){var gr4=d4.data||d4.group||d4;if(gr4&&gr4.id)openPanel(gr4);}).catch(function(e4){ntf((e4&&e4.message)||'That group is no longer available','error');});}
                 // FIX (was a dead parameter): scroll+highlight the target
                 // message once it renders, using the SAME selector and pulse
                 // style the existing in-panel message search feature already
@@ -2954,7 +2977,7 @@ function hookClicks(){
                     }
                 }).catch(function(){});
             } else {
-                api('/groups/'+gid).then(function(d){var gr=d.data||d.group||d;if(gr&&gr.id)openPanel(gr);}).catch(function(){});
+                api('/groups/'+gid).then(function(d){var gr=d.data||d.group||d;if(gr&&gr.id)openPanel(gr);}).catch(function(e){ntf((e&&e.message)||'That group is no longer available','error');});
             }
         });
     });
@@ -3275,11 +3298,14 @@ function buildSub(type,g,el){
                     });
                 }).catch(function(){picker.innerHTML='<p style="text-align:center;padding:12px;color:var(--text-secondary);font-size:13px">Could not load friends list</p>';});
             });
-        }).catch(function(){
+        }).catch(function(e){
             // FIX-NO-LOADING-SPINNER: don't blow away a cached member list on
             // a failed refresh — only show the error state if we were still
             // showing the spinner (i.e. nothing cached existed to fall back to).
-            if(el.querySelector('.fa-spinner'))el.innerHTML='<p style="text-align:center;padding:20px;color:var(--text-secondary)">Could not load</p>';
+            // Now that api() actually rejects on HTTP errors, e.message carries
+            // the real reason (e.g. "You are not a member of this group")
+            // instead of the generic placeholder this used to always show.
+            if(el.querySelector('.fa-spinner'))el.innerHTML='<p style="text-align:center;padding:20px;color:var(--text-secondary)">'+esc((e&&e.message)||'Could not load')+'</p>';
         });
         return;
     }

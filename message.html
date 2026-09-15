@@ -1873,6 +1873,41 @@
         }
         return;
       }
+      // FIX-ROOT-CAUSE-STUCK-OFFLINE: chat.html's _fwdPresenceToMessages
+      // already posts these on every 'user:online'/'user:offline'/
+      // 'presence:update' socket event — this module just never listened.
+      // Update the client-side state (also fixes the sidebar via the same
+      // 'conversation:updated' notify every other patch goes through), then
+      // re-announce the header immediately if the update is for whoever the
+      // currently open chat is with — same CHAT_HEADER_UPDATE feed used by
+      // MODULE_FOCUSED above, not a new code path.
+      if (data.type === 'FRIEND_ONLINE' || data.type === 'FRIEND_OFFLINE') {
+        const presP = data.payload || {};
+        if (presP.userId != null && window.MessageModule && typeof window.MessageModule.updatePresence === 'function') {
+          window.MessageModule.updatePresence(presP.userId, data.type === 'FRIEND_ONLINE', presP.lastSeen);
+          const activeId2 = window.MessageModule.getActiveChatId && window.MessageModule.getActiveChatId();
+          if (activeId2) {
+            const conv2 = window.MessageModule.getConversations().find(c => c.chatId === activeId2);
+            if (conv2 && conv2.otherUser && String(conv2.otherUser.id) === String(presP.userId)) {
+              try {
+                window.parent.postMessage({
+                  source: 'message-iframe',
+                  type: 'CHAT_HEADER_UPDATE',
+                  payload: {
+                    chatId: activeId2,
+                    seq: (window.__kynChatHdrSeq = (window.__kynChatHdrSeq || 0) + 1),
+                    name: conv2.otherUser.username || 'Conversation',
+                    avatarUrl: conv2.otherUser.avatar || null,
+                    online: !!conv2.otherUser.online,
+                  },
+                  timestamp: Date.now(),
+                }, '*');
+              } catch (_) {}
+            }
+          }
+        }
+        return;
+      }
       if (data.type !== 'FRIENDS_LIST_UPDATE' && data.type !== 'FRIENDS_LIST_RESPONSE' &&
           data.type !== 'FRIENDS_DATA' && data.type !== 'FRIENDS_SYNC') return;
       const rawFriends = (data.payload && data.payload.friends) || data.friends || [];
