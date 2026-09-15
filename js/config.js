@@ -43,9 +43,8 @@
     window.GOOGLE_CLIENT_ID = String(runtime.GOOGLE_CLIENT_ID || '').trim();
     window.FRONTEND_URL = String(runtime.FRONTEND_URL || '').trim().replace(/\/+$/, '');
 
-    // Canonical public application brand. This is deliberately separate from
-    // legacy internal namespace names (for example __kynAPI) so renaming the
-    // product cannot break storage keys, API contracts, or compatibility code.
+    // Canonical public application brand. Keep legacy internal namespace names
+    // intact because storage keys and compatibility code may depend on them.
     window.NECPRA_APP_NAME = 'Necpra';
     window.NECPRA_APP_SHORT_NAME = 'Necpra';
 
@@ -68,7 +67,6 @@
             if (next !== target.nodeValue) target.nodeValue = next;
             return;
         }
-
         if (target.nodeType !== Node.ELEMENT_NODE && target !== document) return;
 
         if (target === document) {
@@ -102,6 +100,14 @@
                     if (next !== current) element.setAttribute(attribute, next);
                 });
                 if (element.tagName === 'TITLE') element.textContent = normalizeBrandText(element.textContent);
+            });
+        }
+
+        // Canonical favicon/icon for every page that loads the shared config.
+        if (target === document || target === document.documentElement || target === document.head) {
+            document.querySelectorAll('link[rel~="icon"]').forEach(function (link) {
+                link.setAttribute('href', '/icons/necpra-192.svg');
+                link.setAttribute('type', 'image/svg+xml');
             });
         }
     }
@@ -202,21 +208,15 @@
         const apiOrigin = requireBackendOrigin();
         const normalize = function (rawUrl) {
             if (!rawUrl || typeof rawUrl !== 'string') return rawUrl;
-
             if (/^\/api(?:\/|$)/i.test(rawUrl) || /^\/socket\.io(?:\/|$)/i.test(rawUrl) || /^\/ws(?:\/|$)/i.test(rawUrl)) {
                 return `${apiOrigin}${rawUrl}`;
             }
-
             try {
                 const parsed = new URL(rawUrl, window.location.origin);
-                if (isBackendApiPath(parsed.href)) {
-                    return `${apiOrigin}${parsed.pathname}${parsed.search}${parsed.hash}`;
-                }
+                if (isBackendApiPath(parsed.href)) return `${apiOrigin}${parsed.pathname}${parsed.search}${parsed.hash}`;
             } catch (_) {}
-
             return rawUrl;
         };
-
         if (typeof Request !== 'undefined' && input instanceof Request) {
             const rewrittenUrl = normalize(input.url);
             if (rewrittenUrl === input.url) return input;
@@ -228,9 +228,7 @@
     if (!window.__KYNECTA_API_FETCH_PATCHED__ && typeof window.fetch === 'function') {
         window.__KYNECTA_API_FETCH_PATCHED__ = true;
         const nativeFetch = window.fetch.bind(window);
-        window.fetch = function (input, init) {
-            return nativeFetch(window.__rewriteApiUrl(input), init);
-        };
+        window.fetch = function (input, init) { return nativeFetch(window.__rewriteApiUrl(input), init); };
     }
 
     if (!window.__KYNECTA_API_XHR_PATCHED__ && typeof XMLHttpRequest !== 'undefined') {
@@ -264,16 +262,10 @@
 
     window.apiCall = async function (endpoint, options) {
         const url = `${window.__getApiBase()}${String(endpoint || '').startsWith('/') ? endpoint : `/${endpoint || ''}`}`;
-        const finalOptions = Object.assign({
-            headers: { 'Content-Type': 'application/json' }
-        }, options || {});
+        const finalOptions = Object.assign({ headers: { 'Content-Type': 'application/json' } }, options || {});
         finalOptions.headers = Object.assign({ 'Content-Type': 'application/json' }, (options && options.headers) || {});
-
         const token = localStorage.getItem('authToken') || localStorage.getItem('accessToken') || localStorage.getItem('token');
-        if (token && !finalOptions.headers.Authorization) {
-            finalOptions.headers.Authorization = `Bearer ${token}`;
-        }
-
+        if (token && !finalOptions.headers.Authorization) finalOptions.headers.Authorization = `Bearer ${token}`;
         try {
             const response = await fetch(url, finalOptions);
             const data = await response.json().catch(() => ({}));
@@ -284,14 +276,12 @@
         }
     };
 
-    // Live auth-token bridge used by legacy and E2E consumers.
     if (!Object.getOwnPropertyDescriptor(window, 'authToken') || Object.getOwnPropertyDescriptor(window, 'authToken').configurable) {
         let legacyToken = null;
         try {
             const current = Object.getOwnPropertyDescriptor(window, 'authToken');
             if (current && 'value' in current) legacyToken = current.value;
         } catch (_) {}
-
         try {
             Object.defineProperty(window, 'authToken', {
                 configurable: true,
