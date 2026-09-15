@@ -1,17 +1,15 @@
 /*
- * Group panel header consolidation + feature loader.
- * chat.html owns the visible module header and its group actions. group.html
- * must not render a second header row or duplicate voice/video/info controls.
+ * Group panel header consolidation + group chat feature loaders.
  */
 (function () {
   'use strict';
 
-  function loadGroupChatFeatures() {
-    if (document.querySelector('script[data-group-chat-features]')) return;
+  function load(src, attr) {
+    if (document.querySelector(`script[${attr}]`)) return;
     const s = document.createElement('script');
-    s.src = '/js/group-chat-features.js';
+    s.src = src;
     s.async = false;
-    s.dataset.groupChatFeatures = 'true';
+    s.dataset[attr] = 'true';
     (document.head || document.documentElement).appendChild(s);
   }
 
@@ -29,18 +27,16 @@
     }
   }
 
-  function removeDuplicateHeader() {
+  function initialize() {
     const chatbar = document.querySelector('#chat .chatbar');
     if (chatbar) chatbar.remove();
-    loadGroupChatFeatures();
+    load('/js/group-chat-features.js', 'groupChatFeatures');
+    load('/js/group-message-cache.js', 'groupMessageCache');
     installParentCallBridge();
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', removeDuplicateHeader, { once: true });
-  } else {
-    removeDuplicateHeader();
-  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initialize, { once: true });
+  else initialize();
 
   window.addEventListener('beforeunload', () => {
     try { window.parent?.postMessage({ type: 'GROUP_PANEL_CLOSE', source: 'groups' }, '*'); } catch (_) {}
