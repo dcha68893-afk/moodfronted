@@ -269,5 +269,26 @@
         (document.head || document.documentElement).appendChild(script);
     }
 
+    // Messages gets a defensive group boundary plus a real group-only sidebar.
+    // It is loaded from the same origin and resolves its API through config.js.
+    if (/\/message\.html$/i.test(window.location.pathname) && !document.querySelector('script[data-group-message-isolation]')) {
+        const script = document.createElement('script');
+        script.src = '/js/group-message-isolation.js';
+        script.async = false;
+        script.dataset.groupMessageIsolation = 'true';
+        (document.head || document.documentElement).appendChild(script);
+    }
+
+    // The parent chat shell owns the visible group header/actions. Keep the
+    // legacy group.html chatbar hidden so voice/video/info/back controls are
+    // not duplicated inside the group panel.
+    if (/\/group\.html$/i.test(window.location.pathname) && !document.querySelector('script[data-group-panel-cleanup]')) {
+        const script = document.createElement('script');
+        script.src = '/js/group-panel-cleanup.js';
+        script.async = false;
+        script.dataset.groupPanelCleanup = 'true';
+        (document.head || document.documentElement).appendChild(script);
+    }
+
     console.log('[Config] Runtime configuration loaded. Backend:', configuredOrigin || '(missing)');
 })();
