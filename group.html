@@ -1,3 +1,158 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Groups</title><script src="/js/runtime-config.js"></script><script src="/js/config.js"></script><script src="/js/theme.engine.js"></script><style>*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden}body{background:var(--bg,#f8fafc);color:var(--text,#0f172a);font:14px system-ui,-apple-system,"Segoe UI",Roboto,Arial}.hidden{display:none!important}button,input,textarea{font:inherit}button{cursor:pointer}.layout{height:100%;display:grid;grid-template-columns:minmax(250px,32%) 1fr}.sidebar{border-right:1px solid var(--border,#e2e8f0);background:var(--surface,#fff);display:flex;flex-direction:column;min-width:0}.side-head{padding:12px 14px;border-bottom:1px solid var(--border,#e2e8f0);font-weight:800}.toolbar{display:flex;gap:7px;padding:10px}.search{flex:1;min-width:0;padding:9px;border:1px solid var(--border,#e2e8f0);border-radius:11px;background:var(--surface2,#f1f5f9);color:inherit}.refresh{width:38px;border:1px solid var(--border,#e2e8f0);border-radius:10px;background:var(--surface2,#f1f5f9);color:inherit}.groups{flex:1;overflow:auto;padding:0 10px}.group{width:100%;display:flex;align-items:center;gap:10px;padding:10px;border:1px solid transparent;border-radius:13px;background:transparent;color:inherit;text-align:left;margin-bottom:5px}.group:hover,.group.active{background:var(--surface2,#f1f5f9);border-color:var(--border,#e2e8f0)}.avatar{width:43px;height:43px;border-radius:13px;background:linear-gradient(135deg,#dbeafe,#c4b5fd);display:grid;place-items:center;font-weight:800;color:#1e40af;flex:0 0 auto;background-size:cover;background-position:center}.groupmain{min-width:0;flex:1}.name{font-weight:750;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.meta{font-size:11px;color:var(--muted,#64748b);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.empty{text-align:center;color:var(--muted,#64748b);padding:40px 18px}.panel{min-width:0;height:100%;display:flex;flex-direction:column;background:var(--bg,#f8fafc)}.messages{flex:1;overflow:auto;padding:14px}.row{display:flex;margin:6px 0}.row.mine{justify-content:flex-end}.bubble{max-width:min(78%,620px);padding:9px 11px;border:1px solid var(--border,#e2e8f0);border-radius:15px;background:var(--surface,#fff);overflow-wrap:anywhere}.mine .bubble{background:var(--primary,#2563eb);color:#fff;border-color:var(--primary,#2563eb)}.sender{font-size:10px;font-weight:700;color:var(--primary,#2563eb);margin-bottom:3px}.time{font-size:9px;opacity:.65;text-align:right;margin-top:4px}.composer{display:flex;gap:7px;padding:8px;background:var(--surface,#fff);border-top:1px solid var(--border,#e2e8f0)}textarea{flex:1;resize:none;min-height:42px;max-height:120px;padding:10px;border:1px solid var(--border,#e2e8f0);border-radius:13px;background:var(--surface2,#f1f5f9);color:inherit}.send{width:43px;border:0;border-radius:13px;background:var(--primary,#2563eb);color:#fff}.modal{position:fixed;inset:0;background:#0008;display:grid;place-items:center;padding:14px;z-index:20}.card{width:min(620px,100%);max-height:92vh;overflow:auto;background:var(--surface,#fff);border:1px solid var(--border,#e2e8f0);border-radius:18px}.head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid var(--border,#e2e8f0)}.head h2{margin:0}.close{border:0;background:transparent;color:inherit;font-size:22px}.section{padding:14px 16px;border-bottom:1px solid var(--border,#e2e8f0)}.member{display:flex;align-items:center;gap:8px;padding:7px 0}.who{flex:1}.who b{display:block}.who small{color:var(--muted,#64748b);font-size:10px}.smallbtn{padding:8px 10px;border:1px solid var(--border,#e2e8f0);border-radius:9px;background:var(--surface2,#f1f5f9);color:inherit}.section input,.section textarea{width:100%;padding:9px;border:1px solid var(--border,#e2e8f0);border-radius:10px;background:var(--surface2,#f1f5f9);color:inherit}.section textarea{min-height:80px;margin-top:8px}@media(max-width:700px){.layout{grid-template-columns:1fr}.panel{display:none}.layout.chat-open .sidebar{display:none}.layout.chat-open .panel{display:flex}}</style></head><body><div id="layout" class="layout"><aside class="sidebar"><div class="side-head">Groups</div><div class="toolbar"><input id="search" class="search" placeholder="Search groups…"><button id="refresh" class="refresh" type="button">↻</button></div><div id="groups" class="groups"><div class="empty">Loading groups…</div></div></aside><section class="panel"><div id="messages" class="messages"><div class="empty">Select a group to start chatting.</div></div><div class="composer"><textarea id="input" rows="1" placeholder="Message the group…"></textarea><button id="send" class="send" type="button">➤</button></div></section></div><div id="create" class="modal hidden"><div class="card"><div class="head"><h2>Create group</h2><button class="close" data-close type="button">×</button></div><form id="createForm"><div class="section"><input id="gname" required maxlength="100" placeholder="Group name"><textarea id="gdesc" maxlength="1000" placeholder="Description"></textarea></div><div class="section"><b>Choose members</b><div id="friends"></div></div><div class="section" style="text-align:right"><button type="submit" class="smallbtn">Create group</button></div></form></div></div><script>
-(()=>{'use strict';const S={groups:[],friends:[],current:null,messages:[],q:'',loading:false};const $=x=>document.getElementById(x);const base=()=>String(window.__getApiBase?.()||window.API_BASE_URL||'').replace(/\/$/,'');const token=()=>window.__kynToken||window.__accessToken||window.AuthSessionManager?.getToken?.()||window.authToken||localStorage.getItem('authToken')||localStorage.getItem('accessToken')||localStorage.getItem('token')||'';async function api(path,opt={}){const h={...(opt.headers||{})};const t=token();if(t)h.Authorization='Bearer '+t;if(opt.body&&!(opt.body instanceof FormData)&&!h['Content-Type'])h['Content-Type']='application/json';const r=await fetch(base()+path,{...opt,headers:h});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.message||d.error||`Request failed (${r.status})`);return d}const G=x=>x?.chat||x?.group||x;const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));const uid=()=>String(window._kynCurrentUserId||localStorage.getItem('userId')||'');function showCreate(){loadFriends();$('create').classList.remove('hidden')}function hideCreate(){$('create').classList.add('hidden')}function icon(g){const a=document.createElement('div');a.className='avatar';a.textContent=String(g?.name||g?.groupName||'G').slice(0,1).toUpperCase();if(g?.avatar){a.style.backgroundImage=`url(${JSON.stringify(g.avatar)})`;a.textContent=''}return a}async function loadGroups(){if(S.loading)return;S.loading=true;try{const r=await api('/chats?limit=100');const rows=r?.data?.chats||r?.data||[];S.groups=Array.isArray(rows)?rows.filter(x=>(x?.type||x?.chatType)==='group').map(G):[];renderGroups()}catch(e){$('groups').innerHTML=`<div class="empty">Unable to load groups.<br>${esc(e.message)}</div>`}finally{S.loading=false}}function renderGroups(){const box=$('groups');box.innerHTML='';const q=S.q.toLowerCase();const rows=S.groups.filter(g=>!q||String(g.name||g.groupName||'').toLowerCase().includes(q));if(!rows.length){box.innerHTML='<div class="empty">No groups yet.</div>';return}rows.forEach(g=>{const b=document.createElement('button');b.type='button';b.className='group'+(S.current&&String(S.current.id)===String(g.id)?' active':'');const a=icon(g),m=document.createElement('div');m.className='groupmain';m.innerHTML=`<div class="name">${esc(g.name||g.groupName||'Unnamed group')}</div><div class="meta">${Number(g.participantCount??g.participants?.length??0)} members</div>`;b.append(a,m);b.onclick=()=>openGroup(g.id);box.append(b)})}async function loadFriends(){try{const r=await api('/friends?status=accepted');const rows=r?.data?.friends||r?.friends||r?.data||[];S.friends=Array.isArray(rows)?rows.map(x=>x.friend||x.user||x):[];const box=$('friends');box.innerHTML='';S.friends.forEach(f=>{const id=f.id||f.userId;if(String(id)===uid())return;const row=document.createElement('label');row.className='member';row.innerHTML=`<input type="checkbox" value="${esc(id)}"><div class="who"><b>${esc(f.displayName||f.name||f.username||'User')}</b><small>@${esc(f.username||'user')}</small></div>`;box.append(row)})}catch(e){$('friends').innerHTML='<div class="empty">No friends available.</div>'}}async function createGroup(e){e.preventDefault();const ids=[...document.querySelectorAll('#friends input:checked')].map(x=>Number(x.value)).filter(Number.isInteger);if(!ids.length)return alert('Select at least one member.');try{const r=await api('/chats',{method:'POST',body:JSON.stringify({type:'group',name:$('gname').value.trim(),description:$('gdesc').value.trim(),participantIds:ids})});const g=G(r?.data?.chat||r?.data);hideCreate();await loadGroups();if(g?.id)openGroup(g.id)}catch(e){alert(e.message)}}async function openGroup(id){try{const r=await api('/chats/'+encodeURIComponent(id));S.current=G(r?.data?.chat||r?.data);const mr=await api('/messages/'+encodeURIComponent(id)+'?limit=100');S.messages=mr?.data?.messages||mr?.data||[];$('layout').classList.add('chat-open');renderGroups();renderMessages();parent.postMessage({type:'GROUP_PANEL_OPEN',source:'groups',payload:{...S.current,id:Number(id),chatId:Number(id),participantCount:S.current?.participantCount??S.current?.participants?.length??0,participants:S.current?.participants||[]}},'*')}catch(e){console.error('[Groups] open',e);alert(e.message)}}function renderMessages(){const box=$('messages');box.innerHTML='';if(!S.messages.length){box.innerHTML='<div class="empty">No messages yet.</div>';return}S.messages.forEach(m=>{const row=document.createElement('div'),mine=String(m.senderId||m.userId)===uid();row.className='row'+(mine?' mine':'');row.dataset.messageId=String(m.id||'');const b=document.createElement('div');b.className='bubble';if(!mine){const s=document.createElement('div');s.className='sender';s.textContent=m.sender?.displayName||m.sender?.username||m.senderUsername||'Member';b.append(s)}const media=m.metadata?.media;if(media?.url){const mime=String(media.mimeType||'');if(mime.startsWith('image/')){const x=document.createElement('img');x.src=media.url;x.style.cssText='max-width:420px;max-height:360px;border-radius:12px';b.append(x)}else if(mime.startsWith('video/')){const x=document.createElement('video');x.src=media.url;x.controls=true;x.style.cssText='max-width:420px;max-height:360px';b.append(x)}else if(mime.startsWith('audio/')){const x=document.createElement('audio');x.src=media.url;x.controls=true;b.append(x)}else{const x=document.createElement('a');x.href=media.url;x.target='_blank';x.textContent=media.name||m.content||'Open attachment';b.append(x)}}else{const x=document.createElement('div');x.textContent=m.content||'';b.append(x)}const t=document.createElement('div');t.className='time';t.textContent=new Date(m.createdAt||m.sentAt||Date.now()).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});b.append(t);row.append(b);box.append(row)});box.scrollTop=box.scrollHeight;window.__GROUP_MESSAGES_CACHE=S.messages.slice();window.__GROUP_REFRESH_MESSAGES=loadMessages}async function loadMessages(){if(!S.current)return;try{const r=await api('/messages/'+encodeURIComponent(S.current.id)+'?limit=100');S.messages=r?.data?.messages||r?.data||[];renderMessages()}catch(e){console.warn('[Groups] messages',e.message)}}async function sendMessage(){const text=$('input').value.trim();if(!text||!S.current)return;$('input').value='';try{const r=await api('/messages',{method:'POST',body:JSON.stringify({chatId:Number(S.current.id),content:text,type:'text',clientMessageId:`grp_${Date.now()}`})});const m=r?.data?.message||r?.data;if(m){S.messages=[...S.messages,m];renderMessages()}await loadMessages()}catch(e){$('input').value=text;alert(e.message)}}function onMessage(e){const d=e?.data;if(!d||typeof d!=='object')return;const p=d.payload||{};if(d.type==='OPEN_GROUP_BY_ID'){const id=p.groupId??p.chatId??p.id;if(id)openGroup(id)}else if(d.type==='GROUP_CREATE_REQUEST'||d.type==='CREATE_GROUP'){showCreate()}else if(d.type==='GROUP_PANEL_CLOSE'){S.current=null;$('layout').classList.remove('chat-open');renderGroups()}else if(['GROUP_MESSAGE','GROUP_MESSAGE_NEW','group:message:new','message:new'].includes(d.type)){const m=p.message||p,id=p.groupId??p.chatId??p.conversationId??m.chatId;if(S.current&&String(id)===String(S.current.id)&&m?.id&&!S.messages.some(x=>String(x.id)===String(m.id))){S.messages.push(m);renderMessages()}}}window.addEventListener('message',onMessage);$('send').onclick=sendMessage;$('input').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage()}});$('search').oninput=e=>{S.q=e.target.value;renderGroups()};$('refresh').onclick=loadGroups;$('createForm').onsubmit=createGroup;document.querySelector('[data-close]').onclick=hideCreate;function boot(){const q=new URLSearchParams(location.search),id=q.get('groupId')||q.get('chatId')||window.__GROUP_CHAT_ID;if(id)openGroup(id);loadGroups();setInterval(()=>{if(!document.hidden){loadGroups();if(S.current)loadMessages()}},2500)}boot()})();
+(()=>{'use strict';
+const S={groups:[],friends:[],current:null,messages:[],q:'',loading:false};
+const $=x=>document.getElementById(x);
+const base=()=>String(window.__getApiBase?.()||window.API_BASE_URL||'').replace(/\/$/,'');
+const token=()=>window.__kynToken||window.__accessToken||window.AuthSessionManager?.getToken?.()||window.authToken||localStorage.getItem('authToken')||localStorage.getItem('accessToken')||localStorage.getItem('token')||'';
+async function api(path,opt={}){const h={...(opt.headers||{})};const t=token();if(t)h.Authorization='Bearer '+t;if(opt.body&&!(opt.body instanceof FormData)&&!h['Content-Type'])h['Content-Type']='application/json';const r=await fetch(base()+path,{...opt,headers:h});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.message||d.error||`Request failed (${r.status})`);return d}
+const G=x=>x?.chat||x?.group||x;
+const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid=()=>String(window._kynCurrentUserId||localStorage.getItem('userId')||'');
+function showCreate(){loadFriends();$('create').classList.remove('hidden')}
+function hideCreate(){$('create').classList.add('hidden')}
+function icon(g){const a=document.createElement('div');a.className='avatar';a.textContent=String(g?.name||g?.groupName||'G').slice(0,1).toUpperCase();if(g?.avatar){a.style.backgroundImage=`url(${JSON.stringify(g.avatar)})`;a.textContent=''}return a}
+async function loadGroups(){if(S.loading)return;S.loading=true;try{const r=await api('/chats?limit=100');const rows=r?.data?.chats||r?.data||[];S.groups=Array.isArray(rows)?rows.filter(x=>(x?.type||x?.chatType)==='group').map(G):[];renderGroups()}catch(e){$('groups').innerHTML=`<div class="empty">Unable to load groups.<br>${esc(e.message)}</div>`}finally{S.loading=false}}
+function renderGroups(){const box=$('groups');box.innerHTML='';const q=S.q.toLowerCase();const rows=S.groups.filter(g=>!q||String(g.name||g.groupName||'').toLowerCase().includes(q));if(!rows.length){box.innerHTML='<div class="empty">No groups yet.</div>';return}rows.forEach(g=>{const b=document.createElement('button');b.type='button';b.className='group'+(S.current&&String(S.current.id)===String(g.id)?' active':'');const a=icon(g),m=document.createElement('div');m.className='groupmain';m.innerHTML=`<div class="name">${esc(g.name||g.groupName||'Unnamed group')}</div><div class="meta">${Number(g.participantCount??g.participants?.length??0)} members</div>`;b.append(a,m);b.onclick=()=>openGroup(g.id);box.append(b)})}
+async function loadFriends(){try{const r=await api('/friends?status=accepted');const rows=r?.data?.friends||r?.friends||r?.data||[];S.friends=Array.isArray(rows)?rows.map(x=>x.friend||x.user||x):[];const box=$('friends');box.innerHTML='';S.friends.forEach(f=>{const id=f.id||f.userId;if(String(id)===uid())return;const row=document.createElement('label');row.className='member';row.innerHTML=`<input type="checkbox" value="${esc(id)}"><div class="who"><b>${esc(f.displayName||f.name||f.username||'User')}</b><small>@${esc(f.username||'user')}</small></div>`;box.append(row)})}catch(e){$('friends').innerHTML='<div class="empty">No friends available.</div>'}}
+async function createGroup(e){e.preventDefault();const ids=[...document.querySelectorAll('#friends input:checked')].map(x=>Number(x.value)).filter(Number.isInteger);if(!ids.length)return alert('Select at least one member.');try{const r=await api('/chats',{method:'POST',body:JSON.stringify({type:'group',name:$('gname').value.trim(),description:$('gdesc').value.trim(),participantIds:ids})});const g=G(r?.data?.chat||r?.data);hideCreate();await loadGroups();if(g?.id)openGroup(g.id)}catch(e){alert(e.message)}}
+
+// ── Message rendering: a single row-builder used by both the full
+// rebuild and the incremental-append paths, so both stay in sync. ──
+function buildMessageRow(m){
+  const row=document.createElement('div'),mine=String(m.senderId||m.userId)===uid();
+  row.className='row'+(mine?' mine':'');
+  row.dataset.messageId=String(m.id||'');
+  const b=document.createElement('div');b.className='bubble';
+  if(!mine){const s=document.createElement('div');s.className='sender';s.textContent=m.sender?.displayName||m.sender?.username||m.senderUsername||'Member';b.append(s)}
+  const media=m.metadata?.media;
+  if(media?.url){
+    const mime=String(media.mimeType||'');
+    if(mime.startsWith('image/')){const x=document.createElement('img');x.src=media.url;x.loading='lazy';x.style.cssText='max-width:420px;max-height:360px;border-radius:12px';b.append(x)}
+    else if(mime.startsWith('video/')){const x=document.createElement('video');x.src=media.url;x.controls=true;x.style.cssText='max-width:420px;max-height:360px';b.append(x)}
+    else if(mime.startsWith('audio/')){const x=document.createElement('audio');x.src=media.url;x.controls=true;b.append(x)}
+    else{const x=document.createElement('a');x.href=media.url;x.target='_blank';x.textContent=media.name||m.content||'Open attachment';b.append(x)}
+  }else{const x=document.createElement('div');x.textContent=m.content||'';b.append(x)}
+  const t=document.createElement('div');t.className='time';t.textContent=new Date(m.createdAt||m.sentAt||Date.now()).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  b.append(t);row.append(b);
+  return row;
+}
+
+// True when the user is already reading the latest messages, so it's
+// safe to auto-scroll after new ones arrive without yanking them away
+// from something they scrolled up to read.
+function isNearBottom(box){return box.scrollHeight-box.scrollTop-box.clientHeight<60}
+
+// Full teardown + rebuild. Only used when switching groups or when the
+// message list changed in a way that isn't a simple append (edits,
+// deletes, reordering) — NOT on every poll/incoming message, since that
+// was flashing the whole pane blank ("messages clearing instantly")
+// every time a group member sent something.
+function renderMessages(){
+  const box=$('messages');
+  box.innerHTML='';
+  if(!S.messages.length){box.innerHTML='<div class="empty">No messages yet.</div>';return}
+  S.messages.forEach(m=>box.append(buildMessageRow(m)));
+  box.scrollTop=box.scrollHeight;
+  window.__GROUP_MESSAGES_CACHE=S.messages.slice();
+  window.__GROUP_REFRESH_MESSAGES=loadMessages;
+}
+
+// Appends only the given (already-new) messages to the existing DOM
+// without touching what's already rendered, and keeps the cache/refresh
+// hooks in sync. Preserves scroll position unless the user was already
+// at the bottom.
+function appendMessages(newOnes){
+  if(!newOnes.length)return;
+  const box=$('messages');
+  const emptyNotice=box.querySelector('.empty');
+  if(emptyNotice)box.innerHTML='';
+  const wasAtBottom=isNearBottom(box);
+  newOnes.forEach(m=>box.append(buildMessageRow(m)));
+  if(wasAtBottom)box.scrollTop=box.scrollHeight;
+  window.__GROUP_MESSAGES_CACHE=S.messages.slice();
+  window.__GROUP_REFRESH_MESSAGES=loadMessages;
+}
+
+// Reconciles a freshly-fetched list against what's currently shown.
+// - identical -> does nothing (no flash, no wasted work)
+// - fetched list is exactly the old list plus new items at the end ->
+//   append just the new tail, no clearing
+// - anything else (edit/delete/reorder) -> falls back to a full rebuild
+function reconcileMessages(newList){
+  const oldIds=S.messages.map(m=>String(m.id));
+  const newIds=newList.map(m=>String(m.id));
+  if(oldIds.length===newIds.length&&oldIds.every((id,i)=>id===newIds[i]))return;
+  const isPureAppend=newIds.length>oldIds.length&&oldIds.every((id,i)=>id===newIds[i]);
+  S.messages=newList;
+  if(isPureAppend){appendMessages(newList.slice(oldIds.length))}
+  else{renderMessages()}
+}
+
+async function openGroup(id){
+  try{
+    const r=await api('/chats/'+encodeURIComponent(id));
+    S.current=G(r?.data?.chat||r?.data);
+    const mr=await api('/messages/'+encodeURIComponent(id)+'?limit=100');
+    S.messages=mr?.data?.messages||mr?.data||[];
+    $('layout').classList.add('chat-open');
+    renderGroups();renderMessages();
+    parent.postMessage({type:'GROUP_PANEL_OPEN',source:'groups',payload:{...S.current,id:Number(id),chatId:Number(id),participantCount:S.current?.participantCount??S.current?.participants?.length??0,participants:S.current?.participants||[]}},'*')
+  }catch(e){console.error('[Groups] open',e);alert(e.message)}
+}
+
+async function loadMessages(){
+  if(!S.current)return;
+  try{
+    const r=await api('/messages/'+encodeURIComponent(S.current.id)+'?limit=100');
+    const list=r?.data?.messages||r?.data||[];
+    reconcileMessages(list);
+  }catch(e){console.warn('[Groups] messages',e.message)}
+}
+
+async function sendMessage(){
+  const text=$('input').value.trim();
+  if(!text||!S.current)return;
+  $('input').value='';
+  try{
+    const r=await api('/messages',{method:'POST',body:JSON.stringify({chatId:Number(S.current.id),content:text,type:'text',clientMessageId:`grp_${Date.now()}`})});
+    const m=r?.data?.message||r?.data;
+    if(m&&!S.messages.some(x=>String(x.id)===String(m.id))){S.messages=[...S.messages,m];appendMessages([m])}
+    await loadMessages()
+  }catch(e){$('input').value=text;alert(e.message)}
+}
+
+function onMessage(e){
+  const d=e?.data;if(!d||typeof d!=='object')return;
+  const p=d.payload||{};
+  if(d.type==='OPEN_GROUP_BY_ID'){const id=p.groupId??p.chatId??p.id;if(id)openGroup(id)}
+  else if(d.type==='GROUP_CREATE_REQUEST'||d.type==='CREATE_GROUP'){showCreate()}
+  else if(d.type==='GROUP_PANEL_CLOSE'){S.current=null;$('layout').classList.remove('chat-open');renderGroups()}
+  else if(['GROUP_MESSAGE','GROUP_MESSAGE_NEW','group:message:new','message:new'].includes(d.type)){
+    const m=p.message||p,id=p.groupId??p.chatId??p.conversationId??m.chatId;
+    if(S.current&&String(id)===String(S.current.id)&&m?.id&&!S.messages.some(x=>String(x.id)===String(m.id))){
+      // Append only the new message — do NOT do a full renderMessages()
+      // here, that used to wipe and rebuild the whole pane (visible as
+      // messages "clearing instantly") every time another group member
+      // sent something.
+      S.messages=[...S.messages,m];
+      appendMessages([m]);
+    }
+  }
+}
+
+window.addEventListener('message',onMessage);
+$('send').onclick=sendMessage;
+$('input').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage()}});
+$('search').oninput=e=>{S.q=e.target.value;renderGroups()};
+$('refresh').onclick=loadGroups;
+$('createForm').onsubmit=createGroup;
+document.querySelector('[data-close]').onclick=hideCreate;
+function boot(){
+  const q=new URLSearchParams(location.search),id=q.get('groupId')||q.get('chatId')||window.__GROUP_CHAT_ID;
+  if(id)openGroup(id);
+  loadGroups();
+  setInterval(()=>{if(!document.hidden){loadGroups();if(S.current)loadMessages()}},2500)
+}
+boot()
+})();
 </script><script src="/js/group-chat-features.js?v=20260915-group4"></script><script src="/js/group-message-cache.js?v=20260915-group4"></script><script src="/js/group-media-render.js?v=20260915-group4"></script></body></html>
