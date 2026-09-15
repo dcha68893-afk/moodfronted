@@ -43,9 +43,20 @@ function _resolveNecpaApiBase() {
         return `${window.location.protocol}//${host}:4000/api`;
     }
 
-    // Last-resort fallback only reached if the .env-driven config genuinely
-    // hasn't loaded yet.
-    return 'https://noxopa.onrender.com/api';
+    // FIX (Audit #19 parity — one source of truth for API config): this used
+    // to fall back to a hardcoded 'https://noxopa.onrender.com/api' as a
+    // last resort. That's exactly the class of bug the other marketplace
+    // files (marketplace-advanced.js, marketplace-checkout.js,
+    // marketplace-ecommerce.js) were already fixed to avoid: a hardcoded
+    // origin decided independently by this file instead of by
+    // js/config.js's window.__NEXIPA_RUNTIME_CONFIG__.BACKEND_URL. If the
+    // .env-driven config genuinely hasn't loaded yet, silently pointing at
+    // a specific hardcoded backend is worse than failing loudly — it can
+    // route production traffic at a stale/decommissioned host with no
+    // visible error. Fail clearly instead so the real config-loading bug
+    // gets noticed and fixed.
+    console.error('[ui-fix] API base URL is not configured — window.__NEXIPA_RUNTIME_CONFIG__.BACKEND_URL is missing. Marketplace requests will fail until the runtime config loads.');
+    return '';
 }
 
 (function _fixApiBase() {

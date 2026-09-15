@@ -144,7 +144,14 @@ const CAT_MAT = {
     gaming:['Console','Handheld','Controller','Headset','VR','Refurbished'],
     baby:['Cotton','BPA-Free','Organic','Hypoallergenic','Machine Washable'],
 };
-const _phys = {images:[],variants:[],specs:[],materials:[]};
+const _phys = {images:[],variants:[],specs:[],materials:[],gas:null};
+
+// ADDED: canonical list of Gas & LPG subcategory names — single source of
+// truth for which physSubcategory picks should reveal the Gas/Cylinder
+// Details block. Names must match the subs added to the "home" entry in
+// window._JM_CATS (Tool-ui.js) exactly.
+const _GAS_LPG_SUBCATS = ['Gas Cylinders','LPG Refills','Gas Cookers','Gas Regulators','Gas Hoses & Accessories'];
+window._GAS_LPG_SUBCATS = _GAS_LPG_SUBCATS;
 
 // FIX (metadata-driven category flow, item 4 of the Create Listing spec):
 // this used to be the whole story — a single hardcoded materials list per
@@ -185,6 +192,13 @@ window._physCategoryChanged = cat => {
             ? '<option value="">Select subcategory…</option>' + subs.map(s=>`<option value="${_esc(s)}">${_esc(s)}</option>`).join('')
             : '<option value="">No subcategories for this category</option>';
     }
+    // ADDED: category changed, so any previously-selected subcategory (and
+    // its Gas/Cylinder Details, if it was showing) no longer applies —
+    // hide the block and clear the collected state until the seller picks
+    // a subcategory again via _physSubcategoryChanged.
+    const gasGroup = document.getElementById('physGasGroup');
+    if (gasGroup) gasGroup.style.display = 'none';
+    _phys.gas = null;
     // Brand <select> — category-specific list, driven by window._JM_BRANDS
     const brandSel = document.getElementById('physBrand');
     if (brandSel) {
@@ -194,7 +208,46 @@ window._physCategoryChanged = cat => {
             : '<option value="">Select category first…</option>';
     }
 };
-window._physSubcategoryChanged = () => { /* reserved: type/feature chips are category-level today; per-subcategory refinement can hook in here later without changing the payload shape */ };
+// ADDED: Gas & LPG attribute block — the one per-subcategory refinement this
+// hook was reserved for. Shows/hides #physGasGroup and, within it, the
+// refill-specific fields (only relevant for "LPG Refills"), based on the
+// chosen subcategory. Reads window._GAS_LPG_SUBCATS as the canonical list
+// rather than hardcoding subcategory names a second time.
+window._physSubcategoryChanged = () => {
+    const sub = document.getElementById('physSubcategory')?.value || '';
+    const isGas = (window._GAS_LPG_SUBCATS || _GAS_LPG_SUBCATS).includes(sub);
+    const group = document.getElementById('physGasGroup');
+    if (group) group.style.display = isGas ? 'block' : 'none';
+    if (!isGas) { _phys.gas = null; return; }
+
+    const isRefill = sub === 'LPG Refills';
+    const refillTypeGroup = document.getElementById('physGasRefillTypeGroup');
+    const refillOptsGroup = document.getElementById('physGasRefillOptionsGroup');
+    if (refillTypeGroup) refillTypeGroup.style.display = isRefill ? 'block' : 'none';
+    if (refillOptsGroup) refillOptsGroup.style.display = isRefill ? 'block' : 'none';
+
+    _phys.gas = _phys.gas || {};
+};
+
+// ADDED: reads the Gas/Cylinder Details fields into a plain object for
+// payload.metadata.gas. Returns null when the block isn't showing (not a
+// Gas & LPG subcategory), so non-gas listings' metadata shape is unchanged.
+function _collectGasAttributes() {
+    const group = document.getElementById('physGasGroup');
+    if (!group || group.style.display === 'none') return null;
+    const sub = document.getElementById('physSubcategory')?.value || '';
+    const gas = {
+        capacity:    document.getElementById('physGasCapacity')?.value || '',
+        cylinderType: document.getElementById('physGasCylinderType')?.value || '',
+        valveType:   document.getElementById('physGasValveType')?.value || '',
+    };
+    if (sub === 'LPG Refills') {
+        gas.refillType = document.getElementById('physGasRefillType')?.value || 'refill';
+        gas.emptyCylinderRequired = !!document.getElementById('physGasEmptyCylinderRequired')?.checked;
+        gas.deliveryAvailable = !!document.getElementById('physGasDeliveryAvailable')?.checked;
+    }
+    return gas;
+}
 window._physCalcDiscount=()=>{
     const p=parseFloat(document.getElementById('physPrice')?.value||0),o=parseFloat(document.getElementById('physOriginalPrice')?.value||0),l=document.getElementById('physDiscountLabel');
     if(!l)return;l.style.display=o>p&&p>0?'block':'none';
@@ -298,7 +351,17 @@ window._physPublish=async()=>{
     // expects) — category/subcategory/brand now come from the metadata-driven
     // selects instead of free text, but they're still plain strings, so
     // existing submission/API behavior (item 5 of the spec) keeps working.
-    const payload={title,description:desc,short_description:document.getElementById('physShortDesc')?.value?.trim()||'',price,original_price:parseFloat(document.getElementById('physOriginalPrice')?.value||0)||null,category:cat,subcategory:sub,brand:document.getElementById('physBrand')?.value?.trim()||'',sku:document.getElementById('physSku')?.value?.trim()||'',stock_quantity:stock,weight:parseFloat(document.getElementById('physWeight')?.value||0)||null,images:imgs,type:'physical',condition:'new',available:false,status:'pending_review',approval_status:'pending',metadata:{materials:_phys.materials.slice(),variants:_phys.variants.filter(v=>v.name),specs:Object.fromEntries(_phys.specs.filter(s=>s.k&&s.v).map(s=>[s.k,s.v]))}};
+    // ADDED: gas/cylinder attributes (capacity, cylinder type, valve type,
+    // and for LPG Refills: refill vs exchange, empty-cylinder requirement,
+    // delivery availability) — only populated when subcategory is a Gas &
+    // LPG one (see _physSubcategoryChanged/_collectGasAttributes above).
+    // Folded into the same metadata object other category-specific data
+    // (materials/variants/specs) already lives in — no payload shape change
+    // for any other category.
+    const gasAttrs = _collectGasAttributes();
+    const metadata = {materials:_phys.materials.slice(),variants:_phys.variants.filter(v=>v.name),specs:Object.fromEntries(_phys.specs.filter(s=>s.k&&s.v).map(s=>[s.k,s.v]))};
+    if (gasAttrs) metadata.gas = gasAttrs;
+    const payload={title,description:desc,short_description:document.getElementById('physShortDesc')?.value?.trim()||'',price,original_price:parseFloat(document.getElementById('physOriginalPrice')?.value||0)||null,category:cat,subcategory:sub,brand:document.getElementById('physBrand')?.value?.trim()||'',sku:document.getElementById('physSku')?.value?.trim()||'',stock_quantity:stock,weight:parseFloat(document.getElementById('physWeight')?.value||0)||null,images:imgs,type:'physical',condition:'new',available:false,status:'pending_review',approval_status:'pending',metadata};
     console.log('[PUBLISH] physical: creating listing', {title,category:cat});
     const r=await _api('POST','/marketplace/products',payload);
     if(btn){btn.disabled=false;btn.textContent='Submit for Review';}
@@ -306,7 +369,7 @@ window._physPublish=async()=>{
     const product=r?.data?.product||r?.product;
     if(!product){_toast('Submission failed','error','❌');return null;}
     console.log('[PUBLISH] physical: listing created', {id:product.id});
-    _phys.images=[];_phys.variants=[];_phys.specs=[];_phys.materials=[];
+    _phys.images=[];_phys.variants=[];_phys.specs=[];_phys.materials=[];_phys.gas=null;
     _toast('Submitted for review! Goes live after admin approval ✅','success','📋');
     if(typeof window.hideCreateListingModal==='function') window.hideCreateListingModal();
     return product;

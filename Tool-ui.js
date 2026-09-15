@@ -6230,6 +6230,20 @@ const _JM_CATS = [
             { name:'Rugs & Carpet',     img:_CDN['Rugs & Carpet'] },
             { name:'Lighting',          img:_CDN.Lighting },
         ]},
+        // ADDED (Gas/LPG marketplace category, canonical data source):
+        // Physical Products → Home & Office → Gas & LPG. This is the single
+        // place category data is defined — it drives the physSubcategory
+        // <select>, the Categories browse page, and (via
+        // window._GAS_LPG_SUBCATS in marketplace-seller.js) the dynamic
+        // Gas Attributes fields in Create Listing. Not hardcoded anywhere
+        // else; every consumer reads from here.
+        { name:'Gas & LPG', subs:[
+            { name:'Gas Cylinders',            img:_CDN['Gas Cylinders'] },
+            { name:'LPG Refills',              img:_CDN['LPG Refills'] },
+            { name:'Gas Cookers',              img:_CDN['Gas Cookers'] },
+            { name:'Gas Regulators',           img:_CDN['Gas Regulators'] },
+            { name:'Gas Hoses & Accessories',  img:_CDN['Gas Hoses & Accessories'] },
+        ]},
     ]},
     { id:'fashion',     name:'Fashion',           icon:'👗', sections:[
         { name:"Men's Fashion", subs:[

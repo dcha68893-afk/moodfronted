@@ -1986,6 +1986,63 @@
                             <div id="physMaterialOptions" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px"></div>
                         </div>
 
+                        <!-- ADDED: Gas & LPG attributes — shown only when physSubcategory
+                             is one of the Gas & LPG subcategories (see
+                             window._GAS_LPG_SUBCATS / _physSubcategoryChanged in
+                             marketplace-seller.js). Populated into payload.metadata.gas
+                             at publish time; does not change the existing payload shape
+                             for any other category. -->
+                        <div class="input-group" id="physGasGroup" style="display:none">
+                            <label>Gas / Cylinder Details</label>
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px">
+                                <div>
+                                    <label for="physGasCapacity" style="font-size:11px;color:#6b7280">Cylinder Capacity</label>
+                                    <select class="text-input" id="physGasCapacity">
+                                        <option value="">Select capacity…</option>
+                                        <option value="3kg">3kg</option>
+                                        <option value="6kg">6kg</option>
+                                        <option value="13kg">13kg</option>
+                                        <option value="22.5kg">22.5kg</option>
+                                        <option value="50kg">50kg</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="physGasCylinderType" style="font-size:11px;color:#6b7280">Cylinder Type</label>
+                                    <select class="text-input" id="physGasCylinderType">
+                                        <option value="">Select type…</option>
+                                        <option value="steel">Steel</option>
+                                        <option value="composite">Composite</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
+                                <div>
+                                    <label for="physGasValveType" style="font-size:11px;color:#6b7280">Valve Type</label>
+                                    <select class="text-input" id="physGasValveType">
+                                        <option value="">Select valve…</option>
+                                        <option value="pol">POL</option>
+                                        <option value="clip_on">Clip-on</option>
+                                        <option value="screw_on">Screw-on</option>
+                                    </select>
+                                </div>
+                                <div id="physGasRefillTypeGroup" style="display:none">
+                                    <label for="physGasRefillType" style="font-size:11px;color:#6b7280">Refill Type</label>
+                                    <select class="text-input" id="physGasRefillType">
+                                        <option value="refill">Refill (bring your own cylinder)</option>
+                                        <option value="exchange">Exchange (swap empty for full)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div id="physGasRefillOptionsGroup" style="display:none;margin-top:8px">
+                                <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#374151;cursor:pointer">
+                                    <input type="checkbox" id="physGasEmptyCylinderRequired"> Requires customer's empty cylinder
+                                </label>
+                                <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#374151;cursor:pointer;margin-top:4px">
+                                    <input type="checkbox" id="physGasDeliveryAvailable"> Delivery available
+                                </label>
+                            </div>
+                        </div>
+
                         <!-- Description -->
                         <div class="input-group">
                             <label for="physDescription">Description *</label>
