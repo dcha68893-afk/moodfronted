@@ -1,6 +1,6 @@
 {
-  "name": "Kynecta Necpa",
-  "short_name": "Necpa",
+  "name": "Necpra",
+  "short_name": "Necpra",
   "description": "Real-time mood-based chat and marketplace platform",
   "start_url": "/index.html",
   "scope": "/",
@@ -25,11 +25,6 @@
   ],
   "categories": ["social", "communication", "shopping"],
   "prefer_related_applications": false,
-  "related_applications": [
-    {
-      "platform": "webapp",
-      "url": "https://noxopa.onrender.com/manifest.json"
-    }
-  ],
+  "related_applications": [],
   "screenshots": []
 }
