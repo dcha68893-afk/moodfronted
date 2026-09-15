@@ -19,6 +19,42 @@ if(!window.__KYNECTA_API_XHR_PATCHED__&&typeof XMLHttpRequest!=='undefined'){win
 if(!window.__KYNECTA_WEBSOCKET_PATCHED__&&typeof window.WebSocket==='function'){window.__KYNECTA_WEBSOCKET_PATCHED__=true;const NativeWebSocket=window.WebSocket;const ConfiguredWebSocket=function(url,protocols){let target=url;try{const p=new URL(url,window.location.origin);if(/^\/socket\.io(?:\/|$)/i.test(p.pathname)||/^\/ws(?:\/|$)/i.test(p.pathname)){const api=new URL(requireBackendOrigin());p.protocol=api.protocol==='https:'?'wss:':'ws:';p.host=api.host;target=p.toString();}}catch(_){}return protocols===undefined?new NativeWebSocket(target):new NativeWebSocket(target,protocols);};ConfiguredWebSocket.prototype=NativeWebSocket.prototype;window.WebSocket=ConfiguredWebSocket;}
 window.apiCall=async function(endpoint,options){const url=`${window.__getApiBase()}${String(endpoint||'').startsWith('/')?endpoint:`/${endpoint||''}`}`;const final=Object.assign({headers:{'Content-Type':'application/json'}},options||{});final.headers=Object.assign({'Content-Type':'application/json'},options?.headers||{});const t=localStorage.getItem('authToken')||localStorage.getItem('accessToken')||localStorage.getItem('token');if(t&&!final.headers.Authorization)final.headers.Authorization=`Bearer ${t}`;try{const r=await fetch(url,final);return await r.json().catch(()=>({}));}catch(e){console.error('[API] Request failed:',e);return{success:false,message:e.message};}};
 if(!Object.getOwnPropertyDescriptor(window,'authToken')||Object.getOwnPropertyDescriptor(window,'authToken').configurable){let legacy=null;try{const d=Object.getOwnPropertyDescriptor(window,'authToken');if(d&&'value'in d)legacy=d.value;}catch(_){}try{Object.defineProperty(window,'authToken',{configurable:true,enumerable:true,get(){try{if(window.__kynToken)return window.__kynToken;}catch(_){}try{if(window.__accessToken)return window.__accessToken;}catch(_){}try{if(window.AuthSessionManager?.getToken){const t=window.AuthSessionManager.getToken();if(t)return t;}}catch(_){}for(const k of ['authToken','accessToken','token','jwt','USER_TOKEN','necpa_token']){try{const t=localStorage.getItem(k)||sessionStorage.getItem(k);if(t&&!t.startsWith('{'))return t;}catch(_){} }return legacy||'';},set(v){legacy=v||null;}});}catch(_){} }
+
+// Calls iframe security must trust the runtime-configured application origin,
+// not a stale hard-coded hostname. calls-core.part4.js creates its validator
+// later in the load order, so patch it once the shared calls object exists.
+// This keeps one origin policy and avoids adding another parallel call engine.
+function installRuntimeCallOriginTrust(){
+  try {
+    const shared=window.__CallsCoreShared;
+    if(!shared||typeof shared.isValidOrigin!=='function')return false;
+    if(shared.__runtimeOriginTrustInstalled)return true;
+    const previous=shared.isValidOrigin;
+    const frontendOrigin=String(window.location?.origin||'').replace(/\/+$/,'');
+    let backendOrigin='';
+    try{backendOrigin=new URL(requireBackendOrigin()).origin;}catch(_){}
+    const trusted=new Set([frontendOrigin,backendOrigin].filter(Boolean));
+    if(Array.isArray(shared.CONFIG?.TRUSTED_DOMAINS)){
+      trusted.forEach(origin=>{try{shared.CONFIG.TRUSTED_DOMAINS.push(new URL(origin).host);}catch(_){} });
+    }
+    shared.isValidOrigin=function(origin){
+      if(!origin)return true;
+      if(trusted.has(String(origin).replace(/\/+$/,'')))return true;
+      return previous.call(this,origin);
+    };
+    shared.__runtimeOriginTrustInstalled=true;
+    console.log('[Config] Calls origin trust derived from runtime origins:',Array.from(trusted));
+    return true;
+  }catch(_){return false;}
+}
+if(!installRuntimeCallOriginTrust()){
+  let attempts=0;
+  const timer=setInterval(()=>{
+    attempts+=1;
+    if(installRuntimeCallOriginTrust()||attempts>=100)clearInterval(timer);
+  },50);
+}
+
 if(/\/message\.html$/i.test(window.location.pathname)&&!document.querySelector('script[data-group-message-isolation]')){const s=document.createElement('script');s.src='/js/group-message-isolation.js?v=20260915-group3';s.async=false;s.dataset.groupMessageIsolation='true';(document.head||document.documentElement).appendChild(s);}
 if(/\/group\.html$/i.test(window.location.pathname)&&!document.querySelector('script[data-group-panel-cleanup]')){const s=document.createElement('script');s.src='/js/group-panel-cleanup.js?v=20260915-group3';s.async=false;s.dataset.groupPanelCleanup='true';(document.head||document.documentElement).appendChild(s);}
 console.log('[Config] Runtime configuration loaded. Backend:',configuredOrigin||'(missing)');
