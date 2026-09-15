@@ -43,6 +43,98 @@
     window.GOOGLE_CLIENT_ID = String(runtime.GOOGLE_CLIENT_ID || '').trim();
     window.FRONTEND_URL = String(runtime.FRONTEND_URL || '').trim().replace(/\/+$/, '');
 
+    // Canonical public application brand. This is deliberately separate from
+    // legacy internal namespace names (for example __kynAPI) so renaming the
+    // product cannot break storage keys, API contracts, or compatibility code.
+    window.NECPRA_APP_NAME = 'Necpra';
+    window.NECPRA_APP_SHORT_NAME = 'Necpra';
+
+    function normalizeBrandText(value) {
+        if (typeof value !== 'string' || !value) return value;
+        return value
+            .replace(/Kynecta/gi, 'Necpra')
+            .replace(/Knecta/gi, 'Necpra')
+            .replace(/MoodChat/gi, 'Necpra')
+            .replace(/Mood Chat/gi, 'Necpra')
+            .replace(/Necpa/gi, 'Necpra');
+    }
+
+    function applyNecpraBrand(root) {
+        const target = root || document;
+        if (!target) return;
+
+        if (target.nodeType === Node.TEXT_NODE) {
+            const next = normalizeBrandText(target.nodeValue);
+            if (next !== target.nodeValue) target.nodeValue = next;
+            return;
+        }
+
+        if (target.nodeType !== Node.ELEMENT_NODE && target !== document) return;
+
+        if (target === document) {
+            if (document.title) document.title = normalizeBrandText(document.title);
+        } else {
+            if (target.tagName === 'TITLE') target.textContent = normalizeBrandText(target.textContent);
+            ['aria-label', 'title', 'placeholder', 'alt', 'content', 'data-app-name'].forEach(function (attribute) {
+                if (target.hasAttribute && target.hasAttribute(attribute)) {
+                    const current = target.getAttribute(attribute);
+                    const next = normalizeBrandText(current);
+                    if (next !== current) target.setAttribute(attribute, next);
+                }
+            });
+        }
+
+        const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT);
+        const nodes = [];
+        let node;
+        while ((node = walker.nextNode())) nodes.push(node);
+        nodes.forEach(function (textNode) {
+            const next = normalizeBrandText(textNode.nodeValue);
+            if (next !== textNode.nodeValue) textNode.nodeValue = next;
+        });
+
+        if (target.querySelectorAll) {
+            target.querySelectorAll('[aria-label],[title],[placeholder],[alt],[content],[data-app-name],title').forEach(function (element) {
+                ['aria-label', 'title', 'placeholder', 'alt', 'content', 'data-app-name'].forEach(function (attribute) {
+                    if (!element.hasAttribute(attribute)) return;
+                    const current = element.getAttribute(attribute);
+                    const next = normalizeBrandText(current);
+                    if (next !== current) element.setAttribute(attribute, next);
+                });
+                if (element.tagName === 'TITLE') element.textContent = normalizeBrandText(element.textContent);
+            });
+        }
+    }
+
+    function initializeNecpraBranding() {
+        try {
+            document.documentElement.setAttribute('data-app-brand', 'necpra');
+            applyNecpraBrand(document);
+            if (document.head) {
+                document.querySelectorAll('meta[name="application-name"],meta[property="og:site_name"],meta[name="apple-mobile-web-app-title"]').forEach(function (meta) {
+                    meta.setAttribute('content', 'Necpra');
+                });
+            }
+            if (window.MutationObserver && document.documentElement) {
+                const observer = new MutationObserver(function (mutations) {
+                    mutations.forEach(function (mutation) {
+                        if (mutation.type === 'characterData') applyNecpraBrand(mutation.target);
+                        mutation.addedNodes && mutation.addedNodes.forEach(function (added) {
+                            if (added.nodeType === Node.ELEMENT_NODE || added.nodeType === Node.TEXT_NODE) applyNecpraBrand(added);
+                        });
+                    });
+                });
+                observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+            }
+        } catch (_) {}
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initializeNecpraBranding, { once: true });
+    } else {
+        initializeNecpraBranding();
+    }
+
     window.__kynShouldFilterConsole = window.__kynShouldFilterConsole || function (level, args) {
         if (!window.__isProductionConsoleHost || !window.__isProductionConsoleHost()) return false;
         if (window.__ALLOW_VERBOSE_CONSOLE__ === true) return false;
