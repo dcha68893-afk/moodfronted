@@ -91,8 +91,6 @@
 
   function openPanel() { if(!state.chatId)return; panel().classList.remove('hidden'); }
 
-  // Observe the existing group's network calls. This avoids duplicating the
-  // group-open state or introducing another conversation implementation.
   const originalFetch = window.fetch;
   window.fetch = async function(...args) {
     const response = await originalFetch.apply(this,args);
@@ -110,11 +108,116 @@
   document.addEventListener('DOMContentLoaded', () => { ensureButton(); });
   setInterval(ensureButton, 1000);
 
-  // Invite links can be opened directly. Resolve and join after authentication
-  // is available; the parent shell can then open the resulting conversation.
   async function consumeInvite() {
     const tokenValue = new URLSearchParams(location.search).get('invite'); if(!tokenValue)return;
     try { const info=await api(`/group-admin/invite/${encodeURIComponent(tokenValue)}`); if(confirm(`Join ${info.data.name||'this group'}?`)){const joined=await api(`/group-admin/invite/${encodeURIComponent(tokenValue)}/join`,{method:'POST',body:'{}'}); if(joined.data?.chatId)window.postMessage({type:'OPEN_GROUP_BY_ID',payload:{groupId:joined.data.chatId},source:'groups'},'*');} } catch(e) { console.warn('[GroupInvite]',e.message); }
   }
   setTimeout(consumeInvite, 1200);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // GROUP MESSAGE REALTIME ISOLATION
+  // ─────────────────────────────────────────────────────────────────────────
+  // The private MessageModule and the Groups module share the same backend
+  // message transport. A group message must not wait for the private-chat
+  // panel to become active, and it must never be rendered by the private-chat
+  // renderer. This bridge owns only the currently visible #chat group panel.
+  // It reads the same authoritative conversation history endpoint that
+  // group.html already uses, detects only messages newer than the last seen
+  // group message, and writes directly to #messages.
+  const groupRT = { chatId:null, lastId:0, initialized:false, timer:null, fetchInstalled:false };
+  const groupPanelVisible = () => {
+    const chat = document.getElementById('chat');
+    return !!chat && !chat.classList.contains('hidden') && !!document.getElementById('messages');
+  };
+  const currentUserId = () => String(window.__GROUP_CALL_USER_ID || localStorage.getItem('userId') || localStorage.getItem('currentUserId') || '');
+  const normalizeMessages = d => {
+    const x=d?.data?.messages||d?.data||d?.messages||d;
+    if(Array.isArray(x))return x;
+    return x?.id?[x]:[];
+  };
+  const messageId = m => Number(m?.id);
+  const groupMessageMatches = m => String(m?.chatId||m?.conversationId||'')===String(groupRT.chatId||'');
+
+  function renderRealtimeGroupMessage(m){
+    if(!groupPanelVisible()||!groupMessageMatches(m)||!Number.isFinite(messageId(m)))return;
+    const box=document.getElementById('messages');
+    if(!box)return;
+    // The normal group renderer does not add a message-id attribute, so use
+    // the realtime bridge's own registry as the authoritative dedupe layer.
+    if(messageId(m)<=groupRT.lastId && groupRT.initialized)return;
+    const row=document.createElement('div');
+    row.className='row'+(String(m.senderId||m.userId)===currentUserId()?' mine':'');
+    row.dataset.groupRealtimeMessageId=String(m.id);
+    const bubble=document.createElement('div');bubble.className='bubble';
+    const mine=String(m.senderId||m.userId)===currentUserId();
+    if(!mine){const sender=document.createElement('div');sender.className='sender';sender.textContent=m.sender?.displayName||m.sender?.username||m.senderUsername||'Member';bubble.appendChild(sender);}
+    let marker=null;try{marker=JSON.parse(m.content||'')}catch(_){ }
+    if(marker?.__groupCall&&marker.callId){
+      const body=document.createElement('div');body.textContent='📞 Group call started';
+      const join=document.createElement('button');join.className='smallbtn';join.style.marginTop='7px';join.textContent='Join call';join.onclick=()=>window.GroupCall?.join(marker.callId,marker.type);bubble.append(body,join);
+    }else{const body=document.createElement('div');body.textContent=m.content||'';bubble.appendChild(body);}
+    const time=document.createElement('div');time.className='time';time.textContent=new Date(m.createdAt||m.sentAt||Date.now()).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});bubble.appendChild(time);
+    row.appendChild(bubble);box.appendChild(row);box.scrollTop=box.scrollHeight;
+  }
+
+  async function syncGroupPanel(){
+    if(!groupRT.chatId||!groupPanelVisible())return;
+    try{
+      const r=await originalFetch(apiBase()+`/messages/${encodeURIComponent(groupRT.chatId)}?limit=100`,{headers:token()?{Authorization:'Bearer '+token()}: {}});
+      if(!r.ok)return;
+      const messages=normalizeMessages(await r.json().catch(()=>({})))
+        .filter(groupMessageMatches)
+        .sort((a,b)=>messageId(a)-messageId(b));
+      if(!messages.length)return;
+      if(!groupRT.initialized){
+        // History was already rendered by group.html. Seed the cursor without
+        // adding those messages a second time.
+        groupRT.lastId=Math.max(...messages.map(messageId).filter(Number.isFinite),0);
+        groupRT.initialized=true;
+        return;
+      }
+      for(const m of messages){
+        const id=messageId(m);if(!Number.isFinite(id)||id<=groupRT.lastId)continue;
+        renderRealtimeGroupMessage(m);groupRT.lastId=Math.max(groupRT.lastId,id);
+      }
+    }catch(e){console.warn('[Groups] realtime history sync:',e.message)}
+  }
+
+  function startGroupRealtime(id){
+    if(!id)return;
+    const next=String(id);
+    if(groupRT.chatId!==next){
+      groupRT.chatId=next;groupRT.lastId=0;groupRT.initialized=false;
+    }
+    if(!groupRT.timer)groupRT.timer=setInterval(syncGroupPanel,1200);
+    syncGroupPanel();
+  }
+  function stopGroupRealtime(){
+    groupRT.chatId=null;groupRT.lastId=0;groupRT.initialized=false;
+    if(groupRT.timer)clearInterval(groupRT.timer);groupRT.timer=null;
+  }
+
+  // Extend the existing fetch observer without replacing it. This catches
+  // the authoritative GET /chats/:id used by group.html and starts the
+  // group-only realtime bridge immediately after the panel opens.
+  const realtimeFetchObserver = window.fetch;
+  window.fetch = async function(...args){
+    const response=await realtimeFetchObserver.apply(this,args);
+    try{
+      const url=String(args[0]?.url||args[0]||'');
+      const chatMatch=url.match(/\/api\/chats\/(\d+)(?:\?|$)/);
+      if(chatMatch&&response.ok){startGroupRealtime(chatMatch[1]);}
+      const postMessages=/\/api\/messages(?:\?|$)/.test(url);
+      const method=String(args[1]?.method||args[0]?.method||'GET').toUpperCase();
+      if(postMessages&&method==='POST'&&response.ok){
+        const d=await response.clone().json().catch(()=>null);const ms=normalizeMessages(d);for(const m of ms){if(groupMessageMatches(m))groupRT.lastId=Math.max(groupRT.lastId,messageId(m)||0);}
+      }
+    }catch(_){ }
+    if(!groupPanelVisible()&&groupRT.timer)stopGroupRealtime();
+    return response;
+  };
+
+  const visibilityObserver=new MutationObserver(()=>{if(!groupPanelVisible())stopGroupRealtime();else if(state.chatId)startGroupRealtime(state.chatId);});
+  const startObserver=()=>{if(document.body)visibilityObserver.observe(document.body,{subtree:true,attributes:true,attributeFilter:['class']});};
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',startObserver,{once:true});else startObserver();
 })();
