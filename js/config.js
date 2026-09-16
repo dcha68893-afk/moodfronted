@@ -31,6 +31,6 @@ if(/\/message\.html$/i.test(window.location.pathname))loadOnce('/js/group-messag
 if(/\/group\.html$/i.test(window.location.pathname))loadOnce('/js/group-panel-cleanup.js?v=20260916-group5','group-panel-cleanup');
 if(/\/status\.html$/i.test(window.location.pathname))loadOnce('/js/status-recent-sections.js?v=20260916-status1','status-recent-sections');
 if(/\/chat\.html$/i.test(window.location.pathname))loadOnce('/js/friend-request-center-action.js?v=20260916-friend1','friend-request-center-action');
-if(/\/Tools\.html$/i.test(window.location.pathname)||/\/tools\.html$/i.test(window.location.pathname)){loadOnce('/js/marketplace-accommodation.js?v=20260916-accom1','marketplace-accommodation');loadOnce('/js/marketplace-accommodation-service.js?v=20260916-accom2','marketplace-accommodation-service');}
+if(/\/Tools\.html$/i.test(window.location.pathname)||/\/tools\.html$/i.test(window.location.pathname)){loadOnce('/js/marketplace-accommodation.js?v=20260916-accom1','marketplace-accommodation');loadOnce('/js/marketplace-accommodation-service.js?v=20260916-accom2','marketplace-accommodation-service');loadOnce('/js/accommodation-marketplace-surface.js?v=20260916-accom3','accommodation-marketplace-surface');}
 console.log('[Config] Runtime configuration loaded. Backend:',configuredOrigin||'(missing)');
 })();
