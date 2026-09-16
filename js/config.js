@@ -1,6 +1,7 @@
 // js/config.js - single runtime configuration gateway
 (function () {
 'use strict';
+try{const saved=localStorage.getItem('app_theme')||localStorage.getItem('theme');const prefers=window.matchMedia?.('(prefers-color-scheme: dark)').matches;const theme=saved==='dark'||saved==='light'?saved:(prefers?'dark':'light');document.documentElement.setAttribute('data-theme',theme);document.documentElement.style.colorScheme=theme;}catch(_){}
 const runtime=window.__NEXIPA_RUNTIME_CONFIG__||{};
 const configuredOrigin=String(runtime.BACKEND_URL||'').trim().replace(/\/+$/,'');
 if(!configuredOrigin)console.error('[Config] BACKEND_URL is missing. Run the frontend build and configure it in .env.');
