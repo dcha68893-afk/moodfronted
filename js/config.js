@@ -24,6 +24,7 @@ function installRuntimeCallOriginTrust(){try{const shared=window.__CallsCoreShar
 if(!installRuntimeCallOriginTrust()){let attempts=0;const timer=setInterval(()=>{attempts+=1;if(installRuntimeCallOriginTrust()||attempts>=100)clearInterval(timer)},50)}
 function loadOnce(src,key){if(document.querySelector(`script[data-${key}]`))return;const s=document.createElement('script');s.src=src;s.async=false;s.dataset[key]='1';(document.head||document.documentElement).appendChild(s)}
 loadOnce('/js/admin-support-bridge.js?v=20260916-admin1','admin-support-bridge');
+if(window.location.pathname==='/'||/\/index\.html$/i.test(window.location.pathname))loadOnce('/js/pwa-identity.js?v=20260916-pwa1','pwa-identity');
 if(/\/message\.html$/i.test(window.location.pathname))loadOnce('/js/group-message-isolation.js?v=20260916-group5','group-message-isolation');
 if(/\/group\.html$/i.test(window.location.pathname))loadOnce('/js/group-panel-cleanup.js?v=20260916-group5','group-panel-cleanup');
 if(/\/status\.html$/i.test(window.location.pathname))loadOnce('/js/status-recent-sections.js?v=20260916-status1','status-recent-sections');
