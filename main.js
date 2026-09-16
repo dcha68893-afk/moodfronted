@@ -288,7 +288,7 @@ class PWAManager {
         } else if (property === 'email') {
           element.textContent = this.authState.user.email || '';
         } else if (property === 'avatar') {
-          element.src = this.authState.user.avatar || '/default-avatar.png';
+          element.src = this.authState.user.avatar || '/icons/necpa-192.png';
         } else if (property === 'initials') {
           const name = this.authState.user.name || '';
           element.textContent = name.split(' ').map(n => n[0]).join('').toUpperCase();
@@ -297,7 +297,7 @@ class PWAManager {
         if (property === 'name' || property === 'email' || property === 'initials') {
           element.textContent = '';
         } else if (property === 'avatar') {
-          element.src = '/default-avatar.png';
+          element.src = '/icons/necpa-192.png';
         }
       }
     });

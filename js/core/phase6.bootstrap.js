@@ -46,13 +46,15 @@
     'realtime/RealtimeSyncEngine.js',
     'realtime/BackgroundSyncService.js',
     // ── Phase 3: WebRTC Call Engine ──────────────────────────────────────
-    'calls/CallStateMachine.js',
-    'calls/DeviceMediaManager.js',
-    'calls/PeerConnectionManager.js',
-    'calls/WebRTCSessionOrchestrator.js',
-    'calls/GroupCallEngine.js',
-    'calls/AdaptiveBitrateEngine.js',
-    'calls/LANCallEngine.js',
+    // FIX (dead-file 404 storm on every page load): the calling feature was
+    // disabled elsewhere (config.js's disableLegacyCallHandlers()/removeCalls()
+    // and the /api/calls fetch stub), and the js/core/calls/ directory itself
+    // was removed from the repo, but this module list was never updated — so
+    // every single page load fired 7 guaranteed 404s (each also logged a
+    // "Refused to execute script ... MIME type ('text/html')" warning, since
+    // the 404 response is the SPA's HTML fallback, not JS). Removed the dead
+    // entries; re-add them here (with the files restored) if calling is ever
+    // re-enabled.
     // ── Phase 4: Social Ecosystem ────────────────────────────────────────
     'groups/GroupOrchestrator.js',
     'groups/GroupModerationEngine.js',

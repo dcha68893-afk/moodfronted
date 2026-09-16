@@ -477,23 +477,29 @@
        re-decrypt anything already seen. Must load before message-client.js,
        not deferred, since message-client.js's top-level bootstrap reads it
        synchronously on first run. -->
+  <!-- FIX (group messages leaking into the private Message Module's own
+       chat list instead of being isolated to group.html): the previous fix
+       here assumed "capture-phase listeners always run before bubble-phase
+       ones regardless of script load order" — true for events that
+       propagate through a real ancestor chain, but message events from
+       postMessage() are dispatched directly AT `window`, which has no
+       ancestors. With no capturing/bubbling phases to separate them, ALL
+       listeners on `window` (capture:true or not) fire in the order they
+       were REGISTERED. message-client.js's own window 'message' listener
+       (registered synchronously the moment that script runs, from its
+       top-level wireRealtimeListeners() call) was registered first because
+       this script tag loaded after it — so every group message already got
+       routed into applyIncomingMessage() (private-chat state) and rendered
+       in this module's own chat list before this file's listener ever ran;
+       its stopImmediatePropagation() call only blocks listeners still
+       waiting to run, it can't undo work an earlier listener already did.
+       Moving this tag ABOVE message-client.js's makes this file's listener
+       register first, so it actually intercepts and isolates group
+       payloads before message-client.js can touch them. -->
+  <script src="/js/group-message-isolation.js"></script>
   <script src="/js/message-local-db.js"></script>
   <script src="/js/message-client.js"></script>
-  <!-- FIX (MESSAGE-MODULE-VS-GROUP-MODULE ISOLATION NEVER RAN): this file
-       existed fully written (capture-phase window 'message' listener that
-       stops any group-shaped message:new/new_message payload before
-       message-client.js's own bubble-phase handler can treat it as a
-       private-chat message) but was never actually included via a script
-       tag on any page, in this file or any other. With it absent, a group message
-       delivered under the legacy 'message:new'/'new_message' type had
-       nothing here to recognize it as belonging to group.html instead of
-       this private Message Module's chat list/unread state — the exact
-       cross-contamination this file's own header comment describes it as
-       existing to prevent. Loaded after message-client.js only for reading
-       order; capture-phase listeners always run before bubble-phase ones
-       regardless of script load order, so this still intercepts group
-       payloads before message-client.js sees them either way. -->
-  <script src="/js/group-message-isolation.js"></script>
+
 
   <script>
   (function () {
@@ -659,7 +665,7 @@
 
       const rowHtml = (c) => `
         <div class="conv-item${c.chatId === window.MessageModule.getActiveChatId() ? ' active' : ''}" data-chat-id="${c.chatId}">
-          <img class="conv-avatar" src="${escapeHtml(c.otherUser?.avatar || '/img/default-avatar.png')}" alt="">
+          <img class="conv-avatar" src="${escapeHtml(c.otherUser?.avatar || '/icons/necpa-192.png')}" alt="">
           <div class="conv-meta">
             <div class="conv-name">${favIds.has(String(c.chatId)) ? '\u2b50 ' : ''}${escapeHtml(c.otherUser?.username || 'Conversation')}</div>
             <div class="conv-preview">${escapeHtml(safeConvPreview(c.lastMessage))}</div>
@@ -746,7 +752,7 @@
         }
         listEl.innerHTML = convs.map(c => `
           <div class="conv-item" data-chat-id="${c.chatId}" style="display:flex;align-items:center;">
-            <img class="conv-avatar" src="${escapeHtml(c.otherUser?.avatar || '/img/default-avatar.png')}" alt="">
+            <img class="conv-avatar" src="${escapeHtml(c.otherUser?.avatar || '/icons/necpa-192.png')}" alt="">
             <div class="conv-meta">
               <div class="conv-name">${escapeHtml(c.otherUser?.username || 'Conversation')}</div>
               <div class="conv-preview">${escapeHtml(safeConvPreview(c.lastMessage))}</div>
@@ -882,7 +888,7 @@
       }
       convListEl.innerHTML = archived.map(c => `
         <div class="conv-item">
-          <img class="conv-avatar" src="${escapeHtml(c.otherUser?.avatar || '/img/default-avatar.png')}" alt="">
+          <img class="conv-avatar" src="${escapeHtml(c.otherUser?.avatar || '/icons/necpa-192.png')}" alt="">
           <div class="conv-meta">
             <div class="conv-name">${escapeHtml(c.otherUser?.username || 'Conversation')}</div>
           </div>
@@ -1775,7 +1781,7 @@
 
       body.innerHTML = `
         <div class="chat-info-header">
-          <img src="${escapeHtml(conv?.otherUser?.avatar || '/img/default-avatar.png')}" class="chat-info-avatar">
+          <img src="${escapeHtml(conv?.otherUser?.avatar || '/icons/necpa-192.png')}" class="chat-info-avatar">
           <div class="chat-info-name">${escapeHtml(conv?.otherUser?.username || 'Conversation')}</div>
         </div>
         <div class="chat-info-section">
@@ -2035,7 +2041,7 @@
     function renderNewChatResults(users) {
       newChatResults.innerHTML = users.map(u => `
         <div class="new-chat-result-item${broadcastMode ? ' broadcast-mode' : ''}" data-user-id="${u.id}" data-user-name="${escapeHtml(u.username || '')}" data-user-avatar="${escapeHtml(u.avatar || u.photoURL || '')}">
-          <img src="${escapeHtml(u.avatar || u.photoURL || '/img/default-avatar.png')}" alt="">
+          <img src="${escapeHtml(u.avatar || u.photoURL || '/icons/necpa-192.png')}" alt="">
           <span>${escapeHtml(u.username || u.firstName || u.displayName || 'User')}</span>
           ${broadcastMode
             ? `<input type="checkbox" class="broadcast-checkbox" data-broadcast-id="${u.id}"${broadcastSelectedIds.has(Number(u.id)) ? ' checked' : ''}>`

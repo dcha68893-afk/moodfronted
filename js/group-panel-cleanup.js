@@ -36,7 +36,12 @@ function initialize(){
   load('/js/group-settings-bridge.js','groupSettingsBridge');
   parentCreateBridge();
   parentNavigationBridge();
-  try{const p=window.parent;if(p&&p!==window&&!p.document.querySelector('script[data-parent-group-call]')){const s=p.document.createElement('script');s.src=`/js/group-call-parent-bridge.js?v=${VERSION}`;s.async=false;s.dataset.parentGroupCall='1';p.document.head.appendChild(s)}}catch(e){console.warn('[Groups] call bridge unavailable:',e.message)}
+  // FIX (console 404 + MIME-refused-script spam every time a group is opened
+  // from the message/chat list): this used to inject js/group-call-parent-bridge.js
+  // into the parent document on every group.html load. That file was removed
+  // from the repo along with the rest of the (disabled) calling feature, so
+  // every group open guaranteed a 404 plus a "Refused to execute script ...
+  // MIME type ('text/html')" warning. Removed; re-add if group calling ships.
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initialize,{once:true});else initialize();
 window.addEventListener('beforeunload',()=>{try{window.parent?.postMessage({type:'GROUP_PANEL_CLOSE',source:'groups'},'*')}catch(_) {}});

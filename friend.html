@@ -3369,7 +3369,10 @@
     <script src="/js/vendor/RecordRTC.min.js"></script>
     <script src="/js/vendor/viewer.min.js"></script>
     <script src="/js/vendor/wavesurfer.min.js"></script>
-    <script src="/js/vendor/peerjs.min.js"></script>
+    <!-- FIX: js/vendor/peerjs.min.js was 404ing on every load — the calling
+         feature (the only consumer of PeerJS) is disabled and the file was
+         removed from the repo. Re-add this tag alongside the restored
+         js/core/calls/*.js files if calling is re-enabled. -->
     <script src="/js/vendor/spectrum.min.js"></script>
     <script src="/js/vendor/video.min.js"></script>
     <script type="module" src="/js/vendor/emoji-picker.js"></script>

@@ -14,6 +14,16 @@
 (function () {
   'use strict';
 
+  // FIX (double-init): this file is now loaded via a static <script> tag in
+  // message.html (see that file for why), but config.js's loadOnce() for
+  // 'group_message_isolation' doesn't recognize a plain static tag (it only
+  // dedupes against its own data-necpra-loader attribute) and would inject
+  // this file a second time at DOMContentLoaded — registering a second
+  // 'message' listener with its own separate GROUPS/UNREAD maps and firing
+  // a second /chats fetch. Guard against running twice.
+  if (window.__necpraGroupMessageIsolationLoaded) return;
+  window.__necpraGroupMessageIsolationLoaded = true;
+
   const GROUPS = new Map();
   const UNREAD = new Map();
   let groupLoadInFlight = null;

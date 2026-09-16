@@ -6100,6 +6100,21 @@ const _CDN = {
     'Events & Entertainment': 'https://images.unsplash.com/photo-1511795409834-ef04bbd61622?w=300&h=300&fit=crop',
     'Beauty & Wellness':   'https://images.unsplash.com/photo-1487412947147-5cebf100ffc2?w=300&h=300&fit=crop',
     'Transport & Delivery':'https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?w=300&h=300&fit=crop',
+    // FIX (Gas & LPG listings showing an unrelated fallback photo, e.g. "K
+    // Gas" rendering an earphones/electronics stock image): the Gas & LPG
+    // category tree (below) references these 5 keys, but none of them were
+    // ever defined here, so _resolveListingImg()'s exact/case-insensitive
+    // lookups always missed and fell through to the generic _catImg()
+    // default or the unrelated first-subcategory image of the "Home &
+    // Office" category. Using placehold.co (already used elsewhere in this
+    // file as the guaranteed-to-load option — no CORS/auth/rate-limit) so
+    // every gas listing gets its own correct, always-loading tile instead
+    // of a random unrelated product photo.
+    'Gas Cylinders':          'https://placehold.co/400x300/f97316/ffffff?text=Gas+Cylinder',
+    'LPG Refills':            'https://placehold.co/400x300/f97316/ffffff?text=LPG+Refill',
+    'Gas Cookers':            'https://placehold.co/400x300/f97316/ffffff?text=Gas+Cooker',
+    'Gas Regulators':         'https://placehold.co/400x300/f97316/ffffff?text=Gas+Regulator',
+    'Gas Hoses & Accessories':'https://placehold.co/400x300/f97316/ffffff?text=Gas+Hose',
 };
 // Fallback for any entry not in the map — use a real product-style image
 function _catImg(name) {
