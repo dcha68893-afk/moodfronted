@@ -3,7 +3,7 @@
 'use strict';
 if(window.__NECPRA_GROUP_PANEL_CLEANUP__)return;
 window.__NECPRA_GROUP_PANEL_CLEANUP__=true;
-const VERSION='20260916-group6';
+const VERSION='20260916-group7';
 function load(src,key){if(document.querySelector(`script[data-${key}]`))return;const s=document.createElement('script');s.src=`${src}?v=${VERSION}`;s.async=false;s.dataset[key]='1';(document.head||document.documentElement).appendChild(s)}
 function removeDuplicateShell(){document.querySelector('.top')?.remove();document.querySelector('#chat .chatbar')?.remove()}
 function parentCreateBridge(){try{const p=window.parent;if(!p||p===window)return;const bind=()=>{const nodes=p.document.querySelectorAll('button,a,[role="button"]');nodes.forEach(el=>{if(el.dataset.groupCreateBound==='1')return;const text=[el.id,el.className,el.getAttribute('aria-label'),el.getAttribute('title'),el.textContent].join(' ').toLowerCase();const marked=/(group.*(create|new|add)|(create|new|add).*group)/.test(text);const plus=/^[+＋]$/.test(String(el.textContent||'').trim());const headerPlus=plus&&!!el.closest('#globalHeader,.header-actions,.module-header');if(!marked&&!headerPlus)return;el.dataset.groupCreateBound='1';el.addEventListener('click',ev=>{ev.preventDefault();ev.stopImmediatePropagation();const frame=p.document.querySelector('iframe[src*="group.html"],iframe[data-module="groups"]');try{frame?.contentWindow?.postMessage({type:'GROUP_CREATE_REQUEST',source:'chat-parent'},'*')}catch(_){}},true)})};bind();if(!p.__NECPRA_GROUP_CREATE_OBSERVER__){p.__NECPRA_GROUP_CREATE_OBSERVER__=new MutationObserver(bind);p.__NECPRA_GROUP_CREATE_OBSERVER__.observe(p.document.documentElement,{childList:true,subtree:true})}}catch(e){console.warn('[Groups] parent create bridge unavailable:',e.message)}}
@@ -34,14 +34,9 @@ function initialize(){
   load('/js/group-message-cache.js','groupMessageCache');
   load('/js/group-media-render.js','groupMediaRender');
   load('/js/group-settings-bridge.js','groupSettingsBridge');
+  load('/js/group-hardening.js','groupHardening');
   parentCreateBridge();
   parentNavigationBridge();
-  // FIX (console 404 + MIME-refused-script spam every time a group is opened
-  // from the message/chat list): this used to inject js/group-call-parent-bridge.js
-  // into the parent document on every group.html load. That file was removed
-  // from the repo along with the rest of the (disabled) calling feature, so
-  // every group open guaranteed a 404 plus a "Refused to execute script ...
-  // MIME type ('text/html')" warning. Removed; re-add if group calling ships.
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initialize,{once:true});else initialize();
 window.addEventListener('beforeunload',()=>{try{window.parent?.postMessage({type:'GROUP_PANEL_CLOSE',source:'groups'},'*')}catch(_) {}});
