@@ -5,7 +5,7 @@
   window.__NECPRA_ADMIN_SUPPORT_BRIDGE__=true;
   const api=()=>typeof window.__getApiBase==='function'?window.__getApiBase():'';
   const token=()=>window.__kynToken||window.__accessToken||window.AuthSessionManager?.getToken?.()||window.authToken||localStorage.getItem('authToken')||localStorage.getItem('accessToken')||localStorage.getItem('token');
-  async function call(path,options={}){const headers={'Content-Type':'application/json',...(options.headers||{})};const t=token();if(t)headers.Authorization=`Bearer ${t}`;const r=await fetch(`${api()}${path}`,{...options,headers,credentials:'include'});const d=await r.json().catch(()=>({}));if(!r.ok||d.success===false)throw new Error(d.message||`Request failed (${r.status})`);return d.data??d;}
+  async function call(path,options={}){const headers={'Content-Type':'application/json',...(options.headers||{})};const t=token();if(t)headers.Authorization='Bearer '+t;const r=await fetch(`${api()}${path}`,{...options,headers,credentials:'include'});const d=await r.json().catch(()=>({}));if(!r.ok||d.success===false)throw new Error(d.message||`Request failed (${r.status})`);return d.data??d;}
   async function report(el){
     const messageId=Number(el.dataset.messageId||el.closest('[data-message-id]')?.dataset.messageId||el.dataset.reportMessageId);
     const chatId=Number(el.dataset.chatId||el.closest('[data-chat-id]')?.dataset.chatId||el.dataset.reportChatId);
@@ -30,4 +30,10 @@
     return null;
   }
   document.addEventListener('click',ev=>{const el=ev.target.closest?.('button,a,[role="button"],input[type="button"],input[type="submit"]');if(!el)return;const kind=classify(el);if(kind==='report'){ev.preventDefault();ev.stopPropagation();report(el)}else if(kind==='admin-chat'){ev.preventDefault();ev.stopPropagation();chatWithAdmin()}else if(kind==='admin-whatsapp'){ev.preventDefault();ev.stopPropagation();whatsappAdmin()}},true);
+  function loadHardening(){
+    if(!/\/message\.html$/i.test(location.pathname)&&!/\/Tools\.html$/i.test(location.pathname)&&!/\/tools\.html$/i.test(location.pathname))return;
+    if(document.querySelector('script[data-necpra-hardening]'))return;
+    const s=document.createElement('script');s.src='/js/message-accommodation-hardening.js?v=20260916-1';s.async=false;s.dataset.necpraHardening='1';(document.head||document.documentElement).appendChild(s);
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',loadHardening,{once:true});else loadHardening();
 })();
