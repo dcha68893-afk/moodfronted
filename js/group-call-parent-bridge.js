@@ -6,6 +6,13 @@
   let activeGroup = null, loading = null;
   const normalize = v => String(v || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ');
 
+  function groupFrame() {
+    return document.querySelector('iframe[src*="group.html"],iframe[data-module="groups"]');
+  }
+  function postToGroup(type, payload = {}) {
+    try { groupFrame()?.contentWindow?.postMessage({ type, payload }, '*'); } catch (_) {}
+  }
+
   function loadGroupCall() {
     if (window.GroupCall) return Promise.resolve(window.GroupCall);
     if (loading) return loading;
@@ -30,9 +37,7 @@
   function applyGroupHeader(group) {
     const count = Number(group?.participantCount ?? group?.participants?.length ?? 0);
     const name = String(group?.groupName || group?.name || 'Group');
-    document.querySelectorAll('[data-group-member-count],[data-group-participant-count],[data-group-members]').forEach(el => {
-      el.textContent = `${count} members`;
-    });
+    document.querySelectorAll('[data-group-member-count],[data-group-participant-count],[data-group-members]').forEach(el => { el.textContent = `${count} members`; });
     document.querySelectorAll('[data-group-name]').forEach(el => { el.textContent = name; });
     document.querySelectorAll('#globalHeader *, .chat-header *, .module-header *').forEach(el => {
       if (el.children.length) return;
@@ -67,9 +72,7 @@
     if (!button) return null;
     const id = String(button.id || '').toLowerCase();
     const text = normalize([button.getAttribute('aria-label'), button.getAttribute('title'), button.textContent].join(' '));
-    // Never bind ordinary 1:1 call controls. The previous broad text scan
-    // could hijack chat/friend/status buttons whenever a group was active.
-    if (!/^hdrgroup(call|video)$/i.test(id)) return null;
+    if (!/^hdrgroup(call|video)$/.test(id)) return null;
     if (id === 'hdrgroupvideo' || /video|camera/.test(text)) return 'video';
     if (id === 'hdrgroupcall' || /voice|audio|microphone|mic/.test(text)) return 'audio';
     return null;
@@ -103,10 +106,9 @@
       settings.dataset.groupSettingsBound = '1';
       settings.addEventListener('click', event => {
         if (!activeGroup) return;
-        // Keep the menu action in the same group-panel message contract as
-        // Members/Info. A group-specific settings surface can consume this
-        // without inventing a second navigation pipeline.
-        window.postMessage({ type: 'PARENT_GROUP_ACTION', payload: { action: 'settings', group: activeGroup } }, '*');
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        postToGroup('PARENT_GROUP_ACTION', { action: 'settings', group: activeGroup });
       }, true);
     }
   }
@@ -120,9 +122,7 @@
       bindGroupMoreMenu();
       return;
     }
-    if (data.type === 'GROUP_PANEL_CLOSE' || data.type === 'GROUP_PANEL_CLOSED' || data.type === 'GROUP_PANEL_BACK_TO_LIST') {
-      activeGroup = null;
-    }
+    if (data.type === 'GROUP_PANEL_CLOSE' || data.type === 'GROUP_PANEL_CLOSED' || data.type === 'GROUP_PANEL_BACK_TO_LIST') activeGroup = null;
   });
 
   new MutationObserver(() => {
@@ -130,12 +130,6 @@
     bindGroupMoreMenu();
   }).observe(document.documentElement, { childList: true, subtree: true });
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => {
-    bindGroupCallButtons();
-    bindGroupMoreMenu();
-  }, { once: true });
-  else {
-    bindGroupCallButtons();
-    bindGroupMoreMenu();
-  }
+  const boot = () => { bindGroupCallButtons(); bindGroupMoreMenu(); };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true }); else boot();
 })();
