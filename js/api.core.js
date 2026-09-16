@@ -337,19 +337,26 @@ function resolveBaseURL() {
         if (typeof window !== 'undefined') {
             try {
                 if (typeof window.__getApiBase === 'function') {
-                    return window.__getApiBase();
+                    const base = window.__getApiBase();
+                    if (base) return base;
                 }
                 if (window.BACKEND_URL) {
                     return String(window.BACKEND_URL).replace(/\/+$/, '') + '/api';
                 }
             } catch (_) {
-                // fall through to the last-resort literal below
+                // window.__getApiBase() threw because js/config.js hasn't
+                // resolved BACKEND_URL yet. Fall through WITHOUT returning a
+                // hardcoded literal — getBaseUrl() below deliberately does not
+                // cache a null result, so the next call re-resolves instead of
+                // getting stuck on a stale/dead host for the rest of the page
+                // session (this used to fall back to a hardcoded, now-dead
+                // 'noxopa.onrender.com' — removed).
             }
         }
-        return 'https://noxopa.onrender.com/api';
+        return null;
     } catch (error) {
         console.error('[ENV] Base URL resolution error:', error);
-        return 'https://noxopa.onrender.com/api';
+        return null;
     }
 }
 
@@ -570,7 +577,22 @@ getBaseUrl = function() {
             console.log(`[ENV] Auto-detected environment: ${CURRENT_ENVIRONMENT}`);
         }
         
-        ACTIVE_BASE_URL = resolveBaseURL();
+        const resolved = resolveBaseURL();
+        if (!resolved) {
+            // FIX (MISSING-API-BASE-STATE): resolveBaseURL() found no centralized
+            // BACKEND_URL yet (js/config.js hasn't resolved it on this call). This
+            // used to still assign a hardcoded 'noxopa.onrender.com' (a now-dead
+            // host) into ACTIVE_BASE_URL, which then got cached and reused for
+            // the rest of the page session even after the real BACKEND_URL became
+            // available — every request silently kept going to the dead host,
+            // which is what caused api.auth.js's polling requests to hang/timeout.
+            // Deliberately do NOT assign ACTIVE_BASE_URL here, so the very next
+            // getBaseUrl() call re-resolves instead of getting stuck.
+            console.warn('[ENV] Backend URL not yet available from centralized config (js/config.js) — not caching a fallback, will retry next call');
+            return 'http://localhost:4000/api';
+        }
+        
+        ACTIVE_BASE_URL = resolved;
         
         if (CURRENT_ENVIRONMENT === ENVIRONMENTS.PRODUCTION && 
             ACTIVE_BASE_URL && 
@@ -584,7 +606,7 @@ getBaseUrl = function() {
         
     } catch (error) {
         console.error('[ENV] Get base URL error:', error);
-        return 'http://localhost:4000/api';  // CHANGE THIS - add /api
+        return 'http://localhost:4000/api';
     }
 };
 

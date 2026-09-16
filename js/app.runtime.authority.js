@@ -73,17 +73,32 @@
         return /^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
     }
 
+    // FIX (RUNTIME-AUTHORITY-STALE-BACKEND-FALLBACK): this file used to define
+    // its own getApiOrigin()/getApiBase() resolver, hardcoded to a dead backend
+    // host ('https://noxopa.onrender.com', the old renamed backend — see
+    // moodfronted/.env's BACKEND_URL for the real current host) for anything
+    // that wasn't localhost, and registered them as window.__getApiOrigin /
+    // window.__getApiBase whenever those globals weren't already set. js/config.js
+    // (loaded earlier on every page, before this file) is the single centralized
+    // source of truth for BACKEND_URL and already defines window.__getApiOrigin /
+    // window.__getApiBase from it — this file has no business redefining them or
+    // second-guessing that value. Reading window.BACKEND_URL directly here (never
+    // calling window.__getApiOrigin()) avoids any dependency on config.js's
+    // function objects and removes the dead-host fallback entirely: if
+    // window.BACKEND_URL genuinely isn't set yet, this returns an empty string
+    // instead of silently pointing at a host that no longer serves this app.
     function getApiOrigin() {
-        return detectLocalEnvironment() ? 'http://localhost:4000' : 'https://noxopa.onrender.com';
+        return String(window.BACKEND_URL || '').trim().replace(/\/+$/, '');
     }
 
     function getApiBase() {
-        return `${getApiOrigin()}/api`;
+        const origin = getApiOrigin();
+        return origin ? `${origin}/api` : '';
     }
 
     window.__isLocalEnvironment = window.__isLocalEnvironment || detectLocalEnvironment;
-    window.__getApiOrigin = window.__getApiOrigin || getApiOrigin;
-    window.__getApiBase = window.__getApiBase || getApiBase;
+    if (typeof window.__getApiOrigin !== 'function') window.__getApiOrigin = getApiOrigin;
+    if (typeof window.__getApiBase !== 'function') window.__getApiBase = getApiBase;
 
     function emit(eventName, payload) {
         if (window.KynectaEventBus && typeof window.KynectaEventBus.emit === 'function') {
