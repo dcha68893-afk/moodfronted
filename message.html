@@ -479,6 +479,21 @@
        synchronously on first run. -->
   <script src="/js/message-local-db.js"></script>
   <script src="/js/message-client.js"></script>
+  <!-- FIX (MESSAGE-MODULE-VS-GROUP-MODULE ISOLATION NEVER RAN): this file
+       existed fully written (capture-phase window 'message' listener that
+       stops any group-shaped message:new/new_message payload before
+       message-client.js's own bubble-phase handler can treat it as a
+       private-chat message) but was never actually included via a script
+       tag on any page, in this file or any other. With it absent, a group message
+       delivered under the legacy 'message:new'/'new_message' type had
+       nothing here to recognize it as belonging to group.html instead of
+       this private Message Module's chat list/unread state — the exact
+       cross-contamination this file's own header comment describes it as
+       existing to prevent. Loaded after message-client.js only for reading
+       order; capture-phase listeners always run before bubble-phase ones
+       regardless of script load order, so this still intercepts group
+       payloads before message-client.js sees them either way. -->
+  <script src="/js/group-message-isolation.js"></script>
 
   <script>
   (function () {

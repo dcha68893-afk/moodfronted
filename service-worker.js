@@ -24,17 +24,19 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.24.0';
+const SW_VERSION = '19.25.0';
 // FIX: bumped so activate() drops every existing cache immediately on this
 // deploy — anyone with a stale pre-rebuild group.html (or the old, now-
-// deleted group-core-*/group-os-* files, or the misspelled necpa-* icons)
-// cached under the old name gets a clean break on next load, instead of
-// waiting on the 7-day CACHE_MAX_AGE staleness check or a lucky reinstall.
-const CACHE_NAME = 'necpa-static-v48';
+// deleted group-core-*/group-os-* files, or the misspelled necpra-* icons
+// that a previous "fix" had wrongly swapped in place of the real necpa-*
+// app log image set) cached under the old name gets a clean break on next
+// load, instead of waiting on the 7-day CACHE_MAX_AGE staleness check or a
+// lucky reinstall.
+const CACHE_NAME = 'necpa-static-v49';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
-  '/index.html','/manifest.json','/icons/necpra-192.png','/icons/necpra-512.png',
+  '/index.html','/manifest.json','/icons/necpa-192.png','/icons/necpa-512.png',
   '/Tool.css','/Tool-ui.js','/Tool-core.part1.js','/Tool-core.part2.js','/Tool-core.part3.js',
   '/friend.html','/chat.html','/calls.html',
   '/calls-core.part1.js','/calls-core.part2.js','/calls-core.part3.js','/calls-core.part4.js',
@@ -177,7 +179,7 @@ function encryptedBody(s){if(typeof s!=='string')return false;const t=s.trim();i
 self.addEventListener('push',event=>{
   if(!event.data)return;let data={};try{data=event.data.json();}catch(_){try{data={title:'Necpa',body:event.data.text()};}catch(__){return;}}
   const raw=String(data.body||data.message||'');const safe=encryptedBody(raw)?'You have a new message':(raw||'You have a new notification');const title=data.title||'Necpa';
-  const options={body:data.senderName?data.senderName+': '+safe:safe,icon:data.icon||'/icons/necpra-192.png',badge:data.badge||'/icons/necpra-192.png',tag:data.type==='message'||data.type==='new_message'?'msg-'+(data.chatId||'chat'):(data.tag||'necpa-notification'),data:data.data||{url:data.url||'/chat.html'},silent:data.silent===true,requireInteraction:data.requireInteraction||false,vibrate:Array.isArray(data.vibrate)?data.vibrate:(data.vibrate===false?[]:[200,100,200])};
+  const options={body:data.senderName?data.senderName+': '+safe:safe,icon:data.icon||'/icons/necpa-192.png',badge:data.badge||'/icons/necpa-192.png',tag:data.type==='message'||data.type==='new_message'?'msg-'+(data.chatId||'chat'):(data.tag||'necpa-notification'),data:data.data||{url:data.url||'/chat.html'},silent:data.silent===true,requireInteraction:data.requireInteraction||false,vibrate:Array.isArray(data.vibrate)?data.vibrate:(data.vibrate===false?[]:[200,100,200])};
   event.waitUntil((async()=>{if(data.type==='message'||data.type==='new_message'){try{const chat=String(data.chatId||(data.data&&data.data.chatId)||''),map=self.__kynActiveChatByClient,cs=await self.clients.matchAll({type:'window',includeUncontrolled:true});if(chat&&cs.some(c=>c.focused&&map&&map.get(c.id)===chat))return;}catch(_){} }return self.registration.showNotification(title,options);})());
 });
 self.addEventListener('notificationclick',event=>{event.notification.close();const url=(event.notification.data&&event.notification.data.url)||'/chat.html';event.waitUntil(self.clients.matchAll({type:'window',includeUncontrolled:true}).then(cs=>{for(const c of cs){if(c.url.includes(url)&&c.focus)return c.focus();}return self.clients.openWindow?self.clients.openWindow(url):null;}));});

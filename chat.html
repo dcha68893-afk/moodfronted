@@ -58,12 +58,11 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="Necpa">
-    <!-- FIX (tab icon didn't match the actual app icon): pointed at the old,
-         misspelled "necpa-*" files instead of the real "necpra-*" icon set
-         manifest.json already uses as the PWA/home-screen icon. -->
-    <link rel="apple-touch-icon" href="/icons/necpra-192.png">
-    <link rel="icon" type="image/png" sizes="192x192" href="/icons/necpra-192.png">
-    <link rel="icon" type="image/png" sizes="512x512" href="/icons/necpra-512.png">
+    <!-- App log image (favicon / home-screen icon): must use the "necpa-*" icon set to
+         match the app's actual name (Necpa), not the misspelled "necpra-*" set. -->
+    <link rel="apple-touch-icon" href="/icons/necpa-192.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/necpa-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="/icons/necpa-512.png">
     <style>
         :root {
             --app-primary-gradient: linear-gradient(135deg, #2563eb 0%, #1d4ed8 62%, #06b6d4 100%);
@@ -6975,6 +6974,54 @@
                         const friendsIframe = document.getElementById('friendsIframe');
                         if (friendsIframe && friendsIframe.contentWindow) setTimeout(() => friendsIframe.contentWindow.postMessage({ type: 'RETURN_FROM_CALL', payload: { returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*'), 300);
                     }
+                    // FIX (GROUP-CLICK-NOT-OPENING): navigateToPage(data.module) above only
+                    // ever switches the visible module container — it never opens a specific
+                    // group. Every sender of a groups SWITCH_MODULE (e.g. the Messages
+                    // module's embedded group sidebar in group-message-isolation.js) also
+                    // includes payload.groupId expecting the exact group to open, the same
+                    // way the 'messages' branch above opens a specific chat. That never
+                    // happened for groups, so clicking a group from anywhere outside
+                    // group.html itself just showed the bare group list. Mirrors the
+                    // messages module's retry-until-open pattern, using the group iframe's
+                    // GROUP_PANEL_OPEN ack (posted by group.html's openGroup()) instead of
+                    // messagesIframe's CHAT_OPENED.
+                    if (data.module === 'group' && data.payload?.groupId) {
+                        const _gid = data.payload.groupId;
+                        let _gAcked = false;
+                        let _gAttempts = 0;
+                        const _postG = () => {
+                            if (_gAcked) return;
+                            const gIframe = document.getElementById('groupIframe');
+                            if (gIframe && gIframe.contentWindow) {
+                                gIframe.contentWindow.postMessage({ type: 'OPEN_GROUP_BY_ID', payload: { groupId: _gid }, source: 'parent-frame' }, '*');
+                            }
+                            if (_gAttempts++ < 12) setTimeout(_postG, 500);
+                        };
+                        window.addEventListener('message', function _gAckListener(gackEvt) {
+                            if (gackEvt.data && gackEvt.data.type === 'GROUP_PANEL_OPEN' &&
+                                String(gackEvt.data.payload && gackEvt.data.payload.id) === String(_gid)) {
+                                _gAcked = true;
+                                window.removeEventListener('message', _gAckListener);
+                            }
+                        });
+                        _postG();
+                    }
+                }
+
+                // FIX (GROUP-CLICK-NOT-OPENING, direct path): some callers post a bare
+                // 'OPEN_GROUP_BY_ID' message straight to the parent (not wrapped in
+                // SWITCH_MODULE) expecting it to reach group.html the same way
+                // 'OPEN_CHAT_WITH_USER' reaches messagesIframe. Nothing here relayed it,
+                // so that request silently went nowhere. Forward it straight into the
+                // group iframe; also make sure the Group module is actually visible,
+                // since a deep-link/notification click may arrive before the user has
+                // ever opened the Groups tab this session.
+                if (data.type === 'OPEN_GROUP_BY_ID' && data.payload?.groupId) {
+                    try { navigateToPage('group'); } catch (_) {}
+                    const gIframe = document.getElementById('groupIframe');
+                    if (gIframe && gIframe.contentWindow) {
+                        gIframe.contentWindow.postMessage({ type: 'OPEN_GROUP_BY_ID', payload: data.payload, source: 'parent-frame' }, '*');
+                    }
                 }
 
                 if (data.type === 'DIRECT_CHAT_REQUEST') {
@@ -8984,6 +9031,16 @@ function postToGroup(type, payload) {
     if (f && f.contentWindow)
         f.contentWindow.postMessage({ type: type, payload: payload || {}, source: 'parent-shell', timestamp: Date.now() }, '*');
 }
+// FIX (ReferenceError: postToGroup is not defined): postToGroup was only ever
+// declared inside this IIFE's local closure, but other <script> blocks further
+// down this same file (each one its own separate execution context — an IIFE
+// in one script tag is invisible to another) call postToGroup directly, e.g.
+// the group push-notification deep-link handler (kyn:openGroup). That call
+// silently threw and was swallowed, so a group notification click never
+// actually opened the group. Expose it on window so every later script block
+// in this file can reuse the one real implementation instead of each needing
+// its own copy (or reimplementing it against a stale/missing groupIframe).
+window.postToGroup = postToGroup;
 
 /* ── Show group context in globalHeader ─────────────────────── */
 function showGroupHeader(g) {

@@ -144,9 +144,21 @@
     renderSidebar();
 
     try {
+      // FIX (GROUP-CLICK-NOT-OPENING, root cause): every other module's nav
+      // button/content-div id matches what its own SWITCH_MODULE sender uses
+      // ('messages'->messagesContent, 'friends'->friendsContent, 'calls'->
+      // callsContent, 'settings'->settingsContent) — Groups is the one
+      // exception: its nav button is data-page="group" and its container is
+      // #groupContent (singular), not #groupsContent. chat.html's
+      // navigateToPage(data.module) looks up `${page}Content` directly, so
+      // sending 'groups' here made it search for a #groupsContent that has
+      // never existed — every click on a group from this sidebar hid every
+      // module and showed nothing, with no visible error. Use the real
+      // module key. (chat.html now also reads payload.groupId here to open
+      // this exact group instead of just the bare group list.)
       window.parent.postMessage({
         type: 'SWITCH_MODULE',
-        module: 'groups',
+        module: 'group',
         payload: { groupId: Number(id), groupIdString: id, groupName: group.name || 'Group' },
         source: 'message-group-sidebar'
       }, '*');

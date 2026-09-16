@@ -44,7 +44,7 @@
 
     inject('pwaInstallBanner',
       '<div id="pwaInstallInner" style="position:fixed;left:0;right:0;bottom:0;z-index:2147483647;background:#fff;border-top:2px solid #2563eb;box-shadow:0 -6px 28px rgba(0,0,0,.18);padding:12px 14px;display:flex;align-items:center;gap:12px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">' +
-      '<img src="/icons/necpa-192.png" alt="Necpra" style="width:46px;height:46px;border-radius:12px;object-fit:cover;flex:0 0 auto" onerror="this.style.display=\'none\'">' +
+      '<img src="/icons/necpa-192.png" alt="Necpa" style="width:46px;height:46px;border-radius:12px;object-fit:cover;flex:0 0 auto" onerror="this.style.display=\'none\'">' +
       '<div style="flex:1;min-width:0"><div style="font-weight:800;font-size:14px;color:#111">Install Necpra</div><div style="font-size:12px;color:#64748b;margin-top:2px">Install the app for a faster experience.</div></div>' +
       '<button type="button" id="pwaInstallButton" style="background:#2563eb;color:#fff;border:0;border-radius:10px;padding:10px 17px;font-weight:700;cursor:pointer">Install</button>' +
       '<button type="button" id="pwaInstallClose" aria-label="Dismiss" style="background:none;border:0;color:#64748b;font-size:23px;line-height:1;padding:4px 7px;cursor:pointer">&times;</button>' +

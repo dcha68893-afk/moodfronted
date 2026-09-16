@@ -54,13 +54,10 @@
     <script src="/js/kynecta.safety.layer.js"></script>
     <link rel="manifest" href="../manifest.json">
     <!-- theme-color is now set dynamically by theme.engine.js to match the saved theme -->
-    <!-- FIX (tab icon didn't match the actual app icon): every page's
-         favicon link pointed at the old, misspelled "necpa-*" image files
-         instead of the real "necpra-*" icon set that manifest.json (the
-         PWA/home-screen icon source of truth) already used — so the browser
-         tab and the installed app icon never matched. -->
-    <link rel="icon" href="../icons/necpra-192.png">
-    <link rel="icon" href="../icons/necpra-512.png">
+    <!-- App log image (favicon / home-screen icon): use the "necpa-*" icon set to
+         match the app's actual name (Necpa), not the misspelled "necpra-*" set. -->
+    <link rel="icon" href="../icons/necpa-192.png">
+    <link rel="icon" href="../icons/necpa-512.png">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
     <title>Marketplace | Knecta Chat</title>
