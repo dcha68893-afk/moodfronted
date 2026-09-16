@@ -668,9 +668,8 @@
       const lockedSectionHtml = lockedConvs.length ? `
         <div class="conv-locked-header" id="kynLockedHeader" style="display:flex;align-items:center;gap:8px;padding:10px 14px;font-size:12px;font-weight:700;color:var(--kyn-text-secondary,#888);cursor:pointer;">
           <span>🔒 Locked chats (${lockedConvs.length})</span>
-          <span style="margin-left:auto;">${_kynLockedRevealed ? '▾ Hide' : '▸ Unlock'}</span>
+          <span style="margin-left:auto;">▸ Unlock</span>
         </div>
-        ${_kynLockedRevealed ? lockedConvs.map(rowHtml).join('') : ''}
       ` : '';
 
       convListEl.innerHTML = convs.map(rowHtml).join('') + lockedSectionHtml;
@@ -690,12 +689,73 @@
 
       const lockedHeader = document.getElementById('kynLockedHeader');
       if (lockedHeader) {
+        // ROOT-CAUSE FIX (LOCKED-CHATS-SHARE-THE-NORMAL-SCREEN): this used to
+        // just flip _kynLockedRevealed and re-render THIS SAME list with the
+        // locked rows appended inline below the regular ones — not the
+        // separate, PIN-gated screen requested (open only locked chats,
+        // with its own place to unlock/re-lock each one). Opens a dedicated
+        // full-screen overlay instead; the inline reveal path is removed.
         lockedHeader.addEventListener('click', async () => {
-          if (_kynLockedRevealed) { _kynLockedRevealed = false; renderConversationList(); return; }
           if (!_kynHasChatLockPin()) { if (!(await _kynSetupChatLockPin())) return; }
-          if (await _kynVerifyChatLockPin()) { _kynLockedRevealed = true; renderConversationList(); }
+          if (await _kynVerifyChatLockPin()) _kynShowLockedChatsScreen();
         });
       }
+    }
+
+    // Dedicated locked-chats screen: shows ONLY locked conversations, each
+    // with its own unlock control, and lets the user tap through to open
+    // one normally. Re-verifies the PIN every time it's opened (same as
+    // WhatsApp) — nothing about unlocking here persists past this screen.
+    function _kynShowLockedChatsScreen() {
+      const existing = document.getElementById('kynLockedScreen');
+      if (existing) existing.remove();
+      const overlay = document.createElement('div');
+      overlay.id = 'kynLockedScreen';
+      overlay.style.cssText = 'position:fixed;inset:0;background:var(--kyn-bg-root,#fff);z-index:9500;display:flex;flex-direction:column;';
+      overlay.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--kyn-border,#eee);">
+          <button id="kynLockedBack" style="border:none;background:none;font-size:18px;cursor:pointer;color:inherit;">←</button>
+          <div style="font-weight:700;font-size:15px;">🔒 Locked Chats</div>
+        </div>
+        <div id="kynLockedList" style="flex:1;overflow-y:auto;"></div>`;
+      document.body.appendChild(overlay);
+      overlay.querySelector('#kynLockedBack').addEventListener('click', () => overlay.remove());
+
+      const renderLockedScreenList = () => {
+        const lockedIds = _kynCLGetSet('locked_chats');
+        const convs = (window.MessageModule.getConversations() || []).filter(c => lockedIds.has(String(c.chatId)));
+        const listEl = overlay.querySelector('#kynLockedList');
+        if (!convs.length) {
+          listEl.innerHTML = `<div class="empty-conv-list"><div class="empty-conv-icon">🔒</div><div class="empty-conv-title">No locked chats</div><div class="empty-conv-subtitle">Long-press any chat and choose "Lock chat"</div></div>`;
+          return;
+        }
+        listEl.innerHTML = convs.map(c => `
+          <div class="conv-item" data-chat-id="${c.chatId}" style="display:flex;align-items:center;">
+            <img class="conv-avatar" src="${escapeHtml(c.otherUser?.avatar || '/img/default-avatar.png')}" alt="">
+            <div class="conv-meta">
+              <div class="conv-name">${escapeHtml(c.otherUser?.username || 'Conversation')}</div>
+              <div class="conv-preview">${escapeHtml(safeConvPreview(c.lastMessage))}</div>
+            </div>
+            <button data-unlock="${c.chatId}" style="border:none;background:none;font-size:16px;cursor:pointer;color:inherit;padding:8px;" title="Unlock chat">🔓</button>
+          </div>`).join('');
+        listEl.querySelectorAll('[data-unlock]').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const ids = _kynCLGetSet('locked_chats');
+            ids.delete(String(btn.dataset.unlock));
+            _kynCLSaveSet('locked_chats', ids);
+            renderLockedScreenList();
+            renderConversationList();
+          });
+        });
+        listEl.querySelectorAll('.conv-item').forEach(el => {
+          el.addEventListener('click', () => {
+            overlay.remove();
+            window.MessageModule.openChat({ conversationId: Number(el.dataset.chatId) });
+          });
+        });
+      };
+      renderLockedScreenList();
     }
 
     function _kynCloseConvMenu() {

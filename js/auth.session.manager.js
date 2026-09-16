@@ -266,8 +266,22 @@
         return { success: true };
     }
 
-    function shouldPromptLogin() {
-        const session = loadSession();
+    // ROOT-CAUSE FIX (SESSION-EXPIRES-ON-REFRESH-BEFORE-TIMEOUT): this used to
+    // unconditionally call loadSession(), which reads ONLY the
+    // 'kynecta_session' storage key (CONFIG.SESSION_KEY) that this file
+    // itself writes via createSession()/performSaveSession(). But the real
+    // login record lives in 'kynecta_auth', written directly by
+    // app.ui.auth.js — and createSession() is a no-op (returns {ephemeral:
+    // true} without ever calling performSaveSession()) whenever rememberMe
+    // is false. In that case 'kynecta_session' is NEVER written at all, so
+    // on the very next refresh loadSession() returns null and this function
+    // reported "expired" even though the actual, unexpired token was sitting
+    // right there in 'kynecta_auth'. Now it prefers an explicitly-passed
+    // session (initialize() passes the one it just built from 'kynecta_auth'
+    // moments earlier) and only falls back to the separate 'kynecta_session'
+    // copy — for legacy/other callers — when no session was supplied.
+    function shouldPromptLogin(explicitSession) {
+        const session = explicitSession || loadSession();
         if (!session) return true;
         const timeout = getSessionTimeoutMs(session);
         const lastActivity = Number(session.lastActivity) || Number(session.createdAt) || Date.now();
@@ -441,8 +455,10 @@
             window.__userToken = auth.token;
             window.__accessToken = auth.token;
 
-            // Enforce timeout immediately when reopening the app.
-            if (shouldPromptLogin()) return { success: true, sessionExpired: true };
+            // Enforce timeout immediately when reopening the app — check the
+            // session we just built from the authoritative 'kynecta_auth'
+            // record, not a possibly-never-written separate copy.
+            if (shouldPromptLogin(currentSession)) return { success: true, sessionExpired: true };
             if (!isTokenValid(auth.token)) await _attemptTokenRefresh(currentSession);
             return { success: true, sessionRestored: true };
         } catch (error) {

@@ -517,7 +517,19 @@ const SettingsState = {
                 username: 'username', bio: 'bio',
                 displayName: 'displayName', firstName: 'displayName', lastName: 'displayName',
             };
-            if (section === 'account' && IDENTITY_KEY_MAP[key]) {
+            // ROOT-CAUSE FIX (PROFILE/COVER-PHOTO-DOESN'T-SYNC-INSTANTLY):
+            // this gate required section === 'account', but both photo
+            // upload call sites (settings-ui.js) call
+            // updatePhoto('profile', 'photoUrl'/'coverPhotoUrl', ...) — i.e.
+            // section is 'profile', not 'account'. So this whole
+            // zero-latency Identity-store push (the mechanism specifically
+            // built to make a photo change appear instantly in every open
+            // module, including group.html/status.html which don't load
+            // AppSettings.js at all) was silently skipped for every photo
+            // upload, regardless of whether the account was Google-linked or
+            // manual — it never ran for photos at all. Widened to accept
+            // both section names actually in use.
+            if ((section === 'account' || section === 'profile') && IDENTITY_KEY_MAP[key]) {
                 let currentUserId = null;
                 try { currentUserId = (window.currentUser && window.currentUser.id) || JSON.parse(localStorage.getItem('currentUser') || '{}').id; } catch (_) {}
                 if (currentUserId != null) {

@@ -4978,12 +4978,28 @@ export async function inviteTeamMemberWrapper(email, role = 'member') {
 export async function openChat(userId, userName) {
     try {
         if (!isActive()) return false;
-        safeSend('OPEN_CHAT', { userId, userName, timestamp: Date.now() });
+        // ROOT-CAUSE FIX (CHAT-WITH-ADMIN-DOES-NOTHING): this posted a message
+        // of type 'OPEN_CHAT' — a type the parent shell (chat.html) never
+        // listens for at all. The parent's real, working "open a 1:1 chat
+        // with a specific user" entry point is 'DIRECT_CHAT_REQUEST' (see
+        // calls-ui.js's working "message this user" button, and chat.html's
+        // DIRECT_CHAT_REQUEST → OPEN_CHAT_WITH_USER handler) — every caller
+        // of this function (support chat, and the 3 other "chat with X"
+        // buttons in Tool-ui.js that fall back to it) was silently a no-op.
+        safeSend('DIRECT_CHAT_REQUEST', { userId, userName, findExisting: true, timestamp: Date.now() });
         return true;
     } catch {
         return false;
     }
 }
+// ROOT-CAUSE FIX (CHAT-WITH-ADMIN-DOES-NOTHING, part 2): this file is loaded
+// as an ES module (Tools.html: <script type="module" src="Tool-core.part3.js">),
+// so `export`ing openChat does NOT put it in the global/window scope. Every
+// caller in Tool-ui.js (a plain, non-module script) checks
+// `typeof openChat === 'function' ? openChat : window.openChat` — both sides
+// of that check were always undefined from outside this module, so it always
+// fell through to a fake "Opening support chat…" toast that opened nothing.
+window.openChat = openChat;
 
 export async function loadAnalyticsData() {
     try {

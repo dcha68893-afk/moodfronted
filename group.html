@@ -1,4 +1,18 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Groups</title><script src="/js/runtime-config.js"></script><script src="/js/config.js"></script><script src="/js/theme.engine.js"></script><style>*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden}body{background:var(--bg,#f8fafc);color:var(--text,#0f172a);font:14px system-ui,-apple-system,"Segoe UI",Roboto,Arial}.hidden{display:none!important}button,input,textarea{font:inherit}button{cursor:pointer}.layout{height:100%;display:grid;grid-template-columns:minmax(250px,32%) 1fr}.sidebar{border-right:1px solid var(--border,#e2e8f0);background:var(--surface,#fff);display:flex;flex-direction:column;min-width:0}.side-head{padding:12px 14px;border-bottom:1px solid var(--border,#e2e8f0);font-weight:800}.toolbar{display:flex;gap:7px;padding:10px}.search{flex:1;min-width:0;padding:9px;border:1px solid var(--border,#e2e8f0);border-radius:11px;background:var(--surface2,#f1f5f9);color:inherit}.refresh{width:38px;border:1px solid var(--border,#e2e8f0);border-radius:10px;background:var(--surface2,#f1f5f9);color:inherit}.groups{flex:1;overflow:auto;padding:0 10px}.group{width:100%;display:flex;align-items:center;gap:10px;padding:10px;border:1px solid transparent;border-radius:13px;background:transparent;color:inherit;text-align:left;margin-bottom:5px}.group:hover,.group.active{background:var(--surface2,#f1f5f9);border-color:var(--border,#e2e8f0)}.avatar{width:43px;height:43px;border-radius:13px;background:linear-gradient(135deg,#dbeafe,#c4b5fd);display:grid;place-items:center;font-weight:800;color:#1e40af;flex:0 0 auto;background-size:cover;background-position:center}.groupmain{min-width:0;flex:1}.name{font-weight:750;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.meta{font-size:11px;color:var(--muted,#64748b);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.empty{text-align:center;color:var(--muted,#64748b);padding:40px 18px}.panel{min-width:0;height:100%;display:flex;flex-direction:column;background:var(--bg,#f8fafc)}.messages{flex:1;overflow:auto;padding:14px}.row{display:flex;margin:6px 0}.row.mine{justify-content:flex-end}.bubble{max-width:min(78%,620px);padding:9px 11px;border:1px solid var(--border,#e2e8f0);border-radius:15px;background:var(--surface,#fff);overflow-wrap:anywhere}.mine .bubble{background:var(--primary,#2563eb);color:#fff;border-color:var(--primary,#2563eb)}.sender{font-size:10px;font-weight:700;color:var(--primary,#2563eb);margin-bottom:3px}.time{font-size:9px;opacity:.65;text-align:right;margin-top:4px}.composer{display:flex;gap:7px;padding:8px;background:var(--surface,#fff);border-top:1px solid var(--border,#e2e8f0)}textarea{flex:1;resize:none;min-height:42px;max-height:120px;padding:10px;border:1px solid var(--border,#e2e8f0);border-radius:13px;background:var(--surface2,#f1f5f9);color:inherit}.send{width:43px;border:0;border-radius:13px;background:var(--primary,#2563eb);color:#fff}.modal{position:fixed;inset:0;background:#0008;display:grid;place-items:center;padding:14px;z-index:20}.card{width:min(620px,100%);max-height:92vh;overflow:auto;background:var(--surface,#fff);border:1px solid var(--border,#e2e8f0);border-radius:18px}.head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid var(--border,#e2e8f0)}.head h2{margin:0}.close{border:0;background:transparent;color:inherit;font-size:22px}.section{padding:14px 16px;border-bottom:1px solid var(--border,#e2e8f0)}.member{display:flex;align-items:center;gap:8px;padding:7px 0}.who{flex:1}.who b{display:block}.who small{color:var(--muted,#64748b);font-size:10px}.smallbtn{padding:8px 10px;border:1px solid var(--border,#e2e8f0);border-radius:9px;background:var(--surface2,#f1f5f9);color:inherit}.section input,.section textarea{width:100%;padding:9px;border:1px solid var(--border,#e2e8f0);border-radius:10px;background:var(--surface2,#f1f5f9);color:inherit}.section textarea{min-height:80px;margin-top:8px}@media(max-width:700px){.layout{grid-template-columns:1fr}.panel{display:none}.layout.chat-open .sidebar{display:none}.layout.chat-open .panel{display:flex}}</style></head><body><div id="layout" class="layout"><aside class="sidebar"><div class="side-head">Groups</div><div class="toolbar"><input id="search" class="search" placeholder="Search groups…"><button id="refresh" class="refresh" type="button">↻</button></div><div id="groups" class="groups"><div class="empty">Loading groups…</div></div></aside><section class="panel"><div id="messages" class="messages"><div class="empty">Select a group to start chatting.</div></div><div class="composer"><textarea id="input" rows="1" placeholder="Message the group…"></textarea><button id="send" class="send" type="button">➤</button></div></section></div><div id="create" class="modal hidden"><div class="card"><div class="head"><h2>Create group</h2><button class="close" data-close type="button">×</button></div><form id="createForm"><div class="section"><input id="gname" required maxlength="100" placeholder="Group name"><textarea id="gdesc" maxlength="1000" placeholder="Description"></textarea></div><div class="section"><b>Choose members</b><div id="friends"></div></div><div class="section" style="text-align:right"><button type="submit" class="smallbtn">Create group</button></div></form></div></div><script>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Groups</title><script src="/js/runtime-config.js"></script><script src="/js/config.js"></script><script src="/js/theme.engine.js"></script><style>/* ROOT-CAUSE FIX (DARK-THEME-SPARK/FLICKER-IN-GROUP-PANEL): this file's
+   rules below reference --bg/--surface/--surface2/--border/--text/--muted/
+   --primary, but theme.engine.js + theme.colors.css only ever define the
+   --kyn-* prefixed variable names (root.style.setProperty('--kyn-bg-root',...)
+   etc). None of those generic names were ever set anywhere, so every rule
+   here silently fell back to its literal light-mode default color no matter
+   what theme was active — this panel was permanently light. Loaded as an
+   iframe inside a dark-themed parent shell, that showed as a bright white
+   flash every time the group panel (re)loaded, which read as "sparking"
+   specifically in dark mode (light mode already matched, so nothing looked
+   wrong there). Bridging the generic names to the real, live --kyn-* custom
+   properties — rather than rewriting every rule below — makes this panel
+   follow the same theme the rest of the app already paints atomically. */
+:root{--bg:var(--kyn-bg-root,#f8fafc);--surface:var(--kyn-bg-panel,#fff);--surface2:var(--kyn-bg-input,#f1f5f9);--border:var(--kyn-border,#e2e8f0);--text:var(--kyn-text-primary,#0f172a);--muted:var(--kyn-text-muted,#64748b);--primary:var(--kyn-accent-secondary,#2563eb)}
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden}body{background:var(--bg,#f8fafc);color:var(--text,#0f172a);font:14px system-ui,-apple-system,"Segoe UI",Roboto,Arial}.hidden{display:none!important}button,input,textarea{font:inherit}button{cursor:pointer}.layout{height:100%;display:grid;grid-template-columns:minmax(250px,32%) 1fr}.sidebar{border-right:1px solid var(--border,#e2e8f0);background:var(--surface,#fff);display:flex;flex-direction:column;min-width:0}.side-head{padding:12px 14px;border-bottom:1px solid var(--border,#e2e8f0);font-weight:800}.toolbar{display:flex;gap:7px;padding:10px}.search{flex:1;min-width:0;padding:9px;border:1px solid var(--border,#e2e8f0);border-radius:11px;background:var(--surface2,#f1f5f9);color:inherit}.refresh{width:38px;border:1px solid var(--border,#e2e8f0);border-radius:10px;background:var(--surface2,#f1f5f9);color:inherit}.groups{flex:1;overflow:auto;padding:0 10px}.group{width:100%;display:flex;align-items:center;gap:10px;padding:10px;border:1px solid transparent;border-radius:13px;background:transparent;color:inherit;text-align:left;margin-bottom:5px}.group:hover,.group.active{background:var(--surface2,#f1f5f9);border-color:var(--border,#e2e8f0)}.avatar{width:43px;height:43px;border-radius:13px;background:linear-gradient(135deg,#dbeafe,#c4b5fd);display:grid;place-items:center;font-weight:800;color:#1e40af;flex:0 0 auto;background-size:cover;background-position:center}.groupmain{min-width:0;flex:1}.name{font-weight:750;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.meta{font-size:11px;color:var(--muted,#64748b);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.empty{text-align:center;color:var(--muted,#64748b);padding:40px 18px}.panel{min-width:0;height:100%;display:flex;flex-direction:column;background:var(--bg,#f8fafc)}.messages{flex:1;overflow:auto;padding:14px}.row{display:flex;margin:6px 0}.row.mine{justify-content:flex-end}.bubble{max-width:min(78%,620px);padding:9px 11px;border:1px solid var(--border,#e2e8f0);border-radius:15px;background:var(--surface,#fff);overflow-wrap:anywhere}.mine .bubble{background:var(--primary,#2563eb);color:#fff;border-color:var(--primary,#2563eb)}.sender{font-size:10px;font-weight:700;color:var(--primary,#2563eb);margin-bottom:3px}.time{font-size:9px;opacity:.65;text-align:right;margin-top:4px}.composer{display:flex;gap:7px;padding:8px;background:var(--surface,#fff);border-top:1px solid var(--border,#e2e8f0)}textarea{flex:1;resize:none;min-height:42px;max-height:120px;padding:10px;border:1px solid var(--border,#e2e8f0);border-radius:13px;background:var(--surface2,#f1f5f9);color:inherit}.send{width:43px;border:0;border-radius:13px;background:var(--primary,#2563eb);color:#fff}.modal{position:fixed;inset:0;background:#0008;display:grid;place-items:center;padding:14px;z-index:20}.card{width:min(620px,100%);max-height:92vh;overflow:auto;background:var(--surface,#fff);border:1px solid var(--border,#e2e8f0);border-radius:18px}.head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid var(--border,#e2e8f0)}.head h2{margin:0}.close{border:0;background:transparent;color:inherit;font-size:22px}.section{padding:14px 16px;border-bottom:1px solid var(--border,#e2e8f0)}.member{display:flex;align-items:center;gap:8px;padding:7px 0}.who{flex:1}.who b{display:block}.who small{color:var(--muted,#64748b);font-size:10px}.smallbtn{padding:8px 10px;border:1px solid var(--border,#e2e8f0);border-radius:9px;background:var(--surface2,#f1f5f9);color:inherit}.section input,.section textarea{width:100%;padding:9px;border:1px solid var(--border,#e2e8f0);border-radius:10px;background:var(--surface2,#f1f5f9);color:inherit}.section textarea{min-height:80px;margin-top:8px}@media(max-width:700px){.layout{grid-template-columns:1fr}.panel{display:none}.layout.chat-open .sidebar{display:none}.layout.chat-open .panel{display:flex}}</style></head><body><div id="layout" class="layout"><aside class="sidebar"><div class="side-head">Groups</div><div class="toolbar"><input id="search" class="search" placeholder="Search groups…"><button id="refresh" class="refresh" type="button">↻</button></div><div id="groups" class="groups"><div class="empty">Loading groups…</div></div></aside><section class="panel"><div id="messages" class="messages"><div class="empty">Select a group to start chatting.</div></div><div class="composer"><textarea id="input" rows="1" placeholder="Message the group…"></textarea><button id="send" class="send" type="button">➤</button></div></section></div><div id="create" class="modal hidden"><div class="card"><div class="head"><h2>Create group</h2><button class="close" data-close type="button">×</button></div><form id="createForm"><div class="section"><input id="gname" required maxlength="100" placeholder="Group name"><textarea id="gdesc" maxlength="1000" placeholder="Description"></textarea></div><div class="section"><b>Choose members</b><div id="friends"></div></div><div class="section" style="text-align:right"><button type="submit" class="smallbtn">Create group</button></div></form></div></div><script>
 (()=>{'use strict';
 const S={groups:[],friends:[],current:null,messages:[],q:'',loading:false};
 const $=x=>document.getElementById(x);
@@ -124,10 +138,29 @@ async function sendMessage(){
 function onMessage(e){
   const d=e?.data;if(!d||typeof d!=='object')return;
   const p=d.payload||{};
-  if(d.type==='OPEN_GROUP_BY_ID'){const id=p.groupId??p.chatId??p.id;if(id)openGroup(id)}
-  else if(d.type==='GROUP_CREATE_REQUEST'||d.type==='CREATE_GROUP'){showCreate()}
-  else if(d.type==='GROUP_PANEL_CLOSE'){S.current=null;$('layout').classList.remove('chat-open');renderGroups()}
-  else if(['GROUP_MESSAGE','GROUP_MESSAGE_NEW','group:message:new','message:new'].includes(d.type)){
+  // ROOT-CAUSE FIX (LIVE-MESSAGES-NEVER-ARRIVE — layer 2): app.realtime.socket.js's
+  // actual fan-out for every 'group:*' socket event posts it to iframes as
+  // 'REALTIME_EVENT:group:message', not bare 'group:message' — this file
+  // only ever matched the bare form, so even a correctly-named backend event
+  // never reached this listener at all. Strip that prefix once, up front, so
+  // every check below matches what's actually delivered.
+  const type = d.type && d.type.indexOf('REALTIME_EVENT:') === 0 ? d.type.slice('REALTIME_EVENT:'.length) : d.type;
+  if(type==='OPEN_GROUP_BY_ID'){const id=p.groupId??p.chatId??p.id;if(id)openGroup(id)}
+  else if(type==='GROUP_CREATE_REQUEST'||type==='CREATE_GROUP'){showCreate()}
+  // ROOT-CAUSE FIX (BACK-BUTTON-ONLY-RESTORES-HEADER-NOT-BODY): the parent
+  // shell's back handler (chat.html) posts {type:'GO_BACK_TO_LIST'} — this
+  // listener only ever recognized 'GROUP_PANEL_CLOSE', a message nothing in
+  // the parent actually sends. So clicking back removed the parent's
+  // group-panel-active body class (which is all the header visibility CSS
+  // is keyed off), but this iframe's own 'chat-open' class — which is what
+  // actually hides the message panel and shows the sidebar again — never
+  // got removed, leaving the body stuck open under a now-reset header.
+  else if(type==='GROUP_PANEL_CLOSE'||type==='GO_BACK_TO_LIST'){S.current=null;$('layout').classList.remove('chat-open');renderGroups()}
+  // ROOT-CAUSE FIX (LIVE-MESSAGES-NEVER-ARRIVE — layer 1): the backend's
+  // canonical group broadcast event is plain 'group:message' (see
+  // messageBroadcast.js / wsService.broadcastToGroup — the same event every
+  // other group feature uses), which this list never included.
+  else if(['GROUP_MESSAGE','GROUP_MESSAGE_NEW','group:message','group:message:new','message:new'].includes(type)){
     const m=p.message||p,id=p.groupId??p.chatId??p.conversationId??m.chatId;
     if(S.current&&String(id)===String(S.current.id)&&m?.id&&!S.messages.some(x=>String(x.id)===String(m.id))){
       // Append only the new message — do NOT do a full renderMessages()
@@ -138,6 +171,37 @@ function onMessage(e){
       appendMessages([m]);
     }
   }
+  // ROOT-CAUSE FIX (GROUP-INFO/MEMBERS-MENU-ITEMS-DO-NOTHING): chat.html's
+  // header avatar and its "Members"/"Group Info" menu items both post
+  // 'PARENT_GROUP_ACTION' into this iframe, but nothing here ever listened
+  // for it — so clicking them, like the call/more-menu buttons, silently
+  // did nothing. Reuses the already-defined-but-unused .modal/.card/.member
+  // CSS (built for exactly this, per the create-group modal's styling) with
+  // real data from S.current — the same group object this panel already
+  // has loaded, no extra round-trip needed.
+  else if(type==='PARENT_GROUP_ACTION'){showGroupInfo(p.action)}
+}
+
+function showGroupInfo(mode){
+  const g=S.current;if(!g)return;
+  const members=(g.participants||[]).map(u=>{
+    const name=u.username||u.name||u.firstName||('User '+(u.userId??u.id??''));
+    const role=u.role?` <small>(${u.role})</small>`:'';
+    return `<div class="member"><div class="who"><b>${name}</b>${role}</div></div>`;
+  }).join('')||'<div class="empty">No member details available.</div>';
+  const body = mode==='members'
+    ? `<div class="section"><b>Members — ${g.participantCount??(g.participants||[]).length}</b>${members}</div>`
+    : `<div class="section"><b>${g.name||'Group'}</b>${g.description?`<div class="meta" style="margin-top:6px">${g.description}</div>`:''}<div class="meta" style="margin-top:6px">${g.participantCount??(g.participants||[]).length} members</div></div>${members}`;
+  let modal=$('groupInfoModal');
+  if(!modal){
+    modal=document.createElement('div');
+    modal.id='groupInfoModal';modal.className='modal';
+    modal.innerHTML='<div class="card"><div class="head"><h2 id="groupInfoTitle">Group</h2><button class="close" data-close type="button">×</button></div><div id="groupInfoBody"></div></div>';
+    modal.addEventListener('click',e=>{if(e.target===modal||e.target.closest('[data-close]'))modal.remove()});
+    document.body.appendChild(modal);
+  }
+  modal.querySelector('#groupInfoTitle').textContent = mode==='members' ? 'Members' : 'Group Info';
+  modal.querySelector('#groupInfoBody').innerHTML = body;
 }
 
 window.addEventListener('message',onMessage);

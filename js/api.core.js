@@ -5598,23 +5598,43 @@ SAIC.initialize();
     };
     
     updateGroup = async function(groupId, groupData) {
-        return put(`/api/groups/${groupId}`, groupData);
+        // ROOT-CAUSE FIX: same wrong-router bug as leave/delete/members above,
+        // plus the wrong HTTP verb — the real endpoint is
+        // PATCH /api/group-admin/:chatId/settings, expecting {settings:{...}}.
+        return patch(`/api/group-admin/${groupId}/settings`, { settings: groupData });
     };
     
     deleteGroup = async function(groupId) {
-        return del(`/api/groups/${groupId}`);
+        // ROOT-CAUSE FIX (LEAVE/DELETE-GROUP-MENU-ITEMS-DO-NOTHING): a group IS
+        // a chat (type='group') in this backend — there is no standalone
+        // '/api/groups/:id' resource for deleting one. The real "tear down the
+        // group for everyone" endpoint is DELETE /api/chats/:chatId (see
+        // src/routes/chats.js). The old '/api/groups/:id' path 404'd against
+        // whichever unrelated router happens to be mounted at '/groups'
+        // (sealed-groups.routes.js / smart-groups.js — neither defines this
+        // route), so every call silently failed.
+        return del(`/api/chats/${groupId}`);
     };
     
     addGroupMember = async function(groupId, userId) {
-        return post(`/api/groups/${groupId}/members`, { userId });
+        // ROOT-CAUSE FIX: same '/api/groups/:id' → wrong-router bug as
+        // deleteGroup/leaveGroup above. Real route: group-admin.js, mounted
+        // at '/group-admin'.
+        return post(`/api/group-admin/${groupId}/members`, { userId });
     };
     
     removeGroupMember = async function(groupId, userId) {
-        return del(`/api/groups/${groupId}/members/${userId}`);
+        return del(`/api/group-admin/${groupId}/members/${userId}`);
     };
     
     leaveGroup = async function(groupId) {
-        return post(`/api/groups/${groupId}/leave`, {});
+        // ROOT-CAUSE FIX (LEAVE/DELETE-GROUP-MENU-ITEMS-DO-NOTHING): the real,
+        // live leave-group route is POST /api/group-admin/:chatId/leave (see
+        // src/routes/group-admin.js — auto-mounted at '/group-admin' since
+        // it has no explicit entry in routes/index.js's ROUTE_MAPPING). The
+        // old '/api/groups/:id/leave' path hit the same wrong router as
+        // deleteGroup above and 404'd.
+        return post(`/api/group-admin/${groupId}/leave`, {});
     };
     
     // ============================================================================

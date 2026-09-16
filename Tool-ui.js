@@ -7764,9 +7764,28 @@ function _doSearch(q) {
         productsPage.classList.add('active');
         const title = document.getElementById('jmProductsTitle');
         if (title) title.textContent = `← Results: "${q}"`;
+        const container = document.getElementById('jmProductsContent');
         const ecom = window.EcomMarketplace;
-        const results = ecom ? ecom.ProductEngine.search(q) : (window.currentListings||[]).filter(l=>l.title?.toLowerCase().includes(q.toLowerCase()));
-        _renderGrid(document.getElementById('jmProductsContent'), results);
+        // ROOT-CAUSE FIX (DIRECT-SEARCH-SHOWS-INCOMPLETE/STALE-RESULTS): this
+        // used to call ecom.ProductEngine.search(q) — the same client-side-
+        // cache-only search (just the 40 most-recent products across ALL
+        // categories, loaded once at app init) already identified and fixed
+        // for category browsing above. A search for e.g. "Samsung A10s"
+        // would silently miss it unless that exact listing happened to be
+        // among the last 40 products loaded anywhere in the app. Switched to
+        // loadProducts({search}), the same real-backend call
+        // (GET /api/marketplace/products?search=...&sort=...) the fixed
+        // category drill-down already uses, so a direct search always shows
+        // every real, approved listing that matches — not just recent ones.
+        if (container) container.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:#9ca3af">Searching…</div>`;
+        const doRender = (results) => { if (container) _renderGrid(container, results); };
+        if (ecom) {
+            ecom.ProductEngine.loadProducts({ search: q, sort: _state.sort || 'newest', limit: 100 })
+                .then(doRender)
+                .catch(() => doRender((window.currentListings||[]).filter(l=>l.title?.toLowerCase().includes(q.toLowerCase()))));
+        } else {
+            doRender((window.currentListings||[]).filter(l=>l.title?.toLowerCase().includes(q.toLowerCase())));
+        }
         const backBtn = document.getElementById('jmBackBtn');
         if (backBtn) backBtn.style.display='flex';
     }
@@ -7781,13 +7800,19 @@ function _initSortChips() {
         chip.classList.add('active');
         _state.sort = chip.dataset.sort;
         const ecom = window.EcomMarketplace;
-        if (ecom) {
-            const sorted = ecom.ProductEngine.search(_state.search, { sort:_state.sort });
-            const grid = document.getElementById('marketplaceListContent');
-            if (grid) { grid.innerHTML=''; sorted.forEach((p,i)=>setTimeout(()=>renderers.addListingItem(p),i*15)); }
-            const countEl = document.getElementById('jmProductCount');
+        const grid = document.getElementById('marketplaceListContent') || document.getElementById('jmProductsContent');
+        const countEl = document.getElementById('jmProductCount');
+        if (!ecom || !grid) return;
+        // ROOT-CAUSE FIX: same client-cache-only search() swapped for the
+        // real backend call as _doSearch above, so sorting by price/rating
+        // reorders the FULL matching result set, not just whatever 40
+        // products happened to be cached locally.
+        grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:#9ca3af">Loading…</div>`;
+        ecom.ProductEngine.loadProducts({ search: _state.search || '', sort: _state.sort, limit: 100 }).then(sorted => {
+            grid.innerHTML = '';
+            sorted.forEach((p,i) => setTimeout(() => renderers.addListingItem(p), i*15));
             if (countEl) countEl.textContent = `(${sorted.length})`;
-        }
+        }).catch(() => { grid.innerHTML = ''; });
     });
 }
 

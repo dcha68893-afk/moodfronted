@@ -478,9 +478,24 @@ body {
 }
 
 /* Status Sections */
+/* ROOT-CAUSE FIX (RECENTLY-VIEWED-DOESN'T-SCROLL-AFTER-RECENT-UPDATED): this
+   used to give both .statuses-section AND its child .statuses-list their own
+   flex:1 + (on the list) its own overflow-y:auto. Since #allStatusSection and
+   #viewedStatusSection are BOTH .active (rendered together, by design — see
+   status-ui.js's renderStatusListInstantlyUI), each one was claiming its own
+   independently-scrolling slice of the shared flex parent's fixed height —
+   a split-pane, not a single feed. That meant "Viewed updates" never simply
+   continued below "Recently updated"; it sat in its own cramped box that
+   scrolled separately, which is exactly the reported "recently viewed must
+   scroll down after the last status" not working. The actual scroll
+   container is the outer .status-list (which already has its own
+   overflow-y:auto + flex:1) — these two rules just need to stack in normal
+   document flow underneath it, not compete with it. This also doesn't
+   affect the single-tab-at-a-time cases (#rankedStatusSection /
+   #memoriesStatusSection) since only one of those is ever .active at once
+   and the same outer container still scrolls it exactly as before. */
 .statuses-section {
     display: none;
-    flex: 1;
     flex-direction: column;
 }
 
@@ -489,8 +504,6 @@ body {
 }
 
 .statuses-list {
-    flex: 1;
-    overflow-y: auto;
     min-height: 200px;
 }
 

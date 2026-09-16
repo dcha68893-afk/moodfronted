@@ -2804,6 +2804,15 @@
             ],
             friends: [
                 { btnId: 'startNewChatBtn', icon: 'fa-comments', title: 'New chat' },
+                // ROOT-CAUSE FIX (NO-FRIEND-REQUEST-ICON-IN-HEADER): friend.html
+                // already has a fully working friend-request bell (badge count +
+                // click opens BOTH the received (#requestsList) and sent
+                // (#sentRequestsList) lists — see friendRequestBellBtn in
+                // friend.html) — it just was never added to this parent header
+                // config, so the only header row visible on mobile (this one)
+                // never exposed it. Reuses the same proxy-click mechanism the
+                // other two buttons already use instead of building anything new.
+                { btnId: 'friendRequestBellBtn', icon: 'fa-bell', title: 'Friend Requests' },
                 { btnId: 'addFriendBtn', icon: 'fa-user-plus', title: 'Add friend' }
             ],
             calls: [
@@ -9026,20 +9035,69 @@ function wireButtons() {
     /* Voice call */
     var call = document.getElementById('hdrGroupCall');
     if (call && !call._ghw) { call._ghw = true;
-        call.addEventListener('click', function () { postToGroup('PARENT_GROUP_CALL', { type: 'voice' }); });
+        // ROOT-CAUSE FIX (GROUP-CALL-BUTTON-NOT-RESPONDING): postToGroup()
+        // only ever posts INTO the group iframe's contentWindow — but
+        // group.html has no listener for 'PARENT_GROUP_CALL' at all, so the
+        // message went nowhere and nothing happened. The code to actually
+        // start a call already exists right here in this same file's own
+        // window.addEventListener('message', ...) handler for
+        // 'PARENT_GROUP_CALL' (which calls __dispatchCallToIframe) — it was
+        // just never reachable, because nothing was posting that message
+        // type back to this window itself. Self-dispatching it is the fix.
+        call.addEventListener('click', function () { window.postMessage({ type: 'PARENT_GROUP_CALL', payload: { type: 'voice' } }, '*'); });
     }
     /* Video call */
     var vid = document.getElementById('hdrGroupVideo');
     if (vid && !vid._ghw) { vid._ghw = true;
-        vid.addEventListener('click', function () { postToGroup('PARENT_GROUP_CALL', { type: 'video' }); });
+        vid.addEventListener('click', function () { window.postMessage({ type: 'PARENT_GROUP_CALL', payload: { type: 'video' } }, '*'); });
     }
-    /* Three-dots — forwards to group iframe's chatMoreMenu (the authoritative menu) */
+    /* Three-dots — opens the local dropdown menu that already sits right next
+       to this button in the markup (#hdrGroupMenu). This used to call
+       postToGroup('OPEN_GROUP_MORE_MENU', {}), which — like the call buttons
+       above — went into the group iframe, which has no listener for it. The
+       menu it claimed to open lives in THIS document, not the iframe. */
     var more = document.getElementById('hdrGroupMore');
     if (more && !more._ghw) { more._ghw = true;
         more.addEventListener('click', function (e) {
             e.stopPropagation();
-            // Send message to group iframe — group.html's setupMenu() handles it
-            postToGroup('OPEN_GROUP_MORE_MENU', {});
+            var menu = document.getElementById('hdrGroupMenu');
+            if (menu) menu.style.display = (menu.style.display === 'block') ? 'none' : 'block';
+        });
+        // Close the menu on any outside click.
+        document.addEventListener('click', function (e) {
+            var menu = document.getElementById('hdrGroupMenu');
+            if (menu && menu.style.display === 'block' && !menu.contains(e.target) && e.target !== more) {
+                menu.style.display = 'none';
+            }
+        });
+        // Wire each menu item. Members/Info/Leave/Delete call real, working
+        // group data/actions; Settings/Theme/Purpose have no backing
+        // implementation anywhere in this codebase yet, so they say so
+        // honestly instead of silently doing nothing.
+        document.querySelectorAll('#hdrGroupMenu [data-hga]').forEach(function (item) {
+            if (item._ghw) return; item._ghw = true;
+            item.addEventListener('click', function () {
+                document.getElementById('hdrGroupMenu').style.display = 'none';
+                var action = item.getAttribute('data-hga');
+                var grp = window.__gcCurrentGroup || {};
+                if (action === 'members' || action === 'info') {
+                    postToGroup('PARENT_GROUP_ACTION', { action: action });
+                } else if (action === 'leave') {
+                    if (!grp.id) return;
+                    if (!confirm('Leave "' + (grp.name || 'this group') + '"?')) return;
+                    (window.apiCore && window.apiCore.groups ? window.apiCore.groups.leave(grp.id) : Promise.reject(new Error('API unavailable')))
+                        .then(function (r) { if (r && r.success === false) throw new Error(r.message || 'Failed to leave group'); postToGroup('GO_BACK_TO_LIST', {}); hideGroupHeader(); document.body.classList.remove('group-panel-active'); })
+                        .catch(function (e) { alert(e.message || 'Failed to leave group'); });
+                } else if (action === 'delete') {
+                    if (!grp.id) return;
+                    if (!confirm('Delete "' + (grp.name || 'this group') + '" for everyone? This cannot be undone.')) return;
+                    (window.apiCore && window.apiCore.groups ? window.apiCore.groups.delete(grp.id) : Promise.reject(new Error('API unavailable')))
+                        .then(function (r) { if (r && r.success === false) throw new Error(r.message || 'Failed to delete group'); postToGroup('GO_BACK_TO_LIST', {}); hideGroupHeader(); document.body.classList.remove('group-panel-active'); })
+                        .catch(function (e) { alert(e.message || 'Failed to delete group'); });
+                } else {
+                    alert('That option isn\'t available yet.');
+                }
+            });
         });
     }
     /* Avatar → group info sub-panel */
