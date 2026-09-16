@@ -9,9 +9,11 @@
   const token = () => window.__kynToken || window.__accessToken || localStorage.getItem('authToken') || localStorage.getItem('accessToken') || localStorage.getItem('token') || '';
   let currentGroupId = null;
   let pollTimer = null;
+  const seenMessages = new Set();
 
   function isMobile(){
-    try { if (window.matchMedia('(pointer:coarse)').matches) return true; } catch(_) {}
+    const ua=navigator.userAgent||'';
+    if(/Android|iPhone|iPad|iPod|Mobile/i.test(ua))return true;
     let width = window.innerWidth || 9999;
     try { if (window.parent && window.parent !== window) width = Math.min(width, window.parent.innerWidth || width); } catch(_) {}
     return width <= 900;
@@ -91,14 +93,20 @@
 
   function isMobileGroupPage(){ return /\/group\.html$/i.test(location.pathname); }
 
-  let nativeFetch=window.fetch.bind(window);
+  const nativeFetch=window.fetch.bind(window);
   async function pollGroup(){
     if(!currentGroupId)return;
     try{
       const h={'Content-Type':'application/json'}; const t=token(); if(t)h.Authorization='Bearer '+t;
       const r=await nativeFetch(`${api()}/messages/${encodeURIComponent(currentGroupId)}?scope=group&limit=100`,{headers:h});
       if(!r.ok)return;
-      if(typeof window.__GROUP_REFRESH_MESSAGES==='function') await window.__GROUP_REFRESH_MESSAGES();
+      const d=await r.json().catch(()=>({}));
+      const list=d?.data?.messages||d?.data||[];
+      list.forEach(m=>{
+        if(!m?.id||seenMessages.has(String(m.id)))return;
+        seenMessages.add(String(m.id));
+        window.postMessage({type:'group:message',payload:{message:m,groupId:Number(currentGroupId)}},'*');
+      });
     }catch(_){}
   }
 
