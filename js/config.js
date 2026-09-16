@@ -71,7 +71,7 @@
     function removeCalls(root) {
         try {
             var doc = root || document;
-            doc.querySelectorAll('#hdrChatCall,#hdrChatVideo,#hdrGroupCall,#hdrGroupVideo,[data-page="calls"],.center-menu-calls,[data-module="calls"],#_kynMiniCallBar,#kyn-call-banner,#bannerAcceptCall,#bannerDeclineCall').forEach(function (node) {
+            doc.querySelectorAll('#hdrChatCall,#hdrChatVideo,#hdrGroupCall,#hdrGroupVideo,[data-page="calls"],.center-menu-calls,#_kynMiniCallBar,#kyn-call-banner,#bannerAcceptCall,#bannerDeclineCall').forEach(function (node) {
                 node.remove();
             });
             doc.querySelectorAll('button,a').forEach(function (node) {
@@ -237,7 +237,10 @@
         disableLegacyCallHandlers();
         fixBrokenImages(document);
         loadOnce('/js/admin-support-bridge.js?v=20260916-5', 'admin_support_bridge');
-        if (/\/index\.html$/i.test(location.pathname) || location.pathname === '/') loadOnce('/js/pwa-identity.js?v=20260916-5', 'pwa_identity');
+        if (/\/index\.html$/i.test(location.pathname) || location.pathname === '/') {
+            loadOnce('/js/pwa-identity.js?v=20260916-5', 'pwa_identity');
+            loadOnce('/js/pwa-mobile-install.js?v=20260916-1', 'pwa_mobile_install');
+        }
         if (/\/group\.html$/i.test(location.pathname)) {
             loadOnce('/js/group-panel-cleanup.js?v=20260916-5', 'group_panel_cleanup');
             loadOnce('/js/group-mobile-navigation.js?v=20260916-6', 'group_mobile_navigation');
