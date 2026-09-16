@@ -5,6 +5,11 @@
  *
  * Browser runtime configuration is generated from .env/deployment variables.
  * Application source must not contain deployment-specific backend URLs.
+ *
+ * Some legacy modules in this repository are intentionally split across
+ * status-core.partN.js / Tool-core.partN.js files. Those files are fragments,
+ * not standalone JavaScript programs. They must be joined in order before
+ * syntax validation and before the browser receives them.
  */
 
 const fs = require('fs');
@@ -25,7 +30,9 @@ function parseEnvFile(file) {
         const match = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
         if (!match) continue;
         let value = match[2].trim();
-        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
+        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+            value = value.slice(1, -1);
+        }
         values[match[1]] = value;
     }
     return values;
@@ -44,14 +51,25 @@ const BACKEND_URL = required('BACKEND_URL');
 const FRONTEND_URL = String(env.FRONTEND_URL || '').trim().replace(/\/+$/, '');
 const GOOGLE_CLIENT_ID = String(env.GOOGLE_CLIENT_ID || '').trim();
 
-if (!/^https?:\/\//i.test(BACKEND_URL)) throw new Error('BACKEND_URL must be an absolute http(s) URL.');
+if (!/^https?:\/\//i.test(BACKEND_URL)) {
+    throw new Error('BACKEND_URL must be an absolute http(s) URL.');
+}
 
-function removeIfExists(target) { fs.rmSync(target, { recursive: true, force: true }); }
+function removeIfExists(target) {
+    fs.rmSync(target, { recursive: true, force: true });
+}
+
 removeIfExists(DIST);
 fs.mkdirSync(DIST, { recursive: true });
 
-const excludedDirectories = new Set(['.git', '.github', 'node_modules', 'android', 'dist', 'scripts', 'coverage', 'build']);
-const excludedFiles = new Set(['.env', '.env.example', '.gitignore', 'package.json', 'package-lock.json', 'yarn.lock']);
+const excludedDirectories = new Set([
+    '.git', '.github', 'node_modules', 'android', 'dist', 'scripts',
+    'coverage', 'build'
+]);
+const excludedFiles = new Set([
+    '.env', '.env.example', '.gitignore', 'package.json',
+    'package-lock.json', 'yarn.lock'
+]);
 
 function shouldCopy(relativePath, entry) {
     const parts = relativePath.split(path.sep);
@@ -82,6 +100,59 @@ const runtimeConfig = `// GENERATED FILE — DO NOT EDIT. Change .env/deployment
 fs.mkdirSync(path.join(DIST, 'js'), { recursive: true });
 fs.writeFileSync(path.join(DIST, 'js', 'runtime-config.js'), runtimeConfig, 'utf8');
 
+/**
+ * Join intentionally split JavaScript modules.
+ *
+ * A fragment such as status-core.part1.js can legitimately end in the middle
+ * of an expression/function and status-core.part2.js continues it. Validating
+ * each fragment independently therefore produces false build failures such as
+ * "Unexpected end of input". The browser also cannot execute such fragments
+ * separately. We create status-core.js / Tool-core.js and remove the fragments
+ * from dist. HTML references to the fragments are rewritten to the combined file.
+ */
+function mergeSplitJavaScriptModules(dir) {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    const groups = new Map();
+    const partPattern = /^(.*)\.part(\d+)\.js$/i;
+
+    for (const entry of entries) {
+        const match = entry.isFile() ? entry.name.match(partPattern) : null;
+        if (!match) continue;
+        const baseName = `${match[1]}.js`;
+        const key = path.join(dir, baseName);
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push({
+            part: Number(match[2]),
+            file: path.join(dir, entry.name),
+            name: entry.name
+        });
+    }
+
+    let mergedCount = 0;
+    for (const [outputFile, parts] of groups) {
+        parts.sort((a, b) => a.part - b.part);
+        const expected = parts.map((item, index) => index + 1);
+        const actual = parts.map(item => item.part);
+        if (actual.some((value, index) => value !== expected[index])) {
+            throw new Error(`Incomplete split JavaScript module: ${path.relative(ROOT, outputFile)}; found parts ${actual.join(', ')}.`);
+        }
+
+        const combined = parts.map(item => fs.readFileSync(item.file, 'utf8')).join('\n');
+        fs.writeFileSync(outputFile, combined, 'utf8');
+        for (const item of parts) fs.rmSync(item.file, { force: true });
+        mergedCount++;
+        console.log(`[Necpa build] Merged ${parts.length} fragments -> ${path.relative(ROOT, outputFile)}`);
+    }
+
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (entry.isDirectory()) mergedCount += mergeSplitJavaScriptModules(path.join(dir, entry.name));
+    }
+
+    return mergedCount;
+}
+
+mergeSplitJavaScriptModules(DIST);
+
 function transformBackendUrlLiterals(text, fileName) {
     if (fileName === 'runtime-config.js') return text;
     const urlLiteral = /(["'`])((?:https?:\/\/)(?:[A-Za-z0-9.-]+\.onrender\.com|localhost|127\.0\.0\.1)(?::\d+)?)(\/[^"'`\s]*)?\1/g;
@@ -107,8 +178,24 @@ function processArtifacts(dir) {
 }
 processArtifacts(DIST);
 
+function rewriteSplitScriptReferences(dir) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const file = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+            rewriteSplitScriptReferences(file);
+            continue;
+        }
+        if (!entry.isFile() || !/\.html$/i.test(entry.name)) continue;
+
+        const original = fs.readFileSync(file, 'utf8');
+        const rewritten = original.replace(/([A-Za-z0-9_.\/-]+)\.part\d+\.js/gi, '$1.js');
+        if (rewritten !== original) fs.writeFileSync(file, rewritten, 'utf8');
+    }
+}
+rewriteSplitScriptReferences(DIST);
+
 // Fail the build if a generated JS artifact has invalid syntax. This prevents
-// a broken config.js from ever reaching the deployed static site.
+// broken JavaScript from ever reaching the deployed static site.
 function validateJavaScript(dir) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
         const file = path.join(dir, entry.name);
