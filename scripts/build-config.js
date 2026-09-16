@@ -6,10 +6,11 @@
  * Browser runtime configuration is generated from .env/deployment variables.
  * Application source must not contain deployment-specific backend URLs.
  *
- * Some legacy modules in this repository are intentionally split across
- * status-core.partN.js / Tool-core.partN.js files. Those files are fragments,
- * not standalone JavaScript programs. They must be joined in order before
- * syntax validation and before the browser receives them.
+ * Legacy status-core.partN.js files are true source fragments and must be
+ * joined. Tool-core.partN.js files are different: they are ES modules with
+ * imports between parts, so they must remain separate and be exposed through
+ * a small ES-module entrypoint. Concatenating Tool-core parts redeclares
+ * bindings such as ENVIRONMENT_TYPES and breaks the Tools page at parse time.
  */
 
 const fs = require('fs');
@@ -101,57 +102,69 @@ fs.mkdirSync(path.join(DIST, 'js'), { recursive: true });
 fs.writeFileSync(path.join(DIST, 'js', 'runtime-config.js'), runtimeConfig, 'utf8');
 
 /**
- * Join intentionally split JavaScript modules.
+ * Join only true source fragments.
  *
- * A fragment such as status-core.part1.js can legitimately end in the middle
- * of an expression/function and status-core.part2.js continues it. Validating
- * each fragment independently therefore produces false build failures such as
- * "Unexpected end of input". The browser also cannot execute such fragments
- * separately. We create status-core.js / Tool-core.js and remove the fragments
- * from dist. HTML references to the fragments are rewritten to the combined file.
+ * status-core.partN.js is a literal split source file. Tool-core.partN.js is
+ * an ES-module graph: part1 imports part3, part2 imports part1/part3, and
+ * part3 imports part1. Joining that graph would create duplicate declarations
+ * and invalid module semantics. For Tool-core we instead create an entrypoint
+ * that loads all three modules without concatenating them.
  */
-function mergeSplitJavaScriptModules(dir) {
+function mergeStatusCoreFragments(dir) {
     const entries = fs.readdirSync(dir, { withFileTypes: true });
     const groups = new Map();
-    const partPattern = /^(.*)\.part(\d+)\.js$/i;
+    const partPattern = /^(status-core)\.part(\d+)\.js$/i;
 
     for (const entry of entries) {
         const match = entry.isFile() ? entry.name.match(partPattern) : null;
         if (!match) continue;
-        const baseName = `${match[1]}.js`;
-        const key = path.join(dir, baseName);
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key).push({
+        const outputFile = path.join(dir, 'status-core.js');
+        if (!groups.has(outputFile)) groups.set(outputFile, []);
+        groups.get(outputFile).push({
             part: Number(match[2]),
-            file: path.join(dir, entry.name),
-            name: entry.name
+            file: path.join(dir, entry.name)
         });
     }
 
     let mergedCount = 0;
     for (const [outputFile, parts] of groups) {
         parts.sort((a, b) => a.part - b.part);
-        const expected = parts.map((item, index) => index + 1);
+        const expected = parts.map((_item, index) => index + 1);
         const actual = parts.map(item => item.part);
         if (actual.some((value, index) => value !== expected[index])) {
             throw new Error(`Incomplete split JavaScript module: ${path.relative(ROOT, outputFile)}; found parts ${actual.join(', ')}.`);
         }
-
         const combined = parts.map(item => fs.readFileSync(item.file, 'utf8')).join('\n');
         fs.writeFileSync(outputFile, combined, 'utf8');
         for (const item of parts) fs.rmSync(item.file, { force: true });
         mergedCount++;
-        console.log(`[Necpa build] Merged ${parts.length} fragments -> ${path.relative(ROOT, outputFile)}`);
+        console.log(`[Necpa build] Merged ${parts.length} status fragments -> ${path.relative(ROOT, outputFile)}`);
     }
 
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        if (entry.isDirectory()) mergedCount += mergeSplitJavaScriptModules(path.join(dir, entry.name));
+        if (entry.isDirectory()) mergedCount += mergeStatusCoreFragments(path.join(dir, entry.name));
     }
-
     return mergedCount;
 }
 
-mergeSplitJavaScriptModules(DIST);
+mergeStatusCoreFragments(DIST);
+
+// Tool-core parts are ES modules. Keep them intact and provide the entrypoint
+// expected by Tools.html / legacy markup. The imports inside the parts retain
+// their correct module graph and therefore avoid ENVIRONMENT_TYPES redeclaration.
+const toolParts = [
+    path.join(DIST, 'Tool-core.part1.js'),
+    path.join(DIST, 'Tool-core.part2.js'),
+    path.join(DIST, 'Tool-core.part3.js')
+];
+if (toolParts.every(fs.existsSync)) {
+    fs.writeFileSync(
+        path.join(DIST, 'Tool-core.js'),
+        "// ES-module entrypoint for the split Tools core.\nexport * from './Tool-core.part1.js';\nexport * from './Tool-core.part2.js';\nexport * from './Tool-core.part3.js';\n",
+        'utf8'
+    );
+    console.log('[Necpa build] Created Tool-core.js ES-module entrypoint; preserved Tool-core.part1/2/3.js.');
+}
 
 function transformBackendUrlLiterals(text, fileName) {
     if (fileName === 'runtime-config.js') return text;
@@ -188,14 +201,15 @@ function rewriteSplitScriptReferences(dir) {
         if (!entry.isFile() || !/\.html$/i.test(entry.name)) continue;
 
         const original = fs.readFileSync(file, 'utf8');
-        const rewritten = original.replace(/([A-Za-z0-9_.\/-]+)\.part\d+\.js/gi, '$1.js');
+        const rewritten = original.replace(/status-core\.part\d+\.js/gi, 'status-core.js');
         if (rewritten !== original) fs.writeFileSync(file, rewritten, 'utf8');
     }
 }
 rewriteSplitScriptReferences(DIST);
 
-// Fail the build if a generated JS artifact has invalid syntax. This prevents
-// broken JavaScript from ever reaching the deployed static site.
+// Fail the build if a generated JS artifact has invalid syntax. This validates
+// each real module independently, while Tool-core's entrypoint remains a valid
+// ES module and its parts retain their import/export boundaries.
 function validateJavaScript(dir) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
         const file = path.join(dir, entry.name);
