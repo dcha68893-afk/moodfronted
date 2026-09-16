@@ -238,7 +238,10 @@
         fixBrokenImages(document);
         loadOnce('/js/admin-support-bridge.js?v=20260916-5', 'admin_support_bridge');
         if (/\/index\.html$/i.test(location.pathname) || location.pathname === '/') loadOnce('/js/pwa-identity.js?v=20260916-5', 'pwa_identity');
-        if (/\/group\.html$/i.test(location.pathname)) loadOnce('/js/group-panel-cleanup.js?v=20260916-5', 'group_panel_cleanup');
+        if (/\/group\.html$/i.test(location.pathname)) {
+            loadOnce('/js/group-panel-cleanup.js?v=20260916-5', 'group_panel_cleanup');
+            loadOnce('/js/group-mobile-navigation.js?v=20260916-6', 'group_mobile_navigation');
+        }
         if (/\/chat\.html$/i.test(location.pathname)) loadOnce('/js/friend-request-center-action.js?v=20260916-5', 'friend_request_center_action');
         if (/\/Tools\.html$/i.test(location.pathname) || /\/tools\.html$/i.test(location.pathname)) {
             loadOnce('/js/marketplace-accommodation-service.js?v=20260916-5', 'marketplace_accommodation_service');
