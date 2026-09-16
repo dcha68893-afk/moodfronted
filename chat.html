@@ -1831,7 +1831,11 @@
         <iframe id="friendsIframe" class="content-iframe" src="friend.html" data-module="friends" allow="camera; microphone; geolocation"></iframe>
     </div>
     <div id="callsContent" class="iframe-container hidden">
-        <iframe id="callsIframe" class="content-iframe" src="calls.html" data-module="calls" allow="camera; microphone"></iframe>
+        <!-- FIX-DEAD-CALLS-REQUEST: calls.html was deleted (calls are retired
+             app-wide); this iframe is removed at runtime by config.js's
+             removeCalls() anyway, but a src here fired a 404 request on
+             every chat.html load before that runtime removal ran. -->
+        <iframe id="callsIframe" class="content-iframe" data-module="calls" allow="camera; microphone"></iframe>
     </div>
     <div id="settingsContent" class="iframe-container hidden">
         <iframe id="settingsIframe" class="content-iframe" src="settings.html" data-module="settings"></iframe>
