@@ -6701,12 +6701,75 @@ if (domElements.closeCameraBtn) {
                 section.classList.add('active');
                 UIState.activeSection = sectionId;
                 // Render directly - functions now handle data availability themselves
-                if (sectionId === 'allFriendsSection') renderAllFriendsList();
+                if (sectionId === 'allFriendsSection') {
+                    renderAllFriendsList();
+                    // Re-apply the online-only filter (if it was active) since
+                    // renderAllFriendsList() rebuilds the rows from scratch.
+                    const allList = document.getElementById('allFriendsList');
+                    if (allList && allList.classList.contains('online-filter-active')) {
+                        allList.querySelectorAll('.friend-item').forEach(item => {
+                            const isOnline = !!item.querySelector('.friend-status.online');
+                            item.style.display = isOnline ? '' : 'none';
+                        });
+                    }
+                }
                 else if (sectionId === 'friendsSection') renderFriends();
                 else if (isUIActive()) updateCurrentSection();
             }
         });
     });
+
+    // Friend stat pills (Total / Online / Pinned) — previously inert; wire
+    // them to the existing tab-switch logic above instead of duplicating it.
+    const totalFriendsStatEl = document.getElementById('totalFriendsStat');
+    const totalStatItem = totalFriendsStatEl ? totalFriendsStatEl.closest('.stat-item') : null;
+    if (totalStatItem) {
+        totalStatItem.style.cursor = 'pointer';
+        totalStatItem.addEventListener('click', function(e) {
+            e.preventDefault();
+            const list = document.getElementById('allFriendsList');
+            if (list) {
+                list.classList.remove('online-filter-active');
+                list.querySelectorAll('.friend-item').forEach(item => { item.style.display = ''; });
+            }
+            onlineStatItem?.classList.remove('stat-item-active');
+            document.getElementById('allTab')?.click();
+        });
+    }
+
+    const pinnedFriendsStatEl = document.getElementById('pinnedFriends');
+    const pinnedStatItem = pinnedFriendsStatEl ? pinnedFriendsStatEl.closest('.stat-item') : null;
+    if (pinnedStatItem) {
+        pinnedStatItem.style.cursor = 'pointer';
+        pinnedStatItem.addEventListener('click', function(e) {
+            e.preventDefault();
+            document.getElementById('pinnedTab')?.click();
+        });
+    }
+
+    const onlineFriendsStatEl = document.getElementById('onlineFriends');
+    const onlineStatItem = onlineFriendsStatEl ? onlineFriendsStatEl.closest('.stat-item') : null;
+    if (onlineStatItem) {
+        onlineStatItem.style.cursor = 'pointer';
+        onlineStatItem.addEventListener('click', function(e) {
+            e.preventDefault();
+            // No dedicated "online" section exists server-side, so switch to
+            // the All tab (already-working render path) then filter the
+            // already-rendered rows using each row's own .friend-status
+            // marker — same online/offline signal the app already computes
+            // per friend, just never surfaced as a filter.
+            document.getElementById('allTab')?.click();
+            const list = document.getElementById('allFriendsList');
+            if (!list) return;
+            const nowFiltering = !list.classList.contains('online-filter-active');
+            list.classList.toggle('online-filter-active', nowFiltering);
+            onlineStatItem.classList.toggle('stat-item-active', nowFiltering);
+            list.querySelectorAll('.friend-item').forEach(item => {
+                const isOnline = !!item.querySelector('.friend-status.online');
+                item.style.display = (nowFiltering && !isOnline) ? 'none' : '';
+            });
+        });
+    }
 
     // Category filter buttons
     document.querySelectorAll('.category-filter-btn').forEach(btn => {

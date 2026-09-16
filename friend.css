@@ -362,6 +362,15 @@
         .stat-item:hover {
             background-color: #e4e6e9;
         }
+
+        .stat-item-active {
+            background-color: var(--primary-color, #667eea);
+        }
+
+        .stat-item-active .stat-number,
+        .stat-item-active .stat-label {
+            color: #fff;
+        }
         
         .stat-number {
             font-size: 24px;

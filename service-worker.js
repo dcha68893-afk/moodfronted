@@ -30,7 +30,7 @@ const SW_VERSION = '19.24.0';
 // deleted group-core-*/group-os-* files, or the misspelled necpa-* icons)
 // cached under the old name gets a clean break on next load, instead of
 // waiting on the 7-day CACHE_MAX_AGE staleness check or a lucky reinstall.
-const CACHE_NAME = 'necpa-static-v47';
+const CACHE_NAME = 'necpa-static-v48';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [

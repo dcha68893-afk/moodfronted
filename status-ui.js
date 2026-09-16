@@ -5076,6 +5076,15 @@ function updateCurrentSectionUI() {
             if (section) {
                 document.querySelectorAll('.statuses-section').forEach(s => s.classList.remove('active'));
                 section.classList.add('active');
+                // The "All" tab is a two-section layout: allStatusSection holds
+                // "Recently Updated" and viewedStatusSection holds "Viewed
+                // updates" side by side. Without this, the loop above strips
+                // .active off viewedStatusSection and nothing ever re-adds it,
+                // so the Viewed updates block silently disappears.
+                if (sectionId === 'allStatusSection') {
+                    const viewedSection = UIElements.getElement('viewedStatusSection');
+                    if (viewedSection) viewedSection.classList.add('active');
+                }
                 renderSectionContent(sectionId);
                 UIStateManager.saveFilters();
             }

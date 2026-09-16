@@ -1,12 +1,12 @@
-// Necpra runtime configuration gateway
+// Necpa runtime configuration gateway
 (function(){
 'use strict';
 try{const saved=localStorage.getItem('app_theme')||localStorage.getItem('theme');const prefers=window.matchMedia?.('(prefers-color-scheme: dark)').matches;const theme=saved==='dark'||saved==='light'?saved:(prefers?'dark':'light');document.documentElement.setAttribute('data-theme',theme);document.documentElement.style.colorScheme=theme;}catch(_){}
 const runtime=window.__NEXIPA_RUNTIME_CONFIG__||window.__NECPRA_RUNTIME_CONFIG__||{};
 const configuredOrigin=String(runtime.BACKEND_URL||window.BACKEND_URL||'').trim().replace(/\/+$/,'');
 function requireBackendOrigin(){if(!configuredOrigin)throw new Error('BACKEND_URL is not configured.');return configuredOrigin;}
-window.BACKEND_URL=configuredOrigin;window.FRONTEND_URL=String(runtime.FRONTEND_URL||'').trim().replace(/\/+$/,'');window.GOOGLE_CLIENT_ID=String(runtime.GOOGLE_CLIENT_ID||'').trim();window.NECPRA_APP_NAME='Necpra';window.NECPRA_APP_SHORT_NAME='Necpra';window.__getApiOrigin=()=>requireBackendOrigin();window.__getApiBase=()=>requireBackendOrigin()+'/api';
-function normalizeBrandText(v){return typeof v==='string'&&v?v.replace(/Kynecta/gi,'Necpra').replace(/Knecta/gi,'Necpra').replace(/MoodChat/gi,'Necpra').replace(/Mood Chat/gi,'Necpra').replace(/Necpa/gi,'Necpra'):v;}
+window.BACKEND_URL=configuredOrigin;window.FRONTEND_URL=String(runtime.FRONTEND_URL||'').trim().replace(/\/+$/,'');window.GOOGLE_CLIENT_ID=String(runtime.GOOGLE_CLIENT_ID||'').trim();window.NECPRA_APP_NAME='Necpa';window.NECPRA_APP_SHORT_NAME='Necpa';window.__getApiOrigin=()=>requireBackendOrigin();window.__getApiBase=()=>requireBackendOrigin()+'/api';
+function normalizeBrandText(v){return typeof v==='string'&&v?v.replace(/Kynecta/gi,'Necpa').replace(/Knecta/gi,'Necpa').replace(/MoodChat/gi,'Necpa').replace(/Mood Chat/gi,'Necpa').replace(/Necpra/gi,'Necpa'):v;}
 function applyBrand(root){try{if(!root)return;if(root.nodeType===Node.TEXT_NODE){root.nodeValue=normalizeBrandText(root.nodeValue);return;}if(root===document&&document.title)document.title=normalizeBrandText(document.title);const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);let n;while(n=w.nextNode())n.nodeValue=normalizeBrandText(n.nodeValue);}catch(_){} }
 function normalizeIcons(){try{const icon='/icons/necpra-192.svg';document.querySelectorAll('link[rel="icon"],link[rel="shortcut icon"]').forEach(n=>n.href=icon);}catch(_){} }
 function removeCalls(root){try{const d=root||document;d.querySelectorAll('#hdrChatCall,#hdrChatVideo,#hdrGroupCall,#hdrGroupVideo,[data-page="calls"],.center-menu-calls,[data-module="calls"],#_kynMiniCallBar,#kyn-call-banner,#bannerAcceptCall,#bannerDeclineCall').forEach(n=>n.remove());d.querySelectorAll('button,a').forEach(n=>{const t=(n.textContent||'').trim().toLowerCase(),title=(n.getAttribute('title')||'').trim().toLowerCase();if(['calls','new call','voice call','video call'].includes(t)||['voice call','video call'].includes(title))n.remove();});}catch(_){} }
@@ -35,5 +35,5 @@ function init(){applyBrand(document);normalizeIcons();disableLegacyCallHandlers(
    wanted, it just needed the labels below renamed to match. */if(/\/chat\.html$/i.test(location.pathname))loadOnce('/js/friend-request-center-action.js?v=20260916-4','friend_request_center_action');if(/\/Tools\.html$/i.test(location.pathname)||/\/tools\.html$/i.test(location.pathname)){loadOnce('/js/marketplace-accommodation-service.js?v=20260916-4','marketplace_accommodation_service');loadOnce('/js/accommodation-marketplace-surface.js?v=20260916-4','accommodation_marketplace_surface');}}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
 if(window.MutationObserver)new MutationObserver(ms=>ms.forEach(m=>m.addedNodes?.forEach(n=>{if(n.nodeType===1){applyBrand(n);removeCalls(n);fixBrokenImages(n);}}))).observe(document.documentElement,{childList:true,subtree:true});
-console.log('[Config] Necpra runtime configuration loaded. Backend:',configuredOrigin||'(missing)');
+console.log('[Config] Necpa runtime configuration loaded. Backend:',configuredOrigin||'(missing)');
 })();
