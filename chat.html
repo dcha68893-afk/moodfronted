@@ -58,9 +58,12 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="Necpa">
-    <link rel="apple-touch-icon" href="/icons/necpa-192.png">
-    <link rel="icon" type="image/png" sizes="192x192" href="/icons/necpa-192.png">
-    <link rel="icon" type="image/png" sizes="512x512" href="/icons/necpa-512.png">
+    <!-- FIX (tab icon didn't match the actual app icon): pointed at the old,
+         misspelled "necpa-*" files instead of the real "necpra-*" icon set
+         manifest.json already uses as the PWA/home-screen icon. -->
+    <link rel="apple-touch-icon" href="/icons/necpra-192.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/necpra-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="/icons/necpra-512.png">
     <style>
         :root {
             --app-primary-gradient: linear-gradient(135deg, #2563eb 0%, #1d4ed8 62%, #06b6d4 100%);

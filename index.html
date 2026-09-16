@@ -73,9 +73,13 @@
     <link rel="icon" href="favicon.ico" type="image/x-icon">
     <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16x16.png">
     <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="192x192" href="icons/necpa-192.png">
-    <link rel="icon" type="image/png" sizes="512x512" href="icons/necpa-512.png">
-    <link rel="apple-touch-icon" href="icons/necpa-192.png">
+    <!-- FIX (tab icon didn't match the actual app icon): the 192/512 and
+         apple-touch-icon entries pointed at the old, misspelled "necpa-*"
+         files instead of the real "necpra-*" icon set manifest.json already
+         uses as the PWA/home-screen icon source of truth. -->
+    <link rel="icon" type="image/png" sizes="192x192" href="icons/necpra-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="icons/necpra-512.png">
+    <link rel="apple-touch-icon" href="icons/necpra-192.png">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Necpra - Global Chat Platform | Messaging, Calls & Marketplace</title>

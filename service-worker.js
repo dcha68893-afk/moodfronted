@@ -24,18 +24,18 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.23.0';
+const SW_VERSION = '19.24.0';
 // FIX: bumped so activate() drops every existing cache immediately on this
-// deploy — anyone with a stale friend-ui.js (or anything else) cached under
-// the old name gets a clean break on next load, instead of waiting on the
-// 7-day CACHE_MAX_AGE staleness check or a lucky reinstall.
-const CACHE_NAME = 'necpa-static-v46';
+// deploy — anyone with a stale pre-rebuild group.html (or the old, now-
+// deleted group-core-*/group-os-* files, or the misspelled necpa-* icons)
+// cached under the old name gets a clean break on next load, instead of
+// waiting on the 7-day CACHE_MAX_AGE staleness check or a lucky reinstall.
+const CACHE_NAME = 'necpa-static-v47';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
-  '/index.html','/manifest.json','/icons/necpa-192.png','/icons/necpa-512.png',
+  '/index.html','/manifest.json','/icons/necpra-192.png','/icons/necpra-512.png',
   '/Tool.css','/Tool-ui.js','/Tool-core.part1.js','/Tool-core.part2.js','/Tool-core.part3.js',
-  '/group-ui.js','/group-core-bootstrap.js','/group-core-operations.js','/group-core-bridge.js',
   '/friend.html','/chat.html','/calls.html',
   '/calls-core.part1.js','/calls-core.part2.js','/calls-core.part3.js','/calls-core.part4.js',
   '/calls-core.part5.js','/calls-core.part6.js','/calls-core.part7.js','/calls-core.part8.js',
@@ -60,11 +60,24 @@ const NETWORK_FIRST_PATTERNS = [
   /\/js\/message-local-db\.js/i,/\/js\/message-realtime-bridge\.js/i,/\/MessageLifecycleClient\.js/i,
   /\/messages-core\.bootstrap\.js/i,/\/messages-core\.operations\.js/i,/\/messages-core\.ui-bridge\.js/i,
   /\/messageSync\.engine\.js/i,/\/status-core-runtime\.js/i,/\/status-core\.part[1-3]\.js/i,
-  /\/status-core-transport\.js/i,/\/status-core-state\.js/i,/\/status-ui\.js/i,/\/group-ui\.js/i,
-  /\/group-core-bootstrap\.js/i,/\/group-core-operations\.js/i,/\/group-core-bridge\.js/i,
-  /\/group-os\/group-os\.js/i,/\/group-os\/group-os-integration\.js/i,/\/group-core-patch\.js/i,
-  /\/group-core-patch\.legacy\.js/i,/\/js\/groupEncryption\.client\.js/i,
-  /\/js\/groupEncryption\.client\.legacy\.js/i,/\/friend-core\.ui-bridge\.js/i,
+  /\/status-core-transport\.js/i,/\/status-core-state\.js/i,/\/status-ui\.js/i,
+  // ROOT-CAUSE FIX (Groups panel showing blank on open / after "back to list",
+  // group messages from other members never appearing): group.html was
+  // rebuilt from scratch on 2026-09-15 as a single self-contained page —
+  // group-ui.js, group-core-bootstrap.js, group-core-operations.js,
+  // group-core-bridge.js, group-os/group-os.js, group-os/group-os-
+  // integration.js, group-core-patch(.legacy).js and js/groupEncryption.
+  // client(.legacy).js no longer exist and are not referenced by ANY page
+  // anymore — yet this list (last touched 2026-09-13, two days before the
+  // rebuild) still prioritized those dead files and never protected the
+  // ones the new group.html actually loads. A browser that had already
+  // cached the OLD group.html/group module before the rebuild would keep
+  // reusing it — same "fix shipped, mobile still runs old code" pattern
+  // already hit and fixed for the friend module and marketplace files
+  // below. Swapped the dead legacy entries for the real, still-actively-
+  // edited files group.html depends on today.
+  /\/group\.html/i,/\/js\/group-chat-features\.js/i,/\/js\/group-message-cache\.js/i,
+  /\/js\/group-media-render\.js/i,/\/friend-core\.ui-bridge\.js/i,
   // ROOT-CAUSE FIX (fixes to the friend module silently not appearing after
   // deploy — "some changes show, others don't"): friend.html and friend.css
   // were already precached fresh on every SW install (CORE_STATIC_ASSETS
@@ -164,7 +177,7 @@ function encryptedBody(s){if(typeof s!=='string')return false;const t=s.trim();i
 self.addEventListener('push',event=>{
   if(!event.data)return;let data={};try{data=event.data.json();}catch(_){try{data={title:'Necpa',body:event.data.text()};}catch(__){return;}}
   const raw=String(data.body||data.message||'');const safe=encryptedBody(raw)?'You have a new message':(raw||'You have a new notification');const title=data.title||'Necpa';
-  const options={body:data.senderName?data.senderName+': '+safe:safe,icon:data.icon||'/icons/necpa-192.png',badge:data.badge||'/icons/necpa-192.png',tag:data.type==='message'||data.type==='new_message'?'msg-'+(data.chatId||'chat'):(data.tag||'necpa-notification'),data:data.data||{url:data.url||'/chat.html'},silent:data.silent===true,requireInteraction:data.requireInteraction||false,vibrate:Array.isArray(data.vibrate)?data.vibrate:(data.vibrate===false?[]:[200,100,200])};
+  const options={body:data.senderName?data.senderName+': '+safe:safe,icon:data.icon||'/icons/necpra-192.png',badge:data.badge||'/icons/necpra-192.png',tag:data.type==='message'||data.type==='new_message'?'msg-'+(data.chatId||'chat'):(data.tag||'necpa-notification'),data:data.data||{url:data.url||'/chat.html'},silent:data.silent===true,requireInteraction:data.requireInteraction||false,vibrate:Array.isArray(data.vibrate)?data.vibrate:(data.vibrate===false?[]:[200,100,200])};
   event.waitUntil((async()=>{if(data.type==='message'||data.type==='new_message'){try{const chat=String(data.chatId||(data.data&&data.data.chatId)||''),map=self.__kynActiveChatByClient,cs=await self.clients.matchAll({type:'window',includeUncontrolled:true});if(chat&&cs.some(c=>c.focused&&map&&map.get(c.id)===chat))return;}catch(_){} }return self.registration.showNotification(title,options);})());
 });
 self.addEventListener('notificationclick',event=>{event.notification.close();const url=(event.notification.data&&event.notification.data.url)||'/chat.html';event.waitUntil(self.clients.matchAll({type:'window',includeUncontrolled:true}).then(cs=>{for(const c of cs){if(c.url.includes(url)&&c.focus)return c.focus();}return self.clients.openWindow?self.clients.openWindow(url):null;}));});

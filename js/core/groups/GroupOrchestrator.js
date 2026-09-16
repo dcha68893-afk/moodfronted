@@ -236,11 +236,20 @@
       this._recovery.attach();
       console.log('[GroupOrchestrator] ✅ Started');
     }
+    // ROOT-CAUSE FIX (member's messages never appear on other members'
+    // side): this emitted 'group:join_room', but the backend's socket
+    // handler (webSocketService.js) only ever listens for the exact event
+    // name 'group:join' — so this call never actually added the socket to
+    // the group's broadcast room. broadcastToGroup() then emits new
+    // messages to io.to(`group:${groupId}`)/`group_${groupId}`, which
+    // reached nobody who'd called joinGroup() through this path, even
+    // though they were genuine members. Renamed to match what the backend
+    // actually listens for.
     joinGroup(groupId) {
       const g = this._registry.ensure(groupId);
       g.joinedRoom = true;
       const rt = window.KynectaRealtime;
-      if (rt?._socket?.connected) rt._socket.emit('group:join_room', { groupId });
+      if (rt?._socket?.connected) rt._socket.emit('group:join', { groupId });
     }
     leaveGroup(groupId) { const g = this._registry.get(groupId); if (g) g.joinedRoom = false; }
     markRead(groupId) { this._registry.clearUnread(groupId); }

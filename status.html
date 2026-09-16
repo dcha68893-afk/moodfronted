@@ -28,8 +28,9 @@
     <link rel="manifest" href="../manifest.json">
     <!-- Light theme-color for status module — matches white/gradient header -->
     <!-- theme-color is now set dynamically by theme.engine.js to match the saved theme -->
-    <link rel="icon" href="../icons/necpa-192.png">
-    <link rel="icon" href="../icons/necpa-512.png">
+    <!-- FIX (tab icon didn't match the actual app icon): see chat.html -->
+    <link rel="icon" href="../icons/necpra-192.png">
+    <link rel="icon" href="../icons/necpra-512.png">
     <meta charset="UTF-8">
     <!-- FIX (hardcoded theme audit): removed <meta name="color-scheme"
          content="dark">, a stray leftover from the same original bug that
@@ -3766,7 +3767,7 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
                 <div class="status-topic-filter-bar" id="statusTopicFilterBar" style="display:none;"></div>
 
                 <!-- ── RECENT UPDATES (unviewed friend statuses) ── -->
-                <div class="sw-section-label" id="recentUpdatesLabel" style="display:none;">Recent updates</div>
+                <div class="sw-section-label" id="recentUpdatesLabel" style="display:none;">Recently Updated</div>
                 <div class="statuses-section active" id="allStatusSection">
                     <div class="statuses-list" id="allStatusList">
                         <div class="enhanced-loading">
@@ -3791,7 +3792,7 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
                      "active" here makes it visible by default, alongside
                      allStatusSection, the way the two-section layout is supposed
                      to work. -->
-                <div class="sw-section-label" id="viewedUpdatesLabel" style="display:none;">Viewed updates</div>
+                <div class="sw-section-label" id="viewedUpdatesLabel" style="display:none;">Recently Viewed</div>
                 <div class="statuses-section active" id="viewedStatusSection">
                     <div class="statuses-list" id="viewedStatusList"></div>
                 </div>
