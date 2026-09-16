@@ -59,7 +59,7 @@
         const body = await response.json().catch(() => ({}));
         const rows = body?.data?.chats || body?.data || body?.chats || [];
         if (!Array.isArray(rows)) return;
-        rows.filter(chat => chat && chat.type === 'group').forEach(chat => {
+        rows.filter(chat => chat && String(chat.type || chat.chatType || '').toLowerCase() === 'group').forEach(chat => {
           GROUPS.set(String(chat.id), chat);
         });
         renderSidebar();
@@ -143,8 +143,6 @@
     UNREAD.delete(id);
     renderSidebar();
 
-    // Use the existing parent/module navigation contract. group.html already
-    // consumes OPEN_GROUP_BY_ID and loads the authoritative group data itself.
     try {
       window.parent.postMessage({
         type: 'SWITCH_MODULE',
@@ -179,17 +177,28 @@
     toastTimer = setTimeout(() => toast.classList.remove('visible'), 4500);
   }
 
-  function isKnownGroupMessage(payload) {
-    if (!payload || typeof payload !== 'object') return false;
-    const chatId = payload.chatId ?? payload.conversationId ?? payload.groupId;
-    if (chatId != null && GROUPS.has(String(chatId))) return true;
-    return payload.isGroup === true || payload.chatType === 'group' || payload.type === 'group';
+  function groupIdFromPayload(payload) {
+    if (!payload || typeof payload !== 'object') return '';
+    return String(payload.groupId ?? payload.chatId ?? payload.conversationId ?? payload.chat?.id ?? payload.group?.id ?? '');
   }
 
-  // Capture phase is deliberate: message-client.js installs its normal
-  // bubble-phase message:new listener earlier. Stopping here prevents a group
-  // message from ever entering private-chat state, even when an old parent
-  // relay accidentally labels it message:new.
+  function explicitlyGroupPayload(payload) {
+    if (!payload || typeof payload !== 'object') return false;
+    const chatType = String(payload.chatType ?? payload.chat?.type ?? '').toLowerCase();
+    const type = String(payload.type || '').toLowerCase();
+    return payload.isGroup === true || chatType === 'group' || type === 'group' || payload.groupId != null || payload.group?.id != null;
+  }
+
+  function isKnownGroupMessage(payload) {
+    const id = groupIdFromPayload(payload);
+    return explicitlyGroupPayload(payload) || (id && GROUPS.has(id));
+  }
+
+  // Capture phase is deliberate. It runs before message-client.js's normal
+  // bubble-phase handler. Any explicitly identified group message is stopped
+  // before it can enter private-chat state. The backend's canonical group
+  // payload includes chatType/isGroup; the id fallback also covers older
+  // relays that only preserved chatId after the group list was loaded.
   window.addEventListener('message', event => {
     const data = event.data;
     if (!data || typeof data !== 'object') return;
@@ -198,8 +207,13 @@
       const payload = data.payload || {};
       if (!isKnownGroupMessage(payload)) return;
       event.stopImmediatePropagation();
-      const groupId = String(payload.chatId ?? payload.conversationId ?? payload.groupId ?? '');
-      const group = GROUPS.get(groupId) || { id: groupId, name: payload.groupName || payload.chatName || 'Group' };
+
+      const groupId = groupIdFromPayload(payload);
+      const group = GROUPS.get(groupId) || {
+        id: groupId,
+        name: payload.groupName || payload.chatName || payload.group?.name || 'Group',
+        avatar: payload.groupAvatar || payload.group?.avatar || null,
+      };
       if (groupId) {
         GROUPS.set(groupId, group);
         UNREAD.set(groupId, Number(UNREAD.get(groupId) || 0) + 1);
@@ -209,8 +223,6 @@
       return;
     }
 
-    // The group iframe can explicitly tell the parent that its panel is open;
-    // clear that group's sidebar unread indicator when it becomes active.
     if (data.type === 'GROUP_PANEL_OPEN') {
       const groupId = String(data.payload?.id || data.payload?.chatId || data.payload?.groupId || '');
       if (groupId) {
@@ -246,8 +258,6 @@
     setInterval(loadGroups, 15000);
   }
 
-  // This script is dynamically loaded by config.js before message-client.js
-  // on some pages, so wait for the sidebar DOM and never assume ordering.
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
   else boot();
 })();
