@@ -123,6 +123,70 @@
         return opts;
     }
 
+    // Friends iframe transport recovery.
+    // The Friends core historically depended on its internal parent/session relay
+    // before it would allow any API request. On a cold iframe load the parent can
+    // already have emitted its session burst before the Friends listener exists,
+    // leaving the module in WAITING_AUTH with parentReady=false and producing
+    // client-side /friends timeouts without any request reaching Render.
+    // Send the two parent handshake messages directly, without the Friends core's
+    // own state gate. The existing Friends listener will receive the parent's
+    // SESSION_DATA/AUTH_READY/PARENT_READY response normally.
+    function installFriendsHandshakeRecovery() {
+        if (!/\/friend(?:\.html)?$/i.test(window.location.pathname)) return;
+        if (window.__NECPRA_FRIEND_HANDSHAKE_RECOVERY__) return;
+        window.__NECPRA_FRIEND_HANDSHAKE_RECOVERY__ = true;
+
+        var parent = window.parent;
+        if (!parent || parent === window) return;
+
+        var attempts = 0;
+        var maxAttempts = 40;
+        var timer = null;
+
+        function requestSession(reason) {
+            if (attempts >= maxAttempts) {
+                if (timer) clearInterval(timer);
+                return;
+            }
+            attempts += 1;
+            var payload = { module: 'friends', source: 'friends', target: 'parent', reason: reason, timestamp: Date.now() };
+            try {
+                parent.postMessage({
+                    type: 'CHILD_READY',
+                    source: 'friends',
+                    module: 'friends',
+                    payload: payload,
+                    timestamp: Date.now()
+                }, window.location.origin);
+            } catch (_) {}
+            try {
+                parent.postMessage({
+                    type: 'REQUEST_SESSION',
+                    source: 'friends',
+                    module: 'friends',
+                    target: 'parent',
+                    payload: payload,
+                    timestamp: Date.now()
+                }, window.location.origin);
+            } catch (_) {}
+        }
+
+        requestSession('config_bootstrap');
+        timer = setInterval(function () { requestSession('config_recovery'); }, 750);
+
+        window.addEventListener('message', function (event) {
+            try {
+                if (event.source !== parent) return;
+                var type = event.data && event.data.type;
+                if (type === 'SESSION_DATA' || type === 'AUTH_READY' || type === 'PARENT_READY') {
+                    if (timer) clearInterval(timer);
+                    console.log('[Friends] Parent session handshake recovered via direct transport:', type);
+                }
+            } catch (_) {}
+        });
+    }
+
     // Bootstrap the API-core contract before any security/feature layer asks for it.
     window.__API_CORE = window.__API_CORE || {};
     window.__API_CORE.allowedOrigins = window.__NECPRA_ALLOWED_ORIGINS__;
@@ -212,6 +276,7 @@
 
     function init() {
         try { var saved = localStorage.getItem('app_theme') || localStorage.getItem('theme'), prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches, theme = saved === 'dark' || saved === 'light' ? saved : (prefersDark ? 'dark' : 'light'); document.documentElement.setAttribute('data-theme', theme); document.documentElement.style.colorScheme = theme; } catch (_) {}
+        installFriendsHandshakeRecovery();
         applyBrand(document); normalizeIcons(); disableLegacyCallHandlers(); fixBrokenImages(document); installMessageStabilization(); installAccessibilityGuards();
         loadOnce('/js/admin-support-bridge.js?v=20260916-5', 'admin_support_bridge');
         if (/\/index\.html$/i.test(location.pathname) || location.pathname === '/') { loadOnce('/js/pwa-identity.js?v=20260916-5', 'pwa_identity'); loadOnce('/js/pwa-mobile-install.js?v=20260916-1', 'pwa_mobile_install'); }
