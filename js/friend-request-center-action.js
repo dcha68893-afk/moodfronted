@@ -1,11 +1,11 @@
-/* Parent Friends action. config.js loads this on chat.html. */
+/* Parent Friends action + unified shell loader. */
 (function(){
 'use strict';
 if(!/\/chat\.html$/i.test(location.pathname))return;
 function openFriends(){
   try{if(typeof window.__openFriendsAdd==='function')return window.__openFriendsAdd();}catch(_){ }
   try{if(typeof window.__openFriendsOverlay==='function')return window.__openFriendsOverlay('friend.html?mode=add');}catch(_){ }
-  window.location.href='friend.html?mode=add';
+  if(typeof window.navigateToPage==='function') window.navigateToPage('friends');
 }
 function install(){
   var header=document.getElementById('globalHeader')||document.querySelector('header')||document.querySelector('.global-header')||document.querySelector('[data-global-header]');
@@ -18,12 +18,11 @@ function install(){
   }
   if(!b.__friendsBound){b.__friendsBound=true;b.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();openFriends();},true);}
 }
-function boot(){install();setTimeout(install,250);setTimeout(install,1000);setTimeout(install,2500);}
+function boot(){install();setTimeout(install,300);setTimeout(install,1000);}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
-if(window.MutationObserver)new MutationObserver(function(){install();}).observe(document.documentElement,{childList:true,subtree:true});
 })();
 
-/* Unified screen authority is loaded once by the parent chat shell. */
+/* Load the single parent-shell screen authority from the parent shell only. */
 (function(){
 'use strict';
 if(!/\/chat\.html$/i.test(location.pathname)||window.__NECPRA_UNIFIED_SCREEN_LOADER__)return;
@@ -31,7 +30,7 @@ window.__NECPRA_UNIFIED_SCREEN_LOADER__=true;
 function load(){
   if(document.querySelector('script[data-necpra-unified-screen]'))return;
   var s=document.createElement('script');
-  s.src='/js/unified-screen-controller.js?v=20260917-1';
+  s.src='/js/unified-screen-controller.js?v=20260917-2';
   s.async=false;
   s.setAttribute('data-necpra-unified-screen','1');
   (document.head||document.documentElement).appendChild(s);
