@@ -36,4 +36,14 @@ window.__openFriendsAdd=()=>{const p=ensureAddPanel();p.querySelector('#fqaInput
 function wireParentButton(){try{const doc=window.parent&&window.parent!==window?window.parent.document:document,b=doc.getElementById('fabAddFriend');if(!b||b.__friendsWired)return;b.__friendsWired=true;b.addEventListener('click',()=>{setTimeout(()=>window.__openFriendsAdd(),250)},false)}catch(_) {}}
 window.addEventListener('message',e=>{if(e.data?.type==='OPEN_FRIENDS_ADD')window.__openFriendsAdd()});
 function boot(){wireParentButton();bootCardBridge();setTimeout(wireParentButton,250);setTimeout(wireParentButton,1000);setTimeout(decorateFriendCards,500)}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
+
+// Realtime relationship invalidation. The socket bridge already forwards these
+// events into every iframe; this module must translate them into the existing
+// FRIENDS_LIST_UPDATE contract so incoming/accepted requests are rendered
+// without a full-page refresh. No polling is introduced.
+(function installRealtimeFriendBridge(){
+  var types=['FRIEND_REQUEST_RECEIVED','FRIEND_ACCEPTED','FRIEND_REQUEST_REJECTED','FRIEND_REQUEST_CANCELLED','FRIEND_REMOVED','REALTIME_EVENT:friend:request','REALTIME_EVENT:friend:accepted','REALTIME_EVENT:friend:rejected','REALTIME_EVENT:friend:removed'];
+  types.forEach(function(type){window.addEventListener('message',function(e){var d=e&&e.data;if(!d||d.type!==type)return;try{window.dispatchEvent(new CustomEvent('FRIENDS_LIST_UPDATE',{detail:{reason:type,payload:d.payload||{}}}))}catch(_){} });});
+  ['friend:request','friend:accepted','friend:rejected','friend:removed'].forEach(function(type){window.addEventListener(type,function(){try{window.dispatchEvent(new CustomEvent('FRIENDS_LIST_UPDATE',{detail:{reason:type}}))}catch(_){} });});
+})();
 })();
