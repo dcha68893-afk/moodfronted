@@ -24,7 +24,7 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.26.0';
+const SW_VERSION = '19.27.0';
 // FIX: bumped so activate() drops every existing cache immediately on this
 // deploy — anyone with a stale pre-rebuild group.html (or the old, now-
 // deleted group-core-*/group-os-* files, or the misspelled necpra-* icons
@@ -32,7 +32,7 @@ const SW_VERSION = '19.26.0';
 // app log image set) cached under the old name gets a clean break on next
 // load, instead of waiting on the 7-day CACHE_MAX_AGE staleness check or a
 // lucky reinstall.
-const CACHE_NAME = 'necpa-static-v50';
+const CACHE_NAME = 'necpa-static-v51';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
