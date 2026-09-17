@@ -1,304 +1,40 @@
-/* Necpa Unified Screen Controller v2
- *
- * One parent-shell authority for every module screen, panel, theme handoff and
- * transition. Existing module DOM/business logic is preserved; modules report
- * their state to this controller instead of owning the app shell.
- *
- * The controller deliberately does not poll. It reacts to navigation, panel,
- * iframe-load and theme events, which keeps the shell responsive on low-tier
- * devices and avoids mutation/polling feedback loops.
+/* Necpa Unified Screen + Theme Authority v3
+ * The parent shell owns module visibility and the saved Settings theme.
+ * Modules keep their existing DOM/business logic; they receive the shell state.
  */
 (function (global, document) {
   'use strict';
   if (!document || !/\/chat\.html$/i.test(location.pathname) || global.parent !== global) return;
   if (global.__NECPRA_UNIFIED_SCREEN_CONTROLLER__) return;
   global.__NECPRA_UNIFIED_SCREEN_CONTROLLER__ = true;
-
-  var MODULES = {
-    messages: { container: 'messagesContent', frame: 'messagesIframe' },
-    status:   { container: 'statusContent',   frame: 'statusIframe' },
-    group:    { container: 'groupContent',    frame: 'groupIframe' },
-    friends:  { container: 'friendsContent',  frame: 'friendsIframe' },
-    calls:    { container: 'callsContent',    frame: 'callsIframe' },
-    settings: { container: 'settingsContent', frame: 'settingsIframe' },
-    tools:    { container: 'toolsContent',    frame: 'toolsIframe' },
-    games:    { container: 'gamesContent',    frame: 'gamesIframe' }
-  };
-
-  var ALIASES = {
-    message:'messages', messages:'messages', chat:'messages',
-    group:'group', groups:'group', 'group-core':'group',
-    friend:'friends', friends:'friends', 'friend-core':'friends',
-    status:'status', statuses:'status',
-    call:'calls', calls:'calls', 'calls-core':'calls',
-    setting:'settings', settings:'settings',
-    tool:'tools', tools:'tools', marketplace:'tools',
-    game:'games', games:'games'
-  };
-
-  var state = global.__NECPRA_SCREEN_STATE__ = global.__NECPRA_SCREEN_STATE__ || {
-    module: normalizePage(global.__currentPage || 'messages'),
-    panel: null,
-    panels: {},
-    switching: false,
-    ready: false,
-    theme: null,
-    transitionId: 0
-  };
-
-  function normalizePage(value) {
-    var key = String(value || '').toLowerCase().replace(/\.html$/,'');
-    return ALIASES[key] || key || 'messages';
+  var MODULES={messages:{container:'messagesContent',frame:'messagesIframe'},status:{container:'statusContent',frame:'statusIframe'},group:{container:'groupContent',frame:'groupIframe'},friends:{container:'friendsContent',frame:'friendsIframe'},calls:{container:'callsContent',frame:'callsIframe'},settings:{container:'settingsContent',frame:'settingsIframe'},tools:{container:'toolsContent',frame:'toolsIframe'},games:{container:'gamesContent',frame:'gamesIframe'}};
+  var ALIASES={message:'messages',messages:'messages',chat:'messages',group:'group',groups:'group','group-core':'group',friend:'friends',friends:'friends','friend-core':'friends',status:'status',statuses:'status',call:'calls',calls:'calls','calls-core':'calls',setting:'settings',settings:'settings',tool:'tools',tools:'tools',marketplace:'tools',game:'games',games:'games'};
+  var state=global.__NECPRA_SCREEN_STATE__||{module:'messages',panel:null,panels:{},switching:false,ready:false,theme:null,transitionId:0};global.__NECPRA_SCREEN_STATE__=state;
+  function normalize(v){var k=String(v||'').toLowerCase().replace(/\.html$/,'');return ALIASES[k]||k||'messages';}
+  function frames(){var out=[];Object.keys(MODULES).forEach(function(n){var f=document.getElementById(MODULES[n].frame);if(f&&out.indexOf(f)<0)out.push(f);});document.querySelectorAll('iframe[data-module],iframe[data-page]').forEach(function(f){if(out.indexOf(f)<0)out.push(f);});return out;}
+  function emit(n,d){try{document.dispatchEvent(new CustomEvent(n,{detail:d||{}}));}catch(_) {}}
+  function shellState(){document.documentElement.setAttribute('data-kyn-screen-module',state.module);document.documentElement.setAttribute('data-kyn-screen-panel',state.panel||'none');if(document.body){document.body.setAttribute('data-kyn-screen-module',state.module);document.body.setAttribute('data-kyn-screen-panel',state.panel||'none');}}
+  function switchStart(){state.switching=true;state.transitionId++;document.documentElement.classList.add('kyn-screen-switching');if(document.body)document.body.classList.add('kyn-screen-switching');shellState();}
+  function switchEnd(id){requestAnimationFrame(function(){if(id!==state.transitionId)return;state.switching=false;document.documentElement.classList.remove('kyn-screen-switching');if(document.body)document.body.classList.remove('kyn-screen-switching');});}
+  function validTheme(v){return v==='dark'||v==='light';}
+  function readSettingsTheme(){try{var keys=['knecta_settings_cache','app_settings_global','necpa_settings_default'];for(var i=0;i<keys.length;i++){var raw=localStorage.getItem(keys[i]);if(!raw)continue;var p=JSON.parse(raw),d=p&&(p.data||p),t=d&&(d.appearance&&d.appearance.theme||d.theme);if(validTheme(t))return t;}}catch(_){}return null;}
+  function authoritativeTheme(){var saved=readSettingsTheme();if(saved)return saved;var root=document.documentElement.getAttribute('data-theme');if(validTheme(root))return root;try{var t=global.ThemeManager&&global.ThemeManager.getTheme&&global.ThemeManager.getTheme();if(validTheme(t))return t;}catch(_){}return 'light';}
+  function setAuthoritativeTheme(){var t=authoritativeTheme();try{if(global.ThemeManager&&global.ThemeManager.getTheme&&global.ThemeManager.getTheme()!==t)global.ThemeManager.setTheme(t,{force:true});}catch(_){}try{localStorage.setItem('app_theme',t);}catch(_){}return t;}
+  function copyThemeVars(src,dst){try{var cs=src.defaultView.getComputedStyle(src.documentElement);for(var i=0;i<cs.length;i++){var k=cs[i];if(k.indexOf('--kyn-')===0||k.indexOf('--app-')===0||k==='--bg-color'||k==='--text-primary'||k==='--text-color'||k==='--text-secondary'||k==='--sidebar-bg'||k==='--card-bg'||k==='--border-color'||k==='--hover-color'||k==='--primary-color'||k==='--primary-dark'||k==='--primary-light'||k==='--secondary-color'||k==='--background-color'||k==='--surface-color'||k==='--card-background'||k==='--accent-color'||k==='--accent-soft')dst.documentElement.style.setProperty(k,cs.getPropertyValue(k));}}catch(_){}
   }
-
-  function frameList() {
-    var seen = [];
-    Object.keys(MODULES).forEach(function (name) {
-      var f = document.getElementById(MODULES[name].frame);
-      if (f && seen.indexOf(f) < 0) seen.push(f);
-    });
-    document.querySelectorAll('iframe[data-module],iframe[data-page]').forEach(function (f) {
-      if (seen.indexOf(f) < 0) seen.push(f);
-    });
-    return seen;
+  function themeFrame(frame){if(!frame||!frame.contentDocument)return;try{var theme=state.theme||authoritativeTheme(),doc=frame.contentDocument;doc.documentElement.setAttribute('data-parent-shell','true');doc.documentElement.setAttribute('data-theme',theme);doc.documentElement.classList.toggle('theme-dark',theme==='dark');doc.documentElement.classList.toggle('dark-theme',theme==='dark');doc.documentElement.style.colorScheme=theme;copyThemeVars(document,doc);if(doc.body){doc.body.setAttribute('data-theme',theme);doc.body.classList.toggle('dark-theme',theme==='dark');}if(global.ThemeManager&&typeof global.ThemeManager.broadcastToIframe==='function')global.ThemeManager.broadcastToIframe(frame,frame.dataset&&frame.dataset.module||'');frame.contentWindow.postMessage({type:'THEME_CHANGED',theme:theme,source:'necpra-shell'},location.origin);}catch(_){}
   }
-
-  function emit(name, detail) {
-    try { document.dispatchEvent(new CustomEvent(name, { detail: detail || {} })); } catch (_) {}
-  }
-
-  function setShellState() {
-    var root = document.documentElement;
-    root.setAttribute('data-kyn-screen-module', state.module);
-    root.setAttribute('data-kyn-screen-panel', state.panel || 'none');
-    if (document.body) {
-      document.body.setAttribute('data-kyn-screen-module', state.module);
-      document.body.setAttribute('data-kyn-screen-panel', state.panel || 'none');
-    }
-  }
-
-  function beginSwitch() {
-    state.switching = true;
-    state.transitionId += 1;
-    document.documentElement.classList.add('kyn-screen-switching');
-    if (document.body) document.body.classList.add('kyn-screen-switching');
-    setShellState();
-  }
-
-  function endSwitch(id) {
-    requestAnimationFrame(function () {
-      requestAnimationFrame(function () {
-        if (id !== state.transitionId) return;
-        state.switching = false;
-        document.documentElement.classList.remove('kyn-screen-switching');
-        if (document.body) document.body.classList.remove('kyn-screen-switching');
-      });
-    });
-  }
-
-  function applyThemeToFrame(frame) {
-    if (!frame || !frame.contentDocument) return;
-    try {
-      var theme = document.documentElement.getAttribute('data-theme') || 'light';
-      state.theme = theme;
-      var doc = frame.contentDocument;
-      doc.documentElement.setAttribute('data-parent-shell', 'true');
-      doc.documentElement.setAttribute('data-theme', theme);
-      doc.documentElement.classList.toggle('theme-dark', theme === 'dark');
-      doc.documentElement.classList.toggle('dark-theme', theme === 'dark');
-      if (global.ThemeManager && typeof global.ThemeManager.broadcastToIframe === 'function') {
-        global.ThemeManager.broadcastToIframe(frame, frame.dataset.module || '');
-      } else if (global.ThemeManager && typeof global.ThemeManager.applyToFrame === 'function') {
-        global.ThemeManager.applyToFrame(frame);
-      }
-    } catch (_) {}
-  }
-
-  function applyThemeAll() { frameList().forEach(applyThemeToFrame); }
-
-  function revealModule(module) {
-    Object.keys(MODULES).forEach(function (name) {
-      var meta = MODULES[name];
-      var container = document.getElementById(meta.container);
-      if (!container) return;
-      if (name === module) container.classList.remove('hidden');
-      else container.classList.add('hidden');
-    });
-    document.querySelectorAll('.nav-icon[data-page],.mobile-nav-icon[data-page]').forEach(function (el) {
-      el.classList.toggle('active', normalizePage(el.getAttribute('data-page')) === module);
-    });
-  }
-
-  function syncModule(module, options) {
-    module = normalizePage(module);
-    if (!MODULES[module]) return;
-    options = options || {};
-    var previous = state.module;
-    var changed = previous !== module;
-    if (!changed && !options.force) {
-      setShellState();
-      applyThemeAll();
-      return;
-    }
-
-    var id = state.transitionId + 1;
-    beginSwitch();
-    state.module = module;
-    if (!options.keepPanel) state.panel = null;
-    setShellState();
-    revealModule(module);
-    applyThemeAll();
-    emit('kyn:screenchange', { module: module, previous: previous, panel: state.panel, source: 'unified-screen-controller' });
-    endSwitch(id);
-  }
-
-  function syncPanel(module, panel, open) {
-    module = normalizePage(module || state.module);
-    var value = open ? String(panel || 'panel') : null;
-    state.module = MODULES[module] ? module : state.module;
-    state.panel = value;
-    state.panels[state.module] = value;
-    setShellState();
-    emit('kyn:screenpanelchange', { module: state.module, panel: value, open: !!open, source: 'unified-screen-controller' });
-  }
-
-  function installNavigationAuthority() {
-    var original = global.navigateToPage;
-    if (typeof original !== 'function' || original.__kynUnifiedWrapped) return typeof original === 'function';
-    function unifiedNavigate(page) {
-      var module = normalizePage(page);
-      beginSwitch();
-      var result;
-      try { result = original.apply(this, arguments); }
-      finally {
-        state.module = MODULES[module] ? module : state.module;
-        state.panel = null;
-        setShellState();
-        applyThemeAll();
-        emit('kyn:screenchange', { module: state.module, panel: null, source: 'unified-screen-controller' });
-        endSwitch(state.transitionId);
-      }
-      return result;
-    }
-    unifiedNavigate.__kynUnifiedWrapped = true;
-    unifiedNavigate.__kynOriginal = original;
-    global.navigateToPage = unifiedNavigate;
-    return true;
-  }
-
-  function installClicks() {
-    document.addEventListener('click', function (event) {
-      var target = event.target && event.target.closest ? event.target.closest('[data-page],[data-module]') : null;
-      if (!target) return;
-      var page = target.getAttribute('data-page') || target.getAttribute('data-module');
-      if (page && MODULES[normalizePage(page)]) syncModule(page);
-    }, true);
-  }
-
-  function installPanelEvents() {
-    global.addEventListener('message', function (event) {
-      var data = event && event.data;
-      if (!data || typeof data !== 'object') return;
-      if (data.type === 'PanelOpened') syncPanel(data.module, data.panel, true);
-      else if (data.type === 'PanelClosed') syncPanel(data.module, data.panel, false);
-      else if (data.type === 'GROUP_PANEL_OPEN' || data.type === 'GROUP_CHAT_OPENED' || data.type === 'GROUP_DETAIL_OPENED') syncPanel('group', 'conversation', true);
-      else if (data.type === 'GROUP_PANEL_CLOSED' || data.type === 'GROUP_LIST_SHOWN' || data.type === 'GO_BACK_TO_LIST') {
-        if (data.source !== 'group-iframe' || state.module === 'group') syncPanel('group', null, false);
-      } else if (data.type === 'CHAT_OPENED' || data.type === 'CONVERSATION_OPENED' || data.type === 'CHAT_HEADER_UPDATE') syncPanel('messages', 'conversation', true);
-      else if (data.type === 'CHAT_LIST_SHOWN' || data.type === 'CHAT_CLOSED' || data.type === 'GO_BACK_TO_CHAT_LIST') syncPanel('messages', null, false);
-      else if (data.type === 'STATUS_VIEW_OPENED' || data.type === 'STATUS_CREATE_OPENED' || data.type === 'STATUS_PANEL_OPENED') syncPanel('status', 'viewer', true);
-      else if (data.type === 'STATUS_PANEL_CLOSED' || data.type === 'STATUS_LIST_SHOWN') syncPanel('status', null, false);
-    });
-    document.addEventListener('kyn:panelstate', function (event) {
-      var d = event.detail || {};
-      syncPanel(d.module, d.panel, d.type === 'PanelOpened');
-    });
-  }
-
-  function installThemeAuthority() {
-    function refresh() {
-      var theme = document.documentElement.getAttribute('data-theme') || 'light';
-      if (theme === state.theme) { applyThemeAll(); return; }
-      beginSwitch();
-      state.theme = theme;
-      applyThemeAll();
-      emit('kyn:themechange', { theme: theme, source: 'unified-screen-controller' });
-      endSwitch(state.transitionId);
-    }
-    if (global.MutationObserver) {
-      var observer = new MutationObserver(function (records) {
-        for (var i = 0; i < records.length; i += 1) {
-          if (records[i].attributeName === 'data-theme') { refresh(); break; }
-        }
-      });
-      observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-    }
-    global.addEventListener('storage', function (event) {
-      if (event.key === 'app_theme' || event.key === 'knecta_settings_cache' || event.key === 'app_settings_global') setTimeout(refresh, 0);
-    });
-    document.addEventListener('kyn:themechange', function () { setTimeout(refresh, 0); });
-  }
-
-  function installFrameAuthority() {
-    document.addEventListener('load', function (event) {
-      if (event.target && event.target.tagName === 'IFRAME') {
-        applyThemeToFrame(event.target);
-        if (event.target.dataset) event.target.dataset.kynShellReady = '1';
-      }
-    }, true);
-    frameList().forEach(function (frame) {
-      frame.addEventListener('load', function () { applyThemeToFrame(frame); }, false);
-    });
-    applyThemeAll();
-  }
-
-  function installHistoryBridge() {
-    global.addEventListener('popstate', function () {
-      var page = normalizePage(global.__currentPage || state.module);
-      syncModule(page, { force: true, keepPanel: true });
-    });
-  }
-
-  function boot() {
-    var style = document.createElement('style');
-    style.id = 'kynUnifiedScreenControllerStyle';
-    style.textContent = [
-      'html.kyn-screen-switching,html.kyn-screen-switching *,body.kyn-screen-switching,body.kyn-screen-switching *{transition:none!important;animation:none!important}',
-      'html[data-kyn-screen-module] .iframe-container{contain:layout paint;}',
-      'html[data-kyn-screen-module] .iframe-container.hidden{visibility:hidden!important;pointer-events:none!important;}'
-    ].join('');
-    (document.head || document.documentElement).appendChild(style);
-
-    installClicks();
-    installPanelEvents();
-    installThemeAuthority();
-    installFrameAuthority();
-    installHistoryBridge();
-    setShellState();
-    state.theme = document.documentElement.getAttribute('data-theme') || 'light';
-    installNavigationAuthority();
-    state.ready = true;
-
-    global.KynectaScreen = {
-      state: state,
-      normalizeModule: normalizePage,
-      openModule: function (module, options) { syncModule(module, options); },
-      openPanel: function (module, panel) { syncPanel(module, panel, true); },
-      closePanel: function (module) { syncPanel(module, null, false); },
-      refreshTheme: applyThemeAll,
-      getFrame: function (module) { var m = MODULES[normalizePage(module)]; return m ? document.getElementById(m.frame) : null; }
-    };
-
-    /* The parent shell is the only place allowed to decide which module is
-       visible. Existing navigateToPage still performs its established work;
-       this final reconciliation makes the controller authoritative without
-       rewriting module-specific business logic. */
-    setTimeout(function () {
-      installNavigationAuthority();
-      syncModule(global.__currentPage || state.module, { force: true, keepPanel: true });
-    }, 0);
-  }
-
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
-  else boot();
-})(window, document);
+  function themeAll(){frames().forEach(themeFrame);}
+  function applyTheme(theme,source){if(!validTheme(theme))theme=authoritativeTheme();state.theme=theme;document.documentElement.setAttribute('data-theme',theme);document.documentElement.classList.toggle('theme-dark',theme==='dark');document.documentElement.classList.toggle('dark-theme',theme==='dark');document.documentElement.style.colorScheme=theme;try{if(global.ThemeManager&&global.ThemeManager.getTheme&&global.ThemeManager.getTheme()!==theme)global.ThemeManager.setTheme(theme,{force:true});}catch(_){}themeAll();emit('kyn:themechange',{theme:theme,source:source||'unified-screen-controller'});}
+  function refreshTheme(source){var t=authoritativeTheme();if(t===state.theme){themeAll();return;}var id=state.transitionId+1;switchStart();applyTheme(t,source);switchEnd(id);}
+  function reveal(module){Object.keys(MODULES).forEach(function(n){var c=document.getElementById(MODULES[n].container);if(c)c.classList.toggle('hidden',n!==module);});document.querySelectorAll('.nav-icon[data-page],.mobile-nav-icon[data-page]').forEach(function(el){el.classList.toggle('active',normalize(el.getAttribute('data-page'))===module);});}
+  function syncModule(module,opts){module=normalize(module);if(!MODULES[module])return;opts=opts||{};var prev=state.module,changed=prev!==module;if(!changed&&!opts.force){shellState();themeAll();return;}var id=state.transitionId+1;switchStart();state.module=module;if(!opts.keepPanel)state.panel=null;shellState();reveal(module);themeAll();emit('kyn:screenchange',{module:module,previous:prev,panel:state.panel,source:'unified-screen-controller'});switchEnd(id);}
+  function syncPanel(module,panel,open){module=normalize(module||state.module);state.module=MODULES[module]?module:state.module;state.panel=open?String(panel||'panel'):null;state.panels[state.module]=state.panel;shellState();emit('kyn:screenpanelchange',{module:state.module,panel:state.panel,open:!!open,source:'unified-screen-controller'});}
+  function installNavigation(){var original=global.navigateToPage;if(typeof original!=='function'||original.__kynUnifiedWrapped)return;function nav(page){var m=normalize(page),id=state.transitionId+1;switchStart();var r;try{r=original.apply(this,arguments);}finally{state.module=MODULES[m]?m:state.module;state.panel=null;shellState();themeAll();emit('kyn:screenchange',{module:state.module,panel:null,source:'unified-screen-controller'});switchEnd(id);}return r;}nav.__kynUnifiedWrapped=true;nav.__kynOriginal=original;global.navigateToPage=nav;}
+  function installClicks(){document.addEventListener('click',function(e){var t=e.target&&e.target.closest?e.target.closest('[data-page],[data-module]'):null;if(!t)return;var p=t.getAttribute('data-page')||t.getAttribute('data-module');if(p&&MODULES[normalize(p)])syncModule(p);},true);}
+  function installPanels(){global.addEventListener('message',function(e){var d=e&&e.data;if(!d||typeof d!=='object')return;if(d.type==='PanelOpened')syncPanel(d.module,d.panel,true);else if(d.type==='PanelClosed')syncPanel(d.module,d.panel,false);else if(d.type==='GROUP_PANEL_OPEN'||d.type==='GROUP_CHAT_OPENED'||d.type==='GROUP_DETAIL_OPENED')syncPanel('group','conversation',true);else if(d.type==='GROUP_PANEL_CLOSED'||d.type==='GROUP_LIST_SHOWN'||d.type==='GO_BACK_TO_LIST')syncPanel('group',null,false);else if(d.type==='CHAT_OPENED'||d.type==='CONVERSATION_OPENED'||d.type==='CHAT_HEADER_UPDATE')syncPanel('messages','conversation',true);else if(d.type==='CHAT_LIST_SHOWN'||d.type==='CHAT_CLOSED'||d.type==='GO_BACK_TO_CHAT_LIST')syncPanel('messages',null,false);});document.addEventListener('kyn:panelstate',function(e){var d=e.detail||{};syncPanel(d.module,d.panel,d.type==='PanelOpened');});}
+  function installTheme(){var initial=setAuthoritativeTheme();state.theme=initial;applyTheme(initial,'settings-authority-boot');document.addEventListener('kyn:themechange',function(e){var d=e.detail||{},t=readSettingsTheme()||d.theme;if(validTheme(t)&&t!==state.theme)refreshTheme('theme-event');else themeAll();});global.addEventListener('storage',function(e){if(e.key==='app_theme'||e.key==='knecta_settings_cache'||e.key==='app_settings_global'||e.key==='necpa_settings_default')refreshTheme('storage');});global.addEventListener('message',function(e){var d=e&&e.data;if(d&&d.type==='THEME_CHANGED'&&validTheme(d.theme)&&d.source!=='necpra-shell'){applyTheme(d.theme,'module-theme-change');}});}
+  function installFrames(){document.addEventListener('load',function(e){if(e.target&&e.target.tagName==='IFRAME')themeFrame(e.target);},true);frames().forEach(function(f){f.addEventListener('load',function(){themeFrame(f);},false);});themeAll();}
+  function boot(){var s=document.createElement('style');s.id='kynUnifiedScreenControllerStyle';s.textContent='html.kyn-screen-switching,html.kyn-screen-switching *,body.kyn-screen-switching,body.kyn-screen-switching *{transition:none!important;animation:none!important}html[data-kyn-screen-module] .iframe-container{contain:layout paint}html[data-kyn-screen-module] .iframe-container.hidden{visibility:hidden!important;pointer-events:none!important}';(document.head||document.documentElement).appendChild(s);installClicks();installPanels();installTheme();installFrames();shellState();installNavigation();state.ready=true;global.KynectaScreen={state:state,normalizeModule:normalize,openModule:function(m,o){syncModule(m,o);},openPanel:function(m,p){syncPanel(m,p,true);},closePanel:function(m){syncPanel(m,null,false);},refreshTheme:function(){refreshTheme('manual');},getFrame:function(m){var x=MODULES[normalize(m)];return x&&document.getElementById(x.frame);}};requestAnimationFrame(function(){syncModule(global.__currentPage||state.module,{force:true,keepPanel:true});});}
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
+})(window,document);
