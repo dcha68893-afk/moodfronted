@@ -22,3 +22,19 @@ function boot(){install();setTimeout(install,250);setTimeout(install,1000);setTi
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 if(window.MutationObserver)new MutationObserver(function(){install();}).observe(document.documentElement,{childList:true,subtree:true});
 })();
+
+/* Unified screen authority is loaded once by the parent chat shell. */
+(function(){
+'use strict';
+if(!/\/chat\.html$/i.test(location.pathname)||window.__NECPRA_UNIFIED_SCREEN_LOADER__)return;
+window.__NECPRA_UNIFIED_SCREEN_LOADER__=true;
+function load(){
+  if(document.querySelector('script[data-necpra-unified-screen]'))return;
+  var s=document.createElement('script');
+  s.src='/js/unified-screen-controller.js?v=20260917-1';
+  s.async=false;
+  s.setAttribute('data-necpra-unified-screen','1');
+  (document.head||document.documentElement).appendChild(s);
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',load,{once:true});else load();
+})();
