@@ -1,24 +1,10 @@
-/* Group -> Friends bridge. group.html already loads this filename from config.js. */
+/* Group -> Friends bridge. Friendship creation always goes through FriendsService. */
 (function(){
-  'use strict';
-  if (window.__FRIENDS_GROUP_BRIDGE__) return;
-  window.__FRIENDS_GROUP_BRIDGE__ = true;
-  const base=()=>String(window.__getApiBase?.()||window.API_BASE_URL||'').replace(/\/$/,'');
-  const token=()=>window.__kynToken||window.__accessToken||localStorage.getItem('authToken')||localStorage.getItem('accessToken')||localStorage.getItem('token')||'';
-  async function api(path,opt={}){const headers={...(opt.headers||{})};const t=token();if(t)headers.Authorization='Bearer '+t;if(opt.body&&typeof opt.body!=='string'){headers['Content-Type']='application/json';opt={...opt,body:JSON.stringify(opt.body)}}const r=await fetch(base()+path,{...opt,headers});const d=await r.json().catch(()=>({}));if(!r.ok||d.success===false)throw Error(d.message||'Friend request failed');return d;}
-  function decorate(){
-    const list=document.getElementById('membersList'); if(!list)return;
-    list.querySelectorAll('.member').forEach(row=>{
-      if(row.querySelector('.group-friend-action'))return;
-      const username=(row.querySelector('.who small')?.textContent||'').replace(/^@/,'').trim();
-      const name=(row.querySelector('.who b')?.textContent||'Member').trim();
-      if(!username)return;
-      const wrap=document.createElement('span');wrap.className='group-friend-action';wrap.style.cssText='display:flex;gap:5px;margin-left:auto';
-      const btn=document.createElement('button');btn.type='button';btn.className='smallbtn';btn.textContent='Add friend';btn.title='Send friend request to '+name;
-      btn.onclick=async()=>{btn.disabled=true;btn.textContent='Sending…';try{const s=await api('/friend-discovery/search?q='+encodeURIComponent(username)+'&limit=5');const u=(s.data?.users||[]).find(x=>String(x.username).toLowerCase()===username.toLowerCase());if(!u)throw Error('User could not be found');const r=await api('/friends/requests',{method:'POST',body:{userId:Number(u.id)}});const rel=r.data?.relationship||r.data;btn.textContent=rel?.status==='accepted'?'Friends':'Request sent';}catch(e){btn.disabled=false;btn.textContent='Add friend';alert(e.message)}};
-      wrap.appendChild(btn);row.appendChild(wrap);
-    });
-  }
-  const observer=new MutationObserver(decorate); observer.observe(document.documentElement,{childList:true,subtree:true});
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',decorate);else decorate();
+'use strict';
+if(window.__FRIENDS_GROUP_BRIDGE__)return;window.__FRIENDS_GROUP_BRIDGE__=true;
+const base=()=>String(window.__getApiBase?.()||window.API_BASE_URL||'').replace(/\/$/,'');
+const token=()=>window.__kynToken||window.__accessToken||window.AuthSessionManager?.getToken?.()||localStorage.getItem('authToken')||localStorage.getItem('accessToken')||localStorage.getItem('token')||'';
+async function api(path,opt={}){const h={...(opt.headers||{})},t=token();if(t)h.Authorization='Bearer '+t;if(opt.body&&typeof opt.body!=='string'){h['Content-Type']='application/json';opt={...opt,body:JSON.stringify(opt.body)}}const r=await fetch(base()+path,{...opt,headers:h});const d=await r.json().catch(()=>({}));if(!r.ok||d.success===false)throw Error(d.message||'Friend request failed');return d}
+function decorate(){const list=document.getElementById('membersList');if(!list)return;list.querySelectorAll('.member').forEach(row=>{if(row.querySelector('.group-friend-action'))return;const explicitId=row.dataset.userId||row.dataset.userid||row.getAttribute('data-user-id');const username=(row.querySelector('.who small')?.textContent||'').replace(/^@/,'').trim();const name=(row.querySelector('.who b')?.textContent||'Member').trim();if(!explicitId&&!username)return;const wrap=document.createElement('span');wrap.className='group-friend-action';wrap.style.cssText='display:flex;gap:5px;margin-left:auto';const btn=document.createElement('button');btn.type='button';btn.className='smallbtn';btn.textContent='Add friend';btn.title='Add '+name+' as a friend';btn.onclick=async e=>{e.preventDefault();e.stopPropagation();btn.disabled=true;btn.textContent='Sending…';try{let id=Number(explicitId);if(!Number.isInteger(id)||id<=0){const s=await api('/friend-discovery/search?q='+encodeURIComponent(username)+'&limit=5');const found=(s.data?.users||[]).find(x=>String(x.username).toLowerCase()===username.toLowerCase());if(!found)throw Error('User could not be found');id=Number(found.id)}await window.FriendsService?.send(id)??api('/friends/requests',{method:'POST',body:{userId:id}});btn.textContent='Request sent';btn.classList.add('friend-sent')}catch(err){btn.disabled=false;btn.textContent='Add friend';btn.title=err.message}};wrap.appendChild(btn);row.appendChild(wrap)})}
+const observer=new MutationObserver(decorate);observer.observe(document.documentElement,{childList:true,subtree:true});if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',decorate);else decorate();
 })();
