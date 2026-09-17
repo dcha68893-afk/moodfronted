@@ -667,6 +667,12 @@
         .center-menu-calls i { color: #34d399; }
         .center-menu-group i { color: #60a5fa; }
         .center-menu-games i { color: #f59e0b; }
+        /* FIX (FRIENDS-ICON-INVISIBLE-IN-LIGHT-THEME): unlike calls/group/games,
+           this icon had no explicit color, so it fell back to the .center-menu-item
+           default. That default is fine in dark mode but effectively disappears
+           in light mode, so give it its own explicit, theme-independent color
+           like its siblings. */
+        .center-menu-friends i { color: #f472b6; }
         #centerMenuOverlay {
             display: none;
             position: fixed;
@@ -1555,10 +1561,10 @@
         }
 
         /* ── TOOLS MODULE NAV TABS (in parent header) ────────────────── */
-        #toolsHeaderNav {
+        #toolsHeaderNav, #friendsHeaderNav {
             display: flex; align-items: center; gap: 4px;
         }
-        #toolsHeaderNav.hidden { display: none !important; }
+        #toolsHeaderNav.hidden, #friendsHeaderNav.hidden { display: none !important; }
         /* FIX (theme audit): these pills only had translucent-white/light-gray
            values (background rgba(255,255,255,0.07), text #9ca3af) meant to
            sit on the header's old permanently-dark background — now that
@@ -1692,6 +1698,34 @@
             <button class="jm-parent-nav-tab" data-tools-page="account" title="Account" onclick="toolsNavTo('account')">
                 <i class="fas fa-user-circle" style="font-size:15px"></i>
                 <span style="font-size:10px;line-height:1">Account</span>
+            </button>
+        </div>
+
+        <!-- FRIENDS NAV TABS — shown only when friends page is active. Replaces
+             the Friends/Discover/Requests/Sent/Nearby tab row that used to live
+             inside friend.html's own iframe: this parent header now owns the
+             tabs, and just tells the iframe which one is active. -->
+        <div id="friendsHeaderNav" class="hidden" aria-label="Friends navigation">
+            <button class="jm-parent-nav-tab active" data-friends-page="friends" title="Friends" onclick="friendsNavTo('friends')">
+                <i class="fas fa-user-friends" style="font-size:15px"></i>
+                <span style="font-size:10px;line-height:1">Friends</span>
+            </button>
+            <button class="jm-parent-nav-tab" data-friends-page="discover" title="Discover" onclick="friendsNavTo('discover')">
+                <i class="fas fa-compass" style="font-size:15px"></i>
+                <span style="font-size:10px;line-height:1">Discover</span>
+            </button>
+            <button class="jm-parent-nav-tab" data-friends-page="requests" title="Requests" onclick="friendsNavTo('requests')" style="position:relative">
+                <i class="fas fa-user-clock" style="font-size:15px"></i>
+                <span id="friendsRequestsBadge" style="display:none;position:absolute;top:-4px;right:-4px;background:#f97316;color:#fff;font-size:8px;font-weight:800;border-radius:10px;padding:1px 5px;min-width:14px;text-align:center;line-height:1.4">0</span>
+                <span style="font-size:10px;line-height:1">Requests</span>
+            </button>
+            <button class="jm-parent-nav-tab" data-friends-page="sent" title="Sent" onclick="friendsNavTo('sent')">
+                <i class="fas fa-paper-plane" style="font-size:15px"></i>
+                <span style="font-size:10px;line-height:1">Sent</span>
+            </button>
+            <button class="jm-parent-nav-tab" data-friends-page="nearby" title="Nearby" onclick="friendsNavTo('nearby')">
+                <i class="fas fa-location-arrow" style="font-size:15px"></i>
+                <span style="font-size:10px;line-height:1">Nearby</span>
             </button>
         </div>
 
@@ -2823,19 +2857,14 @@
                 { btnId: 'multiSendToggleBtn', icon: 'fa-broadcast-tower', title: 'Multi-send' },
                 { btnId: 'newChatBtn', icon: 'fa-edit', title: 'New chat' }
             ],
-            friends: [
-                { btnId: 'startNewChatBtn', icon: 'fa-comments', title: 'New chat' },
-                // ROOT-CAUSE FIX (NO-FRIEND-REQUEST-ICON-IN-HEADER): friend.html
-                // already has a fully working friend-request bell (badge count +
-                // click opens BOTH the received (#requestsList) and sent
-                // (#sentRequestsList) lists — see friendRequestBellBtn in
-                // friend.html) — it just was never added to this parent header
-                // config, so the only header row visible on mobile (this one)
-                // never exposed it. Reuses the same proxy-click mechanism the
-                // other two buttons already use instead of building anything new.
-                { btnId: 'friendRequestBellBtn', icon: 'fa-bell', title: 'Friend Requests' },
-                { btnId: 'addFriendBtn', icon: 'fa-user-plus', title: 'Add friend' }
-            ],
+            // FRIENDS-HEADER-CLEANUP: the New-chat / Friend-request-bell /
+            // Add-friend buttons this used to proxy-click into friend.html no
+            // longer exist there (friend.html's own title/subtitle and its
+            // Friends/Discover/Requests/Sent/Nearby tab row were removed and
+            // replaced by #friendsHeaderNav below, which the parent now owns
+            // directly). Left empty like tools/games — friend.html's search
+            // bar covers finding people, and #friendsHeaderNav covers the tabs.
+            friends: [],
             calls: [
                 { btnId: 'newCallBtn', icon: 'fa-phone-plus', title: 'New call' }
             ],
@@ -2874,17 +2903,29 @@
         function updateHeaderActions(page) {
             const headerActionsEl = document.getElementById('headerActions');
             const toolsNavEl      = document.getElementById('toolsHeaderNav');
+            const friendsNavEl    = document.getElementById('friendsHeaderNav');
             if (!headerActionsEl) return;
 
             if (page === 'tools') {
                 // Show tools tabs, hide generic actions
                 if (toolsNavEl) toolsNavEl.classList.remove('hidden');
+                if (friendsNavEl) friendsNavEl.classList.add('hidden');
                 headerActionsEl.innerHTML = '';
                 headerActionsEl.classList.add('hidden');
                 return;
             }
-            // Hide tools nav for every other page (including games)
+            // Hide tools nav for every other page
             if (toolsNavEl) toolsNavEl.classList.add('hidden');
+
+            if (page === 'friends') {
+                // Show friends tabs, hide generic actions (friends has none)
+                if (friendsNavEl) friendsNavEl.classList.remove('hidden');
+                headerActionsEl.innerHTML = '';
+                headerActionsEl.classList.add('hidden');
+                return;
+            }
+            // Hide friends nav for every other page (including games)
+            if (friendsNavEl) friendsNavEl.classList.add('hidden');
             // Games page — no header actions needed
             if (page === 'games') {
                 headerActionsEl.innerHTML = '';
@@ -3364,6 +3405,40 @@
                 if (badge) {
                     badge.textContent = d.payload.count || '0';
                     badge.style.display = (d.payload.visible && parseInt(d.payload.count || '0') > 0) ? 'block' : 'none';
+                }
+            }
+        }, true);
+
+        // ── FRIENDS NAV TABS (parent-owned, drives the friend.html iframe) ──
+        function friendsNavTo(page) {
+            const iframe = document.getElementById('friendsIframe');
+            if (iframe && iframe.contentWindow) {
+                iframe.contentWindow.postMessage(
+                    { type: 'FRIENDS_NAV', payload: { page: page }, source: 'parent-shell' }, '*'
+                );
+            }
+            document.querySelectorAll('#friendsHeaderNav .jm-parent-nav-tab').forEach(function(btn) {
+                btn.classList.toggle('active', btn.getAttribute('data-friends-page') === page);
+            });
+        }
+
+        // Listen for the current tab + request-count FROM the friends iframe,
+        // so the parent's tab row and badge stay in sync with searches,
+        // deep links (?target=), and requests loading in the background.
+        window.addEventListener('message', function(e) {
+            const d = e.data;
+            if (!d || typeof d !== 'object' || d.source !== 'friends-iframe') return;
+            if (d.type === 'FRIENDS_PAGE_CHANGED' && d.payload && d.payload.page) {
+                document.querySelectorAll('#friendsHeaderNav .jm-parent-nav-tab').forEach(function(btn) {
+                    btn.classList.toggle('active', btn.getAttribute('data-friends-page') === d.payload.page);
+                });
+            }
+            if (d.type === 'FRIENDS_REQUEST_COUNT' && d.payload) {
+                const badge = document.getElementById('friendsRequestsBadge');
+                if (badge) {
+                    const count = parseInt(d.payload.count || 0, 10);
+                    badge.textContent = count;
+                    badge.style.display = count > 0 ? 'block' : 'none';
                 }
             }
         }, true);
