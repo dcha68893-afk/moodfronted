@@ -4035,6 +4035,18 @@ function isValidEndpoint(url, baseUrl) {
             const allowedDomains = [
                 'noxopa.onrender.com',
                 'nexipa.onrender.com',
+                // FIX (STALE-DOMAIN-ALLOWLIST): the frontend now also serves
+                // from a custom domain, necpra.co.ke — this list was never
+                // updated, so every page load logged a false
+                // "[API-CORE] Current origin may not be allowed" warning for
+                // that origin. This list only gates requests to a URL a
+                // caller explicitly passed as a full http(s) URL (relative
+                // '/api/...' calls skip it entirely, see the branch above),
+                // so it wasn't blocking real traffic — but the noise made a
+                // genuine misconfiguration (backend CORS, see below) harder
+                // to spot in the console. Kept in sync with whatever domain
+                // this app is actually deployed to.
+                'necpra.co.ke',
                 'localhost',
                 '127.0.0.1'
             ];
