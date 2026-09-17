@@ -46,6 +46,48 @@ const MODULE_VERSION = '14.0';
 
 const EXPECTED_PARENT_ORIGIN = window.location.origin;
 
+// ROOT-CAUSE FIX (RENDER-COLD-START-TIMEOUTS): free/starter-tier Render web
+// services spin down after ~15 minutes idle and take 30-60s to wake on the
+// next request. Every real data call in this module (loadFriendsFromBackend,
+// fetchAllUsersFromBackend, search, etc.) uses a 30s client-side timeout —
+// shorter than a cold start can take — so the FIRST batch of calls after any
+// idle period is reported as "API request timeout" even though the backend
+// eventually answers. This is the dominant cause of "friends/discover/search
+// don't work" on a cold session: the request did reach the server, it just
+// didn't reach it fast enough for authorizedRequest's own clock.
+//
+// Absorb that penalty up front with one lightweight, long-timeout ping fired
+// the instant this script evaluates — independent of the CHILD_READY/AUTH_READY
+// handshake, the postMessage bridge, and any session — so the dyno is already
+// warm (or at least warming) by the time the real, time-sensitive data calls
+// go out a few seconds later once the handshake completes.
+let _backendWarmPromise = null;
+function warmBackend() {
+    if (_backendWarmPromise) return _backendWarmPromise;
+    _backendWarmPromise = (async () => {
+        try {
+            const base = (typeof window.__getApiBase === 'function') ? window.__getApiBase() : '';
+            if (!base) return false;
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 55000);
+            try {
+                const res = await fetch(`${base}/friends/ping`, { method: 'GET', signal: controller.signal, cache: 'no-store' });
+                console.log(`[${MODULE_NAME}] Backend warm-up ${res.ok ? 'succeeded' : `returned ${res.status}`}`);
+                return res.ok;
+            } finally {
+                clearTimeout(timer);
+            }
+        } catch (err) {
+            console.warn(`[${MODULE_NAME}] Backend warm-up failed (will proceed anyway):`, err && err.message);
+            return false;
+        }
+    })();
+    return _backendWarmPromise;
+}
+if (typeof window !== 'undefined') {
+    warmBackend();
+}
+
 const POLLING_CONFIG = {
     INCOMING_REQUESTS_INTERVAL: 60000,  // 60s — socket handles realtime; polling is offline fallback
     MAX_RETRY_ATTEMPTS: 3,
@@ -595,15 +637,39 @@ async function flushRequestQueue() {
     console.log(`[${MODULE_NAME}] Queue flush complete`);
 }
 
+// ROOT-CAUSE FIX (FRIEND-MODULE-HANDSHAKE-DEADLOCK — "no friend request goes
+// through"): this table only permitted one exact ordering
+//   BOOT → INITIALIZING → WAITING_AUTH → AUTH_READY → READY → WAIT_PARENT → ACTIVE
+// while the parent (chat.html sendSessionToModule) fires SESSION_DATA,
+// AUTH_READY and PARENT_READY back-to-back in a single synchronous burst, and
+// re-fires the whole burst again at +350ms and +800ms.
+//
+// Any message that landed a step "early" was permanently discarded:
+//   * AUTH_READY arriving while still INITIALIZING (the iframe listener mounts
+//     inside initialize(), so this is a real race on slow/cold loads) was
+//     accepted by handleAuthReady's guard but BOTH of its transitions
+//     (INITIALIZING→AUTH_READY, →READY) were rejected here, leaving the state
+//     pinned at INITIALIZING.
+//   * PARENT_READY then arrived in a state that was not WAIT_PARENT, so
+//     handleParentReady dropped it and parentReadyReceived stayed false.
+// The module therefore never reached ACTIVE, and since assertActive() gates
+// every operation and authorizedRequest() returns
+// {success:false, error:'Module not active'} when not ACTIVE, EVERY friend API
+// call — send request, accept, reject, list, block — failed with no network
+// traffic at all. There was no recovery path either: requestSessionFromParent()
+// is only ever called from onModuleActive(), which requires ACTIVE.
+//
+// Allow the legal short-cuts and re-entries so the state machine converges on
+// ACTIVE regardless of which order the parent's three messages are observed in.
 const VALID_TRANSITIONS = {
-    [LIFECYCLE_STATES.BOOT]: [LIFECYCLE_STATES.INITIALIZING],
-    [LIFECYCLE_STATES.INITIALIZING]: [LIFECYCLE_STATES.WAITING_AUTH],
-    [LIFECYCLE_STATES.WAITING_AUTH]: [LIFECYCLE_STATES.AUTH_READY, LIFECYCLE_STATES.ERROR],
-    [LIFECYCLE_STATES.AUTH_READY]: [LIFECYCLE_STATES.READY],
-    [LIFECYCLE_STATES.READY]: [LIFECYCLE_STATES.WAIT_PARENT],
+    [LIFECYCLE_STATES.BOOT]: [LIFECYCLE_STATES.INITIALIZING, LIFECYCLE_STATES.WAITING_AUTH],
+    [LIFECYCLE_STATES.INITIALIZING]: [LIFECYCLE_STATES.WAITING_AUTH, LIFECYCLE_STATES.AUTH_READY, LIFECYCLE_STATES.ERROR],
+    [LIFECYCLE_STATES.WAITING_AUTH]: [LIFECYCLE_STATES.AUTH_READY, LIFECYCLE_STATES.READY, LIFECYCLE_STATES.ERROR],
+    [LIFECYCLE_STATES.AUTH_READY]: [LIFECYCLE_STATES.READY, LIFECYCLE_STATES.WAIT_PARENT, LIFECYCLE_STATES.ACTIVE, LIFECYCLE_STATES.ERROR],
+    [LIFECYCLE_STATES.READY]: [LIFECYCLE_STATES.WAIT_PARENT, LIFECYCLE_STATES.ACTIVE, LIFECYCLE_STATES.ERROR],
     [LIFECYCLE_STATES.WAIT_PARENT]: [LIFECYCLE_STATES.ACTIVE, LIFECYCLE_STATES.ERROR],
-    [LIFECYCLE_STATES.ACTIVE]: [],
-    [LIFECYCLE_STATES.ERROR]: [LIFECYCLE_STATES.INITIALIZING]
+    [LIFECYCLE_STATES.ACTIVE]: [LIFECYCLE_STATES.ERROR],
+    [LIFECYCLE_STATES.ERROR]: [LIFECYCLE_STATES.INITIALIZING, LIFECYCLE_STATES.WAITING_AUTH]
 };
 
 function transitionTo(nextState, reason = '') {
@@ -706,14 +772,25 @@ function assertReadyForSession(actionName) {
     return true;
 }
 
-function sendChildReady() {
-    if (childReadySent) {
-        console.warn('[Lifecycle] CHILD_READY already sent');
+// ROOT-CAUSE FIX (FRIEND-MODULE-HANDSHAKE-DEADLOCK): CHILD_READY was a
+// once-only message that could only be sent from exactly one state. Two
+// consequences, both fatal:
+//   1. The module never announced itself until AFTER it had already received
+//      AUTH_READY — so if that first burst was missed (listener not mounted
+//      yet), the parent was never prompted to re-send it. chat.html's
+//      CHILD_READY handler is precisely the code path that re-pushes the
+//      session (immediately, +350ms, +800ms), so not sending it early meant
+//      giving up the one built-in recovery mechanism.
+//   2. The `childReadySent` latch made the retry/watchdog below a no-op.
+// CHILD_READY is idempotent on the parent side (registerModule + re-send
+// session), so allow it to be sent from any pre-ACTIVE state and to repeat.
+function sendChildReady(force = false) {
+    if (childReadySent && !force) {
+        Logger.debug('Lifecycle', 'CHILD_READY already sent — skipping duplicate');
         return false;
     }
 
-    if (currentState !== LIFECYCLE_STATES.READY) {
-        console.warn(`[Lifecycle] Cannot send CHILD_READY - state: ${currentState}`);
+    if (currentState === LIFECYCLE_STATES.ACTIVE && !force) {
         return false;
     }
 
@@ -733,21 +810,139 @@ function sendChildReady() {
     if (sent) {
         childReadySent = true;
         console.log(`[${MODULE_NAME}] CHILD_READY sent with module=${MODULE_NAME}`);
-        transitionTo(LIFECYCLE_STATES.WAIT_PARENT, 'child_ready_sent');
+        // Only advance the state machine when auth has already been applied.
+        // An early CHILD_READY (fired by the watchdog while still WAITING_AUTH)
+        // must NOT push the module into WAIT_PARENT, or handleAuthReady would
+        // then reject the AUTH_READY it is trying to provoke.
+        if (authReadyReceived && currentState === LIFECYCLE_STATES.READY) {
+            transitionTo(LIFECYCLE_STATES.WAIT_PARENT, 'child_ready_sent');
+        }
         return true;
     }
     return false;
 }
 
+// ROOT-CAUSE FIX (FRIEND-MODULE-HANDSHAKE-DEADLOCK): single convergence point.
+// Previously ACTIVE could only be entered from inside handleParentReady, and
+// only if that message happened to arrive while the state was exactly
+// WAIT_PARENT. Now either handler can complete the handshake once both halves
+// (auth/session and parent-ready) are satisfied, in whichever order they land.
+function tryActivate(reason = 'converge') {
+    if (currentState === LIFECYCLE_STATES.ACTIVE) return true;
+    if (!authReadyReceived || !__session.ready) return false;
+    if (!parentReadyReceived) return false;
+
+    // Walk whatever intermediate states are still outstanding.
+    if (currentState === LIFECYCLE_STATES.BOOT || currentState === LIFECYCLE_STATES.INITIALIZING) {
+        transitionTo(LIFECYCLE_STATES.WAITING_AUTH, reason);
+    }
+    if (currentState === LIFECYCLE_STATES.WAITING_AUTH) {
+        transitionTo(LIFECYCLE_STATES.AUTH_READY, reason);
+    }
+    if (currentState === LIFECYCLE_STATES.AUTH_READY) {
+        transitionTo(LIFECYCLE_STATES.READY, reason);
+    }
+    if (currentState === LIFECYCLE_STATES.READY) {
+        transitionTo(LIFECYCLE_STATES.WAIT_PARENT, reason);
+    }
+    if (currentState === LIFECYCLE_STATES.WAIT_PARENT) {
+        transitionTo(LIFECYCLE_STATES.ACTIVE, reason);
+    }
+
+    if (currentState === LIFECYCLE_STATES.ACTIVE) {
+        window.__PARENT_READY__       = true;
+        window.__HANDSHAKE_COMPLETE__ = true;
+        window.__IFRAME_READY__       = true;
+        console.log(`[${MODULE_NAME}] ✅ ACTIVE (${reason})`);
+        stopHandshakeWatchdog();
+        onModuleActive();
+        flushRequestQueue();
+        return true;
+    }
+    return false;
+}
+
+// ROOT-CAUSE FIX (FRIEND-MODULE-HANDSHAKE-DEADLOCK): recovery path. If the
+// parent's session burst was missed entirely (iframe listener mounted after
+// the messages were posted — the common cold-start race), nothing in the old
+// code ever asked for it again, so the module sat in WAITING_AUTH forever and
+// every friend API call failed instantly with "Module not active".
+// chat.html already handles both CHILD_READY and REQUEST_SESSION by re-sending
+// the full session, so poll for it until the handshake completes.
+let _handshakeWatchdogTimer = null;
+let _handshakeWatchdogAttempts = 0;
+const HANDSHAKE_WATCHDOG_INTERVAL = 1200;
+const HANDSHAKE_WATCHDOG_MAX_ATTEMPTS = 25; // ~30s of retries
+
+function stopHandshakeWatchdog() {
+    if (_handshakeWatchdogTimer) {
+        clearInterval(_handshakeWatchdogTimer);
+        _handshakeWatchdogTimer = null;
+    }
+}
+
+function startHandshakeWatchdog() {
+    if (_handshakeWatchdogTimer) return;
+    if (!window.parent || window.parent === window) return; // not framed — nothing to ask
+
+    _handshakeWatchdogTimer = setInterval(() => {
+        if (currentState === LIFECYCLE_STATES.ACTIVE) {
+            stopHandshakeWatchdog();
+            return;
+        }
+
+        // Both halves already in hand but state never converged — converge now.
+        if (tryActivate('watchdog_converge')) return;
+
+        if (_handshakeWatchdogAttempts++ >= HANDSHAKE_WATCHDOG_MAX_ATTEMPTS) {
+            Logger.error('Lifecycle', 'Handshake watchdog gave up — parent never delivered a session', null, {
+                state: currentState,
+                authReady: authReadyReceived,
+                parentReady: parentReadyReceived,
+                sessionReady: __session.ready
+            });
+            stopHandshakeWatchdog();
+            window.dispatchEvent(new CustomEvent('friendHandshakeFailed', {
+                detail: { state: currentState, attempts: _handshakeWatchdogAttempts }
+            }));
+            return;
+        }
+
+        console.warn(`[${MODULE_NAME}] Handshake incomplete (state=${currentState}, authReady=${authReadyReceived}, parentReady=${parentReadyReceived}) — re-requesting session from parent (attempt ${_handshakeWatchdogAttempts})`);
+
+        // Re-announce, then explicitly ask. chat.html answers both.
+        sendChildReady(true);
+        sendMessageInternal({
+            type: 'REQUEST_SESSION',
+            module: MODULE_NAME,
+            source: MODULE_NAME,
+            target: 'parent',
+            payload: { module: MODULE_NAME, reason: 'handshake_watchdog', state: currentState, timestamp: Date.now() }
+        });
+    }, HANDSHAKE_WATCHDOG_INTERVAL);
+}
+
 function handleParentReady(message, event) {
-    if (parentReadyReceived) {
-        console.warn('[Lifecycle] PARENT_READY already received — ignoring');
+    // ROOT-CAUSE FIX (FRIEND-MODULE-HANDSHAKE-DEADLOCK): a duplicate
+    // PARENT_READY used to be discarded unconditionally. chat.html deliberately
+    // re-sends the whole session burst at +350ms and +800ms precisely so a
+    // module that missed the first one can recover — dropping the repeats threw
+    // that safety net away. Only ignore repeats once we are genuinely ACTIVE.
+    if (parentReadyReceived && currentState === LIFECYCLE_STATES.ACTIVE) {
+        Logger.debug('Lifecycle', 'PARENT_READY duplicate while ACTIVE — ignoring');
         return;
     }
 
+    // ROOT-CAUSE FIX (FRIEND-MODULE-HANDSHAKE-DEADLOCK): this used to hard-drop
+    // PARENT_READY unless the state was exactly WAIT_PARENT. Because the parent
+    // posts AUTH_READY and PARENT_READY in the same burst, any hiccup in the
+    // AUTH_READY leg (see handleAuthReady / VALID_TRANSITIONS above) left the
+    // state at INITIALIZING or READY, PARENT_READY was thrown away, and
+    // parentReadyReceived stayed false forever — permanently blocking every
+    // friend API call. PARENT_READY carries the session, so it is now always
+    // processed; tryActivate() decides when the handshake is actually complete.
     if (currentState !== LIFECYCLE_STATES.WAIT_PARENT) {
-        console.warn(`[Lifecycle] PARENT_READY received in invalid state: ${currentState} — ignoring`);
-        return;
+        Logger.debug('Lifecycle', `PARENT_READY received in state ${currentState} — accepting and converging`);
     }
 
     // PRODUCTION FIX: Learn origin from the event so cross-origin parent is trusted
@@ -778,27 +973,45 @@ function handleParentReady(message, event) {
     }
 
     parentReadyReceived = true;
-    transitionTo(LIFECYCLE_STATES.ACTIVE, 'parent_ready_received');
-    window.__PARENT_READY__       = true;
-    window.__HANDSHAKE_COMPLETE__ = true;
-    window.__IFRAME_READY__       = true;  // FIX: was never set — blocked all friend ops
-    console.log(`[${MODULE_NAME}] ✅ ACTIVE`);
-    onModuleActive();
+
+    // ROOT-CAUSE FIX (FRIEND-MODULE-HANDSHAKE-DEADLOCK): this used to call
+    // transitionTo(ACTIVE) directly and then unconditionally declare success —
+    // announcing "✅ ACTIVE" and running onModuleActive() even when the
+    // transition had been rejected as invalid and the state was still
+    // INITIALIZING/READY. The logs therefore said the module was ACTIVE while
+    // assertActive() kept rejecting every single friend API call. Converge
+    // through tryActivate(), which only reports success if the state really
+    // moved, and keep the watchdog running if it did not.
+    if (!tryActivate('parent_ready_received')) {
+        console.warn(`[${MODULE_NAME}] PARENT_READY handled but handshake incomplete (state=${currentState}, authReady=${authReadyReceived}, sessionReady=${__session.ready}) — waiting for AUTH_READY`);
+        startHandshakeWatchdog();
+    }
 }
 
 let _authReadyHandled = false;
 
 function handleAuthReady(message) {
     // FIXED: Suppress duplicate AUTH_READY silently (no console.warn)
-    if (_authReadyHandled) {
+    // ROOT-CAUSE FIX (FRIEND-MODULE-HANDSHAKE-DEADLOCK): `_authReadyHandled`
+    // latched on the FIRST AUTH_READY even if that one failed to yield a usable
+    // session (no token, or a user object the extraction below could not
+    // resolve). Every subsequent re-send from the parent was then silently
+    // dropped and the module could never authenticate. Only latch once a
+    // session has actually been applied.
+    if (_authReadyHandled && __session.ready && __session.token) {
         Logger.debug('Lifecycle', 'AUTH_READY already handled - ignoring duplicate');
         return;
     }
 
-    if (currentState !== LIFECYCLE_STATES.WAITING_AUTH && 
-        currentState !== LIFECYCLE_STATES.AUTH_READY && 
-        currentState !== LIFECYCLE_STATES.INITIALIZING) {
-        console.warn(`[Lifecycle] AUTH_READY received in invalid state: ${currentState} — ignoring`);
+    // ROOT-CAUSE FIX (FRIEND-MODULE-HANDSHAKE-DEADLOCK): the old guard rejected
+    // AUTH_READY in BOOT, READY and WAIT_PARENT. Combined with the narrow
+    // VALID_TRANSITIONS table above, an AUTH_READY that arrived one tick early
+    // (before initialize() had moved the state out of INITIALIZING) left the
+    // module wedged with authReadyReceived === false, which makes
+    // authorizedRequest() queue every call indefinitely and assertActive()
+    // reject every operation. Accept it in any state other than ACTIVE.
+    if (currentState === LIFECYCLE_STATES.ACTIVE && __session.ready) {
+        Logger.debug('Lifecycle', 'AUTH_READY received while ACTIVE — ignoring');
         return;
     }
 
@@ -849,9 +1062,27 @@ function handleAuthReady(message) {
 
         _authReadyHandled = true;  // FIXED: Mark as handled to prevent duplicates
         authReadyReceived = true;
+
+        // ROOT-CAUSE FIX (FRIEND-MODULE-HANDSHAKE-DEADLOCK): normalise the state
+        // first. If AUTH_READY beat initialize() to the punch the state is still
+        // BOOT/INITIALIZING, and the two transitions below were both rejected —
+        // silently, because transitionTo() only warns. The module then looked
+        // authenticated (authReadyReceived === true) but was stuck one or two
+        // states short of ACTIVE, so assertActive() failed on every call.
+        if (currentState === LIFECYCLE_STATES.BOOT || currentState === LIFECYCLE_STATES.INITIALIZING) {
+            transitionTo(LIFECYCLE_STATES.WAITING_AUTH, 'auth_ready_early');
+        }
         transitionTo(LIFECYCLE_STATES.AUTH_READY, 'auth_ready_received');
         transitionTo(LIFECYCLE_STATES.READY,      'auth_ready_complete');
-        sendChildReady();
+        sendChildReady(true);
+
+        // If PARENT_READY already landed (it is posted in the same burst and may
+        // have been processed before this handler ran), finish the handshake now
+        // instead of waiting for a message that will never come again.
+        if (!tryActivate('auth_ready_complete')) {
+            startHandshakeWatchdog();
+        }
+
         flushRequestQueue();
 
         // Start polling for incoming and sent requests after auth is ready
@@ -909,17 +1140,45 @@ function applySession(session) {
     }
 }
 
-function onModuleActive() {
+async function onModuleActive() {
     console.log(`[${MODULE_NAME}] Module ACTIVE — safe to perform API calls`);
     flushQueue();
     
     if (!__session.ready && parentReadyReceived && authReadyReceived) {
         requestSessionFromParent();
     }
-    
+
+    // ROOT-CAUSE FIX (RENDER-COLD-START-TIMEOUTS): give the warm-up ping
+    // (fired the instant this script loaded — see warmBackend() above) a
+    // short head start before the real, 30s-timeout-bound data loaders fire.
+    // In the common warm-dyno case this resolves near-instantly and adds no
+    // delay; it only matters on a cold start, and even then this is a small,
+    // bounded wait rather than letting the first real request eat the whole
+    // cold-start penalty against its own tight timeout.
+    try {
+        await Promise.race([
+            warmBackend(),
+            new Promise(resolve => setTimeout(resolve, 4000))
+        ]);
+    } catch (_) { /* never block activation on the warm-up */ }
+
     window.dispatchEvent(new CustomEvent('loadInitialData'));
     window.dispatchEvent(new CustomEvent('moduleActivated'));
     window.dispatchEvent(new CustomEvent('parentReady'));
+}
+
+// ROOT-CAUSE FIX (FRIEND-MODULE-HANDSHAKE-DEADLOCK): arm the recovery loop as
+// soon as this module is evaluated. The parent's session burst is fired from
+// chat.html on iframe load and can easily land before MessageDispatcher.init()
+// has mounted the listener inside initialize(); when that happened there was
+// previously no way back — the module stayed in WAITING_AUTH and every friend
+// API call failed with "Module not active" / "Session not ready" without ever
+// touching the network. The first tick also gives the normal handshake ~1.2s to
+// complete on its own, so in the happy path this costs nothing.
+if (typeof window !== 'undefined') {
+    setTimeout(() => {
+        if (currentState !== LIFECYCLE_STATES.ACTIVE) startHandshakeWatchdog();
+    }, HANDSHAKE_WATCHDOG_INTERVAL);
 }
 
 const _messageQueue = [];
@@ -1058,12 +1317,29 @@ async function authorizedRequest(endpoint, options = {}) {
         });
     }
     
-    if (!assertActive('authorizedRequest')) {
-        return { success: false, error: 'Module not active', statusCode: 503 };
+    // ROOT-CAUSE FIX (FRIEND-MODULE-HANDSHAKE-DEADLOCK): this returned
+    // "Module not active" — a 503 with no network call at all — whenever the
+    // lifecycle state lagged, which is exactly the failure mode described
+    // above and the reason every friend request appeared to do nothing. What
+    // actually matters for an authenticated call is having a valid session and
+    // a parent to relay through, not the label on the state machine. Try to
+    // converge first, and only refuse if we genuinely have nothing to send with.
+    if (currentState !== LIFECYCLE_STATES.ACTIVE) {
+        tryActivate('authorized_request');
     }
-    
+    if (currentState !== LIFECYCLE_STATES.ACTIVE) {
+        if (!__session.ready || !__session.token) {
+            assertActive('authorizedRequest');
+            startHandshakeWatchdog();
+            return { success: false, error: 'Module not active', statusCode: 503 };
+        }
+        Logger.warn('authorizedRequest', `Proceeding with valid session while state=${currentState}`, { endpoint });
+        startHandshakeWatchdog();
+    }
+
     if (!__session.ready || !__session.token) {
         Logger.warn('authorizedRequest', 'Session not ready, waiting for parent session');
+        startHandshakeWatchdog();
         return { success: false, error: 'Session not ready', statusCode: 401 };
     }
     
@@ -1084,10 +1360,33 @@ async function authorizedRequest(endpoint, options = {}) {
         normalizedEndpoint = normalizedEndpoint.replace(/\/+/g, '/');
     }
     
-    return new Promise((resolve) => {
+    return new Promise((_resolveRaw) => {
         const requestId = generateRequestId();
-        const timeout = options.timeout || 30000;
+        // ROOT-CAUSE FIX (RENDER-COLD-START-TIMEOUTS): 30s was tighter than a
+        // Render free/starter dyno's cold-start wake time (commonly 30-60s),
+        // so the first request after any idle period was declared "timed out"
+        // client-side even when the server would have answered a few seconds
+        // later. Combined with the warmBackend() head start in onModuleActive,
+        // this gives a cold dyno room to finish waking without every caller
+        // needing to pass its own longer timeout.
+        const timeout = options.timeout || 45000;
         let resolved = false;
+
+        // ROOT-CAUSE FIX (FRIEND-MODULE-SLOW/TIMING-OUT-REQUESTS): every call
+        // added a 'message' listener that was NEVER removed. The friend module
+        // polls incoming + sent requests on intervals and issues a dozen loads
+        // per screen, so listeners accumulated without bound — after a few
+        // minutes every inbound postMessage (including every realtime event)
+        // ran through hundreds of dead handlers, which is what pushed bridge
+        // POSTs past their 30s timeout and forced the "direct fetch" fallbacks
+        // scattered through friend-core.operations.js. Detach on settle.
+        const _cleanup = () => {
+            try { window.removeEventListener('message', handler); } catch (_) {}
+        };
+        const resolve = (value) => {
+            _cleanup();
+            _resolveRaw(value);
+        };
         
         const timeoutId = setTimeout(() => {
             if (!resolved) {
