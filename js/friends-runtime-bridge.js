@@ -1,4 +1,4 @@
-/* Friends runtime bridge: guarantees the parent Add Friend control exists and is wired. */
+/* Friends runtime bridge: compact, theme-aware navigation controls. */
 (function(){
 'use strict';
 if(!/\/chat\.html$/i.test(location.pathname)) return;
@@ -14,35 +14,23 @@ function install(){
   let button=document.getElementById('fabAddFriend');
   if(!button){
     button=document.createElement('button');
-    button.id='fabAddFriend';
-    button.type='button';
-    button.title='Add friend';
-    button.setAttribute('aria-label','Add friend');
+    button.id='fabAddFriend'; button.type='button'; button.title='Add friend'; button.setAttribute('aria-label','Add friend');
     button.innerHTML='<span aria-hidden="true">＋</span>';
     const style=document.createElement('style');
-    style.textContent='#fabAddFriend{position:absolute;right:12px;top:50%;transform:translateY(-50%);width:40px;height:40px;border:1px solid var(--kyn-border);border-radius:12px;background:var(--kyn-bg-panel);color:var(--kyn-accent-primary);font-size:25px;line-height:1;display:grid;place-items:center;z-index:100;cursor:pointer;box-shadow:var(--kyn-shadow-sm)}#fabAddFriend:hover{transform:translateY(-50%) scale(1.05);background:var(--kyn-bg-hover)}@media(max-width:768px){#fabAddFriend{width:38px;height:38px;color:var(--kyn-accent-primary);background:var(--kyn-bg-active)}}';
+    style.textContent='#fabAddFriend{position:absolute;right:10px;top:50%;transform:translateY(-50%);width:36px;height:36px;min-width:36px;max-width:36px;border:1px solid var(--kyn-border);border-radius:10px;background:var(--kyn-bg-panel);color:var(--kyn-accent-primary);font-size:21px;line-height:1;display:grid;place-items:center;z-index:100;cursor:pointer;box-shadow:none;padding:0;overflow:hidden}#fabAddFriend:hover{transform:translateY(-50%);background:var(--kyn-bg-hover);box-shadow:var(--kyn-shadow-sm)}#fabAddFriend:active{transform:translateY(-50%) scale(.94)}';
     document.head.appendChild(style);
     if(getComputedStyle(header).position==='static') header.style.position='relative';
     header.appendChild(button);
   }
-  if(!button.__friendsBound){
-    button.__friendsBound=true;
-    button.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();openFriends();});
-  }
+  if(!button.__friendsBound){button.__friendsBound=true;button.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();openFriends();});}
 }
 function installFriendsNavigation(){
   try{
     const selectors=['a[href*="friend.html"]','[data-module="friends"]','[data-page="friends"]','[data-nav="friends"]','[data-target="friends"]'];
     document.querySelectorAll(selectors.join(',')).forEach(function(item){
-      item.classList.add('necpra-friends-nav');
-      item.style.setProperty('color','var(--kyn-accent-primary)','important');
-      item.style.setProperty('visibility','visible','important');
-      item.style.setProperty('opacity','1','important');
-      item.querySelectorAll('i,svg,.icon,.nav-icon').forEach(function(icon){
-        icon.style.setProperty('color','var(--kyn-accent-primary)','important');
-        icon.style.setProperty('fill','currentColor','important');
-        icon.style.setProperty('stroke','currentColor','important');
-      });
+      item.classList.add('necpra-friends-nav'); item.style.setProperty('color','var(--kyn-text-primary)','important'); item.style.setProperty('visibility','visible','important'); item.style.setProperty('opacity','1','important');
+      item.style.setProperty('display','flex','important'); item.style.setProperty('align-items','center','important'); item.style.setProperty('gap','8px','important');
+      item.querySelectorAll('i,svg,.icon,.nav-icon').forEach(function(icon){icon.style.setProperty('color','var(--kyn-accent-primary)','important');icon.style.setProperty('fill','currentColor','important');icon.style.setProperty('stroke','currentColor','important');icon.style.setProperty('opacity','1','important');});
     });
   }catch(_){}
 }
