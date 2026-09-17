@@ -3363,7 +3363,12 @@ function getFilteredUsers(searchTerm) {
     }
     if (!users || !users.length) {
         // fallback: filter manually from cache
-        const currentUserId = currentUser?.id;
+        // FIX (BROWSE-ALL-SHOWS-OWN-ACCOUNT): prefer the durable
+        // (localStorage-backed) id via getDurableCurrentUserId(), same as
+        // getDiscoverableUsers() in friend-core.ui-bridge.js — currentUser?.id
+        // alone can still be unset this early (e.g. right after switching
+        // accounts, before the in-memory session object catches up).
+        const currentUserId = (typeof window.getDurableCurrentUserId === 'function' && window.getDurableCurrentUserId()) || currentUser?.id;
         const existingFriendIds = new Set(
             window.safeArray(window.FriendCore?.friends || window.FriendCore?.getFriends?.() || [])
                 .map(f => String(f.id || f.userId || ''))
@@ -3435,6 +3440,27 @@ function renderAllUsersFromCache() {
                     <p class="subtext">Try a different search term</p>
                 </div>
             `;
+        } else if (window._allUsersFetchAttempted) {
+            // FIX (BROWSE-ALL-STUCK-ON-"Loading users..."): a completed fetch
+            // (success or failure — fetchAllUsersFromBackend sets this flag in
+            // both cases) that still leaves zero users is a genuine empty
+            // state, not a still-loading one. Previously this branch always
+            // rendered the spinner, so a real "there's nobody else yet" result
+            // looked identical to "the app is broken/stuck loading" forever.
+            allUsersListElement.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-user-friends" style="font-size: 32px; margin-bottom: 15px;"></i>
+                    <p>No other users found yet</p>
+                    <p class="subtext">Invite friends to join, or check back later.</p>
+                    <button class="action-btn secondary retry-users-btn" style="margin-top: 12px;">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+            `;
+            const retryBtn = allUsersListElement.querySelector('.retry-users-btn');
+            if (retryBtn && typeof refreshAllUsersFromAPI === 'function') {
+                retryBtn.addEventListener('click', () => refreshAllUsersFromAPI());
+            }
         } else {
             allUsersListElement.innerHTML = `
                 <div class="empty-state">

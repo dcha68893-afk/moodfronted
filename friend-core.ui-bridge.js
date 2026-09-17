@@ -343,6 +343,36 @@ async function loadFriendsFromBackend() {
     return _loadFriendsInFlight;
 }
 
+// ROOT-CAUSE FIX (BROWSE-ALL-SHOWS-OWN-ACCOUNT): getDiscoverableUsers() and
+// fetchAllUsersFromBackend() below both used to determine "who am I" purely
+// from the in-memory __session.user?.id / currentUser?.id. That value is
+// populated asynchronously (auth-ready event, session restore, or — on this
+// app's two-account switcher — a page reload of the whole shell). Any render
+// that runs before it lands treats currentUserId as undefined, so the
+// "exclude myself" check silently passes every user through, including your
+// own account. Once there is only one real account in the directory (a
+// fresh install, or right after switching to a second account nobody else
+// has friended yet), that is the ONLY row left over — which is exactly the
+// "Browse All Users just shows me" symptom. AuthStorage's own persisted
+// record (localStorage, written synchronously on login/switch) is available
+// before that in-memory state is, so use it as a durable fallback instead of
+// trusting only the async session object.
+function getDurableCurrentUserId() {
+    try {
+        if (window.AuthStorage?.getUser) {
+            const u = window.AuthStorage.getUser();
+            const id = u?.id ?? u?.userId ?? u?.uid ?? u?._id;
+            if (id != null) return String(id);
+        }
+    } catch (_) {}
+    try {
+        const auth = JSON.parse(localStorage.getItem('kynecta_auth') || 'null');
+        const id = auth?.user?.id ?? auth?.user?.userId ?? auth?.user?.uid ?? auth?.user?._id;
+        if (id != null) return String(id);
+    } catch (_) {}
+    return null;
+}
+
 function getDiscoverableUsers() {
     let allUsersList = [];
     
@@ -376,8 +406,10 @@ function getDiscoverableUsers() {
         }
     });
     
-    // Get current user ID
-    const currentUserId = __session.user?.id || currentUser?.id;
+    // Get current user ID — prefer the durable (localStorage-backed) id;
+    // fall back to the in-memory session objects if that's unavailable.
+    // See getDurableCurrentUserId() above for why this order matters.
+    const currentUserId = getDurableCurrentUserId() || __session.user?.id || currentUser?.id;
     
     // Filter out current user, existing friends, and system/bot accounts
     const discoverable = allUsersList.filter(user => {
@@ -414,6 +446,7 @@ function getDiscoverableUsers() {
 }
 
 window.getDiscoverableUsers = getDiscoverableUsers;
+window.getDurableCurrentUserId = getDurableCurrentUserId;
 
 async function loadFriendRequestsFromBackend() {
     if (!assertActive('loadFriendRequestsFromBackend')) {
@@ -857,8 +890,8 @@ async function fetchAllUsersFromBackend() {
             }
         }
         
-        const currentUserId = __session.user?.id;
-        const filteredUsers = Array.isArray(usersData) ? usersData.filter(user => String(user.id) !== String(currentUserId)) : [];
+        const currentUserId = getDurableCurrentUserId() || __session.user?.id;
+        const filteredUsers = Array.isArray(usersData) ? usersData.filter(user => !currentUserId || String(user.id) !== String(currentUserId)) : [];
         
         // Normalize avatar fields
         filteredUsers.forEach(user => {
@@ -918,8 +951,17 @@ async function fetchAllUsersFromBackend() {
         
         console.log(`✅ fetchAllUsersFromBackend: Loaded ${filteredUsers.length} users for discovery`);
         
+        // FIX (BROWSE-ALL-STUCK-ON-"Loading users..."): renderAllUsersFromCache()
+        // in friend-ui.js could not tell "the fetch really came back with zero
+        // other users" apart from "the fetch hasn't resolved yet" and always
+        // showed the loading spinner for the empty case too, forever. This flag
+        // lets it show a real "no other users yet" state instead once a fetch
+        // has actually completed (success OR failure — see the catch branch).
+        window._allUsersFetchAttempted = true;
+        
         return { success: true, count: filteredUsers.length, users: filteredUsers };
     } catch (error) {
+        window._allUsersFetchAttempted = true;
         Logger.error('fetchAllUsersFromBackend', 'Failed to fetch users', error);
         
         // Priority 1: In-memory FriendCacheManager (fastest, already loaded)
