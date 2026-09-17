@@ -50,7 +50,7 @@
     </style>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Kynecta - Advanced Mood-Based Chat</title>
+    <title>Necpa - Chat, Calls & Marketplace</title>
     <!-- PWA: manifest MUST be linked from the main shell so beforeinstallprompt fires -->
     <link rel="manifest" href="/manifest.json">
     <!-- theme-color is now set dynamically by theme.engine.js to match the saved theme -->
@@ -1347,8 +1347,16 @@
         #hdrChatCall:hover, #hdrChatVideo:hover, #hdrGroupCall:hover, #hdrGroupVideo:hover {
             background: rgba(34,197,94,.24); border-color: rgba(34,197,94,.34);
         }
-        /* Override any color the header gradient might add */
-        #globalHeader.group-chat-active {
+        /* FIX (GROUP-HEADER-HARDCODED-DARK): this rule used to apply
+           unconditionally with !important the moment a group conversation
+           opened — regardless of data-theme — so the group panel header
+           rendered dark even while the rest of the app (and this same
+           header for a 1:1 chat or any other page) correctly followed
+           whatever theme was saved in Settings > Appearance. Gated behind
+           [data-theme="dark"] like every other dark override in this file;
+           in light mode the header now falls back to #globalHeader's own
+           light gradient declared near the top of this <style> block. */
+        [data-theme="dark"] #globalHeader.group-chat-active {
             background:
                 linear-gradient(135deg, rgba(15,23,42,0.98), rgba(30,41,59,0.97)),
                 linear-gradient(90deg, rgba(17,24,39,0.2), rgba(14,165,233,0.06)) !important;
@@ -1578,12 +1586,20 @@
 <body>
 
     <!-- Loading Screen -->
+    <!-- FIX (WRONG-ICON-ON-LAUNCH-SCREEN): this was a hardcoded 🧠 emoji on a
+         purple/green gradient tile captioned "Kynecta" — leftover pre-rebrand
+         placeholder art. It is the first thing shown on every cold start, so it
+         was the "brain icon instead of the Necpa icon" seen at launch. It now
+         renders the real app icon (/icons/necpa-192.png — the same asset
+         manifest.json ships for the installed PWA) under the real product name,
+         with a plain tile kept only as an onerror fallback so the screen never
+         goes blank if the image 404s. -->
     <div id="loadingScreen">
         <div style="text-align: center;">
-            <div style="width: 64px; height: 64px; background: linear-gradient(135deg, #a855f7, #10b981); border-radius: 16px; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; animation: pulse 1.5s infinite;">
-                <span style="color: white; font-size: 32px;">🧠</span>
-            </div>
-            <h2 style="color: #374151;">Kynecta</h2>
+            <img src="/icons/necpa-192.png" alt="Necpa"
+                 style="width: 64px; height: 64px; border-radius: 16px; display: block; object-fit: cover; margin: 0 auto 16px; animation: pulse 1.5s infinite;"
+                 onerror="this.onerror=null;this.replaceWith(Object.assign(document.createElement('div'),{style:'width:64px;height:64px;border-radius:16px;margin:0 auto 16px;background:#1a73e8'}));">
+            <h2 style="color: #374151;">Necpa</h2>
             <p style="color: #6b7280;">Loading...</p>
         </div>
     </div>
@@ -1640,7 +1656,7 @@
             <button class="hgm-btn" id="hdrGroupVideo" title="Video call"><i class="fas fa-video"></i></button>
             <div style="position:relative;">
                 <button class="hgm-btn" id="hdrGroupMore" title="More options"><i class="fas fa-ellipsis-v"></i></button>
-                <div id="hdrGroupMenu" style="display:none;position:absolute;top:40px;right:0;min-width:175px;background:var(--surface-color);border:1px solid var(--border-color);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:9999;overflow:hidden;padding:4px 0;">
+                <div id="hdrGroupMenu" style="display:none;position:fixed;min-width:175px;background:var(--surface-color);border:1px solid var(--border-color);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:9999;overflow:hidden;padding:4px 0;">
                     <button class="hgm-item" data-hga="members"><i class="fas fa-users"></i> Members</button>
                     <button class="hgm-item" data-hga="settings"><i class="fas fa-cog"></i> Settings</button>
                     <button class="hgm-item" data-hga="theme"><i class="fas fa-palette"></i> Theme</button>
@@ -4058,6 +4074,7 @@
     <script src="js/kynecta.safety.layer.js"></script>
     <!-- PWA install banner + SW update manager — MUST be in main shell (chat.html) -->
     <script src="/pwa-manager.js"></script>
+    <script src="/js/pwa-mobile-install.js" defer></script>
     <script>
         // Signal to child iframes that AppStorage is ready
         (function() {
@@ -9125,7 +9142,20 @@ function wireButtons() {
         more.addEventListener('click', function (e) {
             e.stopPropagation();
             var menu = document.getElementById('hdrGroupMenu');
-            if (menu) menu.style.display = (menu.style.display === 'block') ? 'none' : 'block';
+            if (!menu) return;
+            var opening = menu.style.display !== 'block';
+            if (opening) {
+                // FIX (GROUP-MORE-MENU-CLIPPED): #hdrGroupMenu is now
+                // position:fixed (see markup comment) precisely so this
+                // placement is computed against the viewport, not against
+                // #headerGroupCtx's overflow:hidden box, which used to
+                // clip the whole dropdown out of view.
+                var r = more.getBoundingClientRect();
+                menu.style.top = (r.bottom + 6) + 'px';
+                menu.style.right = (window.innerWidth - r.right) + 'px';
+                menu.style.left = 'auto';
+            }
+            menu.style.display = opening ? 'block' : 'none';
         });
         // Close the menu on any outside click.
         document.addEventListener('click', function (e) {

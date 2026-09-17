@@ -7,6 +7,19 @@
   if (window.__pwaManagerLoaded) return;
   window.__pwaManagerLoaded = true;
 
+  // FIX (DUPLICATE-INSTALL-BANNER-ON-MOBILE): pwa-mobile-install.js now owns
+  // the install prompt on phones/tablets (it also covers iOS Safari, which
+  // never fires beforeinstallprompt at all, so it can't rely on the same
+  // event this file uses). Without this check, a mobile browser that DOES
+  // fire beforeinstallprompt (most Android Chrome) would get this file's
+  // full-width banner AND the mobile one stacked on top of each other.
+  var isMobileDevice = (function () {
+    var ua = navigator.userAgent || '';
+    return /iphone|ipad|ipod|android/i.test(ua) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ||
+      /mobile/i.test(ua);
+  })();
+
   function isStandalone() {
     try {
       return window.matchMedia('(display-mode: standalone)').matches ||
@@ -39,6 +52,7 @@
   }
 
   function showInstallBanner() {
+    if (isMobileDevice) return; // pwa-mobile-install.js owns the mobile banner
     if (!deferredPrompt || appIsInstalled()) return;
     if (document.getElementById('pwaInstallBanner')) return;
 

@@ -22,7 +22,17 @@
     if (document.getElementById('necpraAccomSurfaceCssV3')) return;
     const s = document.createElement('style');
     s.id = 'necpraAccomSurfaceCssV3';
-    s.textContent = '[data-necpra-accommodation-category]{display:flex;align-items:center;gap:12px;padding:14px;border:1px solid var(--border-color,#ddd);border-radius:14px;background:var(--card-bg,#fff);cursor:pointer;min-height:70px;color:inherit;width:100%;text-align:left}.accom-surface{margin:12px;padding:16px;border:1px solid var(--border-color,#ddd);border-radius:16px;background:var(--card-bg,#fff);color:var(--text-primary,#111)}.accom-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin-top:12px}.accom-grid input,.accom-grid select{width:100%;box-sizing:border-box;padding:10px;border:1px solid var(--border-color,#ccc);border-radius:10px;background:var(--bg-color,#fff);color:inherit}.accom-results{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;margin-top:14px}.accom-card{border:1px solid var(--border-color,#ddd);border-radius:14px;overflow:hidden;background:var(--card-bg,#fff)}.accom-card img{width:100%;height:140px;object-fit:cover}.accom-body{padding:12px}.accom-btn{border:0;border-radius:10px;padding:10px 13px;font-weight:700;cursor:pointer;background:#2563eb;color:#fff}.accom-modal{position:fixed;inset:0;z-index:30000;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px}.accom-dialog{width:min(760px,100%);max-height:94vh;overflow:auto;padding:20px;border-radius:18px;background:var(--card-bg,#fff);color:var(--text-primary,#111)}.accom-form{display:grid;grid-template-columns:1fr 1fr;gap:10px}.accom-form label{display:flex;flex-direction:column;gap:5px;font-size:13px;font-weight:650}.accom-form input:disabled,.accom-form select:disabled{opacity:.55;cursor:not-allowed}.accom-form input,.accom-form select,.accom-form textarea{padding:10px;border:1px solid var(--border-color,#ccc);border-radius:9px;background:var(--bg-color,#fff);color:inherit}.accom-full{grid-column:1/-1}.accom-path{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}.accom-path span{padding:6px 9px;border-radius:999px;background:var(--sidebar-bg,#f3f4f6);font-size:12px}.accom-price{font-weight:800;margin:7px 0}.accom-discount{font-size:12px;margin-top:3px}@media(max-width:700px){.accom-grid,.accom-form{grid-template-columns:1fr}.accom-full{grid-column:auto}}';
+    // FIX (SURFACE-OPENS-INSIDE-THE-CATEGORY-PAGE): .accom-surface used to be a
+    // plain bordered card with a 12px margin that was prepended INTO the
+    // categories page. Everything that page renders — the Physical/Digital/
+    // Services type bar, the "All Products"/"Home Services"/"Professional
+    // Services" rails and the Top Sellers Leaderboard — therefore stayed on
+    // screen underneath it, which is what the screenshot circles. It is now a
+    // real full-screen layer (position:fixed, inset:0) with its own scroll
+    // container and a sticky header, so opening Accommodation & Rentals shows
+    // Accommodation & Rentals and nothing else. body.accom-locked stops the
+    // page behind it from scrolling through.
+    s.textContent = '[data-necpra-accommodation-category]{display:flex;align-items:center;gap:12px;padding:14px;border:1px solid var(--border-color,#ddd);border-radius:14px;background:var(--card-bg,#fff);cursor:pointer;min-height:70px;color:inherit;width:100%;text-align:left}body.accom-locked{overflow:hidden!important}.accom-surface{position:fixed;inset:0;z-index:25000;margin:0;padding:0;border:0;border-radius:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;background:var(--bg-color,var(--card-bg,#fff));color:var(--text-primary,#111);display:flex;flex-direction:column}.accom-head{position:sticky;top:0;z-index:2;padding:14px 16px;background:var(--card-bg,#fff);border-bottom:1px solid var(--border-color,#e5e7eb);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}.accom-inner{padding:16px;flex:1}.accom-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin-top:12px}.accom-combo{position:relative;display:block;width:100%;box-sizing:border-box}.accom-combo>input{width:100%;box-sizing:border-box;padding:10px 30px 10px 10px;border:1px solid var(--border-color,#ccc);border-radius:10px;background:var(--bg-color,#fff);color:inherit}.accom-combo>input:disabled{opacity:.55;cursor:not-allowed}.accom-combo:after{content:"\\25BE";position:absolute;right:11px;top:50%;transform:translateY(-50%);pointer-events:none;opacity:.55;font-size:12px}.accom-pop{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:40;max-height:230px;overflow:auto;background:var(--card-bg,#fff);border:1px solid var(--border-color,#ccc);border-radius:10px;box-shadow:0 12px 30px rgba(0,0,0,.18);display:none}.accom-combo.open .accom-pop{display:block}.accom-pop div{padding:10px 12px;cursor:pointer;font-size:14px}.accom-pop div:hover,.accom-pop div.hi{background:var(--sidebar-bg,#eef2ff)}.accom-pop div.muted{opacity:.6;cursor:default}.accom-grid input,.accom-grid select{width:100%;box-sizing:border-box;padding:10px;border:1px solid var(--border-color,#ccc);border-radius:10px;background:var(--bg-color,#fff);color:inherit}.accom-results{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;margin-top:14px}.accom-card{border:1px solid var(--border-color,#ddd);border-radius:14px;overflow:hidden;background:var(--card-bg,#fff)}.accom-card img{width:100%;height:140px;object-fit:cover}.accom-body{padding:12px}.accom-btn{border:0;border-radius:10px;padding:10px 13px;font-weight:700;cursor:pointer;background:#2563eb;color:#fff}.accom-modal{position:fixed;inset:0;z-index:30000;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px}.accom-dialog{width:min(760px,100%);max-height:94vh;overflow:auto;padding:20px;border-radius:18px;background:var(--card-bg,#fff);color:var(--text-primary,#111)}.accom-form{display:grid;grid-template-columns:1fr 1fr;gap:10px}.accom-form label{display:flex;flex-direction:column;gap:5px;font-size:13px;font-weight:650}.accom-form input:disabled,.accom-form select:disabled{opacity:.55;cursor:not-allowed}.accom-form input,.accom-form select,.accom-form textarea{padding:10px;border:1px solid var(--border-color,#ccc);border-radius:9px;background:var(--bg-color,#fff);color:inherit}.accom-full{grid-column:1/-1}.accom-path{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}.accom-path span{padding:6px 9px;border-radius:999px;background:var(--sidebar-bg,#f3f4f6);font-size:12px}.accom-price{font-weight:800;margin:7px 0}.accom-discount{font-size:12px;margin-top:3px}@media(max-width:700px){.accom-grid,.accom-form{grid-template-columns:1fr}.accom-full{grid-column:auto}}';
     document.head.appendChild(s);
   }
 
@@ -62,6 +72,95 @@
     sel.innerHTML = optionHtml(values, placeholder);
     sel.disabled = !!disabled;
   }
+
+  // FIX ("LOCATION AND VILLAGE DON'T BEHAVE LIKE REGION/COUNTY/SUB COUNTY"):
+  // Region, County and Sub county are <select>s filled from a fixed Kenya
+  // administrative dataset, so clicking them always drops a list open. Location,
+  // Village and Estate were <select>s too, but their options could only ever
+  // come from OTHER sellers' existing accommodation listings (the /accommodation
+  // /drilldown endpoint literally scans published listings). In any area with no
+  // listings yet — Kuria West in the screenshot — the list is empty, so the
+  // control opens onto nothing and reads "No listed locations here yet", which
+  // looks broken next to the three levels above it. Kenya has no authoritative
+  // fixed list below sub-county, so these three levels become a combobox
+  // instead: click it and it drops open exactly like the selects above, showing
+  // every name already used nearby; type and it filters, and an unlisted name
+  // can simply be entered and searched. Both the buyer filter and the
+  // create-listing form use this same control (it is exported on
+  // window.NecpraAccomCombo), so the two forms can no longer drift apart.
+  function combo(input, opts) {
+    const wrap = input.parentElement;
+    let pop = wrap.querySelector('.accom-pop');
+    if (!pop) { pop = document.createElement('div'); pop.className = 'accom-pop'; wrap.appendChild(pop); }
+    const st = input.__combo || (input.__combo = { values: [], onPick: null, empty: 'Nothing saved here yet' });
+    if (opts && opts.onPick) st.onPick = opts.onPick;
+    if (opts && opts.empty) st.empty = opts.empty;
+
+    function paint() {
+      const typed = input.value.trim().toLowerCase();
+      const list = st.values.filter(v => !typed || v.toLowerCase().includes(typed));
+      if (!list.length) {
+        pop.innerHTML = '<div class="muted">' + esc(typed ? 'No saved match — press Enter to search "' + input.value.trim() + '"' : st.empty) + '</div>';
+        return;
+      }
+      pop.innerHTML = list.slice(0, 200).map(v => '<div data-v="' + esc(v) + '">' + esc(v) + '</div>').join('');
+    }
+    function open() { if (input.disabled) return; closeAll(wrap); paint(); wrap.classList.add('open'); }
+    function close() { wrap.classList.remove('open'); }
+
+    if (!input.dataset.comboBound) {
+      input.dataset.comboBound = '1';
+      input.addEventListener('focus', open);
+      input.addEventListener('click', open);
+      input.addEventListener('input', () => { paint(); wrap.classList.add('open'); });
+      input.addEventListener('keydown', ev => {
+        if (ev.key === 'Enter') { ev.preventDefault(); close(); st.onPick && st.onPick(input.value.trim()); }
+        else if (ev.key === 'Escape' && wrap.classList.contains('open')) { ev.stopPropagation(); close(); }
+      });
+      pop.addEventListener('mousedown', ev => {
+        const row = ev.target.closest('div[data-v]');
+        if (!row) return;
+        ev.preventDefault();
+        input.value = row.dataset.v; close(); st.onPick && st.onPick(input.value);
+      });
+      input.addEventListener('blur', () => setTimeout(close, 160));
+    }
+
+    return {
+      set(values, placeholder, disabled, emptyText) {
+        st.values = uniq(values);
+        if (emptyText) st.empty = emptyText;
+        input.placeholder = placeholder || '';
+        input.disabled = !!disabled;
+        if (disabled) { input.value = ''; close(); }
+        paint();
+      },
+      clear() { input.value = ''; close(); },
+      get value() { return input.value.trim(); }
+    };
+  }
+  function closeAll(except) { document.querySelectorAll('.accom-combo.open').forEach(w => { if (w !== except) w.classList.remove('open'); }); }
+  document.addEventListener('mousedown', e => { if (!e.target.closest || !e.target.closest('.accom-combo')) closeAll(null); });
+  window.NecpraAccomCombo = combo;
+  // Used by marketplace-accommodation-service.js so the create-listing form and
+  // the "List accommodation / rental" modal get the exact same control as the
+  // buyer filter above, instead of the <datalist> hints they used to carry
+  // (which never drop open on their own on most mobile browsers, so those two
+  // forms looked just as empty as the buyer one).
+  window.NecpraAccomAttachCombo = function (input, onPick) {
+    if (!input) return null;
+    css();
+    let wrap = input.parentElement;
+    if (!wrap || !wrap.classList.contains('accom-combo')) {
+      wrap = document.createElement('span');
+      wrap.className = 'accom-combo';
+      input.replaceWith(wrap);
+      wrap.appendChild(input);
+    }
+    input.setAttribute('autocomplete', 'off');
+    input.removeAttribute('list');
+    return combo(input, { onPick: onPick });
+  };
 
   function state(p) {
     return {
@@ -114,27 +213,29 @@
   function adminData(){return window.NecpraAccommodationService||{regions:{},subCounties:{}}}
   async function refreshCascade(p, level) {
     const a = state(p), { regions, subCounties } = adminData(), c = p.querySelector('#nasC'), sc = p.querySelector('#nasSC'), l = p.querySelector('#nasL'), v = p.querySelector('#nasV'), e = p.querySelector('#nasE');
+    const cb = p.__combos || {};
     if (level === 'region') {
       setOptions(c, regions[a.region] || [], 'All counties', !a.region);
-      setOptions(sc, [], 'All sub counties', true); setOptions(l, [], 'All locations', true); setOptions(v, [], 'All villages', true); setOptions(e, [], 'All estates', true);
+      setOptions(sc, [], 'All sub counties', true);
+      cb.l.set([], 'Choose a sub county first', true); cb.v.set([], 'Choose a location first', true); cb.e.set([], 'Choose a village first', true);
     }
     if (level === 'county') {
       setOptions(sc, subCounties[a.county] || [], 'All sub counties', !a.county);
-      setOptions(l, [], 'All locations', true); setOptions(v, [], 'All villages', true); setOptions(e, [], 'All estates', true);
+      cb.l.set([], 'Choose a sub county first', true); cb.v.set([], 'Choose a location first', true); cb.e.set([], 'Choose a village first', true);
     }
     if (level === 'subCounty') {
-      const vals = await drill({ region:a.region, county:a.county, subCounty:a.subCounty, level:'location' });
-      setOptions(l, vals, vals.length ? 'All locations' : 'No listed locations here yet', !a.subCounty);
-      setOptions(v, [], 'All villages', true); setOptions(e, [], 'All estates', true);
+      const vals = a.subCounty ? await drill({ region:a.region, county:a.county, subCounty:a.subCounty, level:'location' }) : [];
+      cb.l.set(vals, a.subCounty ? 'All locations — tap to pick or type' : 'Choose a sub county first', !a.subCounty, 'No location has been listed in ' + (a.subCounty || 'this sub county') + ' yet — type one to search');
+      cb.v.set([], 'Choose a location first', true); cb.e.set([], 'Choose a village first', true);
     }
     if (level === 'location') {
-      const vals = await drill({ region:a.region, county:a.county, subCounty:a.subCounty, location:a.location, level:'village' });
-      setOptions(v, vals, vals.length ? 'All villages' : 'No listed villages here yet', !a.location);
-      setOptions(e, [], 'All estates', true);
+      const vals = a.location ? await drill({ region:a.region, county:a.county, subCounty:a.subCounty, location:a.location, level:'village' }) : [];
+      cb.v.set(vals, a.location ? 'All villages — tap to pick or type' : 'Choose a location first', !a.location, 'No village has been listed in ' + (a.location || 'this location') + ' yet — type one to search');
+      cb.e.set([], 'Choose a village first', true);
     }
     if (level === 'village') {
-      const vals = await drill({ region:a.region, county:a.county, subCounty:a.subCounty, location:a.location, village:a.village, level:'estate' });
-      setOptions(e, vals, vals.length ? 'All estates' : 'No listed estates here yet', !a.village);
+      const vals = a.village ? await drill({ region:a.region, county:a.county, subCounty:a.subCounty, location:a.location, village:a.village, level:'estate' }) : [];
+      cb.e.set(vals, a.village ? 'All estates — tap to pick or type' : 'Choose a village first', !a.village, 'No estate has been listed in ' + (a.village || 'this village') + ' yet — type one to search');
     }
     await renderResults(p);
   }
@@ -151,25 +252,47 @@
     const old = document.getElementById('necpraAccommodationSurface');
     if (old) { old.scrollIntoView({behavior:'smooth',block:'start'}); return; }
     css();
-    const host = document.getElementById('jmPageCategories') || document.querySelector('.jm-page.active') || document.body;
     const p = document.createElement('section');
     p.id = 'necpraAccommodationSurface';
     p.className = 'accom-surface';
-    p.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div><h2 style="margin:0 0 4px">Accommodation & Rentals</h2><p style="margin:0;opacity:.7;font-size:13px">Choose your area step-by-step. Results update after every selection.</p></div><div style="display:flex;gap:8px;align-items:center"><button class="accom-btn" id="acListBtn">List accommodation / rental</button><button class="accom-btn" id="acCloseSurface" style="background:transparent;color:inherit;border:1px solid var(--border-color,#ccc)" aria-label="Close Accommodation & Rentals" title="Back to categories">✕</button></div></div><div class="accom-path"><span>Region</span><span>County</span><span>Sub county</span><span>Location</span><span>Village</span><span>Estate</span></div><div class="accom-grid"><select id="nasR"></select><select id="nasC" disabled></select><select id="nasSC" disabled></select><select id="nasL" disabled></select><select id="nasV" disabled></select><select id="nasE" disabled></select><input id="nasQ" placeholder="Search room, hostel, apartment or rental..."></div><div id="nasResults" class="accom-results"></div>';
-    host.prepend(p);
+    p.setAttribute('role', 'dialog');
+    p.setAttribute('aria-modal', 'true');
+    p.innerHTML = '<div class="accom-head"><div><h2 style="margin:0 0 4px">Accommodation & Rentals</h2><p style="margin:0;opacity:.7;font-size:13px">Choose your area step-by-step. Results update after every selection.</p></div><div style="display:flex;gap:8px;align-items:center"><button class="accom-btn" id="acListBtn">List accommodation / rental</button><button class="accom-btn" id="acCloseSurface" style="background:transparent;color:inherit;border:1px solid var(--border-color,#ccc)" aria-label="Close Accommodation & Rentals" title="Back to categories">✕</button></div></div><div class="accom-inner"><div class="accom-path"><span>Region</span><span>County</span><span>Sub county</span><span>Location</span><span>Village</span><span>Estate</span></div><div class="accom-grid"><select id="nasR"></select><select id="nasC" disabled></select><select id="nasSC" disabled></select><span class="accom-combo"><input id="nasL" autocomplete="off" disabled placeholder="Choose a sub county first"></span><span class="accom-combo"><input id="nasV" autocomplete="off" disabled placeholder="Choose a location first"></span><span class="accom-combo"><input id="nasE" autocomplete="off" disabled placeholder="Choose a village first"></span><input id="nasQ" placeholder="Search room, hostel, apartment or rental..."></div><div id="nasResults" class="accom-results"></div></div>';
+    document.body.appendChild(p);
+    document.body.classList.add('accom-locked');
     const r=p.querySelector('#nasR'), c=p.querySelector('#nasC'), sc=p.querySelector('#nasSC'), l=p.querySelector('#nasL'), v=p.querySelector('#nasV'), e=p.querySelector('#nasE'), q=p.querySelector('#nasQ');
+    p.__combos = {
+      l: combo(l, { onPick: () => { v.value=''; e.value=''; refreshCascade(p,'location'); } }),
+      v: combo(v, { onPick: () => { e.value=''; refreshCascade(p,'village'); } }),
+      e: combo(e, { onPick: () => renderResults(p) })
+    };
     setOptions(r, ['Nairobi','Coast','Rift Valley','Eastern','North Eastern','Nyanza','Western','Central'], 'Choose region', false);
     r.onchange=()=>{c.value='';sc.value='';l.value='';v.value='';e.value='';refreshCascade(p,'region')};
     c.onchange=()=>{sc.value='';l.value='';v.value='';e.value='';refreshCascade(p,'county')};
     sc.onchange=()=>{l.value='';v.value='';e.value='';refreshCascade(p,'subCounty')};
-    l.onchange=()=>{v.value='';e.value='';refreshCascade(p,'location')};
-    v.onchange=()=>{e.value='';refreshCascade(p,'village')};
-    e.onchange=()=>renderResults(p);
     q.oninput=()=>{clearTimeout(q._t);q._t=setTimeout(()=>renderResults(p),250)};
     p.querySelector('#acListBtn').onclick=openLandlordModal;
-    p.querySelector('#acCloseSurface').onclick=()=>p.remove();
+
+    // Closing has to put the page back exactly as it was: unlock body scroll,
+    // drop the history entry that makes the hardware/browser Back button close
+    // the layer instead of leaving the marketplace entirely, and unbind Escape.
+    const onKey = ev => { if (ev.key === 'Escape') closeSurface(); };
+    function closeSurface() {
+      document.removeEventListener('keydown', onKey);
+      document.body.classList.remove('accom-locked');
+      p.remove();
+      if (history.state && history.state.necpraAccom) history.back();
+    }
+    p.querySelector('#acCloseSurface').onclick = closeSurface;
+    document.addEventListener('keydown', onKey);
+    try { history.pushState({ necpraAccom: 1 }, '', location.href); } catch (_) {}
+    window.addEventListener('popstate', function once() {
+      window.removeEventListener('popstate', once);
+      document.removeEventListener('keydown', onKey);
+      document.body.classList.remove('accom-locked');
+      p.remove();
+    });
     renderResults(p);
-    p.scrollIntoView({behavior:'smooth',block:'start'});
   }
 
   function openLandlordModal() {

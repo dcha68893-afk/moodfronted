@@ -14,15 +14,31 @@ function injectStyles(){if(document.getElementById('necpraAccommodationFormCss')
 async function drill(params){try{const r=await fetch(`${api()}/accommodation/drilldown?${new URLSearchParams(params)}`);if(!r.ok)return [];const j=await r.json();return Array.isArray(j.data)?j.data:[]}catch(_){return[]}}
 function fill(s,values,placeholder,disabled){if(!s)return;s.innerHTML=`<option value="">${esc(placeholder)}</option>`+unique(values).map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');s.disabled=!!disabled}
 function setDatalist(id,values){const d=document.getElementById(id);if(!d)return;d.innerHTML=unique(values).map(v=>`<option value="${esc(v)}"></option>`).join('')}
+// FIX (LOCATION/VILLAGE/ESTATE BEHAVE DIFFERENTLY FROM REGION/COUNTY/SUB COUNTY):
+// these three levels were <input list="...">+<datalist> hints. A datalist only
+// opens if the browser decides to show it — on Android Chrome and iOS Safari it
+// frequently doesn't — so where Region/County/Sub county drop a visible list
+// open on tap, Location/Village/Estate appeared to do nothing at all. They now
+// use the same click-to-open combobox the buyer surface uses (exported by
+// accommodation-marketplace-surface.js), with the datalist kept only as a
+// fallback if that file hasn't loaded. Behaviour is unchanged in one important
+// way: a name that nobody has listed yet can still be typed in freely, because
+// below sub-county Kenya has no fixed official list to choose from.
+const comboCache=new WeakMap();
+function comboFor(input,onPick){if(!input)return null;if(comboCache.has(input))return comboCache.get(input);if(typeof window.NecpraAccomAttachCombo!=='function')return null;const c=window.NecpraAccomAttachCombo(input,onPick);comboCache.set(input,c);return c}
+function suggest(input,values,placeholder,disabled,empty,onPick){if(!input)return;const c=comboFor(input,onPick);if(c){c.set(values,placeholder,disabled,empty);return}input.placeholder=placeholder||input.placeholder;input.disabled=!!disabled;if(disabled)input.value='';setDatalist(input.id+'Options',values)}
 function wireCascade(root,ids){const r=root.querySelector('#'+ids.region),c=root.querySelector('#'+ids.county),sc=root.querySelector('#'+ids.subCounty),l=root.querySelector('#'+ids.location),v=root.querySelector('#'+ids.village),e=root.querySelector('#'+ids.estate);if(!r||!c||!sc||!l||!v||!e)return;
   const sync=()=>Object.assign(draft,{region:r.value,county:c.value,subCounty:sc.value,location:l.value,village:v.value,estate:e.value});
-  const resetBelowSubCounty=()=>{l.value='';v.value='';e.value='';l.disabled=true;v.disabled=true;e.disabled=true;setDatalist(l.id+'Options',[]);setDatalist(v.id+'Options',[]);setDatalist(e.id+'Options',[])};
+  const locOnPick=async()=>{draft.location=l.value.trim();sync();const vals=draft.location?await drill({region:draft.region,county:draft.county,subCounty:draft.subCounty,location:draft.location,level:'village'}):[];suggest(v,vals,draft.location?'Tap to pick or type a village':'Choose a location first',!draft.location,`No village has been listed in ${draft.location||'this location'} yet — type the new one`,vilOnPick);suggest(e,[],'Choose a village first',true,'',estOnPick)};
+  const vilOnPick=async()=>{draft.village=v.value.trim();sync();const vals=draft.village?await drill({region:draft.region,county:draft.county,subCounty:draft.subCounty,location:draft.location,village:draft.village,level:'estate'}):[];suggest(e,vals,draft.village?'Tap to pick or type an estate':'Choose a village first',!draft.village,`No estate has been listed in ${draft.village||'this village'} yet — type the new one`,estOnPick)};
+  const estOnPick=()=>{draft.estate=e.value.trim();sync()};
+  const resetBelowSubCounty=()=>{l.value='';v.value='';e.value='';suggest(l,[],'Choose a sub county first',true,'',locOnPick);suggest(v,[],'Choose a location first',true,'',vilOnPick);suggest(e,[],'Choose a village first',true,'',estOnPick)};
   r.onchange=()=>{Object.assign(draft,{region:r.value,county:'',subCounty:'',location:'',village:'',estate:''});fill(c,regions[r.value]||[],'Choose county',!r.value);fill(sc,[],'Choose sub county first',true);resetBelowSubCounty();sync()};
   c.onchange=()=>{Object.assign(draft,{county:c.value,subCounty:'',location:'',village:'',estate:''});fill(sc,subCounties[c.value]||[],'Choose sub county',!c.value);resetBelowSubCounty();sync()};
-  sc.onchange=async()=>{Object.assign(draft,{subCounty:sc.value,location:'',village:'',estate:''});resetBelowSubCounty();l.disabled=!sc.value;sync();if(!sc.value)return;const vals=await drill({region:draft.region,county:draft.county,subCounty:draft.subCounty,level:'location'});setDatalist(l.id+'Options',vals)};
-  l.oninput=async()=>{draft.location=l.value;v.disabled=!l.value;e.disabled=true;sync();if(!l.value)return;const vals=await drill({region:draft.region,county:draft.county,subCounty:draft.subCounty,location:draft.location,level:'village'});setDatalist(v.id+'Options',vals)};
-  v.oninput=async()=>{draft.village=v.value;e.disabled=!v.value;sync();if(!v.value)return;const vals=await drill({region:draft.region,county:draft.county,subCounty:draft.subCounty,location:draft.location,village:draft.village,level:'estate'});setDatalist(e.id+'Options',vals)};
-  e.oninput=sync;
+  sc.onchange=async()=>{Object.assign(draft,{subCounty:sc.value,location:'',village:'',estate:''});resetBelowSubCounty();sync();const vals=sc.value?await drill({region:draft.region,county:draft.county,subCounty:draft.subCounty,level:'location'}):[];suggest(l,vals,sc.value?'Tap to pick or type a location':'Choose a sub county first',!sc.value,`No location has been listed in ${sc.value||'this sub county'} yet — type the new one`,locOnPick)};
+  l.addEventListener('input',()=>{draft.location=l.value.trim();sync();clearTimeout(l._t);l._t=setTimeout(locOnPick,350)});
+  v.addEventListener('input',()=>{draft.village=v.value.trim();sync();clearTimeout(v._t);v._t=setTimeout(vilOnPick,350)});
+  e.addEventListener('input',estOnPick);
   if(r.value)r.dispatchEvent(new Event('change'));else{fill(c,[],'Choose region first',true);fill(sc,[],'Choose county first',true);resetBelowSubCounty()}}
 // FIX (ACCOMMODATION-CASCADE-DEAD-END + MESSY-LAYOUT): Location/Village/Estate
 // used to be locked <select> elements populated only from other sellers'
@@ -69,17 +85,16 @@ function enhanceSurfaceModal(modal){if(!modal||modal.dataset.necpraLocationCasca
   const sc=document.createElement('select');sc.id='acSubCounty';sc.disabled=true;
   fill(c,[],'Choose region first',true);fill(sc,[],'Choose county first',true);
   [c,sc].forEach((s,i)=>{const lab=document.createElement('label');lab.textContent=i?'Sub county':'County';lab.appendChild(s);locLabel.before(lab)});
-  const locOpts=document.createElement('datalist');locOpts.id='acLocationOptions';loc.setAttribute('list',locOpts.id);locLabel.appendChild(locOpts);
-  const vOpts=document.createElement('datalist');vOpts.id='acVillageOptions';v.setAttribute('list',vOpts.id);v.closest('label').appendChild(vOpts);
-  const eOpts=document.createElement('datalist');eOpts.id='acEstateOptions';e.setAttribute('list',eOpts.id);e.closest('label').appendChild(eOpts);
-  const setList=(d,vals)=>{d.innerHTML=unique(vals).map(x=>`<option value="${esc(x)}"></option>`).join('')};
-  const resetBelowSubCounty=()=>{loc.value='';v.value='';e.value='';loc.disabled=true;v.disabled=true;e.disabled=true;setList(locOpts,[]);setList(vOpts,[]);setList(eOpts,[])};
+  const locPick=async()=>{draft.location=loc.value.trim();const vals=draft.location?await drill({region:draft.region,county:draft.county,subCounty:draft.subCounty,location:draft.location,level:'village'}):[];suggest(v,vals,draft.location?'Tap to pick or type a village':'Choose a location first',!draft.location,`No village has been listed in ${draft.location||'this location'} yet — type the new one`,vilPick);suggest(e,[],'Choose a village first',true,'',estPick)};
+  const vilPick=async()=>{draft.village=v.value.trim();const vals=draft.village?await drill({region:draft.region,county:draft.county,subCounty:draft.subCounty,location:draft.location,village:draft.village,level:'estate'}):[];suggest(e,vals,draft.village?'Tap to pick or type an estate':'Choose a village first',!draft.village,`No estate has been listed in ${draft.village||'this village'} yet — type the new one`,estPick)};
+  const estPick=()=>{draft.estate=e.value.trim()};
+  const resetBelowSubCounty=()=>{loc.value='';v.value='';e.value='';suggest(loc,[],'Choose a sub county first',true,'',locPick);suggest(v,[],'Choose a location first',true,'',vilPick);suggest(e,[],'Choose a village first',true,'',estPick)};
   r.addEventListener('change',()=>{Object.assign(draft,{region:r.value,county:'',subCounty:'',location:'',village:'',estate:''});fill(c,regions[r.value]||[],'Choose county',!r.value);fill(sc,[],'Choose sub county first',true);resetBelowSubCounty()});
   c.addEventListener('change',()=>{Object.assign(draft,{county:c.value,subCounty:'',location:'',village:'',estate:''});fill(sc,subCounties[c.value]||[],'Choose sub county',!c.value);resetBelowSubCounty()});
-  sc.addEventListener('change',async()=>{Object.assign(draft,{subCounty:sc.value,location:'',village:'',estate:''});resetBelowSubCounty();loc.disabled=!sc.value;if(!sc.value)return;const vals=await drill({region:draft.region,county:draft.county,subCounty:draft.subCounty,level:'location'});setList(locOpts,vals)});
-  loc.addEventListener('input',async()=>{draft.location=loc.value;v.disabled=!loc.value;e.disabled=true;if(!loc.value)return;const vals=await drill({region:draft.region,county:draft.county,subCounty:draft.subCounty,location:draft.location,level:'village'});setList(vOpts,vals)});
-  v.addEventListener('input',async()=>{draft.village=v.value;e.disabled=!v.value;if(!v.value)return;const vals=await drill({region:draft.region,county:draft.county,subCounty:draft.subCounty,location:draft.location,village:draft.village,level:'estate'});setList(eOpts,vals)});
-  e.addEventListener('input',()=>{draft.estate=e.value});
+  sc.addEventListener('change',async()=>{Object.assign(draft,{subCounty:sc.value,location:'',village:'',estate:''});resetBelowSubCounty();const vals=sc.value?await drill({region:draft.region,county:draft.county,subCounty:draft.subCounty,level:'location'}):[];suggest(loc,vals,sc.value?'Tap to pick or type a location':'Choose a sub county first',!sc.value,`No location has been listed in ${sc.value||'this sub county'} yet — type the new one`,locPick)});
+  loc.addEventListener('input',()=>{draft.location=loc.value.trim();clearTimeout(loc._t);loc._t=setTimeout(locPick,350)});
+  v.addEventListener('input',()=>{draft.village=v.value.trim();clearTimeout(v._t);v._t=setTimeout(vilPick,350)});
+  e.addEventListener('input',estPick);
   if(r.value)r.dispatchEvent(new Event('change'))}
 function patchSurfacePublish(){if(window.__NECPRA_ACCOM_FETCH_PATCHED__)return;window.__NECPRA_ACCOM_FETCH_PATCHED__=true;const native=window.fetch.bind(window);window.fetch=function(input,init){try{const url=typeof input==='string'?input:(input&&input.url)||'';if(/\/marketplace\/listings$/i.test(new URL(url,location.origin).pathname)&&init&&String(init.method||'GET').toUpperCase()==='POST'&&typeof init.body==='string'){const body=JSON.parse(init.body);body.metadata=body.metadata||{};body.metadata.accommodation=body.metadata.accommodation||{};Object.assign(body.metadata.accommodation,{region:draft.region,county:draft.county,subCounty:draft.subCounty,location:draft.location,village:draft.village,estate:draft.estate});init=Object.assign({},init,{body:JSON.stringify(body)})}}catch(_){}return native(input,init)}}
 function init(){bindServiceForm();patchSurfacePublish();const scan=()=>{bindServiceForm();document.querySelectorAll('.accom-modal').forEach(enhanceSurfaceModal)};scan();if(window.MutationObserver)new MutationObserver(scan).observe(document.documentElement,{childList:true,subtree:true})}
