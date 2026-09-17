@@ -7108,7 +7108,22 @@ fetchOptions.signal = controller.signal;
     
     function waitForBootstrap() {
         return new Promise((resolve) => {
-            const maxWaitTime = 30000;
+            // ROOT-CAUSE FIX (30s-DEAD-WAIT-ON-STANDALONE-PAGES): this used to
+            // be 30000. window.AppState.bootstrapComplete / __APP_BOOTSTRAP_COMPLETE__
+            // / the 'necpa-bootstrap-complete' event are only ever set by
+            // app.core.bootstrap.js — which top-level pages like chat.html load,
+            // but standalone pages such as message.html do NOT (see its own
+            // <script> list). On those pages this flag can never become true,
+            // so every single page load paid the FULL 30s wait here before the
+            // first real API call was even attempted — independent of, and on
+            // top of, any backend cold-start delay. That's the fixed 30s tax
+            // visible in the console as a wall of "checkBootstrap" retries
+            // followed by "[API] Bootstrap timeout, proceeding anyway" right
+            // before every conversation-list/friends load. Cut the wait to a
+            // short grace period: pages that DO set the flag still resolve
+            // almost immediately via the fast path/event listener above, so
+            // this only shortens the case where the flag was never coming.
+            const maxWaitTime = 3000;
             
             // Fast path: resolve immediately if already bootstrapped
             const isAlreadyComplete = 

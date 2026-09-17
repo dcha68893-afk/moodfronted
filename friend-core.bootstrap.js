@@ -1362,14 +1362,18 @@ async function authorizedRequest(endpoint, options = {}) {
     
     return new Promise((_resolveRaw) => {
         const requestId = generateRequestId();
-        // ROOT-CAUSE FIX (RENDER-COLD-START-TIMEOUTS): 30s was tighter than a
-        // Render free/starter dyno's cold-start wake time (commonly 30-60s),
-        // so the first request after any idle period was declared "timed out"
-        // client-side even when the server would have answered a few seconds
-        // later. Combined with the warmBackend() head start in onModuleActive,
-        // this gives a cold dyno room to finish waking without every caller
-        // needing to pass its own longer timeout.
-        const timeout = options.timeout || 45000;
+        // ROOT-CAUSE FIX (45s-STILL-TOO-TIGHT-FOR-SLOW-COLD-STARTS): 45000 was
+        // an improvement over the original 30000 but Render free/starter dynos
+        // occasionally take noticeably longer than their "typical" 30-60s
+        // range to wake, especially the first request after a long idle
+        // period that also has to re-establish the DB connection pool. Real
+        // users were still seeing "API request timeout" on the very first
+        // load after any idle gap even with the warmBackend() head start,
+        // because that head-start ping and the real data calls both started
+        // their own independent clocks close together rather than one
+        // waiting on the other. 65s comfortably covers the documented
+        // worst case with buffer for network + relay overhead.
+        const timeout = options.timeout || 65000;
         let resolved = false;
 
         // ROOT-CAUSE FIX (FRIEND-MODULE-SLOW/TIMING-OUT-REQUESTS): every call
