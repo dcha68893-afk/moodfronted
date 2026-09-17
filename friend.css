@@ -519,7 +519,7 @@
             align-items: center;
             justify-content: center;
             font-size: 18px;
-            color: white;
+            color: var(--text-color);
             margin-right: 15px;
             position: relative;
             overflow: hidden;
@@ -756,7 +756,7 @@
             align-items: center;
             justify-content: center;
             font-size: 36px;
-            color: white;
+            color: var(--text-color);
             overflow: hidden;
             background-size: cover;
             background-position: center;
@@ -1265,7 +1265,7 @@
             align-items: center;
             justify-content: center;
             font-size: 24px;
-            color: white;
+            color: var(--text-color);
             overflow: hidden;
             background-size: cover;
             background-position: center;

@@ -289,7 +289,7 @@ body {
     align-items: center;
     justify-content: center;
     font-size: 18px;
-    color: white;
+    color: var(--text-color);
     overflow: hidden;
     background-size: cover;
     background-position: center;
@@ -567,7 +567,7 @@ body {
     align-items: center;
     justify-content: center;
     font-size: 18px;
-    color: white;
+    color: var(--text-color);
     margin-right: 15px;
     position: relative;
     overflow: hidden;

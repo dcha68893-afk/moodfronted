@@ -91,6 +91,39 @@
         persistConversation(chatId);
     }
 
+    // ROOT-CAUSE FIX (STUCK/INVERTED ONLINE-OFFLINE STATUS): message.html
+    // calls window.MessageModule.updatePresence() on every live
+    // 'user:online'/'user:offline'/'presence:update' event chat.html relays
+    // in as FRIEND_ONLINE/FRIEND_OFFLINE (see message.html's postMessage
+    // listener, guarded by `typeof window.MessageModule.updatePresence ===
+    // 'function'`). That guard was silently failing: this file's
+    // window.MessageModule export never actually included an
+    // updatePresence method (a duplicate, unused copy of this exact
+    // function existed only in a stray root-level message-client.js that
+    // the page never loads), so every live presence push was dropped and
+    // the chat panel/list kept showing whatever online/offline state was
+    // true at the last full page load or friends-list fetch — explaining
+    // reports of a friend showing offline while actually online, and vice
+    // versa. Reuses upsertConversationMeta so both the 'conversation:updated'
+    // notify (sidebar dot) and the local cache pick it up the same way
+    // every other patch does; message.html's own listener re-announces
+    // CHAT_HEADER_UPDATE to the parent when the update is for whoever the
+    // currently open chat is with.
+    function updatePresence(userId, online, lastSeen) {
+        if (userId == null) return;
+        const uid = String(userId);
+        state.conversations.forEach((conv, chatId) => {
+            if (conv && conv.otherUser && String(conv.otherUser.id) === uid) {
+                upsertConversationMeta(chatId, {
+                    otherUser: Object.assign({}, conv.otherUser, {
+                        online: !!online,
+                        lastSeen: lastSeen || conv.otherUser.lastSeen || null,
+                    }),
+                });
+            }
+        });
+    }
+
     // Best-effort write-through to js/message-local-db.js. Never on the
     // critical path — the UI's source of truth stays the in-memory `state`
     // above; this just mirrors it to IndexedDB so the NEXT reload/relogin
@@ -563,6 +596,40 @@
         }
     }
 
+    // ROOT-CAUSE FIX (ATTACHMENT UPLOAD ALWAYS FAILING): this used to go
+    // through api().post('/files/upload', formData) — the generic
+    // _directRequest() bridge, which delivers every request to the parent
+    // shell via window.parent.postMessage({ payload: { body, ... } }, '*').
+    // postMessage uses the structured-clone algorithm, and a FormData
+    // object (holding File/Blob + internal browser state) is NOT
+    // structured-cloneable — the postMessage call throws a DataCloneError
+    // synchronously, before any network request is ever made. Every
+    // attachment upload from this chat panel failed for exactly this
+    // reason, 100% of the time, regardless of file type or size (hence
+    // "many places" — every conversation goes through this one function).
+    // Fixed by uploading directly from this same-origin iframe with a real
+    // fetch()+FormData, bypassing the JSON-only relay entirely — the same
+    // pattern this file's own direct-fetch fallbacks elsewhere (e.g. the
+    // New Chat picker's Strategy 4) already use successfully. Do not route
+    // this back through api()/_directRequest: that bridge cannot carry a
+    // file body, full stop.
+    function _resolveApiBase() {
+        const base = (window.__kynAPI && window.__kynAPI.baseUrl) || window.API_BASE_URL ||
+            window.__API_BASE || (window.__getApiBase && window.__getApiBase()) || 'https://noxopa.onrender.com/api';
+        return /\/api$/.test(base) ? base : (base.replace(/\/$/, '') + '/api');
+    }
+    function _resolveAuthToken() {
+        try {
+            const s = JSON.parse(localStorage.getItem('kynecta_session') || 'null');
+            if (s && s.token) return s.token;
+        } catch (_) {}
+        try {
+            const a = JSON.parse(localStorage.getItem('kynecta_auth') || 'null');
+            if (a && a.token) return a.token;
+        } catch (_) {}
+        return localStorage.getItem('authToken') || localStorage.getItem('necpa_token') ||
+            localStorage.getItem('token') || localStorage.getItem('accessToken') || null;
+    }
     // Uses the existing generic /api/files/upload endpoint — not
     // message-specific infra, and not the Media-table path (routes/media.js
     // has a pre-existing bug where its Media.create() call uses field names
@@ -570,11 +637,25 @@
     // Attachment info instead travels in the message's own metadata field,
     // which messageDeliveryService.sendMessage() already supports generically.
     async function uploadAttachment(file, onProgress) {
+        const token = _resolveAuthToken();
+        if (!token) throw new Error('Not signed in — please reload and try again.');
         const formData = new FormData();
         formData.append('file', file);
-        const res = await api().post('/files/upload', formData);
-        if (!res || res.success === false) throw new Error((res && res.message) || 'Upload failed');
-        const data = res.data || res;
+        // Deliberately no 'Content-Type' header: the browser must set
+        // multipart/form-data with its own boundary from the FormData body.
+        // Setting it manually (or letting a shared request helper default
+        // it to application/json) breaks multer's parsing server-side.
+        const response = await fetch(`${_resolveApiBase()}/files/upload`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+            body: formData,
+        });
+        let payload = {};
+        try { payload = await response.json(); } catch (_) {}
+        if (!response.ok || payload.success === false) {
+            throw new Error(payload.message || `Upload failed (${response.status})`);
+        }
+        const data = payload.data || payload;
         return { url: data.url, mimeType: data.mimeType, size: data.size, type: data.type, originalName: data.originalName };
     }
 
@@ -1626,6 +1707,7 @@
         getActiveChatId: () => state.activeChatId,
         setActiveChatId: (id) => { state.activeChatId = id; },
         getSetting: (section, key) => settingsState[section] && settingsState[section][key],
+        updatePresence,
     };
 
     wireRealtimeListeners();
