@@ -119,6 +119,19 @@
             autoDownloadMedia: true,
             moodAutoShare: false
         },
+        // FIX (SESSION-TIMEOUT-OFF-DEFAULT): this module had no 'security'
+        // section at all, so window.AppSettings.get('security.sessionTimeout')
+        // (read by js/settings-ui.local-first.patch.js's injectSessionTimeoutOff)
+        // always returned undefined for a brand-new user, regardless of what
+        // the older SettingsState/DEFAULT_SETTINGS system (settings-ui.js,
+        // settings-core.js) had it set to. Mirrors that system's shape/default
+        // so both settings sources agree.
+        security: {
+            twoFactorAuth: false,
+            loginNotifications: true,
+            sessionTimeout: 'off',
+            changePassword: false
+        },
         account: {
             displayName: 'User',
             username: 'user',

@@ -3305,26 +3305,50 @@ function updateAllUsersCache() {
     // Priority 5: IndexedDB 'users' store — async, fires a re-render when ready.
     // This is the critical offline path: if localStorage was cleared or never
     // populated, IndexedDB is the only durable offline source.
-    (async () => {
-        try {
-            const ls = window.KynectaFriendsLocalStore;
-            if (!ls || typeof ls.getAllUsers !== 'function') return;
-            const idbUsers = await ls.getAllUsers();
-            if (!Array.isArray(idbUsers) || idbUsers.length === 0) return;
-            _allUsersCache        = idbUsers;
-            window._allUsersCache = idbUsers;
-            if (window.FriendCore) {
-                window.FriendCore._allUsers         = idbUsers;
-                window.FriendCore._allUsersCache    = idbUsers;
-                window.FriendCore.discoverableUsers = idbUsers;
+    //
+    // FIX (INFINITE-HYDRATION-LOOP): without a guard, every render that saw an
+    // empty _allUsersCache spawned a new getAllUsers() read here, and each read
+    // that resolved unconditionally called renderAllUsersList(), which itself
+    // calls updateAllUsersCache() again (see getFilteredUsers/callers below) —
+    // spawning another read, forever. _idbHydrationInFlight stops overlapping
+    // reads, and only re-rendering when the hydrated data actually differs from
+    // what's already cached stops a resolved-but-unchanged read from
+    // re-triggering the same cycle.
+    if (!updateAllUsersCache._idbHydrationInFlight) {
+        updateAllUsersCache._idbHydrationInFlight = true;
+        (async () => {
+            try {
+                const ls = window.KynectaFriendsLocalStore;
+                if (!ls || typeof ls.getAllUsers !== 'function') return;
+                const idbUsers = await ls.getAllUsers();
+                if (!Array.isArray(idbUsers) || idbUsers.length === 0) return;
+
+                const prev = _allUsersCache;
+                const changed = !Array.isArray(prev) ||
+                    idbUsers.length !== prev.length ||
+                    idbUsers.some((u, i) => String(u?.id ?? '') !== String(prev[i]?.id ?? ''));
+
+                _allUsersCache        = idbUsers;
+                window._allUsersCache = idbUsers;
+                if (window.FriendCore) {
+                    window.FriendCore._allUsers         = idbUsers;
+                    window.FriendCore._allUsersCache    = idbUsers;
+                    window.FriendCore.discoverableUsers = idbUsers;
+                }
+                console.log(`[All Users] Cache hydrated from IndexedDB: ${idbUsers.length} users`);
+                // Re-render the discover tab only when the hydrated data is new —
+                // re-rendering unconditionally is what re-triggered this same
+                // hydration path over and over.
+                if (changed) {
+                    try { renderAllUsersList?.(); } catch (_) {}
+                }
+            } catch (e) {
+                console.warn('[All Users] IndexedDB hydration failed:', e.message);
+            } finally {
+                updateAllUsersCache._idbHydrationInFlight = false;
             }
-            console.log(`[All Users] Cache hydrated from IndexedDB: ${idbUsers.length} users`);
-            // Re-render the discover tab with the newly loaded data
-            try { renderAllUsersList?.(); } catch (_) {}
-        } catch (e) {
-            console.warn('[All Users] IndexedDB hydration failed:', e.message);
-        }
-    })();
+        })();
+    }
 
     return _allUsersCache; // return current (possibly empty) value synchronously
 }

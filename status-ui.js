@@ -5847,6 +5847,36 @@ function setupBasicEventListeners_StatusUI() {
             }
         });
     }
+    // FIX (status upload not instant): tapping the "+" badge on your own
+    // status ring used to just bubble into myStatusPreview's own click
+    // handler above, which opens the composer on its default Text tab --
+    // matching WhatsApp's pencil icon, not its camera icon. The badge is
+    // supposed to be the instant camera/gallery shortcut: one tap should
+    // land straight on the Camera/Gallery chooser, the same one
+    // composerFileBtn already opens instantly (see the bottombar handler
+    // in status.html), instead of requiring modal-open -> switch to Media
+    // tab -> tap upload area -> chooser, as a separate later step.
+    const myStatusAddBadge = document.getElementById('myStatusAddBadge');
+    if (myStatusAddBadge && !myStatusAddBadge._hasListener) {
+        myStatusAddBadge._hasListener = true;
+        myStatusAddBadge.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (!ensureUIActive('myStatusPreview')) return;
+            if (!isUserAuthenticated_StatusUI()) {
+                showNotification('Please sign in to create a status', 'error');
+                return;
+            }
+            const modal = UIElements.createStatusModal;
+            if (modal) modal.classList.add('active');
+            // Reuse the exact same "open chooser right away" path the
+            // bottombar's own file icon already uses, so there's one single
+            // place (status.html's composerBottombar handler) that decides
+            // what "instant" means instead of a second copy of that logic
+            // living here too.
+            const fileModeBtn = document.getElementById('composerFileBtn');
+            if (fileModeBtn) fileModeBtn.click();
+        });
+    }
     const savedTab = UIStateManager.get('currentTab');
     if (savedTab) {
         const tab = UIElements.getElement(savedTab);

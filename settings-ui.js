@@ -2787,6 +2787,16 @@ export function loadSecuritySection(container) {
                             <option value="30min" ${settings.sessionTimeout === '30min' ? 'selected' : ''}>30 Minutes</option>
                             <option value="1hr" ${settings.sessionTimeout === '1hr' ? 'selected' : ''}>1 Hour</option>
                             <option value="8hr" ${settings.sessionTimeout === '8hr' ? 'selected' : ''}>8 Hours</option>
+                            <!-- FIX (SESSION-TIMEOUT-OFF-DEFAULT): 'Off' used to only
+                                 exist as an option that js/settings-ui.local-first.patch.js
+                                 injected after the fact, and only got pre-selected if the
+                                 saved value already happened to be 'off' -- a brand-new
+                                 user's real default ('30min', now 'off' -- see
+                                 DEFAULT_SETTINGS.security) never had a matching <option>
+                                 here at all, so the browser silently fell back to
+                                 whichever option came first (15 Minutes) regardless of the
+                                 underlying setting. It's now a first-class option here. -->
+                            <option value="off" ${settings.sessionTimeout === 'off' ? 'selected' : ''}>Off</option>
                         </select>
                     </div>
                 </div>

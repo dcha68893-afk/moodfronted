@@ -3827,14 +3827,22 @@
         //     is left to only show its warning toast; this coordinator is now
         //     the single source of truth for the actual logout so the two
         //     timers can't race and log the user out twice.
+        // FIX (SESSION-TIMEOUT-OFF-NOT-APPLIED): 'off' was never a key in
+        // TIMEOUT_MS, so `TIMEOUT_MS[choice]` was undefined whenever a user
+        // picked "Off" in Settings > Security > Session Timeout, and this
+        // function silently fell through to the 30-minute default — the
+        // dropdown showed "Off" but the actual inactivity auto-logout kept
+        // running on a 30-minute clock regardless. 'off' now maps to
+        // Infinity, and resetActivityTimeout() below skips scheduling any
+        // timer at all when the configured timeout isn't finite.
         _getConfiguredInactivityTimeoutMs: function() {
-          const TIMEOUT_MS = { '15min': 15 * 60 * 1000, '30min': 30 * 60 * 1000, '1hr': 60 * 60 * 1000, '8hr': 8 * 60 * 60 * 1000 };
+          const TIMEOUT_MS = { '15min': 15 * 60 * 1000, '30min': 30 * 60 * 1000, '1hr': 60 * 60 * 1000, '8hr': 8 * 60 * 60 * 1000, 'off': Infinity };
           try {
             const raw = localStorage.getItem('knecta_settings_cache');
             if (raw) {
               const parsed = JSON.parse(raw);
               const choice = parsed && parsed.data && parsed.data.security && parsed.data.security.sessionTimeout;
-              if (choice && TIMEOUT_MS[choice]) return TIMEOUT_MS[choice];
+              if (choice && TIMEOUT_MS[choice] !== undefined) return TIMEOUT_MS[choice];
             }
           } catch (_) { /* fall through to default */ }
           return this._config.inactivityTimeout || TIMEOUT_MS['30min'];
@@ -3857,6 +3865,17 @@
             }
             
             const fullTimeout = this._config.inactivityTimeout;
+
+            // FIX (SESSION-TIMEOUT-OFF-NOT-APPLIED, cont'd): Infinity here
+            // means the user has Session Timeout set to "Off" — previously
+            // this still scheduled a setTimeout(fn, Infinity), which browsers
+            // silently clamp/never fire in inconsistent ways depending on
+            // engine, instead of the explicit "no auto-logout" behavior the
+            // setting promises. Skip scheduling entirely in that case.
+            if (!Number.isFinite(fullTimeout)) {
+              return;
+            }
+
             const warnAfter = Math.max(0, fullTimeout - this._config.warningThreshold);
             
             this._warningTimeout = setTimeout(() => {

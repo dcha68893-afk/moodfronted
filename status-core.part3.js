@@ -2074,7 +2074,13 @@ const DEFAULT_SETTINGS = {
     security: {
         twoFactorAuth: false,
         loginNotifications: true,
-        sessionTimeout: '30min',
+        // FIX (SESSION-TIMEOUT-OFF-DEFAULT): brand-new users used to inherit
+        // '30min' here with no way to land on 'off' out of the box -- the
+        // dropdown only ever *displayed* 'off' once a user had already saved
+        // it once (see js/settings-ui.local-first.patch.js's
+        // injectSessionTimeoutOff), so a first-time user always started
+        // timed-out even though 'Off' is the intended default.
+        sessionTimeout: 'off',
         changePassword: false
     },
     notifications: {
