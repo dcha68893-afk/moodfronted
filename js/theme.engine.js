@@ -4,6 +4,85 @@
  */
 (function (global) {
   'use strict';
+
+  /* EMBEDDED-MODULE LOCK:
+   * chat.html owns the theme when a module is loaded in an iframe. The child
+   * keeps only a read-only/proxy API so module code can observe the shell
+   * without creating its own theme, reading its own fallback, or persisting a
+   * competing theme. Theme changes are requests to the shell, never child
+   * theme writes.
+   */
+  if (global.parent !== global) {
+    var shell = null;
+    try { shell = global.parent; } catch (_) {}
+    var proxyListeners = [];
+    var proxy = {
+      __kynEmbeddedProxy: true,
+      __kynEngine: true,
+      getTheme: function () {
+        try {
+          if (shell && shell.ThemeManager && typeof shell.ThemeManager.getTheme === 'function') {
+            return shell.ThemeManager.getTheme();
+          }
+        } catch (_) {}
+        var current = document.documentElement && document.documentElement.getAttribute('data-theme');
+        return current === 'dark' ? 'dark' : 'light';
+      },
+      getFontSize: function () {
+        try { return shell && shell.ThemeManager && shell.ThemeManager.getFontSize ? shell.ThemeManager.getFontSize() : 16; } catch (_) { return 16; }
+      },
+      getAccentColor: function () {
+        try { return shell && shell.ThemeManager && shell.ThemeManager.getAccentColor ? shell.ThemeManager.getAccentColor() : null; } catch (_) { return null; }
+      },
+      getIconScale: function () {
+        try { return shell && shell.ThemeManager && shell.ThemeManager.getIconScale ? shell.ThemeManager.getIconScale() : 'medium'; } catch (_) { return 'medium'; }
+      },
+      setTheme: function (value) {
+        try {
+          if (shell && shell.postMessage) {
+            shell.postMessage({ type: 'NECPRA_THEME_REQUEST', theme: value, source: 'embedded-module' }, global.location.origin);
+          }
+        } catch (_) {}
+        return proxy.getTheme();
+      },
+      setFontSize: function (value) {
+        try {
+          if (shell && shell.postMessage) shell.postMessage({ type: 'NECPRA_FONT_REQUEST', value: value, source: 'embedded-module' }, global.location.origin);
+        } catch (_) {}
+        return proxy.getFontSize();
+      },
+      setIconScale: function (value) {
+        try {
+          if (shell && shell.postMessage) shell.postMessage({ type: 'NECPRA_ICON_REQUEST', value: value, source: 'embedded-module' }, global.location.origin);
+        } catch (_) {}
+        return proxy.getIconScale();
+      },
+      setAccentColor: function (value) {
+        try {
+          if (shell && shell.postMessage) shell.postMessage({ type: 'NECPRA_ACCENT_REQUEST', value: value, source: 'embedded-module' }, global.location.origin);
+        } catch (_) {}
+        return proxy.getAccentColor();
+      },
+      onChange: function (fn) {
+        if (typeof fn !== 'function') return function () {};
+        proxyListeners.push(fn);
+        return function () { var i = proxyListeners.indexOf(fn); if (i >= 0) proxyListeners.splice(i, 1); };
+      },
+      broadcastToIframe: function () {},
+      broadcastToAllIframes: function () {}
+    };
+    global.addEventListener('message', function (event) {
+      var data = event && event.data;
+      if (!data || data.type !== 'NECPRA_THEME_APPLIED') return;
+      var detail = { theme: data.theme, fontSize: data.fontSize, iconScale: data.iconScale, reason: data.reason || 'shell' };
+      proxyListeners.slice().forEach(function (fn) { try { fn(detail); } catch (_) {} });
+      try { document.dispatchEvent(new CustomEvent('kyn:themechange', { detail: detail })); } catch (_) {}
+    });
+    global.ThemeManager = proxy;
+    global.ThemeEngine = proxy;
+    return;
+  }
+
   if (global.ThemeManager && global.ThemeManager.__kynEngine) return;
   var THEME_KEY='app_theme',FONT_KEY='app_font_size',ICON_KEY='app_icon_scale';
   var SETTINGS_CACHE_KEY='knecta_settings_cache',LEGACY_SETTINGS_KEY='app_settings_global',LEGACY_DEFAULT_KEY='necpa_settings_default';
@@ -18,7 +97,7 @@
   function validateFont(v){var n=parseInt(v,10);return n>=FONT_MIN&&n<=FONT_MAX?n:FONT_DEFAULT;}
   function validateIcon(v){return Object.prototype.hasOwnProperty.call(ICONS,v)?v:ICON_DEFAULT;}
   function settingsCache(){var raw=get(SETTINGS_CACHE_KEY)||get(LEGACY_SETTINGS_KEY)||get(LEGACY_DEFAULT_KEY);if(!raw)return null;try{var p=JSON.parse(raw);return p&&(p.data||p);}catch(_){return null;}}
-  function initialTheme(){var c=settingsCache(),saved=c&&(c.appearance&&c.appearance.theme||c.theme);return validateTheme(saved||get(THEME_KEY));}
+  function initialTheme(){var direct=get(THEME_KEY),c=settingsCache(),saved=c&&(c.appearance&&c.appearance.theme||c.theme);return validateTheme(direct||saved);}
   function initialFont(){var c=settingsCache(),saved=c&&c.appearance&&c.appearance.fontSize;return validateFont(get(FONT_KEY)||saved);}
   function initialIcon(){var c=settingsCache(),saved=c&&c.appearance&&c.appearance.iconSize;return validateIcon(get(ICON_KEY)||saved);}
   function initialAccent(){var c=settingsCache();return c&&c.appearance&&c.appearance.accentColor||null;}
