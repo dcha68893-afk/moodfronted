@@ -75,11 +75,37 @@
     try { return await (await e2e()).decryptFromChat(entry, Number(gid), Number(sender), false, `group-${gid}-${sender || ''}`); }
     catch (err) { console.error('[GroupE2E] decrypt failed:', err.message || err); return '🔒 Unable to decrypt this group message.'; }
   }
+  // BUGFIX (DUPLICATE-DECRYPT-FLIP-TO-FAILED): patchMessage() gets called
+  // multiple times for the exact same message id — chat.html forwards a
+  // single incoming group message into this iframe via several overlapping
+  // paths at once (window.wsService listens on both 'group:message' AND the
+  // legacy 'group_message' for the same handler; app.realtime.socket.js's
+  // realtimeManager independently relays the same event through its own
+  // _routeMessage; a cross-tab/localStorage relay can add a further copy).
+  // The old code's only de-dup was `el.dataset.necpraDecrypted === '1'`,
+  // checked synchronously — but all the duplicate calls arrive and start
+  // their own decryptText() before any of them finishes, so the check never
+  // catches them and every one runs a REAL Double Ratchet decrypt attempt
+  // against the same one-time, forward-secret message key. The first
+  // attempt succeeds and permanently advances the chain; every other
+  // (still in-flight) duplicate is now decrypting against an already-moved
+  // chain and fails with the exact "V3 failed ... V2 fallback also failed"
+  // OperationError seen in the console — and because each writes the bubble
+  // text in its own .then() whenever it resolves, a later-resolving failure
+  // overwrites the correctly-decrypted text already shown, producing the
+  // "decrypts, then instantly flips back to failed" symptom. Fix: memoize
+  // by message id so decryptText() (and the ratchet it drives) is invoked
+  // at most ONCE per message, no matter how many times patchMessage() is
+  // called for it; every duplicate call just awaits the same result.
+  const _decryptOnce = new Map(); // messageId -> Promise<string>
   function patchMessage(m) {
     if (!m || m.id == null) return;
     const row = document.querySelector(`[data-message-id="${CSS.escape(String(m.id))}"]`); if (!row) return;
     const el = row.querySelector('.msg-text'); if (!el || el.dataset.necpraDecrypted === '1') return;
-    decryptText(m.content, m.chatId || window.__GROUP_CHAT_ID, m.senderId).then(text => { el.textContent = text; el.dataset.necpraDecrypted = '1'; });
+    const key = String(m.id);
+    let p = _decryptOnce.get(key);
+    if (!p) { p = decryptText(m.content, m.chatId || window.__GROUP_CHAT_ID, m.senderId); _decryptOnce.set(key, p); }
+    p.then(text => { el.textContent = text; el.dataset.necpraDecrypted = '1'; });
   }
   async function syncOpenGroup(gid) {
     if (typeof window.__GROUP_REFRESH_MESSAGES === 'function') {

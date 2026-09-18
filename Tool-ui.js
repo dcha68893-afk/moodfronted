@@ -2125,23 +2125,11 @@ const renderers = {
         // an unrecognised subcategory still gets a phone photo, not a random
         // one) — only truly unknown categories reach _catImg()'s own
         // last-resort generic image.
-        const _resolveListingImg = (l) => {
-            const sub = (l.subcategory || '').trim();
-            const cat = (l.category || l.type || '').trim();
-            if (sub && typeof _CDN !== 'undefined' && _CDN[sub]) return _CDN[sub];
-            if (cat && typeof _JM_SERVICE_CAT_IMG !== 'undefined' && _JM_SERVICE_CAT_IMG[cat]) return _JM_SERVICE_CAT_IMG[cat];
-            if (sub && typeof _CDN !== 'undefined') {
-                const subLower = sub.toLowerCase();
-                const hit = Object.keys(_CDN).find(k => k.toLowerCase() === subLower);
-                if (hit) return _CDN[hit];
-            }
-            if (cat && typeof _JM_CATS !== 'undefined') {
-                const catEntry = _JM_CATS.find(c => c.id === cat);
-                const firstSub = catEntry?.sections?.[0]?.subs?.[0];
-                if (firstSub?.img) return firstSub.img;
-            }
-            return (typeof _catImg === 'function') ? _catImg(sub || cat) : null;
-        };
+        // FIX: this per-card local copy of the fallback chain was hoisted to
+        // a shared top-level _resolveListingImg() (see near _JM_CATS/
+        // _JM_BRANDS above) so _renderHScroll() — Home/Cart/Wishlist/
+        // Vouchers' small cards — gets the same real fallback instead of a
+        // generic emoji tile. Behavior here is unchanged.
         const fallbackImg = _resolveListingImg(listing)
             || `https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&h=300&fit=crop&q=70`;
 
@@ -5815,8 +5803,19 @@ function _renderHScroll(containerId, listings, sectionId) {
     el.innerHTML = listings.slice(0,10).map(p => {
         const pr = _price(p), op = _origPrice(p), disc = _discount(p);
         const img = _img(p);
+        // FIX (real listing image not showing here — was falling back to a
+        // generic 💾/🛒 emoji tile with no attempt to resolve a real
+        // category/subcategory photo, unlike the main grid): use the same
+        // shared _resolveListingImg() fallback chain the Categories grid
+        // uses, both when there's no uploaded image at all AND when the
+        // uploaded image URL fails to load (onerror), instead of just
+        // hiding the image or showing a generic icon.
+        const fallbackImg = (typeof _resolveListingImg === 'function') ? _resolveListingImg(p) : null;
+        const displaySrc = img || fallbackImg;
         return `<div class="jm-hcard" data-id="${p.id}">
-            ${img ? `<img class="jm-hcard-img" src="${_esc(img)}" loading="lazy" onerror="this.style.display='none'">` : `<div class="jm-hcard-img-placeholder">${p.type==='digital'?'💾':'🛒'}</div>`}
+            ${displaySrc
+                ? `<img class="jm-hcard-img" src="${_esc(displaySrc)}" loading="lazy" onerror="${fallbackImg ? `this.onerror=null;this.src='${_esc(fallbackImg)}';` : `this.style.display='none';`}">`
+                : `<div class="jm-hcard-img-placeholder">${p.type==='digital'?'💾':'🛒'}</div>`}
             <div class="jm-hcard-body">
                 <div class="jm-hcard-title">${_esc(p.title||'')}</div>
                 <div><span class="jm-hcard-price">${pr>0?_fmt(pr):'Free'}</span>${op>pr?`<span class="jm-hcard-oldprice">${_fmt(op)}</span>`:''}</div>
@@ -6468,6 +6467,39 @@ const _JM_BRANDS = {
 // of each script keeping its own hardcoded, phones-only category list.
 window._JM_CATS = _JM_CATS;
 window._JM_BRANDS = _JM_BRANDS;
+
+// FIX (real listing image not showing in Home/Cart/Wishlist/Vouchers —
+// falls back to a generic app-style icon instead, "same as its seen in
+// categories" per the report): this fallback-image chain used to live only
+// as a local const inside renderers.addListingItem() (the main grid used by
+// the Categories product page), so every OTHER place that renders a small
+// listing card — _renderHScroll(), used by Home's Featured row, Cart's
+// "Recently Viewed", Wishlist's "Recently Viewed", and the Vouchers
+// recommendation rows — had no access to it and used the much weaker local
+// _img()-only logic with no fallback beyond a generic 💾/🛒 emoji tile.
+// Hoisted here (after _JM_CATS/_JM_BRANDS/_CDN/_JM_SERVICE_CAT_IMG/_catImg
+// all exist) as a shared, top-level function so every card renderer —
+// addListingItem() included, updated below — resolves a real fallback image
+// (subcategory photo → service-category photo → case-insensitive
+// subcategory match → first image in the listing's own top-level category →
+// generic default) the same way, everywhere a listing can appear.
+function _resolveListingImg(l) {
+    const sub = (l.subcategory || '').trim();
+    const cat = (l.category || l.type || '').trim();
+    if (sub && typeof _CDN !== 'undefined' && _CDN[sub]) return _CDN[sub];
+    if (cat && typeof _JM_SERVICE_CAT_IMG !== 'undefined' && _JM_SERVICE_CAT_IMG[cat]) return _JM_SERVICE_CAT_IMG[cat];
+    if (sub && typeof _CDN !== 'undefined') {
+        const subLower = sub.toLowerCase();
+        const hit = Object.keys(_CDN).find(k => k.toLowerCase() === subLower);
+        if (hit) return _CDN[hit];
+    }
+    if (cat && typeof _JM_CATS !== 'undefined') {
+        const catEntry = _JM_CATS.find(c => c.id === cat);
+        const firstSub = catEntry?.sections?.[0]?.subs?.[0];
+        if (firstSub?.img) return firstSub.img;
+    }
+    return (typeof _catImg === 'function') ? _catImg(sub || cat) : null;
+}
 window._JM_SERVICE_CAT_IMG = _JM_SERVICE_CAT_IMG;
 window._catImg = _catImg;
 

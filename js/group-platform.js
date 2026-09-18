@@ -179,7 +179,15 @@
             content: caption,
             type,
             clientMessageId: `group-media-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-            metadata: { attachment: { url: media.url, mimeType: media.mimeType, size: media.size, type, originalName: media.originalName || file.name } },
+            // BUGFIX (GROUP-UPLOAD-NEVER-RENDERS): this used to write the key
+            // "attachment", but every renderer in this codebase — group.html's
+            // buildRow()/renderMedia() and js/group-media-render.js — only ever
+            // reads metadata.media. With the wrong key, media?.url was always
+            // undefined, so the upload silently fell through to plain-text
+            // rendering (nothing shown) even though the file uploaded fine and
+            // the message was created. Matches js/group-chat-features.js's
+            // (unused, but correctly-shaped) reference implementation.
+            metadata: { media: { url: media.url, mimeType: media.mimeType, size: media.size, type, name: media.originalName || file.name } },
           }),
         });
         if (!messageResponse?.success && !messageResponse?.data) throw new Error(messageResponse?.message || 'Message was not created');
