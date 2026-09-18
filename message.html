@@ -1093,6 +1093,24 @@
 
       if (hasChat) renderMessages(chatId);
 
+      // ROOT-CAUSE FIX (header shows "offline" for a peer who is actually
+      // online, until an incoming message happens to arrive): the parent
+      // shell (js/chat-shell-message-presence-fix.js) only ever asked the
+      // backend's authoritative presence registry in reaction to an
+      // incoming message notification. Opening a chat never triggered that
+      // check at all, so the header just displayed whatever `otherUser
+      // .online` happened to already be cached (frequently still the
+      // untouched default of false). Ask for a fresh, live answer the
+      // moment a real chat is opened — the parent already knows how to
+      // turn this into a `check_user_online` socket round trip and feed
+      // the answer straight back into this same header via
+      // FRIEND_ONLINE/FRIEND_OFFLINE (see the listener below).
+      if (hasChat && conv && conv.otherUser && conv.otherUser.id != null) {
+        try {
+          window.parent.postMessage({ type: 'kyn:requestPresenceCheck', userId: conv.otherUser.id }, '*');
+        } catch (_) {}
+      }
+
       // FIX (PARENT-HEADER-CONSOLIDATION): with #chatHeader now hidden
       // (chat.html's mirrored #headerChatCtx is the only visible chat
       // header), the parent needs real data to populate it. chat.html
@@ -1951,6 +1969,15 @@
         const panelVisible = chatPanelEl && !chatPanelEl.classList.contains('hide-on-mobile');
         if (activeId && panelVisible) {
           const conv = window.MessageModule.getConversations().find(c => c.chatId === activeId);
+          // Same live presence re-check as renderChatPanel's open path —
+          // refocusing an already-open chat (e.g. switching back from
+          // another module) deserves an up-to-date header just as much as
+          // a fresh open does.
+          if (conv && conv.otherUser && conv.otherUser.id != null) {
+            try {
+              window.parent.postMessage({ type: 'kyn:requestPresenceCheck', userId: conv.otherUser.id }, '*');
+            } catch (_) {}
+          }
           try {
             window.parent.postMessage({
               source: 'message-iframe',

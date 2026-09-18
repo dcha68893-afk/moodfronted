@@ -158,6 +158,22 @@
             return;
         }
 
+        // ROOT-CAUSE FIX (chat header stuck on "offline" until a message
+        // happens to arrive): requestPresence() above was only ever called
+        // from showIncomingMessageNotification, i.e. only once an incoming
+        // message triggered it. Opening a chat — the moment the header
+        // actually needs to be right — never asked the backend's
+        // authoritative presence registry at all; it just showed whatever
+        // stale `otherUser.online` flag (often still the untouched default)
+        // happened to already be cached client-side. message.html now posts
+        // this the instant a chat panel opens/refocuses (see its
+        // renderChatPanel + MODULE_FOCUSED handler) so the header always
+        // gets a real, current answer instead of waiting on chance.
+        if (data.type === 'kyn:requestPresenceCheck' && data.userId != null) {
+            requestPresence(data.userId);
+            return;
+        }
+
         if (data.type === 'user_online_status' || data.type === 'presence:user_online_status') {
             applyPresence(data);
         }
