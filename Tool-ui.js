@@ -6499,7 +6499,7 @@ function _listingImageCandidates(l) {
 function _isAppIconImage(url) {
     if (!url || typeof url !== 'string') return false;
     const u = url.toLowerCase();
-    return /(?:^|[\\/])icons[\\/](?:necpa|necpra)-(?:192|512)\\.png(?:$|[?#])/.test(u) || u.includes('/favicon.') || u.includes('favicon.png');
+    return /(?:^|[\\/])icons[\\/](?:necpa|necpra)-(?:192|512)\.png(?:$|[?#])/.test(u) || u.includes('/favicon.') || u.includes('favicon.png');
 }
 function _getListingImage(l) {
     return _listingImageCandidates(l).find(u => !_isAppIconImage(u)) || '';
