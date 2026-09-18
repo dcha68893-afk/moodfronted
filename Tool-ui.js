@@ -1034,9 +1034,10 @@ const UIPipeline = {
         if (DOM.backBtn) {
             DOM.backBtn.onclick = (e) => {
                 e.preventDefault();
-                if (DOM.marketplaceDetailPanel) {
-                    DOM.marketplaceDetailPanel.classList.remove('active');
-                }
+                if (DOM.marketplaceDetailPanel) DOM.marketplaceDetailPanel.classList.remove('active');
+                if (_navStack[_navStack.length - 1]?.page === 'detail') _navStack.pop();
+                const shellBackBtn = document.getElementById('jmBackBtn');
+                if (shellBackBtn) shellBackBtn.style.display = (_navStack.length > 1) ? 'flex' : 'none';
                 return false;
             };
         }
@@ -2262,20 +2263,21 @@ const renderers = {
         if (!container) return;
         let html = '';
 
-        // Media section
+        // Media section — always prefer the seller-uploaded listing image.
+        const detailImage = _getListingImage(listing) || _resolveListingImg(listing);
         if (listing.videoIntro) {
-            html += `<div class="file-preview" style="margin-bottom: 20px;">
-                <video controls class="listing-detail-media" poster="${listing.mediaUrl || ''}">
+            html += `<div class="file-preview" style="margin-bottom:20px;">
+                <video controls class="listing-detail-media" poster="${detailImage || listing.mediaUrl || ''}">
                     <source src="${escapeHtml(listing.videoIntro)}" type="video/mp4">
                     Your browser does not support the video tag.
                 </video>
             </div>`;
-        } else if (listing.mediaUrl) {
+        } else if (detailImage || listing.mediaUrl) {
+            const detailSrc = detailImage || listing.mediaUrl;
             html += `<div class="file-preview">
-                <img src="${escapeHtml(listing.mediaUrl)}" class="listing-detail-media" alt="${escapeHtml(listing.title)}" loading="lazy">
+                <img src="${escapeHtml(detailSrc)}" class="listing-detail-media" alt="${escapeHtml(listing.title)}" loading="lazy" onerror="this.onerror=null;this.style.display='none';this.parentElement.classList.add('listing-detail-media-missing')">
             </div>`;
         }
-        
         // AR Preview for premium
         if (listing.arPreview && isUserPremium()) {
             html += `<div class="ar-preview-container" style="margin-bottom: 20px;">
@@ -4304,9 +4306,10 @@ function forceBindAllUIEvents() {
         if (backBtn && !backBtn.dataset.bound) {
             backBtn.dataset.bound = 'true';
             backBtn.onclick = () => {
-                if (DOM.marketplaceDetailPanel) {
-                    DOM.marketplaceDetailPanel.classList.remove('active');
-                }
+                if (DOM.marketplaceDetailPanel) DOM.marketplaceDetailPanel.classList.remove('active');
+                if (_navStack[_navStack.length - 1]?.page === 'detail') _navStack.pop();
+                const shellBackBtn = document.getElementById('jmBackBtn');
+                if (shellBackBtn) shellBackBtn.style.display = (_navStack.length > 1) ? 'flex' : 'none';
             };
         }
         
