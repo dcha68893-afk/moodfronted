@@ -30,7 +30,7 @@ const _normalizeProduct = (raw) => ({
     description:     String(raw.description || ''),
     category:        String(raw.category || 'general'),
     subcategory:     String(raw.subcategory || ''),
-    images:          Array.isArray(raw.images) ? raw.images : [],
+    images:          Array.isArray(raw.images) && raw.images.length ? raw.images : [raw.imageUrl, raw.image_url, raw.mediaUrl, raw.media_url, raw.image].filter(Boolean),
     price:           parseFloat(raw.price) || 0,
     original_price:  parseFloat(raw.original_price || raw.originalPrice) || 0,
     discount:        parseFloat(raw.discount) || 0,
