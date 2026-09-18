@@ -2089,7 +2089,7 @@ const renderers = {
         const inStock  = listing.available !== false && (stock === null || stock > 0);
         const rating   = parseFloat(listing.rating) || 0;
         const reviews  = parseInt(listing.reviews_count || listing.ratingCount) || 0;
-        const imgSrc   = listing.images?.[0] || listing.mediaUrl || listing.image || '';
+        const imgSrc   = _getListingImage(listing);
         const delivFee = parseFloat(listing.delivery_fee || listing.deliveryFee || 0);
         const condition = listing.condition || (listing.type === 'digital' ? 'Digital' : '');
         const ecom     = window.EcomMarketplace;
@@ -2130,8 +2130,7 @@ const renderers = {
         // _JM_BRANDS above) so _renderHScroll() — Home/Cart/Wishlist/
         // Vouchers' small cards — gets the same real fallback instead of a
         // generic emoji tile. Behavior here is unchanged.
-        const fallbackImg = _resolveListingImg(listing)
-            || `https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&h=300&fit=crop&q=70`;
+        const fallbackImg = _resolveListingImg(listing) || '';
 
         card.innerHTML = `
             <div class="jm-card-img-wrap">
@@ -2223,7 +2222,7 @@ const renderers = {
             if (!last || last.page !== 'detail' || last.subpage !== listing.id) {
                 _navStack.push({ page: 'detail', subpage: listing.id, fromPage: _state.page || 'products', fromSubpage: _state.subpage || '' });
             }
-            const backBtn = document.getElementById('jmBackBtn'); if (backBtn) backBtn.style.display = 'flex';
+            const shellBackBtn = document.getElementById('jmBackBtn'); if (shellBackBtn) shellBackBtn.style.display = 'none';
         } catch(_) {}
 
         if (DOM.detailName) DOM.detailName.textContent = listing.user?.displayName || 'User';
@@ -6483,6 +6482,25 @@ window._JM_BRANDS = _JM_BRANDS;
 // (subcategory photo → service-category photo → case-insensitive
 // subcategory match → first image in the listing's own top-level category →
 // generic default) the same way, everywhere a listing can appear.
+function _listingImageCandidates(l) {
+    const raw = [];
+    const add = v => {
+        if (!v) return;
+        if (Array.isArray(v)) v.forEach(add);
+        else if (typeof v === 'object') add(v.url || v.src || v.href || v.path);
+        else if (typeof v === 'string') raw.push(v.trim());
+    };
+    add(l?.images); add(l?.imageUrl); add(l?.image_url); add(l?.mediaUrl); add(l?.media_url); add(l?.image);
+    return [...new Set(raw)].filter(Boolean);
+}
+function _isAppIconImage(url) {
+    if (!url || typeof url !== 'string') return false;
+    const u = url.toLowerCase();
+    return /(?:^|[\\/])icons[\\/](?:necpa|necpra)-(?:192|512)\\.png(?:$|[?#])/.test(u) || u.includes('/favicon.') || u.includes('favicon.png');
+}
+function _getListingImage(l) {
+    return _listingImageCandidates(l).find(u => !_isAppIconImage(u)) || '';
+}
 function _resolveListingImg(l) {
     const sub = (l.subcategory || '').trim();
     const cat = (l.category || l.type || '').trim();
@@ -6685,7 +6703,7 @@ function _renderCatContent(cat, container) {
                              src="${sub.img}"
                              alt="${_esc(sub.name)}"
                              loading="lazy"
-                             onerror="this.onerror=null;this.src='https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&h=300&fit=crop&q=70'">
+                             onerror="this.onerror=null;this.src='${(section.subs.find(x => x !== sub && x.img)?.img) || (cat.sections.flatMap(x => x.subs || []).find(x => x !== sub && x.img)?.img) || ''}'">
                     </div>
                     <div class="jm-subcat-name">${_esc(sub.name)}</div>
                 </div>`).join('')}
