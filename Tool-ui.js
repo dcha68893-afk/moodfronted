@@ -6703,7 +6703,7 @@ function _renderCatContent(cat, container) {
                 <div class="jm-subcat-item" onclick="window._jmNav('products','${catId}:${_esc(sub.name)}')">
                     <div class="jm-subcat-img-wrap">
                         <img class="jm-subcat-img"
-                             src="${sub.img}"
+                             src="${sub.img || ((section.subs.find(x => x !== sub && x.img)?.img) || (cat.sections.flatMap(x => x.subs || []).find(x => x !== sub && x.img)?.img) || '')}"
                              alt="${_esc(sub.name)}"
                              loading="lazy"
                              onerror="this.onerror=null;this.src='${(section.subs.find(x => x !== sub && x.img)?.img) || (cat.sections.flatMap(x => x.subs || []).find(x => x !== sub && x.img)?.img) || ''}'">
