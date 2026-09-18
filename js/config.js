@@ -279,7 +279,21 @@
         installFriendsHandshakeRecovery();
         applyBrand(document); normalizeIcons(); disableLegacyCallHandlers(); fixBrokenImages(document); installMessageStabilization(); installAccessibilityGuards();
         loadOnce('/js/admin-support-bridge.js?v=20260916-5', 'admin_support_bridge');
-        if (/\/index\.html$/i.test(location.pathname) || location.pathname === '/') { loadOnce('/js/pwa-identity.js?v=20260916-5', 'pwa_identity'); loadOnce('/js/pwa-mobile-install.js?v=20260916-1', 'pwa_mobile_install'); }
+        // ROOT-CAUSE FIX (PWA install prompt appears on desktop but never on
+        // mobile): pwa-manager.js — the DESKTOP install banner — is loaded
+        // broadly, on chat.html/index.html/Tools.html/status.html/
+        // settings.html (see each file's own <script> tags), and correctly
+        // no-ops on mobile ("pwa-mobile-install.js owns the mobile banner").
+        // But pwa-mobile-install.js — the actual mobile banner it defers
+        // to — was only ever loaded here on index.html/'/'. A person who
+        // logs in and spends their time on chat.html (which, for anyone
+        // already logged in, is almost always immediately) never had
+        // either script show them an install prompt on a phone: the
+        // desktop one intentionally declines, and the mobile one was never
+        // even loaded on that page. Load it everywhere the desktop banner
+        // is loaded, so mobile gets the same opportunities to prompt.
+        if (/\/index\.html$/i.test(location.pathname) || location.pathname === '/') loadOnce('/js/pwa-identity.js?v=20260916-5', 'pwa_identity');
+        if (/\/index\.html$/i.test(location.pathname) || location.pathname === '/' || /\/(chat|Tools|tools|status|settings)\.html$/i.test(location.pathname)) loadOnce('/js/pwa-mobile-install.js?v=20260916-1', 'pwa_mobile_install');
         if (/\/group\.html$/i.test(location.pathname)) { loadOnce('/js/group-panel-cleanup.js?v=20260916-5', 'group_panel_cleanup'); loadOnce('/js/group-mobile-navigation.js?v=20260916-6', 'group_mobile_navigation'); }
         if (/\/chat\.html$/i.test(location.pathname)) loadOnce('/js/friend-request-center-action.js?v=20260916-5', 'friend_request_center_action');
         if (/\/Tools\.html$/i.test(location.pathname) || /\/tools\.html$/i.test(location.pathname)) { loadOnce('/js/marketplace-accommodation-service.js?v=20260916-6', 'marketplace_accommodation_service'); loadOnce('/js/accommodation-marketplace-surface.js?v=20260916-6', 'accommodation_marketplace_surface'); loadOnce('/js/invoice-ui.js?v=20260916-5', 'invoice_ui'); loadOnce('/js/marketplace-image-hardening.js?v=20260916-5', 'marketplace_image_hardening'); }

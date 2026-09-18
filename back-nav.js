@@ -10,6 +10,96 @@
     var _history = [];
     var _currentPage = null;
 
+    // FIX (companion to chat.html's handleAppBackNavigation() root-cause
+    // fix): this list already existed inside goBack() below to close the
+    // right panel on an in-app back-arrow tap, but the parent shell had no
+    // way to know any of these panels was open in the first place, so the
+    // device/hardware back button (which fires popstate on the parent, not
+    // in here) skipped straight past whichever one of these was open and
+    // closed the whole module instead. Hoisted to module scope so both
+    // goBack() and the new visibility watcher below share one list.
+    var TRACKED_PANELS = [
+        'discoverPanel', 'eventsPanel', 'invitePanel',
+        'marketplaceDetailPanel', 'createListingModal', 'analyticsModal',
+        'adminManagementModal', 'friendSelectionModal', 'groupInviteModal',
+        'addFriendModal', 'startChatModal', 'createGroupModal',
+        'friendDetailsPanel', 'statusViewerPanel'
+    ];
+    function _panelIsVisible(el) {
+        return !!el && (el.style.display === 'flex' || el.style.display === 'block' || el.classList.contains('active'));
+    }
+    // FIX: message.html and group.html each use their own shared modal
+    // class (`.modal-overlay`/`.modal`, hidden via a `.hidden` class) for
+    // things like "chat info", "new chat", "group members", "group
+    // settings" — none of which match any of the specifically-named ids
+    // above, and neither file even loads this script at all (see below).
+    // Detecting the class pattern generically, instead of only the fixed
+    // id list, means any current or future modal in those modules (or any
+    // other module using the same convention) is covered without needing
+    // another one-off id added here.
+    function _visibleGenericModal() {
+        var els = document.querySelectorAll('.modal:not(.hidden), .modal-overlay:not(.hidden)');
+        for (var i = 0; i < els.length; i++) {
+            var el = els[i];
+            if (el.style.display !== 'none') return el;
+        }
+        return null;
+    }
+    function _topmostVisiblePanelId() {
+        for (var i = 0; i < TRACKED_PANELS.length; i++) {
+            var el = document.getElementById(TRACKED_PANELS[i]);
+            if (_panelIsVisible(el)) return TRACKED_PANELS[i];
+        }
+        var generic = _visibleGenericModal();
+        if (generic) {
+            if (!generic.id) generic.id = '_backnav_anon_' + Math.random().toString(36).slice(2, 8);
+            return generic.id;
+        }
+        return null;
+    }
+    var _lastReportedPanel = null;
+    function _reportPanelStateToParent() {
+        var current = _topmostVisiblePanelId();
+        if (current === _lastReportedPanel) return;
+        _lastReportedPanel = current;
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'SCREEN_STATE_CHANGED', restore: current }, '*');
+        }
+    }
+    // Any of these panels can be opened by code elsewhere in this module
+    // (friend.html, status.html, group.html, Tools.html, etc. each have
+    // their own click handlers/logic that toggles display/class on these
+    // ids) — rather than needing to touch every one of those call sites,
+    // watch the DOM itself: a MutationObserver on style/class changes
+    // anywhere under <body> catches every panel open/close generically,
+    // "from any source", exactly once each, and reports only on an actual
+    // visibility change (not on every unrelated attribute mutation).
+    function _installPanelWatcher() {
+        if (!document.body) { document.addEventListener('DOMContentLoaded', _installPanelWatcher, { once: true }); return; }
+        _reportPanelStateToParent();
+        var observer = new MutationObserver(function (mutations) {
+            for (var i = 0; i < mutations.length; i++) {
+                var t = mutations[i].target;
+                if (!t || t.nodeType !== 1) continue;
+                if ((t.id && TRACKED_PANELS.indexOf(t.id) !== -1) || t.classList.contains('modal') || t.classList.contains('modal-overlay')) {
+                    _reportPanelStateToParent();
+                    return;
+                }
+            }
+        });
+        observer.observe(document.body, { attributes: true, attributeFilter: ['style', 'class'], subtree: true });
+    }
+    _installPanelWatcher();
+
+    // Companion to the watcher above: lets the parent's hardware-back
+    // handler actually close the panel it was just told about, without
+    // needing to know which local mechanism (style vs. class) this
+    // particular panel uses — goBack() below already handles that.
+    window.addEventListener('message', function (e) {
+        var d = e && e.data;
+        if (d && d.type === 'CLOSE_LOCAL_PANEL') goBack();
+    });
+
     // Push a page onto the internal stack
     function pushPage(page) {
         if (page && page !== _currentPage) {
@@ -24,30 +114,7 @@
         var overlay = document.getElementById('groupOSOverlay');
         if (overlay && overlay.style.display !== 'none') { overlay.remove(); return; }
 
-        var panels = [
-            'discoverPanel', 'eventsPanel', 'invitePanel',
-            'marketplaceDetailPanel', 'createListingModal', 'analyticsModal',
-            'adminManagementModal', 'friendSelectionModal', 'groupInviteModal',
-            'addFriendModal', 'startChatModal', 'createGroupModal',
-            // FIX (Android back button returns previous module instead of
-            // previous screen): friendDetailsPanel (the friend/user profile
-            // view opened from the Friends list) was missing here, so
-            // pressing back while it was open skipped straight past both
-            // this panel AND the Friends list itself, falling through to
-            // the generic cross-module NAVIGATE_BACK path below. Listing it
-            // here means back-nav.js's own goBack() closes the profile and
-            // returns to the Friends list in one predictable local step,
-            // exactly like every other panel in this list.
-            'friendDetailsPanel',
-            // FIX: status.html's story viewer (toggled via .active, same
-            // mechanism as the others here) wasn't in this list, so tapping
-            // its own back arrow fell through to postMessage NAVIGATE_BACK —
-            // which the parent handles by sending GO_BACK_TO_LIST to this
-            // iframe, but nothing in status.html ever listens for that
-            // message, so the viewer never actually closed. Closing it
-            // locally here doesn't depend on that missing listener.
-            'statusViewerPanel'
-        ];
+        var panels = TRACKED_PANELS;
         for (var i = 0; i < panels.length; i++) {
             var el = document.getElementById(panels[i]);
             if (el && (el.style.display === 'flex' || el.style.display === 'block' || el.classList.contains('active'))) {
@@ -59,11 +126,26 @@
                 // shell is tracking (see SCREEN_STATE_CHANGED) so a chat/call
                 // opened afterward from the bare list doesn't incorrectly try
                 // to restore a panel the user already dismissed.
+                // (_reportPanelStateToParent() below, driven by the
+                // MutationObserver watching this same style/class change,
+                // sends its own up-to-date SCREEN_STATE_CHANGED too — this
+                // explicit one is kept so an *immediate* caller relying on
+                // this side effect synchronously still gets it right away.)
                 if (window.parent && window.parent !== window) {
                     window.parent.postMessage({ type: 'SCREEN_STATE_CHANGED', restore: null, timestamp: Date.now() }, '*');
                 }
                 return;
             }
+        }
+        // 1b. Same idea for the shared .modal/.modal-overlay convention
+        // (message.html, group.html) — see _visibleGenericModal() above.
+        var genericModal = _visibleGenericModal();
+        if (genericModal) {
+            genericModal.classList.add('hidden');
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ type: 'SCREEN_STATE_CHANGED', restore: null, timestamp: Date.now() }, '*');
+            }
+            return;
         }
 
         // 2. If we have internal history, go to previous page

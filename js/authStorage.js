@@ -163,8 +163,34 @@
             // If the previous account was explicitly logged out, auth storage is
             // empty but its application caches remain. Capture and clear that
             // previous account before admitting a different account.
-            if(incomingUserId&&previousUserId&&String(previousUserId)!==String(incomingUserId))wipePreviousAccountData();
-            else if(incomingUserId&&lastActiveId&&String(lastActiveId)!==String(incomingUserId)&&!previousUserId){captureAccountState(lastActiveId);try{withAuthMutation(()=>Object.keys(localStorage).forEach(key=>{if(!WIPE_ALLOWLIST.has(key)){try{localStorage.removeItem(key);}catch(_){}}}));sessionStorage.clear();}catch(_){}_pendingAccountWipe=wipeIndexedDBData();}
+            // ROOT-CAUSE FIX (ACCOUNT-SWITCH-VIA-RELOGIN LOSES E2E IDENTITY,
+            // "can't decrypt" after switching accounts and back): both
+            // branches below correctly CAPTURE the outgoing account's
+            // localStorage (including js/e2e-identity-core.js's per-user
+            // `kyn_e2e_keypair_v1_<uid>` identity blob, which lives in plain
+            // localStorage whenever KynectaSecureStorage's native Keystore
+            // plugin isn't present — see secure-storage-bridge.js) before
+            // wiping down to the allowlist. But neither branch ever
+            // RESTORED the *incoming* account's own previously-captured
+            // snapshot — only switchAccount() (the explicit in-app account
+            // switcher) did that half of the round trip, via
+            // restoreAccountState(). A person who instead manages two
+            // accounts the ordinary way — log out of A, log into B, later
+            // log back into A — goes through THIS function both times, and
+            // always hit a wiped-and-never-restored localStorage on the
+            // return login. With no identity blob found at storeKey(),
+            // e2e-identity-core.js's init() silently generated a BRAND NEW
+            // keypair for A and re-registered its public key with the
+            // backend, overwriting A's original one — so any peer still
+            // holding A's old public key (or A itself, holding a peer's
+            // now-mismatched cached key) permanently fails to decrypt in
+            // both directions, exactly as reported. Restoring the incoming
+            // account's own snapshot here (a no-op if this is a genuinely
+            // new account, since restoreAccountState() does nothing when no
+            // prior snapshot exists) closes that gap, matching what
+            // switchAccount() already does correctly.
+            if(incomingUserId&&previousUserId&&String(previousUserId)!==String(incomingUserId)){wipePreviousAccountData();restoreAccountState(incomingUserId);}
+            else if(incomingUserId&&lastActiveId&&String(lastActiveId)!==String(incomingUserId)&&!previousUserId){captureAccountState(lastActiveId);try{withAuthMutation(()=>Object.keys(localStorage).forEach(key=>{if(!WIPE_ALLOWLIST.has(key)){try{localStorage.removeItem(key);}catch(_){}}}));sessionStorage.clear();}catch(_){}_pendingAccountWipe=wipeIndexedDBData();restoreAccountState(incomingUserId);}
             const expiresAt=Object.prototype.hasOwnProperty.call(data,'expiresAt')?data.expiresAt:(Date.now()+30*24*60*60*1000);const payload={token:data.token,refreshToken:data.refreshToken||null,user:data.user||null,expiresAt,issuedAt:data.issuedAt||Date.now(),savedAt:new Date().toISOString(),_version:'1.5.2'};
             withAuthMutation(()=>{localStorage.setItem(AUTH_STORAGE_KEY,JSON.stringify(payload));LEGACY_TOKEN_KEYS.forEach(k=>{try{localStorage.setItem(k,payload.token);}catch(_){}});LEGACY_USER_KEYS.forEach(k=>{try{localStorage.setItem(k,JSON.stringify(payload.user));}catch(_){}});localStorage.setItem(LOGIN_STATE_KEY,'true');});propagateOffSessionPolicy(payload.token);registerAccount(payload);setLastActiveAccountId(incomingUserId);return true;
         }catch(e){console.error('[AuthStorage] saveAuth failed:',e.message);return false;}

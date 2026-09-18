@@ -147,7 +147,23 @@ function renderMedia(){const box=$('mediaBar');const items=S.messages.filter(m=>
 
 function openGroup(id){const g=S.groups.find(x=>String(x.id)===String(id))||{id};S.current=g;window.__GROUP_CHAT_ID=String(id);window.__GROUP_CHAT_TYPE='group';$('input').disabled=false;$('send').disabled=false;['searchToggle','pinnedToggle','mediaToggle'].forEach(bid=>{const b=$(bid);if(b)b.disabled=false});S.messages=[];markRead(id);renderMessages(false);renderGroups();setMobileChat(true);const meta=currentGroupMeta(g);postParent('GROUP_PANEL_OPEN',meta);postSelf('GROUP_PANEL_OPEN',meta);window.dispatchEvent(new CustomEvent('kyn:group:open',{detail:{groupId:String(id)}}));loadMessages();loadPins();clearInterval(S.poll);S.poll=setInterval(loadMessages,5000)}
 function closeGroup(){S.current=null;window.__GROUP_CHAT_ID=null;window.__GROUP_CHAT_TYPE=null;clearInterval(S.poll);S.poll=null;$('input').value='';$('input').disabled=true;$('send').disabled=true;['searchToggle','pinnedToggle','mediaToggle'].forEach(bid=>{const b=$(bid);if(b)b.disabled=true});closeSubbars();S.messages=[];S.pins=[];renderMessages(false);setMobileChat(false);renderGroups();postParent('GROUP_PANEL_CLOSED',{});postSelf('GROUP_PANEL_CLOSE',{});window.dispatchEvent(new CustomEvent('kyn:group:close'))}
-async function sendMessage(){if(S.sending||!S.current?.id)return;const input=$('input'),content=input.value.trim();if(!content)return;S.sending=true;$('send').disabled=true;try{const r=await api('/messages',{method:'POST',body:JSON.stringify({chatId:Number(S.current.id),content,type:'text',clientMessageId:`group-${Date.now()}-${Math.random().toString(36).slice(2)}`})});const message=r?.data?.message||r?.data;if(message&&String(message.chatId||S.current.id)===String(S.current.id)){const exists=S.messages.some(m=>String(m.id||m.messageId)===String(message.id||message.messageId));if(!exists){S.messages.push(message);renderMessages(true)}}input.value='';await loadMessages()}catch(e){alert(`Unable to send message: ${e.message}`)}finally{S.sending=false;$('send').disabled=!S.current}}
+// ROOT-CAUSE FIX (SILENT-PLAINTEXT-GROUP-SEND): this function used to send
+// `content` to POST /messages completely unencrypted, with no lock icon or
+// error to distinguish it from a real encrypted send. In normal operation
+// this code never actually ran — js/group-mobile-navigation.js's
+// installSendHook() attaches a CAPTURE-phase listener on this same #send
+// button/#input (with stopImmediatePropagation), which encrypts the
+// message via its own per-recipient E2E fanout before this bubble-phase
+// listener ever fires. But if that script fails to load (network hiccup,
+// blocked request, or a page load that reaches DOMContentLoaded before
+// config.js's loadOnce() call attaches it), this listener silently became
+// the ONLY one — and sent every message in this group in plaintext with
+// no warning at all. This contradicts the app's established "no plaintext
+// fallback" design (see message-client.js's sendMessage(), which fails
+// loudly instead of ever falling back to plaintext) — matching fix here:
+// refuse to send and surface a clear error instead of silently sending
+// unencrypted, if the encrypted send-hook never installed.
+async function sendMessage(){if(S.sending||!S.current?.id)return;const input=$('input'),content=input.value.trim();if(!content)return;if(input.dataset.necpraSendHook!=='1'){alert('Secure messaging is not ready yet for this group — please wait a moment and try again, or reload the page.');return}S.sending=true;$('send').disabled=true;try{const r=await api('/messages',{method:'POST',body:JSON.stringify({chatId:Number(S.current.id),content,type:'text',clientMessageId:`group-${Date.now()}-${Math.random().toString(36).slice(2)}`})});const message=r?.data?.message||r?.data;if(message&&String(message.chatId||S.current.id)===String(S.current.id)){const exists=S.messages.some(m=>String(m.id||m.messageId)===String(message.id||message.messageId));if(!exists){S.messages.push(message);renderMessages(true)}}input.value='';await loadMessages()}catch(e){alert(`Unable to send message: ${e.message}`)}finally{S.sending=false;$('send').disabled=!S.current}}
 async function loadFriends(){try{const r=await api('/friends?status=accepted');const rows=r?.data?.friends||r?.friends||r?.data||[];S.friends=Array.isArray(rows)?rows.map(x=>x.friend||x.user||x):[];const box=$('friends');box.replaceChildren();for(const f of S.friends){const id=f.id||f.userId;if(String(id)===uid())continue;const row=document.createElement('label');row.className='member';row.innerHTML=`<input type="checkbox" value="${esc(id)}"><div class="who"><b>${esc(f.displayName||f.name||f.username||'User')}</b><small>@${esc(f.username||'user')}</small></div>`;box.append(row)}}catch(e){$('friends').innerHTML='<div class="empty">No friends available.</div>'}}
 function showCreate(){loadFriends();$('create').classList.remove('hidden')}function hideCreate(){$('create').classList.add('hidden')}
 async function createGroup(e){e.preventDefault();const ids=[...document.querySelectorAll('#friends input:checked')].map(x=>Number(x.value)).filter(Number.isInteger);if(!ids.length)return alert('Select at least one member.');try{const r=await api('/chats',{method:'POST',body:JSON.stringify({type:'group',name:$('gname').value.trim(),description:$('gdesc').value.trim(),participantIds:ids})});const g=unwrap(r?.data?.chat||r?.data);hideCreate();$('createForm').reset();await loadGroups();if(g?.id)openGroup(g.id)}catch(e){alert(e.message)}}
@@ -255,4 +271,12 @@ window.addEventListener('message',e=>{
 });
 window.__GROUP_LOAD_GROUPS=loadGroups;window.__GROUP_REFRESH_MESSAGES=loadMessages;loadUnread();loadGroups();
 })();
-</script></body></html>
+</script>
+<!-- FIX: this module's own modals (membersModal, purposeModal, settingsModal
+     — all .modal, closed by adding .hidden) had no hardware/device
+     back-button coverage at all, only their own in-page close buttons —
+     back-nav.js was never loaded here. See chat.html's
+     handleAppBackNavigation() and back-nav.js's _visibleGenericModal() for
+     the other half of this fix. -->
+<script src="back-nav.js"></script>
+</body></html>

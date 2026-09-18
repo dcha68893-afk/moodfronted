@@ -1327,19 +1327,33 @@
       const attachBtn = document.getElementById('attachBtn');
       const attachInput = document.getElementById('attachInput');
 
+      // ROOT-CAUSE FIX (can't send another message until the previous one
+      // is delivered/times out): this used to disable sendBtn, `await`
+      // the full sendMessage() round trip (the REST call plus, after the
+      // earlier fix, up to 50s of timeout margin), and only then re-enable
+      // the button — so a slow network turned every send into a forced
+      // wait before the next message could even be composed. There's no
+      // real reason for that: sendMessage() already inserts its optimistic
+      // bubble and returns almost immediately, and getMessages() already
+      // sorts by createdAt (set synchronously, in call order) whenever
+      // either side is still optimistic — see the ROOT-CAUSE FIX comment
+      // on that sort in js/message-client.js — so messages render in the
+      // order they were actually sent regardless of which network request
+      // happens to resolve first. Fire the send without awaiting it here,
+      // so the compose box is free again immediately and several messages
+      // can be sent back to back; each still gets delivered, in the order
+      // it was sent.
       async function doSend() {
         if (!hasChat) return;
         const content = input.value.trim();
         if (!content) return;
         input.value = '';
-        sendBtn.disabled = true;
         window.MessageModule.sendTypingStop(chatId);
         clearTimeout(typingStopTimer);
         const replyToId = activeReplyTo ? activeReplyTo.messageId : null;
         activeReplyTo = null;
         renderReplyBar();
-        await window.MessageModule.sendMessage({ chatId, content, replyToId });
-        sendBtn.disabled = false;
+        window.MessageModule.sendMessage({ chatId, content, replyToId }).catch(() => {});
         input.focus();
       }
 
@@ -2576,5 +2590,12 @@
     renderChatPanel(null);
   })();
   </script>
+  <!-- FIX: this module's own modals (chatInfoModal, newChatModal — both
+       .modal-overlay, closed by adding .hidden) had no hardware/device
+       back-button coverage at all, only their own in-page × buttons —
+       back-nav.js was never loaded here. See chat.html's
+       handleAppBackNavigation() and back-nav.js's _visibleGenericModal()
+       for the other half of this fix. -->
+  <script src="back-nav.js"></script>
 </body>
 </html>

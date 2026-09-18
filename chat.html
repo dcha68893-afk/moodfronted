@@ -3028,6 +3028,39 @@
         }
 
         function handleAppBackNavigation() {
+            // ROOT-CAUSE FIX (hardware/device back button skips straight
+            // past a panel a MODULE opened locally on its own, closing the
+            // whole module instead — while the in-app back-arrow/cancel
+            // button on that same panel works fine): every one of the ~8
+            // module iframes has back-nav.js loaded, whose goBack() already
+            // knows how to close a tracked local panel (friendDetailsPanel,
+            // marketplaceDetailPanel, statusViewerPanel, etc. — see
+            // back-nav.js's own panel list) — but only when something
+            // INSIDE that iframe calls it (a click on the panel's own back
+            // arrow). The device back button fires `popstate` on this
+            // TOP-level document, not inside the iframe, so this function —
+            // the sole authoritative hardware-back handler — never knew
+            // such a panel was open at all: it has no visibility into an
+            // iframe's own internal DOM, so it fell straight through to its
+            // own module-level checks below and closed/left the entire
+            // module. window.__childLocalPanel is kept up to date by a
+            // matching fix in back-nav.js, which reports every local panel
+            // open/close via postMessage as it happens (see the
+            // SCREEN_STATE_CHANGED listener below) — so it can be checked
+            // synchronously, with no round trip, before anything else here.
+            window.__childLocalPanel = window.__childLocalPanel || {};
+            const activeIframe = document.querySelector(`.content-iframe[data-module="${window.__currentPage}"]`);
+            const openPanel = activeIframe && window.__childLocalPanel[activeIframe.id];
+            if (activeIframe && openPanel) {
+                try { activeIframe.contentWindow.postMessage({ type: 'CLOSE_LOCAL_PANEL', panel: openPanel }, '*'); } catch (_) {}
+                // Optimistic — the iframe's own SCREEN_STATE_CHANGED message
+                // (sent right after it actually closes the panel) reconciles
+                // this if it turns out to be stale.
+                delete window.__childLocalPanel[activeIframe.id];
+                logProcessStatus('back-navigation', true, `closed-local-panel:${openPanel}`);
+                return true;
+            }
+
             const profileModal = document.getElementById('profileModal');
             if (profileModal && profileModal.classList.contains('active')) {
                 profileModal.classList.remove('active');
@@ -3623,6 +3656,25 @@
                 }
                 _performFullLogoutRedirect(_d.type, event.origin);
             }
+        });
+
+        // Companion listener for the ROOT-CAUSE FIX in handleAppBackNavigation()
+        // above: every module iframe's back-nav.js now reports its own local
+        // panel open/close state here as it happens (`restore` is the panel's
+        // element id while a tracked panel is open, or null once it closes),
+        // keyed by which iframe it came from — so the hardware-back handler
+        // always has a synchronous, up-to-date answer to "does the currently
+        // visible module have a local panel open right now?" with no
+        // round-trip needed at the moment a back press actually happens.
+        window.addEventListener('message', (event) => {
+            if (!isTrustedOrigin(event.origin)) return;
+            const _d = event.data || {};
+            if (_d.type !== 'SCREEN_STATE_CHANGED') return;
+            window.__childLocalPanel = window.__childLocalPanel || {};
+            const sourceIframe = Array.from(document.querySelectorAll('.content-iframe')).find(f => f.contentWindow === event.source);
+            if (!sourceIframe) return;
+            if (_d.restore) window.__childLocalPanel[sourceIframe.id] = _d.restore;
+            else delete window.__childLocalPanel[sourceIframe.id];
         });
 
         window.addEventListener('popstate', (event) => {
@@ -5579,6 +5631,24 @@
                 // behavior users saw. Apply here immediately, then relay to every
                 // other live iframe (skip the sender — it already applied its own
                 // change) so the whole app updates together, live.
+                // FIX (root cause of "theme doesn't apply live" / relies on a
+                // refresh to show up): this used to relay the raw THEME_CHANGED
+                // message to every sibling iframe and simply hope each one had
+                // its own local listener that would repaint itself on receipt.
+                // None of message.html, group.html, friend.html, Tools.html, or
+                // status.html ever had such a listener at all — so the relayed
+                // message was silently dropped by every one of them every time,
+                // and the only reason the new theme ever showed up there was a
+                // later full page reload re-reading it fresh from localStorage
+                // (which this now-unused-here update() call does still keep
+                // correct via ThemeManager.setTheme() above). reapplyThemeToAllIframes()
+                // (== window.ThemeManager.broadcastToAllIframes()) is the SAME
+                // mechanism already used by the settings-boot code path further
+                // below — it reaches directly into each iframe's DOM and paints
+                // it from here, needing no cooperation from that module's own
+                // script at all, so this is the one real, working path instead
+                // of depending on five separate modules each correctly
+                // implementing their own copy of the same listener.
                 if (data.type === 'THEME_CHANGED' && data.theme) {
                     if (window.ThemeManager) {
                         window.ThemeManager.setTheme(data.theme);
@@ -5589,10 +5659,7 @@
                         document.documentElement.classList.toggle('dark-theme', _resolvedTheme === 'dark');
                         try { (window.ThemeManager ? window.ThemeManager.setTheme(_resolvedTheme) : localStorage.setItem('app_theme', _resolvedTheme)); } catch (_) {}
                     }
-                    document.querySelectorAll('iframe').forEach(function (f) {
-                        if (f.contentWindow === event.source) return;
-                        try { f.contentWindow.postMessage(data, '*'); } catch (_) {}
-                    });
+                    reapplyThemeToAllIframes();
                     return;
                 }
                 if (data.type === 'FONT_SIZE_CHANGED' && data.fontSize) {
@@ -5604,10 +5671,7 @@
                         document.documentElement.style.setProperty('--base-font-size', _fs + 'px');
                         try { localStorage.setItem('app_font_size', String(_fs)); } catch (_) {}
                     }
-                    document.querySelectorAll('iframe').forEach(function (f) {
-                        if (f.contentWindow === event.source) return;
-                        try { f.contentWindow.postMessage(data, '*'); } catch (_) {}
-                    });
+                    reapplyThemeToAllIframes();
                     return;
                 }
                 if (data.type === 'ICON_SCALE_CHANGED' && data.iconScale) {
@@ -5619,10 +5683,7 @@
                         document.documentElement.style.setProperty('--icon-scale', String(_iconMap[data.iconScale] || 1));
                         try { localStorage.setItem('app_icon_scale', data.iconScale); } catch (_) {}
                     }
-                    document.querySelectorAll('iframe').forEach(function (f) {
-                        if (f.contentWindow === event.source) return;
-                        try { f.contentWindow.postMessage(data, '*'); } catch (_) {}
-                    });
+                    reapplyThemeToAllIframes();
                     return;
                 }
                 if (data.type) {

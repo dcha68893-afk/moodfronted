@@ -146,6 +146,29 @@
         const chatId = message.chatId;
         const bucket = getOrCreateConversationBucket(chatId);
 
+        // ROOT-CAUSE FIX (stale "failed" bubble never clears / duplicate
+        // bubble once the real message shows up): this function is keyed
+        // purely by the server's numeric message.id, never by
+        // clientMessageId, despite this function's own header comment
+        // claiming "dedup by clientMessageId (optimistic reconciliation)"
+        // happens here — it never actually did. sendMessage() only deletes
+        // the matching `optimistic:<clientMessageId>` stub on its OWN
+        // immediate REST success (see below); if that REST call instead
+        // timed out locally (see _directRequest's watchdog above) while the
+        // send in fact succeeded server-side, the stub stayed in the
+        // bucket marked 'failed' forever. The real message (which DOES
+        // carry the same clientMessageId — see messageBroadcast.js /
+        // Message model) then arrives later via a socket 'message:new'
+        // echo or the next loadHistory()/getMessages() call and was simply
+        // added alongside it as a second, separate entry — the exact
+        // "both sides showing not delivered, but it was delivered" symptom.
+        // Clear out any matching optimistic stub before the real message
+        // lands, so the false failure is replaced rather than duplicated.
+        if (message.clientMessageId) {
+            const staleOptimisticId = `optimistic:${message.clientMessageId}`;
+            if (bucket.has(staleOptimisticId)) bucket.delete(staleOptimisticId);
+        }
+
         if (bucket.has(message.id)) {
             bucket.set(message.id, Object.assign({}, bucket.get(message.id), message));
         } else {
@@ -455,12 +478,31 @@
         return new Promise((resolve, reject) => {
             const requestId = 'msg_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
             let settled = false;
+            // ROOT-CAUSE FIX (FALSE-"FAILED"-DESPITE-DELIVERED / send button
+            // stuck disabled for the full wait): this local watchdog used to
+            // fire at 30000ms, but chat.html's actual underlying fetch (the
+            // one that really talks to the backend on the other end of this
+            // postMessage bridge) uses AbortSignal.timeout(45000) — see
+            // js/api.core.js's own "was 10000 — too short for 1KB/s links or
+            // Render cold start" fix. Because 30000 < 45000, on any slow
+            // link or Render cold start this promise rejected and detached
+            // its listener a full 15s BEFORE the real request could
+            // possibly have failed on its own — so a request that was still
+            // in flight and about to succeed got reported here as failed,
+            // the optimistic bubble got marked 'failed', and the real
+            // success (posted back by chat.html 15-ish seconds later) had
+            // nowhere to go, since the listener was already removed. This
+            // is also why the send button (disabled for the duration of
+            // this await in message.html's doSend()) appeared to "hang"
+            // for exactly this same window before giving up. Raised above
+            // chat.html's real ceiling with margin for the postMessage
+            // round-trip itself.
             const timeoutId = setTimeout(() => {
                 if (settled) return;
                 settled = true;
                 window.removeEventListener('message', handler);
                 reject(new Error('API request timeout'));
-            }, 30000);
+            }, 50000);
             const handler = (event) => {
                 if (settled) return;
                 const msg = event.data;

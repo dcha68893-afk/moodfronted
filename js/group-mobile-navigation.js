@@ -119,15 +119,31 @@
     const camera = document.createElement('input'); camera.type = 'file'; camera.accept = 'image/*,video/*'; camera.capture = 'environment'; camera.hidden = true;
     const files = document.createElement('input'); files.type = 'file'; files.accept = 'image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip'; files.hidden = true;
     menu.append(cameraBtn, fileBtn); c.append(camera, files, menu); tools.append(emojiBtn, attachBtn); c.insertBefore(tools, input);
-    const picker = document.createElement('div'); picker.id = 'groupEmojiPicker'; picker.hidden = true;
-    picker.style.cssText = 'position:absolute;bottom:58px;left:8px;width:min(340px,calc(100vw - 32px));padding:10px;background:var(--surface,#fff);border:1px solid var(--border,#ddd);border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.2);display:grid;grid-template-columns:repeat(8,1fr);gap:3px;z-index:101';
+    // ROOT-CAUSE FIX (emoji picker showing without being tapped): this set
+    // BOTH `picker.hidden = true` (an HTML attribute, which relies on the
+    // browser's default `[hidden]{display:none}` UA-stylesheet rule — which
+    // is NOT `!important`) AND an inline `style.cssText` containing
+    // `display:grid` on the very same element. An inline style always wins
+    // over a non-!important stylesheet rule, UA or not — so the inline
+    // `display:grid` permanently overrode the `hidden` attribute's
+    // `display:none` from the moment this ran, and the emoji grid was
+    // visible from page load, before anything was ever clicked. The click
+    // handlers below only ever toggled the (already-overridden, so
+    // visually inert) `hidden` attribute, never the actual `display` that
+    // was controlling visibility — so tapping the emoji button did nothing
+    // visible either. Managing `style.display` directly, consistently, in
+    // every place that opens or closes this picker (instead of `hidden`)
+    // fixes both: it starts genuinely closed, and the toggle now actually
+    // has an effect.
+    const picker = document.createElement('div'); picker.id = 'groupEmojiPicker';
+    picker.style.cssText = 'position:absolute;bottom:58px;left:8px;width:min(340px,calc(100vw - 32px));padding:10px;background:var(--surface,#fff);border:1px solid var(--border,#ddd);border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.2);display:none;grid-template-columns:repeat(8,1fr);gap:3px;z-index:101';
     EMOJIS.forEach(e => { const b=document.createElement('button'); b.type='button'; b.textContent=e; b.style.cssText='border:0;background:transparent;padding:7px;font-size:22px;border-radius:8px;cursor:pointer'; b.onclick=()=>{const a=input.selectionStart||input.value.length,z=input.selectionEnd||a;input.value=input.value.slice(0,a)+e+input.value.slice(z);input.focus();input.selectionStart=input.selectionEnd=a+e.length;}; picker.appendChild(b); });
     c.appendChild(picker);
-    emojiBtn.onclick = e => { e.stopPropagation(); picker.hidden=!picker.hidden; menu.classList.remove('open'); };
-    attachBtn.onclick = e => { e.stopPropagation(); menu.classList.toggle('open'); picker.hidden=true; };
+    emojiBtn.onclick = e => { e.stopPropagation(); picker.style.display = picker.style.display === 'none' ? 'grid' : 'none'; menu.classList.remove('open'); };
+    attachBtn.onclick = e => { e.stopPropagation(); menu.classList.toggle('open'); picker.style.display = 'none'; };
     cameraBtn.onclick = () => { menu.classList.remove('open'); camera.click(); };
     fileBtn.onclick = () => { menu.classList.remove('open'); files.click(); };
-    document.addEventListener('click', e => { if (!menu.contains(e.target) && e.target !== attachBtn) menu.classList.remove('open'); if (!picker.contains(e.target) && e.target !== emojiBtn) picker.hidden=true; });
+    document.addEventListener('click', e => { if (!menu.contains(e.target) && e.target !== attachBtn) menu.classList.remove('open'); if (!picker.contains(e.target) && e.target !== emojiBtn) picker.style.display = 'none'; });
     camera.onchange = () => { const f=camera.files?.[0]; if(f) upload(f); camera.value=''; };
     files.onchange = () => { const f=files.files?.[0]; if(f) upload(f); files.value=''; };
   }
