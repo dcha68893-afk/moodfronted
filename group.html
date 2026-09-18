@@ -1,4 +1,4 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Groups</title><script src="/js/runtime-config.js"></script><script src="/js/config.js"></script><script src="/js/theme.engine.js"></script><script src="js/group-platform.js"></script><style>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Groups</title><script src="/js/runtime-config.js"></script><script src="/js/config.js"></script><script src="/js/theme.engine.js"></script><script src="/js/e2e-encryption.js"></script><script src="js/groupEncryption.client.js"></script><script src="js/group-platform.js"></script><style>
 :root{--bg:var(--kyn-bg-root,#f8fafc);--surface:var(--kyn-bg-panel,#fff);--surface2:var(--kyn-bg-input,#f1f5f9);--border:var(--kyn-border,#e2e8f0);--text:var(--kyn-text-primary,#0f172a);--muted:var(--kyn-text-muted,#64748b);--primary:var(--kyn-accent-secondary,#2563eb)}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden}body{background:var(--bg);color:var(--text);font:14px system-ui,-apple-system,"Segoe UI",Roboto,Arial}button,input,textarea{font:inherit}button{cursor:pointer}.layout{height:100%;display:grid;grid-template-columns:minmax(250px,32%) 1fr}.sidebar,.panel{min-width:0;min-height:0}.sidebar{border-right:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column}.side-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--border);font-weight:800}.toolbar{display:flex;gap:7px;padding:10px}.search{flex:1;min-width:0;padding:9px;border:1px solid var(--border);border-radius:11px;background:var(--surface2);color:inherit}.refresh{border:1px solid var(--border);border-radius:10px;background:var(--surface2);color:inherit;padding:8px 11px}.groups{flex:1;overflow:auto;padding:0 10px}.group{width:100%;display:flex;align-items:center;gap:10px;padding:10px;border:1px solid transparent;border-radius:13px;background:transparent;color:inherit;text-align:left;margin-bottom:5px}.group:hover,.group.active{background:var(--surface2);border-color:var(--border)}.avatar{width:43px;height:43px;border-radius:13px;background:linear-gradient(135deg,#dbeafe,#c4b5fd);display:grid;place-items:center;font-weight:800;color:#1e40af;flex:0 0 auto;background-size:cover;background-position:center}.groupmain{min-width:0;flex:1}.name{font-weight:750;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.meta{font-size:11px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.empty{text-align:center;color:var(--muted);padding:40px 18px}
 .unread-badge{flex:0 0 auto;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:#ef4444;color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;line-height:1}
 /* No in-panel header any more: the parent shell's #globalHeader owns the
@@ -64,6 +64,37 @@ function postParent(type,payload){try{if(window.parent&&window.parent!==window)w
 function postSelf(type,payload){try{window.postMessage({type,payload:payload||{}},'*')}catch(_){}}
 function currentGroupMeta(g){return{id:g.id,name:g.name||g.groupName||'Group',memberCount:Number(g.participantCount??g.participants?.length??0),stats:{totalMembers:Number(g.participantCount??g.participants?.length??0)}}}
 
+// SECURITY FIX (GROUP-MESSAGES-SENT-PLAINTEXT): this panel never loaded
+// js/e2e-encryption.js and never tried to unlock it, so window.KynectaE2E
+// was undefined here and window.KynectaGroupE2E (see js/groupEncryption
+// .client.js, also newly wired in above) could never do anything either —
+// sendMessage() below just posted raw content with no encryption call at
+// all. Mirrors the same session-password reuse index.html's unlock modal
+// already sets up for message.html, so this iframe gets the same identity
+// key material without re-prompting for a password.
+async function ensureE2EReady(){
+  if(window.KynectaE2E?.enabled)return true;
+  if(!window.KynectaE2E||typeof window.KynectaE2E.init!=='function')return false;
+  let pw=null;try{pw=sessionStorage.getItem('kyn_e2e_pw_session')}catch(_){}
+  if(!pw)return false;
+  let legacyPw=null;try{legacyPw=sessionStorage.getItem('kyn_e2e_pw_legacy_session')}catch(_){}
+  try{return !!(await window.KynectaE2E.init(pw,legacyPw||undefined))}catch(_){return false}
+}
+ensureE2EReady();
+function groupMemberIds(g){const list=Array.isArray(g?.participants)?g.participants:[];return[...new Set(list.map(p=>Number((p.user||p).id??p.userId)).filter(n=>Number.isInteger(n)&&n>0))]}
+// Decrypts one message's `content` in place (returns a shallow copy).
+// Attachments carry their payload in metadata.media, not content, so they
+// pass through untouched; anything that isn't our envelope shape is
+// returned as-is by KynectaGroupE2E.decryptForGroup itself.
+async function decryptRow(m){
+  if(!m||typeof m.content!=='string'||!m.content)return m;
+  try{
+    const plain=await window.KynectaGroupE2E.decryptForGroup(S.current?.id??m.chatId,m.content,groupMemberIds(S.current));
+    return Object.assign({},m,{content:plain});
+  }catch(e){return Object.assign({},m,{content:'[Unable to decrypt this message]'})}
+}
+function decryptRows(list){return Promise.all(list.map(decryptRow))}
+
 function renderGroups(){const box=$('groups');if(!box)return;box.replaceChildren();const q=S.q.trim().toLowerCase();const rows=S.groups.filter(g=>!q||String(g.name||g.groupName||'').toLowerCase().includes(q));if(!rows.length){box.innerHTML='<div class="empty">No groups yet.</div>';return}for(const g of rows){const b=document.createElement('button');b.type='button';b.className='group'+(S.current&&String(S.current.id)===String(g.id)?' active':'');const a=document.createElement('div');a.className='avatar';a.textContent=String(g.name||g.groupName||'G').slice(0,1).toUpperCase();const m=document.createElement('div');m.className='groupmain';m.innerHTML=`<div class="name">${esc(g.name||g.groupName||'Unnamed group')}</div><div class="meta">${Number(g.participantCount??g.participants?.length??0)} members</div>`;b.append(a,m);const unread=Number(S.unread?.[String(g.id)]||0);if(unread>0){const badge=document.createElement('span');badge.className='unread-badge';badge.textContent=unread>99?'99+':String(unread);b.append(badge)}b.onclick=()=>openGroup(g.id);box.append(b)}}
 async function loadGroups(){if(S.loading)return;S.loading=true;try{const r=await api('/chats?limit=100');const rows=r?.data?.chats||r?.data||[];S.groups=Array.isArray(rows)?rows.filter(x=>(x?.type||x?.chatType)==='group').map(unwrap):[];renderGroups()}catch(e){const box=$('groups');if(box)box.innerHTML=`<div class="empty">Unable to load groups.<br>${esc(e.message)}</div>`}finally{S.loading=false}}
 function normalizeMessages(r){const rows=r?.data?.messages||r?.data||r?.messages||[];return Array.isArray(rows)?rows:[]}
@@ -112,9 +143,18 @@ function buildRow(m){const id=String(m.id||m.messageId||'');const row=document.c
 
 function renderMessages(scroll=true){const box=$('messages');if(!box)return;box.replaceChildren();if(!S.messages.length){box.innerHTML='<div class="empty">No messages yet.</div>'}else{for(const m of S.messages)box.append(buildRow(m));if(scroll)box.scrollTop=box.scrollHeight}window.__GROUP_MESSAGES_CACHE=S.messages.slice();window.__GROUP_REFRESH_MESSAGES=loadMessages}
 function reconcile(list){const map=new Map();for(const m of S.messages)map.set(String(m.id||m.messageId),m);for(const m of list)map.set(String(m.id||m.messageId),m);const merged=[...map.values()].sort((a,b)=>Number(a.id||0)-Number(b.id||0));const changed=merged.length!==S.messages.length||merged.some((m,i)=>String(m.id||m.messageId)!==String(S.messages[i]?.id||S.messages[i]?.messageId)||m.content!==S.messages[i]?.content||m.isEdited!==S.messages[i]?.isEdited);if(changed){const box=$('messages'),near=box&&box.scrollHeight-box.scrollTop-box.clientHeight<80;S.messages=merged;renderMessages(near)}}
-async function loadMessages(){if(!S.current?.id)return;const id=String(S.current.id);try{const r=await api(`/messages/${encodeURIComponent(id)}?limit=100`);if(!S.current||String(S.current.id)!==id)return;reconcile(normalizeMessages(r))}catch(e){if(!S.messages.length){const box=$('messages');if(box)box.innerHTML=`<div class="empty">Unable to load messages.<br>${esc(e.message)}</div>`}}}
+async function loadMessages(){if(!S.current?.id)return;const id=String(S.current.id);try{const r=await api(`/messages/${encodeURIComponent(id)}?limit=100`);if(!S.current||String(S.current.id)!==id)return;const decrypted=await decryptRows(normalizeMessages(r));if(!S.current||String(S.current.id)!==id)return;reconcile(decrypted)}catch(e){if(!S.messages.length){const box=$('messages');if(box)box.innerHTML=`<div class="empty">Unable to load messages.<br>${esc(e.message)}</div>`}}}
 
-function startEdit(id,currentContent){const next=prompt('Edit message:',currentContent);if(next==null)return;const trimmed=next.trim();if(!trimmed||trimmed===currentContent)return;api(`/messages/${encodeURIComponent(id)}`,{method:'PATCH',body:JSON.stringify({content:trimmed})}).then(()=>{const idx=S.messages.findIndex(m=>String(m.id||m.messageId)===String(id));if(idx!==-1){S.messages[idx]={...S.messages[idx],content:trimmed,isEdited:true};renderMessages(false)}}).catch(e=>alert(e.message||'Could not edit message'))}
+function startEdit(id,currentContent){const next=prompt('Edit message:',currentContent);if(next==null)return;const trimmed=next.trim();if(!trimmed||trimmed===currentContent)return;(async()=>{
+  // SECURITY FIX (GROUP-MESSAGES-SENT-PLAINTEXT): same bug as sendMessage()
+  // — this used to PATCH the raw edited text straight to the server.
+  let outgoing;
+  try{
+    if(!(await ensureE2EReady())||!window.KynectaGroupE2E)throw new Error('Secure messaging is not ready yet');
+    outgoing=await window.KynectaGroupE2E.encryptForGroup(S.current?.id,trimmed,groupMemberIds(S.current));
+  }catch(e){alert(e.message||'Could not encrypt the edited message');return}
+  api(`/messages/${encodeURIComponent(id)}`,{method:'PATCH',body:JSON.stringify({content:outgoing})}).then(()=>{const idx=S.messages.findIndex(m=>String(m.id||m.messageId)===String(id));if(idx!==-1){S.messages[idx]={...S.messages[idx],content:trimmed,isEdited:true};renderMessages(false)}}).catch(e=>alert(e.message||'Could not edit message'))
+})()}
 function deleteMessage(id){const forEveryone=confirm('Delete for everyone? Click Cancel to delete just for you.');api(`/messages/${encodeURIComponent(id)}?deleteForEveryone=${forEveryone}`,{method:'DELETE'}).then(()=>{S.messages=S.messages.filter(m=>String(m.id||m.messageId)!==String(id));renderMessages(false)}).catch(e=>alert(e.message||'Could not delete message'))}
 
 // ── Mentions ─────────────────────────────────────────────────────────────
@@ -130,11 +170,27 @@ function applyMention(name){const input=$('input');const before=input.value.slic
 // ── Pinned messages ──────────────────────────────────────────────────────
 function closeSubbars(){['searchBar','pinnedBar','mediaBar'].forEach(id=>$(id)?.classList.add('hidden'))}
 async function loadPins(){if(!S.current?.id)return;try{const r=await api(`/pins/${encodeURIComponent(S.current.id)}`);S.pins=r?.data?.pins||[]}catch(e){S.pins=[]}}
-function renderPins(){const box=$('pinnedBar');if(!S.pins.length){box.innerHTML='<div class="empty" style="padding:6px">No pinned messages yet. Use a message\'s ⋮ menu to pin up to 3.</div>';return}box.innerHTML='';for(const p of S.pins){const row=document.createElement('div');row.className='pin-item';row.innerHTML=`<b>${esc(p.pinnedBy?.displayName||'Someone')}</b> pinned: ${esc((p.message?.content||'').slice(0,140))}<span class="unpin">Unpin</span>`;row.querySelector('.unpin').onclick=async ev=>{ev.stopPropagation();try{await api(`/pins/${encodeURIComponent(S.current.id)}/${encodeURIComponent(p.messageId)}`,{method:'DELETE'});await loadPins();renderPins()}catch(e){alert(e.message)}};box.append(row)}}
+async function renderPins(){const box=$('pinnedBar');if(!S.pins.length){box.innerHTML='<div class="empty" style="padding:6px">No pinned messages yet. Use a message\'s ⋮ menu to pin up to 3.</div>';return}box.innerHTML='<div class="empty">Loading…</div>';
+  // SECURITY FIX (GROUP-MESSAGES-SENT-PLAINTEXT): p.message.content here is
+  // still the server's ciphertext (pins come from a separate /pins
+  // endpoint, not from the already-decrypted S.messages) — this used to
+  // render it raw.
+  const decryptedPins=await Promise.all(S.pins.map(async p=>{
+    if(!p?.message?.content)return p;
+    try{const plain=await window.KynectaGroupE2E.decryptForGroup(S.current?.id,p.message.content,groupMemberIds(S.current));return{...p,message:{...p.message,content:plain}}}
+    catch(_){return{...p,message:{...p.message,content:'[Unable to decrypt this message]'}}}
+  }));
+  box.innerHTML='';for(const p of decryptedPins){const row=document.createElement('div');row.className='pin-item';row.innerHTML=`<b>${esc(p.pinnedBy?.displayName||'Someone')}</b> pinned: ${esc((p.message?.content||'').slice(0,140))}<span class="unpin">Unpin</span>`;row.querySelector('.unpin').onclick=async ev=>{ev.stopPropagation();try{await api(`/pins/${encodeURIComponent(S.current.id)}/${encodeURIComponent(p.messageId)}`,{method:'DELETE'});await loadPins();renderPins()}catch(e){alert(e.message)}};box.append(row)}}
 async function pinMessage(messageId){if(!S.current?.id)return;try{await api(`/pins/${encodeURIComponent(S.current.id)}`,{method:'POST',body:JSON.stringify({messageId:Number(messageId)})});await loadPins();if(!$('pinnedBar').classList.contains('hidden'))renderPins()}catch(e){alert(e.message||'Could not pin message')}}
 
 // ── Group search — GET /search/messages/:chatId?query= (already exists
 // and already works; it just had no group.html UI calling it). ──
+// NOTE (expected, not a bug introduced by the encryption fix above): this
+// hits the server's ILIKE-on-content search, which can no longer match
+// anything inside a message once content is encrypted — the server never
+// sees plaintext. Same trade-off 1:1 chat already has; a real fix would
+// need client-side search over already-decrypted local history instead,
+// which is a separate, larger piece of work not done here.
 async function runGroupSearch(q){const box=$('searchResults');if(!q.trim()){box.innerHTML='';return}box.innerHTML='<div class="empty">Searching…</div>';try{const r=await api(`/search/messages/${encodeURIComponent(S.current.id)}?query=${encodeURIComponent(q)}`);const hits=r?.data?.results||r?.data?.messages||r?.data||[];if(!Array.isArray(hits)||!hits.length){box.innerHTML='<div class="empty">No matches.</div>';return}box.innerHTML='';for(const h of hits.slice(0,30)){const row=document.createElement('div');row.className='search-hit';row.innerHTML=`<b>${esc(h.sender?.displayName||h.sender?.username||'Member')}</b> — ${esc((h.content||'').slice(0,140))}`;row.onclick=()=>{closeSubbars();const el=document.querySelector(`[data-message-id="${CSS.escape(String(h.id))}"]`);el?.scrollIntoView({behavior:'smooth',block:'center'})};box.append(row)}}catch(e){box.innerHTML=`<div class="empty">${esc(e.message)}</div>`}}
 
 // ── Files & media — no dedicated group-scoped backend exists for this yet
@@ -163,7 +219,18 @@ function closeGroup(){S.current=null;window.__GROUP_CHAT_ID=null;window.__GROUP_
 // loudly instead of ever falling back to plaintext) — matching fix here:
 // refuse to send and surface a clear error instead of silently sending
 // unencrypted, if the encrypted send-hook never installed.
-async function sendMessage(){if(S.sending||!S.current?.id)return;const input=$('input'),content=input.value.trim();if(!content)return;if(input.dataset.necpraSendHook!=='1'){alert('Secure messaging is not ready yet for this group — please wait a moment and try again, or reload the page.');return}S.sending=true;$('send').disabled=true;try{const r=await api('/messages',{method:'POST',body:JSON.stringify({chatId:Number(S.current.id),content,type:'text',clientMessageId:`group-${Date.now()}-${Math.random().toString(36).slice(2)}`})});const message=r?.data?.message||r?.data;if(message&&String(message.chatId||S.current.id)===String(S.current.id)){const exists=S.messages.some(m=>String(m.id||m.messageId)===String(message.id||message.messageId));if(!exists){S.messages.push(message);renderMessages(true)}}input.value='';await loadMessages()}catch(e){alert(`Unable to send message: ${e.message}`)}finally{S.sending=false;$('send').disabled=!S.current}}
+async function sendMessage(){if(S.sending||!S.current?.id)return;const input=$('input'),content=input.value.trim();if(!content)return;if(input.dataset.necpraSendHook!=='1'){alert('Secure messaging is not ready yet for this group — please wait a moment and try again, or reload the page.');return}
+  // SECURITY FIX (GROUP-MESSAGES-SENT-PLAINTEXT): `content` used to go
+  // straight into the POST body below with no encryption step at all —
+  // window.KynectaGroupE2E (js/groupEncryption.client.js) was never even
+  // called. Encrypt first and fail loudly (no silent plaintext fallback,
+  // matching js/message-client.js's rule for 1:1 chat) rather than send.
+  let outgoingContent;
+  try{
+    if(!(await ensureE2EReady())||!window.KynectaGroupE2E)throw new Error('Secure messaging is not ready yet');
+    outgoingContent=await window.KynectaGroupE2E.encryptForGroup(S.current.id,content,groupMemberIds(S.current));
+  }catch(e){alert(`Unable to send message: ${e.message||'could not secure this message for the group'}`);return}
+  S.sending=true;$('send').disabled=true;try{const r=await api('/messages',{method:'POST',body:JSON.stringify({chatId:Number(S.current.id),content:outgoingContent,type:'text',clientMessageId:`group-${Date.now()}-${Math.random().toString(36).slice(2)}`})});const message=r?.data?.message||r?.data;if(message&&String(message.chatId||S.current.id)===String(S.current.id)){const exists=S.messages.some(m=>String(m.id||m.messageId)===String(message.id||message.messageId));if(!exists){S.messages.push(Object.assign({},message,{content}));renderMessages(true)}}input.value='';await loadMessages()}catch(e){alert(`Unable to send message: ${e.message}`)}finally{S.sending=false;$('send').disabled=!S.current}}
 async function loadFriends(){try{const r=await api('/friends?status=accepted');const rows=r?.data?.friends||r?.friends||r?.data||[];S.friends=Array.isArray(rows)?rows.map(x=>x.friend||x.user||x):[];const box=$('friends');box.replaceChildren();for(const f of S.friends){const id=f.id||f.userId;if(String(id)===uid())continue;const row=document.createElement('label');row.className='member';row.innerHTML=`<input type="checkbox" value="${esc(id)}"><div class="who"><b>${esc(f.displayName||f.name||f.username||'User')}</b><small>@${esc(f.username||'user')}</small></div>`;box.append(row)}}catch(e){$('friends').innerHTML='<div class="empty">No friends available.</div>'}}
 function showCreate(){loadFriends();$('create').classList.remove('hidden')}function hideCreate(){$('create').classList.add('hidden')}
 async function createGroup(e){e.preventDefault();const ids=[...document.querySelectorAll('#friends input:checked')].map(x=>Number(x.value)).filter(Number.isInteger);if(!ids.length)return alert('Select at least one member.');try{const r=await api('/chats',{method:'POST',body:JSON.stringify({type:'group',name:$('gname').value.trim(),description:$('gdesc').value.trim(),participantIds:ids})});const g=unwrap(r?.data?.chat||r?.data);hideCreate();$('createForm').reset();await loadGroups();if(g?.id)openGroup(g.id)}catch(e){alert(e.message)}}
@@ -231,7 +298,14 @@ function handleRealtime(ev){
     if(groupId==null||!message?.id)return;
     if(S.current&&String(groupId)===String(S.current.id)){
         const exists=S.messages.some(m=>String(m.id||m.messageId)===String(message.id));
-        if(!exists){S.messages.push(message);S.messages.sort((a,b)=>Number(a.id||0)-Number(b.id||0));renderMessages(true)}
+        // SECURITY FIX (GROUP-MESSAGES-SENT-PLAINTEXT): `message.content`
+        // arriving here is still the server's ciphertext — this used to
+        // push it straight into S.messages/render with no decrypt step.
+        if(!exists){decryptRow(message).then(dm=>{
+            if(!S.current||String(groupId)!==String(S.current.id))return;
+            if(S.messages.some(m=>String(m.id||m.messageId)===String(dm.id||dm.messageId)))return;
+            S.messages.push(dm);S.messages.sort((a,b)=>Number(a.id||0)-Number(b.id||0));renderMessages(true)
+        })}
         markRead(groupId);
         return;
     }
