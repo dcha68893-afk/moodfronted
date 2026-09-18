@@ -2017,7 +2017,7 @@ const renderers = {
         DOM.marketplaceListContent.innerHTML = '';
 
         if (!allListings || allListings.length === 0) {
-            DOM.marketplaceListContent.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:48px 20px;color:#9ca3af"><div style="font-size:48px;margin-bottom:12px">🛒</div><div style="font-size:15px;font-weight:600;margin-bottom:6px">No products yet</div><div style="font-size:13px;margin-bottom:20px">Be the first to create a listing!</div><button onclick="showCreateListingModal()" style="background:#f57224;color:#fff;border:none;border-radius:8px;padding:12px 24px;font-size:14px;font-weight:700;cursor:pointer"><i class='fas fa-plus'></i> Create Listing</button></div>`;
+            DOM.marketplaceListContent.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:48px 20px;color:#9ca3af;min-height:50vh;display:flex;flex-direction:column;align-items:center;justify-content:center"><div style="font-size:48px;margin-bottom:12px">🛒</div><div style="font-size:15px;font-weight:600;margin-bottom:6px">No products yet</div><div style="font-size:13px;margin-bottom:20px">Be the first to create a listing!</div><button onclick="showCreateListingModal()" style="background:#f57224;color:#fff;border:none;border-radius:8px;padding:12px 24px;font-size:14px;font-weight:700;cursor:pointer"><i class='fas fa-plus'></i> Create Listing</button></div>`;
             return;
         }
 
@@ -2070,7 +2070,7 @@ const renderers = {
         setTimeout(() => { const c=document.getElementById('jmProductCount'); if(c) c.textContent=`(${filtered.length})`; }, filtered.length*18+200);
         
         if (filtered.length === 0) {
-            DOM.marketplaceListContent.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:#9ca3af"><div style="font-size:40px;margin-bottom:12px">🔍</div><div style="font-size:14px;font-weight:600">No products match your filters</div><div style="font-size:12px;margin-top:6px">Try a different category or clear filters</div></div>`;
+            DOM.marketplaceListContent.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:#9ca3af;min-height:50vh;display:flex;flex-direction:column;align-items:center;justify-content:center"><div style="font-size:40px;margin-bottom:12px">🔍</div><div style="font-size:14px;font-weight:600">No products match your filters</div><div style="font-size:12px;margin-top:6px">Try a different category or clear filters</div></div>`;
         }
         
         if (DOM.availableListingsCount) {
@@ -5778,6 +5778,26 @@ window._jmAddRecent  = _addRecent;
 window._jmClearRecent = _clearRecent;
 
 // ── HOME PAGE render ───────────────────────────────────────────────────────
+// FIX (admin-approved listing never appears on Home without a full reload):
+// this used to only re-render whatever was already sitting in the in-memory/
+// localStorage-cached `allListings` (populated once at app boot by
+// MarketplaceCore.loadListings()). Nothing ever asked the server again just
+// because the buyer tapped the Home tab, so a product a seller published and
+// an admin approved *after* the buyer's session had already loaded stayed
+// invisible on Home until they force-reloaded the whole app — even though
+// GET /api/marketplace/listings (Tool.getListings: status='active' AND
+// available=true, exactly what admin-approve sets) would have returned it
+// correctly on a fresh fetch. Category/subcategory browsing didn't have this
+// problem because _renderProductsPage() always calls loadProducts() fresh
+// on every visit — Home just never did the equivalent. Now Home does the
+// same: a throttled (15s floor, so rapid tab-switching doesn't hammer the
+// endpoint), non-blocking refetch via the same MarketplaceCore instance
+// (window.marketplace.loadListings()) already used for pull-to-refresh
+// elsewhere. It dispatches 'marketplace:data-updated' when it resolves,
+// which the existing progressiveEnhancement() listener already uses to
+// re-run renderMarketplaceList() — so the grid updates itself in place
+// once fresh data arrives, with no visible flash of the old list first.
+let _lastHomeRefresh = 0;
 function _renderHome() {
     // Featured row
     const ecom = window.EcomMarketplace;
@@ -5792,6 +5812,15 @@ function _renderHome() {
     const grid = document.getElementById('marketplaceListContent');
     const countEl = document.getElementById('jmProductCount');
     if (grid && countEl) countEl.textContent = `(${grid.querySelectorAll('.jm-card').length})`;
+
+    // Background refresh so newly-approved listings surface without a
+    // full reload (see FIX comment above). Fire-and-forget: any failure
+    // just leaves the current (already-rendered) list in place.
+    const now = Date.now();
+    if (window.marketplace?.loadListings && (now - _lastHomeRefresh) > 15000) {
+        _lastHomeRefresh = now;
+        window.marketplace.loadListings().catch(() => {});
+    }
 }
 
 // ── HORIZONTAL SCROLL render ───────────────────────────────────────────────
@@ -7736,7 +7765,7 @@ window._jmEditAddr = function(idx) {
 function _renderGrid(container, listings) {
     if (!container) return;
     if (!listings?.length) {
-        container.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:#9ca3af"><div style="font-size:40px;margin-bottom:12px">🔍</div><div>No products found</div></div>`;
+        container.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:#9ca3af;min-height:50vh;display:flex;flex-direction:column;align-items:center;justify-content:center"><div style="font-size:40px;margin-bottom:12px">🔍</div><div>No products found</div></div>`;
         return;
     }
     container.innerHTML = '';

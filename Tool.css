@@ -3305,6 +3305,27 @@ input:focus + .toggle-slider,
     align-items: start !important;
     grid-auto-rows: max-content !important;
 }
+/* FIX (empty-gray-box-below-listings): the two rules above only fixed how
+   ROWS size *inside* the grid — they never stopped the grid ELEMENT itself
+   from growing. #marketplaceListContent carries both `.marketplace-list-
+   content` (flex:1; see the base rule elsewhere in this file) and
+   `.jm-product-grid` (display:grid; background:var(--bg-color) — see
+   Tools.html's theme block). Its parent `.marketplace-list` is also
+   flex:1/display:flex, so the grid was stretching to fill 100% of the
+   remaining page height regardless of how many products it held, then
+   painting that entire stretched box with its own (different-from-parent)
+   background — visible as a large blank gray panel under a single product
+   card, reaching all the way to the bottom nav. Live-verified with a
+   before/after Playwright render at 390x844: the grid element measured
+   637px tall (full flex fill) against a 463px card before this fix, and
+   ~479px (content-fit) after it — the phantom box is gone and the page's
+   own background shows through instead. `.jm-product-grid` (no
+   `.marketplace-list-content`) covers #jmProductsContent/#jmRecentContent
+   too so any grid using this shared class is protected the same way. */
+.jm-product-grid,
+.marketplace-list-content.jm-product-grid {
+    flex: none !important;
+}
 .jm-card {
     align-self: start !important;
     min-height: 0 !important;
