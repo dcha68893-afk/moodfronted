@@ -6,7 +6,6 @@
   window.__NECPRA_GROUP_MOBILE_NAV__ = true;
 
   const X = { crypto: null, installed: false, uploading: false, realtime: false };
-  const EMOJIS = '😀 😃 😄 😁 😆 😅 😂 🤣 😊 😇 🙂 🙃 😉 😌 😍 🥰 😘 😗 😙 😚 😋 😛 😝 😜 🤪 🤨 🧐 🤓 😎 🤩 🥳 😏 😒 😞 😔 😟 😕 🙁 ☹️ 😣 😖 😫 😩 🥺 😢 😭 😤 😠 😡 🤬 🤯 😳 🥵 🥶 😱 😨 😰 😥 😓 🤗 🤔 🫡 🤭 🫢 🫣 🤫 🤥 😶 😐 😑 😬 🙄 😯 😦 😧 😮 😲 🥱 😴 🤤 😪 😵 🤐 🥴 🤢 🤮 🤧 😷 🤒 🤕 ❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎 💔 💕 💞 💓 💗 💖 💘 💝 💟 ✨ ⭐ 🌟 🔥 🎉 🎊 👍 👎 👏 🙌 🙏 💪 🤝 👌 ✌️ 🤞 🤟 🤘 👋 💯'.split(' ');
 
   function base() { try { return String(window.__getApiBase?.() || window.API_BASE_URL || '').replace(/\/$/, ''); } catch (_) { return ''; } }
   function token() { try { return window.__kynToken || window.__accessToken || window.AuthSessionManager?.getToken?.() || localStorage.getItem('authToken') || localStorage.getItem('accessToken') || localStorage.getItem('token') || ''; } catch (_) { return ''; } }
@@ -103,63 +102,16 @@
       setTimeout(() => rows.forEach(patchMessage), 100);
     }
   }
-  function installComposer() {
-    const c = document.querySelector('.composer'), input = document.getElementById('input');
-    if (!c || !input || c.dataset.necpraEnhanced === '1') return;
-    c.dataset.necpraEnhanced = '1';
-    const style = document.createElement('style');
-    style.textContent = `.necpra-group-tools{display:flex;align-items:center;gap:5px;flex:0 0 auto}.necpra-group-tool{width:38px!important;height:38px!important;min-width:38px!important;padding:0!important;border-radius:11px!important;display:grid!important;place-items:center!important;border:1px solid var(--border,#dbe3ee)!important;background:var(--surface2,#f1f5f9)!important;color:var(--text,#0f172a)!important;font-size:18px!important;line-height:1!important;flex:0 0 38px!important}.necpra-group-tool:hover{background:var(--surface,#fff)!important;transform:translateY(-1px)}.necpra-group-attach-menu{position:absolute;left:8px;bottom:56px;display:none;min-width:170px;padding:6px;background:var(--surface,#fff);border:1px solid var(--border,#dbe3ee);border-radius:13px;box-shadow:0 10px 30px rgba(0,0,0,.18);z-index:100}.necpra-group-attach-menu.open{display:block}.necpra-group-attach-menu button{width:100%;border:0;background:transparent;color:var(--text,#0f172a);padding:10px 12px;border-radius:9px;text-align:left;display:flex;gap:9px;align-items:center}.necpra-group-attach-menu button:hover{background:var(--surface2,#f1f5f9)}#groupEmojiPicker{max-height:230px!important;overflow-y:auto!important}`;
-    document.head.appendChild(style);
-    const tools = document.createElement('div'); tools.className = 'necpra-group-tools';
-    const emojiBtn = document.createElement('button'); emojiBtn.type = 'button'; emojiBtn.className = 'necpra-group-tool'; emojiBtn.textContent = '😊'; emojiBtn.title = 'Emoji';
-    const attachBtn = document.createElement('button'); attachBtn.type = 'button'; attachBtn.className = 'necpra-group-tool'; attachBtn.textContent = '📎'; attachBtn.title = 'Attach';
-    const menu = document.createElement('div'); menu.className = 'necpra-group-attach-menu';
-    const cameraBtn = document.createElement('button'); cameraBtn.type = 'button'; cameraBtn.innerHTML = '📷 <span>Camera</span>';
-    const fileBtn = document.createElement('button'); fileBtn.type = 'button'; fileBtn.innerHTML = '📁 <span>Choose file</span>';
-    const camera = document.createElement('input'); camera.type = 'file'; camera.accept = 'image/*,video/*'; camera.capture = 'environment'; camera.hidden = true;
-    const files = document.createElement('input'); files.type = 'file'; files.accept = 'image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip'; files.hidden = true;
-    menu.append(cameraBtn, fileBtn); c.append(camera, files, menu); tools.append(emojiBtn, attachBtn); c.insertBefore(tools, input);
-    // ROOT-CAUSE FIX (emoji picker showing without being tapped): this set
-    // BOTH `picker.hidden = true` (an HTML attribute, which relies on the
-    // browser's default `[hidden]{display:none}` UA-stylesheet rule — which
-    // is NOT `!important`) AND an inline `style.cssText` containing
-    // `display:grid` on the very same element. An inline style always wins
-    // over a non-!important stylesheet rule, UA or not — so the inline
-    // `display:grid` permanently overrode the `hidden` attribute's
-    // `display:none` from the moment this ran, and the emoji grid was
-    // visible from page load, before anything was ever clicked. The click
-    // handlers below only ever toggled the (already-overridden, so
-    // visually inert) `hidden` attribute, never the actual `display` that
-    // was controlling visibility — so tapping the emoji button did nothing
-    // visible either. Managing `style.display` directly, consistently, in
-    // every place that opens or closes this picker (instead of `hidden`)
-    // fixes both: it starts genuinely closed, and the toggle now actually
-    // has an effect.
-    const picker = document.createElement('div'); picker.id = 'groupEmojiPicker';
-    picker.style.cssText = 'position:absolute;bottom:58px;left:8px;width:min(340px,calc(100vw - 32px));padding:10px;background:var(--surface,#fff);border:1px solid var(--border,#ddd);border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.2);display:none;grid-template-columns:repeat(8,1fr);gap:3px;z-index:101';
-    EMOJIS.forEach(e => { const b=document.createElement('button'); b.type='button'; b.textContent=e; b.style.cssText='border:0;background:transparent;padding:7px;font-size:22px;border-radius:8px;cursor:pointer'; b.onclick=()=>{const a=input.selectionStart||input.value.length,z=input.selectionEnd||a;input.value=input.value.slice(0,a)+e+input.value.slice(z);input.focus();input.selectionStart=input.selectionEnd=a+e.length;}; picker.appendChild(b); });
-    c.appendChild(picker);
-    emojiBtn.onclick = e => { e.stopPropagation(); picker.style.display = picker.style.display === 'none' ? 'grid' : 'none'; menu.classList.remove('open'); };
-    attachBtn.onclick = e => { e.stopPropagation(); menu.classList.toggle('open'); picker.style.display = 'none'; };
-    cameraBtn.onclick = () => { menu.classList.remove('open'); camera.click(); };
-    fileBtn.onclick = () => { menu.classList.remove('open'); files.click(); };
-    document.addEventListener('click', e => { if (!menu.contains(e.target) && e.target !== attachBtn) menu.classList.remove('open'); if (!picker.contains(e.target) && e.target !== emojiBtn) picker.style.display = 'none'; });
-    camera.onchange = () => { const f=camera.files?.[0]; if(f) upload(f); camera.value=''; };
-    files.onchange = () => { const f=files.files?.[0]; if(f) upload(f); files.value=''; };
-  }
-  async function upload(file) {
-    const gid = Number(window.__GROUP_CHAT_ID); if (!gid || X.uploading) return; X.uploading = true;
-    const btn = document.querySelector('.necpra-group-tool[title="Attach"]'); if (btn) btn.disabled=true;
-    try {
-      const fd = new FormData(); fd.append('file', file, file.name);
-      const r = await api('/files/upload', { method:'POST', body:fd });
-      const d = r.data || r, url = d.url || d.fileUrl || d.mediaUrl;
-      if (!url) throw new Error('Upload did not return a media URL');
-      const type = d.type === 'image' || file.type.startsWith('image/') ? 'image' : d.type === 'video' || file.type.startsWith('video/') ? 'video' : d.type === 'audio' || file.type.startsWith('audio/') ? 'audio' : 'file';
-      await send('', type, { media:{ url, publicId:d.publicId||null, name:d.originalName||file.name, originalName:d.originalName||file.name, mimeType:d.mimeType||file.type, size:d.size||file.size, type } });
-    } catch (e) { alert(`Unable to upload file: ${e.message||e}`); }
-    finally { X.uploading=false; if(btn) btn.disabled=false; }
-  }
+  // REMOVED (DUPLICATE-COMPOSER-ICONS FIX): this used to build a second,
+  // near-identical row of emoji/attach/camera/choose-file controls on top of
+  // the ones group-platform.js already installs into the same `.composer`
+  // (its #groupComposerExtras: the ＋ upload toggle and ☺ emoji toggle).
+  // Both scripts ran unconditionally on every group.html load and both
+  // inserted an element with id="groupEmojiPicker", so the two pickers
+  // collided by id and the buttons cross-wired unpredictably on top of
+  // simply looking duplicated/misaligned. group-platform.js's composer is
+  // the one kept; this file now only owns encrypted text sending (below),
+  // not composer UI.
   async function send(text, type='text', metadata=null) {
     const gid=Number(window.__GROUP_CHAT_ID); if(!gid) return;
     const content=text ? await encryptText(text,gid) : '';
@@ -179,7 +131,7 @@
   function mobileNav() {
     const style=document.createElement('style'); style.textContent='@media(max-width:768px){#layout{width:100%!important;min-width:0!important;max-width:100%!important}#layout.mobile-mode{display:block!important;position:relative!important;height:100%!important;overflow:hidden!important}#layout.mobile-mode .groups-panel,#layout.mobile-mode .chat-panel{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;max-width:none!important;min-width:0!important}#layout.mobile-mode .groups-panel{display:flex!important;flex-direction:column!important}#layout.mobile-mode .chat-panel{display:flex!important;flex-direction:column!important}#layout.mobile-mode .mobile-hidden{display:none!important;visibility:hidden!important;pointer-events:none!important}#layout.mobile-mode .mobile-visible{display:flex!important;visibility:visible!important;pointer-events:auto!important}}@media(min-width:769px){#layout{display:grid!important;width:100%!important;height:100%!important}.groups-panel,.chat-panel{display:flex!important;visibility:visible!important;pointer-events:auto!important}.groups-panel{flex-direction:column!important}.chat-panel{flex-direction:column!important}}'; document.head.appendChild(style);
     function apply(panel){const l=document.getElementById('layout'),g=document.querySelector('.sidebar'),c=document.querySelector('.panel');if(!l||!g||!c)return;g.classList.add('groups-panel');c.classList.add('chat-panel');if(window.matchMedia?.('(max-width:768px)').matches){l.classList.add('mobile-mode');const chat=panel==='chat';g.classList.toggle('mobile-hidden',chat);g.classList.toggle('mobile-visible',!chat);c.classList.toggle('mobile-hidden',!chat);c.classList.toggle('mobile-visible',chat);}else{l.classList.remove('mobile-mode');g.classList.remove('mobile-hidden','mobile-visible');c.classList.remove('mobile-hidden','mobile-visible');}}
-    window.addEventListener('kyn:group:open',()=>{apply('chat');setTimeout(()=>syncOpenGroup(window.__GROUP_CHAT_ID),120)}); window.addEventListener('kyn:group:close',()=>apply('groups')); const run=()=>{apply(window.__GROUP_CHAT_ID?'chat':'groups');installComposer();installSendHook();realtime();}; if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',run,{once:true});else run();
+    window.addEventListener('kyn:group:open',()=>{apply('chat');setTimeout(()=>syncOpenGroup(window.__GROUP_CHAT_ID),120)}); window.addEventListener('kyn:group:close',()=>apply('groups')); const run=()=>{apply(window.__GROUP_CHAT_ID?'chat':'groups');installSendHook();realtime();}; if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',run,{once:true});else run();
   }
   mobileNav();
 })();

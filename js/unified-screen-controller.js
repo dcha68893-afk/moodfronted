@@ -18,7 +18,16 @@ function copyVars(src,dst){try{var cs=src.defaultView.getComputedStyle(src.docum
 function notifyFrameTheme(f,reason){try{if(f&&f.contentWindow)f.contentWindow.postMessage({type:'NECPRA_THEME_APPLIED',theme:state.theme,fontSize:global.ThemeManager&&global.ThemeManager.getFontSize?global.ThemeManager.getFontSize():16,iconScale:global.ThemeManager&&global.ThemeManager.getIconScale?global.ThemeManager.getIconScale():'medium',reason:reason||'shell'},location.origin)}catch(_){} }
 function themeFrame(f,reason){if(!f||!f.contentDocument)return;try{var d=f.contentDocument,t=state.theme||readTheme();d.documentElement.setAttribute('data-parent-shell','true');d.documentElement.setAttribute('data-parent-module',f.dataset&&f.dataset.module||'');d.documentElement.setAttribute('data-theme',t);d.documentElement.classList.toggle('theme-dark',t==='dark');d.documentElement.classList.toggle('dark-theme',t==='dark');d.documentElement.style.colorScheme=t;copyVars(document,d);if(d.body){d.body.setAttribute('data-theme',t);d.body.classList.toggle('dark-theme',t==='dark');d.body.setAttribute('data-parent-shell','true')}notifyFrameTheme(f,reason);f.dataset.kynThemeReady='true';f.style.visibility='visible'}catch(_){} }
 function themeAll(reason){frames().forEach(function(f){if(f.contentDocument)themeFrame(f,reason)})}
-function applyTheme(theme,source){if(!validTheme(theme))theme=readTheme();var changed=theme!==state.theme||document.documentElement.getAttribute('data-theme')!==theme;setTheme(theme);if(changed)emit('kyn:themechange',{theme:theme,source:source||'unified-screen-controller'});themeAll(source||'shell');return changed}
+/* ROOT-CAUSE FIX (theme-storm, round 10): this used to call themeAll() on
+ * every call regardless of `changed`, so every NECPRA_THEME_REQUEST this
+ * shell received — including the redundant, no-op ones a child frame's
+ * unguarded setTheme() used to send on every settings broadcast (see the
+ * matching fix in theme.engine.js) — re-broadcast NECPRA_THEME_APPLIED to
+ * every module frame again. Skipping the broadcast when nothing actually
+ * changed breaks that amplification without affecting real theme switches
+ * (a freshly-loaded/reloading frame still gets themed independently via
+ * installFrames()'s own 'load' listener, not through this path). */
+function applyTheme(theme,source){if(!validTheme(theme))theme=readTheme();var changed=theme!==state.theme||document.documentElement.getAttribute('data-theme')!==theme;setTheme(theme);if(changed){emit('kyn:themechange',{theme:theme,source:source||'unified-screen-controller'});themeAll(source||'shell')}return changed}
 function refreshTheme(source){var t=readTheme();if(t!==state.theme||document.documentElement.getAttribute('data-theme')!==t){var id=state.transitionId+1;switchStart();applyTheme(t,source);switchEnd(id)}else themeAll(source||'refresh')}
 function reveal(m){Object.keys(MODULES).forEach(function(n){var c=document.getElementById(MODULES[n].container);if(c)c.classList.toggle('hidden',n!==m)});document.querySelectorAll('.nav-icon[data-page],.mobile-nav-icon[data-page]').forEach(function(el){el.classList.toggle('active',normalize(el.getAttribute('data-page'))===m)})}
 function syncModule(m,o){m=normalize(m);if(!MODULES[m])return;o=o||{};var prev=state.module,changed=prev!==m;if(!changed&&!o.force){shellState();return}var id=state.transitionId+1;switchStart();state.module=m;if(!o.keepPanel)state.panel=null;shellState();reveal(m);emit('kyn:screenchange',{module:m,previous:prev,panel:state.panel,source:'unified-screen-controller'});switchEnd(id)}

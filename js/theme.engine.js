@@ -37,7 +37,28 @@
       getIconScale: function () {
         try { return shell && shell.ThemeManager && shell.ThemeManager.getIconScale ? shell.ThemeManager.getIconScale() : 'medium'; } catch (_) { return 'medium'; }
       },
+      // ROOT-CAUSE FIX (theme-storm / settings revert, round 10): every one of
+      // these setters used to unconditionally postMessage a *REQUEST* to the
+      // parent shell, with no check for whether `value` was already the
+      // current value. Every module page has several independent listeners
+      // that all react to the same incoming settings broadcast (this file's
+      // own NECPRA_THEME_APPLIED handler is passive, but
+      // settings-broadcast-listener.js's applyFull(), and each module's
+      // Tool-core.part3.js / tool-core-patch.js / Tool-ui.js message
+      // handlers, all separately call `window.ThemeManager.setTheme(...)`
+      // for the *same* single real change) — so one real change fanned out
+      // into several redundant REQUESTs from this one frame alone. The
+      // parent then re-broadcast NECPRA_THEME_APPLIED to every frame for
+      // each redundant REQUEST it received (see the matching fix in
+      // unified-screen-controller.js's applyTheme()), and those redundant,
+      // out-of-order broadcasts are also what made a just-applied change
+      // visually revert — a stale duplicate broadcast could land after the
+      // fresh one and repaint the old value. Guarding each setter here so a
+      // call that doesn't actually change anything is a no-op (matching the
+      // equivalent guard the real, non-embedded ThemeManager below already
+      // has) stops the redundant REQUESTs at the source.
       setTheme: function (value) {
+        if (value === proxy.getTheme()) return value;
         try {
           if (shell && shell.postMessage) {
             shell.postMessage({ type: 'NECPRA_THEME_REQUEST', theme: value, source: 'embedded-module' }, global.location.origin);
@@ -46,18 +67,21 @@
         return proxy.getTheme();
       },
       setFontSize: function (value) {
+        if (value === proxy.getFontSize()) return value;
         try {
           if (shell && shell.postMessage) shell.postMessage({ type: 'NECPRA_FONT_REQUEST', value: value, source: 'embedded-module' }, global.location.origin);
         } catch (_) {}
         return proxy.getFontSize();
       },
       setIconScale: function (value) {
+        if (value === proxy.getIconScale()) return value;
         try {
           if (shell && shell.postMessage) shell.postMessage({ type: 'NECPRA_ICON_REQUEST', value: value, source: 'embedded-module' }, global.location.origin);
         } catch (_) {}
         return proxy.getIconScale();
       },
       setAccentColor: function (value) {
+        if (value === proxy.getAccentColor()) return value;
         try {
           if (shell && shell.postMessage) shell.postMessage({ type: 'NECPRA_ACCENT_REQUEST', value: value, source: 'embedded-module' }, global.location.origin);
         } catch (_) {}
