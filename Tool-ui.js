@@ -5416,7 +5416,7 @@ function _discount(listing) {
     return o>p&&o>0 ? Math.round((1-p/o)*100) : (parseFloat(listing.discount)||0);
 }
 function _img(listing) {
-    return listing.images?.[0] || listing.mediaUrl || listing.image || '';
+    return (typeof _getListingImage === 'function' ? _getListingImage(listing) : (listing.images?.[0] || listing.mediaUrl || listing.image || ''));
 }
 function _inStock(listing) {
     const s = listing.stock_quantity??listing.stock??null;
