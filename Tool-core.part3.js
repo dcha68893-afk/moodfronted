@@ -4170,6 +4170,7 @@ export async function createDigitalListing(title, description, fileData, options
         category: 'digital',
         mediaUrl: fileData?.url || '',
         fileUrl: fileData?.url || '',
+        images: fileData?.url ? [fileData.url] : [],
         fileName: fileData?.name || (fileData instanceof File ? fileData.name : ''),
         fileSize: fileData?.size || (fileData instanceof File ? fileData.size : 0),
         fileType: fileData?.type || (fileData instanceof File ? fileData.type : ''),
