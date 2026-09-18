@@ -4231,7 +4231,9 @@ export async function createDigitalListing(title, description, fileData, options
         }
 
         // Replace fake entry with real DB-confirmed listing
-        const committed = { ...optimistic, ...confirmed, id: confirmed.id, user: userObj, _isOptimistic: false };
+        const committed = { ...optimistic, ...confirmed, id: confirmed.id, user: userObj, _isOptimistic: false,
+            images: Array.isArray(confirmed.images) && confirmed.images.length ? confirmed.images : optimistic.images,
+            mediaUrl: confirmed.mediaUrl || optimistic.mediaUrl || '' };
         __set_allListings(allListings.map(l => l.id === fakeId ? committed : l));
         __set_myListings(myListings.map(l =>  l.id === fakeId ? committed : l));
         window.allListings = allListings;
