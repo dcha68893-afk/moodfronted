@@ -3298,6 +3298,48 @@ input:focus + .toggle-slider,
 }
 
 /* ── PRODUCT CARD ─────────────────────────────────────────────────────────── */
+/* Marketplace card sizing: grid rows must size to content, not the viewport. */
+.jm-product-grid,
+.marketplace-list-content.jm-product-grid {
+    align-content: start !important;
+    align-items: start !important;
+    grid-auto-rows: max-content !important;
+}
+.jm-card {
+    align-self: start !important;
+    min-height: 0 !important;
+}
+.jm-card-body {
+    flex: 0 0 auto !important;
+}
+.jm-subcat-img-missing,
+.listing-detail-media-missing {
+    background: #f8f8f8;
+}
+
+/* Keep the Marketplace Menu control fully visible on narrow phones. */
+@media (max-width: 480px) {
+    .jm-header { gap: 5px; padding-left: 8px; padding-right: 8px; }
+    #jmMoreBtn {
+        width: 36px !important;
+        min-width: 36px !important;
+        max-width: 36px !important;
+        padding: 0 !important;
+        justify-content: center !important;
+        gap: 0 !important;
+    }
+    #jmMoreBtn span { display: none !important; }
+    .jm-search-wrap {
+        min-width: 0 !important;
+        padding-left: 9px !important;
+        padding-right: 9px !important;
+    }
+}
+@media (max-width: 360px) {
+    .jm-icon-btn { width: 32px !important; min-width: 32px !important; }
+    #jmMoreBtn { width: 32px !important; min-width: 32px !important; max-width: 32px !important; }
+}
+
 .jm-card {
     background: var(--kyn-bg-card);
     border-radius: 8px;
