@@ -8229,6 +8229,15 @@
 
                     // FIXED: Enrich payload — ensure chatId is always present.
                     const _enriched = { ...payload };
+                    // HARD IDENTITY BOUNDARY: group messages belong only to the group
+                    // surface. Never forward a group payload into message.html, where
+                    // it can be resolved as a 1:1 conversation and appear duplicated.
+                    const _isGroupMessage = String(_enriched.chatType || '').toLowerCase() === 'group'
+                        || _enriched.isGroup === true
+                        || !!_enriched.groupId;
+                    if (_isGroupMessage) {
+                        return;
+                    }
                     if (!_enriched.chatId && _enriched.conversationId) _enriched.chatId = _enriched.conversationId;
                     if (!_enriched.chatId && _enriched.chat_id)        _enriched.chatId = _enriched.chat_id;
                     if (!_enriched.chatId && _enriched.roomId)         _enriched.chatId = _enriched.roomId;
@@ -8564,8 +8573,12 @@
                     if (!data) return;
                     if (data.action === 'create' || data.action === 'upsert')
                         _fwdToGroupIframe('GROUP_CREATED', { group: data.group });
-                    else if (data.action === 'message')
-                        _fwdToGroupIframe('GROUP_MESSAGE', { groupId: data.groupId, message: data.message });
+                    else if (data.action === 'message') {
+                        // Message delivery has ONE canonical transport: group:message.
+                        // Do not turn group/localSync into a second message transport.
+                        // Otherwise one server message reaches the group iframe twice.
+                        return;
+                    }
                     else if (data.action === 'member_add')
                         _fwdToGroupIframe('GROUP_MEMBER_ADDED', data);
                     else if (data.action === 'member_remove' || data.action === 'member_leave')
