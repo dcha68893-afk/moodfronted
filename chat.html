@@ -1588,6 +1588,14 @@
         [data-theme="dark"] .jm-parent-nav-tab.active { background: rgba(37,99,235,0.25); color: #60a5fa; }
         /* toolsBackBtn removed — back navigation handled inside the tools iframe */
     </style>
+
+        /* STATUS ONE-PANEL MOBILE */
+        @media (max-width: 768px) {
+            body.status-panel-active #statusContent { top:0!important;left:0!important;right:0!important;bottom:0!important;z-index:5000!important;visibility:visible!important;pointer-events:auto!important;display:block!important;background:transparent!important; }
+            body.status-panel-active #globalHeader, body.status-panel-active #permanentSidebar, body.status-panel-active .mobile-nav-bar { visibility:hidden!important;pointer-events:none!important; }
+            body.status-panel-active .iframe-container:not(#statusContent) { visibility:hidden!important;pointer-events:none!important; }
+            #statusContent .content-iframe { width:100%!important;height:100%!important;display:block!important;border:0!important; }
+        }
 </head>
 <body>
 
@@ -10041,5 +10049,13 @@ window.__groupHdrHide = hideGroupHeader;
             .catch(function () {});
     })();
     </script>
+
+<script id="statusRealtimeBridge">
+(function(){
+  function forward(type,payload){var f=document.getElementById('statusIframe');if(f&&f.contentWindow)f.contentWindow.postMessage({type:type,payload:payload||{}},'*');}
+  function bind(){var ws=window.wsService||window.KynectaRealtime||window.realtimeService;if(!ws||typeof ws.on!=='function')return false;['status:new','status:deleted','status:viewed','status:reaction','status:reply'].forEach(function(ev){try{ws.on(ev,function(payload){forward(ev,payload);});}catch(_){}});return true;}
+  if(!bind()){var n=0,t=setInterval(function(){if(bind()||++n>20)clearInterval(t);},500);}
+})();
+</script>
 </body>
 </html>

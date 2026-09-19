@@ -2,8 +2,8 @@
 'use strict';
 if(window.__NecpaProfessionalStatus) return;
 
-const API='/api/status';
-const UPLOAD='/api/cloudinary/direct-upload';
+const API=((window.__getApiOrigin&&window.__getApiOrigin())||'')+'/api/status';
+const UPLOAD=((window.__getApiOrigin&&window.__getApiOrigin())||'')+'/api/cloudinary/direct-upload';
 const TTL=24*60*60*1000;
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const currentUser=()=>{
@@ -186,7 +186,7 @@ async function publish(){
   let media={};
   if(c.media){const fd=new FormData();fd.append('file',c.media.file);const t=token();const r=await fetch(UPLOAD,{method:'POST',headers:t?{Authorization:/^Bearer /i.test(t)?t:'Bearer '+t}:{},body:fd});const d=await r.json();if(!r.ok||!d.success)throw new Error(d.error||'Media upload failed');media={mediaUrl:d.url,mediaPublicId:d.publicId,mediaMime:c.media.file.type};}
   const activePane=root.querySelector('.ns-pane.active')?.dataset.pane;
-  const type=activePane==='poll'?'poll':activePane==='link'?'link':activePane==='media'?c.type:'text';
+  const type=activePane==='poll'?'poll':activePane==='link'?'link':activePane==='media'?(c.media?.type||'image'):'text';
   let content=c.content||'';
   if(type==='poll')content=root.querySelector('[data-pollq]').value.trim();
   if(type==='link')content=root.querySelector('[data-linkcaption]').value.trim();
