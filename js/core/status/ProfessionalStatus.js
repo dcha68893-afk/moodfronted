@@ -47,6 +47,14 @@ function mount(){
  const root=document.createElement('div');root.id='necpa-status-root';
  root.innerHTML='<div class="ns-shell"><aside class="ns-side"><div class="ns-brand"><div><h2>Moments</h2><small>Share what is happening</small></div><button class="ns-close" data-close>×</button></div><div class="ns-my-card" data-compose>'+avatar(currentUser())+'<div style="flex:1"><b>My Status</b><small style="display:block;color:#64748b">Create a new moment</small></div><button class="ns-add" data-compose>+</button></div><div class="ns-section-title">Status</div><div class="ns-tabs"><button class="ns-tab active" data-tab="friends">Friends</button><button class="ns-tab" data-tab="discover">Discover</button></div><div class="ns-section-title">People</div><div class="ns-list" data-people></div></aside><main class="ns-main"><div class="ns-main-head"><button class="ns-close" data-mobile-close>×</button><input class="ns-search" placeholder="Search statuses, topics or people"><select class="ns-filter"><option value="all">All moments</option><option value="image">Photos</option><option value="video">Videos</option><option value="text">Text</option><option value="poll">Polls</option></select><button class="ns-btn primary" data-compose>Create</button></div><section class="ns-feed" data-feed></section><div class="ns-composer" data-composer></div><div class="ns-viewer" data-viewer></div></main></div><div class="ns-toast"></div>';
  document.body.appendChild(root);
+ const applyViewportLayout=()=>{
+   const mobile=window.matchMedia('(max-width: 768px)').matches;
+   root.classList.toggle('ns-mobile',mobile);
+   const side=root.querySelector('.ns-side');
+   if(side) side.style.display=mobile?'none':'';
+ };
+ applyViewportLayout();
+ window.addEventListener('resize',applyViewportLayout,{passive:true});
  root.querySelectorAll('[data-close],[data-mobile-close]').forEach(b=>b.onclick=close);
  root.querySelectorAll('[data-compose]').forEach(b=>b.onclick=()=>openComposer());
  root.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.tab;root.querySelectorAll('.ns-tab').forEach(x=>x.classList.toggle('active',x===b));loadFeed()});
