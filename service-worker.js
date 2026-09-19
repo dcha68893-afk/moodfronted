@@ -32,7 +32,7 @@ const SW_VERSION = '19.27.0';
 // app log image set) cached under the old name gets a clean break on next
 // load, instead of waiting on the 7-day CACHE_MAX_AGE staleness check or a
 // lucky reinstall.
-const CACHE_NAME = 'necpa-static-v51';
+const CACHE_NAME = 'necpa-static-v52';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -63,6 +63,9 @@ const NETWORK_FIRST_PATTERNS = [
   /\/messages-core\.bootstrap\.js/i,/\/messages-core\.operations\.js/i,/\/messages-core\.ui-bridge\.js/i,
   /\/messageSync\.engine\.js/i,/\/status-core-runtime\.js/i,/\/status-core\.part[1-3]\.js/i,
   /\/status-core-transport\.js/i,/\/status-core-state\.js/i,/\/status-ui\.js/i,
+  // status.html now hosts js/core/status/ProfessionalStatus.js (the whole Status UI); neither was
+  // network-first, so a cached copy kept the old mobile layout after deploys.
+  /\/status\.html/i,/\/js\/core\/status\/ProfessionalStatus\.js/i,
   // ROOT-CAUSE FIX (Groups panel showing blank on open / after "back to list",
   // group messages from other members never appearing): group.html was
   // rebuilt from scratch on 2026-09-15 as a single self-contained page —

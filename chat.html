@@ -1587,7 +1587,6 @@
         [data-theme="dark"] .jm-parent-nav-tab:hover { background: rgba(255,255,255,0.14); color: #e5e7eb; }
         [data-theme="dark"] .jm-parent-nav-tab.active { background: rgba(37,99,235,0.25); color: #60a5fa; }
         /* toolsBackBtn removed — back navigation handled inside the tools iframe */
-    </style>
 
         /* STATUS ONE-PANEL MOBILE */
         @media (max-width: 768px) {
@@ -1596,6 +1595,7 @@
             body.status-panel-active .iframe-container:not(#statusContent) { visibility:hidden!important;pointer-events:none!important; }
             #statusContent .content-iframe { width:100%!important;height:100%!important;display:block!important;border:0!important; }
         }
+    </style>
 </head>
 <body>
 
@@ -3291,11 +3291,27 @@
                 }
                 document.body.classList.remove('group-panel-active');
             }
-            if (page === 'status' && window.innerWidth <= 768) {
-                // Status is a single full-screen mobile surface. Do not wait for
-                // the iframe to finish booting before hiding the parent panels.
-                document.body.classList.add('status-panel-active');
-            } else if (page !== 'status') {
+            if (page === 'status') {
+                // FIX (Status opens the content panel instead of the status
+                // list on mobile): this used to add status-panel-active
+                // unconditionally on entry, which puts the iframe in its
+                // full-screen "deeper screen" mode (parent header + nav hidden)
+                // before the user has opened anything. Entering Status must land
+                // on the LIST. status.html raises the class itself through
+                // STATUS_PANEL_OPENED (feed / viewer / composer) and drops it
+                // again with STATUS_LIST_SHOWN.
+                document.body.classList.remove('status-panel-active');
+            } else {
+                if (document.body.classList.contains('status-panel-active')) {
+                    // Leaving Status mid-flow (viewer/composer/feed open): reset
+                    // the iframe to its list so returning later starts clean.
+                    try {
+                        const _statusIframeAway = document.getElementById('statusIframe');
+                        if (_statusIframeAway && _statusIframeAway.contentWindow) {
+                            _statusIframeAway.contentWindow.postMessage({ type: 'GO_BACK_TO_LIST', source: 'parent', timestamp: Date.now() }, '*');
+                        }
+                    } catch (_) {}
+                }
                 document.body.classList.remove('status-panel-active');
             }
 
@@ -3686,7 +3702,13 @@
             const _d = event.data || {};
             if (_d.type !== 'SCREEN_STATE_CHANGED') return;
             window.__childLocalPanel = window.__childLocalPanel || {};
-            const sourceIframe = Array.from(document.querySelectorAll('.content-iframe')).find(f => f.contentWindow === event.source);
+            // FIX: js/config.js's installMessageStabilization() wraps
+            // window.postMessage with a function bound to the TARGET window,
+            // so in this app event.source is the receiving window itself, not
+            // the iframe that sent the message. Identity by contentWindow can
+            // therefore never match; fall back to the sender's declared module
+            // (data-module on the iframe) so hardware-back can see local panels.
+            const sourceIframe = Array.from(document.querySelectorAll('.content-iframe')).find(f => f.contentWindow === event.source || (_d.module && f.dataset.module === _d.module));
             if (!sourceIframe) return;
             if (_d.restore) window.__childLocalPanel[sourceIframe.id] = _d.restore;
             else delete window.__childLocalPanel[sourceIframe.id];
@@ -3893,7 +3915,9 @@
                     }
                 }
                 if (data.type === 'STATUS_PANEL_CLOSED' || data.type === 'STATUS_LIST_SHOWN') {
-                    if (window.innerWidth <= 768 && event.source === document.getElementById('statusIframe')?.contentWindow) {
+                    // event.source is unreliable here (see SCREEN_STATE_CHANGED
+                    // handler): accept the status module's own declared source too.
+                    if (window.innerWidth <= 768 && (event.source === document.getElementById('statusIframe')?.contentWindow || data.source === 'professional-status')) {
                         document.body.classList.remove('status-panel-active');
                     }
                 }

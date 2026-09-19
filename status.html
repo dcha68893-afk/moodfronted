@@ -28,11 +28,11 @@
     #necpa-status-root { position:fixed !important; inset:0 !important; padding:0 !important; }
     #necpa-status-root.open { display:flex !important; }
     .ns-shell { width:100% !important; height:100% !important; max-width:none !important; max-height:none !important; border-radius:0 !important; }
-@media (max-width:768px){html,body,#necpa-status-root,#necpa-status-root.open,.ns-shell{width:100vw!important;height:100dvh!important;min-width:100%!important;min-height:100%!important;margin:0!important;padding:0!important}.ns-side{display:none!important}.ns-main{width:100%!important;height:100%!important;min-width:0!important;min-height:0!important}}
+@media (max-width:768px){html,body,#necpa-status-root,#necpa-status-root.open,.ns-shell{width:100vw!important;height:100dvh!important;min-width:100%!important;min-height:100%!important;margin:0!important;padding:0!important}.ns-main{width:100%!important;height:100%!important;min-width:0!important;min-height:0!important}}
     .ns-main { min-width:0; min-height:0; }
   
 #necpa-status-root,#necpa-status-root *{box-sizing:border-box}
-@media(max-width:768px){html,body{width:100%;height:100%;margin:0;padding:0;overflow:hidden}.ns-side{display:none!important}.ns-main{width:100%!important;min-width:0!important;height:100%!important}.ns-compose-box{width:100%!important;max-width:none!important}.ns-compose-tabs{grid-template-columns:repeat(4,minmax(0,1fr))!important}.ns-pane{min-width:0!important}.ns-textarea{width:100%!important;max-width:100%!important}.ns-compose-foot{position:sticky!important;bottom:0!important;z-index:10}}
+@media(max-width:768px){html,body{width:100%;height:100%;margin:0;padding:0;overflow:hidden}.ns-main{width:100%!important;min-width:0!important;height:100%!important}.ns-compose-box{width:100%!important;max-width:none!important}.ns-compose-tabs{grid-template-columns:repeat(4,minmax(0,1fr))!important}.ns-pane{min-width:0!important}.ns-textarea{width:100%!important;max-width:100%!important}.ns-compose-foot{position:sticky!important;bottom:0!important;z-index:10}}
 </style>
 </head>
 <body>
@@ -63,32 +63,12 @@
         boot();
       }
 
-      window.addEventListener('message', function (event) {
-        const data = event && event.data;
-        if (!data || typeof data !== 'object') return;
-
-        if (data.type === 'GO_BACK_TO_LIST') {
-          // Parent navigation owns the iframe visibility. Close the local
-          // surface as well so Back never leaves an invisible overlay behind.
-          try {
-            window.__NecpaProfessionalStatus?.close?.();
-            window.parent.postMessage({ type:'STATUS_PANEL_CLOSED', source:'professional-status' }, '*');
-          } catch (_) {}
-        }
-      });
-
-      // Relay explicit close actions to the parent shell.
-      document.addEventListener('click', function (event) {
-        const target = event.target && event.target.closest
-          ? event.target.closest('[data-close],[data-mobile-close]')
-          : null;
-        if (!target) return;
-        setTimeout(function () {
-          try {
-            window.parent.postMessage({ type:'STATUS_PANEL_CLOSED', source:'professional-status' }, '*');
-          } catch (_) {}
-        }, 0);
-      });
+      // Back navigation is owned by ProfessionalStatus itself: it handles
+      // GO_BACK_TO_LIST (reset to the status list, keeping the surface open)
+      // and CLOSE_LOCAL_PANEL (unwind one screen), and it reports its current
+      // screen to the parent via STATUS_PANEL_OPENED / STATUS_LIST_SHOWN /
+      // SCREEN_STATE_CHANGED. Nothing here may close the surface, otherwise
+      // the iframe is left blank.
     })();
   </script>
   <script id="STATUS_REALTIME_BRIDGE">
