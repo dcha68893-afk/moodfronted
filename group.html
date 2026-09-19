@@ -119,10 +119,16 @@ function groupMemberIds(g){const list=Array.isArray(g?.participants)?g.participa
 // around — this is a same-strength decrypt swap, not a security downgrade.
 async function decryptGroupContent(content, gid, senderId) {
   if (!content || typeof content !== 'string') return content;
-  if (window.KynectaGroupE2E?.decryptForGroup) {
-    return window.KynectaGroupE2E.decryptForGroup(Number(gid), content, groupMemberIds(S.current));
-  }
-  return content;
+  if (!_groupE2EReadyPromise) _groupE2EReadyPromise=(async()=>{
+    try {
+      const pw=sessionStorage.getItem('kyn_e2e_pw_session')||'';
+      const legacy=sessionStorage.getItem('kyn_e2e_pw_legacy_session')||'';
+      if (window.KynectaE2E && typeof window.KynectaE2E.init==='function' && !window.KynectaE2E.enabled && pw) await window.KynectaE2E.init(pw,legacy||undefined);
+    } catch (_) {}
+    return !!window.KynectaGroupE2E?.decryptForGroup;
+  })().catch(()=>false);
+  if (!(await _groupE2EReadyPromise)) return null;
+  try { return await window.KynectaGroupE2E.decryptForGroup(Number(gid),content,groupMemberIds(S.current)); } catch (_) { return null; }
 }
 // Decrypts one message's `content` in place (returns a shallow copy).
 // Attachments carry their payload in metadata.media, not content, so they
@@ -141,6 +147,7 @@ async function decryptGroupContent(content, gid, senderId) {
 // fresh decrypt, but an unchanged message is never re-decrypted again.
 const _decryptedCache=new Map();
 const _groupDecryptInFlight=new Map();
+let _groupE2EReadyPromise=null;
 const _groupDecryptFailed=new Map();
 window.__NECPRA_GROUP_PENDING_PLAINTEXT = window.__NECPRA_GROUP_PENDING_PLAINTEXT || new Map();
 // FIX (GROUP-HISTORY-RE-DECRYPTS-ON-RELOAD): js/group-history-cache-fix.js
