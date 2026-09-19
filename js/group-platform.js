@@ -183,25 +183,9 @@
         const caption = input.value.trim();
         input.value = '';
         const type = ['image','video','audio'].includes(media.type) ? media.type : 'file';
-        const messageResponse = await api('/messages', {
-          method: 'POST',
-          body: JSON.stringify({
-            chatId: Number(state.groupId),
-            content: caption,
-            type,
-            clientMessageId: `group-media-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-            // BUGFIX (GROUP-UPLOAD-NEVER-RENDERS): this used to write the key
-            // "attachment", but every renderer in this codebase — group.html's
-            // buildRow()/renderMedia() and js/group-media-render.js — only ever
-            // reads metadata.media. With the wrong key, media?.url was always
-            // undefined, so the upload silently fell through to plain-text
-            // rendering (nothing shown) even though the file uploaded fine and
-            // the message was created. Matches js/group-chat-features.js's
-            // (unused, but correctly-shaped) reference implementation.
-            metadata: { media: { url: media.url, mimeType: media.mimeType, size: media.size, type, name: media.originalName || file.name } },
-          }),
-        });
-        if (!messageResponse?.success && !messageResponse?.data) throw new Error(messageResponse?.message || 'Message was not created');
+        const metadata = { media: { url: media.url, mimeType: media.mimeType, size: media.size, type, name: media.originalName || file.name } };
+        if (typeof window.__NECPRA_GROUP_SEND !== 'function') throw new Error('Secure group sender is not ready yet');
+        await window.__NECPRA_GROUP_SEND(caption, type, metadata);
         if (typeof window.__GROUP_REFRESH_MESSAGES === 'function') await window.__GROUP_REFRESH_MESSAGES();
       } catch (err) {
         alert('Upload failed: ' + err.message);

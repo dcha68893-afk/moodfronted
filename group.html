@@ -181,7 +181,7 @@ async function decryptGroupContent(content, gid, senderId) {
 // Cache successful decryptions by message id + the exact ciphertext that
 // produced them — an edit changes the ciphertext, so it naturally forces a
 // fresh decrypt, but an unchanged message is never re-decrypted again.
-const _decryptedCache=new Map();
+const _decryptedCache=new Map();\nwindow.__NECPRA_GROUP_PENDING_PLAINTEXT = window.__NECPRA_GROUP_PENDING_PLAINTEXT || new Map();
 // FIX (GROUP-HISTORY-RE-DECRYPTS-ON-RELOAD): js/group-history-cache-fix.js
 // already hydrates S.messages instantly from IndexedDB on open, with
 // content that's already plaintext (it's a copy of what renderMessages()
@@ -214,7 +214,7 @@ async function decryptRow(m){
     const plain=await decryptGroupContent(m.content,S.current?.id??m.chatId,m.senderId);
     if(id)_decryptedCache.set(id,{ciphertext:m.content,plain,isEdited:!!m.isEdited});
     return Object.assign({},m,{content:plain});
-  }catch(e){console.error('[GroupDecrypt] decryptRow failed:',e&&e.message||e);return Object.assign({},m,{content:'[Unable to decrypt this message]'})}
+  }catch(e){console.error('[GroupDecrypt] decryptRow failed:',e&&e.message||e);const prior=S.messages.find(x=>String(x.id||x.messageId)===id);if(prior&&typeof prior.content==='string'&&!/^\\[Unable to decrypt|^🔒/.test(prior.content))return Object.assign({},m,{content:prior.content});return Object.assign({},m,{content:'Decrypting securely…'})}
 }
 function decryptRows(list){return Promise.all(list.map(decryptRow))}
 
