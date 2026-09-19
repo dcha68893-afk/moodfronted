@@ -5796,11 +5796,23 @@ function setupBasicEventListeners_StatusUI() {
     // had just been opened, all within the same click. Net effect: tapping
     // "Upload Photo or Video" appeared to do nothing. Exempt clicks
     // originating on/inside mediaUploadArea too.
+    //
+    // FIX (CHOOSER-FLASHES-THEN-CLOSES): the composerFileBtn exemption above
+    // used a strict `e.target === composerFileBtn` check. Tapping the button
+    // almost always sets e.target to the <i> icon or <span> label *inside*
+    // the button, not the button element itself, so the exemption silently
+    // never matched — the very click that opened the chooser (via the
+    // bottombar handler in status.html) then closed it again on the same
+    // bubble, making it look like the menu appeared for an instant and
+    // vanished instead of staying open. Using .contains() (already the
+    // correct pattern used for mediaUploadArea/fileChooser just below) fixes
+    // this the same way.
     if (fileChooser && !fileChooser._outsideBound) {
         fileChooser._outsideBound = true;
         document.addEventListener('click', (e) => {
             if (fileChooser.style.display === 'none') return;
-            if (e.target === document.getElementById('composerFileBtn')) return;
+            const fileBtn = document.getElementById('composerFileBtn');
+            if (fileBtn && fileBtn.contains(e.target)) return;
             if (mediaUploadArea && mediaUploadArea.contains(e.target)) return;
             if (fileChooser.contains(e.target)) return;
             fileChooser.style.display = 'none';
@@ -8035,6 +8047,19 @@ function renderStatusListInstantlyUI() {
     if (!friendData.length && Array.isArray(friendsStatuses)) {
         friendData = friendsStatuses;
     }
+    // FIX (VIEWED-STATUS-NEVER-MOVES-TO-RECENTLY-VIEWED): _reconcileViewedFromServer()
+    // is what keeps the local `viewedStatuses` Set in sync with the
+    // server's own `viewedByMe` field (see its comment above) — but it only
+    // ever ran on the local `friendsStatuses` variable, via
+    // _mergeStatusesById(). This function's PRIMARY data source is
+    // core.getFriendsStatuses() (used first, above, whenever it returns
+    // anything) — a separate store that never passed through that reconcile
+    // step at all. So on the common path, the server's confirmation that a
+    // status had been viewed never reached the Set this function is about
+    // to partition by, and a status stayed in "recent" no matter how many
+    // times it had actually been opened. Run every render through the same
+    // reconcile step regardless of which store supplied the data.
+    _reconcileViewedFromServer(friendData);
 
     // Deduplicate, exclude own
     const seenIds = new Set();

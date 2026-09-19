@@ -4226,9 +4226,15 @@ html.dark-mode .viewer-container {
    styles above and are intentionally untouched.
    ═══════════════════════════════════════════════════════════════════ */
 
+/* FIX (HARDCODED-COMPOSER-THEME): these two backgrounds used to be
+   hardcoded #000 / #0b0b0f regardless of the user's saved theme setting
+   (theme.colors.css's --kyn-bg-modal already tracks light/dark/auto for
+   every other modal in the app — the composer just never used it). The
+   literal hex values are kept only as a fallback for the rare case this
+   CSS loads before theme.colors.css has applied the variable. */
 #createStatusModal.active {
     display: flex;
-    background: #000;
+    background: var(--kyn-bg-modal, #000);
 }
 
 #createStatusModal .create-status-container {
@@ -4238,7 +4244,7 @@ html.dark-mode .viewer-container {
     max-height: 100%;
     border-radius: 0;
     box-shadow: none;
-    background: #0b0b0f;
+    background: var(--kyn-bg-modal, #0b0b0f);
     position: relative;
     overflow: hidden;
 }
@@ -4376,7 +4382,7 @@ html.dark-mode .viewer-container {
 /* Media mode: fills the screen; upload dropzone centered until a file
    is chosen, then the preview + caption take over */
 #createStatusModal #mediaTab {
-    background: #000;
+    background: var(--kyn-bg-modal, #000);
     position: relative;
 }
 #createStatusModal .media-upload-container {

@@ -222,9 +222,26 @@
    * already flagged). Concurrent callers for the same group share one
    * in-flight attempt instead of racing separate rotations.
    */
-  function ensureGroupKey(groupId, memberIdsHint) {
+  function ensureGroupKey(groupId, memberIdsHint, opts) {
     const gid = String(groupId);
     if (_inflight.has(gid)) return _inflight.get(gid);
+
+    // FIX (GROUP-SEND-SLOW / MESSAGE-TAKES-LONG-TO-APPEAR): this used to call
+    // fetchState() — a full network round trip to
+    // GET /group-encryption/:chatId/state — unconditionally on every single
+    // call, even when a perfectly good, still-valid key for the group's
+    // current version was already sitting in _cache. That added a
+    // guaranteed extra round trip on top of the /messages POST itself to
+    // every single group message send. A cached key you already hold stays
+    // safe to keep sending with — anyone who can read the group at all
+    // already has a copy of whatever version was current when they last
+    // joined/synced — so encryptForGroup() (below) now asks to skip this
+    // check when a cached entry already exists. Decrypt callers don't pass
+    // this, since a genuine gap there does need the live state.
+    if (opts && opts.preferCached) {
+      const cached = _cache.get(gid);
+      if (cached) return Promise.resolve(cached);
+    }
 
     const p = (async function () {
       const ready = await waitForE2E();
@@ -253,7 +270,7 @@
   }
 
   async function encryptForGroup(groupId, plaintext, memberIdsHint) {
-    const entry = await ensureGroupKey(groupId, memberIdsHint);
+    const entry = await ensureGroupKey(groupId, memberIdsHint, { preferCached: true });
     return api().encryptGroupMessage(plaintext, entry.key, entry.version);
   }
 
@@ -270,7 +287,26 @@
       if (persisted) {
         entry = { version: envelope.gen, key: persisted };
       } else {
-        try { entry = await ensureGroupKey(gid, memberIdsHint); } catch (_) { entry = null; }
+        // FIX (DECRYPTING-AN-OLD-MESSAGE-TRIGGERS-AN-UNWANTED-ROTATION): this
+        // used to call ensureGroupKey() unconditionally here — but
+        // ensureGroupKey() can itself decide to *rotate* the group key
+        // (bump the version and redistribute) whenever it can't find a
+        // usable key for the group's CURRENT server version. That's exactly
+        // right when we're trying to send, or catch up to the current key.
+        // It's the wrong thing to do as a side effect of merely trying to
+        // read one OLD message from a version we don't have cached — it was
+        // forcing a brand-new rotation (and a fresh burst of "unable to
+        // decrypt" for every other member until they catch up) every time
+        // anyone scrolled past history from a key version they didn't
+        // happen to have. Only attempt ensureGroupKey when this message's
+        // gen actually IS the server's current version and we're simply
+        // missing it locally (a real, recoverable gap) — never as a blind
+        // fallback for old generations.
+        let state = null;
+        try { state = await fetchState(gid); } catch (_) {}
+        if (state && Number(state.version) === envelope.gen) {
+          try { entry = await ensureGroupKey(gid, memberIdsHint); } catch (_) { entry = null; }
+        }
         if (!entry || entry.version !== envelope.gen) {
           return '[Message encrypted with a group key version you no longer have]';
         }

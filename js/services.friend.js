@@ -4,7 +4,12 @@
 if(window.FriendsService)return;
 const base=()=>String(window.__getApiBase?.()||window.API_BASE_URL||'').replace(/\/$/,'');
 const token=()=>window.__kynToken||window.__accessToken||window.AuthSessionManager?.getToken?.()||localStorage.getItem('authToken')||localStorage.getItem('accessToken')||localStorage.getItem('token')||'';
-async function request(path,options={}){const headers={...(options.headers||{})},t=token();if(t)headers.Authorization='Bearer '+t;if(options.body&&typeof options.body!=='string'&&!(options.body instanceof FormData)){headers['Content-Type']='application/json';options={...options,body:JSON.stringify(options.body)}}const r=await fetch(base()+path,{...options,headers});const d=await r.json().catch(()=>({}));if(!r.ok||d.success===false){const e=Error(d.message||d.error||`Friends request failed (${r.status})`);e.status=r.status;e.response=d;throw e}return d}
+async function doFriendsFetch(path,options){const headers={...(options.headers||{})},t=token();if(t)headers.Authorization='Bearer '+t;if(options.body&&typeof options.body!=='string'&&!(options.body instanceof FormData)){headers['Content-Type']='application/json';options={...options,body:JSON.stringify(options.body)}}return fetch(base()+path,{...options,headers})}
+// FIX (FRIENDS-TOKEN-EXPIRED-AFTER-IDLE): retry once after a silent token
+// refresh instead of throwing straight to the UI on a routinely-expired
+// access token — see js/necpa-session-resilience.js for why this file needs
+// its own copy of that logic instead of api.core.js's.
+async function request(path,options={}){let r=await doFriendsFetch(path,options);if(r.status===401&&window.NecpaSessionResilience){const refreshed=await window.NecpaSessionResilience.refreshAccessToken(base());if(refreshed)r=await doFriendsFetch(path,options)}const d=await r.json().catch(()=>({}));if(!r.ok||d.success===false){const e=Error(d.message||d.error||`Friends request failed (${r.status})`);e.status=r.status;e.response=d;throw e}return d}
 const emit=(type,detail)=>{try{window.dispatchEvent(new CustomEvent(type,{detail}));window.postMessage({type,payload:detail},window.location.origin)}catch(_) {}};
 const normalizeRequests=(r,direction)=>({...r,data:{users:(r.requests||[]).map(x=>({...x.user||{},relationship:{status:'pending',direction,requestId:x.id}}))}});
 function cacheFriends(users){try{if(Array.isArray(users))localStorage.setItem('knecta_friends_cache',JSON.stringify(users));}catch(_){}try{if(window.KynectaStore?.set)window.KynectaStore.set('friends.list',users||[])}catch(_){}try{if(window.KynectaFriendsLocalStore?.saveUsers)window.KynectaFriendsLocalStore.saveUsers(users||[])}catch(_){} }

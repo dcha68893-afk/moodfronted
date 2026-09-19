@@ -1,4 +1,4 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Groups</title><script src="/js/runtime-config.js"></script><script src="/js/config.js"></script><script src="/js/theme.engine.js"></script><script src="/js/e2e-encryption.js"></script><script src="js/groupEncryption.client.js"></script><script src="js/group-platform.js"></script><style>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Groups</title><script src="/js/runtime-config.js"></script><script src="/js/config.js"></script><script src="/js/theme.engine.js"></script><script src="/js/e2e-encryption.js"></script><script src="/js/settings-broadcast-listener.js"></script><script src="/js/necpa-session-resilience.js"></script><script src="js/core/groups/group-cache-first.js"></script><script src="js/groupEncryption.client.js"></script><script src="js/group-platform.js"></script><style>
 :root{--bg:var(--kyn-bg-root,#f8fafc);--surface:var(--kyn-bg-panel,#fff);--surface2:var(--kyn-bg-input,#f1f5f9);--border:var(--kyn-border,#e2e8f0);--text:var(--kyn-text-primary,#0f172a);--muted:var(--kyn-text-muted,#64748b);--primary:var(--kyn-accent-secondary,#2563eb)}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden}body{background:var(--bg);color:var(--text);font:14px system-ui,-apple-system,"Segoe UI",Roboto,Arial}button,input,textarea{font:inherit}button{cursor:pointer}.layout{height:100%;display:grid;grid-template-columns:minmax(250px,32%) 1fr}.sidebar,.panel{min-width:0;min-height:0}.sidebar{border-right:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column}.side-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--border);font-weight:800}.toolbar{display:flex;gap:7px;padding:10px}.search{flex:1;min-width:0;padding:9px;border:1px solid var(--border);border-radius:11px;background:var(--surface2);color:inherit}.refresh{border:1px solid var(--border);border-radius:10px;background:var(--surface2);color:inherit;padding:8px 11px}.groups{flex:1;overflow:auto;padding:0 10px}.group{width:100%;display:flex;align-items:center;gap:10px;padding:10px;border:1px solid transparent;border-radius:13px;background:transparent;color:inherit;text-align:left;margin-bottom:5px}.group:hover,.group.active{background:var(--surface2);border-color:var(--border)}.avatar{width:43px;height:43px;border-radius:13px;background:linear-gradient(135deg,#dbeafe,#c4b5fd);display:grid;place-items:center;font-weight:800;color:#1e40af;flex:0 0 auto;background-size:cover;background-position:center}.groupmain{min-width:0;flex:1}.name{font-weight:750;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.meta{font-size:11px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.empty{text-align:center;color:var(--muted);padding:40px 18px}
 .unread-badge{flex:0 0 auto;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:#ef4444;color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;line-height:1}
 /* No in-panel header any more: the parent shell's #globalHeader owns the
@@ -38,7 +38,12 @@ const token=()=>window.__kynToken||window.__accessToken||window.AuthSessionManag
 const uid=()=>String(window._kynCurrentUserId||localStorage.getItem('userId')||localStorage.getItem('currentUserId')||'');
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const unwrap=x=>x?.chat||x?.group||x;
-async function api(path,opt={}){const h={...(opt.headers||{})},t=token();if(t)h.Authorization='Bearer '+t;if(opt.body&&!(opt.body instanceof FormData)&&!h['Content-Type'])h['Content-Type']='application/json';const r=await fetch(base()+path,{...opt,headers:h});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.message||d.error||`Request failed (${r.status})`);return d}
+async function doGroupsFetch(path,opt){const h={...(opt.headers||{})},t=token();if(t)h.Authorization='Bearer '+t;if(opt.body&&!(opt.body instanceof FormData)&&!h['Content-Type'])h['Content-Type']='application/json';return fetch(base()+path,{...opt,headers:h})}
+// FIX (GROUP-TOKEN-EXPIRED-AFTER-IDLE): same fix as group-platform.js and
+// Friends — retry once after a silent token refresh instead of surfacing a
+// raw 401 ("token expired") after the access token simply expired from
+// being idle for a while.
+async function api(path,opt={}){let r=await doGroupsFetch(path,opt);if(r.status===401&&window.NecpaSessionResilience){const refreshed=await window.NecpaSessionResilience.refreshAccessToken(base());if(refreshed)r=await doGroupsFetch(path,opt)}const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.message||d.error||`Request failed (${r.status})`);return d}
 function setMobileChat(open){$('layout')?.classList.toggle('chat-open',!!open)}
 
 // ── Parent-shell integration ────────────────────────────────────────────
@@ -86,17 +91,61 @@ function groupMemberIds(g){const list=Array.isArray(g?.participants)?g.participa
 // Attachments carry their payload in metadata.media, not content, so they
 // pass through untouched; anything that isn't our envelope shape is
 // returned as-is by KynectaGroupE2E.decryptForGroup itself.
+// FIX (GROUP-MESSAGES-INTERMITTENTLY-FLIP-TO-UNABLE-TO-DECRYPT): loadMessages()
+// polls the last 100 messages every 5s while a group is open and used to run
+// every single one of them back through decryptForGroup() from raw
+// ciphertext on every poll — including ones already decrypted successfully
+// a moment earlier. That's 100 WebCrypto calls every 5 seconds just to
+// re-derive text that hadn't changed, and gave any transient hiccup in that
+// batch (or the unwanted-rotation bug fixed in groupEncryption.client.js)
+// a fresh chance to show up on a message that had already rendered fine.
+// Cache successful decryptions by message id + the exact ciphertext that
+// produced them — an edit changes the ciphertext, so it naturally forces a
+// fresh decrypt, but an unchanged message is never re-decrypted again.
+const _decryptedCache=new Map();
+// FIX (GROUP-HISTORY-RE-DECRYPTS-ON-RELOAD): js/group-history-cache-fix.js
+// already hydrates S.messages instantly from IndexedDB on open, with
+// content that's already plaintext (it's a copy of what renderMessages()
+// last displayed) — but it had no way to tell decryptRow() that, since
+// _decryptedCache above is only ever populated by an actual decrypt in
+// THIS page session and starts empty on every fresh load. So the network
+// refetch loadMessages() kicks off right after open would still run every
+// one of those same messages back through decryptForGroup() from raw
+// ciphertext, even though a good plaintext copy was sitting on disk a
+// moment before. Seed the cache from that same disk copy, keyed by id only
+// (no ciphertext to compare yet) and gated on the isEdited flag so an
+// actual edit — new ciphertext — still forces a real decrypt of the new
+// content instead of silently keeping the old text.
+window.__seedGroupDecryptedCache=function(list){
+  if(!Array.isArray(list))return;
+  for(const m of list){
+    const id=String(m?.id||m?.messageId||'');
+    if(id&&typeof m.content==='string')_decryptedCache.set(id,{ciphertext:null,plain:m.content,isEdited:!!m.isEdited});
+  }
+};
 async function decryptRow(m){
   if(!m||typeof m.content!=='string'||!m.content)return m;
+  const id=String(m.id||m.messageId||'');
+  const cached=id&&_decryptedCache.get(id);
+  if(cached){
+    if(cached.ciphertext===m.content)return Object.assign({},m,{content:cached.plain});
+    if(cached.ciphertext===null&&cached.isEdited===!!m.isEdited)return Object.assign({},m,{content:cached.plain});
+  }
   try{
     const plain=await window.KynectaGroupE2E.decryptForGroup(S.current?.id??m.chatId,m.content,groupMemberIds(S.current));
+    if(id)_decryptedCache.set(id,{ciphertext:m.content,plain,isEdited:!!m.isEdited});
     return Object.assign({},m,{content:plain});
   }catch(e){return Object.assign({},m,{content:'[Unable to decrypt this message]'})}
 }
 function decryptRows(list){return Promise.all(list.map(decryptRow))}
 
 function renderGroups(){const box=$('groups');if(!box)return;box.replaceChildren();const q=S.q.trim().toLowerCase();const rows=S.groups.filter(g=>!q||String(g.name||g.groupName||'').toLowerCase().includes(q));if(!rows.length){box.innerHTML='<div class="empty">No groups yet.</div>';return}for(const g of rows){const b=document.createElement('button');b.type='button';b.className='group'+(S.current&&String(S.current.id)===String(g.id)?' active':'');const a=document.createElement('div');a.className='avatar';a.textContent=String(g.name||g.groupName||'G').slice(0,1).toUpperCase();const m=document.createElement('div');m.className='groupmain';m.innerHTML=`<div class="name">${esc(g.name||g.groupName||'Unnamed group')}</div><div class="meta">${Number(g.participantCount??g.participants?.length??0)} members</div>`;b.append(a,m);const unread=Number(S.unread?.[String(g.id)]||0);if(unread>0){const badge=document.createElement('span');badge.className='unread-badge';badge.textContent=unread>99?'99+':String(unread);b.append(badge)}b.onclick=()=>openGroup(g.id);box.append(b)}}
-async function loadGroups(){if(S.loading)return;S.loading=true;try{const r=await api('/chats?limit=100');const rows=r?.data?.chats||r?.data||[];S.groups=Array.isArray(rows)?rows.filter(x=>(x?.type||x?.chatType)==='group').map(unwrap):[];renderGroups()}catch(e){const box=$('groups');if(box)box.innerHTML=`<div class="empty">Unable to load groups.<br>${esc(e.message)}</div>`}finally{S.loading=false}}
+// FIX (GROUPS-NO-OFFLINE-CACHE): js/core/groups/group-cache-first.js already
+// existed in the repo (built for exactly this) but was never loaded on any
+// page — a failed request used to always replace the whole list with a raw
+// error, even when there was perfectly good last-known data to show
+// instead, unlike other modules that already fall back to a cache offline.
+async function loadGroups(){if(S.loading)return;S.loading=true;const GCF=window.__GroupCacheFirst;if(GCF&&!S.groups.length){GCF.hydrate('groups',cached=>{S.groups=cached;renderGroups()})}try{const r=await api('/chats?limit=100');const rows=r?.data?.chats||r?.data||[];S.groups=Array.isArray(rows)?rows.filter(x=>(x?.type||x?.chatType)==='group').map(unwrap):[];if(GCF)GCF.set('groups',S.groups);renderGroups()}catch(e){const cached=GCF&&GCF.get('groups');const cachedList=cached&&cached.value!==undefined?cached.value:cached;if(Array.isArray(cachedList)&&cachedList.length){S.groups=cachedList;renderGroups()}else{const box=$('groups');if(box)box.innerHTML=`<div class="empty">Unable to load groups.<br>${esc(e.message)}</div>`}}finally{S.loading=false}}
 function normalizeMessages(r){const rows=r?.data?.messages||r?.data||r?.messages||[];return Array.isArray(rows)?rows:[]}
 
 function closeMsgMenu(){if(S.openMenuId==null)return;const el=document.querySelector(`.msg-menu[data-for="${S.openMenuId}"]`);if(el){el.classList.remove('open');el.style.left='';el.style.right='';el.style.top='';el.style.bottom=''}S.openMenuId=null}

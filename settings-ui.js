@@ -1624,18 +1624,33 @@ export function updateAccentColor(color) {
 // next full reload. 'auto' has also been removed app-wide — only 'light'
 // and 'dark' are valid themes now.
 export function applyTheme(theme) {
-    // Paint + persist now go through the single canonical engine (see
-    // js/theme.engine.js / window.ThemeManager) instead of this file
-    // keeping its own copy of the same data-theme/localStorage logic.
-    const resolved = window.ThemeManager ? window.ThemeManager.setTheme(theme) : (theme === 'dark' ? 'dark' : 'light');
-    if (!window.ThemeManager) {
+    // FIX (THEME-FLASH-THEN-REVERT-TO-OLD-VALUE): settings.html runs inside
+    // chat.html's iframe shell, where js/theme.engine.js hands out a PROXY
+    // ThemeManager instead of the real engine. The proxy's setTheme() does
+    // not apply anything itself — it POSTS A REQUEST to the parent and
+    // deliberately returns the OLD, not-yet-applied theme (the real change
+    // only happens once/if the parent responds). This function used to
+    // treat that return value as "the theme that was just applied" and use
+    // it for both the THEME_CHANGED broadcast below and the Settings save —
+    // meaning every theme switch broadcast and PERSISTED the theme the user
+    // was leaving, not the one they just picked. chat.html's own
+    // THEME_CHANGED handler then dutifully re-applied that stale value on
+    // top of whatever had briefly painted correctly, which is the
+    // "flashes to the new theme, then reverts" you saw — and why the
+    // reverted value was still there after a reload: it's what actually got
+    // saved. Always use the theme the caller asked for, not a return value
+    // whose meaning differs between the top-level engine and this proxy.
+    const resolved = theme === 'dark' ? 'dark' : 'light';
+    if (window.ThemeManager) {
+        window.ThemeManager.setTheme(resolved);
+    } else {
         // Fallback only if theme.engine.js somehow failed to load.
         const root = document.documentElement;
         root.setAttribute('data-theme', resolved);
         root.classList.toggle('theme-dark', resolved === 'dark');
         document.body.classList.toggle('dark-theme', resolved === 'dark');
         root.style.colorScheme = resolved;
-        try { (window.ThemeManager ? window.ThemeManager.setTheme(resolved) : localStorage.setItem('app_theme', resolved)); } catch (_) {}
+        try { localStorage.setItem('app_theme', resolved); } catch (_) {}
     }
 
     // FIX (live theme sync, Phase 17 follow-up): this used to only touch
@@ -1667,8 +1682,14 @@ export function applyTheme(theme) {
 // the same 'app_font_size' key every module's early-init script reads, so
 // text size stays in sync across modules without waiting for a reload.
 export function applyFontSize(size) {
-    const fontSize = window.ThemeManager ? window.ThemeManager.setFontSize(size) : (parseInt(size, 10) || 16);
-    if (!window.ThemeManager) {
+    // FIX (same stale-return-value bug as applyTheme above): the embedded
+    // proxy's setFontSize() also just posts a request and returns the OLD
+    // size, not the new one — use what was actually requested for the
+    // broadcast/save instead of that return value.
+    const fontSize = parseInt(size, 10) || 16;
+    if (window.ThemeManager) {
+        window.ThemeManager.setFontSize(fontSize);
+    } else {
         // Fallback only if theme.engine.js somehow failed to load.
         document.documentElement.style.fontSize = `${fontSize}px`;
         document.documentElement.style.setProperty('--base-font-size', `${fontSize}px`);
@@ -1697,8 +1718,14 @@ export function applyFontSize(size) {
 // the same 'app_icon_scale' key theme.engine.js's pre-paint script reads,
 // so icon size stays in sync across modules without waiting for a reload.
 export function applyIconSize(size) {
-    const iconScale = window.ThemeManager ? window.ThemeManager.setIconScale(size) : (size || 'medium');
-    if (!window.ThemeManager) {
+    // FIX (same stale-return-value bug as applyTheme above): the embedded
+    // proxy's setIconScale() also just posts a request and returns the OLD
+    // scale, not the new one — use what was actually requested for the
+    // broadcast/save instead of that return value.
+    const iconScale = size || 'medium';
+    if (window.ThemeManager) {
+        window.ThemeManager.setIconScale(iconScale);
+    } else {
         // Fallback only if theme.engine.js somehow failed to load.
         const ICON_SCALE_MAP = { small: 0.85, medium: 1, large: 1.2, xl: 1.4 };
         document.documentElement.setAttribute('data-icon-size', iconScale);

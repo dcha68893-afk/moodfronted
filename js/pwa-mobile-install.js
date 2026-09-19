@@ -73,29 +73,36 @@
     }
   }
 
+  // FIX (INSTALL-PROMPT-BOTTOM-TO-CENTER): was a bottom-anchored strip.
+  // Centering it in its own full-viewport backdrop, the same way any other
+  // dialog on the page works, also removes any dependency on exactly where
+  // the visual viewport's bottom edge is — a bottom-fixed element can end up
+  // clipped or hidden behind a mobile browser's own bottom chrome depending
+  // on device/browser, a centered one can't.
   function createBanner() {
     if (banner || dismissedRecently() || installed()) return;
     banner = document.createElement('div');
     banner.setAttribute('role', 'dialog');
     banner.setAttribute('aria-label', 'Install Necpa');
     banner.style.cssText = [
-      'position:fixed','left:10px','right:10px','bottom:calc(10px + env(safe-area-inset-bottom))',
-      'z-index:2147483646','background:#fff','color:#172033','border:1px solid #dfe4ee',
-      'border-radius:16px','box-shadow:0 10px 35px rgba(0,0,0,.22)','padding:13px 14px',
-      'display:flex','align-items:center','gap:11px','font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif'
+      'position:fixed','inset:0','z-index:2147483646','background:rgba(15,23,42,.45)',
+      'display:flex','align-items:center','justify-content:center','padding:18px',
+      'font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif'
     ].join(';');
     banner.innerHTML =
-      '<div style="width:42px;height:42px;border-radius:11px;overflow:hidden;flex:0 0 42px;background:#eef2ff;display:grid;place-items:center">' +
-        '<img src="/icons/necpa-192.png" alt="Necpa" style="width:42px;height:42px;object-fit:cover" onerror="this.style.display=\'none\'">' +
-      '</div>' +
-      '<div style="min-width:0;flex:1">' +
-        '<div data-pwa-title style="font-weight:750;font-size:14px;line-height:1.2">Install Necpa</div>' +
-        '<div data-pwa-text style="font-size:12px;line-height:1.35;margin-top:3px;color:#667085">Preparing installation…</div>' +
-      '</div>' +
-      '<button type="button" data-pwa-action style="border:0;border-radius:10px;padding:9px 13px;background:#1a73e8;color:#fff;font-weight:700;font-size:12px;white-space:nowrap">Install</button>' +
-      '<button type="button" data-pwa-close aria-label="Close" style="border:0;background:transparent;color:#667085;font-size:20px;padding:4px;line-height:1">×</button>';
+      '<div style="width:min(360px,100%);background:#fff;color:#172033;border-radius:18px;box-shadow:0 20px 60px rgba(0,0,0,.3);padding:22px 20px;text-align:center;position:relative">' +
+        '<button type="button" data-pwa-close aria-label="Close" style="position:absolute;top:8px;right:10px;border:0;background:transparent;color:#667085;font-size:22px;padding:6px;line-height:1">×</button>' +
+        '<div style="width:56px;height:56px;border-radius:15px;overflow:hidden;margin:0 auto 12px;background:#eef2ff;display:grid;place-items:center">' +
+          '<img src="/icons/necpa-192.png" alt="Necpa" style="width:56px;height:56px;object-fit:cover" onerror="this.style.display=\'none\'">' +
+        '</div>' +
+        '<div data-pwa-title style="font-weight:750;font-size:16px;line-height:1.2">Install Necpa</div>' +
+        '<div data-pwa-text style="font-size:13px;line-height:1.4;margin-top:6px;color:#667085">Preparing installation…</div>' +
+        '<button type="button" data-pwa-action style="margin-top:16px;width:100%;border:0;border-radius:11px;padding:12px 13px;background:#1a73e8;color:#fff;font-weight:700;font-size:14px">Install</button>' +
+      '</div>';
     document.body.appendChild(banner);
     banner.querySelector('[data-pwa-close]').onclick = function () { rememberDismiss(); remove(); };
+    // Tapping the dimmed backdrop dismisses too, same as any other modal.
+    banner.addEventListener('click', function (e) { if (e.target === banner) { rememberDismiss(); remove(); } });
   }
 
   async function install() {

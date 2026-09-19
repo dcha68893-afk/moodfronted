@@ -51,18 +51,23 @@
     if (banner) banner.remove();
   }
 
+  // FIX (INSTALL-PROMPT-BOTTOM-TO-CENTER): was a bottom-fixed strip; matches
+  // the same change made to pwa-mobile-install.js's banner so desktop and
+  // mobile behave the same way.
   function showInstallBanner() {
     if (isMobileDevice) return; // pwa-mobile-install.js owns the mobile banner
     if (!deferredPrompt || appIsInstalled()) return;
     if (document.getElementById('pwaInstallBanner')) return;
 
     inject('pwaInstallBanner',
-      '<div id="pwaInstallInner" style="position:fixed;left:0;right:0;bottom:0;z-index:2147483647;background:#fff;border-top:2px solid #2563eb;box-shadow:0 -6px 28px rgba(0,0,0,.18);padding:12px 14px;display:flex;align-items:center;gap:12px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">' +
-      '<img src="/icons/necpa-192.png" alt="Necpa" style="width:46px;height:46px;border-radius:12px;object-fit:cover;flex:0 0 auto" onerror="this.style.display=\'none\'">' +
-      '<div style="flex:1;min-width:0"><div style="font-weight:800;font-size:14px;color:#111">Install Necpra</div><div style="font-size:12px;color:#64748b;margin-top:2px">Install the app for a faster experience.</div></div>' +
-      '<button type="button" id="pwaInstallButton" style="background:#2563eb;color:#fff;border:0;border-radius:10px;padding:10px 17px;font-weight:700;cursor:pointer">Install</button>' +
-      '<button type="button" id="pwaInstallClose" aria-label="Dismiss" style="background:none;border:0;color:#64748b;font-size:23px;line-height:1;padding:4px 7px;cursor:pointer">&times;</button>' +
-      '</div>'
+      '<div style="position:fixed;inset:0;z-index:2147483647;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center;padding:20px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">' +
+      '<div id="pwaInstallInner" style="width:min(380px,100%);background:#fff;border-radius:18px;box-shadow:0 20px 60px rgba(0,0,0,.3);padding:22px 20px;text-align:center;position:relative">' +
+      '<button type="button" id="pwaInstallClose" aria-label="Dismiss" style="position:absolute;top:8px;right:10px;background:none;border:0;color:#64748b;font-size:22px;line-height:1;padding:6px;cursor:pointer">&times;</button>' +
+      '<img src="/icons/necpa-192.png" alt="Necpa" style="width:56px;height:56px;border-radius:14px;object-fit:cover;margin:0 auto 12px;display:block" onerror="this.style.display=\'none\'">' +
+      '<div style="font-weight:800;font-size:16px;color:#111">Install Necpra</div>' +
+      '<div style="font-size:13px;color:#64748b;margin-top:6px">Install the app for a faster experience.</div>' +
+      '<button type="button" id="pwaInstallButton" style="margin-top:16px;width:100%;background:#2563eb;color:#fff;border:0;border-radius:11px;padding:12px 13px;font-weight:700;font-size:14px;cursor:pointer">Install</button>' +
+      '</div></div>'
     );
 
     const installButton = document.getElementById('pwaInstallButton');
@@ -72,8 +77,14 @@
       removeInstallBanner();
       try { localStorage.setItem('pwa_dismissed_ts', String(Date.now())); } catch (_) {}
     });
-
-    hideTimer = setTimeout(removeInstallBanner, 15000);
+    // Tapping the dimmed backdrop dismisses too, same as any other modal.
+    const outer = document.getElementById('pwaInstallBanner');
+    if (outer) outer.addEventListener('click', function (e) {
+      if (e.target === outer) {
+        removeInstallBanner();
+        try { localStorage.setItem('pwa_dismissed_ts', String(Date.now())); } catch (_) {}
+      }
+    });
   }
 
   window._pwaDoInstall = async function () {

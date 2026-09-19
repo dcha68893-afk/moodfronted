@@ -42,6 +42,14 @@
           // the time this resolves — never paint a stale group's history
           // into the one that's actually open now.
           if (String(window.__GROUP_CHAT_ID) !== String(id)) return;
+          // Seed decryptRow()'s skip-cache with this already-plaintext copy
+          // before the network refetch (already kicked off inside
+          // origOpenGroup) has a chance to re-decrypt all of it from raw
+          // ciphertext again — see group.html's own comment on
+          // __seedGroupDecryptedCache for why.
+          if (typeof window.__seedGroupDecryptedCache === 'function') {
+            window.__seedGroupDecryptedCache(cached);
+          }
           if (typeof window.reconcile === 'function') window.reconcile(cached);
         }).catch(() => {});
         return ret;

@@ -10,10 +10,21 @@
   const token = () => localStorage.getItem('authToken') || localStorage.getItem('accessToken') || localStorage.getItem('token') || '';
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 
-  async function api(path, options = {}) {
+  async function doGroupFetch(path, options) {
     const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
     if (token()) headers.Authorization = 'Bearer ' + token();
-    const response = await fetch(base() + path, { ...options, headers });
+    return fetch(base() + path, { ...options, headers });
+  }
+  // FIX (GROUP-TOKEN-EXPIRED-AFTER-IDLE): retry once after a silent token
+  // refresh instead of surfacing a raw 401 as "token expired" whenever the
+  // access token has simply expired from sitting idle — see
+  // js/necpa-session-resilience.js.
+  async function api(path, options = {}) {
+    let response = await doGroupFetch(path, options);
+    if (response.status === 401 && window.NecpaSessionResilience) {
+      const refreshed = await window.NecpaSessionResilience.refreshAccessToken(base());
+      if (refreshed) response = await doGroupFetch(path, options);
+    }
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.message || `Request failed (${response.status})`);
     return data;

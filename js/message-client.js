@@ -84,6 +84,30 @@
         return state.messagesByConversation.get(chatId);
     }
 
+    // ROOT-CAUSE FIX (DELIVERED-MESSAGE-LATER-FLIPS-TO-FAILED): sendMessage()'s
+    // own POST /messages call and the server's realtime socket broadcast of
+    // that same message are two independent races on the same write. Under a
+    // slow response (Render cold start, flaky network) the socket echo can
+    // land — reconciling the optimistic bubble into a real, correctly
+    // "delivered" message via applyIncomingMessage() — well before
+    // sendMessage()'s own `await api().post(...)` finally settles. When that
+    // slow request then times out or rejects, sendMessage()'s failure
+    // handlers used to unconditionally write a fresh 'failed' entry back
+    // under the same `optimistic:<clientMessageId>` key with no check that
+    // the real message had already arrived — resurrecting a dead bubble on
+    // top of one that was already showing correctly, seconds after the
+    // fact. This checks whether a real message with this clientMessageId is
+    // already sitting in the bucket under its own (non-optimistic) id before
+    // any failure handler is allowed to mark the optimistic stub failed.
+    function isAlreadyDelivered(bucket, clientMessageId) {
+        if (!clientMessageId) return false;
+        const optimisticId = `optimistic:${clientMessageId}`;
+        for (const [key, msg] of bucket) {
+            if (key !== optimisticId && msg && msg.clientMessageId === clientMessageId) return true;
+        }
+        return false;
+    }
+
     function upsertConversationMeta(chatId, patch) {
         const existing = state.conversations.get(chatId) || { chatId, unreadCount: 0 };
         state.conversations.set(chatId, Object.assign(existing, patch));
@@ -834,10 +858,16 @@
                 applyIncomingMessage(Object.assign({}, res.data, { clientMessageId, displayContent: content }), { fromSelf: true });
                 return { success: true, messageId: res.data.id, chatId: res.data.chatId };
             }
+            if (isAlreadyDelivered(bucket, clientMessageId)) {
+                return { success: true, alreadyDelivered: true };
+            }
             bucket.set(optimisticId, Object.assign({}, optimisticMessage, { status: 'failed' }));
             notify('message:failed', { chatId: optimisticMessage.chatId, clientMessageId });
             return { success: false, error: res && res.message };
         } catch (err) {
+            if (isAlreadyDelivered(bucket, clientMessageId)) {
+                return { success: true, alreadyDelivered: true };
+            }
             bucket.set(optimisticId, Object.assign({}, optimisticMessage, { status: 'failed' }));
             notify('message:failed', { chatId: optimisticMessage.chatId, clientMessageId });
             return { success: false, error: err.message };

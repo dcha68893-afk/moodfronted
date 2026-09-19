@@ -10,6 +10,13 @@
 <script src="/js/runtime-config.js"></script>
 <script src="/js/config.js"></script>
 <script src="/js/theme.engine.js"></script>
+<!-- FIX (SETTINGS-NOT-APPLIED-EVERYWHERE): this listener's own header comment
+     already claims it's "Embedded in EVERY module iframe (messages, calls,
+     status, group, friend, tools)" — it wasn't actually loaded here (or in
+     friend.html/group.html/game.html), so a settings change made while one
+     of those was already open never reached it; only a full reload of that
+     iframe would pick up the new value via its own cache bootstrap. -->
+<script src="/js/settings-broadcast-listener.js"></script>
 <script>
   window.API_BASE_URL = window.__getApiOrigin();
   window.__kynAPI = window.__kynAPI || {};

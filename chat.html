@@ -9819,67 +9819,21 @@ window.__groupHdrHide = hideGroupHeader;
 <script src="js/link-preview.js" defer></script>
 <script src="js/voice-recorder.js" defer></script>
 
-<!-- PWA Install Banner + Instant Update -->
-<script>
-(function _pwaInstallAndUpdate() {
-    'use strict';
-    var isStandalone = function() {
-        return window.matchMedia('(display-mode: standalone)').matches ||
-               window.navigator.standalone === true ||
-               document.referrer.includes('android-app://');
-    };
-    function _showEl(id, html) {
-        if (document.getElementById(id)) return;
-        var el = document.createElement('div');
-        el.id = id;
-        el.innerHTML = html;
-        document.body.appendChild(el);
-    }
-
-    // Install Banner
-    var _dp = null;
-    window.addEventListener('beforeinstallprompt', function(e) {
-        e.preventDefault();
-        _dp = e;
-        var ts = parseInt(localStorage.getItem('pwa_dismissed') || '0');
-        if (Date.now() - ts < 3 * 86400000) return;
-        _showEl('pwaInstallBanner',
-            '<div style="position:fixed;bottom:0;left:0;right:0;z-index:999999;background:#fff;border-top:2px solid #667eea;box-shadow:0 -4px 20px rgba(0,0,0,.15);padding:14px 16px;display:flex;align-items:center;gap:12px;font-family:-apple-system,sans-serif;animation:_pslide .35s ease">' +
-            '<style>@keyframes _pslide{from{transform:translateY(100%)}to{transform:translateY(0)}}</style>' +
-            '<img src="/necpa-192.png" style="width:44px;height:44px;border-radius:10px;flex-shrink:0" onerror="this.style.display=\'none\'">' +
-            '<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:14px;color:#111">Install Necpa</div>' +
-            '<div style="font-size:12px;color:#6b7280;margin-top:1px">Faster &amp; works offline</div></div>' +
-            '<button onclick="window._pwaInstall()" style="background:#667eea;color:#fff;border:none;border-radius:10px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0">Install</button>' +
-            '<button onclick="window._pwaDismiss()" style="background:none;border:none;color:#9ca3af;font-size:22px;line-height:1;cursor:pointer;padding:2px;flex-shrink:0">&times;</button></div>'
-        );
-    });
-    window._pwaInstall = async function() {
-        if (!_dp) return;
-        _dp.prompt();
-        var r = await _dp.userChoice;
-        _dp = null;
-        var b = document.getElementById('pwaInstallBanner');
-        if (b) b.remove();
-    };
-    window._pwaDismiss = function() {
-        var b = document.getElementById('pwaInstallBanner');
-        if (b) b.remove();
-        localStorage.setItem('pwa_dismissed', String(Date.now()));
-    };
-    window.addEventListener('appinstalled', function() {
-        var b = document.getElementById('pwaInstallBanner');
-        if (b) b.remove();
-    });
-
-    // FIX: removed a duplicate, buggier inline PWA-update/banner implementation
-    // that lived here. pwa-manager.js (loaded above) already does this
-    // correctly: it compares SW versions before showing the banner (fixing
-    // false-positive banners with no real update) and uses controllerchange
-    // as the single, one-time reload trigger (fixing the double-reload
-    // "opening-loading-opening-loading" loop). Having both meant two
-    // independent systems racing each other on every update.
-})();
-</script>
+<!-- FIX (FOUR-WAY-COMPETING-PWA-INSTALL-PROMPTS): this whole inline block was
+     a THIRD independent beforeinstallprompt/#pwaInstallBanner implementation
+     living alongside pwa-manager.js (loaded above, which already owns the
+     desktop banner and correctly defers to pwa-mobile-install.js on mobile)
+     and pwa-mobile-install.js itself. This one had no mobile gate at all, so
+     on a phone it could show its own old bottom banner at the same time as
+     pwa-mobile-install.js's centered one. A comment right below already
+     documented removing this exact IIFE's OTHER half (the update banner)
+     for the identical reason — "two independent systems racing each other"
+     — but only that half was actually removed; the install-banner half
+     (using a completely separate `pwa_dismissed` dismiss key, never the
+     `pwa_dismissed_ts` key pwa-manager.js checks) was left in place. Removed
+     now too, so pwa-manager.js is the only desktop owner and
+     pwa-mobile-install.js the only mobile owner.
+-->
     <!-- FIX (VERIFIED-DEAD-EVENT: notification deep-link never opened a chat):
          js/push-init.js parses ?chatId=/?messageId= off this page's own URL
          (the URL a push-notification click deep-links to — see
