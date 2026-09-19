@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Necpa — Status</title>
+  <script src="/js/runtime-config.js"></script>
+  <script src="/js/config.js"></script>
+  <script>
+    // The Status module uses the same authenticated session and API origin
+    // as the main Necpa shell. Keep this iframe visually independent from
+    // the legacy status.css/status-ui stack.
+    (function () {
+      try {
+        if (typeof window.__getApiOrigin === 'function') {
+          window.API_BASE_URL = window.__getApiOrigin();
+        }
+      } catch (_) {}
+    })();
+  </script>
+  <style>
+    html, body { width:100%; height:100%; margin:0; padding:0; overflow:hidden; }
+    body { background:#f8fafc; }
+    /* ProfessionalStatus is the complete Status surface in this iframe.
+       Do not show its floating launcher: the parent chat shell already owns
+       navigation and opens this page through the Status module button. */
+    #necpa-status-launcher { display:none !important; }
+    #necpa-status-root { position:fixed !important; inset:0 !important; padding:0 !important; }
+    #necpa-status-root.open { display:flex !important; }
+    .ns-shell { width:100% !important; height:100% !important; max-width:none !important; max-height:none !important; border-radius:0 !important; }
+    .ns-main { min-width:0; min-height:0; }
+  </style>
+</head>
+<body>
+  <script src="/js/core/status/ProfessionalStatus.js"></script>
+  <script>
+    (function () {
+      'use strict';
+
+      function openProfessionalStatus() {
+        if (window.__NecpaProfessionalStatus &&
+            typeof window.__NecpaProfessionalStatus.open === 'function') {
+          window.__NecpaProfessionalStatus.open();
+          return true;
+        }
+        return false;
+      }
+
+      function boot() {
+        if (openProfessionalStatus()) {
+          try {
+            window.parent.postMessage({ type:'STATUS_PANEL_OPENED', source:'professional-status' }, '*');
+          } catch (_) {}
+          return;
+        }
+        setTimeout(boot, 50);
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', boot, { once:true });
+      } else {
+        boot();
+      }
+
+      window.addEventListener('message', function (event) {
+        const data = event && event.data;
+        if (!data || typeof data !== 'object') return;
+
+        if (data.type === 'GO_BACK_TO_LIST') {
+          // Parent navigation owns the iframe visibility. Close the local
+          // surface as well so Back never leaves an invisible overlay behind.
+          try {
+            window.__NecpaProfessionalStatus?.close?.();
+            window.parent.postMessage({ type:'STATUS_PANEL_CLOSED', source:'professional-status' }, '*');
+          } catch (_) {}
+        }
+      });
+
+      // Relay explicit close actions to the parent shell.
+      document.addEventListener('click', function (event) {
+        const target = event.target && event.target.closest
+          ? event.target.closest('[data-close],[data-mobile-close]')
+          : null;
+        if (!target) return;
+        setTimeout(function () {
+          try {
+            window.parent.postMessage({ type:'STATUS_PANEL_CLOSED', source:'professional-status' }, '*');
+          } catch (_) {}
+        }, 0);
+      });
+    })();
+  </script>
+</body>
+</html>
