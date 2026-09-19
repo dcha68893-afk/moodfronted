@@ -320,6 +320,30 @@ async function handleMedia(e){
   try{const compressed=await compressImage(file);state.composer.media={file:compressed,type:'image'};previewMedia()}catch(_){state.composer.media={file,type:'image'};previewMedia()}
  }
 }
+async function trimVideoToRange(file,start,end){
+ const duration=Math.max(0.1,end-start);
+ if(start<=0.001&&duration<=20.001&&Number(file.size)>0&&end>=Math.min(20,end)) return file;
+ if(!window.MediaRecorder) throw new Error('This browser cannot trim video here. Please choose a video shorter than 20 seconds.');
+ const url=URL.createObjectURL(file);
+ const v=document.createElement('video');v.src=url;v.muted=false;v.playsInline=true;v.preload='auto';
+ await new Promise((resolve,reject)=>{v.onloadedmetadata=resolve;v.onerror=()=>reject(new Error('Could not read the video'))});
+ await new Promise((resolve,reject)=>{const done=()=>{v.removeEventListener('canplay',done);resolve()};v.addEventListener('canplay',done);v.currentTime=Math.max(0,start)});
+ const stream=v.captureStream?.();
+ if(!stream){URL.revokeObjectURL(url);throw new Error('Video trimming is not supported by this browser.');}
+ const mime=['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'].find(x=>MediaRecorder.isTypeSupported(x));
+ if(!mime){URL.revokeObjectURL(url);throw new Error('Video recording is not supported by this browser.');}
+ const recorder=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:2500000});
+ const chunks=[];let timer=null;
+ const result=new Promise((resolve,reject)=>{
+   recorder.ondataavailable=e=>{if(e.data?.size)chunks.push(e.data)};
+   recorder.onerror=()=>reject(new Error('Video trimming failed'));
+   recorder.onstop=()=>{clearTimeout(timer);resolve(new File([new Blob(chunks,{type:mime})],file.name.replace(/\.[^.]+$/i,'')+'.webm',{type:mime,lastModified:Date.now()}))};
+ });
+ recorder.start(250);
+ await v.play();
+ timer=setTimeout(()=>{try{v.pause();recorder.stop()}catch(_){}},duration*1000+100);
+ const out=await result;stream.getTracks().forEach(t=>t.stop());URL.revokeObjectURL(url);return out;
+}
 async function compressImage(file){
  const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=URL.createObjectURL(file)});
  const max=1600,scale=Math.min(1,max/Math.max(img.width,img.height));const canvas=document.createElement('canvas');canvas.width=Math.round(img.width*scale);canvas.height=Math.round(img.height*scale);canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);URL.revokeObjectURL(img.src);
@@ -344,7 +368,14 @@ async function publish(){
  try{
   if((type==='image'||type==='video')&&!c.media?.file) throw new Error('Choose an image or video before publishing.');
   let media={};
-  if(c.media){const fd=new FormData();fd.append('file',c.media.file);fd.append('trimStart',String(c.media.trimStart||0));fd.append('trimEnd',String(c.media.trimEnd||Math.min(Number(c.media.sourceDuration||20),20)));fd.append('sourceDuration',String(c.media.sourceDuration||0));const t=token();const r=await fetch(uploadUrl(),{method:'POST',headers:t?{Authorization:/^Bearer /i.test(t)?t:'Bearer '+t}:{},body:fd});const d=await r.json();if(!r.ok||!d.success)throw new Error(d.error||'Media upload failed');const uploaded=d?.data?.cloudinary||d?.cloudinary||d; const mediaUrl=uploaded?.url||uploaded?.secure_url||d?.url; const mediaPublicId=uploaded?.public_id||uploaded?.publicId||d?.publicId; if(!mediaUrl)throw new Error('Media upload succeeded but no media URL was returned'); media={mediaUrl,mediaPublicId,mediaMime:c.media.file.type};}
+  if(c.media){
+   if(c.media.type==='video'){
+    const start=Number(c.media.trimStart||0),end=Math.min(Number(c.media.trimEnd||20),start+20,Number(c.media.sourceDuration||20));
+    if(end-start>20.001) throw new Error('Status video cannot exceed 20 seconds.');
+    c.media.file=await trimVideoToRange(c.media.file,start,end);
+    c.media.sourceDuration=end-start;c.media.trimStart=0;c.media.trimEnd=end-start;
+   }
+   const fd=new FormData();fd.append('file',c.media.file);fd.append('trimStart','0');fd.append('trimEnd',String(c.media.trimEnd||Math.min(Number(c.media.sourceDuration||20),20)));fd.append('sourceDuration',String(c.media.sourceDuration||0));const t=token();const r=await fetch(uploadUrl(),{method:'POST',headers:t?{Authorization:/^Bearer /i.test(t)?t:'Bearer '+t}:{},body:fd});const d=await r.json();if(!r.ok||!d.success)throw new Error(d.error||'Media upload failed');const uploaded=d?.data?.cloudinary||d?.cloudinary||d; const mediaUrl=uploaded?.url||uploaded?.secure_url||d?.url; const mediaPublicId=uploaded?.public_id||uploaded?.publicId||d?.publicId; if(!mediaUrl)throw new Error('Media upload succeeded but no media URL was returned'); media={mediaUrl,mediaPublicId,mediaMime:c.media.file.type};}
   const activePane=root.querySelector('.ns-pane.active')?.dataset.pane;
   const type=activePane==='poll'?'poll':activePane==='link'?'link':activePane==='media'?(c.media?.type||'image'):'text';
   let content=(root.querySelector('[data-content]')?.value||c.content||'').trim();
