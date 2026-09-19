@@ -38,43 +38,6 @@
     })().catch(err => { X.crypto = null; throw err; });
     return X.crypto;
   }
-  function envelope(content) { try { const o = JSON.parse(content); return o && o.v === 6 && o.kind === 'group-e2e-fanout' ? o : null; } catch (_) { return null; } }
-  function b64(bytes) { let s = ''; const a = new Uint8Array(bytes); for (let i = 0; i < a.length; i++) s += String.fromCharCode(a[i]); return btoa(s); }
-  function unb64(s) { const b = atob(s), a = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) a[i] = b.charCodeAt(i); return a; }
-  async function senderKey() {
-    const id = me(); if (!id) throw new Error('User identity unavailable');
-    const keyName = `necpra_group_sender_key_${id}`;
-    let raw = localStorage.getItem(keyName); const wc = window.crypto;
-    if (!raw) { raw = b64(wc.getRandomValues(new Uint8Array(32))); localStorage.setItem(keyName, raw); }
-    return wc.subtle.importKey('raw', unb64(raw), 'AES-GCM', false, ['encrypt', 'decrypt']);
-  }
-  async function senderCopy(text) {
-    const key = await senderKey(), wc = window.crypto, iv = wc.getRandomValues(new Uint8Array(12));
-    const ct = await wc.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(text));
-    return { iv: b64(iv), ct: b64(ct) };
-  }
-  async function senderOpen(copy) {
-    try { const key = await senderKey(), wc = window.crypto; const pt = await wc.subtle.decrypt({ name: 'AES-GCM', iv: unb64(copy.iv) }, key, unb64(copy.ct)); return new TextDecoder().decode(pt); }
-    catch (_) { return '🔒 Unable to decrypt your local group copy.'; }
-  }
-  async function members(gid) {
-    const r = await api(`/chats/${encodeURIComponent(gid)}`); const chat = r?.data?.chat || r?.data || {};
-    return Array.isArray(chat.participants) ? chat.participants : [];
-  }
-  async function encryptText(text, gid) {
-    const e = await e2e(), uid = Number(me()); if (!uid) throw new Error('E2E identity unavailable');
-    const ps = await members(gid), ids = [...new Set(ps.map(p => Number(p.id || p.userId)).filter(id => id > 0 && id !== uid))];
-    const recipients = {};
-    for (const id of ids) recipients[String(id)] = await e.encryptForChat(text, Number(gid), id);
-    return JSON.stringify({ v: 6, kind: 'group-e2e-fanout', senderId: uid, recipients, senderCopy: await senderCopy(text) });
-  }
-  async function decryptText(content, gid, sender) {
-    const o = envelope(content); if (!o) return content;
-    if (String(sender) === me() && o.senderCopy) return senderOpen(o.senderCopy);
-    const entry = o.recipients[String(me())]; if (!entry) return '🔒 This group message is unavailable on this device.';
-    try { return await (await e2e()).decryptFromChat(entry, Number(gid), Number(sender), false, `group-${gid}-${sender || ''}`); }
-    catch (err) { console.error('[GroupE2E] decrypt failed:', err.message || err); return '🔒 Unable to decrypt this group message.'; }
-  }
   // BUGFIX (DUPLICATE-DECRYPT-FLIP-TO-FAILED): patchMessage() gets called
   // multiple times for the exact same message id — chat.html forwards a
   // single incoming group message into this iframe via several overlapping

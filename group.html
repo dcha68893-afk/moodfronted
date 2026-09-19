@@ -117,54 +117,12 @@ function groupMemberIds(g){const list=Array.isArray(g?.participants)?g.participa
 // decryptForGroup() only for content that isn't a v6 fanout envelope (older
 // pre-switchover history, if any still exists), never the other way
 // around — this is a same-strength decrypt swap, not a security downgrade.
-const _fanoutCrypto = { mod: null };
-function _fanoutEnvelope(content) {
-  try { const o = JSON.parse(content); return (o && o.v === 6 && o.kind === 'group-e2e-fanout') ? o : null; }
-  catch (_) { return null; }
-}
-function _fanoutLoadScript(src) {
-  return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[data-necpra-fanout-crypto="${src}"]`)) return resolve();
-    const s = document.createElement('script'); s.src = src; s.async = false; s.dataset.necpraFanoutCrypto = src;
-    s.onload = resolve; s.onerror = reject; (document.head || document.documentElement).appendChild(s);
-  });
-}
-async function _fanoutCryptoReady() {
-  if (_fanoutCrypto.mod) return _fanoutCrypto.mod;
-  _fanoutCrypto.mod = (async () => {
-    if (!window.KynectaE2EIdentity) await _fanoutLoadScript('/js/e2e-identity-core.js');
-    if (!window.KynectaRatchet) await _fanoutLoadScript('/js/e2e-ratchet-v3.js');
-    if (!window.KynectaMessageE2E) await _fanoutLoadScript('/js/message-e2e-core.js');
-    await window.KynectaMessageE2E.init();
-    return window.KynectaMessageE2E;
-  })().catch(err => { _fanoutCrypto.mod = null; throw err; });
-  return _fanoutCrypto.mod;
-}
-function _fanoutB64(bytes) { let s = ''; const a = new Uint8Array(bytes); for (let i = 0; i < a.length; i++) s += String.fromCharCode(a[i]); return btoa(s); }
-function _fanoutUnb64(s) { const b = atob(s), a = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) a[i] = b.charCodeAt(i); return a; }
-// Same localStorage-backed AES-GCM "local copy" key group-mobile-navigation.js
-// uses for your own sent messages (same key name, so both scripts share it
-// transparently — no coordination needed beyond the shared localStorage key).
-async function _fanoutSenderKey() {
-  const id = uid(); if (!id) throw new Error('User identity unavailable');
-  const keyName = `necpra_group_sender_key_${id}`;
-  let raw = localStorage.getItem(keyName); const wc = window.crypto;
-  if (!raw) { raw = _fanoutB64(wc.getRandomValues(new Uint8Array(32))); localStorage.setItem(keyName, raw); }
-  return wc.subtle.importKey('raw', _fanoutUnb64(raw), 'AES-GCM', false, ['encrypt', 'decrypt']);
-}
-async function _fanoutSenderOpen(copy) {
-  try { const key = await _fanoutSenderKey(), wc = window.crypto; const pt = await wc.subtle.decrypt({ name: 'AES-GCM', iv: _fanoutUnb64(copy.iv) }, key, _fanoutUnb64(copy.ct)); return new TextDecoder().decode(pt); }
-  catch (_) { return '🔒 Unable to decrypt your local group copy.'; }
-}
 async function decryptGroupContent(content, gid, senderId) {
-  const fanout = _fanoutEnvelope(content);
-  if (!fanout) return window.KynectaGroupE2E.decryptForGroup(gid, content, groupMemberIds(S.current));
-  const actualSender = senderId ?? fanout.senderId;
-  if (String(actualSender) === uid() && fanout.senderCopy) return _fanoutSenderOpen(fanout.senderCopy);
-  const entry = fanout.recipients && fanout.recipients[uid()];
-  if (!entry) return '🔒 This group message is unavailable on this device.';
-  const mod = await _fanoutCryptoReady();
-  return mod.decryptFromChat(entry, Number(gid), Number(actualSender), false, `group-${gid}-${actualSender || ''}`);
+  if (!content || typeof content !== 'string') return content;
+  if (window.KynectaGroupE2E?.decryptForGroup) {
+    return window.KynectaGroupE2E.decryptForGroup(Number(gid), content, groupMemberIds(S.current));
+  }
+  return content;
 }
 // Decrypts one message's `content` in place (returns a shallow copy).
 // Attachments carry their payload in metadata.media, not content, so they
@@ -183,6 +141,7 @@ async function decryptGroupContent(content, gid, senderId) {
 // fresh decrypt, but an unchanged message is never re-decrypted again.
 const _decryptedCache=new Map();
 const _groupDecryptInFlight=new Map();
+const _groupDecryptFailed=new Map();
 window.__NECPRA_GROUP_PENDING_PLAINTEXT = window.__NECPRA_GROUP_PENDING_PLAINTEXT || new Map();
 // FIX (GROUP-HISTORY-RE-DECRYPTS-ON-RELOAD): js/group-history-cache-fix.js
 // already hydrates S.messages instantly from IndexedDB on open, with
@@ -212,6 +171,7 @@ async function decryptRow(m){
     if(cached.ciphertext===m.content)return Object.assign({},m,{content:cached.plain});
     if(cached.ciphertext===null&&cached.isEdited===!!m.isEdited)return Object.assign({},m,{content:cached.plain});
   }
+  if(id&&_groupDecryptFailed.get(id)===m.content)return Object.assign({},m,{_decryptPending:true});
   if(id&&_groupDecryptInFlight.has(id))return Object.assign({},m,{content:await _groupDecryptInFlight.get(id)});
   const task=(async()=>{
     try{
@@ -220,6 +180,7 @@ async function decryptRow(m){
       return plain;
     }catch(e){
       console.error('[GroupDecrypt] decryptRow failed:',e&&e.message||e);
+      if(id)_groupDecryptFailed.set(id,m.content);
       const prior=S.messages.find(x=>String(x.id||x.messageId)===id);
       if(prior&&typeof prior.content==='string'&&!prior._decryptPending&&!/^\\[Unable to decrypt|^🔒|^Decrypting securely/.test(prior.content))return prior.content;
       return null;

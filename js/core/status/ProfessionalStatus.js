@@ -119,14 +119,22 @@ window.addEventListener('message',e=>{
 });
 function open(){mount();document.getElementById('necpa-status-root').classList.add('open');loadFeed()}
 function close(){document.getElementById('necpa-status-root')?.classList.remove('open');closeViewer();closeComposer()}
+function normalizeStatus(s){
+ const x={...(s||{})};
+ x.mediaUrl=x.mediaUrl||x.media_url||x.media?.url||x.cloudinary?.url||null;
+ x.mediaPublicId=x.mediaPublicId||x.media_public_id||x.media?.publicId||x.media?.public_id||null;
+ x.mediaMime=x.mediaMime||x.media_mime||x.media?.mimeType||x.media?.mime||null;
+ if(!x.type&&x.mediaMime)x.type=String(x.mediaMime).startsWith('video/')?'video':String(x.mediaMime).startsWith('image/')?'image':'text';
+ return x;
+}
 async function loadFeed(){
  try{
   const me=currentUser();
   const mine=(await api('/my')).data||[];
-  state.mine=mine;
+  state.mine=mine.map(normalizeStatus);
   let data=state.tab==='discover'?(await api('/public')).data||[]:(await api('/friends')).data||[];
   state.mine=mine.sort((a,b)=>Date.parse(b.createdAt||0)-Date.parse(a.createdAt||0));
-  state.statuses=data
+  state.statuses=data.map(normalizeStatus)
     .filter(s=>String(s.userId||s.owner?.id||'')!==String(me.id||''))
     .sort((a,b)=>Date.parse(b.createdAt||0)-Date.parse(a.createdAt||0));
   renderMyStatus();
@@ -200,6 +208,7 @@ function showViewer(){
  root.classList.add('open');syncParent();
  if(isOwner) root.querySelector('.ns-viewer-bottom')?.remove();
  root.querySelector('[data-vclose]').onclick=()=>closeViewer();root.querySelector('[data-prev]').onclick=()=>move(-1);root.querySelector('[data-next]').onclick=()=>move(1);
+ root.querySelector('.ns-viewer-stage')?.addEventListener('click',e=>{if(e.target.closest('button,input,.ns-viewer-bottom,.ns-viewer-head,.ns-viewer-more'))return;move(1)});
  root.querySelector('.ns-viewer-bottom')?.addEventListener('pointerdown',()=>clearInterval(state.timer),{passive:true});
  root.querySelector('[data-reply]')?.addEventListener('focus',()=>clearInterval(state.timer));
  root.querySelector('[data-more]').onclick=()=>root.querySelector('[data-moremenu]').classList.toggle('open');
@@ -337,8 +346,10 @@ async function publish(){
   const options=[...root.querySelectorAll('[data-poll0],[data-poll1],[data-pollx]')].map(x=>x.value.trim()).filter(Boolean);
   const body={type,content,caption:c.caption||'',background:c.background,font:c.font,privacy:root.querySelector('[data-privacy]').value,privacyList:(root.querySelector('[data-privacy-list]')?.value||'').split(',').map(x=>x.trim()).filter(Boolean),durationSeconds:Number(root.querySelector('[data-duration]').value),moodType:root.querySelector('[data-mood]').value.trim(),category:root.querySelector('[data-category]').value.trim(),intent:root.querySelector('[data-intent]').value.trim(),topics:root.querySelector('[data-topics]').value.split(',').map(x=>x.trim()).filter(Boolean),allowReplies:root.querySelector('[data-replies]').checked,allowReactions:root.querySelector('[data-reactions]').checked,allowSharing:root.querySelector('[data-sharing]').checked,linkUrl:type==='link'?root.querySelector('[data-link]').value.trim():'',musicUrl:root.querySelector('[data-music]')?.value.trim()||'',stickers:c.stickers,...media};
   if(type==='poll')body.pollOptions=options;
-  await api('',{method:'POST',body:JSON.stringify(body)});
-  closeComposer();await loadFeed();toast('Your status is live for 24 hours');
+  const created=await api('',{method:'POST',body:JSON.stringify(body)});
+  const createdStatus=normalizeStatus(created?.data?.status||created?.status||created?.data);
+  if(createdStatus?.id){state.mine=[createdStatus,...state.mine.filter(x=>String(x.id)!==String(createdStatus.id))];}
+  closeComposer();renderMyStatus();await loadFeed();toast('Your status is live for 24 hours');
  }catch(e){toast(e.message)}finally{btn.disabled=false;btn.textContent='Publish Status'}
 }
 window.addEventListener('kyn:status:new',()=>loadFeed());window.addEventListener('message',e=>{const t=e.data?.type||'';if(/^status:/i.test(t)||/^STATUS_/i.test(t)||t==='FRIEND_STATUS_NEW')loadFeed()});
