@@ -10053,7 +10053,7 @@ window.__groupHdrHide = hideGroupHeader;
 <script id="statusRealtimeBridge">
 (function(){
   function forward(type,payload){var f=document.getElementById('statusIframe');if(f&&f.contentWindow)f.contentWindow.postMessage({type:type,payload:payload||{}},'*');}
-  function bind(){var ws=window.wsService||window.KynectaRealtime||window.realtimeService;if(!ws||typeof ws.on!=='function')return false;['status:new','status:deleted','status:viewed','status:reaction','status:reply'].forEach(function(ev){try{ws.on(ev,function(payload){forward(ev,payload);});}catch(_){}});return true;}
+  function bind(){var ws=window.wsService||window.KynectaRealtime||window.realtimeService;if(!ws||typeof ws.on!=='function')return false;['status:new','status:created','status:deleted','status:viewed','status:reaction','status:reply'].forEach(function(ev){try{ws.on(ev,function(payload){forward(ev,payload);});}catch(_){}});return true;}
   if(!bind()){var n=0,t=setInterval(function(){if(bind()||++n>20)clearInterval(t);},500);}
 })();
 </script>

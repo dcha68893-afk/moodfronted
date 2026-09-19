@@ -30,7 +30,10 @@
     .ns-shell { width:100% !important; height:100% !important; max-width:none !important; max-height:none !important; border-radius:0 !important; }
 @media (max-width:768px){html,body,#necpa-status-root,#necpa-status-root.open,.ns-shell{width:100vw!important;height:100dvh!important;min-width:100%!important;min-height:100%!important;margin:0!important;padding:0!important}.ns-side{display:none!important}.ns-main{width:100%!important;height:100%!important;min-width:0!important;min-height:0!important}}
     .ns-main { min-width:0; min-height:0; }
-  </style>
+  
+#necpa-status-root,#necpa-status-root *{box-sizing:border-box}
+@media(max-width:768px){html,body{width:100%;height:100%;margin:0;padding:0;overflow:hidden}.ns-side{display:none!important}.ns-main{width:100%!important;min-width:0!important;height:100%!important}.ns-compose-box{width:100%!important;max-width:none!important}.ns-compose-tabs{grid-template-columns:repeat(4,minmax(0,1fr))!important}.ns-pane{min-width:0!important}.ns-textarea{width:100%!important;max-width:100%!important}.ns-compose-foot{position:sticky!important;bottom:0!important;z-index:10}}
+</style>
 </head>
 <body>
   <script src="/js/core/status/ProfessionalStatus.js"></script>
@@ -49,9 +52,6 @@
 
       function boot() {
         if (openProfessionalStatus()) {
-          try {
-            window.parent.postMessage({ type:'STATUS_PANEL_OPENED', source:'professional-status' }, '*');
-          } catch (_) {}
           return;
         }
         setTimeout(boot, 50);
