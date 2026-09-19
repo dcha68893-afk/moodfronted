@@ -6552,6 +6552,16 @@ function _resolveListingImg(l) {
 }
 window._JM_SERVICE_CAT_IMG = _JM_SERVICE_CAT_IMG;
 window._catImg = _catImg;
+// FIX-IMG-SCOPE: these helpers are declared INSIDE the _JumiaMPEngine IIFE (which opens
+// at "(function _JumiaMPEngine() {"), but renderers.addListingItem() and the detail
+// panel further up this file run at MODULE scope and call them as bare identifiers.
+// Function declarations are scoped to the IIFE, so those callers threw
+// "_getListingImage is not defined" (caught by the AddListingItem error boundary =>
+// every listing card failed to render). Bare-identifier lookups fall through to
+// window, so publishing them here fixes every module-scope caller (same pattern as
+// _catImg above). The IIFE's own callers keep using their local copies.
+window._getListingImage = _getListingImage;
+window._resolveListingImg = _resolveListingImg;
 
 // ── CSS injected once for the new category UI ──────────────────────────────
 (function _injectCatStyles() {
