@@ -6,6 +6,7 @@
   <title>Necpa — Status</title>
   <script src="/js/runtime-config.js"></script>
   <script src="/js/config.js"></script>
+  <script src="/js/theme.engine.js"></script>
   <script>
     // The Status module uses the same authenticated session and API origin
     // as the main Necpa shell. Keep this iframe visually independent from
@@ -19,6 +20,10 @@
     })();
   </script>
   <style>
+    /* The shell owns theme state. This iframe is a full-screen surface, so it
+       must inherit the shell palette before any visible content is painted. */
+    html[data-theme="dark"],html[data-theme="dark"] body{background:var(--kyn-bg-root,#0f172a)!important;color:var(--kyn-text-primary,#e5e7eb)!important}
+    html[data-theme="light"],html[data-theme="light"] body{background:var(--kyn-bg-root,#fff)!important;color:var(--kyn-text-primary,#111b21)!important}
     html, body { width:100%; height:100%; margin:0; padding:0; overflow:hidden; }
     body { background:var(--app-secondary-surface, transparent); color:var(--app-text-color, inherit); }
     /* ProfessionalStatus is the complete Status surface in this iframe.

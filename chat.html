@@ -23,6 +23,17 @@
     <script>window.API_BASE_URL = window.__getApiOrigin();</script>
     <script src="/js/theme.engine.js"></script>
     <script src="/js/panel-state-bridge.js"></script>
+    <style id="kynUnifiedShellTheme">
+        /* ONE SCREEN THEME: header, body, sidebar and bottom navigation all
+           consume the same ThemeEngine variables. No module may introduce a
+           separate first-paint palette. */
+        html,body{background:var(--kyn-bg-root)!important;color:var(--kyn-text-primary)!important}
+        #globalHeader{background:var(--kyn-bg-header)!important;border-color:var(--kyn-border)!important;color:var(--kyn-text-primary)!important}
+        #permanentSidebar{background:var(--kyn-bg-sidebar)!important;color:var(--kyn-text-primary)!important}
+        .mobile-nav-bar{background:var(--kyn-bg-navbar)!important;border-color:var(--kyn-navbar-border)!important;color:var(--kyn-text-primary)!important}
+        .mobile-nav-bar::before{box-shadow:20px 0 0 0 transparent,0 20px 0 0 var(--kyn-navbar-notch-shadow)!important}
+        #appContent,.app-content,.content-area,.main-content,.page-content{background:var(--kyn-bg-root)!important;color:var(--kyn-text-primary)!important}
+    </style>
     <style id="kynCriticalHeaderFix">
         /* FIX (header patchwork/sparking): the old selector included
            [class*="header"], [class*="topbar"], [class*="top-bar"], which

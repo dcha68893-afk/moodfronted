@@ -61,7 +61,6 @@
   // at most ONCE per message, no matter how many times patchMessage() is
   // called for it; every duplicate call just awaits the same result.
   const _pendingPlain = new Map();
-  const _pendingPlain = new Map();
   function patchMessage(m) {
     if (!m || m.id == null) return;
     const row = document.querySelector(`[data-message-id="${CSS.escape(String(m.id))}"]`);
@@ -108,9 +107,8 @@
     const gid=String(window.__GROUP_CHAT_ID); if(!gid) return;
     const localId=`group-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const plain=String(text||'');
-    _pendingPlain.set(localId,plain);
-    window.__NECPRA_GROUP_PENDING_PLAINTEXT?.set?.(String(localId),plain);
-    window.dispatchEvent(new CustomEvent('kyn:group:message',{detail:{groupId:gid,message:{id:`pending_${localId}`,localId,senderId:me(),content:plain,type,status:'sending',pending:true,createdAt:new Date().toISOString()}}}));
+    // The server response is the only canonical message row. Do not paint a
+    // temporary/fake bubble that must later be reconciled with the real row.
     try {
       let content='';
       if(plain){
@@ -127,9 +125,6 @@
       }
       return m;
     } catch(err) {
-      // A retry must reuse this logical client id rather than creating a
-      // second message. The current row stays the real optimistic row.
-      window.dispatchEvent(new CustomEvent('kyn:group:message',{detail:{groupId:gid,message:{id:`pending_${localId}`,localId,senderId:me(),content:plain,type,status:'failed',pending:true,createdAt:new Date().toISOString()}}}));
       throw err;
     }
   }
