@@ -2616,6 +2616,9 @@ app.post("/api/status", apiLimiter, authMiddleware, (req, res) => {
     visibility: req.body?.visibility || "friends",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    viewers: [],
+    viewCount: 0,
+    viewEvents: [],
   };
 
   statuses.unshift(createdStatus);
@@ -2667,29 +2670,101 @@ app.post("/api/status/:statusId/view", apiLimiter, authMiddleware, (req, res) =>
     return sendError(res, "Status not found", 404);
   }
 
-  status.viewers = Array.isArray(status.viewers) ? status.viewers : [];
-  if (!status.viewers.includes(String(req.user.id))) {
-    status.viewers.push(String(req.user.id));
+  const viewerId = String(req.user.id);
+  const ownerId = String(statusOwnerId);
+
+  // Opening your own status is never a view.
+  if (viewerId === ownerId) {
+    return sendSuccess(res, {
+      statusId,
+      viewCount: Number(status.viewCount || 0),
+      viewed: false,
+      self: true,
+      created: false,
+    }, 200, "Own status view ignored");
   }
-  status.viewCount = status.viewers.length;
-  status.updatedAt = new Date().toISOString();
+
+  // Keep a unique viewer list for the viewer list, but count every actual
+  // viewing event. Re-opening the same status therefore increments viewCount.
+  status.viewers = Array.isArray(status.viewers) ? status.viewers.map(String) : [];
+  const firstViewByUser = !status.viewers.includes(viewerId);
+  if (firstViewByUser) status.viewers.push(viewerId);
+
+  status.viewEvents = Array.isArray(status.viewEvents) ? status.viewEvents : [];
+  const viewedAt = new Date().toISOString();
+  status.viewEvents.push({
+    id: "status_view_" + Date.now() + "_" + crypto.randomBytes(3).toString("hex"),
+    viewerId,
+    viewedAt,
+  });
+  status.viewCount = Number(status.viewCount || 0) + 1;
+  status.updatedAt = viewedAt;
 
   const payload = {
     statusId,
-    userId: statusOwnerId,
-    viewerId: req.user.id,
+    userId: ownerId,
+    viewerId,
     viewerCount: status.viewCount,
+    uniqueViewerCount: status.viewers.length,
+    firstViewByUser,
     timestamp: Date.now(),
   };
-  webSocketService.sendToUser(statusOwnerId, "status:viewed", payload);
-  webSocketService.sendToUser(statusOwnerId, "status:viewer_update", payload);
-  webSocketService.sendToUser(req.user.id, "status:viewer_update", payload);
+  webSocketService.sendToUser(ownerId, "status:viewed", payload);
+  webSocketService.sendToUser(ownerId, "status:viewer_update", payload);
+  webSocketService.sendToUser(viewerId, "status:viewer_update", payload);
 
   return sendSuccess(res, {
     statusId,
     viewCount: status.viewCount,
+    uniqueViewerCount: status.viewers.length,
     viewed: true,
+    created: true,
+    firstViewByUser,
   }, 200, "Status view tracked");
+});
+
+app.get("/api/status/:statusId/viewers", apiLimiter, authMiddleware, (req, res) => {
+  const statusId = String(req.params.statusId);
+  const ownerEntry = Array.from(devState.statuses.entries())
+    .find(([, entries]) => entries.some((status) => String(status.id) === statusId));
+  if (!ownerEntry) return sendError(res, "Status not found", 404);
+
+  const [statusOwnerId] = ownerEntry;
+  const status = ensureUserBucket(devState.statuses, statusOwnerId, () => [])
+    .find((entry) => String(entry.id) === statusId);
+  if (!status) return sendError(res, "Status not found", 404);
+
+  const viewerIds = Array.isArray(status.viewers) ? status.viewers.map(String) : [];
+  const events = Array.isArray(status.viewEvents) ? status.viewEvents : [];
+  const latestByViewer = new Map();
+  events.forEach((event) => {
+    const id = String(event?.viewerId || "");
+    if (id) latestByViewer.set(id, event.viewedAt || null);
+  });
+
+  const viewers = viewerIds.map((viewerId) => {
+    const profile = getUserProfile(viewerId) || ensureSeedUser(viewerId);
+    return {
+      viewerId,
+      viewedAt: latestByViewer.get(viewerId) || null,
+      viewCount: events.filter((event) => String(event?.viewerId) === viewerId).length,
+      viewer: {
+        id: String(profile.id),
+        userId: String(profile.id),
+        displayName: profile.displayName || profile.username || viewerId,
+        username: profile.username || viewerId,
+        avatar: profile.avatar || profile.photoURL || null,
+        photoURL: profile.avatar || profile.photoURL || null,
+      },
+    };
+  }).sort((a, b) => Date.parse(b.viewedAt || 0) - Date.parse(a.viewedAt || 0));
+
+  return sendSuccess(res, {
+    statusId,
+    viewCount: Number(status.viewCount || events.length),
+    uniqueViewerCount: viewers.length,
+    viewers,
+  }, 200, "Status viewers loaded");
 });
 
 app.post("/api/status/:statusId/reply", apiLimiter, authMiddleware, (req, res) => {
