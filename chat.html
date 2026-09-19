@@ -3291,7 +3291,13 @@
                 }
                 document.body.classList.remove('group-panel-active');
             }
-            if (page !== 'status') document.body.classList.remove('status-panel-active');
+            if (page === 'status' && window.innerWidth <= 768) {
+                // Status is a single full-screen mobile surface. Do not wait for
+                // the iframe to finish booting before hiding the parent panels.
+                document.body.classList.add('status-panel-active');
+            } else if (page !== 'status') {
+                document.body.classList.remove('status-panel-active');
+            }
 
             // BUG FIX (no icon nav after a call ends / after leaving a screen):
             // chat-panel-active hides .mobile-nav-bar (see CSS), and this used
