@@ -269,15 +269,36 @@
         catch (_) { return false; }
     }
 
+    // ROOT-CAUSE FIX (SIDEBAR-STUCK-ON-"Decrypting…"-EVEN-AFTER-OPENING):
+    // loadConversations() calls decryptForDisplay() directly for every
+    // conversation's last message so the sidebar preview can resolve without
+    // requiring the chat to be opened first — but this function's own bucket
+    // lookups below used to be `state.messagesByConversation.get(chatId)`
+    // (returns undefined for any conversation that has genuinely never been
+    // opened this session, since only openChat()/loadHistory() ever call
+    // getOrCreateConversationBucket() to actually create one) gated with
+    // `if (bucket && bucket.has(message.id))`. For an unopened conversation
+    // BOTH conditions failed — decryptMessageForDisplay() below still ran
+    // and genuinely succeeded, but the result was silently discarded because
+    // syncLastMessageDisplay() (the only thing that ever writes into
+    // conv.lastMessage.displayContent) lives entirely inside that gated
+    // block. The sidebar preview was left on whatever placeholder it started
+    // with ("Decrypting…") forever — not because decryption failed, but
+    // because a real, successful result had nowhere it was allowed to land.
+    // Opening the chat later creates the bucket via a fresh loadHistory()
+    // call and decrypts fine there, which is exactly why the message showed
+    // correctly inside the conversation while the list preview stayed stuck.
+    // Fix: always get-or-create the bucket, and always seed it with this
+    // message if it isn't already present, so the gate can never suppress a
+    // genuine result again.
     async function decryptForDisplay(chatId, message) {
         if (message.displayContent !== undefined) return; // already resolved (e.g. our own just-sent message)
         if (!looksLikeEnvelope(message.content)) {
-            const bucket = state.messagesByConversation.get(chatId);
-            if (bucket && bucket.has(message.id)) {
-                bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: message.content }));
-                syncLastMessageDisplay(chatId, message.id, message.content);
-                persistMessage(chatId, bucket.get(message.id));
-            }
+            const bucket = getOrCreateConversationBucket(chatId);
+            if (!bucket.has(message.id)) bucket.set(message.id, message);
+            bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: message.content }));
+            syncLastMessageDisplay(chatId, message.id, message.content);
+            persistMessage(chatId, bucket.get(message.id));
             return;
         }
         // FIX (CANONICAL-E2E-RACE): wait for the canonical core to be patched
@@ -309,13 +330,16 @@
                 // small per-bubble indicator instead of leaving the person
                 // guessing which scheme actually protected a given message.
                 onResolved: (resolvedText, decryptVersion) => {
-                    const bucket = state.messagesByConversation.get(chatId);
-                    if (bucket && bucket.has(message.id)) {
-                        bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: resolvedText, decryptVersion: decryptVersion || bucket.get(message.id).decryptVersion || null }));
-                        syncLastMessageDisplay(chatId, message.id, resolvedText);
-                        notify('message:decrypted', { chatId, messageId: message.id });
-                        persistMessage(chatId, bucket.get(message.id));
-                    }
+                    // See ROOT-CAUSE FIX (SIDEBAR-STUCK-ON-"Decrypting…") above
+                    // decryptForDisplay()'s declaration — same get-or-create,
+                    // same reason: this must not silently drop a genuine
+                    // result just because the chat has never been opened.
+                    const bucket = getOrCreateConversationBucket(chatId);
+                    if (!bucket.has(message.id)) bucket.set(message.id, message);
+                    bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: resolvedText, decryptVersion: decryptVersion || bucket.get(message.id).decryptVersion || null }));
+                    syncLastMessageDisplay(chatId, message.id, resolvedText);
+                    notify('message:decrypted', { chatId, messageId: message.id });
+                    persistMessage(chatId, bucket.get(message.id));
                 },
             });
             const isQueued = typeof window.KynectaE2E.isMessageQueued === 'function' && window.KynectaE2E.isMessageQueued(message);
@@ -328,8 +352,9 @@
             // gives a third, final state.
             const displayValue = isFailed ? '🔒 Unable to decrypt this message'
               : (isQueued && plaintext === DECRYPT_FALLBACK) ? 'Decrypting…' : plaintext;
-            const bucket = state.messagesByConversation.get(chatId);
-            if (bucket && bucket.has(message.id)) {
+            const bucket = getOrCreateConversationBucket(chatId);
+            if (!bucket.has(message.id)) bucket.set(message.id, message);
+            {
                 // Covers the cache-hit path above: decryptMessageForDisplay()
                 // returns straight from its internal cache without ever
                 // calling onResolved when a message was already decrypted
@@ -367,11 +392,10 @@
                 }
             }
         } catch (_) {
-            const bucket = state.messagesByConversation.get(chatId);
-            if (bucket && bucket.has(message.id)) {
-                bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: '🔒 Encrypted message' }));
-                syncLastMessageDisplay(chatId, message.id, '🔒 Encrypted message', false);
-            }
+            const bucket = getOrCreateConversationBucket(chatId);
+            if (!bucket.has(message.id)) bucket.set(message.id, message);
+            bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: '🔒 Encrypted message' }));
+            syncLastMessageDisplay(chatId, message.id, '🔒 Encrypted message', false);
         }
     }
 

@@ -87,6 +87,85 @@ async function ensureE2EReady(){
 }
 ensureE2EReady();
 function groupMemberIds(g){const list=Array.isArray(g?.participants)?g.participants:[];return[...new Set(list.map(p=>Number((p.user||p).id??p.userId)).filter(n=>Number.isInteger(n)&&n>0))]}
+
+// ROOT-CAUSE FIX (GROUP-MESSAGES-PERMANENTLY-FLIP-TO-"[Unable to decrypt
+// this message]" WHENEVER A NEW MESSAGE ARRIVES): this file's decryptRow()
+// used to send EVERY group message straight to
+// window.KynectaGroupE2E.decryptForGroup() (js/groupEncryption.client.js) —
+// but that has not been the encryption scheme actually used for outgoing
+// group messages for some time. The real send path is
+// js/group-mobile-navigation.js's installSendHook()/send(), which produces
+// a `{v:6, kind:'group-e2e-fanout', senderId, recipients:{<userId>:
+// <Double-Ratchet envelope>}, senderCopy}` envelope via the SAME v3 Double
+// Ratchet engine 1:1 chat uses (js/message-e2e-core.js), one independently
+// ratcheted copy per recipient. decryptForGroup() has no idea how to read
+// that shape, so it always failed — but the failure was invisible most of
+// the time because group-mobile-navigation.js's OWN patchMessage() (using
+// the correct engine) separately patches the DOM text node directly,
+// out-of-band from S.messages/this file's own render pipeline. The instant
+// ANY new message triggers reconcile()/renderMessages() again — a reply
+// arriving, the 5s poll, opening the group fresh — renderMessages() rebuilds
+// every row from S.messages, whose `.content` for older messages is still
+// decryptForGroup()'s permanent failure placeholder (patchMessage() never
+// wrote its correct result back into S.messages, only into the now-discarded
+// DOM node), so every previously-fine message visibly reverts to "[Unable
+// to decrypt this message]" until patchMessage() happens to re-patch it.
+// Fix: give decryptRow() (the actual source of truth for S.messages/render)
+// the same v6-fanout-aware decrypt logic group-mobile-navigation.js uses,
+// so decryption succeeds at the DATA level and survives every re-render —
+// no more racing DOM patch needed. Falls back to the legacy
+// decryptForGroup() only for content that isn't a v6 fanout envelope (older
+// pre-switchover history, if any still exists), never the other way
+// around — this is a same-strength decrypt swap, not a security downgrade.
+const _fanoutCrypto = { mod: null };
+function _fanoutEnvelope(content) {
+  try { const o = JSON.parse(content); return (o && o.v === 6 && o.kind === 'group-e2e-fanout') ? o : null; }
+  catch (_) { return null; }
+}
+function _fanoutLoadScript(src) {
+  return new Promise((resolve, reject) => {
+    if (document.querySelector(`script[data-necpra-fanout-crypto="${src}"]`)) return resolve();
+    const s = document.createElement('script'); s.src = src; s.async = false; s.dataset.necpraFanoutCrypto = src;
+    s.onload = resolve; s.onerror = reject; (document.head || document.documentElement).appendChild(s);
+  });
+}
+async function _fanoutCryptoReady() {
+  if (_fanoutCrypto.mod) return _fanoutCrypto.mod;
+  _fanoutCrypto.mod = (async () => {
+    if (!window.KynectaE2EIdentity) await _fanoutLoadScript('/js/e2e-identity-core.js');
+    if (!window.KynectaRatchet) await _fanoutLoadScript('/js/e2e-ratchet-v3.js');
+    if (!window.KynectaMessageE2E) await _fanoutLoadScript('/js/message-e2e-core.js');
+    await window.KynectaMessageE2E.init();
+    return window.KynectaMessageE2E;
+  })().catch(err => { _fanoutCrypto.mod = null; throw err; });
+  return _fanoutCrypto.mod;
+}
+function _fanoutB64(bytes) { let s = ''; const a = new Uint8Array(bytes); for (let i = 0; i < a.length; i++) s += String.fromCharCode(a[i]); return btoa(s); }
+function _fanoutUnb64(s) { const b = atob(s), a = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) a[i] = b.charCodeAt(i); return a; }
+// Same localStorage-backed AES-GCM "local copy" key group-mobile-navigation.js
+// uses for your own sent messages (same key name, so both scripts share it
+// transparently — no coordination needed beyond the shared localStorage key).
+async function _fanoutSenderKey() {
+  const id = uid(); if (!id) throw new Error('User identity unavailable');
+  const keyName = `necpra_group_sender_key_${id}`;
+  let raw = localStorage.getItem(keyName); const wc = window.crypto;
+  if (!raw) { raw = _fanoutB64(wc.getRandomValues(new Uint8Array(32))); localStorage.setItem(keyName, raw); }
+  return wc.subtle.importKey('raw', _fanoutUnb64(raw), 'AES-GCM', false, ['encrypt', 'decrypt']);
+}
+async function _fanoutSenderOpen(copy) {
+  try { const key = await _fanoutSenderKey(), wc = window.crypto; const pt = await wc.subtle.decrypt({ name: 'AES-GCM', iv: _fanoutUnb64(copy.iv) }, key, _fanoutUnb64(copy.ct)); return new TextDecoder().decode(pt); }
+  catch (_) { return '🔒 Unable to decrypt your local group copy.'; }
+}
+async function decryptGroupContent(content, gid, senderId) {
+  const fanout = _fanoutEnvelope(content);
+  if (!fanout) return window.KynectaGroupE2E.decryptForGroup(gid, content, groupMemberIds(S.current));
+  const actualSender = senderId ?? fanout.senderId;
+  if (String(actualSender) === uid() && fanout.senderCopy) return _fanoutSenderOpen(fanout.senderCopy);
+  const entry = fanout.recipients && fanout.recipients[uid()];
+  if (!entry) return '🔒 This group message is unavailable on this device.';
+  const mod = await _fanoutCryptoReady();
+  return mod.decryptFromChat(entry, Number(gid), Number(actualSender), false, `group-${gid}-${actualSender || ''}`);
+}
 // Decrypts one message's `content` in place (returns a shallow copy).
 // Attachments carry their payload in metadata.media, not content, so they
 // pass through untouched; anything that isn't our envelope shape is
@@ -132,10 +211,10 @@ async function decryptRow(m){
     if(cached.ciphertext===null&&cached.isEdited===!!m.isEdited)return Object.assign({},m,{content:cached.plain});
   }
   try{
-    const plain=await window.KynectaGroupE2E.decryptForGroup(S.current?.id??m.chatId,m.content,groupMemberIds(S.current));
+    const plain=await decryptGroupContent(m.content,S.current?.id??m.chatId,m.senderId);
     if(id)_decryptedCache.set(id,{ciphertext:m.content,plain,isEdited:!!m.isEdited});
     return Object.assign({},m,{content:plain});
-  }catch(e){return Object.assign({},m,{content:'[Unable to decrypt this message]'})}
+  }catch(e){console.error('[GroupDecrypt] decryptRow failed:',e&&e.message||e);return Object.assign({},m,{content:'[Unable to decrypt this message]'})}
 }
 function decryptRows(list){return Promise.all(list.map(decryptRow))}
 
@@ -226,7 +305,7 @@ async function renderPins(){const box=$('pinnedBar');if(!S.pins.length){box.inne
   // render it raw.
   const decryptedPins=await Promise.all(S.pins.map(async p=>{
     if(!p?.message?.content)return p;
-    try{const plain=await window.KynectaGroupE2E.decryptForGroup(S.current?.id,p.message.content,groupMemberIds(S.current));return{...p,message:{...p.message,content:plain}}}
+    try{const plain=await decryptGroupContent(p.message.content,S.current?.id,p.message.senderId);return{...p,message:{...p.message,content:plain}}}
     catch(_){return{...p,message:{...p.message,content:'[Unable to decrypt this message]'}}}
   }));
   box.innerHTML='';for(const p of decryptedPins){const row=document.createElement('div');row.className='pin-item';row.innerHTML=`<b>${esc(p.pinnedBy?.displayName||'Someone')}</b> pinned: ${esc((p.message?.content||'').slice(0,140))}<span class="unpin">Unpin</span>`;row.querySelector('.unpin').onclick=async ev=>{ev.stopPropagation();try{await api(`/pins/${encodeURIComponent(S.current.id)}/${encodeURIComponent(p.messageId)}`,{method:'DELETE'});await loadPins();renderPins()}catch(e){alert(e.message)}};box.append(row)}}
