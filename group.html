@@ -270,8 +270,8 @@ function buildRow(m){const id=String(m.id||m.messageId||'');const row=document.c
   row.append(b);return row}
 
 function renderMessages(scroll=true){const box=$('messages');if(!box)return;box.replaceChildren();if(!S.messages.length){box.innerHTML='<div class="empty">No messages yet.</div>'}else{for(const m of S.messages)box.append(buildRow(m));if(scroll)box.scrollTop=box.scrollHeight}window.__GROUP_MESSAGES_CACHE=S.messages.slice();window.__GROUP_REFRESH_MESSAGES=loadMessages}
-function reconcile(list){const map=new Map();for(const m of S.messages)map.set(String(m.id||m.messageId),m);for(const m of list)map.set(String(m.id||m.messageId),m);const merged=[...map.values()].sort((a,b)=>Number(a.id||0)-Number(b.id||0));const changed=merged.length!==S.messages.length||merged.some((m,i)=>String(m.id||m.messageId)!==String(S.messages[i]?.id||S.messages[i]?.messageId)||m.content!==S.messages[i]?.content||m.isEdited!==S.messages[i]?.isEdited);if(changed){const box=$('messages'),near=box&&box.scrollHeight-box.scrollTop-box.clientHeight<80;S.messages=merged;renderMessages(near)}}
-async function loadMessages(){if(!S.current?.id)return;const id=String(S.current.id);try{const r=await api(`/messages/${encodeURIComponent(id)}?limit=100`);if(!S.current||String(S.current.id)!==id)return;const decrypted=await decryptRows(normalizeMessages(r));if(!S.current||String(S.current.id)!==id)return;reconcile(decrypted)}catch(e){if(!S.messages.length){const box=$('messages');if(box)box.innerHTML=`<div class="empty">Unable to load messages.<br>${esc(e.message)}</div>`}}}
+function reconcile(list){const map=new Map();for(const m of S.messages){if(m.pending)continue;map.set(String(m.localId||m.id||m.messageId),m)}for(const m of list)map.set(String(m.localId||m.id||m.messageId),m);const merged=[...map.values()].sort((a,b)=>Number(a.id||0)-Number(b.id||0));const changed=merged.length!==S.messages.length||merged.some((m,i)=>String(m.id||m.messageId)!==String(S.messages[i]?.id||S.messages[i]?.messageId)||m.content!==S.messages[i]?.content||m.isEdited!==S.messages[i]?.isEdited);if(changed){const box=$('messages'),near=box&&box.scrollHeight-box.scrollTop-box.clientHeight<80;S.messages=merged;renderMessages(near)}}
+async function loadMessages(){if(!S.current?.id)return;const id=String(S.current.id);try{const r=await api(`/groups/${encodeURIComponent(id)}/messages?limit=100`);if(!S.current||String(S.current.id)!==id)return;const decrypted=await decryptRows(normalizeMessages(r));if(!S.current||String(S.current.id)!==id)return;reconcile(decrypted)}catch(e){if(!S.messages.length){const box=$('messages');if(box)box.innerHTML=`<div class="empty">Unable to load messages.<br>${esc(e.message)}</div>`}}}
 
 function startEdit(id,currentContent){const next=prompt('Edit message:',currentContent);if(next==null)return;const trimmed=next.trim();if(!trimmed||trimmed===currentContent)return;(async()=>{
   // SECURITY FIX (GROUP-MESSAGES-SENT-PLAINTEXT): same bug as sendMessage()
@@ -420,6 +420,8 @@ function markRead(groupId){const k=String(groupId);if(!S.unread[k])return;delete
 // discarded, and loadMessages() (already called by openGroup()) picks up
 // the real content the next time that group is opened.
 function handleRealtime(ev){
+    const early=ev?.detail||ev||{};
+    if(early.message?.pending){if(!S.messages.some(m=>String(m.localId||'')===String(early.message.localId||''))){S.messages.push(early.message);renderMessages(true);}return;}
     const d=ev?.detail||ev||{};
     const groupId=d.groupId??d.message?.groupId??d.payload?.groupId??d.payload?.message?.groupId;
     const message=d.message??d.payload?.message??d.payload;

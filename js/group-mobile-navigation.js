@@ -117,7 +117,7 @@
     if (!Array.isArray(rows)) rows = [];
     if (!Array.isArray(rows)) rows = [];
     setTimeout(() => rows.forEach(patchMessage), 100);
-    const incoming = rows.filter(m => Number(m.senderId) !== Number(me())).map(m => Number(m.id)).filter(Boolean);
+    const incoming = rows.filter(m => Number(m.senderId) !== Number(me())).map(m => String(m.id)).filter(Boolean);
     if (incoming.length) {
       try { await api(`/groups/${encodeURIComponent(gid)}/messages/read`, { method: 'POST', body: JSON.stringify({ messageIds: incoming }) }); } catch (_) {}
     }
@@ -137,9 +137,11 @@
   // the one kept; this file now only owns encrypted text sending (below),
   // not composer UI.
   async function send(text, type='text', metadata=null) {
-    const gid=Number(window.__GROUP_CHAT_ID); if(!gid) return;
+    const gid=String(window.__GROUP_CHAT_ID); if(!gid) return;
+    const localId=`group-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    window.dispatchEvent(new CustomEvent('kyn:group:message',{detail:{groupId:gid,message:{id:`pending_${localId}`,localId,senderId:me(),content:text,type,status:'pending',pending:true,createdAt:new Date().toISOString()}}}));
     const content=text ? await encryptText(text,gid) : '';
-    const r=await api(`/groups/${encodeURIComponent(gid)}/messages`,{method:'POST',body:JSON.stringify({content,type,localId:`group-${Date.now()}-${Math.random().toString(36).slice(2)}`,metadata})});
+    const r=await api(`/groups/${encodeURIComponent(gid)}/messages`,{method:'POST',body:JSON.stringify({content,type,localId,metadata})});
     const m=r?.data?.message||r?.data;
     if(m){ window.dispatchEvent(new CustomEvent('kyn:group:message',{detail:{groupId:gid,message:m}})); setTimeout(()=>patchMessage(m),80); }
   }
