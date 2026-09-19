@@ -2645,8 +2645,15 @@ app.post("/api/status", apiLimiter, authMiddleware, (req, res) => {
 });
 
 app.get("/api/status/friends", apiLimiter, authMiddleware, (req, res) => {
-  const statuses = getAcceptedFriendIds(req.user.id)
+  const viewerId = String(req.user.id);
+  const statuses = getAcceptedFriendIds(viewerId)
     .flatMap((friendId) => ensureUserBucket(devState.statuses, friendId, () => []))
+    .map((status) => ({
+      ...status,
+      viewers: Array.isArray(status.viewers) ? status.viewers : [],
+      viewCount: Number(status.viewCount || 0),
+      viewedByMe: Array.isArray(status.viewers) && status.viewers.map(String).includes(viewerId),
+    }))
     .sort((left, right) => Date.parse(right.createdAt || 0) - Date.parse(left.createdAt || 0));
 
   return res.status(200).json({
