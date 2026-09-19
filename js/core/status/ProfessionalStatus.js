@@ -194,9 +194,14 @@ async function openUser(userId){
  try{const data=(await api('/user/'+encodeURIComponent(userId))).data||[];if(data.length){state.viewerGroup=data;state.index=0;showViewer()}}catch(e){toast(e.message)}
 }
 async function openViewer(id){
- let idx=state.statuses.findIndex(s=>s.id===id);if(idx<0)return;
- const s=state.statuses[idx];const same=state.statuses.filter(x=>String(x.userId)===String(s.userId));
- state.viewerGroup=same.length?same:[s];state.index=Math.max(0,same.findIndex(x=>x.id===id));showViewer();
+ const idx=state.statuses.findIndex(s=>String(s.id)===String(id));
+ if(idx<0)return;
+ // One continuous viewer sequence, like the normal status experience:
+ // tapping the current story advances to the next story, including the next
+ // person, instead of ending after the current person's last story.
+ state.viewerGroup=state.statuses.slice();
+ state.index=idx;
+ showViewer();
 }
 function showViewer(){
  const s=state.viewerGroup[state.index];if(!s)return;
@@ -335,6 +340,7 @@ function previewMedia(){
 async function publish(){
  const root=document.querySelector('[data-composer]'),c=state.composer;const btn=root.querySelector('[data-publish]');btn.disabled=true;btn.textContent='Publishing…';
  try{
+  if((type==='image'||type==='video')&&!c.media?.file) throw new Error('Choose an image or video before publishing.');
   let media={};
   if(c.media){const fd=new FormData();fd.append('file',c.media.file);fd.append('trimStart',String(c.media.trimStart||0));fd.append('trimEnd',String(c.media.trimEnd||Math.min(Number(c.media.sourceDuration||20),20)));fd.append('sourceDuration',String(c.media.sourceDuration||0));const t=token();const r=await fetch(uploadUrl(),{method:'POST',headers:t?{Authorization:/^Bearer /i.test(t)?t:'Bearer '+t}:{},body:fd});const d=await r.json();if(!r.ok||!d.success)throw new Error(d.error||'Media upload failed');const uploaded=d?.data?.cloudinary||d?.cloudinary||d; const mediaUrl=uploaded?.url||uploaded?.secure_url||d?.url; const mediaPublicId=uploaded?.public_id||uploaded?.publicId||d?.publicId; if(!mediaUrl)throw new Error('Media upload succeeded but no media URL was returned'); media={mediaUrl,mediaPublicId,mediaMime:c.media.file.type};}
   const activePane=root.querySelector('.ns-pane.active')?.dataset.pane;
