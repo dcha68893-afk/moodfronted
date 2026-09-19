@@ -112,7 +112,11 @@
     window.__NECPRA_GROUP_PENDING_PLAINTEXT?.set?.(String(localId),plain);
     window.dispatchEvent(new CustomEvent('kyn:group:message',{detail:{groupId:gid,message:{id:`pending_${localId}`,localId,senderId:me(),content:plain,type,status:'sending',pending:true,createdAt:new Date().toISOString()}}}));
     try {
-      const content=plain ? await encryptText(plain,gid) : '';
+      let content='';
+      if(plain){
+        if(!window.KynectaGroupE2E?.encryptForGroup) throw new Error('Secure group messaging is not ready yet');
+        content=await window.KynectaGroupE2E.encryptForGroup(Number(gid),plain,groupMemberIds());
+      }
       const r=await api(`/groups/${encodeURIComponent(gid)}/messages`,{method:'POST',body:JSON.stringify({content,type,localId,clientMessageId:localId,metadata})});
       const m=r?.data?.message||r?.data;
       if(m){
