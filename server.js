@@ -1433,12 +1433,17 @@ function serializeGroupForViewer(rawGroup, viewerId, { includeMessages = false, 
   const role = getGroupUserRole(group, viewerId);
   const isCreator = String(group.createdBy) === String(viewerId);
   const isAdmin = role === "owner" || role === "admin";
+  const unreadCount = group.messages.filter((message) =>
+    String(message?.senderId) !== String(viewerId) &&
+    !uniqueIds(message?.seenBy || []).includes(String(viewerId))
+  ).length;
 
   return {
     ...group,
     role,
     isCreator,
     isAdmin,
+    unreadCount,
     memberCount: group.memberIds.length,
     stats: {
       totalMembers: group.memberIds.length,
@@ -2623,6 +2628,7 @@ app.post("/api/status", apiLimiter, authMiddleware, (req, res) => {
 
   statuses.unshift(createdStatus);
   if (dedupeKey) devState.idempotencyKeys.set(dedupeKey, createdStatus.id);
+  scheduleDevStatePersist();
 
   const recipients = new Set([String(req.user.id), ...getAcceptedFriendIds(req.user.id)]);
   recipients.forEach((targetUserId) => {
@@ -2691,21 +2697,27 @@ app.post("/api/status/:statusId/view", apiLimiter, authMiddleware, (req, res) =>
     }, 200, "Own status view ignored");
   }
 
-  // Keep a unique viewer list for the viewer list, but count every actual
-  // viewing event. Re-opening the same status therefore increments viewCount.
-  status.viewers = Array.isArray(status.viewers) ? status.viewers.map(String) : [];
+  // Count one view per friend. Replaying/re-opening the same status by the
+  // same friend does not increase the total a second time.
+  status.viewers = Array.isArray(status.viewers)
+    ? Array.from(new Set(status.viewers.map(String)))
+    : [];
   const firstViewByUser = !status.viewers.includes(viewerId);
-  if (firstViewByUser) status.viewers.push(viewerId);
-
-  status.viewEvents = Array.isArray(status.viewEvents) ? status.viewEvents : [];
   const viewedAt = new Date().toISOString();
-  status.viewEvents.push({
-    id: "status_view_" + Date.now() + "_" + crypto.randomBytes(3).toString("hex"),
-    viewerId,
-    viewedAt,
-  });
-  status.viewCount = Number(status.viewCount || 0) + 1;
-  status.updatedAt = viewedAt;
+  if (firstViewByUser) {
+    status.viewers.push(viewerId);
+    status.viewCount = status.viewers.length;
+    status.viewEvents = Array.isArray(status.viewEvents) ? status.viewEvents : [];
+    status.viewEvents.push({
+      id: "status_view_" + Date.now() + "_" + crypto.randomBytes(3).toString("hex"),
+      viewerId,
+      viewedAt,
+    });
+    status.updatedAt = viewedAt;
+    scheduleDevStatePersist();
+  } else {
+    status.viewCount = status.viewers.length;
+  }
 
   const payload = {
     statusId,
@@ -2725,9 +2737,9 @@ app.post("/api/status/:statusId/view", apiLimiter, authMiddleware, (req, res) =>
     viewCount: status.viewCount,
     uniqueViewerCount: status.viewers.length,
     viewed: true,
-    created: true,
+    created: firstViewByUser,
     firstViewByUser,
-  }, 200, "Status view tracked");
+  }, 200, firstViewByUser ? "Status view counted" : "Status already viewed by this friend");
 });
 
 app.get("/api/status/:statusId/viewers", apiLimiter, authMiddleware, (req, res) => {
@@ -2754,7 +2766,7 @@ app.get("/api/status/:statusId/viewers", apiLimiter, authMiddleware, (req, res) 
     return {
       viewerId,
       viewedAt: latestByViewer.get(viewerId) || null,
-      viewCount: events.filter((event) => String(event?.viewerId) === viewerId).length,
+      viewCount: 1,
       viewer: {
         id: String(profile.id),
         userId: String(profile.id),
@@ -2768,7 +2780,7 @@ app.get("/api/status/:statusId/viewers", apiLimiter, authMiddleware, (req, res) 
 
   return sendSuccess(res, {
     statusId,
-    viewCount: Number(status.viewCount || events.length),
+    viewCount: Number(status.viewCount || viewers.length),
     uniqueViewerCount: viewers.length,
     viewers,
   }, 200, "Status viewers loaded");
@@ -3847,12 +3859,12 @@ app.post("/api/messages", apiLimiter, authMiddleware, (req, res) => {
     createdAt,
     updatedAt: createdAt,
     sentAt: createdAt,
-    deliveredAt: null,
+    deliveredAt: recipientIds.length > 0 ? createdAt : null,
     readAt: null,
-    status: "sent",
+    status: recipientIds.length > 0 ? "delivered" : "sent",
     deletedFor: [],
     deletedForEveryone: false,
-    deliveredTo,
+    deliveredTo: [...recipientIds],
     seenBy: [senderId],
     batchId: req.body?.batchId || null,
     replyVisibility,
@@ -3879,7 +3891,7 @@ app.post("/api/messages", apiLimiter, authMiddleware, (req, res) => {
     serverId: messageId,
     chatId,
     createdAt,
-    status: "sent",
+    status: recipientIds.length > 0 ? "delivered" : "sent",
   });
   webSocketService.sendToUser(senderId, "message:sent", {
     messageId,
@@ -3887,14 +3899,14 @@ app.post("/api/messages", apiLimiter, authMiddleware, (req, res) => {
     serverId: messageId,
     chatId,
     createdAt,
-    status: "sent",
+    status: recipientIds.length > 0 ? "delivered" : "sent",
   });
 
   return sendSuccess(res, {
     message,
     chatId,
     conversation: buildChatSummaryForUser(senderId, ensureChatRecord(senderId, chatId, normalizedParticipants)),
-    delivered: false,
+    delivered: recipientIds.length > 0,
   }, 201, "Message created");
 });
 

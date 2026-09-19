@@ -112,16 +112,14 @@
       try { await window.__GROUP_REFRESH_MESSAGES(); } catch (_) {}
     }
     let r = null;
-    try { r = await api(`/messages/${encodeURIComponent(gid)}?limit=100`); } catch (_) {}
-    let rows = r?.data?.messages || r?.data || r?.messages || [];
-    if (!Array.isArray(rows) || !rows.length) {
-      try { const s = await api(`/messages/${encodeURIComponent(gid)}/sync?limit=100`); rows = s?.data || []; } catch (_) { rows = []; }
-    }
+    try { r = await api(`/groups/${encodeURIComponent(gid)}/messages?limit=100`); } catch (_) {}
+    let rows = r?.data || r?.data?.messages || r?.messages || [];
+    if (!Array.isArray(rows)) rows = [];
     if (!Array.isArray(rows)) rows = [];
     setTimeout(() => rows.forEach(patchMessage), 100);
     const incoming = rows.filter(m => Number(m.senderId) !== Number(me())).map(m => Number(m.id)).filter(Boolean);
     if (incoming.length) {
-      try { await api('/messages/read', { method: 'POST', body: JSON.stringify({ messageIds: incoming }) }); } catch (_) {}
+      try { await api(`/groups/${encodeURIComponent(gid)}/messages/read`, { method: 'POST', body: JSON.stringify({ messageIds: incoming }) }); } catch (_) {}
     }
     if (typeof window.__GROUP_REFRESH_MESSAGES === 'function') {
       try { await window.__GROUP_REFRESH_MESSAGES(); } catch (_) {}
@@ -141,7 +139,7 @@
   async function send(text, type='text', metadata=null) {
     const gid=Number(window.__GROUP_CHAT_ID); if(!gid) return;
     const content=text ? await encryptText(text,gid) : '';
-    const r=await api('/messages',{method:'POST',body:JSON.stringify({chatId:gid,content,type,clientMessageId:`group-${Date.now()}-${Math.random().toString(36).slice(2)}`,metadata})});
+    const r=await api(`/groups/${encodeURIComponent(gid)}/messages`,{method:'POST',body:JSON.stringify({content,type,localId:`group-${Date.now()}-${Math.random().toString(36).slice(2)}`,metadata})});
     const m=r?.data?.message||r?.data;
     if(m){ window.dispatchEvent(new CustomEvent('kyn:group:message',{detail:{groupId:gid,message:m}})); setTimeout(()=>patchMessage(m),80); }
   }
@@ -150,6 +148,14 @@
     const submit=e=>{ if(!window.__GROUP_CHAT_ID)return; e.preventDefault(); e.stopImmediatePropagation(); const t=input.value.trim(); if(!t)return; input.value=''; send(t,'text',null).catch(err=>{alert(`Unable to send message: ${err.message||err}`);input.value=t;}); };
     button.addEventListener('click',submit,true); input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey)submit(e)},true);
   }
+  async function refreshGroupBadges() {
+    try {
+      const r=await api('/groups/user');
+      const groups=r?.data?.groups||[];
+      groups.forEach(group=>{if(group?.id!=null){X.groups.set(String(group.id),String(group.name||'Group'));X.unread.set(String(group.id),Number(group.unreadCount)||0);}});
+      badges();
+    } catch (_) {}
+  }
   function realtime() {
     if(X.realtime)return; X.realtime=true;
     window.addEventListener('message',e=>{const d=e.data;if(!d||typeof d!=='object'||(d.type!=='GROUP_MESSAGE'&&d.type!=='group:message'))return;const m=d.message||d.payload?.message||d.payload,g=d.groupId||d.payload?.groupId||m?.chatId;if(!m||!g)return;if(String(m.senderId)!==me()&&String(window.__GROUP_CHAT_ID)!==String(g)){try{window.parent.postMessage({type:'GROUP_NOTIFICATION',payload:{groupId:Number(g),messageId:m.id}},'*')}catch(_){} } if(String(window.__GROUP_CHAT_ID)===String(g))setTimeout(()=>patchMessage(m),100);});
@@ -157,7 +163,7 @@
   function mobileNav() {
     const style=document.createElement('style'); style.textContent='@media(max-width:768px){#layout{width:100%!important;min-width:0!important;max-width:100%!important}#layout.mobile-mode{display:block!important;position:relative!important;height:100%!important;overflow:hidden!important}#layout.mobile-mode .groups-panel,#layout.mobile-mode .chat-panel{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;max-width:none!important;min-width:0!important}#layout.mobile-mode .groups-panel{display:flex!important;flex-direction:column!important}#layout.mobile-mode .chat-panel{display:flex!important;flex-direction:column!important}#layout.mobile-mode .mobile-hidden{display:none!important;visibility:hidden!important;pointer-events:none!important}#layout.mobile-mode .mobile-visible{display:flex!important;visibility:visible!important;pointer-events:auto!important}}@media(min-width:769px){#layout{display:grid!important;width:100%!important;height:100%!important}.groups-panel,.chat-panel{display:flex!important;visibility:visible!important;pointer-events:auto!important}.groups-panel{flex-direction:column!important}.chat-panel{flex-direction:column!important}}'; document.head.appendChild(style);
     function apply(panel){const l=document.getElementById('layout'),g=document.querySelector('.sidebar'),c=document.querySelector('.panel');if(!l||!g||!c)return;g.classList.add('groups-panel');c.classList.add('chat-panel');if(window.matchMedia?.('(max-width:768px)').matches){l.classList.add('mobile-mode');const chat=panel==='chat';g.classList.toggle('mobile-hidden',chat);g.classList.toggle('mobile-visible',!chat);c.classList.toggle('mobile-hidden',!chat);c.classList.toggle('mobile-visible',chat);}else{l.classList.remove('mobile-mode');g.classList.remove('mobile-hidden','mobile-visible');c.classList.remove('mobile-hidden','mobile-visible');}}
-    window.addEventListener('kyn:group:open',()=>{apply('chat');setTimeout(()=>syncOpenGroup(window.__GROUP_CHAT_ID),120)}); window.addEventListener('kyn:group:close',()=>apply('groups')); const run=()=>{apply(window.__GROUP_CHAT_ID?'chat':'groups');installSendHook();realtime();}; if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',run,{once:true});else run();
+    window.addEventListener('kyn:group:open',()=>{apply('chat');setTimeout(()=>syncOpenGroup(window.__GROUP_CHAT_ID),120)}); window.addEventListener('kyn:group:close',()=>apply('groups')); const run=()=>{apply(window.__GROUP_CHAT_ID?'chat':'groups');installSendHook();realtime();refreshGroupBadges();setInterval(refreshGroupBadges,5000);}; if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',run,{once:true});else run();
   }
   mobileNav();
 })();

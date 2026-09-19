@@ -1556,6 +1556,36 @@ async function loadUserSettings() {
         }
     } catch (error) {}
 }
+        // Tools is embedded in the app shell. The shell owns the theme;
+        // this module mirrors its live CSS variables and data-theme state.
+        const syncParentTheme = (themeOverride) => {
+            try {
+                const parentDoc = window.parent && window.parent !== window ? window.parent.document : document;
+                const parentRoot = parentDoc.documentElement;
+                const root = document.documentElement;
+                const theme = themeOverride === 'dark' || themeOverride === 'light'
+                    ? themeOverride
+                    : (parentRoot.getAttribute('data-theme') || parentDoc.body?.getAttribute('data-theme') || 'light');
+                root.setAttribute('data-theme', theme);
+                document.body?.setAttribute('data-theme', theme);
+                root.classList.toggle('theme-dark', theme === 'dark');
+                root.classList.toggle('dark-theme', theme === 'dark');
+                const computed = parentDoc.defaultView.getComputedStyle(parentRoot);
+                for (let i = 0; i < computed.length; i += 1) {
+                    const name = computed[i];
+                    if (name && name.startsWith('--')) {
+                        const value = computed.getPropertyValue(name);
+                        if (value) root.style.setProperty(name, value);
+                    }
+                }
+                root.style.colorScheme = theme;
+            } catch (_) {}
+        };
+        syncParentTheme();
+        try {
+            const parentRoot = window.parent && window.parent !== window ? window.parent.document.documentElement : document.documentElement;
+            new MutationObserver(() => syncParentTheme()).observe(parentRoot, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
+        } catch (_) {}
         // Setup message listen
         window.addEventListener('message', (event) => {
     // ── OFFLINE-FIRST: Apply setting changes immediately ──
@@ -1567,14 +1597,8 @@ async function loadUserSettings() {
     // other module already listens for it; Tools silently ignored it, so
     // an already-open Tools tab kept showing whatever theme it had at its
     // own last load until a full page reload.
-    if (data && data.type === 'THEME_CHANGED' && data.theme) {
-        const theme = (data.theme === 'dark' ? 'dark' : 'light');
-        if (window.ThemeManager) {
-            window.ThemeManager.setTheme(theme);
-        } else {
-            document.documentElement.setAttribute('data-theme', theme);
-            document.body.setAttribute('data-theme', theme);
-        }
+    if (data && ['THEME_CHANGED','theme:changed','themeChanged'].includes(data.type) && data.theme) {
+        syncParentTheme(data.theme === 'dark' ? 'dark' : 'light');
     }
     if (data && (data.type === 'SETTING_CHANGED' || data.type === 'SETTINGS_UPDATED')) {
         const payload = data.payload || data;
