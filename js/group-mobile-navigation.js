@@ -97,18 +97,20 @@
   // by message id so decryptText() (and the ratchet it drives) is invoked
   // at most ONCE per message, no matter how many times patchMessage() is
   // called for it; every duplicate call just awaits the same result.
-  const _decryptOnce = new Map(); // messageId -> Promise<string>
-  const _pendingPlain = new Map();\n  const _pendingPlain = new Map();
+  const _pendingPlain = new Map();
+  const _pendingPlain = new Map();
   function patchMessage(m) {
     if (!m || m.id == null) return;
-    const row = document.querySelector(`[data-message-id="${CSS.escape(String(m.id))}"]`); if (!row) return;
-    const el = row.querySelector('.msg-text'); if (!el || el.dataset.necpraDecrypted === '1') return;
-    const key = String(m.id);
+    const row = document.querySelector(`[data-message-id="${CSS.escape(String(m.id))}"]`);
+    if (!row) return;
+    const el = row.querySelector('.msg-text');
     const pendingPlain = m.localId && _pendingPlain.get(String(m.localId));
-    if (pendingPlain != null) { el.textContent = pendingPlain; el.dataset.necpraDecrypted = '1'; return; }
-    let p = _decryptOnce.get(key);
-    if (!p) { p = decryptText(m.content, m.chatId || window.__GROUP_CHAT_ID, m.senderId); _decryptOnce.set(key, p); }
-    p.then(text => { el.textContent = text; el.dataset.necpraDecrypted = '1'; });
+    // group.html owns all real-message decryption. This helper only restores
+    // the sender's own optimistic plaintext and never runs a second ratchet.
+    if (el && pendingPlain != null) {
+      el.textContent = pendingPlain;
+      el.dataset.necpraDecrypted = '1';
+    }
   }
   async function syncOpenGroup(gid) {
     if (typeof window.__GROUP_REFRESH_MESSAGES === 'function') {
@@ -142,15 +144,29 @@
   async function send(text, type='text', metadata=null) {
     const gid=String(window.__GROUP_CHAT_ID); if(!gid) return;
     const localId=`group-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    _pendingPlain.set(localId,String(text||''));
-    window.__NECPRA_GROUP_PENDING_PLAINTEXT?.set?.(String(localId),String(text||''));\n    _pendingPlain.set(localId,String(text||''));\n    window.__NECPRA_GROUP_PENDING_PLAINTEXT?.set?.(String(localId),String(text||''));
-    window.dispatchEvent(new CustomEvent('kyn:group:message',{detail:{groupId:gid,message:{id:`pending_${localId}`,localId,senderId:me(),content:text,type,status:'pending',pending:true,createdAt:new Date().toISOString()}}}));
-    const content=text ? await encryptText(text,gid) : '';
-    const r=await api(`/groups/${encodeURIComponent(gid)}/messages`,{method:'POST',body:JSON.stringify({content,type,localId,metadata})});
-    const m=r?.data?.message||r?.data;
-    if(m){ window.dispatchEvent(new CustomEvent('kyn:group:message',{detail:{groupId:gid,message:m}})); setTimeout(()=>patchMessage(m),80); _pendingPlain.delete(localId); window.__NECPRA_GROUP_PENDING_PLAINTEXT?.delete?.(String(localId)); }
+    const plain=String(text||'');
+    _pendingPlain.set(localId,plain);
+    window.__NECPRA_GROUP_PENDING_PLAINTEXT?.set?.(String(localId),plain);
+    window.dispatchEvent(new CustomEvent('kyn:group:message',{detail:{groupId:gid,message:{id:`pending_${localId}`,localId,senderId:me(),content:plain,type,status:'sending',pending:true,createdAt:new Date().toISOString()}}}));
+    try {
+      const content=plain ? await encryptText(plain,gid) : '';
+      const r=await api(`/groups/${encodeURIComponent(gid)}/messages`,{method:'POST',body:JSON.stringify({content,type,localId,clientMessageId:localId,metadata})});
+      const m=r?.data?.message||r?.data;
+      if(m){
+        window.dispatchEvent(new CustomEvent('kyn:group:message',{detail:{groupId:gid,message:m}}));
+        setTimeout(()=>patchMessage(m),80);
+        _pendingPlain.delete(localId);
+        window.__NECPRA_GROUP_PENDING_PLAINTEXT?.delete?.(String(localId));
+      }
+      return m;
+    } catch(err) {
+      // A retry must reuse this logical client id rather than creating a
+      // second message. The current row stays the real optimistic row.
+      window.dispatchEvent(new CustomEvent('kyn:group:message',{detail:{groupId:gid,message:{id:`pending_${localId}`,localId,senderId:me(),content:plain,type,status:'failed',pending:true,createdAt:new Date().toISOString()}}}));
+      throw err;
+    }
   }
-  window.__NECPRA_GROUP_SEND = send;\n  window.__NECPRA_GROUP_SEND = send;
+  window.__NECPRA_GROUP_SEND = send;
   function installSendHook() {
     const input=document.getElementById('input'), button=document.getElementById('send'); if(!input||!button||input.dataset.necpraSendHook)return; input.dataset.necpraSendHook='1';
     const submit=e=>{ if(!window.__GROUP_CHAT_ID)return; e.preventDefault(); e.stopImmediatePropagation(); const t=input.value.trim(); if(!t)return; input.value=''; send(t,'text',null).catch(err=>{alert(`Unable to send message: ${err.message||err}`);input.value=t;}); };

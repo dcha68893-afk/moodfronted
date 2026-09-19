@@ -254,6 +254,12 @@
     color: var(--kyn-text-primary, #111b21); transition: background-color 0.12s ease;
   }
   .bubble-context-menu button:hover { background: var(--kyn-bg-hover, #f0f0f0); }
+  .status-reply-card{margin-bottom:6px;padding:9px 11px;border-radius:12px;border:1px solid var(--kyn-border,#dfe3e8);background:rgba(34,197,94,.08);max-width:100%}
+  .status-reply-head{display:flex;align-items:center;gap:7px;font-size:12px}
+  .status-reply-icon{width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:var(--kyn-accent-primary,#22c55e);color:#fff;font-size:11px}
+  .status-reply-caption{margin-top:5px;font-size:11px;color:var(--kyn-text-secondary,#667085);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .status-reply-text{margin-top:7px;font-size:14px;white-space:pre-wrap;word-break:break-word}
+  .status-reply-emoji{margin-top:4px;font-size:38px;line-height:1.05}
   .reply-quote {
     border-left: 3px solid var(--kyn-accent-primary, #22c55e); padding: 4px 8px; margin-bottom: 4px;
     font-size: 12px; opacity: 0.75; cursor: pointer; background: rgba(0,0,0,0.04); border-radius: 4px;
@@ -925,6 +931,32 @@
       else showArchivedView();
     });
 
+    function statusReplyHtml(m, isMine) {
+      if (m?.type !== 'status_reply') return '';
+      let meta = m.metadata;
+      if (typeof meta === 'string') { try { meta = JSON.parse(meta); } catch (_) { meta = null; } }
+      let interaction = meta?.statusInteraction || null;
+      for (const candidate of [m.displayContent, m.content]) {
+        if (interaction || typeof candidate !== 'string') continue;
+        try {
+          const parsed = JSON.parse(candidate);
+          if (parsed && typeof parsed === 'object' && (parsed.statusId != null || parsed.kind === 'reaction' || parsed.kind === 'comment')) interaction = parsed;
+        } catch (_) {}
+      }
+      if (!interaction) return '';
+      const kind = interaction.kind === 'reaction' ? 'reaction' : 'comment';
+      const emoji = kind === 'reaction' ? String(interaction.emoji || '❤️') : '';
+      const text = kind === 'comment' ? String(interaction.text || '').trim() : '';
+      const caption = String(interaction.caption || '').trim();
+      const heading = isMine ? (kind === 'reaction' ? 'You reacted to a status' : 'You replied to a status') : (kind === 'reaction' ? 'Reacted to your status' : 'Replied to your status');
+      const body = kind === 'reaction'
+        ? '<div class="status-reply-emoji">'+escapeHtml(emoji)+'</div>'
+        : '<div class="status-reply-text">'+escapeHtml(text || 'Replied to your status')+'</div>';
+      return '<div class="status-reply-card" data-status-id="'+escapeHtml(interaction.statusId || '')+'">' +
+        '<div class="status-reply-head"><span class="status-reply-icon">◉</span><b>'+escapeHtml(heading)+'</b></div>' +
+        (caption ? '<div class="status-reply-caption">'+escapeHtml(caption.slice(0,180))+'</div>' : '') + body + '</div>';
+    }
+
     function attachmentHtml(m) {
       let meta = m.metadata;
       if (typeof meta === 'string') { try { meta = JSON.parse(meta); } catch (_) { meta = null; } }
@@ -970,6 +1002,7 @@
       const decryptFailed = m.displayContent === '🔒 Encrypted message' || m.displayContent === '🔒 Unable to decrypt this message';
       const decryptPending = m.displayContent === 'Decrypting…';
       const content = isDeletedForEveryone ? 'This message was deleted' : (m.displayContent !== undefined ? m.displayContent : '…');
+      const statusCard = isDeletedForEveryone ? '' : statusReplyHtml(m, isMine);
       // FIX (SHOW-WHY-V3-FAILED, requested behavior): message-client.js's
       // kyn:messageDecryptFailed listener now stores the exact reason
       // (which stage — Double Ratchet v3, legacy v2 fallback, or both —
@@ -1012,7 +1045,8 @@
           <div class="bubble${isDeletedForEveryone ? ' bubble-deleted' : ''}">
             ${!isDeletedForEveryone ? replyPreviewHtml(m, chatId) : ''}
             ${!isDeletedForEveryone ? attachmentHtml(m) : ''}
-            <span${contentAttrs}>${content ? escapeHtml(content) : ''}</span>${!isDeletedForEveryone ? editedTag : ''}
+            ${statusCard}
+            ${m.type === 'status_reply' && statusCard ? '' : '<span'+contentAttrs+'>'+ (content ? escapeHtml(content) : '') +'</span>'}${!isDeletedForEveryone ? editedTag : ''}
             ${reactionsHtml}
             <div class="bubble-meta">${time} ${statusTick}${m.starred ? ' ⭐' : ''}${decryptVersionBadge}</div>
 

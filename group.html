@@ -181,7 +181,9 @@ async function decryptGroupContent(content, gid, senderId) {
 // Cache successful decryptions by message id + the exact ciphertext that
 // produced them — an edit changes the ciphertext, so it naturally forces a
 // fresh decrypt, but an unchanged message is never re-decrypted again.
-const _decryptedCache=new Map();\nwindow.__NECPRA_GROUP_PENDING_PLAINTEXT = window.__NECPRA_GROUP_PENDING_PLAINTEXT || new Map();
+const _decryptedCache=new Map();
+const _groupDecryptInFlight=new Map();
+window.__NECPRA_GROUP_PENDING_PLAINTEXT = window.__NECPRA_GROUP_PENDING_PLAINTEXT || new Map();
 // FIX (GROUP-HISTORY-RE-DECRYPTS-ON-RELOAD): js/group-history-cache-fix.js
 // already hydrates S.messages instantly from IndexedDB on open, with
 // content that's already plaintext (it's a copy of what renderMessages()
@@ -210,11 +212,24 @@ async function decryptRow(m){
     if(cached.ciphertext===m.content)return Object.assign({},m,{content:cached.plain});
     if(cached.ciphertext===null&&cached.isEdited===!!m.isEdited)return Object.assign({},m,{content:cached.plain});
   }
+  if(id&&_groupDecryptInFlight.has(id))return Object.assign({},m,{content:await _groupDecryptInFlight.get(id)});
+  const task=(async()=>{
+    try{
+      const plain=await decryptGroupContent(m.content,S.current?.id??m.chatId,m.senderId);
+      if(id)_decryptedCache.set(id,{ciphertext:m.content,plain,isEdited:!!m.isEdited});
+      return plain;
+    }catch(e){
+      console.error('[GroupDecrypt] decryptRow failed:',e&&e.message||e);
+      const prior=S.messages.find(x=>String(x.id||x.messageId)===id);
+      if(prior&&typeof prior.content==='string'&&!prior._decryptPending&&!/^\\[Unable to decrypt|^🔒|^Decrypting securely/.test(prior.content))return prior.content;
+      return null;
+    }
+  })();
+  if(id)_groupDecryptInFlight.set(id,task);
   try{
-    const plain=await decryptGroupContent(m.content,S.current?.id??m.chatId,m.senderId);
-    if(id)_decryptedCache.set(id,{ciphertext:m.content,plain,isEdited:!!m.isEdited});
-    return Object.assign({},m,{content:plain});
-  }catch(e){console.error('[GroupDecrypt] decryptRow failed:',e&&e.message||e);const prior=S.messages.find(x=>String(x.id||x.messageId)===id);if(prior&&typeof prior.content==='string'&&!/^\\[Unable to decrypt|^🔒/.test(prior.content))return Object.assign({},m,{content:prior.content});return Object.assign({},m,{content:'Decrypting securely…'})}
+    const plain=await task;
+    return plain==null?Object.assign({},m,{_decryptPending:true}):Object.assign({},m,{content:plain});
+  }finally{if(id)_groupDecryptInFlight.delete(id);}
 }
 function decryptRows(list){return Promise.all(list.map(decryptRow))}
 
@@ -249,7 +264,7 @@ function toggleMsgMenu(id){const willOpen=S.openMenuId!==id;closeMsgMenu();if(!w
 })}
 document.addEventListener('click',e=>{if(!e.target.closest?.('.msg-more, .msg-menu'))closeMsgMenu()});
 
-function buildRow(m){const id=String(m.id||m.messageId||'');const row=document.createElement('div');const mine=String(m.senderId||m.userId)===uid();row.className='row'+(mine?' mine':'');row.dataset.messageId=id;const b=document.createElement('div');b.className='bubble';if(!mine){const s=document.createElement('div');s.className='sender';s.textContent=m.sender?.displayName||m.sender?.username||m.senderUsername||'Member';b.append(s)}const media=m.metadata?.media;if(media?.url){const mime=String(media.mimeType||'');if(mime.startsWith('image/')){const x=document.createElement('img');x.src=media.url;x.loading='lazy';x.style.cssText='max-width:420px;max-height:360px;border-radius:12px';b.append(x)}else if(mime.startsWith('video/')){const x=document.createElement('video');x.src=media.url;x.controls=true;x.style.cssText='max-width:420px;max-height:360px';b.append(x)}else if(mime.startsWith('audio/')){const x=document.createElement('audio');x.src=media.url;x.controls=true;b.append(x)}else{const x=document.createElement('a');x.href=media.url;x.target='_blank';x.rel='noopener';x.textContent=media.name||m.content||'Open attachment';b.append(x)}}else{const x=document.createElement('div');x.className='msg-text';x.innerHTML=highlightMentions(esc(m.content||''));b.append(x)}
+function buildRow(m){const id=String(m.id||m.messageId||'');const pendingDecrypt=!!m._decryptPending;const row=document.createElement('div');const mine=String(m.senderId||m.userId)===uid();row.className='row'+(mine?' mine':'');row.dataset.messageId=id;const b=document.createElement('div');b.className='bubble';if(!mine){const s=document.createElement('div');s.className='sender';s.textContent=m.sender?.displayName||m.sender?.username||m.senderUsername||'Member';b.append(s)}const media=m.metadata?.media;if(media?.url){const mime=String(media.mimeType||'');if(mime.startsWith('image/')){const x=document.createElement('img');x.src=media.url;x.loading='lazy';x.style.cssText='max-width:420px;max-height:360px;border-radius:12px';b.append(x)}else if(mime.startsWith('video/')){const x=document.createElement('video');x.src=media.url;x.controls=true;x.style.cssText='max-width:420px;max-height:360px';b.append(x)}else if(mime.startsWith('audio/')){const x=document.createElement('audio');x.src=media.url;x.controls=true;b.append(x)}else{const x=document.createElement('a');x.href=media.url;x.target='_blank';x.rel='noopener';x.textContent=media.name||m.content||'Open attachment';b.append(x)}}else{const x=document.createElement('div');x.className='msg-text';x.innerHTML=highlightMentions(esc(pendingDecrypt?'':m.content||''));if(pendingDecrypt){x.className='msg-text decrypt-pending';x.textContent='';}b.append(x)}
   const t=document.createElement('div');t.className='time';
   if(m.isEdited){const et=document.createElement('span');et.className='edited-tag';et.textContent='edited';t.append(et)}
   const more=document.createElement('button');more.type='button';more.className='msg-more';more.textContent='⋮';more.title='More';more.onclick=e=>{e.stopPropagation();toggleMsgMenu(id)};t.append(more);
@@ -482,6 +497,7 @@ window.__GROUP_LOAD_GROUPS=loadGroups;window.__GROUP_REFRESH_MESSAGES=loadMessag
      back-nav.js was never loaded here. See chat.html's
      handleAppBackNavigation() and back-nav.js's _visibleGenericModal() for
      the other half of this fix. -->
+<script src="js/group-mobile-navigation.js"></script>
 <script src="js/group-message-local-db.js"></script>
 <script src="js/group-history-cache-fix.js"></script>
 <script src="back-nav.js"></script>

@@ -73,6 +73,29 @@
         }
     });
 
+    // Delivery/read confirmations may arrive before the message itself.
+    // Buffer them and apply them when the real message is inserted.
+    const pendingDeliveryConfirmations = new Map();
+    function deliveryKey(chatId,messageId){return String(chatId)+':'+String(messageId)}
+    function rememberDelivery(p){if(!p||p.chatId==null||p.messageId==null)return;pendingDeliveryConfirmations.set(deliveryKey(p.chatId,p.messageId),{delivered:p.delivered===true,read:p.read===true})}
+    function applyBufferedDelivery(message){
+      if(!message||message.chatId==null||message.id==null)return message;
+      const p=pendingDeliveryConfirmations.get(deliveryKey(message.chatId,message.id));if(!p)return message;
+      const rank={sending:0,sent:1,delivered:2,read:3,failed:-1};const current=rank[message.status]??1;
+      const wanted=p.read?'read':p.delivered?'delivered':message.status;
+      if((rank[wanted]??1)>current)message=Object.assign({},message,{status:wanted});
+      pendingDeliveryConfirmations.delete(deliveryKey(message.chatId,message.id));return message;
+    }
+    function findMessageByClientMessageId(clientMessageId){
+      if(!clientMessageId)return null;
+      for(const [chatId,bucket] of state.messagesByConversation.entries()){
+        for(const [key,msg] of bucket.entries()){
+          if(key!==`optimistic:${clientMessageId}`&&msg?.clientMessageId===clientMessageId)return {chatId,bucket,key,msg};
+        }
+      }
+      return null;
+    }
+
     const listeners = new Set();
     function subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); }
     function notify(event, data) { listeners.forEach(fn => { try { fn(event, data); } catch (_) {} }); }
@@ -102,10 +125,8 @@
     function isAlreadyDelivered(bucket, clientMessageId) {
         if (!clientMessageId) return false;
         const optimisticId = `optimistic:${clientMessageId}`;
-        for (const [key, msg] of bucket) {
-            if (key !== optimisticId && msg && msg.clientMessageId === clientMessageId) return true;
-        }
-        return false;
+        for (const [key,msg] of bucket) if(key!==optimisticId&&msg&&msg.clientMessageId===clientMessageId)return true;
+        return !!findMessageByClientMessageId(clientMessageId);
     }
 
     function upsertConversationMeta(chatId, patch) {
@@ -192,6 +213,8 @@
             const staleOptimisticId = `optimistic:${message.clientMessageId}`;
             if (bucket.has(staleOptimisticId)) bucket.delete(staleOptimisticId);
         }
+
+        message = applyBufferedDelivery(Object.assign({}, message));
 
         if (bucket.has(message.id)) {
             bucket.set(message.id, Object.assign({}, bucket.get(message.id), message));
@@ -885,15 +908,17 @@
             if (isAlreadyDelivered(bucket, clientMessageId)) {
                 return { success: true, alreadyDelivered: true };
             }
-            bucket.set(optimisticId, Object.assign({}, optimisticMessage, { status: 'failed' }));
-            notify('message:failed', { chatId: optimisticMessage.chatId, clientMessageId });
+            if(isAlreadyDelivered(bucket,clientMessageId))return {success:true,alreadyDelivered:true};
+            bucket.set(optimisticId,Object.assign({},optimisticMessage,{status:'failed'}));
+            notify('message:failed',{chatId:optimisticMessage.chatId,clientMessageId});
             return { success: false, error: res && res.message };
         } catch (err) {
             if (isAlreadyDelivered(bucket, clientMessageId)) {
                 return { success: true, alreadyDelivered: true };
             }
-            bucket.set(optimisticId, Object.assign({}, optimisticMessage, { status: 'failed' }));
-            notify('message:failed', { chatId: optimisticMessage.chatId, clientMessageId });
+            if(isAlreadyDelivered(bucket,clientMessageId))return {success:true,alreadyDelivered:true};
+            bucket.set(optimisticId,Object.assign({},optimisticMessage,{status:'failed'}));
+            notify('message:failed',{chatId:optimisticMessage.chatId,clientMessageId});
             return { success: false, error: err.message };
         }
     }
@@ -1144,21 +1169,19 @@
                 const p = data.payload || {};
                 const bucket = state.messagesByConversation.get(p.chatId);
                 if (bucket && p.messageId && bucket.has(p.messageId)) {
-                    bucket.set(p.messageId, Object.assign({}, bucket.get(p.messageId), { status: 'delivered' }));
-                    notify('delivery-state:updated', { chatId: p.chatId, messageId: p.messageId });
-                }
+                    const existing=bucket.get(p.messageId);
+                    if(existing.status!=='failed')bucket.set(p.messageId,Object.assign({},existing,{status:existing.status==='read'?'read':'delivered'}));
+                    notify('delivery-state:updated',{chatId:p.chatId,messageId:p.messageId});
+                } else rememberDelivery(Object.assign({},p,{delivered:true}));
                 return;
             }
             if (data.type === 'message_read') {
                 const p = data.payload || {};
                 const bucket = state.messagesByConversation.get(p.chatId);
-                if (bucket) {
-                    (p.messageIds || []).forEach(id => {
-                        if (bucket.has(id)) bucket.set(id, Object.assign({}, bucket.get(id), { status: 'read' }));
-                    });
-                    notify('read-state:updated', { chatId: p.chatId, messageIds: p.messageIds });
-                }
-                return;
+                const ids=Array.isArray(p.messageIds)?p.messageIds:[];
+                if(bucket)ids.forEach(id=>bucket.has(id)?(bucket.get(id).status!=='failed'&&bucket.set(id,Object.assign({},bucket.get(id),{status:'read'}))):rememberDelivery({chatId:p.chatId,messageId:id,read:true}));
+                else ids.forEach(id=>rememberDelivery({chatId:p.chatId,messageId:id,read:true}));
+                notify('read-state:updated',{chatId:p.chatId,messageIds:ids});return;
             }
             if (data.type === 'message:deleted' || data.type === 'message_deleted') {
                 const p = data.payload || {};
