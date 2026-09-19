@@ -60,6 +60,7 @@
     'groups/GroupPresenceCacheEngine.js',
     'groups/SocialNotificationEngine.js',
     'status/StatusStoryEngine.js',
+    'status/ProfessionalStatus.js',
   ];
 
   let loaded = 0;

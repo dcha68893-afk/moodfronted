@@ -1,0 +1,200 @@
+(function(){
+'use strict';
+if(window.__NecpaProfessionalStatus) return;
+
+const API='/api/status';
+const UPLOAD='/api/cloudinary/direct-upload';
+const TTL=24*60*60*1000;
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const currentUser=()=>{
+  try{const a=JSON.parse(localStorage.getItem('currentUser')||'null');if(a?.id)return a;}
+  catch(_){}
+  try{const a=JSON.parse(localStorage.getItem('user')||'null');if(a?.id)return a;}
+  catch(_){}
+  const id=localStorage.getItem('userId')||localStorage.getItem('currentUserId');
+  return id?{id:Number(id)}:{};
+};
+const token=()=>{
+  const keys=['token','authToken','accessToken','jwt','access_token','kyn_access_token'];
+  for(const k of keys){const v=localStorage.getItem(k);if(v)return v}
+  try{const a=JSON.parse(localStorage.getItem('auth')||'null');return a?.token||a?.accessToken||''}catch(_){return ''}
+};
+async function api(path,opts={}){
+  const headers=Object.assign({'Content-Type':'application/json'},opts.headers||{});
+  const t=token();if(t)headers.Authorization=/^Bearer /i.test(t)?t:'Bearer '+t;
+  const r=await fetch(API+path,Object.assign({},opts,{headers}));
+  const data=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error(data.message||data.error||('Request failed '+r.status));
+  return data;
+}
+function avatar(u,cls='ns-avatar'){
+  const url=window.Identity?.resolveAvatar?.(u)||u?.avatar||u?.photoURL||'';
+  const name=window.Identity?.resolveDisplayName?.(u)||u?.displayName||u?.username||'User';
+  return '<div class="'+cls+'" style="'+(url?'background-image:url(&quot;'+esc(url)+'&quot;)':'')+'">'+(url?'':esc((name.trim().split(/\s+/).map(x=>x[0]).join('').slice(0,2)||'U').toUpperCase()))+'</div>';
+}
+const ago=t=>{const s=Math.max(1,Math.floor((Date.now()-new Date(t).getTime())/1000));if(s<60)return s+'s';if(s<3600)return Math.floor(s/60)+'m';if(s<86400)return Math.floor(s/3600)+'h';return Math.floor(s/86400)+'d'};
+const toast=(m)=>{const el=document.querySelector('.ns-toast');if(!el)return;el.textContent=m;el.classList.add('show');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),2400)};
+const bg=['linear-gradient(135deg,#2563eb,#7c3aed)','linear-gradient(135deg,#ec4899,#f97316)','linear-gradient(135deg,#06b6d4,#2563eb)','linear-gradient(135deg,#22c55e,#14b8a6)','linear-gradient(135deg,#f59e0b,#ef4444)','linear-gradient(135deg,#111827,#475569)','linear-gradient(135deg,#7c3aed,#db2777)','linear-gradient(135deg,#0f172a,#0ea5e9)'];
+const stickers=['❤️','🔥','😂','😍','🎓','✨','💯','🙌','🎉','📚','🛍️','💡'];
+let state={tab:'friends',statuses:[],mine:[],index:0,viewerGroup:[],composer:{type:'text',content:'',caption:'',background:bg[0],font:'system-ui',privacy:'all_contacts',topics:[],moodType:'',category:'',intent:'',allowReplies:true,allowReactions:true,allowSharing:true,linkUrl:'',mentions:[],stickers:[],media:null,poll:['',''],selectedSticker:''},seen:new Set(),timer:null};
+
+function mount(){
+ if(document.getElementById('necpa-status-root'))return;
+ const launcher=document.createElement('button');launcher.id='necpa-status-launcher';launcher.innerHTML='<span class="ns-dot"></span> Status';launcher.onclick=open;
+ document.body.appendChild(launcher);
+ const root=document.createElement('div');root.id='necpa-status-root';
+ root.innerHTML='<div class="ns-shell"><aside class="ns-side"><div class="ns-brand"><div><h2>Moments</h2><small>Share what is happening</small></div><button class="ns-close" data-close>×</button></div><div class="ns-my-card" data-compose>'+avatar(currentUser())+'<div style="flex:1"><b>My Status</b><small style="display:block;color:#64748b">Create a new moment</small></div><button class="ns-add" data-compose>+</button></div><div class="ns-section-title">Status</div><div class="ns-tabs"><button class="ns-tab active" data-tab="friends">Friends</button><button class="ns-tab" data-tab="discover">Discover</button></div><div class="ns-section-title">People</div><div class="ns-list" data-people></div></aside><main class="ns-main"><div class="ns-main-head"><button class="ns-close" data-mobile-close>×</button><input class="ns-search" placeholder="Search statuses, topics or people"><select class="ns-filter"><option value="all">All moments</option><option value="image">Photos</option><option value="video">Videos</option><option value="text">Text</option><option value="poll">Polls</option></select><button class="ns-btn primary" data-compose>Create</button></div><section class="ns-feed" data-feed></section><div class="ns-composer" data-composer></div><div class="ns-viewer" data-viewer></div></main></div><div class="ns-toast"></div>';
+ document.body.appendChild(root);
+ root.querySelectorAll('[data-close],[data-mobile-close]').forEach(b=>b.onclick=close);
+ root.querySelectorAll('[data-compose]').forEach(b=>b.onclick=()=>openComposer());
+ root.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.tab;root.querySelectorAll('.ns-tab').forEach(x=>x.classList.toggle('active',x===b));loadFeed()});
+ root.querySelector('.ns-filter').onchange=renderFeed;
+ root.querySelector('.ns-search').oninput=renderFeed;
+ document.addEventListener('keydown',e=>{if(e.key==='Escape')close()});
+ renderPeople();loadFeed();
+}
+function open(){mount();document.getElementById('necpa-status-root').classList.add('open');loadFeed()}
+function close(){document.getElementById('necpa-status-root')?.classList.remove('open');closeViewer();closeComposer()}
+async function loadFeed(){
+ try{
+  const me=currentUser();
+  const mine=(await api('/my')).data||[];
+  state.mine=mine;
+  let data=state.tab==='discover'?(await api('/public')).data||[]:(await api('/friends')).data||[];
+  const own=mine.filter(x=>!data.some(y=>y.id===x.id));
+  state.statuses=[...own,...data];
+  renderFeed();renderPeople();
+ }catch(e){renderFeed();toast(e.message)}
+}
+function renderPeople(){
+ const el=document.querySelector('[data-people]');if(!el)return;
+ const groups={};for(const s of state.statuses){const u=s.owner||{};const id=String(u.id||s.userId);if(!groups[id])groups[id]=s}
+ const arr=Object.values(groups);
+ el.innerHTML=arr.length?arr.map(s=>{const u=s.owner||{};return '<div class="ns-person" data-user="'+esc(s.userId)+'">'+avatar(u)+'<div class="ns-person-info"><div class="ns-person-name">'+esc(u.displayName||u.username||'User')+'</div><div class="ns-person-time">'+ago(s.createdAt)+' ago</div></div>'+(!state.seen.has(s.id)?'<i class="ns-unseen"></i>':'')+'</div>'}).join(''):'<div style="color:#64748b;font-size:13px;padding:10px">No active statuses yet.</div>';
+ el.querySelectorAll('[data-user]').forEach(x=>x.onclick=()=>openUser(x.dataset.user));
+}
+function renderFeed(){
+ const el=document.querySelector('[data-feed]');if(!el)return;
+ const q=(document.querySelector('.ns-search')?.value||'').toLowerCase().trim();
+ const filter=document.querySelector('.ns-filter')?.value||'all';
+ let data=state.statuses.filter(s=>filter==='all'||s.type===filter);
+ if(q)data=data.filter(s=>JSON.stringify(s).toLowerCase().includes(q));
+ if(!data.length){el.innerHTML='<div class="ns-empty"><strong>Your status space is ready</strong>Post a photo, thought, poll or short video and let your campus see what matters.</div>';return}
+ el.innerHTML=data.map((s,i)=>card(s,i)).join('');
+ el.querySelectorAll('[data-open-status]').forEach(x=>x.onclick=()=>openViewer(Number(x.dataset.openStatus)));
+}
+function card(s,i){
+ const u=s.owner||{};const media=s.mediaUrl;
+ const visual=s.type==='image'&&media?'<img class="ns-card-media" src="'+esc(media)+'" loading="lazy">':s.type==='video'&&media?'<video class="ns-card-media" src="'+esc(media)+'" muted playsinline preload="metadata"></video>':'<div class="ns-card-media" style="background:'+(s.background||bg[0])+';display:grid;place-items:center"><div style="padding:25px;color:#fff;font-weight:850;font-size:25px;text-align:center;font-family:'+esc(s.font||'system-ui')+'">'+esc(s.content||s.caption||'✨')+'</div></div>';
+ return '<article class="ns-card" data-open-status="'+s.id+'">'+visual+'<div class="ns-card-overlay"></div><div class="ns-card-top">'+avatar(u)+'<span class="ns-card-user">'+esc(u.displayName||u.username||'User')+'</span><span class="ns-card-time">'+ago(s.createdAt)+'</span></div><div class="ns-card-bottom"><div class="ns-card-caption">'+esc(s.caption||s.content||'')+'</div><div class="ns-card-meta"><span>👁 '+(s.viewCount||0)+'</span><span>❤️ '+(s.reactionCount||0)+'</span><span>💬 '+(s.replyCount||0)+'</span></div></div></article>';
+}
+async function openUser(userId){
+ try{const data=(await api('/user/'+encodeURIComponent(userId))).data||[];if(data.length){state.viewerGroup=data;state.index=0;showViewer()}}catch(e){toast(e.message)}
+}
+async function openViewer(id){
+ let idx=state.statuses.findIndex(s=>s.id===id);if(idx<0)return;
+ const s=state.statuses[idx];const same=state.statuses.filter(x=>String(x.userId)===String(s.userId));
+ state.viewerGroup=same.length?same:[s];state.index=Math.max(0,same.findIndex(x=>x.id===id));showViewer();
+}
+function showViewer(){
+ const s=state.viewerGroup[state.index];if(!s)return;
+ const root=document.querySelector('[data-viewer]');const u=s.owner||{};state.seen.add(s.id);
+ root.innerHTML='<div class="ns-viewer-stage">'+viewerVisual(s)+'<div class="ns-viewer-grad"></div><div class="ns-progress">'+state.viewerGroup.map((_,i)=>'<i><b style="width:'+(i<state.index?'100':'0')+'%"></b></i>').join('')+'</div><div class="ns-viewer-head">'+avatar(u)+'<div><div class="ns-viewer-name">'+esc(u.displayName||u.username||'User')+'</div><div class="ns-viewer-time">'+ago(s.createdAt)+' ago · 24h moment</div></div><div class="ns-viewer-actions"><button data-viewers>👁 '+(s.viewCount||0)+'</button><button data-more>•••</button><button data-vclose>×</button></div></div><button class="ns-nav ns-prev" data-prev>‹</button><button class="ns-nav ns-next" data-next>›</button><div class="ns-viewer-bottom"><div class="ns-reactions">'+['❤️','😂','🔥','😍','👏','💯'].map(e=>'<button class="ns-reaction" data-react="'+e+'">'+e+'</button>').join('')+'</div><div class="ns-reply-row">'+(s.allowReplies!==false?'<input class="ns-reply" data-reply placeholder="Reply to '+esc(u.displayName||'this status')+'…"><button class="ns-reaction" data-send>➤</button>':'<span style="opacity:.65">Replies are disabled</span>')+'</div></div><div class="ns-viewer-more" data-moremenu><button data-share>↗ Share</button><button data-save>⇩ Save</button><button data-report>⚑ Report</button>'+(String(s.userId)===String(currentUser().id)?'<button data-edit>✎ Edit</button><button data-delete>🗑 Delete</button><button data-highlight>★ Highlight</button>':'')+'</div></div>';
+ root.classList.add('open');
+ root.querySelector('[data-vclose]').onclick=closeViewer;root.querySelector('[data-prev]').onclick=()=>move(-1);root.querySelector('[data-next]').onclick=()=>move(1);
+ root.querySelector('[data-more]').onclick=()=>root.querySelector('[data-moremenu]').classList.toggle('open');
+ root.querySelector('[data-viewers]').onclick=()=>showViewers(s);
+ root.querySelector('[data-edit]')?.addEventListener('click',()=>editStatus(s));
+ root.querySelectorAll('[data-react]').forEach(b=>b.onclick=()=>react(s,b.dataset.react));
+ root.querySelector('[data-send]')?.addEventListener('click',()=>reply(s,root.querySelector('[data-reply]')?.value||''));
+ root.querySelector('[data-share]')?.addEventListener('click',()=>share(s));
+ root.querySelector('[data-save]')?.addEventListener('click',()=>save(s));
+ root.querySelector('[data-report]')?.addEventListener('click',()=>report(s));
+ root.querySelector('[data-delete]')?.addEventListener('click',()=>del(s));
+ root.querySelector('[data-highlight]')?.addEventListener('click',()=>highlight(s));
+ api('/view',{method:'POST',body:JSON.stringify({statusId:s.id})}).then(r=>{s.viewCount=Math.max(Number(s.viewCount||0),Number(r.created?s.viewCount||0:0)+(r.created?1:0));}).catch(()=>{});
+ clearInterval(state.timer);state.timer=setTimeout(()=>move(1),Math.max(3000,(Number(s.durationSeconds)||7)*1000));
+}
+function viewerVisual(s){
+ if(s.type==='image'&&s.mediaUrl)return '<img class="ns-viewer-media" src="'+esc(s.mediaUrl)+'" alt="">';
+ if(s.type==='video'&&s.mediaUrl)return '<video class="ns-viewer-media" src="'+esc(s.mediaUrl)+'" controls autoplay playsinline></video>';
+ if(s.type==='poll'){const p=Array.isArray(s.pollOptions)?s.pollOptions:[];return '<div class="ns-viewer-text" style="background:'+(s.background||bg[0])+';max-width:none;width:100%;height:100%;display:flex;flex-direction:column;justify-content:center;align-items:center"><div>'+esc(s.content||'Poll')+'</div>'+p.map(x=>'<div style="margin:7px;padding:12px 22px;border-radius:999px;background:rgba(255,255,255,.16);font-size:17px">'+esc(x)+'</div>').join('')+'</div>'}
+ return '<div class="ns-viewer-text" style="background:'+(s.background||bg[0])+';width:100%;height:100%;display:grid;place-items:center;font-family:'+esc(s.font||'system-ui')+'">'+esc(s.content||s.caption||'')+'</div>';
+}
+function move(dir){const n=state.index+dir;if(n<0||n>=state.viewerGroup.length){closeViewer();return}state.index=n;showViewer()}
+function closeViewer(){clearInterval(state.timer);document.querySelector('[data-viewer]')?.classList.remove('open')}
+
+async function showViewers(s){
+ try{const r=await api('/'+s.id+'/viewers');const rows=r.data||[];const names=rows.map(x=>(x.viewer?.displayName||x.viewer?.username||('User '+x.viewerId))+' · '+ago(x.viewedAt)+' ago').join('\n');alert(rows.length?'Viewed by:\n\n'+names:'No viewers yet.')}catch(e){toast(e.message)}
+}
+async function editStatus(s){
+ const value=prompt('Edit caption/text:',s.caption||s.content||'');if(value===null)return;
+ try{const r=await api('/'+s.id,{method:'PUT',body:JSON.stringify({caption:value,content:s.type==='text'?value:s.content})});Object.assign(s,r.status||{});showViewer();renderFeed();toast('Status updated')}catch(e){toast(e.message)}
+}
+async function react(s,emoji){if(s.allowReactions===false)return;try{const r=await api('/'+s.id+'/like',{method:'POST',body:JSON.stringify({emoji})});s.reactionCount=r.count;toast('Reaction sent')}catch(e){toast(e.message)}}
+async function reply(s,text){if(!text.trim())return;try{await api('/'+s.id+'/comment',{method:'POST',body:JSON.stringify({text:text.trim()})});s.replyCount=(s.replyCount||0)+1;document.querySelector('[data-reply]').value='';toast('Reply sent privately to the creator')}catch(e){toast(e.message)}}
+async function share(s){try{if(navigator.share)await navigator.share({title:'Necpa Status',text:s.caption||s.content||'Check this status',url:location.href});else await navigator.clipboard.writeText(location.href+'#status-'+s.id);await api('/'+s.id+'/share',{method:'POST',body:'{}'});toast('Status shared')}catch(e){if(e.name!=='AbortError')toast(e.message)}}
+async function save(s){try{const url=s.mediaUrl;if(!url)return toast('Text statuses do not need downloading');const a=document.createElement('a');a.href=url;a.download='necpa-status';a.target='_blank';a.click();toast('Save opened')}catch(e){toast(e.message)}}
+async function report(s){const reason=prompt('Why are you reporting this status?','spam');if(!reason)return;try{await api('/'+s.id+'/report',{method:'POST',body:JSON.stringify({reason})});toast('Report submitted')}catch(e){toast(e.message)}}
+async function del(s){if(!confirm('Delete this status now?'))return;try{await api('/'+s.id,{method:'DELETE'});state.statuses=state.statuses.filter(x=>x.id!==s.id);state.mine=state.mine.filter(x=>x.id!==s.id);closeViewer();renderFeed();toast('Status deleted')}catch(e){toast(e.message)}}
+async function highlight(s){try{await api('/'+s.id,{method:'PUT',body:JSON.stringify({highlight:!s.highlight})});s.highlight=!s.highlight;toast(s.highlight?'Added to Highlights':'Removed from Highlights')}catch(e){toast(e.message)}}
+
+function openComposer(){
+ closeViewer();const root=document.querySelector('[data-composer]');const c=state.composer={type:'text',content:'',caption:'',background:bg[0],font:'system-ui',privacy:'all_contacts',topics:[],moodType:'',category:'',intent:'',allowReplies:true,allowReactions:true,allowSharing:true,linkUrl:'',mentions:[],stickers:[],media:null,poll:['',''],selectedSticker:''};
+ root.innerHTML='<div class="ns-compose-box"><div class="ns-compose-head"><div><h3>Create a moment</h3><small style="color:#64748b">Beautiful, quick and built for campus life</small></div><button class="ns-icon-btn" data-cclose>×</button></div><div class="ns-compose-tabs">'+[['text','✍️ Text'],['media','📷 Media'],['poll','📊 Poll'],['link','🔗 Link']].map((x,i)=>'<button class="ns-compose-tab '+(i===0?'active':'')+'" data-ctype="'+x[0]+'">'+x[1]+'</button>').join('')+'</div><div class="ns-pane active" data-pane="text"><textarea class="ns-textarea" data-content maxlength="4000" placeholder="What is happening? Share a thought, update or campus moment…"></textarea><div class="ns-editor" data-editor style="background:'+c.background+'"><div class="ns-edit-text" data-edittext></div></div><div class="ns-bg-grid">'+bg.map((x,i)=>'<button class="ns-bg '+(i===0?'selected':'')+'" data-bg="'+i+'" style="background:'+x+'"></button>').join('')+'</div><div class="ns-editor-tools"><button class="ns-tool" data-font>Change font</button>'+stickers.map(x=>'<button class="ns-tool" data-sticker="'+x+'">'+x+'</button>').join('')+'</div></div><div class="ns-pane" data-pane="media"><label class="ns-upload">📸 <b>Choose a photo or video</b><br><small>Photos are compressed before upload · videos up to 30 seconds</small><input type="file" hidden accept="image/*,video/*" data-media></label><div data-media-preview></div><div class="ns-editor-tools"><button class="ns-tool" data-rotate>↻ Rotate</button><button class="ns-tool" data-zoomout>− Zoom</button><button class="ns-tool" data-zoomin>＋ Zoom</button><button class="ns-tool" data-filter>✨ Filter</button></div><input class="ns-input" data-caption placeholder="Add a caption…" maxlength="2000" style="margin-top:10px"></div><div class="ns-pane" data-pane="poll"><input class="ns-input" data-pollq placeholder="Ask a question…" maxlength="300"><div class="ns-row"><input class="ns-input" data-poll0 placeholder="Option 1"><input class="ns-input" data-poll1 placeholder="Option 2"></div><button class="ns-tool" data-addpoll style="margin-top:10px">＋ Add option</button></div><div class="ns-pane" data-pane="link"><input class="ns-input" data-link placeholder="https://…"><textarea class="ns-textarea" data-linkcaption style="min-height:100px;margin-top:10px" placeholder="Tell people why this link matters…"></textarea></div><div class="ns-section-title" style="margin-top:16px">Audience & details</div><div class="ns-row"><select class="ns-select" data-privacy><option value="all_contacts">My friends</option><option value="close_friends">Close friends</option><option value="contacts_except">Friends except selected</option><option value="only_share_with">Only selected people</option><option value="public">Public</option><option value="private">Only me</option></select><select class="ns-select" data-duration><option value="7">7 sec</option><option value="10">10 sec</option><option value="15">15 sec</option><option value="30">30 sec</option></select></div><div class="ns-row"><input class="ns-input" data-mood placeholder="Mood (e.g. excited)"><input class="ns-input" data-category placeholder="Category (e.g. campus)"><input class="ns-input" data-intent placeholder="Intent (e.g. announcement)"></div><input class="ns-input" data-topics placeholder="Topics separated by commas (e.g. campus,study,events)" style="margin-top:9px"><input class="ns-input" data-privacy-list placeholder="Optional audience user IDs, comma-separated" style="margin-top:9px"><input class="ns-input" data-music placeholder="Optional music/audio URL" style="margin-top:9px"><label class="ns-check"><input type="checkbox" data-replies checked> Allow replies</label><label class="ns-check"><input type="checkbox" data-reactions checked> Allow reactions</label><label class="ns-check"><input type="checkbox" data-sharing checked> Allow sharing</label><div class="ns-compose-actions"><button class="ns-btn ghost" data-cancel>Cancel</button><button class="ns-btn primary" data-publish>Publish Status</button></div></div>';
+ root.classList.add('open');wireComposer();
+}
+function closeComposer(){document.querySelector('[data-composer]')?.classList.remove('open')}
+function wireComposer(){
+ const root=document.querySelector('[data-composer]');root.querySelector('[data-cclose]').onclick=closeComposer;root.querySelector('[data-cancel]').onclick=closeComposer;
+ root.querySelectorAll('[data-ctype]').forEach(b=>b.onclick=()=>{state.composer.type=b.dataset.ctype==='media'?'image':b.dataset.ctype;root.querySelectorAll('[data-ctype]').forEach(x=>x.classList.toggle('active',x===b));root.querySelectorAll('[data-pane]').forEach(p=>p.classList.toggle('active',p.dataset.pane===(b.dataset.ctype==='media'?'media':b.dataset.ctype)))});
+ const content=root.querySelector('[data-content]');content.oninput=()=>root.querySelector('[data-edittext]').textContent=content.value;
+ root.querySelectorAll('[data-bg]').forEach(b=>b.onclick=()=>{state.composer.background=bg[Number(b.dataset.bg)];root.querySelector('[data-editor]').style.background=state.composer.background;root.querySelectorAll('[data-bg]').forEach(x=>x.classList.toggle('selected',x===b))});
+ root.querySelector('[data-font]').onclick=()=>{state.composer.font=state.composer.font==='system-ui'?'Georgia':state.composer.font==='Georgia'?'monospace':'system-ui';root.querySelector('[data-editor]').style.fontFamily=state.composer.font};
+ root.querySelectorAll('[data-sticker]').forEach(b=>b.onclick=()=>{state.composer.stickers.push({emoji:b.dataset.sticker});root.querySelector('[data-edittext]').textContent=(content.value||'')+' '+b.dataset.sticker});
+ root.querySelector('[data-media]').onchange=handleMedia;
+ root.querySelector('[data-caption]').oninput=e=>state.composer.caption=e.target.value;
+ root.querySelector('[data-poll0]').oninput=e=>state.composer.poll[0]=e.target.value;root.querySelector('[data-poll1]').oninput=e=>state.composer.poll[1]=e.target.value;
+ root.querySelector('[data-addpoll]').onclick=()=>{const row=document.createElement('div');row.className='ns-row';row.innerHTML='<input class="ns-input" data-pollx placeholder="Another option">';root.querySelector('[data-addpoll]').before(row)};
+ root.querySelector('[data-publish]').onclick=publish;
+}
+async function handleMedia(e){
+ const file=e.target.files?.[0];if(!file)return;
+ if(file.type.startsWith('video/')){
+  const v=document.createElement('video');v.preload='metadata';v.onloadedmetadata=()=>{URL.revokeObjectURL(v.src);if(v.duration>30){toast('Videos must be 30 seconds or shorter');e.target.value='';return}state.composer.media={file,type:'video'};previewMedia()};
+  v.src=URL.createObjectURL(file);
+ }else if(file.type.startsWith('image/')){
+  try{const compressed=await compressImage(file);state.composer.media={file:compressed,type:'image'};previewMedia()}catch(_){state.composer.media={file,type:'image'};previewMedia()}
+ }
+}
+async function compressImage(file){
+ const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=URL.createObjectURL(file)});
+ const max=1600,scale=Math.min(1,max/Math.max(img.width,img.height));const canvas=document.createElement('canvas');canvas.width=Math.round(img.width*scale);canvas.height=Math.round(img.height*scale);canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);URL.revokeObjectURL(img.src);
+ return await new Promise(r=>canvas.toBlob(b=>r(new File([b],file.name.replace(/\.[^.]+$/i,'.jpg'),{type:'image/jpeg'})),'image/jpeg',.82));
+}
+function previewMedia(){const root=document.querySelector('[data-composer]');const m=state.composer.media;root.querySelector('[data-media-preview]').innerHTML=m?m.type==='video'?'<video class="ns-preview" controls src="'+URL.createObjectURL(m.file)+'"></video>':'<img class="ns-preview" src="'+URL.createObjectURL(m.file)+'">':''}
+async function publish(){
+ const root=document.querySelector('[data-composer]'),c=state.composer;const btn=root.querySelector('[data-publish]');btn.disabled=true;btn.textContent='Publishing…';
+ try{
+  let media={};
+  if(c.media){const fd=new FormData();fd.append('file',c.media.file);const t=token();const r=await fetch(UPLOAD,{method:'POST',headers:t?{Authorization:/^Bearer /i.test(t)?t:'Bearer '+t}:{},body:fd});const d=await r.json();if(!r.ok||!d.success)throw new Error(d.error||'Media upload failed');media={mediaUrl:d.url,mediaPublicId:d.publicId,mediaMime:c.media.file.type};}
+  const activePane=root.querySelector('.ns-pane.active')?.dataset.pane;
+  const type=activePane==='poll'?'poll':activePane==='link'?'link':activePane==='media'?c.type:'text';
+  let content=c.content||'';
+  if(type==='poll')content=root.querySelector('[data-pollq]').value.trim();
+  if(type==='link')content=root.querySelector('[data-linkcaption]').value.trim();
+  const options=[...root.querySelectorAll('[data-poll0],[data-poll1],[data-pollx]')].map(x=>x.value.trim()).filter(Boolean);
+  const body={type,content,caption:c.caption||'',background:c.background,font:c.font,privacy:root.querySelector('[data-privacy]').value,privacyList:(root.querySelector('[data-privacy-list]')?.value||'').split(',').map(x=>x.trim()).filter(Boolean),durationSeconds:Number(root.querySelector('[data-duration]').value),moodType:root.querySelector('[data-mood]').value.trim(),category:root.querySelector('[data-category]').value.trim(),intent:root.querySelector('[data-intent]').value.trim(),topics:root.querySelector('[data-topics]').value.split(',').map(x=>x.trim()).filter(Boolean),allowReplies:root.querySelector('[data-replies]').checked,allowReactions:root.querySelector('[data-reactions]').checked,allowSharing:root.querySelector('[data-sharing]').checked,linkUrl:type==='link'?root.querySelector('[data-link]').value.trim():'',musicUrl:root.querySelector('[data-music]')?.value.trim()||'',stickers:c.stickers,...media};
+  if(type==='poll')body.pollOptions=options;
+  await api('',{method:'POST',body:JSON.stringify(body)});
+  closeComposer();await loadFeed();toast('Your status is live for 24 hours');
+ }catch(e){toast(e.message)}finally{btn.disabled=false;btn.textContent='Publish Status'}
+}
+window.addEventListener('kyn:status:new',()=>loadFeed());
+window.addEventListener('kyn:status:deleted',()=>loadFeed());
+window.addEventListener('kyn:status:expired',()=>loadFeed());
+window.addEventListener('identity:changed',()=>{document.querySelectorAll('#necpa-status-root').length&&renderFeed()});
+function boot(){if(!document.body)return;const style=document.createElement('style');style.textContent="\n#necpa-status-launcher{position:fixed;right:22px;bottom:86px;z-index:8990;border:0;border-radius:999px;padding:12px 18px;background:linear-gradient(135deg,#2563eb,#7c3aed);color:#fff;font-weight:800;box-shadow:0 12px 35px rgba(37,99,235,.32);cursor:pointer;display:flex;align-items:center;gap:8px}\n#necpa-status-launcher .ns-dot{width:9px;height:9px;background:#22c55e;border-radius:50%;box-shadow:0 0 0 4px rgba(34,197,94,.18)}\n#necpa-status-root{position:fixed;inset:0;z-index:8989;background:rgba(2,6,23,.72);backdrop-filter:blur(18px);display:none;align-items:stretch;justify-content:center;padding:22px}\n#necpa-status-root.open{display:flex}\n.ns-shell{width:min(1180px,100%);height:min(920px,100%);background:var(--app-secondary-surface,#f8fafc);color:var(--app-text-color,#0f172a);border-radius:28px;overflow:hidden;box-shadow:0 30px 90px rgba(0,0,0,.35);display:grid;grid-template-columns:310px 1fr;position:relative}\n.ns-side{border-right:1px solid rgba(100,116,139,.16);padding:22px;display:flex;flex-direction:column;gap:14px;overflow:auto;background:rgba(255,255,255,.72)}\n.ns-brand{display:flex;align-items:center;justify-content:space-between}.ns-brand h2{font-size:22px;margin:0}.ns-brand small{display:block;color:#64748b;margin-top:3px}\n.ns-close{border:0;background:rgba(100,116,139,.1);width:38px;height:38px;border-radius:50%;cursor:pointer;font-size:18px}\n.ns-tabs{display:grid;grid-template-columns:1fr 1fr;gap:7px}.ns-tab{border:0;background:transparent;padding:10px;border-radius:12px;font-weight:700;cursor:pointer;color:#64748b}.ns-tab.active{background:#2563eb;color:#fff}\n.ns-my-card{padding:14px;border-radius:18px;background:linear-gradient(135deg,#eff6ff,#f5f3ff);display:flex;align-items:center;gap:12px;cursor:pointer}\n.ns-avatar{width:48px;height:48px;border-radius:50%;background:#e2e8f0;background-size:cover;background-position:center;display:grid;place-items:center;font-weight:800;flex:none}\n.ns-avatar-ring{box-shadow:0 0 0 3px #2563eb,0 0 0 6px #fff}\n.ns-add{margin-left:auto;width:34px;height:34px;border-radius:50%;border:0;background:#2563eb;color:#fff;font-size:22px;cursor:pointer}\n.ns-section-title{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#64748b;font-weight:800;margin:8px 0 2px}\n.ns-list{display:flex;flex-direction:column;gap:8px}.ns-person{display:flex;align-items:center;gap:10px;padding:9px;border-radius:14px;cursor:pointer}.ns-person:hover{background:rgba(37,99,235,.07)}\n.ns-person .ns-avatar{width:42px;height:42px}.ns-person-info{min-width:0;flex:1}.ns-person-name{font-weight:750;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ns-person-time{font-size:11px;color:#64748b}.ns-unseen{width:8px;height:8px;background:#2563eb;border-radius:50%}\n.ns-main{position:relative;overflow:hidden;display:flex;flex-direction:column}\n.ns-main-head{padding:18px 22px;border-bottom:1px solid rgba(100,116,139,.14);display:flex;align-items:center;gap:12px;background:rgba(255,255,255,.72);backdrop-filter:blur(14px)}\n.ns-search{flex:1;border:1px solid rgba(100,116,139,.2);border-radius:14px;padding:11px 14px;background:transparent;color:inherit;outline:none}.ns-search:focus{border-color:#2563eb}\n.ns-filter{border:0;background:rgba(100,116,139,.1);padding:10px 12px;border-radius:12px;font-weight:700;color:inherit}\n.ns-feed{padding:22px;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(235px,1fr));gap:16px}\n.ns-card{border-radius:22px;overflow:hidden;background:#0f172a;min-height:320px;position:relative;cursor:pointer;box-shadow:0 10px 25px rgba(15,23,42,.12)}\n.ns-card-media{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.ns-card-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(2,6,23,.86),rgba(2,6,23,0) 65%)}\n.ns-card-top{position:absolute;top:13px;left:13px;right:13px;display:flex;align-items:center;gap:9px;color:#fff}.ns-card-top .ns-avatar{width:36px;height:36px;border:2px solid #fff}\n.ns-card-user{font-size:13px;font-weight:800;flex:1}.ns-card-time{font-size:10px;opacity:.8}\n.ns-card-bottom{position:absolute;left:15px;right:15px;bottom:15px;color:#fff}.ns-card-caption{font-size:14px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}.ns-card-meta{display:flex;gap:10px;margin-top:9px;font-size:11px;opacity:.82}\n.ns-empty{grid-column:1/-1;text-align:center;padding:80px 20px;color:#64748b}.ns-empty strong{display:block;font-size:18px;color:inherit;margin-bottom:5px}\n.ns-composer{position:absolute;inset:0;background:rgba(2,6,23,.82);backdrop-filter:blur(16px);display:none;align-items:center;justify-content:center;padding:22px;z-index:20}.ns-composer.open{display:flex}\n.ns-compose-box{width:min(700px,100%);max-height:92%;overflow:auto;background:#fff;color:#0f172a;border-radius:24px;padding:22px;box-shadow:0 30px 80px rgba(0,0,0,.3)}\n.ns-compose-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}.ns-compose-head h3{margin:0;font-size:20px}.ns-icon-btn{border:0;background:#eef2ff;width:38px;height:38px;border-radius:50%;cursor:pointer}\n.ns-compose-tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:14px}.ns-compose-tab{border:1px solid #e2e8f0;background:#fff;padding:10px;border-radius:12px;font-weight:750;cursor:pointer}.ns-compose-tab.active{background:#2563eb;color:#fff;border-color:#2563eb}\n.ns-pane{display:none}.ns-pane.active{display:block}\n.ns-textarea{width:100%;min-height:190px;border:1px solid #e2e8f0;border-radius:18px;padding:18px;font-size:18px;resize:vertical;outline:none}.ns-textarea:focus{border-color:#2563eb}\n.ns-editor{border-radius:20px;min-height:280px;padding:25px;display:flex;align-items:center;justify-content:center;text-align:center;color:#fff;position:relative;overflow:hidden}.ns-editor .ns-edit-text{font-size:30px;font-weight:800;line-height:1.25;word-break:break-word}\n.ns-bg-grid,.ns-sticker-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:7px;margin-top:10px}.ns-bg,.ns-sticker{height:38px;border-radius:10px;border:2px solid transparent;cursor:pointer}.ns-sticker{background:#f8fafc;font-size:22px}.ns-bg.selected{border-color:#0f172a}\n.ns-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.ns-input,.ns-select{border:1px solid #e2e8f0;border-radius:12px;padding:10px 12px;background:#fff;min-width:0;flex:1}.ns-check{display:flex;align-items:center;gap:8px;font-size:13px;margin-top:10px}\n.ns-upload{border:2px dashed #cbd5e1;border-radius:18px;padding:38px 20px;text-align:center;cursor:pointer}.ns-upload:hover{border-color:#2563eb;background:#eff6ff}.ns-preview{width:100%;max-height:360px;object-fit:contain;border-radius:18px;background:#020617}.ns-editor-tools{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}.ns-tool{border:1px solid #e2e8f0;background:#fff;padding:8px 11px;border-radius:10px;cursor:pointer}\n.ns-compose-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:16px}.ns-btn{border:0;border-radius:13px;padding:11px 16px;font-weight:800;cursor:pointer}.ns-btn.primary{background:#2563eb;color:#fff}.ns-btn.ghost{background:#eef2f7;color:#334155}.ns-btn.danger{background:#fee2e2;color:#b91c1c}\n.ns-viewer{position:absolute;inset:0;background:#000;display:none;z-index:40;color:#fff}.ns-viewer.open{display:flex;align-items:center;justify-content:center}.ns-viewer-stage{width:min(620px,100%);height:100%;position:relative;display:flex;align-items:center;justify-content:center;background:#000}.ns-viewer-media{max-width:100%;max-height:100%;width:100%;height:100%;object-fit:contain}.ns-viewer-text{padding:50px;max-width:620px;text-align:center;font-size:34px;font-weight:850;line-height:1.3;white-space:pre-wrap}.ns-viewer-grad{position:absolute;inset:0;pointer-events:none;background:linear-gradient(to bottom,rgba(0,0,0,.72),transparent 25%,transparent 70%,rgba(0,0,0,.88)}\n.ns-progress{position:absolute;top:12px;left:12px;right:12px;display:flex;gap:4px;z-index:4}.ns-progress i{height:3px;background:rgba(255,255,255,.3);flex:1;border-radius:3px;overflow:hidden}.ns-progress b{display:block;height:100%;width:0;background:#fff}.ns-viewer-head{position:absolute;top:25px;left:20px;right:20px;z-index:5;display:flex;align-items:center;gap:10px}.ns-viewer-head .ns-avatar{width:38px;height:38px;border:2px solid #fff}.ns-viewer-name{font-weight:850}.ns-viewer-time{font-size:11px;opacity:.75}.ns-viewer-actions{margin-left:auto;display:flex;gap:5px}.ns-viewer-actions button,.ns-nav{border:0;background:rgba(0,0,0,.35);color:#fff;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:18px}.ns-nav{position:absolute;top:50%;z-index:5}.ns-prev{left:12px}.ns-next{right:12px}.ns-viewer-bottom{position:absolute;left:20px;right:20px;bottom:20px;z-index:6}.ns-reactions{display:flex;gap:5px;margin-bottom:9px}.ns-reaction{border:0;background:rgba(255,255,255,.14);border-radius:999px;padding:7px 10px;color:#fff;cursor:pointer;font-size:17px}.ns-reply-row{display:flex;gap:8px}.ns-reply{flex:1;border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.12);color:#fff;border-radius:999px;padding:12px 15px;outline:none}.ns-viewer-more{display:none;position:absolute;right:20px;bottom:82px;background:#fff;color:#0f172a;border-radius:16px;padding:8px;min-width:170px;z-index:9;box-shadow:0 15px 40px rgba(0,0,0,.3)}.ns-viewer-more.open{display:block}.ns-viewer-more button{display:block;width:100%;border:0;background:transparent;text-align:left;padding:10px;border-radius:10px;cursor:pointer}.ns-viewer-more button:hover{background:#f1f5f9}\n.ns-toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#0f172a;color:#fff;padding:11px 16px;border-radius:999px;z-index:99999;display:none}.ns-toast.show{display:block}\n@media(max-width:800px){#necpa-status-root{padding:0}.ns-shell{height:100%;border-radius:0;grid-template-columns:1fr}.ns-side{display:none}.ns-main-head{padding:13px}.ns-feed{grid-template-columns:repeat(2,minmax(0,1fr));padding:12px;gap:10px}.ns-card{min-height:280px}.ns-compose-box{border-radius:20px}.ns-viewer-text{font-size:28px;padding:30px}.ns-nav{width:34px;height:34px}#necpa-status-launcher{right:14px;bottom:74px}}\n@media(min-width:801px){#necpa-status-root[data-side-open=\"true\"] .ns-side{display:flex}}\n";document.head.appendChild(style);mount()}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
+window.__NecpaProfessionalStatus={open,close,loadFeed};
+})();
