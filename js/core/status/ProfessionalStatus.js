@@ -338,7 +338,9 @@ function previewMedia(){
  }
 }
 async function publish(){
- const root=document.querySelector('[data-composer]'),c=state.composer;const btn=root.querySelector('[data-publish]');btn.disabled=true;btn.textContent='Publishing…';
+ const root=document.querySelector('[data-composer]'),c=state.composer;const btn=root.querySelector('[data-publish]');
+ const activePane=root.querySelector('.ns-pane.active')?.dataset.pane;
+ const type=activePane==='poll'?'poll':activePane==='link'?'link':activePane==='media'?(c.media?.type||'image'):'text';btn.disabled=true;btn.textContent='Publishing…';
  try{
   if((type==='image'||type==='video')&&!c.media?.file) throw new Error('Choose an image or video before publishing.');
   let media={};
