@@ -189,7 +189,7 @@ async function decryptRow(m){
       console.error('[GroupDecrypt] decryptRow failed:',e&&e.message||e);
       if(id)_groupDecryptFailed.set(id,m.content);
       const prior=S.messages.find(x=>String(x.id||x.messageId)===id);
-      if(prior&&typeof prior.content==='string'&&!prior._decryptPending&&!/^\\[Unable to decrypt|^🔒|^Decrypting securely/.test(prior.content))return prior.content;
+      if(prior&&typeof prior.content==='string'&&!prior._decryptPending&&!/^(?:\[Unable to decrypt|🔒|Decrypting securely)/.test(prior.content))return prior.content;
       return null;
     }
   })();
