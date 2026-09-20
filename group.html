@@ -215,6 +215,8 @@ function buildRow(m){const id=String(m.id||m.messageId||'');const pendingDecrypt
       st.textContent='⚠ Not sent';st.style.cssText='color:#fecaca;font-weight:700';t.append(st);
       const rt=document.createElement('button');rt.type='button';rt.textContent='Retry';rt.style.cssText='border:0;background:rgba(255,255,255,.22);color:inherit;border-radius:8px;padding:1px 7px;cursor:pointer;font-size:10px';rt.onclick=e=>{e.stopPropagation();retryOptimistic(m.localId)};t.append(rt);
       const dc=document.createElement('button');dc.type='button';dc.textContent='Discard';dc.style.cssText='border:0;background:transparent;color:inherit;text-decoration:underline;cursor:pointer;font-size:10px';dc.onclick=e=>{e.stopPropagation();S.messages=S.messages.filter(x=>x.localId!==m.localId);renderMessages(false)};t.append(dc);
+    }else if(m.status==='waiting-key'){
+      st.textContent='🔐';st.title='Waiting for group encryption keys…';t.append(st);
     }else{st.textContent='🕓';st.title='Sending…';t.append(st)}
   }
   b.append(t);
@@ -326,9 +328,21 @@ async function deliverOptimistic(cid,groupId,plain){
       loadMessages(); // background reconcile, never blocks the UI
     }
   }catch(error){
-    console.warn('[GroupMessage] send failed',error?.message||error);
+    const msg=String(error?.message||error);
+    const provisioning=error?.code==='GROUP_KEY_PROVISIONING_PENDING'||
+      error?.code==='GROUP_KEY_PROVISIONING_TIMEOUT'||
+      /group encryption.*(waiting|synchronizing)|secure messaging is still unlocking|member key/i.test(msg);
+    console.warn('[GroupMessage] send deferred',msg);
     const row=S.messages.find(m=>m._optimistic&&m.localId===cid);
-    if(row){row.status='failed';row._error=String(error?.message||error);renderMessages(false)}
+    if(row){
+      if(provisioning){
+        row.status='waiting-key';row._error='Waiting for group encryption keys…';renderMessages(false);
+        clearTimeout(row._retryTimer);
+        row._retryTimer=setTimeout(()=>{row._retryTimer=null;queueOptimisticSend(cid,groupId,plain)},5000);
+      }else{
+        row.status='failed';row._error=msg;renderMessages(false);
+      }
+    }
   }
 }
 function queueOptimisticSend(cid,groupId,plain){
