@@ -104,6 +104,7 @@ async function ensureE2EReady(){
   }
   return !!(window.KynectaE2EIdentity?.privateKey&&window.KynectaE2EIdentity?.publicKey);
 }
+window.__NECPRA_ENSURE_E2E=ensureE2EReady;
 async function loadGroups(){if(S.loading)return;S.loading=true;const GCF=window.__GroupCacheFirst;if(GCF&&!S.groups.length){GCF.hydrate('groups',cached=>{S.groups=cached;renderGroups()})}try{const r=await api('/chats?limit=100');const rows=r?.data?.chats||r?.data||[];S.groups=Array.isArray(rows)?rows.filter(x=>(x?.type||x?.chatType)==='group').map(unwrap):[];if(GCF)GCF.set('groups',S.groups);renderGroups()}catch(e){const cached=GCF&&GCF.get('groups');const cachedList=cached&&cached.value!==undefined?cached.value:cached;if(Array.isArray(cachedList)&&cachedList.length){S.groups=cachedList;renderGroups()}else{const box=$('groups');if(box)box.innerHTML=`<div class="empty">Unable to load groups.<br>${esc(e.message)}</div>`}}finally{S.loading=false}}
 function normalizeMessages(r){const rows=r?.data?.messages||r?.data||r?.messages||[];return Array.isArray(rows)?rows:[]}
 
@@ -210,8 +211,6 @@ function renderMedia(){const box=$('mediaBar');const items=S.messages.filter(m=>
 
 async function hydrateGroupHistory(id){if(!window.KynectaGroupMessageCache)return;try{const cached=await window.KynectaGroupMessageCache.getMessages(id);if(String(window.__GROUP_CHAT_ID)!==String(id)||!cached.length)return;S.messages=cached;renderMessages(false);}catch(_){}}
 function openGroup(id){
-  // Initialize group crypto when the conversation opens. Sending no longer
-  // acts as the bootstrap trigger, eliminating the startup race.
   window.KynectaGroupE2E?.initGroup?.(Number(id)).catch(err=>console.warn('[GroupCrypto] startup:',err?.message||err));
   const g=S.groups.find(x=>String(x.id)===String(id))||{id};S.current=g;window.__GROUP_CHAT_ID=String(id);window.__GROUP_CHAT_TYPE='group';
   $('input').disabled=false;$('send').disabled=false;['searchToggle','pinnedToggle','mediaToggle'].forEach(bid=>{const b=$(bid);if(b)b.disabled=false});
