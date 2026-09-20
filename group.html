@@ -1,4 +1,4 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Groups</title><script src="/js/runtime-config.js"></script><script src="/js/config.js"></script><script src="/js/theme.engine.js"></script><script src="/js/e2e-encryption.js"></script><script src="/js/e2e-session-init.js" defer></script><script src="/js/settings-broadcast-listener.js"></script><script src="/js/necpa-session-resilience.js"></script><script src="js/core/groups/group-cache-first.js"></script><script src="js/groupEncryption.client.js"></script><script src="js/group-platform.js"></script><style>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Groups</title><script src="/js/runtime-config.js"></script><script src="/js/config.js"></script><script src="/js/theme.engine.js"></script><script src="/js/e2e-encryption.js"></script><script src="/js/e2e-session-init.js" defer></script><script src="/js/settings-broadcast-listener.js"></script><script src="/js/necpa-session-resilience.js"></script><script src="js/core/groups/group-cache-first.js"></script><script src="js/groupMessaging.client.js"></script><script src="js/group-platform.js"></script><style>
 :root{--bg:var(--kyn-bg-root,#f8fafc);--surface:var(--kyn-bg-panel,#fff);--surface2:var(--kyn-bg-input,#f1f5f9);--border:var(--kyn-border,#e2e8f0);--text:var(--kyn-text-primary,#0f172a);--muted:var(--kyn-text-muted,#64748b);--primary:var(--kyn-accent-secondary,#2563eb)}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden}body{background:var(--bg);color:var(--text);font:14px system-ui,-apple-system,"Segoe UI",Roboto,Arial}button,input,textarea{font:inherit}button{cursor:pointer}.layout{height:100%;display:grid;grid-template-columns:minmax(250px,32%) 1fr}.sidebar,.panel{min-width:0;min-height:0}.sidebar{border-right:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column}.side-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--border);font-weight:800}.toolbar{display:flex;gap:7px;padding:10px}.search{flex:1;min-width:0;padding:9px;border:1px solid var(--border);border-radius:11px;background:var(--surface2);color:inherit}.refresh{border:1px solid var(--border);border-radius:10px;background:var(--surface2);color:inherit;padding:8px 11px}.groups{flex:1;overflow:auto;padding:0 10px}.group{width:100%;display:flex;align-items:center;gap:10px;padding:10px;border:1px solid transparent;border-radius:13px;background:transparent;color:inherit;text-align:left;margin-bottom:5px}.group:hover,.group.active{background:var(--surface2);border-color:var(--border)}.avatar{width:43px;height:43px;border-radius:13px;background:linear-gradient(135deg,#dbeafe,#c4b5fd);display:grid;place-items:center;font-weight:800;color:#1e40af;flex:0 0 auto;background-size:cover;background-position:center}.groupmain{min-width:0;flex:1}.name{font-weight:750;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.meta{font-size:11px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.empty{text-align:center;color:var(--muted);padding:40px 18px}
 .unread-badge{flex:0 0 auto;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:#ef4444;color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;line-height:1}
 /* No in-panel header any more: the parent shell's #globalHeader owns the
@@ -130,10 +130,10 @@ async function decryptGroupContent(message){
 const groupMessageState={decryptInFlight:new Map(),plaintext:new Map(),lastCiphertext:new Map()};
 async function decryptRows(list){return Promise.all(list.map(decryptGroupContent))}
 // FIX (LIVE GROUP MESSAGES NEVER APPEARED UNTIL THE 5s POLL): handleRealtime() below has been calling
-// decryptRow(message), but only decryptRows()/decryptGroupContent() exist — the group rebuild renamed
+// decryptGroupContent(message), but only decryptRows()/decryptGroupContent() exist — the group rebuild renamed
 // it and missed this call site, so every live 'GROUP_MESSAGE' threw a ReferenceError and the message
 // only showed up when the next poll happened to fetch it.
-function decryptRow(message){return decryptGroupContent(message)}
+
 function mergeGroupMessages(incoming){
   const byId=new Map();
   // A local (optimistic) echo is replaced by the real server message carrying the same clientMessageId.
@@ -173,7 +173,7 @@ function schedulePendingRetry(){
 }
 async function loadMessages(){
   if(!S.current?.id)return;const gid=String(S.current.id);
-  try{const r=await api('/groups/'+encodeURIComponent(gid)+'/messages?limit=100');if(!S.current||String(S.current.id)!==gid)return;
+  try{const r=await api('/group-messages/'+encodeURIComponent(gid)+'/messages?limit=100');if(!S.current||String(S.current.id)!==gid)return;
     const decrypted=await decryptRows(normalizeMessages(r));if(!S.current||String(S.current.id)!==gid)return;mergeGroupMessages(decrypted);
   }catch(error){console.warn('[GroupMessage] history sync deferred',error?.message||error);}
 }
@@ -244,9 +244,9 @@ function startEdit(id,currentContent){const next=prompt('Edit message:',currentC
     if(!(await ensureE2EReady())||!window.KynectaGroupE2E)throw new Error(e2eNotReadyMessage());
     outgoing=await window.KynectaGroupE2E.encryptForGroup(S.current?.id,trimmed,groupMemberIds(S.current));
   }catch(e){alert(e.message||'Could not encrypt the edited message');return}
-  api(`/messages/${encodeURIComponent(id)}`,{method:'PATCH',body:JSON.stringify({content:outgoing})}).then(()=>{const idx=S.messages.findIndex(m=>String(m.id||m.messageId)===String(id));if(idx!==-1){S.messages[idx]={...S.messages[idx],content:trimmed,isEdited:true};renderMessages(false)}}).catch(e=>alert(e.message||'Could not edit message'))
+  api(`/group-messages/message/${encodeURIComponent(id)}`,{method:'PATCH',body:JSON.stringify({content:outgoing})}).then(()=>{const idx=S.messages.findIndex(m=>String(m.id||m.messageId)===String(id));if(idx!==-1){S.messages[idx]={...S.messages[idx],content:trimmed,isEdited:true};renderMessages(false)}}).catch(e=>alert(e.message||'Could not edit message'))
 })()}
-function deleteMessage(id){const forEveryone=confirm('Delete for everyone? Click Cancel to delete just for you.');api(`/messages/${encodeURIComponent(id)}?deleteForEveryone=${forEveryone}`,{method:'DELETE'}).then(()=>{S.messages=S.messages.filter(m=>String(m.id||m.messageId)!==String(id));renderMessages(false)}).catch(e=>alert(e.message||'Could not delete message'))}
+function deleteMessage(id){const forEveryone=confirm('Delete for everyone? Click Cancel to delete just for you.');api(`/group-messages/message/${encodeURIComponent(id)}?deleteForEveryone=${forEveryone}`,{method:'DELETE'}).then(()=>{S.messages=S.messages.filter(m=>String(m.id||m.messageId)!==String(id));renderMessages(false)}).catch(e=>alert(e.message||'Could not delete message'))}
 
 // ── Mentions ─────────────────────────────────────────────────────────────
 // Lightweight @name highlighting in rendered messages, plus an autocomplete
@@ -278,7 +278,7 @@ async function pinMessage(messageId){if(!S.current?.id)return;try{await api(`/pi
 // sees plaintext. Same trade-off 1:1 chat already has; a real fix would
 // need client-side search over already-decrypted local history instead,
 // which is a separate, larger piece of work not done here.
-async function runGroupSearch(q){const box=$('searchResults');if(!q.trim()){box.innerHTML='';return}box.innerHTML='<div class="empty">Searching…</div>';try{const r=await api(`/search/messages/${encodeURIComponent(S.current.id)}?query=${encodeURIComponent(q)}`);const hits=r?.data?.results||r?.data?.messages||r?.data||[];if(!Array.isArray(hits)||!hits.length){box.innerHTML='<div class="empty">No matches.</div>';return}box.innerHTML='';for(const h of hits.slice(0,30)){const row=document.createElement('div');row.className='search-hit';row.innerHTML=`<b>${esc(h.sender?.displayName||h.sender?.username||'Member')}</b> — ${esc((h.content||'').slice(0,140))}`;row.onclick=()=>{closeSubbars();const el=document.querySelector(`[data-message-id="${CSS.escape(String(h.id))}"]`);el?.scrollIntoView({behavior:'smooth',block:'center'})};box.append(row)}}catch(e){box.innerHTML=`<div class="empty">${esc(e.message)}</div>`}}
+async function runGroupSearch(q){const box=$('searchResults');if(!q.trim()){box.innerHTML='';return}box.innerHTML='<div class="empty">Searching…</div>';try{const r=await Promise.resolve({data:{results:S.messages.filter(m=>String(m.content||'').toLowerCase().includes(q.toLowerCase()))}});const hits=r?.data?.results||r?.data?.messages||r?.data||[];if(!Array.isArray(hits)||!hits.length){box.innerHTML='<div class="empty">No matches.</div>';return}box.innerHTML='';for(const h of hits.slice(0,30)){const row=document.createElement('div');row.className='search-hit';row.innerHTML=`<b>${esc(h.sender?.displayName||h.sender?.username||'Member')}</b> — ${esc((h.content||'').slice(0,140))}`;row.onclick=()=>{closeSubbars();const el=document.querySelector(`[data-message-id="${CSS.escape(String(h.id))}"]`);el?.scrollIntoView({behavior:'smooth',block:'center'})};box.append(row)}}catch(e){box.innerHTML=`<div class="empty">${esc(e.message)}</div>`}}
 
 // ── Files & media — no dedicated group-scoped backend exists for this yet
 // (the closest thing, /search/files, searches by filename across a user's
@@ -355,7 +355,7 @@ async function deliverOptimistic(cid,groupId,plain){
   try{
     if(!(await ensureE2EReady())||!window.KynectaGroupE2E?.encryptForGroup)throw new Error(e2eNotReadyMessage());
     const encrypted=await window.KynectaGroupE2E.encryptForGroup(groupId,plain,groupMemberIds(groupObjectFor(groupId)));
-    const r=await apiRetry('/messages',{method:'POST',body:JSON.stringify({chatId:groupId,content:encrypted,type:'text',clientMessageId:cid,metadata:{groupId}})});
+    const r=await apiRetry('/group-messages/'+encodeURIComponent(groupId)+'/messages',{method:'POST',body:JSON.stringify({chatId:groupId,content:encrypted,type:'text',clientMessageId:cid,metadata:{groupId}})});
     const serverMessage=r?.data?.message||r?.data;
     if(!serverMessage?.id)throw new Error('Server did not return the saved group message');
     // We know our own plaintext — remember it so this row never needs a decrypt round trip.
@@ -417,7 +417,7 @@ async function sendGroupPayload(plain,type='text',metadata=null){
   if(!(await ensureE2EReady())||!window.KynectaGroupE2E?.encryptForGroup)throw new Error(e2eNotReadyMessage());
   const gid=Number(S.current.id),cid=makeGroupClientId();
   const encrypted=text?await window.KynectaGroupE2E.encryptForGroup(gid,text,groupMemberIds(S.current)):'';
-  const r=await apiRetry('/messages',{method:'POST',body:JSON.stringify({chatId:gid,content:encrypted,type,clientMessageId:cid,metadata:{...(metadata||{}),groupId:gid}})});
+  const r=await apiRetry('/group-messages/'+encodeURIComponent(groupId)+'/messages',{method:'POST',body:JSON.stringify({chatId:gid,content:encrypted,type,clientMessageId:cid,metadata:{...(metadata||{}),groupId:gid}})});
   const message=r?.data?.message||r?.data;if(!message?.id)throw new Error('Server did not return the saved group message');
   if(text){groupMessageState.plaintext.set(String(message.id),text);groupMessageState.lastCiphertext.set(String(message.id),encrypted)}
   mergeGroupMessages([{...message,clientMessageId:cid,content:text,displayContent:text}]);loadMessages();return message;
@@ -493,7 +493,7 @@ function handleRealtime(ev){
     if(groupId==null||!message?.id)return;
     if(S.current&&String(groupId)===String(S.current.id)){
         const exists=S.messages.some(m=>String(m.id||m.messageId)===String(message.id));
-        if(!exists){decryptRow(message).then(dm=>{
+        if(!exists){decryptGroupContent(message).then(dm=>{
             if(!S.current||String(groupId)!==String(S.current.id))return;
             // mergeGroupMessages de-duplicates by id / clientMessageId, replaces our own local echo and keeps
             // a consistent order (a bare sort by Number(id) breaks once local rows are present).
