@@ -108,6 +108,73 @@ window.__NECPRA_ENSURE_E2E=ensureE2EReady;
 async function loadGroups(){if(S.loading)return;S.loading=true;const GCF=window.__GroupCacheFirst;if(GCF&&!S.groups.length){GCF.hydrate('groups',cached=>{S.groups=cached;renderGroups()})}try{const r=await api('/chats?limit=100');const rows=r?.data?.chats||r?.data||[];S.groups=Array.isArray(rows)?rows.filter(x=>(x?.type||x?.chatType)==='group').map(unwrap):[];if(GCF)GCF.set('groups',S.groups);renderGroups()}catch(e){const cached=GCF&&GCF.get('groups');const cachedList=cached&&cached.value!==undefined?cached.value:cached;if(Array.isArray(cachedList)&&cachedList.length){S.groups=cachedList;renderGroups()}else{const box=$('groups');if(box)box.innerHTML=`<div class="empty">Unable to load groups.<br>${esc(e.message)}</div>`}}finally{S.loading=false}}
 function normalizeMessages(r){const rows=r?.data?.messages||r?.data||r?.messages||[];return Array.isArray(rows)?rows:[]}
 
+async function decryptGroupContent(message){
+  if(!message||typeof message.content!=='string'||!message.content)return message;
+  const id=String(message.id||message.messageId||''); const cipher=message.content;
+  const cached=groupMessageState.plaintext.get(id);
+  if(cached&&groupMessageState.lastCiphertext.get(id)===cipher)return {...message,content:cached};
+  if(groupMessageState.decryptInFlight.has(id)){const plain=await groupMessageState.decryptInFlight.get(id);return plain==null?{...message,_decryptPending:true}:{...message,content:plain};}
+  const task=(async()=>{try{
+    if(!(await ensureE2EReady())||!window.KynectaGroupE2E?.decryptForGroup)throw new Error('Secure group messaging is not ready yet');
+    const plain=await window.KynectaGroupE2E.decryptForGroup(Number(S.current?.id??message.chatId),cipher,groupMemberIds(S.current));
+    if(plain==null)throw new Error('Unable to decrypt group message');
+    groupMessageState.plaintext.set(id,plain);groupMessageState.lastCiphertext.set(id,cipher);return plain;
+  }catch(error){console.warn('[GroupMessage] decryption deferred',id,error?.message||error);return null;}})();
+  groupMessageState.decryptInFlight.set(id,task);try{const plain=await task;return plain==null?{...message,_decryptPending:true}:{...message,content:plain};}finally{groupMessageState.decryptInFlight.delete(id);}
+}
+const groupMessageState={decryptInFlight:new Map(),plaintext:new Map(),lastCiphertext:new Map()};
+async function decryptRows(list){return Promise.all(list.map(decryptGroupContent))}
+// FIX (LIVE GROUP MESSAGES NEVER APPEARED UNTIL THE 5s POLL): handleRealtime() below has been calling
+// decryptGroupContent(message), but only decryptRows()/decryptGroupContent() exist — the group rebuild renamed
+// it and missed this call site, so every live 'GROUP_MESSAGE' threw a ReferenceError and the message
+// only showed up when the next poll happened to fetch it.
+
+function mergeGroupMessages(incoming){
+  const byId=new Map();
+  // A local (optimistic) echo is replaced by the real server message carrying the same clientMessageId.
+  const doneCids=new Set(incoming.map(m=>m&&(m.clientMessageId||m.metadata?.localId)).filter(Boolean).map(String));
+  for(const message of S.messages){if(message._optimistic&&doneCids.has(String(message.localId)))continue;const id=String(message.localId||message.id||message.messageId||'');if(id)byId.set(id,message);}
+  for(const message of incoming){
+    const id=String(message.localId||message.id||message.messageId||'');if(!id)continue;
+    const existing=byId.get(id);
+    if(existing&&message._decryptPending&&typeof existing.content==='string'&&existing.content!==message.content)byId.set(id,{...existing,...message,content:existing.content,_decryptPending:false});
+    else byId.set(id,existing?{...existing,...message}:message);
+  }
+  const merged=[...byId.values()].sort((a,b)=>{
+    // not-yet-confirmed local rows always sit after confirmed ones (keeps the comparator consistent)
+    const ao=a._optimistic?1:0,bo=b._optimistic?1:0;if(ao!==bo)return ao-bo;
+    const ai=Number(a.id),bi=Number(b.id);if(!ao&&Number.isFinite(ai)&&Number.isFinite(bi))return ai-bi;
+    return new Date(a.createdAt||a.sentAt||0)-new Date(b.createdAt||b.sentAt||0);});
+  const changed=merged.length!==S.messages.length||merged.some((m,i)=>{const old=S.messages[i];return !old||String(m.id||m.messageId||m.localId)!==String(old.id||old.messageId||old.localId)||m.content!==old.content||m.status!==old.status||m.isEdited!==old.isEdited;});
+  if(changed){S.messages=merged;renderMessages(false);}return merged;
+}
+function renderMessages(scroll=true){
+  const box=$('messages');if(!box)return;box.replaceChildren();
+  if(!S.messages.length)box.innerHTML='<div class="empty">No messages yet.</div>';else S.messages.forEach(m=>box.append(buildRow(m)));
+  if(scroll)box.scrollTop=box.scrollHeight;
+  const confirmed=S.messages.filter(m=>!m._optimistic);
+  window.__GROUP_MESSAGES_CACHE=confirmed.slice();window.__GROUP_REFRESH_MESSAGES=loadMessages;
+  const gid=window.__GROUP_CHAT_ID;if(gid&&window.KynectaGroupMessageCache)window.KynectaGroupMessageCache.putMessages(gid,confirmed);
+  schedulePendingRetry();
+}
+// FIX (MESSAGE-HIDDEN-THEN-APPEARS-LATER): a message whose decryption isn't ready used to render as an
+// EMPTY bubble and only got another attempt on the next 5-second poll. Show a placeholder and retry
+// quickly a few times instead.
+function schedulePendingRetry(){
+  if(!S.messages.some(m=>m._decryptPending)){S._pendTries=0;return}
+  if(S._pendTimer||(S._pendTries||0)>=6)return;
+  S._pendTries=(S._pendTries||0)+1;
+  S._pendTimer=setTimeout(()=>{S._pendTimer=null;loadMessages()},1200*S._pendTries);
+}
+async function loadMessages(){
+  if(!S.current?.id)return;const gid=String(S.current.id);
+  try{const r=await api('/group-messages/'+encodeURIComponent(gid)+'/messages?limit=100');if(!S.current||String(S.current.id)!==gid)return;
+    const decrypted=await decryptRows(normalizeMessages(r));if(!S.current||String(S.current.id)!==gid)return;mergeGroupMessages(decrypted);
+  }catch(error){console.warn('[GroupMessage] history sync deferred',error?.message||error);}
+}
+
+function renderGroups(){const box=$('groups');if(!box)return;box.replaceChildren();const q=S.q.trim().toLowerCase();const rows=S.groups.filter(g=>!q||String(g.name||g.groupName||'').toLowerCase().includes(q));if(!rows.length){box.innerHTML='<div class="empty">No groups yet.</div>';return}for(const g of rows){const b=document.createElement('button');b.type='button';b.className='group'+(S.current&&String(S.current.id)===String(g.id)?' active':'');const a=document.createElement('div');a.className='avatar';a.textContent=String(g.name||g.groupName||'G').slice(0,1).toUpperCase();const m=document.createElement('div');m.className='groupmain';m.innerHTML=`<div class="name">${esc(g.name||g.groupName||'Unnamed group')}</div><div class="meta">${Number(g.participantCount??g.participants?.length??0)} members</div>`;b.append(a,m);const unread=Number(S.unread?.[String(g.id)]||0);if(unread>0){const badge=document.createElement('span');badge.className='unread-badge';badge.textContent=unread>99?'99+':String(unread);b.append(badge)}b.onclick=()=>openGroup(g.id);box.append(b)}}
+
 function closeMsgMenu(){if(S.openMenuId==null)return;const el=document.querySelector(`.msg-menu[data-for="${S.openMenuId}"]`);if(el){el.classList.remove('open');el.style.left='';el.style.right='';el.style.top='';el.style.bottom=''}S.openMenuId=null}
 // FIX (MSG-MENU-CLIPPED-AT-EDGES): this menu used to rely purely on CSS
 // (`.row.mine .msg-menu{right:0}` / `.row:not(.mine) .msg-menu{left:0}`),
