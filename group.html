@@ -96,112 +96,14 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 // actual local identity private key, not the DM registration status.
 // The canonical e2e-session-init.js remains the only component responsible for
 // unlocking/initializing that identity; this page only waits for its result.
-let e2eReadyPromise=null;
-function e2eNotReadyMessage(){
-  let pw=null;try{pw=sessionStorage.getItem('kyn_e2e_pw_session')}catch(_){}
-  return pw?'Secure group messaging is still unlocking. Please try again in a moment.':'Secure group messaging is locked. Please sign in again to unlock it.';
-}
-function hasGroupIdentity(){
-  try{
-    return !!(window.KynectaE2E?.getMyIdentityPrivateKey?.()&&
-      window.KynectaE2E?.publicKey&&
-      typeof window.KynectaE2E?.wrapForLocalStorage==='function');
-  }catch(_){return false}
-}
+function e2eNotReadyMessage(){return 'Secure group messaging is not ready yet. Please wait for the secure session to finish unlocking.'}
 async function ensureE2EReady(){
-  if(hasGroupIdentity())return true;
-  if(e2eReadyPromise)return e2eReadyPromise;
-  e2eReadyPromise=(async()=>{
-    try{
-      const deadline=Date.now()+15000;
-      while(Date.now()<deadline){
-        if(hasGroupIdentity())return true;
-        await new Promise(resolve=>{
-          let done=false,timer=setTimeout(()=>{if(done)return;done=true;resolve()},300);
-          const onReady=()=>{if(done)return;done=true;clearTimeout(timer);document.removeEventListener('kyn:canonicalMessageE2EReady',onReady);resolve()};
-          document.addEventListener('kyn:canonicalMessageE2EReady',onReady,{once:true});
-        });
-      }
-      return hasGroupIdentity();
-    }finally{e2eReadyPromise=null}
-  })();
-  return e2eReadyPromise;
-}
-window.__NECPRA_ENSURE_E2E=ensureE2EReady;
-ensureE2EReady();
-function groupMemberIds(g){const list=Array.isArray(g?.participants)?g.participants:[];return[...new Set(list.map(p=>Number((p.user||p).id??p.userId)).filter(n=>Number.isInteger(n)&&n>0))]}
-
-async function decryptGroupContent(message){
-  if(!message||typeof message.content!=='string'||!message.content)return message;
-  const id=String(message.id||message.messageId||''); const cipher=message.content;
-  const cached=groupMessageState.plaintext.get(id);
-  if(cached&&groupMessageState.lastCiphertext.get(id)===cipher)return {...message,content:cached};
-  if(groupMessageState.decryptInFlight.has(id)){const plain=await groupMessageState.decryptInFlight.get(id);return plain==null?{...message,_decryptPending:true}:{...message,content:plain};}
-  const task=(async()=>{try{
-    if(!(await ensureE2EReady())||!window.KynectaGroupE2E?.decryptForGroup)throw new Error('Secure group messaging is not ready yet');
-    const plain=await window.KynectaGroupE2E.decryptForGroup(Number(S.current?.id??message.chatId),cipher,groupMemberIds(S.current));
-    if(plain==null)throw new Error('Unable to decrypt group message');
-    groupMessageState.plaintext.set(id,plain);groupMessageState.lastCiphertext.set(id,cipher);return plain;
-  }catch(error){console.warn('[GroupMessage] decryption deferred',id,error?.message||error);return null;}})();
-  groupMessageState.decryptInFlight.set(id,task);try{const plain=await task;return plain==null?{...message,_decryptPending:true}:{...message,content:plain};}finally{groupMessageState.decryptInFlight.delete(id);}
-}
-const groupMessageState={decryptInFlight:new Map(),plaintext:new Map(),lastCiphertext:new Map()};
-async function decryptRows(list){return Promise.all(list.map(decryptGroupContent))}
-// FIX (LIVE GROUP MESSAGES NEVER APPEARED UNTIL THE 5s POLL): handleRealtime() below has been calling
-// decryptGroupContent(message), but only decryptRows()/decryptGroupContent() exist — the group rebuild renamed
-// it and missed this call site, so every live 'GROUP_MESSAGE' threw a ReferenceError and the message
-// only showed up when the next poll happened to fetch it.
-
-function mergeGroupMessages(incoming){
-  const byId=new Map();
-  // A local (optimistic) echo is replaced by the real server message carrying the same clientMessageId.
-  const doneCids=new Set(incoming.map(m=>m&&(m.clientMessageId||m.metadata?.localId)).filter(Boolean).map(String));
-  for(const message of S.messages){if(message._optimistic&&doneCids.has(String(message.localId)))continue;const id=String(message.localId||message.id||message.messageId||'');if(id)byId.set(id,message);}
-  for(const message of incoming){
-    const id=String(message.localId||message.id||message.messageId||'');if(!id)continue;
-    const existing=byId.get(id);
-    if(existing&&message._decryptPending&&typeof existing.content==='string'&&existing.content!==message.content)byId.set(id,{...existing,...message,content:existing.content,_decryptPending:false});
-    else byId.set(id,existing?{...existing,...message}:message);
+  if(window.KynectaGroupE2E?.waitUntilReady) return window.KynectaGroupE2E.waitUntilReady();
+  if(typeof window.KynectaMessageE2EReady==='function'){
+    try{await window.KynectaMessageE2EReady()}catch(err){console.warn('[GroupMessage] canonical E2E bootstrap failed:',err?.message||err)}
   }
-  const merged=[...byId.values()].sort((a,b)=>{
-    // not-yet-confirmed local rows always sit after confirmed ones (keeps the comparator consistent)
-    const ao=a._optimistic?1:0,bo=b._optimistic?1:0;if(ao!==bo)return ao-bo;
-    const ai=Number(a.id),bi=Number(b.id);if(!ao&&Number.isFinite(ai)&&Number.isFinite(bi))return ai-bi;
-    return new Date(a.createdAt||a.sentAt||0)-new Date(b.createdAt||b.sentAt||0);});
-  const changed=merged.length!==S.messages.length||merged.some((m,i)=>{const old=S.messages[i];return !old||String(m.id||m.messageId||m.localId)!==String(old.id||old.messageId||old.localId)||m.content!==old.content||m.status!==old.status||m.isEdited!==old.isEdited;});
-  if(changed){S.messages=merged;renderMessages(false);}return merged;
+  return !!(window.KynectaE2EIdentity?.privateKey&&window.KynectaE2EIdentity?.publicKey);
 }
-function renderMessages(scroll=true){
-  const box=$('messages');if(!box)return;box.replaceChildren();
-  if(!S.messages.length)box.innerHTML='<div class="empty">No messages yet.</div>';else S.messages.forEach(m=>box.append(buildRow(m)));
-  if(scroll)box.scrollTop=box.scrollHeight;
-  const confirmed=S.messages.filter(m=>!m._optimistic);
-  window.__GROUP_MESSAGES_CACHE=confirmed.slice();window.__GROUP_REFRESH_MESSAGES=loadMessages;
-  const gid=window.__GROUP_CHAT_ID;if(gid&&window.KynectaGroupMessageCache)window.KynectaGroupMessageCache.putMessages(gid,confirmed);
-  schedulePendingRetry();
-}
-// FIX (MESSAGE-HIDDEN-THEN-APPEARS-LATER): a message whose decryption isn't ready used to render as an
-// EMPTY bubble and only got another attempt on the next 5-second poll. Show a placeholder and retry
-// quickly a few times instead.
-function schedulePendingRetry(){
-  if(!S.messages.some(m=>m._decryptPending)){S._pendTries=0;return}
-  if(S._pendTimer||(S._pendTries||0)>=6)return;
-  S._pendTries=(S._pendTries||0)+1;
-  S._pendTimer=setTimeout(()=>{S._pendTimer=null;loadMessages()},1200*S._pendTries);
-}
-async function loadMessages(){
-  if(!S.current?.id)return;const gid=String(S.current.id);
-  try{const r=await api('/group-messages/'+encodeURIComponent(gid)+'/messages?limit=100');if(!S.current||String(S.current.id)!==gid)return;
-    const decrypted=await decryptRows(normalizeMessages(r));if(!S.current||String(S.current.id)!==gid)return;mergeGroupMessages(decrypted);
-  }catch(error){console.warn('[GroupMessage] history sync deferred',error?.message||error);}
-}
-
-function renderGroups(){const box=$('groups');if(!box)return;box.replaceChildren();const q=S.q.trim().toLowerCase();const rows=S.groups.filter(g=>!q||String(g.name||g.groupName||'').toLowerCase().includes(q));if(!rows.length){box.innerHTML='<div class="empty">No groups yet.</div>';return}for(const g of rows){const b=document.createElement('button');b.type='button';b.className='group'+(S.current&&String(S.current.id)===String(g.id)?' active':'');const a=document.createElement('div');a.className='avatar';a.textContent=String(g.name||g.groupName||'G').slice(0,1).toUpperCase();const m=document.createElement('div');m.className='groupmain';m.innerHTML=`<div class="name">${esc(g.name||g.groupName||'Unnamed group')}</div><div class="meta">${Number(g.participantCount??g.participants?.length??0)} members</div>`;b.append(a,m);const unread=Number(S.unread?.[String(g.id)]||0);if(unread>0){const badge=document.createElement('span');badge.className='unread-badge';badge.textContent=unread>99?'99+':String(unread);b.append(badge)}b.onclick=()=>openGroup(g.id);box.append(b)}}
-// FIX (GROUPS-NO-OFFLINE-CACHE): js/core/groups/group-cache-first.js already
-// existed in the repo (built for exactly this) but was never loaded on any
-// page — a failed request used to always replace the whole list with a raw
-// error, even when there was perfectly good last-known data to show
-// instead, unlike other modules that already fall back to a cache offline.
 async function loadGroups(){if(S.loading)return;S.loading=true;const GCF=window.__GroupCacheFirst;if(GCF&&!S.groups.length){GCF.hydrate('groups',cached=>{S.groups=cached;renderGroups()})}try{const r=await api('/chats?limit=100');const rows=r?.data?.chats||r?.data||[];S.groups=Array.isArray(rows)?rows.filter(x=>(x?.type||x?.chatType)==='group').map(unwrap):[];if(GCF)GCF.set('groups',S.groups);renderGroups()}catch(e){const cached=GCF&&GCF.get('groups');const cachedList=cached&&cached.value!==undefined?cached.value:cached;if(Array.isArray(cachedList)&&cachedList.length){S.groups=cachedList;renderGroups()}else{const box=$('groups');if(box)box.innerHTML=`<div class="empty">Unable to load groups.<br>${esc(e.message)}</div>`}}finally{S.loading=false}}
 function normalizeMessages(r){const rows=r?.data?.messages||r?.data||r?.messages||[];return Array.isArray(rows)?rows:[]}
 
@@ -308,6 +210,9 @@ function renderMedia(){const box=$('mediaBar');const items=S.messages.filter(m=>
 
 async function hydrateGroupHistory(id){if(!window.KynectaGroupMessageCache)return;try{const cached=await window.KynectaGroupMessageCache.getMessages(id);if(String(window.__GROUP_CHAT_ID)!==String(id)||!cached.length)return;S.messages=cached;renderMessages(false);}catch(_){}}
 function openGroup(id){
+  // Initialize group crypto when the conversation opens. Sending no longer
+  // acts as the bootstrap trigger, eliminating the startup race.
+  window.KynectaGroupE2E?.initGroup?.(Number(id)).catch(err=>console.warn('[GroupCrypto] startup:',err?.message||err));
   const g=S.groups.find(x=>String(x.id)===String(id))||{id};S.current=g;window.__GROUP_CHAT_ID=String(id);window.__GROUP_CHAT_TYPE='group';
   $('input').disabled=false;$('send').disabled=false;['searchToggle','pinnedToggle','mediaToggle'].forEach(bid=>{const b=$(bid);if(b)b.disabled=false});
   S.messages=[];markRead(id);renderMessages(false);renderGroups();setMobileChat(true);const meta=currentGroupMeta(g);postParent('GROUP_PANEL_OPEN',meta);postSelf('GROUP_PANEL_OPEN',meta);
@@ -434,13 +339,18 @@ async function deliverOptimistic(cid,groupId,plain){
       // failure — same UI, just reachable from this state too.
       row._error=msg;
       if(provisioning){
-        row._waitingKeyTries=(row._waitingKeyTries||0)+1;
-        if(row._waitingKeyTries>=6){
-          row.status='failed';renderMessages(false);
-        }else{
-          row.status='waiting-key';renderMessages(false);
-          clearTimeout(row._retryTimer);
-          row._retryTimer=setTimeout(()=>{row._retryTimer=null;queueOptimisticSend(cid,groupId,plain)},5000);
+        row.status='waiting-key';renderMessages(false);
+        if(!row._readinessWait){
+          row._readinessWait=true;
+          Promise.resolve(window.KynectaGroupE2E?.waitUntilReady?.()).then(ready=>{
+            row._readinessWait=false;
+            if(!ready||!S.messages.includes(row)) return;
+            row.status='sending';renderMessages(false);
+            queueOptimisticSend(cid,groupId,plain);
+          }).catch(()=>{
+            row._readinessWait=false;
+            if(S.messages.includes(row)){row.status='failed';renderMessages(false);}
+          });
         }
       }else{
         row.status='failed';renderMessages(false);
@@ -453,7 +363,7 @@ function queueOptimisticSend(cid,groupId,plain){
 }
 function retryOptimistic(cid){
   const row=S.messages.find(m=>m._optimistic&&m.localId===cid);if(!row||!S.current?.id)return;
-  row.status='sending';row._waitingKeyTries=0;renderMessages(false);queueOptimisticSend(cid,Number(S.current.id),row.content);
+  row.status='sending';row._readinessWait=false;renderMessages(false);queueOptimisticSend(cid,Number(S.current.id),row.content);
 }
 async function sendMessage(){
   if(!S.current?.id)return;const input=$('input'),plain=input.value.trim();if(!plain)return;
