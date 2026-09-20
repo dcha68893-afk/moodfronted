@@ -75,12 +75,42 @@
             .replace(/Mood Arcade/gi, 'Necpa Arcade');
     }
 
+    // ROOT-CAUSE FIX (GROUP "Secure messaging is still unlocking" FOREVER):
+    // this rewriter used to walk EVERY text node in the document -- including
+    // the text of inline <script> and <style> elements. Because the
+    // MutationObserver below runs as soon as the parser inserts an inline
+    // <script> (before the browser executes it), executable source was being
+    // rewritten first: `window.KynectaGroupE2E` became `window.NecpaGroupE2E`,
+    // `window.KynectaE2EIdentity` became `window.NecpaE2EIdentity`, and
+    // `__NECPRA_ENSURE_E2E` became `__Necpa_ENSURE_E2E`. None of those globals
+    // exist, so group.html could never see the group crypto module or the
+    // unlocked identity and always reported the E2E layer as "still
+    // unlocking" -- even though the keys were ready. External .js files are
+    // unaffected (they have no text nodes), which is why 1:1 chat kept working.
+    // Branding is only meant for VISIBLE text, so code/style/data containers
+    // are now skipped entirely.
+    var BRAND_SKIP_TAGS = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEXTAREA: 1, TEMPLATE: 1, CODE: 1, PRE: 1 };
+    function isBrandSafeTextNode(textNode) {
+        var el = textNode && textNode.parentNode;
+        while (el && el.nodeType === 1) {
+            if (BRAND_SKIP_TAGS[el.nodeName]) return false;
+            el = el.parentNode;
+        }
+        return true;
+    }
+
     function applyBrand(root) {
         try {
             if (!root) return;
-            if (root.nodeType === Node.TEXT_NODE) { root.nodeValue = normalizeBrandText(root.nodeValue); return; }
+            if (root.nodeType === Node.TEXT_NODE) {
+                if (isBrandSafeTextNode(root)) root.nodeValue = normalizeBrandText(root.nodeValue);
+                return;
+            }
+            if (root.nodeType === 1 && BRAND_SKIP_TAGS[root.nodeName]) return;
             if (root === document && document.title) document.title = normalizeBrandText(document.title);
-            var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+            var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+                acceptNode: function (n) { return isBrandSafeTextNode(n) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT; }
+            });
             var node;
             while ((node = walker.nextNode())) node.nodeValue = normalizeBrandText(node.nodeValue);
         } catch (_) {}

@@ -440,7 +440,12 @@ async function deliverOptimistic(cid,groupId,plain){
           row._readinessWait=true;
           Promise.resolve(window.KynectaGroupE2E?.waitUntilReady?.()).then(ready=>{
             row._readinessWait=false;
-            if(!ready||!S.messages.includes(row)) return;
+            if(!S.messages.includes(row)) return;
+            // FIX (message stuck on the clock icon forever): when secure messaging never became ready this used
+            // to return silently, leaving the row in 'waiting-key' with no error and no way out. Now it becomes a
+            // normal "Not sent" row (Retry / Discard) with the real reason, and automatic retries are capped.
+            row._autoTries=(row._autoTries||0)+1;
+            if(!ready||row._autoTries>3){row.status='failed';row._error=e2eNotReadyMessage();row._hint=/sign out and sign in/i.test(row._error)?'sign out and back in':'';renderMessages(false);return}
             row.status='sending';renderMessages(false);
             queueOptimisticSend(cid,groupId,plain);
           }).catch(()=>{

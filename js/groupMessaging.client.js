@@ -68,13 +68,20 @@ function diagnose(){
 async function waitReady(){
   if(canonicalReady())return true;
   const deadline=Date.now()+50000; // matches message-client.js's established Render cold-start tolerance
-  let triggered=false;
+  let inflight=false;
   while(Date.now()<deadline){
     if(canonicalReady())return true;
-    if(!triggered&&typeof global.KynectaMessageE2EReady==='function'){
-      triggered=true;lastBootstrapAt=Date.now();
-      global.KynectaMessageE2EReady().then(()=>{lastBootstrapError=null}).catch(err=>{lastBootstrapError=err?.message||String(err);console.warn('[KynectaGroupE2E] canonical identity bootstrap failed:',lastBootstrapError)});
+    /* FIX (bootstrap was attempted ONCE per wait): if that single attempt failed (network blip, cold backend, token or
+       user id not yet available, session secret restored a moment late) nothing ever retried it, so the wait just spun
+       for the full budget and then gave up for good. Re-run the canonical bootstrap every ~4s while waiting. A failed
+       attempt resets its own cache (see e2e-session-init.js), so each retry is a genuine new attempt. */
+    if(!inflight&&typeof global.KynectaMessageE2EReady==='function'&&Date.now()-lastBootstrapAt>4000){
+      inflight=true;lastBootstrapAt=Date.now();
+      global.KynectaMessageE2EReady().then(()=>{lastBootstrapError=null}).catch(err=>{lastBootstrapError=err?.message||String(err);console.warn('[KynectaGroupE2E] canonical identity bootstrap failed:',lastBootstrapError)}).finally(()=>{inflight=false});
     }
+    /* FIX: when unlocking is impossible without the person (no secret at all, or the stored key rejects the secret we
+       have), waiting 50s cannot help. Stop early so the UI can tell them to sign in again instead of spinning. */
+    if(lastBootstrapError&&!inflight){const r=diagnose().reason;if(r==='no_session_password'||r==='password_mismatch')break}
     await sleep(250);
   }
   const d=diagnose();if(!d.ready)console.warn('[KynectaGroupE2E] not ready:',d.reason,d);

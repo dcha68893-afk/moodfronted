@@ -176,7 +176,14 @@
         const identity = I(); if (!identity) throw new Error('E2E identity layer unavailable');
         const realPw = sessionPassword();
         const pw = realPw || bootstrapSecret();
-        const legacyPw = sessionLegacyPassword();
+        // FIX (identity created before a session secret existed): when a device first ran with no
+        // login-session secret, the identity was wrapped with the local bootstrap secret. Once a real
+        // secret becomes available (Google users now get one restored from the server), that older key
+        // could no longer be unlocked and messaging stayed "still unlocking". Offer the existing
+        // bootstrap secret as the fallback unlock secret (only if one was ever created on this device).
+        let existingBootstrap = null;
+        try { const bid = me(); if (bid) existingBootstrap = localStorage.getItem(`kyn_dm_identity_bootstrap_v2_${bid}`); } catch (_) {}
+        const legacyPw = sessionLegacyPassword() || existingBootstrap;
         const ok = await identity.init(pw, legacyPw || undefined);
         if (!ok || !identity.enabled || !identity.privateKey || !identity.publicKey) {
           const reason = realPw

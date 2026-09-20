@@ -77,7 +77,10 @@
                 localStorage.setItem('isLoggedIn', 'true');
             }
 
-            try { sessionStorage.setItem('kyn_e2e_pw_session', user.e2eWrapSecret || ''); } catch (_) {}
+            // FIX: an empty string used to be stored when the server sent no secret, which the E2E layer treats as
+            // "no password" without ever trying to recover. Only store a real value; e2e-session-init.js re-fetches
+            // the secret from /api/auth/e2e-secret when it is missing.
+            try { if (user.e2eWrapSecret) { sessionStorage.setItem('kyn_e2e_pw_session', user.e2eWrapSecret); sessionStorage.removeItem('kyn_e2e_secret_unavailable'); } } catch (_) {}
             window.currentUser = user;
             window.__userToken = token;
             window.__accessToken = token;

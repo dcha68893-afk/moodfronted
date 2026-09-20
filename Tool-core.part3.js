@@ -1561,6 +1561,11 @@ async function loadUserSettings() {
         const syncParentTheme = (themeOverride) => {
             try {
                 const parentDoc = window.parent && window.parent !== window ? window.parent.document : document;
+                // FIX (TOOLS PAGE FREEZES WHEN OPENED STANDALONE): with no parent shell, "parent" is this very
+                // document, so there is nothing to mirror. Mirroring a document onto itself is pointless work
+                // and (see the observer below) used to re-trigger itself endlessly. An explicit theme message
+                // (themeOverride) is still honoured.
+                if (parentDoc === document && themeOverride !== 'dark' && themeOverride !== 'light') return;
                 const parentRoot = parentDoc.documentElement;
                 const root = document.documentElement;
                 const theme = themeOverride === 'dark' || themeOverride === 'light'
@@ -1583,8 +1588,16 @@ async function loadUserSettings() {
         };
         syncParentTheme();
         try {
-            const parentRoot = window.parent && window.parent !== window ? window.parent.document.documentElement : document.documentElement;
-            new MutationObserver(() => syncParentTheme()).observe(parentRoot, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
+            // ROOT-CAUSE FIX (TOOLS PAGE FREEZES WHEN OPENED STANDALONE): when Tools.html is NOT inside the app
+            // shell, window.parent === window, so this used to observe this document's OWN <html> element for
+            // class/style/data-theme changes while syncParentTheme() writes exactly those attributes on that same
+            // element. Every write queued another mutation record, which re-ran the sync, forever -- the main
+            // thread never got a turn and the whole page hung. Only observe when there is a real, separate
+            // parent document to mirror.
+            if (window.parent && window.parent !== window) {
+                const parentRoot = window.parent.document.documentElement;
+                new MutationObserver(() => syncParentTheme()).observe(parentRoot, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
+            }
         } catch (_) {}
         // Setup message listen
         window.addEventListener('message', (event) => {

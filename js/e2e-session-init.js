@@ -5,6 +5,31 @@
   function loadScript(src) { return new Promise((resolve, reject) => { const existing = document.querySelector(`script[data-e2e-core="${src}"]`); if (existing) return resolve(); const s = document.createElement('script'); s.src = src; s.async = false; s.dataset.e2eCore = src; document.head.appendChild(s); s.onload = resolve; s.onerror = () => reject(new Error(`Could not load ${src}`)); }); }
   function sessionPassword() { try { return sessionStorage.getItem('kyn_e2e_pw_session') || null; } catch (_) { return null; } }
   function sessionLegacyPassword() { try { return sessionStorage.getItem('kyn_e2e_pw_legacy_session') || null; } catch (_) { return null; } }
+  // ROOT-CAUSE FIX (returning Google users could never unlock secure messaging):
+  // the wrap secret is put in sessionStorage at sign-in only. After the app/tab is
+  // reopened the login token is restored from localStorage but sessionStorage is
+  // empty, and a Google account has no password to type. Ask the backend to
+  // re-issue the same stable secret (GET /api/auth/e2e-secret, Google accounts
+  // only). Password accounts get a 403 once and keep the normal unlock prompt.
+  async function restoreSessionSecret() {
+    try {
+      if (sessionPassword()) return true;
+      if (sessionStorage.getItem('kyn_e2e_secret_unavailable') === '1') return false;
+      const token = global.__kynToken || global.__accessToken || global.authToken ||
+        localStorage.getItem('authToken') || localStorage.getItem('accessToken') || localStorage.getItem('token') || '';
+      if (!token) return false;
+      const origin = String((typeof global.__getApiOrigin === 'function' && global.__getApiOrigin()) || global.BACKEND_URL || global.API_BASE_URL || '').replace(/\/api\/?$/, '').replace(/\/$/, '');
+      const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 10000);
+      let res;
+      try { res = await fetch(`${origin}/api/auth/e2e-secret`, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store', signal: ctrl.signal }); }
+      finally { clearTimeout(timer); }
+      if (res.status === 403) { try { sessionStorage.setItem('kyn_e2e_secret_unavailable', '1'); } catch (_) {} return false; }
+      if (!res.ok) return false;
+      const data = await res.json().catch(() => null);
+      if (data && data.success && data.e2eWrapSecret) { sessionStorage.setItem('kyn_e2e_pw_session', String(data.e2eWrapSecret)); return true; }
+    } catch (err) { console.warn('[MessageE2E] could not restore session secret:', err?.message || err); }
+    return false;
+  }
   async function prepareLegacyIdentity() {
     // FIX-ROOT-CAUSE-E2E-DOUBLE-LOAD: every page that reaches this
     // function (group.html, message.html, chat.html) already loads
@@ -35,6 +60,7 @@
   async function loadNewCore() {
     if (loadPromise) return loadPromise;
     loadPromise = (async () => {
+      await restoreSessionSecret();
       await prepareLegacyIdentity();
       await loadScript('/js/secure-storage-bridge.js');
       await loadScript('/js/e2e-identity-core.js');
