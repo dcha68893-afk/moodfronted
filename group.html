@@ -396,7 +396,7 @@ async function deliverOptimistic(cid,groupId,plain){
     // stale and causes GROUP_SENDER_KEY_INCOMPLETE on every send.
     await refreshCurrentGroupMembers(groupId);
     const encrypted=await window.KynectaGroupE2E.encryptForGroup(groupId,plain,groupMemberIds(groupObjectFor(groupId)));
-    const r=await apiRetry('/group-messages/'+encodeURIComponent(gid)+'/messages',{method:'POST',body:JSON.stringify({chatId:groupId,content:encrypted,type:'text',clientMessageId:cid,metadata:{groupId}})});
+    const r=await apiRetry('/group-messages/'+encodeURIComponent(groupId)+'/messages',{method:'POST',body:JSON.stringify({chatId:groupId,content:encrypted,type:'text',clientMessageId:cid,metadata:{groupId}})});
     const serverMessage=r?.data?.message||r?.data;
     if(!serverMessage?.id)throw new Error('Server did not return the saved group message');
     // We know our own plaintext — remember it so this row never needs a decrypt round trip.
@@ -459,7 +459,7 @@ async function sendGroupPayload(plain,type='text',metadata=null){
   const gid=Number(S.current.id),cid=makeGroupClientId();
   await refreshCurrentGroupMembers(gid);
   const encrypted=text?await window.KynectaGroupE2E.encryptForGroup(gid,text,groupMemberIds(S.current)):'';
-  const r=await apiRetry('/group-messages/'+encodeURIComponent(groupId)+'/messages',{method:'POST',body:JSON.stringify({chatId:gid,content:encrypted,type,clientMessageId:cid,metadata:{...(metadata||{}),groupId:gid}})});
+  const r=await apiRetry('/group-messages/'+encodeURIComponent(gid)+'/messages',{method:'POST',body:JSON.stringify({chatId:gid,content:encrypted,type,clientMessageId:cid,metadata:{...(metadata||{}),groupId:gid}})});
   const message=r?.data?.message||r?.data;if(!message?.id)throw new Error('Server did not return the saved group message');
   if(text){groupMessageState.plaintext.set(String(message.id),text);groupMessageState.lastCiphertext.set(String(message.id),encrypted)}
   mergeGroupMessages([{...message,clientMessageId:cid,content:text,displayContent:text}]);loadMessages();return message;
