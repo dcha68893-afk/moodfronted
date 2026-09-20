@@ -109,8 +109,13 @@ async function ensureE2EReady(){
   if(typeof window.KynectaMessageE2EReady==='function'){
     try{await window.KynectaMessageE2EReady()}catch(err){console.warn('[GroupMessage] canonical E2E bootstrap failed:',err?.message||err)}
   }
-  // Fallback only when the group module itself is missing: use the same identity the group crypto uses (legacy), not the canonical one.
-  return !!(window.KynectaE2E?.enabled&&window.KynectaE2E?.getMyIdentityPrivateKey?.());
+  // Fallback only when the group module itself is missing: use the canonical identity —
+  // the same one js/groupMessaging.client.js's own waitReady() checks, and the same one
+  // 1:1 messaging (js/message-e2e-core.js) already unlocks through. Do not fall back to
+  // window.KynectaE2E.enabled here — that's the DM server-registration-confirmed gate,
+  // not a signal about whether the local identity key needed for group crypto is ready
+  // (see the ROOT-CAUSE comment above this function, and the one in groupMessaging.client.js).
+  return !!(window.KynectaE2EIdentity?.privateKey&&window.KynectaE2EIdentity?.publicKey);
 }
 window.__NECPRA_ENSURE_E2E=ensureE2EReady;
 async function loadGroups(){if(S.loading)return;S.loading=true;const GCF=window.__GroupCacheFirst;if(GCF&&!S.groups.length){GCF.hydrate('groups',cached=>{S.groups=cached;renderGroups()})}try{const r=await api('/chats?limit=100');const rows=r?.data?.chats||r?.data||[];S.groups=Array.isArray(rows)?rows.filter(x=>(x?.type||x?.chatType)==='group').map(unwrap):[];if(GCF)GCF.set('groups',S.groups);renderGroups()}catch(e){const cached=GCF&&GCF.get('groups');const cachedList=cached&&cached.value!==undefined?cached.value:cached;if(Array.isArray(cachedList)&&cachedList.length){S.groups=cachedList;renderGroups()}else{const box=$('groups');if(box)box.innerHTML=`<div class="empty">Unable to load groups.<br>${esc(e.message)}</div>`}}finally{S.loading=false}}

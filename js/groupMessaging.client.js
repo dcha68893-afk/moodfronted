@@ -15,50 +15,76 @@ const b64=u=>btoa(String.fromCharCode(...new Uint8Array(u))),unb64=s=>Uint8Array
 async function req(path,opt={}){const h={...(opt.headers||{})},t=token();if(t)h.Authorization='Bearer '+t;if(opt.body)h['Content-Type']='application/json';let r=await fetch(base()+path,{...opt,headers:h});if(r.status===401&&global.NecpaSessionResilience){try{if(await global.NecpaSessionResilience.refreshAccessToken(base())){const nt=token();if(nt)h.Authorization='Bearer '+nt;r=await fetch(base()+path,{...opt,headers:h})}}catch(_){}}
 const d=await r.json().catch(()=>({}));if(!r.ok){const e=new Error(d.message||'Group request failed');Object.assign(e,d);throw e}return d}
 const idkey=(g,e,o)=>`kyn_gsk_v2_${g}_${e}_${o}`;
-/* FIX (GROUP-GATE-CHECKED-THE-WRONG-IDENTITY): readiness used to be "KynectaE2EIdentity (canonical) has keys". But everything in this file
-   encrypts/decrypts with the LEGACY identity (identity() = KynectaE2E.getMyIdentityPrivateKey()). The two could disagree: with no session
-   password the canonical layer could report keys while the legacy key was absent (send then died deeper with "Group identity key is not
-   ready"), and when the legacy key would not unlock the page only ever said "not ready yet". Readiness is now exactly what this file uses. */
+/* ROOT-CAUSE FIX (GROUP-GATE-KEPT-FLIPPING-BETWEEN-TWO-IDENTITY-OBJECTS, round 2):
+   A previous pass "fixed" this by making readiness require the LEGACY identity
+   (window.KynectaE2E: .enabled + getMyIdentityPrivateKey() + wrapForLocalStorage) to match
+   what identity()/publicKey() below read from — reasoning that since the code reads legacy,
+   the gate should check legacy too. That direction is backwards and is exactly what produced
+   "Secure messaging is still unlocking. Please try again in a moment." forever for some
+   accounts: window.KynectaE2E.enabled is the DM *server-registration-confirmed* gate (see
+   e2e-encryption.js's own FIX-REGISTRATION-CONFIRMATION-GATE comment) — group.html's own
+   long-standing comment above ensureE2EReady() already documents that this exact gate was
+   wrong once before ("Group readiness is now based on the actual local identity private key,
+   not the DM registration status") — yet legacyReady() below reintroduced requiring it.
+   Direct messages never wait on window.KynectaE2E at all: js/message-e2e-core.js's
+   ensureIdentity() unlocks purely through window.KynectaE2EIdentity (the canonical layer),
+   which is why 1:1 chat keeps working no matter what state the legacy object is in. Group
+   crypto must wait on and read from that SAME canonical identity — not a second object that
+   can legitimately lag behind it (registration confirmation, background retry) or never
+   resolve independently of it — so this file can never again disagree with the identity
+   group.html's ensureE2EReady() has already decided is ready. */
 const sessionPw=()=>{try{return !!sessionStorage.getItem('kyn_e2e_pw_session')}catch(_){return false}};
 let unlockFailed=false,lastBootstrapError=null,lastBootstrapAt=0;
 try{document.addEventListener('kyn:e2eUnlockFailed',()=>{unlockFailed=true});document.addEventListener('kyn:e2eUnlocked',()=>{unlockFailed=false;lastBootstrapError=null})}catch(_){}
-const legacyReady=()=>{try{const e=global.KynectaE2E;return !!(e&&e.enabled&&typeof e.getMyIdentityPrivateKey==='function'&&e.getMyIdentityPrivateKey()&&typeof e.wrapForLocalStorage==='function')}catch(_){return false}};
+const canonicalReady=()=>{try{const id=global.KynectaE2EIdentity;return !!(id&&id.privateKey&&id.publicKey)}catch(_){return false}};
 function diagnose(){
-  const e=global.KynectaE2E,ready=legacyReady();let reason='ready';
+  const id=global.KynectaE2EIdentity,ready=canonicalReady();let reason='ready';
   if(!ready){
     if(!sessionPw())reason='no_session_password';
     else if(unlockFailed||/would not unlock|wrong password|password/i.test(String(lastBootstrapError||'')))reason='password_mismatch';
     else reason='unlocking';
   }
-  return{ready,reason,passwordInSession:sessionPw(),legacyEnabled:!!e?.enabled,hasPrivateKey:!!(e&&typeof e.getMyIdentityPrivateKey==='function'&&e.getMyIdentityPrivateKey()),canonicalIdentity:!!global.KynectaE2EIdentity?.privateKey,unlockFailed,lastError:lastBootstrapError};
+  return{ready,reason,passwordInSession:sessionPw(),canonicalEnabled:!!id?.enabled,hasPrivateKey:!!id?.privateKey,hasPublicKey:!!id?.publicKey,unlockFailed,lastError:lastBootstrapError};
 }
 async function waitReady(){
-  if(legacyReady())return true;
-  // 1) let the legacy identity finish unlocking (e2e-session-init.js drives init(); we only wait for its result)
-  try{if(typeof global.KynectaE2E?.waitForEnabledBounded==='function')await global.KynectaE2E.waitForEnabledBounded(8000)}catch(_){}
-  if(legacyReady())return true;
-  // 2) if still not ready, (re)join the canonical bootstrap once in a while (throttled so retry loops don't hammer init())
+  if(canonicalReady())return true;
+  // Join the SAME canonical bootstrap 1:1 messaging already waits on (throttled so retry
+  // loops elsewhere in this file don't hammer init() every few hundred ms).
   if(typeof global.KynectaMessageE2EReady==='function'&&Date.now()-lastBootstrapAt>15000){
     lastBootstrapAt=Date.now();
     try{await global.KynectaMessageE2EReady();lastBootstrapError=null}catch(err){lastBootstrapError=err?.message||String(err);console.warn('[KynectaGroupE2E] canonical identity bootstrap failed:',lastBootstrapError)}
   }
-  const deadline=Date.now()+3000;
-  while(Date.now()<deadline){if(legacyReady())return true;await sleep(250)}
+  const deadline=Date.now()+8000;
+  while(Date.now()<deadline){if(canonicalReady())return true;await sleep(250)}
   const d=diagnose();if(!d.ready)console.warn('[KynectaGroupE2E] not ready:',d.reason,d);
   return d.ready;
 }
-function identity(){const p=global.KynectaE2E?.getMyIdentityPrivateKey?.();if(!p)throw new Error('Group identity key is not ready');return p}
+function identity(){const p=global.KynectaE2EIdentity?.privateKey;if(!p)throw new Error('Group identity key is not ready');return p}
 async function publicKey(userId){const imp=b=>subtle.importKey('spki',unb64(b),{name:'ECDH',namedCurve:'P-256'},true,[]);
-/* Your own public key is already held locally by the E2E layer (the same SPKI the server stores). Using it for the owner wrap/unwrap means
-   preparing your own sender key can never fail on a network call, a missing server key row, or an authorization check. */
-if(Number(userId)===me()){const own=global.KynectaE2E?.publicKey;if(own){try{return await imp(own)}catch(_){}}}
+/* Your own public key is already held locally by the canonical E2E identity layer (the same SPKI the server stores, and the same
+   layer identity()/waitReady() above now use). Using it for the owner wrap/unwrap means preparing your own sender key can never
+   fail on a network call, a missing server key row, or an authorization check. */
+if(Number(userId)===me()){const own=global.KynectaE2EIdentity?.publicKey;if(own){try{return await imp(own)}catch(_){}}}
 const r=await req('/encryption/keys/'+encodeURIComponent(userId)),p=r?.data?.publicKey;if(!p)throw new Error('Member '+userId+' has no registered identity key');return imp(p)}
 async function wrapKey(rawB64,recipientId){const bits=await subtle.deriveBits({name:'ECDH',public:await publicKey(recipientId)},identity(),256),mat=await subtle.importKey('raw',bits,{name:'HKDF'},false,['deriveKey']),key=await subtle.deriveKey({name:'HKDF',salt:new Uint8Array(32),info:te.encode('KYN-GROUP-V2/SENDER-KEY-WRAP'),hash:'SHA-256'},mat,{name:'AES-GCM',length:256},false,['encrypt','decrypt']),iv=crypto.getRandomValues(new Uint8Array(12)),ct=await subtle.encrypt({name:'AES-GCM',iv},key,te.encode(rawB64));return JSON.stringify({v:2,iv:b64(iv),ct:b64(ct)})}
 async function unwrapKey(envelope,ownerId){const e=typeof envelope==='string'?JSON.parse(envelope):envelope;if(e?.v!==2)throw new Error('Unsupported group key envelope');const bits=await subtle.deriveBits({name:'ECDH',public:await publicKey(ownerId)},identity(),256),mat=await subtle.importKey('raw',bits,{name:'HKDF'},false,['deriveKey']),key=await subtle.deriveKey({name:'HKDF',salt:new Uint8Array(32),info:te.encode('KYN-GROUP-V2/SENDER-KEY-WRAP'),hash:'SHA-256'},mat,{name:'AES-GCM',length:256},false,['encrypt','decrypt']),pt=await subtle.decrypt({name:'AES-GCM',iv:unb64(e.iv)},key,unb64(e.ct));return td.decode(pt)}
 async function hmac(raw,label){const k=await subtle.importKey('raw',raw,{name:'HMAC',hash:'SHA-256'},false,['sign']);return new Uint8Array(await subtle.sign('HMAC',k,te.encode(label)))}
 const aesKey=raw=>subtle.importKey('raw',raw,{name:'AES-GCM'},false,['encrypt','decrypt']);
-async function saveState(st){try{const p=JSON.stringify({chain:b64(st.chain),privateJwk:st.privateJwk||null,publicJwk:st.publicJwk||null,iteration:st.iteration}),w=await global.KynectaE2E.wrapForLocalStorage(b64(te.encode(p)));if(w)localStorage.setItem(idkey(st.groupId,st.epoch,st.ownerId),w)}catch(_){}}
-async function loadState(g,e,o){try{const w=localStorage.getItem(idkey(g,e,o));if(!w)return null;const raw=await global.KynectaE2E.unwrapFromLocalStorage(w),x=JSON.parse(td.decode(unb64(raw))),priv=x.privateJwk?await subtle.importKey('jwk',x.privateJwk,{name:'ECDSA',namedCurve:'P-256'},true,['sign']):null;return{groupId:Number(g),epoch:Number(e),ownerId:Number(o),chain:unb64(x.chain),privateKey:priv,privateJwk:x.privateJwk||null,publicJwk:x.publicJwk||null,iteration:Number(x.iteration)||0,skipped:new Map()}}catch(_){return null}}
+// Local sender-key-state cache: prefer the canonical identity's own at-rest wrap key
+// (derived unconditionally inside KynectaE2EIdentity.init(), so it's reliably available
+// whenever waitReady() above has passed) and fall back to the legacy wrapper only for
+// reading a cache entry a previous version of this file wrote — a miss here just means
+// re-fetching the sender key from the server, never a broken send.
+async function wrapLocal(plaintextB64){
+  try{const w=await global.KynectaE2EIdentity?.wrapAtRest?.(plaintextB64);if(w)return w}catch(_){}
+  try{return await global.KynectaE2E?.wrapForLocalStorage?.(plaintextB64)}catch(_){return null}
+}
+async function unwrapLocal(wrappedJson){
+  try{const r=await global.KynectaE2EIdentity?.unwrapAtRest?.(wrappedJson);if(r)return r}catch(_){}
+  return global.KynectaE2E.unwrapFromLocalStorage(wrappedJson);
+}
+async function saveState(st){try{const p=JSON.stringify({chain:b64(st.chain),privateJwk:st.privateJwk||null,publicJwk:st.publicJwk||null,iteration:st.iteration}),w=await wrapLocal(b64(te.encode(p)));if(w)localStorage.setItem(idkey(st.groupId,st.epoch,st.ownerId),w)}catch(_){}}
+async function loadState(g,e,o){try{const w=localStorage.getItem(idkey(g,e,o));if(!w)return null;const raw=await unwrapLocal(w),x=JSON.parse(td.decode(unb64(raw))),priv=x.privateJwk?await subtle.importKey('jwk',x.privateJwk,{name:'ECDSA',namedCurve:'P-256'},true,['sign']):null;return{groupId:Number(g),epoch:Number(e),ownerId:Number(o),chain:unb64(x.chain),privateKey:priv,privateJwk:x.privateJwk||null,publicJwk:x.publicJwk||null,iteration:Number(x.iteration)||0,skipped:new Map()}}catch(_){return null}}
 async function createSenderState(g,e){const kp=await subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']),priv=await subtle.exportKey('jwk',kp.privateKey),pub=await subtle.exportKey('jwk',kp.publicKey);return{groupId:Number(g),epoch:Number(e),ownerId:me(),chain:crypto.getRandomValues(new Uint8Array(32)),privateKey:kp.privateKey,privateJwk:priv,publicJwk:pub,iteration:0,skipped:new Map()}}
 async function state(g,force=false){const k=String(g);if(!force&&stateFetch.has(k))return stateFetch.get(k);const p=req('/group-messages/'+encodeURIComponent(g)+'/crypto/state').then(x=>x.data||{});stateFetch.set(k,p);try{return await p}finally{if(stateFetch.get(k)===p)stateFetch.delete(k)}}
 function keyEntry(s,e,o){const cur=(s?.senderKeys||[]).find(x=>Number(x.epoch)===Number(e)&&Number(x.ownerId)===Number(o));if(cur)return cur;for(const h of(s?.history||[])){const x=(h.senderKeys||[]).find(y=>Number(y.epoch)===Number(e)&&Number(y.ownerId)===Number(o));if(x)return x}return null}
