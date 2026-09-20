@@ -44,6 +44,14 @@
   }
 
   // ---- capture the install prompt (fires once, browser-timed) ---------------
+  // FIX (PWA-INSTALL-SINGLE-OWNER): this file is now the sole
+  // beforeinstallprompt owner on index.html — main.js's old competing
+  // "Install kynecta" banner (its own listener + showInstallPrompt()/
+  // installApp()) has been removed. The two used to race for the same
+  // one-time event: whichever banner the user clicked first consumed the
+  // prompt, so the other one's Install button would then silently fail.
+  // This mirrors pwa-manager.js's already-established single-owner role
+  // on chat.html.
   window.addEventListener('beforeinstallprompt', function (e) {
     e.preventDefault();
     deferred = e;
@@ -160,9 +168,18 @@
       if ('serviceWorker' in navigator && !navigator.serviceWorker.controller) {
         return { code: 'sw-not-ready', message: 'Necpa is still setting up offline support. Reload this page once, wait a few seconds, then try again.' };
       }
+      // FIX (DIAGNOSE-FALSE-INSTALLED-CLAIM): this used to assert "that
+      // usually means Necpa is already installed" as if that were the
+      // established explanation. We have no actual signal that it's
+      // installed here — isStandalone() already ruled that in/out above,
+      // this branch only runs when it did NOT detect standalone mode. The
+      // missing prompt is just as often a dismissed-recently cooldown, a
+      // slow/cold-starting service worker, or Chrome's own install-signal
+      // heuristics (engagement time, etc.) not being met yet. List the
+      // possibilities instead of asserting one as the likely cause.
       return {
         code: 'no-prompt',
-        message: 'Chrome has not offered the install prompt for this page. Usually that means Necpa is already installed on this phone (look on your home screen or app drawer), or the prompt was dismissed recently.'
+        message: 'Chrome has not offered the install prompt for this page yet. This can happen if it was dismissed recently, if Necpa is already installed on this device, or if Chrome simply has not decided to offer it yet. Check your home screen or app drawer for Necpa, or try reloading in a few seconds.'
       };
     } catch (_) {
       return { code: 'unknown', message: 'Could not check installation support.' };

@@ -362,12 +362,17 @@ class PWAManager {
       // Updates will apply naturally on next navigation
     });
 
-    // Before install prompt
-    window.addEventListener('beforeinstallprompt', (e) => {
-      e.preventDefault();
-      this.deferredPrompt = e;
-      this.showInstallPrompt();
-    });
+    // FIX (PWA-INSTALL-SINGLE-OWNER): this class used to add its own
+    // `beforeinstallprompt` listener here and pop up its own "Install
+    // kynecta" banner (see the old showInstallPrompt()/installApp()/
+    // dismissInstallPrompt() methods, now removed). That banner competed
+    // with js/install-chooser.js's listener for the SAME one-time browser
+    // event on this page: whichever banner the user acted on first
+    // consumed the prompt, so clicking Install on the other one afterward
+    // silently failed (a used-up beforeinstallprompt event throws when
+    // .prompt() is called on it again). js/install-chooser.js is now the
+    // single owner of beforeinstallprompt on this page, matching the
+    // single-owner role pwa-manager.js already has on chat.html.
 
     // App launched from PWA
     window.addEventListener('appinstalled', () => {
@@ -663,66 +668,11 @@ class PWAManager {
     }, 3000);
   }
 
-  // Install prompt
-  showInstallPrompt() {
-    // Only show if not already installed
-    if (!this.isAppInstalled() && !localStorage.getItem('installPromptDismissed')) {
-      const installPrompt = document.createElement('div');
-      installPrompt.className = 'install-prompt fixed bottom-4 left-4 bg-purple-600 text-white p-4 rounded-lg shadow-lg z-50 max-w-sm';
-      installPrompt.innerHTML = `
-        <div class="flex items-center justify-between">
-          <div class="flex items-center">
-            <span class="text-lg mr-2">📱</span>
-            <div>
-              <p class="font-semibold">Install kynecta</p>
-              <p class="text-sm opacity-90">Use app offline</p>
-            </div>
-          </div>
-          <div class="flex space-x-2 ml-4">
-            <button onclick="window.pwaManager.installApp()" 
-                    class="bg-white text-purple-600 px-3 py-1 rounded text-sm font-semibold hover:bg-purple-50">
-              Install
-            </button>
-            <button onclick="window.pwaManager.dismissInstallPrompt()" 
-                    class="bg-transparent border border-white text-white px-3 py-1 rounded text-sm hover:bg-white hover:bg-opacity-10">
-              Later
-            </button>
-          </div>
-        </div>
-      `;
-      document.body.appendChild(installPrompt);
-    }
-  }
-
-  // Install app
-  async installApp() {
-    if (this.deferredPrompt) {
-      this.deferredPrompt.prompt();
-      const { outcome } = await this.deferredPrompt.userChoice;
-      
-      if (outcome === 'accepted') {
-        console.log('kynecta: User accepted install');
-      } else {
-        console.log('kynecta: User dismissed install');
-      }
-      
-      this.deferredPrompt = null;
-      this.dismissInstallPrompt();
-    }
-  }
-
-  dismissInstallPrompt() {
-    const prompt = document.querySelector('.install-prompt');
-    if (prompt) {
-      prompt.remove();
-    }
-    localStorage.setItem('installPromptDismissed', 'true');
-    
-    // Show again after 7 days
-    setTimeout(() => {
-      localStorage.removeItem('installPromptDismissed');
-    }, 7 * 24 * 60 * 60 * 1000);
-  }
+  // FIX (PWA-INSTALL-SINGLE-OWNER): showInstallPrompt()/installApp()/
+  // dismissInstallPrompt() removed — this class no longer owns any
+  // beforeinstallprompt UI. See the note above setupAppListeners() for why.
+  // isAppInstalled() is kept: other code in this file (splash/launch checks)
+  // still calls it directly.
 
   // Check if app is installed
   isAppInstalled() {
