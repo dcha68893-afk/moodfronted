@@ -19,23 +19,40 @@ async function fetchState(gid,force){const id=String(gid);if(!force&&stateInflig
 function entryFor(state,v){v=Number(v);if(Number(state?.version)===v)return{version:v,ownerId:Number(state?.lastEvent?.actorId)||0,distributions:Array.isArray(state?.distributions)?state.distributions:[]};const hit=(Array.isArray(state?.history)?state.history:[]).find(x=>Number(x?.version)===v);if(!hit)return null;return{version:v,ownerId:Number(hit.actorId)||0,distributions:Array.isArray(hit.distributions)?hit.distributions:[]}}
 async function installVersion(gid,state,v){v=Number(v);if(!Number.isInteger(v)||v<1)return null;const local=bucket(gid).get(v);if(local)return local;const persisted=await loadLocal(gid,v);if(persisted?.key){const installed={version:v,key:persisted.key,ownerId:persisted.ownerId||Number(entryFor(state,v)?.ownerId)||0};bucket(gid).set(v,installed);return installed}const entry=entryFor(state,v);if(!entry?.ownerId)return null;const mine=entry.distributions.find(d=>String(d?.userId)===String(me()));if(!mine?.ciphertext)return null;const rawB64=await e2e().decryptSenderKeyFrom(mine.ciphertext,entry.ownerId),installed={version:v,key:await e2e().importSenderKey(rawB64),ownerId:entry.ownerId};bucket(gid).set(v,installed);await saveLocal(gid,v,rawB64,entry.ownerId);return installed}
 async function resolveMembers(gid,hint){let ids=Array.isArray(hint)?hint.map(Number):[];ids=ids.filter(Number.isInteger).filter(n=>n>0);if(!ids.length){try{const r=await request('/chats/'+encodeURIComponent(gid)),chat=r?.data?.chat||r?.data||{},list=Array.isArray(chat.participants)?chat.participants:[];ids=list.map(p=>Number((p?.user||p)?.id??p?.userId)).filter(Number.isInteger).filter(n=>n>0)}catch(_){}}ids=[...new Set(ids)];if(!ids.includes(me()))ids.push(me());return ids}
+// FIX (group messages not going through): rotate() used to require EVERY
+// member's public key to be reachable (8 retries each, ~5s max backoff) and
+// throw GROUP_KEY_PROVISIONING_PENDING otherwise. ensureCurrentKey then
+// retried the whole thing up to 12 times, and group.html re-queued the send
+// every 5s forever — so one unreachable member (offline device, key not
+// yet published, etc.) permanently blocked the entire group. Now rotate()
+// makes one quick attempt per member, distributes to whoever answered, and
+// proceeds as long as the sender's own copy succeeded — never blocks a send
+// on a member who isn't reachable right now. Stragglers get topped up later
+// via distributeMissing(), backed by POST /distribute.
+let lastMissing=new Map();
 async function rotate(gid,hint,state){
   const ids=await resolveMembers(gid,hint);
   if(!ids.length)throw new Error('Could not resolve group members for key distribution');
   const generated=await e2e().generateSenderKey(),distributions=[],missing=[];
   for(const userId of ids){
     let ciphertext=null,lastError=null;
-    for(let attempt=0;attempt<8;attempt++){
+    // Quick attempt only (was 8x with up to 5s backoff per member) — a
+    // straggler no longer holds up everyone else's ability to send.
+    for(let attempt=0;attempt<2;attempt++){
       try{ciphertext=await e2e().encryptSenderKeyFor(generated.rawB64,userId);if(ciphertext)break}
-      catch(err){lastError=err;await new Promise(r=>setTimeout(r,Math.min(1000*(attempt+1),5000)))}
+      catch(err){lastError=err;if(attempt<1)await new Promise(r=>setTimeout(r,400))}
     }
     if(!ciphertext){missing.push({userId,error:lastError?.message||'recipient key unavailable'});continue}
-    distributions.push({userId,deviceId:'primary',ciphertext,algorithm:'SenderKey-ECDH-P256-AES256GCM-v1'});
+    distributions.push({userId,deviceId:'primary',ciphertext,algorithm:'SenderKey-ECDH-P256-AES256GCM-v1',distributorId:me()});
   }
-  if(missing.length){
-    const err=new Error('Group encryption is waiting for member key(s): '+missing.map(x=>x.userId).join(', '));
+  const selfMissing=missing.some(x=>String(x.userId)===String(me()));
+  if(selfMissing||!distributions.length){
+    // Only throw when we genuinely can't encrypt for ourselves — that's the
+    // one case sending truly cannot proceed without.
+    const err=new Error('Group encryption is waiting for your own device key: '+missing.map(x=>x.userId).join(', '));
     err.code='GROUP_KEY_PROVISIONING_PENDING';err.missingMembers=missing.map(x=>x.userId);throw err;
   }
+  lastMissing.set(String(gid),missing.map(x=>x.userId));
   const version=Number(state?.version||0)+1;
   let result;
   try{result=await request('/group-encryption/'+encodeURIComponent(gid)+'/rotate',{method:'POST',body:JSON.stringify({version,algorithm:'SenderKey-ECDH-P256-AES256GCM-v1',distributions,reason:state?.reason||'initial_key'})})}
@@ -45,6 +62,36 @@ async function rotate(gid,hint,state){
   try{await request('/group-encryption/'+encodeURIComponent(gid)+'/ack',{method:'POST',body:JSON.stringify({version:installed.version,deviceId:'primary'})})}catch(_){}
   return installed;
 }
+// Best-effort top-up: if this member already holds the current key and the
+// server says other members are still missing it, try (quickly, once) to
+// wrap it for them too and post it via /distribute — without re-rotating,
+// so it never disrupts anyone already sending/receiving on this version.
+async function distributeMissing(gid){
+  const id=String(gid);
+  let state;
+  try{state=await fetchState(id,true)}catch(_){return{added:[],missing:[]}}
+  const version=Number(state?.version||0);
+  const missingIds=Array.isArray(state?.missingMemberIds)?state.missingMemberIds.map(Number):[];
+  lastMissing.set(id,missingIds);
+  if(!version||!missingIds.length)return{added:[],missing:missingIds};
+  const held=bucket(id).get(version)||await loadLocal(id,version);
+  if(!held?.key)return{added:[],missing:missingIds}; // we don't hold this version ourselves
+  let rawB64;
+  try{rawB64=await e2e().exportSenderKey(held.key)}catch(_){return{added:[],missing:missingIds}}
+  const distributions=[],stillMissing=[];
+  for(const userId of missingIds){
+    try{const ciphertext=await e2e().encryptSenderKeyFor(rawB64,userId);if(ciphertext)distributions.push({userId,deviceId:'primary',ciphertext,algorithm:'SenderKey-ECDH-P256-AES256GCM-v1',distributorId:me()});else stillMissing.push(userId)}
+    catch(_){stillMissing.push(userId)}
+  }
+  if(!distributions.length)return{added:[],missing:stillMissing};
+  try{
+    const r=await request('/group-encryption/'+encodeURIComponent(id)+'/distribute',{method:'POST',body:JSON.stringify({version,distributions})});
+    const added=(r?.data?.added||[]).map(Number);
+    lastMissing.set(id,stillMissing.concat(missingIds.filter(x=>!added.includes(Number(x))&&!distributions.some(d=>Number(d.userId)===Number(x)))));
+    return{added,missing:stillMissing};
+  }catch(_){return{added:[],missing:missingIds}}
+}
+function getMissingMembers(gid){return lastMissing.get(String(gid))||[]}
 async function ensureCurrentKey(gid,hint){
   const id=String(gid);if(inflight.has(id))return inflight.get(id);
   const p=(async()=>{
@@ -63,6 +110,6 @@ async function ensureCurrentKey(gid,hint){
 async function encryptForGroup(gid,plaintext,hint){const installed=await ensureCurrentKey(gid,hint),env=JSON.parse(await e2e().encryptGroupMessage(plaintext,installed.key,installed.version));env.owner=Number(installed.ownerId||me());env.group=String(gid);return JSON.stringify(env)}
 async function decryptForGroup(gid,ciphertext){if(!ciphertext||typeof ciphertext!=='string')return ciphertext;let envelope;try{envelope=JSON.parse(ciphertext)}catch(_){return ciphertext}if(!envelope||envelope.v!==1||!Number.isInteger(Number(envelope.gen)))return ciphertext;if(!(await waitReady()))throw new Error('Secure group messaging is not ready yet');const version=Number(envelope.gen);let state=await fetchState(gid,false),installed=await installVersion(gid,state,version);if(!installed){state=await fetchState(gid,true);installed=await installVersion(gid,state,version)}if(!installed)throw new Error('Group key version '+version+' is not available for this member');let plain=await e2e().decryptGroupMessage(ciphertext,installed.key);if(plain==='[Decryption failed]'){bucket(gid).delete(version);state=await fetchState(gid,true);installed=await installVersion(gid,state,version);if(installed)plain=await e2e().decryptGroupMessage(ciphertext,installed.key)}if(plain==='[Decryption failed]')throw new Error('Group ciphertext authentication failed');return plain}
 async function rotateSenderKey(gid,hint){bucket(String(gid)).clear();return ensureCurrentKey(String(gid),hint)}
-global.KynectaGroupE2E={ensureGroupKey:ensureCurrentKey,encryptForGroup,decryptForGroup,rotateSenderKey};
+global.KynectaGroupE2E={ensureGroupKey:ensureCurrentKey,encryptForGroup,decryptForGroup,rotateSenderKey,distributeMissing,getMissingMembers};
 console.log('[KynectaGroupE2E] Loaded — exact-version group key fetch/retry active')
 })(window);

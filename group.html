@@ -212,11 +212,13 @@ function buildRow(m){const id=String(m.id||m.messageId||'');const pendingDecrypt
   if(m._optimistic){
     const st=document.createElement('span');
     if(m.status==='failed'){
-      st.textContent='⚠ Not sent';st.style.cssText='color:#fecaca;font-weight:700';t.append(st);
+      st.textContent='⚠ Not sent';st.title=m._error||'';st.style.cssText='color:#fecaca;font-weight:700';t.append(st);
       const rt=document.createElement('button');rt.type='button';rt.textContent='Retry';rt.style.cssText='border:0;background:rgba(255,255,255,.22);color:inherit;border-radius:8px;padding:1px 7px;cursor:pointer;font-size:10px';rt.onclick=e=>{e.stopPropagation();retryOptimistic(m.localId)};t.append(rt);
       const dc=document.createElement('button');dc.type='button';dc.textContent='Discard';dc.style.cssText='border:0;background:transparent;color:inherit;text-decoration:underline;cursor:pointer;font-size:10px';dc.onclick=e=>{e.stopPropagation();S.messages=S.messages.filter(x=>x.localId!==m.localId);renderMessages(false)};t.append(dc);
     }else if(m.status==='waiting-key'){
-      st.textContent='🔐';st.title='Waiting for group encryption keys…';t.append(st);
+      st.textContent='🔐';st.title=m._error||'Waiting for group encryption keys…';t.append(st);
+      const rt=document.createElement('button');rt.type='button';rt.textContent='Retry now';rt.style.cssText='border:0;background:rgba(255,255,255,.22);color:inherit;border-radius:8px;padding:1px 7px;cursor:pointer;font-size:10px';rt.onclick=e=>{e.stopPropagation();retryOptimistic(m.localId)};t.append(rt);
+      const dc=document.createElement('button');dc.type='button';dc.textContent='Discard';dc.style.cssText='border:0;background:transparent;color:inherit;text-decoration:underline;cursor:pointer;font-size:10px';dc.onclick=e=>{e.stopPropagation();clearTimeout(m._retryTimer);S.messages=S.messages.filter(x=>x.localId!==m.localId);renderMessages(false)};t.append(dc);
     }else{st.textContent='🕓';st.title='Sending…';t.append(st)}
   }
   b.append(t);
@@ -287,8 +289,9 @@ function openGroup(id){
   $('input').disabled=false;$('send').disabled=false;['searchToggle','pinnedToggle','mediaToggle'].forEach(bid=>{const b=$(bid);if(b)b.disabled=false});
   S.messages=[];markRead(id);renderMessages(false);renderGroups();setMobileChat(true);const meta=currentGroupMeta(g);postParent('GROUP_PANEL_OPEN',meta);postSelf('GROUP_PANEL_OPEN',meta);
   window.dispatchEvent(new CustomEvent('kyn:group:open',{detail:{groupId:String(id)}}));hydrateGroupHistory(id);loadMessages();loadPins();clearInterval(S.poll);S.poll=setInterval(loadMessages,5000);
+  renderKeyGapNotice(null);checkKeyGap(id);
 }
-function closeGroup(){S.current=null;window.__GROUP_CHAT_ID=null;window.__GROUP_CHAT_TYPE=null;clearInterval(S.poll);S.poll=null;$('input').value='';$('input').disabled=true;$('send').disabled=true;['searchToggle','pinnedToggle','mediaToggle'].forEach(bid=>{const b=$(bid);if(b)b.disabled=true});closeSubbars();S.messages=[];S.pins=[];renderMessages(false);setMobileChat(false);renderGroups();postParent('GROUP_PANEL_CLOSED',{});postSelf('GROUP_PANEL_CLOSE',{});window.dispatchEvent(new CustomEvent('kyn:group:close'))}
+function closeGroup(){S.current=null;window.__GROUP_CHAT_ID=null;window.__GROUP_CHAT_TYPE=null;clearInterval(S.poll);S.poll=null;$('input').value='';$('input').disabled=true;$('send').disabled=true;['searchToggle','pinnedToggle','mediaToggle'].forEach(bid=>{const b=$(bid);if(b)b.disabled=true});closeSubbars();S.messages=[];S.pins=[];renderMessages(false);setMobileChat(false);renderGroups();postParent('GROUP_PANEL_CLOSED',{});postSelf('GROUP_PANEL_CLOSE',{});renderKeyGapNotice(null);window.dispatchEvent(new CustomEvent('kyn:group:close'))}
 function makeGroupClientId(){return 'group-'+(crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random().toString(36).slice(2));}
 // POST /messages is idempotent on clientMessageId server-side (the same route the 1:1 chat uses), so a
 // transient failure (Render cold start / 502 / dropped connection) can be retried safely.
@@ -300,6 +303,37 @@ async function apiRetry(path,opt,attempts=3){
     catch(e){last=e;if(!isTransientErr(e))throw e;if(i<attempts-1)await sleep(1500*(i+1))}
   }
   throw last;
+}
+function ensureKeyGapNotice(){
+  let el=document.getElementById('keyGapNotice');
+  if(!el){
+    el=document.createElement('div');el.id='keyGapNotice';
+    el.style.cssText='padding:6px 12px;font-size:12px;background:rgba(255,193,7,.15);color:#b45309;display:none';
+    const messagesEl=$('messages');messagesEl?.parentNode?.insertBefore(el,messagesEl);
+  }
+  return el;
+}
+// FIX (group messages not going through): small, non-blocking heads-up when
+// the server reports members who don't have the current key yet (see
+// missingMemberIds on GET /state) — previously nothing told anyone this gap
+// existed at all.
+function renderKeyGapNotice(missingIds){
+  const el=ensureKeyGapNotice();
+  if(!missingIds||!missingIds.length){el.style.display='none';el.textContent='';return}
+  el.style.display='block';
+  el.textContent=missingIds.length===1
+    ?'🔒 1 member can\'t read new messages yet — their device key is still syncing.'
+    :`🔒 ${missingIds.length} members can't read new messages yet — their device keys are still syncing.`;
+}
+// Best-effort: top up any stragglers' key copies (if we hold the key) and
+// reflect the result. Safe to call often — it's a no-op once everyone has
+// their copy, and distributeMissing() itself no-ops if we don't hold the key.
+async function checkKeyGap(gid){
+  if(!window.KynectaGroupE2E?.distributeMissing)return;
+  try{
+    const{missing}=await window.KynectaGroupE2E.distributeMissing(gid);
+    if(S.current&&String(S.current.id)===String(gid))renderKeyGapNotice(missing);
+  }catch(_){}
 }
 function groupObjectFor(groupId){return (S.current&&String(S.current.id)===String(groupId))?S.current:S.groups.find(g=>String(g.id)===String(groupId))||null}
 
@@ -326,6 +360,7 @@ async function deliverOptimistic(cid,groupId,plain){
       mergeGroupMessages([{...serverMessage,clientMessageId:cid,content:plain,displayContent:plain}]);
       renderMessages(true);
       loadMessages(); // background reconcile, never blocks the UI
+      checkKeyGap(groupId); // background: top up any stragglers now that we know we hold the key
     }
   }catch(error){
     const msg=String(error?.message||error);
@@ -335,12 +370,25 @@ async function deliverOptimistic(cid,groupId,plain){
     console.warn('[GroupMessage] send deferred',msg);
     const row=S.messages.find(m=>m._optimistic&&m.localId===cid);
     if(row){
+      // FIX (group messages not going through): this used to show a fixed
+      // "Waiting for group encryption keys…" label no matter what actually
+      // went wrong, and re-queued every 5s forever with no way out except
+      // leaving the tab open indefinitely. Now the real reason from the
+      // server/E2E layer is shown, retries are capped, and once capped the
+      // row becomes a normal "Not sent" with Retry/Discard like any other
+      // failure — same UI, just reachable from this state too.
+      row._error=msg;
       if(provisioning){
-        row.status='waiting-key';row._error='Waiting for group encryption keys…';renderMessages(false);
-        clearTimeout(row._retryTimer);
-        row._retryTimer=setTimeout(()=>{row._retryTimer=null;queueOptimisticSend(cid,groupId,plain)},5000);
+        row._waitingKeyTries=(row._waitingKeyTries||0)+1;
+        if(row._waitingKeyTries>=6){
+          row.status='failed';renderMessages(false);
+        }else{
+          row.status='waiting-key';renderMessages(false);
+          clearTimeout(row._retryTimer);
+          row._retryTimer=setTimeout(()=>{row._retryTimer=null;queueOptimisticSend(cid,groupId,plain)},5000);
+        }
       }else{
-        row.status='failed';row._error=msg;renderMessages(false);
+        row.status='failed';renderMessages(false);
       }
     }
   }
@@ -350,7 +398,7 @@ function queueOptimisticSend(cid,groupId,plain){
 }
 function retryOptimistic(cid){
   const row=S.messages.find(m=>m._optimistic&&m.localId===cid);if(!row||!S.current?.id)return;
-  row.status='sending';renderMessages(false);queueOptimisticSend(cid,Number(S.current.id),row.content);
+  row.status='sending';row._waitingKeyTries=0;renderMessages(false);queueOptimisticSend(cid,Number(S.current.id),row.content);
 }
 async function sendMessage(){
   if(!S.current?.id)return;const input=$('input'),plain=input.value.trim();if(!plain)return;
