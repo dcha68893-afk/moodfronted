@@ -248,6 +248,20 @@
         notify('message:added', { chatId, message });
         persistMessage(chatId, bucket.get(message.id));
         decryptForDisplay(chatId, message);
+
+        // FIX (HEADER-SAYS-OFFLINE-WHILE-THEY-ARE-MESSAGING): a message that was created
+        // moments ago and did not come from us is proof its sender is online right now.
+        // (History/sync replays carry old createdAt values, so they never trigger this.)
+        try {
+            if (!fromSelf && message.senderId != null && message.createdAt &&
+                String(message.senderId) !== String(window._kynCurrentUserId) &&
+                Date.now() - new Date(message.createdAt).getTime() < 60000) {
+                updatePresence(message.senderId, true, null);
+                if (chatId === state.activeChatId) {
+                    window.parent.postMessage({ type: 'kyn:requestPresenceCheck', userId: message.senderId }, '*');
+                }
+            }
+        } catch (_) {}
     }
 
     // Runs decryptMessageForDisplay() (the app's one canonical decrypt path
@@ -265,7 +279,7 @@
     // stuck on "Unable to decrypt" forever instead of retrying fresh.
     function syncLastMessageDisplay(chatId, messageId, displayContent, persistToCache = true) {
         const conv = state.conversations.get(chatId);
-        if (conv && conv.lastMessage && conv.lastMessage.id === messageId) {
+        if (conv && conv.lastMessage && String(conv.lastMessage.id) === String(messageId)) {
             conv.lastMessage = Object.assign({}, conv.lastMessage, { displayContent });
             notify('conversation:updated', conv);
             if (persistToCache) persistConversation(chatId); // so the sidebar preview is also decrypt-free on next load
@@ -320,6 +334,10 @@
         if (cached && cached.ciphertext === ciphertext) {
             const bucket = getOrCreateConversationBucket(chatId);
             bucket.set(message.id, Object.assign({}, bucket.get(message.id) || message, cached.value));
+            // FIX (SIDEBAR-STUCK-ON-"Decrypting…"): a cache hit used to update only the
+            // message bucket, never the conversation's lastMessage preview, so a preview
+            // that had just been re-seeded with raw ciphertext stayed unresolved forever.
+            syncLastMessageDisplay(chatId, message.id, cached.value.displayContent, false);
             return;
         }
         if (decryptFlights.has(key)) { await decryptFlights.get(key); return; }
@@ -795,55 +813,88 @@
             }
         }
 
-        try {
-            const res = await api().post('/messages', {
-                chatId, receiverId, content: outgoingContent, type: attachment ? toMessageType(attachment.type) : type,
-                replyToId, clientMessageId, metadata: attachment ? { attachment } : undefined,
-            });
-            if (res && res.success) {
+        // FIX (DELIVERED-BUT-SHOWS-FAILED): POST /messages is idempotent server-side on
+        // (senderId, clientMessageId) — see messageDeliveryService.sendMessage — so it is
+        // safe to retry with the SAME clientMessageId. A slow/cold Render backend (502,
+        // 503, 504, timeout) often saves the message and then fails to answer in time;
+        // the old code marked the bubble 'failed' on the very first such error even
+        // though the receiver got the message. Retry transient errors (bubble stays on
+        // "sending") and only give up after every attempt has failed AND the message
+        // has not shown up via the socket echo.
+        const sendBody = {
+            chatId, receiverId, content: outgoingContent, type: attachment ? toMessageType(attachment.type) : type,
+            replyToId, clientMessageId, metadata: attachment ? { attachment } : undefined,
+        };
+        const MAX_SEND_ATTEMPTS = 3;
+        const postWithRetry = async () => {
+            let last = { success: false, message: 'Send failed' };
+            for (let attempt = 0; attempt < MAX_SEND_ATTEMPTS; attempt++) {
+                try {
+                    const r = await api().post('/messages', sendBody);
+                    if (r && r.success) return r;
+                    last = r || last;
+                    const st = r && r.status;
+                    // A definite client-side rejection (validation, blocked, forbidden) is
+                    // final — retrying cannot change the outcome.
+                    if (st && st < 500 && st !== 408 && st !== 429) return last;
+                } catch (err) {
+                    last = { success: false, message: err && err.message };
+                }
+                if (isAlreadyDelivered(bucket, clientMessageId)) return { success: true, alreadyDelivered: true };
+                if (attempt < MAX_SEND_ATTEMPTS - 1) await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+            }
+            return last;
+        };
+
+        let res;
+        try { res = await postWithRetry(); } catch (err) { res = { success: false, message: err && err.message }; }
+
+        if (res && res.alreadyDelivered) return { success: true, alreadyDelivered: true };
+
+        if (res && res.success) {
+            // Success handling lives OUTSIDE the failure try/catch on purpose: nothing that
+            // goes wrong while tidying local state may ever flip a delivered message to 'failed'.
+            const data = res.data || {};
+            try {
                 bucket.delete(optimisticId);
+                const realChatId = data.chatId != null ? data.chatId : optimisticMessage.chatId;
                 // Real conversations may have a different chatId than the
                 // "pending:<receiverId>" bucket we optimistically wrote to
                 // on the very first message — move the bucket AND the
                 // conversation metadata (otherUser especially — without
                 // this, encryption's recipient resolution would silently
                 // have nothing to go on for this conversation going forward).
-                if (optimisticMessage.chatId !== res.data.chatId) {
+                if (optimisticMessage.chatId !== realChatId) {
                     state.messagesByConversation.delete(optimisticMessage.chatId);
                     const pendingMeta = state.conversations.get(optimisticMessage.chatId);
                     if (pendingMeta) {
-                        upsertConversationMeta(res.data.chatId, { otherUser: pendingMeta.otherUser });
+                        upsertConversationMeta(realChatId, { otherUser: pendingMeta.otherUser });
                         state.conversations.delete(optimisticMessage.chatId);
                     }
-                    // The synthetic "pending:<receiverId>" chatId never had
-                    // any real (non-optimistic) messages persisted to cache
-                    // under it — see the note above deleteChatMessages() in
-                    // js/message-local-db.js — but clear it defensively in
-                    // case a previous version of this code path did.
                     try { window.KynectaMessageCache && window.KynectaMessageCache.deleteChatMessages(optimisticMessage.chatId); } catch (_) {}
                     try { window.KynectaMessageCache && window.KynectaMessageCache.deleteConversation(optimisticMessage.chatId); } catch (_) {}
                 }
-                // We already have the plaintext (we just typed it) — no need
-                // to round-trip it through decrypt; store the server's
-                // envelope in .content (for consistency with history/sync)
-                // but keep our own plaintext as displayContent directly.
-                applyIncomingMessage(Object.assign({}, res.data, { clientMessageId, displayContent: content }), { fromSelf: true });
-                return { success: true, messageId: res.data.id, chatId: res.data.chatId };
+                if (data.id != null) {
+                    // We already have the plaintext (we just typed it) — no need to
+                    // round-trip it through decrypt.
+                    applyIncomingMessage(Object.assign({}, data, { chatId: realChatId, clientMessageId, displayContent: content }), { fromSelf: true });
+                } else {
+                    // Server accepted it but returned no row — keep the bubble as a sent message.
+                    getOrCreateConversationBucket(realChatId).set(optimisticId, Object.assign({}, optimisticMessage, { chatId: realChatId, status: 'sent' }));
+                    notify('delivery-state:updated', { chatId: realChatId, messageId: optimisticId });
+                }
+            } catch (postErr) {
+                console.warn('[MessageModule] post-send bookkeeping failed (message was delivered):', postErr && postErr.message);
             }
-            if (isAlreadyDelivered(bucket, clientMessageId)) {
-                return { success: true, alreadyDelivered: true };
-            }
-            bucket.set(optimisticId,Object.assign({},optimisticMessage,{status:'failed'}));
-            notify('message:failed',{chatId:optimisticMessage.chatId,clientMessageId});
-            return { success: false, error: res && res.message };
-        } catch (err) {
-            if (isAlreadyDelivered(bucket, clientMessageId)) {
-                return { success: true, alreadyDelivered: true };
-            }
-            bucket.set(optimisticId,Object.assign({},optimisticMessage,{status:'failed'}));
-            notify('message:failed',{chatId:optimisticMessage.chatId,clientMessageId});
-            return { success: false, error: err.message };
+            return { success: true, messageId: data.id, chatId: data.chatId != null ? data.chatId : optimisticMessage.chatId };
         }
+
+        if (isAlreadyDelivered(bucket, clientMessageId)) {
+            return { success: true, alreadyDelivered: true };
+        }
+        bucket.set(optimisticId, Object.assign({}, optimisticMessage, { status: 'failed' }));
+        notify('message:failed', { chatId: optimisticMessage.chatId, clientMessageId, error: res && res.message });
+        return { success: false, error: res && res.message };
     }
 
     async function markRead(chatId, messageIds) {
@@ -1123,7 +1174,19 @@
             }
             if (data.type === 'CONVERSATION_UPDATED') {
                 const p = data.payload || {};
-                if (p.chatId) upsertConversationMeta(p.chatId, { lastMessage: { content: p.lastMessage, createdAt: p.lastMessageAt } });
+                // FIX (SIDEBAR-STUCK-ON-"Decrypting…"): chat.html posts this right after
+                // every message:new, carrying only the RAW ciphertext (no id, no
+                // displayContent). Overwriting lastMessage unconditionally wiped the
+                // already-decrypted preview and left an id-less stub that
+                // syncLastMessageDisplay() could never match again. Only replace it when
+                // this is genuinely a different message than the one we already hold.
+                if (p.chatId) {
+                    const prevLast = state.conversations.get(p.chatId)?.lastMessage;
+                    const sameMessage = prevLast && prevLast.content === p.lastMessage;
+                    if (!sameMessage) {
+                        upsertConversationMeta(p.chatId, { lastMessage: { content: p.lastMessage, createdAt: p.lastMessageAt } });
+                    }
+                }
                 return;
             }
         });
@@ -1690,14 +1753,22 @@
             _warmupKnownContactKeys(chats);
             chats.filter(c => c.type === 'direct' && c.otherParticipant).forEach(c => {
                 const lastRaw = Array.isArray(c.chatMessages) && c.chatMessages[0] ? c.chatMessages[0] : null;
+                // FIX (SIDEBAR-STUCK-ON-"Decrypting…"): don't throw away a preview we have
+                // already resolved (from cache/decrypt) when the list is (re)loaded.
+                const prevConv = state.conversations.get(c.id);
+                const prevLast = prevConv && prevConv.lastMessage;
+                const keepDisplay = (prevLast && lastRaw && String(prevLast.id) === String(lastRaw.id) && prevLast.displayContent !== 'Decrypting…') ? prevLast.displayContent : undefined;
                 upsertConversationMeta(c.id, {
-                    otherUser: {
+                    otherUser: Object.assign({}, prevConv && prevConv.otherUser, {
                         id: c.otherParticipant.id,
                         username: c.otherParticipant.displayName || c.otherParticipant.username,
                         avatar: c.otherParticipant.avatar,
-                    },
+                    }),
                     unreadCount: c.unreadCount || 0,
-                    lastMessage: lastRaw ? { id: lastRaw.id, content: lastRaw.content, type: lastRaw.type, createdAt: lastRaw.createdAt, senderId: lastRaw.senderId, chatId: c.id } : null,
+                    lastMessage: lastRaw ? Object.assign(
+                        { id: lastRaw.id, content: lastRaw.content, type: lastRaw.type, createdAt: lastRaw.createdAt, senderId: lastRaw.senderId, chatId: c.id },
+                        keepDisplay !== undefined ? { displayContent: keepDisplay } : {}
+                    ) : null,
                 });
                 if (lastRaw) decryptForDisplay(c.id, { id: lastRaw.id, chatId: c.id, content: lastRaw.content, type: lastRaw.type, senderId: lastRaw.senderId, createdAt: lastRaw.createdAt });
             });

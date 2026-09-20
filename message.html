@@ -546,15 +546,39 @@
     // decryptMessageForDisplay's "never leak ciphertext, either way"
     // comment in js/e2e-encryption.js). The chat bubbles already honor
     // that; this list preview just wasn't going through the same check.
-    function safeConvPreview(lastMessage) {
+    // FIX (LIST-PREVIEW-STUCK-ON-"Decrypting…"): "Decrypting…" is now only a brief
+    // placeholder. It shows for at most DECRYPT_PLACEHOLDER_MS after a message is first
+    // seen undecrypted; the real text replaces it the instant it resolves (also checking
+    // the open chat's message bucket, which can hold a resolved copy the sidebar missed).
+    // If it still hasn't resolved after the window, show the neutral locked-message label
+    // instead of an endless "Decrypting…".
+    const DECRYPT_PLACEHOLDER_MS = 2000;
+    const _decryptSeen = new Map();
+    const _decryptTimers = new Set();
+    function safeConvPreview(lastMessage, chatId) {
       if (!lastMessage) return '';
-      if (lastMessage.displayContent !== undefined) return lastMessage.displayContent;
+      if (lastMessage.displayContent !== undefined && lastMessage.displayContent !== 'Decrypting…') return lastMessage.displayContent;
       const c = lastMessage.content;
-      // An E2E envelope is always a JSON object with a "v" (version) field
-      // — see _envelopeShape's own check in js/e2e-encryption.js. Anything
-      // shaped like that is still-encrypted content that hasn't resolved
-      // yet, never something safe to show as-is.
-      if (typeof c === 'string' && /^\s*\{/.test(c) && c.indexOf('"v"') !== -1) return 'Decrypting…';
+      const looksEncrypted = typeof c === 'string' && /^\s*\{/.test(c) && c.indexOf('"v"') !== -1;
+      if (lastMessage.displayContent === 'Decrypting…' || looksEncrypted) {
+        try {
+          if (chatId != null && lastMessage.id != null) {
+            const m = window.MessageModule.getMessages(chatId).find(x => String(x.id) === String(lastMessage.id));
+            if (m && m.displayContent !== undefined && m.displayContent !== 'Decrypting…') return m.displayContent;
+          }
+        } catch (_) {}
+        const key = String(chatId) + ':' + (lastMessage.id != null ? lastMessage.id : (lastMessage.createdAt || ''));
+        if (!_decryptSeen.has(key)) _decryptSeen.set(key, Date.now());
+        const left = DECRYPT_PLACEHOLDER_MS - (Date.now() - _decryptSeen.get(key));
+        if (left > 0) {
+          if (!_decryptTimers.has(key)) {
+            _decryptTimers.add(key);
+            setTimeout(() => { _decryptTimers.delete(key); renderConversationList(); }, left + 30);
+          }
+          return 'Decrypting…';
+        }
+        return '🔒 Encrypted message';
+      }
       return c ?? '';
     }
 
@@ -681,7 +705,7 @@
           <img class="conv-avatar" src="${escapeHtml(c.otherUser?.avatar || '/icons/necpa-192.png')}" alt="">
           <div class="conv-meta">
             <div class="conv-name">${favIds.has(String(c.chatId)) ? '\u2b50 ' : ''}${escapeHtml(c.otherUser?.username || 'Conversation')}</div>
-            <div class="conv-preview">${escapeHtml(safeConvPreview(c.lastMessage))}</div>
+            <div class="conv-preview">${escapeHtml(safeConvPreview(c.lastMessage, c.chatId))}</div>
           </div>
           ${(c.unreadCount > 0 || forcedUnread.has(String(c.chatId))) ? `<span class="unread-badge">${c.unreadCount > 99 ? '99+' : (c.unreadCount || '')}</span>` : ''}
         </div>`;
@@ -768,7 +792,7 @@
             <img class="conv-avatar" src="${escapeHtml(c.otherUser?.avatar || '/icons/necpa-192.png')}" alt="">
             <div class="conv-meta">
               <div class="conv-name">${escapeHtml(c.otherUser?.username || 'Conversation')}</div>
-              <div class="conv-preview">${escapeHtml(safeConvPreview(c.lastMessage))}</div>
+              <div class="conv-preview">${escapeHtml(safeConvPreview(c.lastMessage, c.chatId))}</div>
             </div>
             <button data-unlock="${c.chatId}" style="border:none;background:none;font-size:16px;cursor:pointer;color:inherit;padding:8px;" title="Unlock chat">🔓</button>
           </div>`).join('');
@@ -2535,6 +2559,30 @@
       switch (event) {
         case 'conversation:updated':
           renderConversationList();
+          // FIX (HEADER-SAYS-OFFLINE): presence changes arrive as conversation updates but
+          // never re-sent the header to the parent, so it kept whatever it showed on open.
+          try {
+            const activeIdHdr = window.MessageModule.getActiveChatId();
+            if (activeIdHdr && data && data.chatId === activeIdHdr && data.otherUser) {
+              const onlineNow = !!data.otherUser.online;
+              const hdrKey = activeIdHdr + ':' + onlineNow;
+              if (window.__kynLastHdrPresence !== hdrKey) {
+                window.__kynLastHdrPresence = hdrKey;
+                window.parent.postMessage({
+                  source: 'message-iframe',
+                  type: 'CHAT_HEADER_UPDATE',
+                  payload: {
+                    chatId: activeIdHdr,
+                    seq: (window.__kynChatHdrSeq = (window.__kynChatHdrSeq || 0) + 1),
+                    name: data.otherUser.username || 'Conversation',
+                    avatarUrl: data.otherUser.avatar || null,
+                    online: onlineNow,
+                  },
+                  timestamp: Date.now(),
+                }, '*');
+              }
+            }
+          } catch (_) {}
           break;
         case 'message:added':
         case 'message:failed':
