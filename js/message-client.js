@@ -124,6 +124,59 @@
         return !!findMessageByClientMessageId(clientMessageId);
     }
 
+    // FIX (DELIVERED-BUT-SHOWS-FAILED, ack path): the server sends the SENDER a status-only
+    // 'message:delivered' ack that carries { chatId, messageId, clientMessageId } (see
+    // messageBroadcast.js). If the POST /messages reply was lost (slow link, cold start), the
+    // only copy of the message in this client is the local `optimistic:<clientMessageId>` stub,
+    // and the old handler looked the message up by server id only, so the stub stayed
+    // "sending"/"failed" until a later history/sync happened to replace it. Promote the stub to
+    // the real message here, keyed by clientMessageId, so the bubble flips to delivered instead.
+    const ACK_RANK = { failed: -1, sending: 0, sent: 1, delivered: 2, read: 3 };
+    function reconcileOptimisticFromAck(p, status) {
+        if (!p) return false;
+        const cid = p.clientMessageId || p.localId;
+        const realId = p.messageId != null ? p.messageId : (p.serverId != null ? p.serverId : p.id);
+        if (!cid || realId == null) return false;
+        const stubKey = `optimistic:${cid}`;
+        for (const [bucketChatId, bucket] of state.messagesByConversation.entries()) {
+            const stub = bucket.get(stubKey);
+            if (!stub) continue;
+            bucket.delete(stubKey);
+            const realChatId = p.chatId != null ? p.chatId : bucketChatId;
+            const target = getOrCreateConversationBucket(realChatId);
+            const existing = target.get(realId) || {};
+            const wanted = (ACK_RANK[existing.status] ?? 0) > (ACK_RANK[status] ?? 1) ? existing.status : status;
+            const merged = Object.assign({}, stub, existing, { id: realId, chatId: realChatId, clientMessageId: cid, status: wanted });
+            delete merged._optimisticId;
+            target.set(realId, merged);
+            persistMessage(realChatId, merged);
+            upsertConversationMeta(realChatId, { lastMessage: merged });
+            notify('message:added', { chatId: realChatId, message: merged });
+            return true;
+        }
+        return false;
+    }
+
+    // FIX (DELIVERED-BUT-SHOWS-FAILED, verify path): when every send attempt failed, ask the
+    // server whether it actually saved the message before telling the user it failed. The
+    // history endpoint returns each row's clientMessageId. Works for existing chats (numeric
+    // chatId); a brand-new chat has no chatId yet and is covered by the ack path above.
+    async function verifyDeliveredOnServer(chatId, clientMessageId, plaintext) {
+        const numericChatId = Number(chatId);
+        if (!clientMessageId || !Number.isFinite(numericChatId) || numericChatId <= 0) return false;
+        try {
+            const res = await api().get(`/messages/${numericChatId}?limit=30`);
+            if (res && res.success && Array.isArray(res.data)) {
+                const hit = res.data.find(m => m && m.clientMessageId === clientMessageId);
+                if (hit) {
+                    applyIncomingMessage(Object.assign({}, hit, { chatId: hit.chatId != null ? hit.chatId : numericChatId, displayContent: plaintext }), { fromSelf: true });
+                    return true;
+                }
+            }
+        } catch (_) { /* still unreachable: caller falls through to "failed", where Retry is safe (idempotent) */ }
+        return false;
+    }
+
     function upsertConversationMeta(chatId, patch) {
         const existing = state.conversations.get(chatId) || { chatId, unreadCount: 0 };
         state.conversations.set(chatId, Object.assign(existing, patch));
@@ -187,8 +240,18 @@
         const bucket = getOrCreateConversationBucket(chatId);
 
         if (message.clientMessageId) {
+            // FIX: the stub can live in a different bucket (the synthetic "pending:<receiverId>"
+            // one used for a brand-new chat), so look everywhere, and keep the plaintext we typed
+            // so our own message is never pushed through decrypt.
             const staleOptimisticId = `optimistic:${message.clientMessageId}`;
-            if (bucket.has(staleOptimisticId)) bucket.delete(staleOptimisticId);
+            for (const b of state.messagesByConversation.values()) {
+                if (!b.has(staleOptimisticId)) continue;
+                const stub = b.get(staleOptimisticId);
+                b.delete(staleOptimisticId);
+                if (message.displayContent === undefined && stub && stub.displayContent !== undefined && String(stub.senderId) === String(message.senderId)) {
+                    message = Object.assign({}, message, { displayContent: stub.displayContent });
+                }
+            }
         }
 
         message = applyBufferedDelivery(Object.assign({}, message));
@@ -836,7 +899,8 @@
                     const st = r && r.status;
                     // A definite client-side rejection (validation, blocked, forbidden) is
                     // final — retrying cannot change the outcome.
-                    if (st && st < 500 && st !== 408 && st !== 429) return last;
+                    // (401 is retryable: chat.html may be mid token-refresh when the first attempt goes out.)
+                    if (st && st < 500 && st !== 408 && st !== 429 && st !== 401) return last;
                 } catch (err) {
                     last = { success: false, message: err && err.message };
                 }
@@ -891,6 +955,9 @@
 
         if (isAlreadyDelivered(bucket, clientMessageId)) {
             return { success: true, alreadyDelivered: true };
+        }
+        if (await verifyDeliveredOnServer(chatId || optimisticMessage.chatId, clientMessageId, content)) {
+            return { success: true, alreadyDelivered: true, verified: true };
         }
         bucket.set(optimisticId, Object.assign({}, optimisticMessage, { status: 'failed' }));
         notify('message:failed', { chatId: optimisticMessage.chatId, clientMessageId, error: res && res.message });
@@ -1136,11 +1203,13 @@
                 // Server confirmation of our own optimistic send arriving via
                 // the socket echo path (in addition to the REST response).
                 const p = data.payload || {};
+                reconcileOptimisticFromAck(p, 'sent');
                 if (p.serverId) notify('message:server-ack', p);
                 return;
             }
             if (data.type === 'message:delivered' || data.type === 'message_delivered') {
                 const p = data.payload || {};
+                if (reconcileOptimisticFromAck(p, 'delivered')) return;
                 const bucket = state.messagesByConversation.get(p.chatId);
                 if (bucket && p.messageId && bucket.has(p.messageId)) {
                     const existing=bucket.get(p.messageId);
