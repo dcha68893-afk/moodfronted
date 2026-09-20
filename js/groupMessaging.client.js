@@ -16,14 +16,20 @@ async function req(path,opt={}){const h={...(opt.headers||{})},t=token();if(t)h.
 const d=await r.json().catch(()=>({}));if(!r.ok){const e=new Error(d.message||'Group request failed');Object.assign(e,d);throw e}return d}
 const idkey=(g,e,o)=>`kyn_gsk_v2_${g}_${e}_${o}`;
 async function waitReady(){
-  // Group Sender Keys only require the locally unlocked identity key. Do not
-  // wait on the direct-message E2E "enabled" flag, because that flag also
-  // waits for server-side identity registration confirmation and can remain
-  // false during a background registration retry even though the identity
-  // private key is already available for group key wrapping.
-  const ready=()=>{try{return !!(global.KynectaE2E?.getMyIdentityPrivateKey?.()&&global.KynectaE2E?.publicKey&&typeof global.KynectaE2E?.wrapForLocalStorage==='function')}catch(_){return false}};
+  // Canonical readiness: the group engine must consume the same identity
+  // lifecycle as the rest of the app. Never maintain a second unlock timer.
+  const ready=()=>{try{
+    const id=global.KynectaE2EIdentity;
+    return !!(id?.privateKey&&id?.publicKey&&typeof global.KynectaE2E?.wrapForLocalStorage==='function');
+  }catch(_){return false}};
   if(ready())return true;
-  const deadline=Date.now()+15000;
+  try{
+    if(typeof global.KynectaMessageE2EReady==='function') await global.KynectaMessageE2EReady();
+  }catch(err){
+    console.warn('[KynectaGroupE2E] canonical identity bootstrap failed:',err?.message||err);
+  }
+  if(ready())return true;
+  const deadline=Date.now()+5000;
   while(Date.now()<deadline){
     if(ready())return true;
     await new Promise(resolve=>setTimeout(resolve,250));
@@ -53,6 +59,6 @@ const signInput=(g,e,o,i,iv,ct)=>te.encode([PIPELINE,g,e,o,i,iv,ct].join('|'));
 async function encryptForGroup(g,plaintext,members){const st=await ensureSenderKey(g,members),i=st.iteration,mk=await hmac(st.chain,'message:'+i),next=await hmac(st.chain,'chain:'+i),key=await aesKey(mk),iv=crypto.getRandomValues(new Uint8Array(12)),ct=await subtle.encrypt({name:'AES-GCM',iv},key,te.encode(String(plaintext))),ivb=b64(iv),ctb=b64(ct),sig=await subtle.sign({name:'ECDSA',hash:{name:'SHA-256'}},st.privateKey,signInput(g,st.epoch,st.ownerId,i,ivb,ctb));st.chain=next;st.iteration++;await saveState(st);return JSON.stringify({v:2,pipeline:PIPELINE,algorithm:ALGORITHM,group:String(g),epoch:st.epoch,owner:st.ownerId,iteration:i,iv:ivb,ct:ctb,sig:b64(sig),publicKey:st.publicJwk})}
 async function decryptForGroup(g,ciphertext){let e;try{e=JSON.parse(ciphertext)}catch(_){return ciphertext}if(!e||e.v!==2||e.pipeline!==PIPELINE)return ciphertext;const st=await getReceiverState(g,Number(e.epoch),Number(e.owner)),pub=await subtle.importKey('jwk',e.publicKey,{name:'ECDSA',namedCurve:'P-256'},false,['verify']),ok=await subtle.verify({name:'ECDSA',hash:{name:'SHA-256'}},pub,unb64(e.sig),signInput(g,e.epoch,e.owner,e.iteration,e.iv,e.ct));if(!ok)throw new Error('Group message signature verification failed');let mk;if(Number(e.iteration)<st.iteration){mk=st.skipped.get(Number(e.iteration));if(!mk)throw new Error('Group message is too old for this sender-key state')}else{while(st.iteration<Number(e.iteration)){const x=await hmac(st.chain,'message:'+st.iteration);st.chain=await hmac(st.chain,'chain:'+st.iteration);st.skipped.set(st.iteration,x);if(st.skipped.size>200)st.skipped.delete(st.skipped.keys().next().value);st.iteration++}mk=await hmac(st.chain,'message:'+st.iteration);st.chain=await hmac(st.chain,'chain:'+st.iteration);st.iteration++}const pt=await subtle.decrypt({name:'AES-GCM',iv:unb64(e.iv)},await aesKey(mk),unb64(e.ct));await saveState(st);return td.decode(pt)}
 async function distributeMissing(g){const gid=Number(g),owner=me(),s=await state(gid,true),epoch=Math.max(1,Number(s.epoch)||1),entry=keyEntry(s,epoch,owner),st=states.get(idkey(gid,epoch,owner))||await loadState(gid,epoch,owner);if(!st||!entry?.distribution)return{missing:Array.isArray(s?.missingMemberIds)?s.missingMemberIds:[]};const live=await liveMembers(gid,[]);const missing=(Array.isArray(s?.missingMemberIds)?s.missingMemberIds:[]).map(Number).filter(id=>live.includes(id));if(!missing.length)return{missing:[]};await distribute(gid,epoch,st,live);return{missing:[]}}
-global.KynectaGroupE2E={ensureSenderKey,encryptForGroup,decryptForGroup,distributeMissing,initGroup:async g=>{await waitReady();try{await state(g,true)}catch(_){}}};
+global.KynectaGroupE2E={ensureSenderKey,encryptForGroup,decryptForGroup,distributeMissing,waitUntilReady:waitReady,initGroup:async g=>{if(!(await waitReady()))throw new Error('Group identity is not unlocked');try{await state(g,true)}catch(err){console.warn('[KynectaGroupE2E] initial group crypto state unavailable:',err?.message||err)}return true}};
 console.log('[KynectaGroupE2E] Group-only Sender Keys v2 loaded');
 })(window);
