@@ -15,7 +15,21 @@ const b64=u=>btoa(String.fromCharCode(...new Uint8Array(u))),unb64=s=>Uint8Array
 async function req(path,opt={}){const h={...(opt.headers||{})},t=token();if(t)h.Authorization='Bearer '+t;if(opt.body)h['Content-Type']='application/json';let r=await fetch(base()+path,{...opt,headers:h});if(r.status===401&&global.NecpaSessionResilience){try{if(await global.NecpaSessionResilience.refreshAccessToken(base())){const nt=token();if(nt)h.Authorization='Bearer '+nt;r=await fetch(base()+path,{...opt,headers:h})}}catch(_){}}
 const d=await r.json().catch(()=>({}));if(!r.ok){const e=new Error(d.message||'Group request failed');Object.assign(e,d);throw e}return d}
 const idkey=(g,e,o)=>`kyn_gsk_v2_${g}_${e}_${o}`;
-async function waitReady(){if(global.KynectaE2E?.enabled)return true;if(global.KynectaE2E?.waitForEnabledBounded)return global.KynectaE2E.waitForEnabledBounded(15000);return false}
+async function waitReady(){
+  // Group Sender Keys only require the locally unlocked identity key. Do not
+  // wait on the direct-message E2E "enabled" flag, because that flag also
+  // waits for server-side identity registration confirmation and can remain
+  // false during a background registration retry even though the identity
+  // private key is already available for group key wrapping.
+  const ready=()=>{try{return !!(global.KynectaE2E?.getMyIdentityPrivateKey?.()&&global.KynectaE2E?.publicKey&&typeof global.KynectaE2E?.wrapForLocalStorage==='function')}catch(_){return false}};
+  if(ready())return true;
+  const deadline=Date.now()+15000;
+  while(Date.now()<deadline){
+    if(ready())return true;
+    await new Promise(resolve=>setTimeout(resolve,250));
+  }
+  return ready();
+}
 function identity(){const p=global.KynectaE2E?.getMyIdentityPrivateKey?.();if(!p)throw new Error('Group identity key is not ready');return p}
 async function publicKey(userId){const imp=b=>subtle.importKey('spki',unb64(b),{name:'ECDH',namedCurve:'P-256'},true,[]);
 /* Your own public key is already held locally by the E2E layer (the same SPKI the server stores). Using it for the owner wrap/unwrap means

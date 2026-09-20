@@ -84,36 +84,45 @@ function postSelf(type,payload){try{window.postMessage({type,payload:payload||{}
 function currentGroupMeta(g){return{id:g.id,name:g.name||g.groupName||'Group',memberCount:Number(g.participantCount??g.participants?.length??0),stats:{totalMembers:Number(g.participantCount??g.participants?.length??0)}}}
 
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-// FIX-ROOT-CAUSE (GROUP-SEND-STUCK-"SECURE MESSAGING IS STILL UNLOCKING"):
-// this used to hand-roll its OWN copy of E2E bootstrap — reading the unlock
-// password out of sessionStorage itself, calling KynectaE2E.init() itself,
-// and polling `.enabled` on its own home-grown timer (bailing out after as
-// little as ~3s if it happened to check before the password was written).
-// js/e2e-session-init.js is the canonical bootstrap that message.html and
-// chat.html already load for exactly this — it owns the password lookup,
-// the init() call, and de-duping against a second load — and it explicitly
-// documents group.html as one of the pages meant to load it. This page
-// just never had the <script> tag for it, so every group send was racing
-// this duplicate, weaker copy instead of the real thing, and lost more
-// often than not. Now this only waits on the single shared readiness gate
-// KynectaE2E already exposes for every caller (group, DM, anything else) —
-// no separate init logic lives here anymore.
+// ROOT-CAUSE (GROUP E2E MUST NOT WAIT FOR DIRECT-MESSAGE REGISTRATION):
+// Group Sender Keys use the account's local ECDH identity only to wrap/unwrap
+// the per-group sender key. The direct-message E2E layer also has a separate
+// server-registration confirmation gate. That gate can legitimately remain
+// false while the private identity key is already loaded locally (for example
+// while a registration retry is running). Gating group sends on
+// KynectaE2E.enabled therefore made every group member see "Secure messaging
+// is still unlocking" even though the cryptographic identity needed by the
+// group pipeline was already usable. Group readiness is now based on the
+// actual local identity private key, not the DM registration status.
+// The canonical e2e-session-init.js remains the only component responsible for
+// unlocking/initializing that identity; this page only waits for its result.
 let e2eReadyPromise=null;
-function e2eNotReadyMessage(){let pw=null;try{pw=sessionStorage.getItem('kyn_e2e_pw_session')}catch(_){}return pw?'Secure messaging is still unlocking. Please try again in a moment.':'Secure messaging is locked. Please sign in again to unlock it.'}
+function e2eNotReadyMessage(){
+  let pw=null;try{pw=sessionStorage.getItem('kyn_e2e_pw_session')}catch(_){}
+  return pw?'Secure group messaging is still unlocking. Please try again in a moment.':'Secure group messaging is locked. Please sign in again to unlock it.';
+}
+function hasGroupIdentity(){
+  try{
+    return !!(window.KynectaE2E?.getMyIdentityPrivateKey?.()&&
+      window.KynectaE2E?.publicKey&&
+      typeof window.KynectaE2E?.wrapForLocalStorage==='function');
+  }catch(_){return false}
+}
 async function ensureE2EReady(){
-  if(window.KynectaE2E?.enabled)return true;
+  if(hasGroupIdentity())return true;
   if(e2eReadyPromise)return e2eReadyPromise;
   e2eReadyPromise=(async()=>{
     try{
-      if(typeof window.KynectaE2E?.waitForEnabledBounded==='function')return await window.KynectaE2E.waitForEnabledBounded(8000);
-      // js/e2e-session-init.js hasn't finished attaching the core yet (very
-      // first tick of the page) — give it a moment to appear, then use the
-      // same bounded gate everyone else uses. No password handling here:
-      // that's e2e-session-init.js's job, and only its job.
-      const until=Date.now()+3000;
-      while(Date.now()<until&&typeof window.KynectaE2E?.waitForEnabledBounded!=='function')await sleep(150);
-      if(typeof window.KynectaE2E?.waitForEnabledBounded==='function')return await window.KynectaE2E.waitForEnabledBounded(5000);
-      return !!window.KynectaE2E?.enabled;
+      const deadline=Date.now()+15000;
+      while(Date.now()<deadline){
+        if(hasGroupIdentity())return true;
+        await new Promise(resolve=>{
+          let done=false,timer=setTimeout(()=>{if(done)return;done=true;resolve()},300);
+          const onReady=()=>{if(done)return;done=true;clearTimeout(timer);document.removeEventListener('kyn:canonicalMessageE2EReady',onReady);resolve()};
+          document.addEventListener('kyn:canonicalMessageE2EReady',onReady,{once:true});
+        });
+      }
+      return hasGroupIdentity();
     }finally{e2eReadyPromise=null}
   })();
   return e2eReadyPromise;
