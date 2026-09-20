@@ -84,43 +84,37 @@ function postSelf(type,payload){try{window.postMessage({type,payload:payload||{}
 function currentGroupMeta(g){return{id:g.id,name:g.name||g.groupName||'Group',memberCount:Number(g.participantCount??g.participants?.length??0),stats:{totalMembers:Number(g.participantCount??g.participants?.length??0)}}}
 
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-// FIX-ROOT-CAUSE (GROUP-SEND-STUCK-"SECURE MESSAGING IS STILL UNLOCKING"):
-// this used to hand-roll its OWN copy of E2E bootstrap — reading the unlock
-// password out of sessionStorage itself, calling KynectaE2E.init() itself,
-// and polling `.enabled` on its own home-grown timer (bailing out after as
-// little as ~3s if it happened to check before the password was written).
-// js/e2e-session-init.js is the canonical bootstrap that message.html and
-// chat.html already load for exactly this — it owns the password lookup,
-// the init() call, and de-duping against a second load — and it explicitly
-// documents group.html as one of the pages meant to load it. This page
-// just never had the <script> tag for it, so every group send was racing
-// this duplicate, weaker copy instead of the real thing, and lost more
-// often than not. Now this only waits on the single shared readiness gate
-// KynectaE2E already exposes for every caller (group, DM, anything else) —
-// no separate init logic lives here anymore.
-let e2eReadyPromise=null;
-function e2eNotReadyMessage(){let pw=null;try{pw=sessionStorage.getItem('kyn_e2e_pw_session')}catch(_){}return pw?'Secure messaging is still unlocking. Please try again in a moment.':'Secure messaging is locked. Please sign in again to unlock it.'}
+// ROOT-CAUSE (GROUP E2E MUST NOT WAIT FOR DIRECT-MESSAGE REGISTRATION):
+// Group Sender Keys use the account's local ECDH identity only to wrap/unwrap
+// the per-group sender key. The direct-message E2E layer also has a separate
+// server-registration confirmation gate. That gate can legitimately remain
+// false while the private identity key is already loaded locally (for example
+// while a registration retry is running). Gating group sends on
+// KynectaE2E.enabled therefore made every group member see "Secure messaging
+// is still unlocking" even though the cryptographic identity needed by the
+// group pipeline was already usable. Group readiness is now based on the
+// actual local identity private key, not the DM registration status.
+// The canonical e2e-session-init.js remains the only component responsible for
+// unlocking/initializing that identity; this page only waits for its result.
+/* FIX (GENERIC-NOT-READY): say WHY secure messaging isn't ready, so the person knows whether to wait or to sign in again.
+   'unlocking' is transient (matches the auto-retry pattern in deliverOptimistic); the other two are permanent and fail fast with an instruction. */
+function e2eNotReadyMessage(){
+  let d=null;try{d=window.KynectaGroupE2E?.diagnose?.()}catch(_){}
+  if(d&&d.reason==='no_session_password')return 'Secure messaging is locked. Please sign out and sign in again to unlock it.';
+  if(d&&d.reason==='password_mismatch')return 'Your secure session no longer matches the encryption key stored on this device. Please sign out and sign in again.';
+  return 'Secure messaging is still unlocking. Please try again in a moment.';
+}
 async function ensureE2EReady(){
-  if(window.KynectaE2E?.enabled)return true;
-  if(e2eReadyPromise)return e2eReadyPromise;
-  e2eReadyPromise=(async()=>{
-    try{
-      if(typeof window.KynectaE2E?.waitForEnabledBounded==='function')return await window.KynectaE2E.waitForEnabledBounded(8000);
-      // js/e2e-session-init.js hasn't finished attaching the core yet (very
-      // first tick of the page) — give it a moment to appear, then use the
-      // same bounded gate everyone else uses. No password handling here:
-      // that's e2e-session-init.js's job, and only its job.
-      const until=Date.now()+3000;
-      while(Date.now()<until&&typeof window.KynectaE2E?.waitForEnabledBounded!=='function')await sleep(150);
-      if(typeof window.KynectaE2E?.waitForEnabledBounded==='function')return await window.KynectaE2E.waitForEnabledBounded(5000);
-      return !!window.KynectaE2E?.enabled;
-    }finally{e2eReadyPromise=null}
-  })();
-  return e2eReadyPromise;
+  if(window.KynectaGroupE2E?.waitUntilReady) return window.KynectaGroupE2E.waitUntilReady();
+  if(typeof window.KynectaMessageE2EReady==='function'){
+    try{await window.KynectaMessageE2EReady()}catch(err){console.warn('[GroupMessage] canonical E2E bootstrap failed:',err?.message||err)}
+  }
+  // Fallback only when the group module itself is missing: use the same identity the group crypto uses (legacy), not the canonical one.
+  return !!(window.KynectaE2E?.enabled&&window.KynectaE2E?.getMyIdentityPrivateKey?.());
 }
 window.__NECPRA_ENSURE_E2E=ensureE2EReady;
-ensureE2EReady();
-function groupMemberIds(g){const list=Array.isArray(g?.participants)?g.participants:[];return[...new Set(list.map(p=>Number((p.user||p).id??p.userId)).filter(n=>Number.isInteger(n)&&n>0))]}
+async function loadGroups(){if(S.loading)return;S.loading=true;const GCF=window.__GroupCacheFirst;if(GCF&&!S.groups.length){GCF.hydrate('groups',cached=>{S.groups=cached;renderGroups()})}try{const r=await api('/chats?limit=100');const rows=r?.data?.chats||r?.data||[];S.groups=Array.isArray(rows)?rows.filter(x=>(x?.type||x?.chatType)==='group').map(unwrap):[];if(GCF)GCF.set('groups',S.groups);renderGroups()}catch(e){const cached=GCF&&GCF.get('groups');const cachedList=cached&&cached.value!==undefined?cached.value:cached;if(Array.isArray(cachedList)&&cachedList.length){S.groups=cachedList;renderGroups()}else{const box=$('groups');if(box)box.innerHTML=`<div class="empty">Unable to load groups.<br>${esc(e.message)}</div>`}}finally{S.loading=false}}
+function normalizeMessages(r){const rows=r?.data?.messages||r?.data||r?.messages||[];return Array.isArray(rows)?rows:[]}
 
 async function decryptGroupContent(message){
   if(!message||typeof message.content!=='string'||!message.content)return message;
@@ -188,13 +182,6 @@ async function loadMessages(){
 }
 
 function renderGroups(){const box=$('groups');if(!box)return;box.replaceChildren();const q=S.q.trim().toLowerCase();const rows=S.groups.filter(g=>!q||String(g.name||g.groupName||'').toLowerCase().includes(q));if(!rows.length){box.innerHTML='<div class="empty">No groups yet.</div>';return}for(const g of rows){const b=document.createElement('button');b.type='button';b.className='group'+(S.current&&String(S.current.id)===String(g.id)?' active':'');const a=document.createElement('div');a.className='avatar';a.textContent=String(g.name||g.groupName||'G').slice(0,1).toUpperCase();const m=document.createElement('div');m.className='groupmain';m.innerHTML=`<div class="name">${esc(g.name||g.groupName||'Unnamed group')}</div><div class="meta">${Number(g.participantCount??g.participants?.length??0)} members</div>`;b.append(a,m);const unread=Number(S.unread?.[String(g.id)]||0);if(unread>0){const badge=document.createElement('span');badge.className='unread-badge';badge.textContent=unread>99?'99+':String(unread);b.append(badge)}b.onclick=()=>openGroup(g.id);box.append(b)}}
-// FIX (GROUPS-NO-OFFLINE-CACHE): js/core/groups/group-cache-first.js already
-// existed in the repo (built for exactly this) but was never loaded on any
-// page — a failed request used to always replace the whole list with a raw
-// error, even when there was perfectly good last-known data to show
-// instead, unlike other modules that already fall back to a cache offline.
-async function loadGroups(){if(S.loading)return;S.loading=true;const GCF=window.__GroupCacheFirst;if(GCF&&!S.groups.length){GCF.hydrate('groups',cached=>{S.groups=cached;renderGroups()})}try{const r=await api('/chats?limit=100');const rows=r?.data?.chats||r?.data||[];S.groups=Array.isArray(rows)?rows.filter(x=>(x?.type||x?.chatType)==='group').map(unwrap):[];if(GCF)GCF.set('groups',S.groups);renderGroups()}catch(e){const cached=GCF&&GCF.get('groups');const cachedList=cached&&cached.value!==undefined?cached.value:cached;if(Array.isArray(cachedList)&&cachedList.length){S.groups=cachedList;renderGroups()}else{const box=$('groups');if(box)box.innerHTML=`<div class="empty">Unable to load groups.<br>${esc(e.message)}</div>`}}finally{S.loading=false}}
-function normalizeMessages(r){const rows=r?.data?.messages||r?.data||r?.messages||[];return Array.isArray(rows)?rows:[]}
 
 function closeMsgMenu(){if(S.openMenuId==null)return;const el=document.querySelector(`.msg-menu[data-for="${S.openMenuId}"]`);if(el){el.classList.remove('open');el.style.left='';el.style.right='';el.style.top='';el.style.bottom=''}S.openMenuId=null}
 // FIX (MSG-MENU-CLIPPED-AT-EDGES): this menu used to rely purely on CSS
@@ -226,7 +213,7 @@ function buildRow(m){const id=String(m.id||m.messageId||'');const pendingDecrypt
   if(m._optimistic){
     const st=document.createElement('span');
     if(m.status==='failed'){
-      st.textContent='⚠ Not sent';st.title=m._error||'';st.style.cssText='color:#fecaca;font-weight:700';t.append(st);
+      st.textContent='⚠ Not sent'+(m._hint?' — '+m._hint:'');st.title=m._error||'';st.style.cssText='color:#fecaca;font-weight:700';t.append(st);
       const rt=document.createElement('button');rt.type='button';rt.textContent='Retry';rt.style.cssText='border:0;background:rgba(255,255,255,.22);color:inherit;border-radius:8px;padding:1px 7px;cursor:pointer;font-size:10px';rt.onclick=e=>{e.stopPropagation();retryOptimistic(m.localId)};t.append(rt);
       const dc=document.createElement('button');dc.type='button';dc.textContent='Discard';dc.style.cssText='border:0;background:transparent;color:inherit;text-decoration:underline;cursor:pointer;font-size:10px';dc.onclick=e=>{e.stopPropagation();S.messages=S.messages.filter(x=>x.localId!==m.localId);renderMessages(false)};t.append(dc);
     }else if(m.status==='waiting-key'){
@@ -299,6 +286,7 @@ function renderMedia(){const box=$('mediaBar');const items=S.messages.filter(m=>
 
 async function hydrateGroupHistory(id){if(!window.KynectaGroupMessageCache)return;try{const cached=await window.KynectaGroupMessageCache.getMessages(id);if(String(window.__GROUP_CHAT_ID)!==String(id)||!cached.length)return;S.messages=cached;renderMessages(false);}catch(_){}}
 function openGroup(id){
+  window.KynectaGroupE2E?.initGroup?.(Number(id)).catch(err=>console.warn('[GroupCrypto] startup:',err?.message||err));
   const g=S.groups.find(x=>String(x.id)===String(id))||{id};S.current=g;window.__GROUP_CHAT_ID=String(id);window.__GROUP_CHAT_TYPE='group';
   $('input').disabled=false;$('send').disabled=false;['searchToggle','pinnedToggle','mediaToggle'].forEach(bid=>{const b=$(bid);if(b)b.disabled=false});
   S.messages=[];markRead(id);renderMessages(false);renderGroups();setMobileChat(true);const meta=currentGroupMeta(g);postParent('GROUP_PANEL_OPEN',meta);postSelf('GROUP_PANEL_OPEN',meta);
@@ -423,15 +411,20 @@ async function deliverOptimistic(cid,groupId,plain){
       // server/E2E layer is shown, retries are capped, and once capped the
       // row becomes a normal "Not sent" with Retry/Discard like any other
       // failure — same UI, just reachable from this state too.
-      row._error=msg;
+      row._error=msg;row._hint=/sign out and sign in/i.test(msg)?'sign out and back in':'';
       if(provisioning){
-        row._waitingKeyTries=(row._waitingKeyTries||0)+1;
-        if(row._waitingKeyTries>=6){
-          row.status='failed';renderMessages(false);
-        }else{
-          row.status='waiting-key';renderMessages(false);
-          clearTimeout(row._retryTimer);
-          row._retryTimer=setTimeout(()=>{row._retryTimer=null;queueOptimisticSend(cid,groupId,plain)},5000);
+        row.status='waiting-key';renderMessages(false);
+        if(!row._readinessWait){
+          row._readinessWait=true;
+          Promise.resolve(window.KynectaGroupE2E?.waitUntilReady?.()).then(ready=>{
+            row._readinessWait=false;
+            if(!ready||!S.messages.includes(row)) return;
+            row.status='sending';renderMessages(false);
+            queueOptimisticSend(cid,groupId,plain);
+          }).catch(()=>{
+            row._readinessWait=false;
+            if(S.messages.includes(row)){row.status='failed';renderMessages(false);}
+          });
         }
       }else{
         row.status='failed';renderMessages(false);
@@ -444,7 +437,7 @@ function queueOptimisticSend(cid,groupId,plain){
 }
 function retryOptimistic(cid){
   const row=S.messages.find(m=>m._optimistic&&m.localId===cid);if(!row||!S.current?.id)return;
-  row.status='sending';row._waitingKeyTries=0;renderMessages(false);queueOptimisticSend(cid,Number(S.current.id),row.content);
+  row.status='sending';row._readinessWait=false;renderMessages(false);queueOptimisticSend(cid,Number(S.current.id),row.content);
 }
 async function sendMessage(){
   if(!S.current?.id)return;const input=$('input'),plain=input.value.trim();if(!plain)return;
