@@ -291,8 +291,25 @@ function renderMedia(){const box=$('mediaBar');const items=S.messages.filter(m=>
 
 async function hydrateGroupHistory(id){if(!window.KynectaGroupMessageCache)return;try{const cached=await window.KynectaGroupMessageCache.getMessages(id);if(String(window.__GROUP_CHAT_ID)!==String(id)||!cached.length)return;S.messages=cached;renderMessages(false);}catch(_){}}
 function openGroup(id){
-  window.KynectaGroupE2E?.initGroup?.(Number(id)).catch(err=>console.warn('[GroupCrypto] startup:',err?.message||err));
-  const g=S.groups.find(x=>String(x.id)===String(id))||{id};S.current=g;window.__GROUP_CHAT_ID=String(id);window.__GROUP_CHAT_TYPE='group';
+  const g=S.groups.find(x=>String(x.id)===String(id))||{id};
+  // FIX (GROUP SENDER KEY NEVER PREWARMED — the group-specific counterpart to the
+  // "still unlocking" fix): initGroup() above already prewarms the shared identity
+  // unlock the moment the panel opens, same as js/message-client.js's openChat()
+  // does for 1:1 — but unlike 1:1, which also prewarms the OTHER slow network step
+  // (the recipient's public key, via prefetchRecipientKey()) at open time, nothing
+  // here prewarmed the group-specific equivalent: preparing/distributing THIS
+  // member's own sender key (ensureSenderKey() -> distribute(), an ECDH wrap per
+  // live member plus a POST /crypto/rotate). That work previously only started the
+  // moment "send" was pressed, so a member's first-ever send in a group still paid
+  // that full network cost live, even once identity was already unlocked — this is
+  // exactly why group could still feel slower than 1:1 even after the identity-wait
+  // fix. ensureSenderKey() is cheap/idempotent on repeat calls (returns the
+  // already-distributed key instead of re-distributing), so calling it again at
+  // actual send time costs nothing if this prewarm already finished.
+  window.KynectaGroupE2E?.initGroup?.(Number(id))
+    .then(()=>window.KynectaGroupE2E?.ensureSenderKey?.(Number(id),groupMemberIds(g)))
+    .catch(err=>console.warn('[GroupCrypto] startup:',err?.message||err));
+  S.current=g;window.__GROUP_CHAT_ID=String(id);window.__GROUP_CHAT_TYPE='group';
   $('input').disabled=false;$('send').disabled=false;['searchToggle','pinnedToggle','mediaToggle'].forEach(bid=>{const b=$(bid);if(b)b.disabled=false});
   S.messages=[];markRead(id);renderMessages(false);renderGroups();setMobileChat(true);const meta=currentGroupMeta(g);postParent('GROUP_PANEL_OPEN',meta);postSelf('GROUP_PANEL_OPEN',meta);
   window.dispatchEvent(new CustomEvent('kyn:group:open',{detail:{groupId:String(id)}}));hydrateGroupHistory(id);loadMessages();loadPins();clearInterval(S.poll);S.poll=setInterval(loadMessages,5000);

@@ -46,16 +46,37 @@ function diagnose(){
   }
   return{ready,reason,passwordInSession:sessionPw(),canonicalEnabled:!!id?.enabled,hasPrivateKey:!!id?.privateKey,hasPublicKey:!!id?.publicKey,unlockFailed,lastError:lastBootstrapError};
 }
+// ROOT-CAUSE FIX (GROUP SEND STUCK ON "Secure messaging is still unlocking", esp. for a
+// member whose identity has never been registered on this device before):
+// 1) Direct messages (js/message-e2e-core.js's ensureIdentity()) never impose their own
+//    timeout — they just await KynectaMessageE2EReady()/identity.init() for as long as it
+//    takes, including the one-time POST /api/encryption/keys registration call a brand-new
+//    identity must make, which can legitimately take far longer than a few seconds behind a
+//    cold Render backend (the same cold-start latency js/message-client.js's own send
+//    watchdog was separately raised to 50000ms to tolerate — see that file). This function
+//    invented its OWN hard 8-second cap on top of that shared bootstrap, so a member sending
+//    for the first time on a device was being told "still unlocking" and left stuck well
+//    before their identity registration had actually finished in the background — it was
+//    never actually stuck, just cut off early.
+// 2) Separately, `global.KynectaMessageE2EReady` is defined by js/e2e-session-init.js, which
+//    loads with the `defer` attribute — so at the exact moment this function first runs (e.g.
+//    a member opens a group and sends immediately) that function can still be undefined. The
+//    old code only ever checked for it ONCE, before starting the wait, so on that race it
+//    silently never triggered the bootstrap at all and spent the whole budget polling a
+//    promise nobody had started. Checking on every loop iteration instead means the bootstrap
+//    gets kicked off the instant it becomes available, however late that is.
 async function waitReady(){
   if(canonicalReady())return true;
-  // Join the SAME canonical bootstrap 1:1 messaging already waits on (throttled so retry
-  // loops elsewhere in this file don't hammer init() every few hundred ms).
-  if(typeof global.KynectaMessageE2EReady==='function'&&Date.now()-lastBootstrapAt>15000){
-    lastBootstrapAt=Date.now();
-    try{await global.KynectaMessageE2EReady();lastBootstrapError=null}catch(err){lastBootstrapError=err?.message||String(err);console.warn('[KynectaGroupE2E] canonical identity bootstrap failed:',lastBootstrapError)}
+  const deadline=Date.now()+50000; // matches message-client.js's established Render cold-start tolerance
+  let triggered=false;
+  while(Date.now()<deadline){
+    if(canonicalReady())return true;
+    if(!triggered&&typeof global.KynectaMessageE2EReady==='function'){
+      triggered=true;lastBootstrapAt=Date.now();
+      global.KynectaMessageE2EReady().then(()=>{lastBootstrapError=null}).catch(err=>{lastBootstrapError=err?.message||String(err);console.warn('[KynectaGroupE2E] canonical identity bootstrap failed:',lastBootstrapError)});
+    }
+    await sleep(250);
   }
-  const deadline=Date.now()+8000;
-  while(Date.now()<deadline){if(canonicalReady())return true;await sleep(250)}
   const d=diagnose();if(!d.ready)console.warn('[KynectaGroupE2E] not ready:',d.reason,d);
   return d.ready;
 }
