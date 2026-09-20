@@ -69,14 +69,6 @@ function postParent(type,payload){try{if(window.parent&&window.parent!==window)w
 function postSelf(type,payload){try{window.postMessage({type,payload:payload||{}},'*')}catch(_){}}
 function currentGroupMeta(g){return{id:g.id,name:g.name||g.groupName||'Group',memberCount:Number(g.participantCount??g.participants?.length??0),stats:{totalMembers:Number(g.participantCount??g.participants?.length??0)}}}
 
-// SECURITY FIX (GROUP-MESSAGES-SENT-PLAINTEXT): this panel never loaded
-// js/e2e-encryption.js and never tried to unlock it, so window.KynectaE2E
-// was undefined here and window.KynectaGroupE2E (see js/groupEncryption
-// .client.js, also newly wired in above) could never do anything either —
-// sendMessage() below just posted raw content with no encryption call at
-// all. Mirrors the same session-password reuse index.html's unlock modal
-// already sets up for message.html, so this iframe gets the same identity
-// key material without re-prompting for a password.
 async function ensureE2EReady(){
   if(window.KynectaE2E?.enabled)return true;
   if(!window.KynectaE2E||typeof window.KynectaE2E.init!=='function')return false;
@@ -88,118 +80,48 @@ async function ensureE2EReady(){
 ensureE2EReady();
 function groupMemberIds(g){const list=Array.isArray(g?.participants)?g.participants:[];return[...new Set(list.map(p=>Number((p.user||p).id??p.userId)).filter(n=>Number.isInteger(n)&&n>0))]}
 
-// ROOT-CAUSE FIX (GROUP-MESSAGES-PERMANENTLY-FLIP-TO-"[Unable to decrypt
-// this message]" WHENEVER A NEW MESSAGE ARRIVES): this file's decryptRow()
-// used to send EVERY group message straight to
-// window.KynectaGroupE2E.decryptForGroup() (js/groupEncryption.client.js) —
-// but that has not been the encryption scheme actually used for outgoing
-// group messages for some time. The real send path is
-// js/group-mobile-navigation.js's installSendHook()/send(), which produces
-// a `{v:6, kind:'group-e2e-fanout', senderId, recipients:{<userId>:
-// <Double-Ratchet envelope>}, senderCopy}` envelope via the SAME v3 Double
-// Ratchet engine 1:1 chat uses (js/message-e2e-core.js), one independently
-// ratcheted copy per recipient. decryptForGroup() has no idea how to read
-// that shape, so it always failed — but the failure was invisible most of
-// the time because group-mobile-navigation.js's OWN patchMessage() (using
-// the correct engine) separately patches the DOM text node directly,
-// out-of-band from S.messages/this file's own render pipeline. The instant
-// ANY new message triggers reconcile()/renderMessages() again — a reply
-// arriving, the 5s poll, opening the group fresh — renderMessages() rebuilds
-// every row from S.messages, whose `.content` for older messages is still
-// decryptForGroup()'s permanent failure placeholder (patchMessage() never
-// wrote its correct result back into S.messages, only into the now-discarded
-// DOM node), so every previously-fine message visibly reverts to "[Unable
-// to decrypt this message]" until patchMessage() happens to re-patch it.
-// Fix: give decryptRow() (the actual source of truth for S.messages/render)
-// the same v6-fanout-aware decrypt logic group-mobile-navigation.js uses,
-// so decryption succeeds at the DATA level and survives every re-render —
-// no more racing DOM patch needed. Falls back to the legacy
-// decryptForGroup() only for content that isn't a v6 fanout envelope (older
-// pre-switchover history, if any still exists), never the other way
-// around — this is a same-strength decrypt swap, not a security downgrade.
-async function decryptGroupContent(content, gid, senderId) {
-  if (!content || typeof content !== 'string') return content;
-  if (!_groupE2EReadyPromise) _groupE2EReadyPromise=(async()=>{
-    try {
-      const pw=sessionStorage.getItem('kyn_e2e_pw_session')||'';
-      const legacy=sessionStorage.getItem('kyn_e2e_pw_legacy_session')||'';
-      if (window.KynectaE2E && typeof window.KynectaE2E.init==='function' && !window.KynectaE2E.enabled && pw) await window.KynectaE2E.init(pw,legacy||undefined);
-    } catch (_) {}
-    return !!window.KynectaGroupE2E?.decryptForGroup;
-  })().catch(()=>false);
-  if (!(await _groupE2EReadyPromise)) return null;
-  try { return await window.KynectaGroupE2E.decryptForGroup(Number(gid),content,groupMemberIds(S.current)); } catch (_) { return null; }
+async function decryptGroupContent(message){
+  if(!message||typeof message.content!=='string'||!message.content)return message;
+  const id=String(message.id||message.messageId||''); const cipher=message.content;
+  const cached=groupMessageState.plaintext.get(id);
+  if(cached&&groupMessageState.lastCiphertext.get(id)===cipher)return {...message,content:cached};
+  if(groupMessageState.decryptInFlight.has(id)){const plain=await groupMessageState.decryptInFlight.get(id);return plain==null?{...message,_decryptPending:true}:{...message,content:plain};}
+  const task=(async()=>{try{
+    if(!(await ensureE2EReady())||!window.KynectaGroupE2E?.decryptForGroup)throw new Error('Secure group messaging is not ready yet');
+    const plain=await window.KynectaGroupE2E.decryptForGroup(Number(S.current?.id??message.chatId),cipher,groupMemberIds(S.current));
+    if(plain==null)throw new Error('Unable to decrypt group message');
+    groupMessageState.plaintext.set(id,plain);groupMessageState.lastCiphertext.set(id,cipher);return plain;
+  }catch(error){console.warn('[GroupMessage] decryption deferred',id,error?.message||error);return null;}})();
+  groupMessageState.decryptInFlight.set(id,task);try{const plain=await task;return plain==null?{...message,_decryptPending:true}:{...message,content:plain};}finally{groupMessageState.decryptInFlight.delete(id);}
 }
-// Decrypts one message's `content` in place (returns a shallow copy).
-// Attachments carry their payload in metadata.media, not content, so they
-// pass through untouched; anything that isn't our envelope shape is
-// returned as-is by KynectaGroupE2E.decryptForGroup itself.
-// FIX (GROUP-MESSAGES-INTERMITTENTLY-FLIP-TO-UNABLE-TO-DECRYPT): loadMessages()
-// polls the last 100 messages every 5s while a group is open and used to run
-// every single one of them back through decryptForGroup() from raw
-// ciphertext on every poll — including ones already decrypted successfully
-// a moment earlier. That's 100 WebCrypto calls every 5 seconds just to
-// re-derive text that hadn't changed, and gave any transient hiccup in that
-// batch (or the unwanted-rotation bug fixed in groupEncryption.client.js)
-// a fresh chance to show up on a message that had already rendered fine.
-// Cache successful decryptions by message id + the exact ciphertext that
-// produced them — an edit changes the ciphertext, so it naturally forces a
-// fresh decrypt, but an unchanged message is never re-decrypted again.
-const _decryptedCache=new Map();
-const _groupDecryptInFlight=new Map();
-let _groupE2EReadyPromise=null;
-const _groupDecryptFailed=new Map();
-window.__NECPRA_GROUP_PENDING_PLAINTEXT = window.__NECPRA_GROUP_PENDING_PLAINTEXT || new Map();
-// FIX (GROUP-HISTORY-RE-DECRYPTS-ON-RELOAD): js/group-history-cache-fix.js
-// already hydrates S.messages instantly from IndexedDB on open, with
-// content that's already plaintext (it's a copy of what renderMessages()
-// last displayed) — but it had no way to tell decryptRow() that, since
-// _decryptedCache above is only ever populated by an actual decrypt in
-// THIS page session and starts empty on every fresh load. So the network
-// refetch loadMessages() kicks off right after open would still run every
-// one of those same messages back through decryptForGroup() from raw
-// ciphertext, even though a good plaintext copy was sitting on disk a
-// moment before. Seed the cache from that same disk copy, keyed by id only
-// (no ciphertext to compare yet) and gated on the isEdited flag so an
-// actual edit — new ciphertext — still forces a real decrypt of the new
-// content instead of silently keeping the old text.
-window.__seedGroupDecryptedCache=function(list){
-  if(!Array.isArray(list))return;
-  for(const m of list){
-    const id=String(m?.id||m?.messageId||'');
-    if(id&&typeof m.content==='string')_decryptedCache.set(id,{ciphertext:null,plain:m.content,isEdited:!!m.isEdited});
+const groupMessageState={decryptInFlight:new Map(),plaintext:new Map(),lastCiphertext:new Map()};
+async function decryptRows(list){return Promise.all(list.map(decryptGroupContent))}
+function mergeGroupMessages(incoming){
+  const byId=new Map();
+  for(const message of S.messages){const id=String(message.localId||message.id||message.messageId||'');if(id)byId.set(id,message);}
+  for(const message of incoming){
+    const id=String(message.localId||message.id||message.messageId||'');if(!id)continue;
+    const existing=byId.get(id);
+    if(existing&&message._decryptPending&&typeof existing.content==='string'&&existing.content!==message.content)byId.set(id,{...existing,...message,content:existing.content,_decryptPending:false});
+    else byId.set(id,existing?{...existing,...message}:message);
   }
-};
-async function decryptRow(m){
-  if(!m||typeof m.content!=='string'||!m.content)return m;
-  const id=String(m.id||m.messageId||'');
-  const cached=id&&_decryptedCache.get(id);
-  if(cached){
-    if(cached.ciphertext===m.content)return Object.assign({},m,{content:cached.plain});
-    if(cached.ciphertext===null&&cached.isEdited===!!m.isEdited)return Object.assign({},m,{content:cached.plain});
-  }
-  if(id&&_groupDecryptFailed.get(id)===m.content)return Object.assign({},m,{_decryptPending:true});
-  if(id&&_groupDecryptInFlight.has(id))return Object.assign({},m,{content:await _groupDecryptInFlight.get(id)});
-  const task=(async()=>{
-    try{
-      const plain=await decryptGroupContent(m.content,S.current?.id??m.chatId,m.senderId);
-      if(id)_decryptedCache.set(id,{ciphertext:m.content,plain,isEdited:!!m.isEdited});
-      return plain;
-    }catch(e){
-      console.error('[GroupDecrypt] decryptRow failed:',e&&e.message||e);
-      if(id)_groupDecryptFailed.set(id,m.content);
-      const prior=S.messages.find(x=>String(x.id||x.messageId)===id);
-      if(prior&&typeof prior.content==='string'&&!prior._decryptPending&&!/^(?:\[Unable to decrypt|🔒|Decrypting securely)/.test(prior.content))return prior.content;
-      return null;
-    }
-  })();
-  if(id)_groupDecryptInFlight.set(id,task);
-  try{
-    const plain=await task;
-    return plain==null?Object.assign({},m,{_decryptPending:true}):Object.assign({},m,{content:plain});
-  }finally{if(id)_groupDecryptInFlight.delete(id);}
+  const merged=[...byId.values()].sort((a,b)=>{const ai=Number(a.id),bi=Number(b.id);if(Number.isFinite(ai)&&Number.isFinite(bi))return ai-bi;return new Date(a.createdAt||a.sentAt||0)-new Date(b.createdAt||b.sentAt||0);});
+  const changed=merged.length!==S.messages.length||merged.some((m,i)=>{const old=S.messages[i];return !old||String(m.id||m.messageId||m.localId)!==String(old.id||old.messageId||old.localId)||m.content!==old.content||m.status!==old.status||m.isEdited!==old.isEdited;});
+  if(changed){S.messages=merged;renderMessages(false);}return merged;
 }
-function decryptRows(list){return Promise.all(list.map(decryptRow))}
+function renderMessages(scroll=true){
+  const box=$('messages');if(!box)return;box.replaceChildren();
+  if(!S.messages.length)box.innerHTML='<div class="empty">No messages yet.</div>';else S.messages.forEach(m=>box.append(buildRow(m)));
+  if(scroll)box.scrollTop=box.scrollHeight;
+  window.__GROUP_MESSAGES_CACHE=S.messages.slice();window.__GROUP_REFRESH_MESSAGES=loadMessages;
+  const gid=window.__GROUP_CHAT_ID;if(gid&&window.KynectaGroupMessageCache)window.KynectaGroupMessageCache.putMessages(gid,S.messages);
+}
+async function loadMessages(){
+  if(!S.current?.id)return;const gid=String(S.current.id);
+  try{const r=await api('/groups/'+encodeURIComponent(gid)+'/messages?limit=100');if(!S.current||String(S.current.id)!==gid)return;
+    const decrypted=await decryptRows(normalizeMessages(r));if(!S.current||String(S.current.id)!==gid)return;mergeGroupMessages(decrypted);
+  }catch(error){console.warn('[GroupMessage] history sync deferred',error?.message||error);}
+}
 
 function renderGroups(){const box=$('groups');if(!box)return;box.replaceChildren();const q=S.q.trim().toLowerCase();const rows=S.groups.filter(g=>!q||String(g.name||g.groupName||'').toLowerCase().includes(q));if(!rows.length){box.innerHTML='<div class="empty">No groups yet.</div>';return}for(const g of rows){const b=document.createElement('button');b.type='button';b.className='group'+(S.current&&String(S.current.id)===String(g.id)?' active':'');const a=document.createElement('div');a.className='avatar';a.textContent=String(g.name||g.groupName||'G').slice(0,1).toUpperCase();const m=document.createElement('div');m.className='groupmain';m.innerHTML=`<div class="name">${esc(g.name||g.groupName||'Unnamed group')}</div><div class="meta">${Number(g.participantCount??g.participants?.length??0)} members</div>`;b.append(a,m);const unread=Number(S.unread?.[String(g.id)]||0);if(unread>0){const badge=document.createElement('span');badge.className='unread-badge';badge.textContent=unread>99?'99+':String(unread);b.append(badge)}b.onclick=()=>openGroup(g.id);box.append(b)}}
 // FIX (GROUPS-NO-OFFLINE-CACHE): js/core/groups/group-cache-first.js already
@@ -238,10 +160,6 @@ function buildRow(m){const id=String(m.id||m.messageId||'');const pendingDecrypt
   const more=document.createElement('button');more.type='button';more.className='msg-more';more.textContent='⋮';more.title='More';more.onclick=e=>{e.stopPropagation();toggleMsgMenu(id)};t.append(more);
   const clock=document.createElement('span');clock.textContent=new Date(m.createdAt||m.sentAt||Date.now()).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});t.append(clock);
   b.append(t);
-  // FIX (EDIT/DELETE-ALWAYS-VISIBLE-ON-RECEIVED-MESSAGES): these used to be
-  // permanent text buttons stacked under every message in the group. Reply
-  // is out of scope for this panel today; Copy is always offered, Edit and
-  // Delete only appear here (in the menu) for your own messages.
   const menu=document.createElement('div');menu.className='msg-menu';menu.dataset.for=id;
   const copyBtn=document.createElement('button');copyBtn.type='button';copyBtn.textContent='📋 Copy text';copyBtn.onclick=()=>{closeMsgMenu();navigator.clipboard?.writeText(m.content||'').catch(()=>{})};menu.append(copyBtn);
   const pinBtn=document.createElement('button');pinBtn.type='button';pinBtn.textContent='📌 Pin message';pinBtn.onclick=()=>{closeMsgMenu();pinMessage(id)};menu.append(pinBtn);
@@ -252,13 +170,7 @@ function buildRow(m){const id=String(m.id||m.messageId||'');const pendingDecrypt
   b.append(menu);
   row.append(b);return row}
 
-function renderMessages(scroll=true){const box=$('messages');if(!box)return;box.replaceChildren();if(!S.messages.length){box.innerHTML='<div class="empty">No messages yet.</div>'}else{for(const m of S.messages)box.append(buildRow(m));if(scroll)box.scrollTop=box.scrollHeight}window.__GROUP_MESSAGES_CACHE=S.messages.slice();window.__GROUP_REFRESH_MESSAGES=loadMessages}
-function reconcile(list){const map=new Map();for(const m of S.messages){if(m.pending)continue;map.set(String(m.localId||m.id||m.messageId),m)}for(const m of list)map.set(String(m.localId||m.id||m.messageId),m);const merged=[...map.values()].sort((a,b)=>Number(a.id||0)-Number(b.id||0));const changed=merged.length!==S.messages.length||merged.some((m,i)=>String(m.id||m.messageId)!==String(S.messages[i]?.id||S.messages[i]?.messageId)||m.content!==S.messages[i]?.content||m.isEdited!==S.messages[i]?.isEdited);if(changed){const box=$('messages'),near=box&&box.scrollHeight-box.scrollTop-box.clientHeight<80;S.messages=merged;renderMessages(near)}}
-async function loadMessages(){if(!S.current?.id)return;const id=String(S.current.id);try{const r=await api(`/groups/${encodeURIComponent(id)}/messages?limit=100`);if(!S.current||String(S.current.id)!==id)return;const decrypted=await decryptRows(normalizeMessages(r));if(!S.current||String(S.current.id)!==id)return;reconcile(decrypted)}catch(e){if(!S.messages.length){const box=$('messages');if(box)box.innerHTML=`<div class="empty">Unable to load messages.<br>${esc(e.message)}</div>`}}}
-
 function startEdit(id,currentContent){const next=prompt('Edit message:',currentContent);if(next==null)return;const trimmed=next.trim();if(!trimmed||trimmed===currentContent)return;(async()=>{
-  // SECURITY FIX (GROUP-MESSAGES-SENT-PLAINTEXT): same bug as sendMessage()
-  // — this used to PATCH the raw edited text straight to the server.
   let outgoing;
   try{
     if(!(await ensureE2EReady())||!window.KynectaGroupE2E)throw new Error('Secure messaging is not ready yet');
@@ -282,13 +194,9 @@ function applyMention(name){const input=$('input');const before=input.value.slic
 function closeSubbars(){['searchBar','pinnedBar','mediaBar'].forEach(id=>$(id)?.classList.add('hidden'))}
 async function loadPins(){if(!S.current?.id)return;try{const r=await api(`/pins/${encodeURIComponent(S.current.id)}`);S.pins=r?.data?.pins||[]}catch(e){S.pins=[]}}
 async function renderPins(){const box=$('pinnedBar');if(!S.pins.length){box.innerHTML='<div class="empty" style="padding:6px">No pinned messages yet. Use a message\'s ⋮ menu to pin up to 3.</div>';return}box.innerHTML='<div class="empty">Loading…</div>';
-  // SECURITY FIX (GROUP-MESSAGES-SENT-PLAINTEXT): p.message.content here is
-  // still the server's ciphertext (pins come from a separate /pins
-  // endpoint, not from the already-decrypted S.messages) — this used to
-  // render it raw.
   const decryptedPins=await Promise.all(S.pins.map(async p=>{
     if(!p?.message?.content)return p;
-    try{const plain=await decryptGroupContent(p.message.content,S.current?.id,p.message.senderId);return{...p,message:{...p.message,content:plain}}}
+    try{const plain=await decryptGroupContent(p.message);return{...p,message:{...p.message,content:plain}}}
     catch(_){return{...p,message:{...p.message,content:'[Unable to decrypt this message]'}}}
   }));
   box.innerHTML='';for(const p of decryptedPins){const row=document.createElement('div');row.className='pin-item';row.innerHTML=`<b>${esc(p.pinnedBy?.displayName||'Someone')}</b> pinned: ${esc((p.message?.content||'').slice(0,140))}<span class="unpin">Unpin</span>`;row.querySelector('.unpin').onclick=async ev=>{ev.stopPropagation();try{await api(`/pins/${encodeURIComponent(S.current.id)}/${encodeURIComponent(p.messageId)}`,{method:'DELETE'});await loadPins();renderPins()}catch(e){alert(e.message)}};box.append(row)}}
@@ -312,36 +220,35 @@ async function runGroupSearch(q){const box=$('searchResults');if(!q.trim()){box.
 function renderMedia(){const box=$('mediaBar');const items=S.messages.filter(m=>m.metadata?.media?.url);if(!items.length){box.innerHTML='<div class="empty" style="padding:6px">No files or media in the loaded history yet.</div>';return}box.innerHTML='';for(const m of items){const media=m.metadata.media;const row=document.createElement('div');row.className='media-item';row.innerHTML=`<a href="${esc(media.url)}" target="_blank" rel="noopener">${esc(media.name||media.mimeType||'Attachment')}</a>`;box.append(row)}}
 
 
-function openGroup(id){const g=S.groups.find(x=>String(x.id)===String(id))||{id};S.current=g;window.__GROUP_CHAT_ID=String(id);window.__GROUP_CHAT_TYPE='group';$('input').disabled=false;$('send').disabled=false;['searchToggle','pinnedToggle','mediaToggle'].forEach(bid=>{const b=$(bid);if(b)b.disabled=false});S.messages=[];markRead(id);renderMessages(false);renderGroups();setMobileChat(true);const meta=currentGroupMeta(g);postParent('GROUP_PANEL_OPEN',meta);postSelf('GROUP_PANEL_OPEN',meta);window.dispatchEvent(new CustomEvent('kyn:group:open',{detail:{groupId:String(id)}}));loadMessages();loadPins();clearInterval(S.poll);S.poll=setInterval(loadMessages,5000)}
+async function hydrateGroupHistory(id){if(!window.KynectaGroupMessageCache)return;try{const cached=await window.KynectaGroupMessageCache.getMessages(id);if(String(window.__GROUP_CHAT_ID)!==String(id)||!cached.length)return;S.messages=cached;renderMessages(false);}catch(_){}}
+function openGroup(id){
+  const g=S.groups.find(x=>String(x.id)===String(id))||{id};S.current=g;window.__GROUP_CHAT_ID=String(id);window.__GROUP_CHAT_TYPE='group';
+  $('input').disabled=false;$('send').disabled=false;['searchToggle','pinnedToggle','mediaToggle'].forEach(bid=>{const b=$(bid);if(b)b.disabled=false});
+  S.messages=[];markRead(id);renderMessages(false);renderGroups();setMobileChat(true);const meta=currentGroupMeta(g);postParent('GROUP_PANEL_OPEN',meta);postSelf('GROUP_PANEL_OPEN',meta);
+  window.dispatchEvent(new CustomEvent('kyn:group:open',{detail:{groupId:String(id)}}));hydrateGroupHistory(id);loadMessages();loadPins();clearInterval(S.poll);S.poll=setInterval(loadMessages,5000);
+}
 function closeGroup(){S.current=null;window.__GROUP_CHAT_ID=null;window.__GROUP_CHAT_TYPE=null;clearInterval(S.poll);S.poll=null;$('input').value='';$('input').disabled=true;$('send').disabled=true;['searchToggle','pinnedToggle','mediaToggle'].forEach(bid=>{const b=$(bid);if(b)b.disabled=true});closeSubbars();S.messages=[];S.pins=[];renderMessages(false);setMobileChat(false);renderGroups();postParent('GROUP_PANEL_CLOSED',{});postSelf('GROUP_PANEL_CLOSE',{});window.dispatchEvent(new CustomEvent('kyn:group:close'))}
-// ROOT-CAUSE FIX (SILENT-PLAINTEXT-GROUP-SEND): this function used to send
-// `content` to POST /messages completely unencrypted, with no lock icon or
-// error to distinguish it from a real encrypted send. In normal operation
-// this code never actually ran — js/group-mobile-navigation.js's
-// installSendHook() attaches a CAPTURE-phase listener on this same #send
-// button/#input (with stopImmediatePropagation), which encrypts the
-// message via its own per-recipient E2E fanout before this bubble-phase
-// listener ever fires. But if that script fails to load (network hiccup,
-// blocked request, or a page load that reaches DOMContentLoaded before
-// config.js's loadOnce() call attaches it), this listener silently became
-// the ONLY one — and sent every message in this group in plaintext with
-// no warning at all. This contradicts the app's established "no plaintext
-// fallback" design (see message-client.js's sendMessage(), which fails
-// loudly instead of ever falling back to plaintext) — matching fix here:
-// refuse to send and surface a clear error instead of silently sending
-// unencrypted, if the encrypted send-hook never installed.
-async function sendMessage(){if(S.sending||!S.current?.id)return;const input=$('input'),content=input.value.trim();if(!content)return;if(input.dataset.necpraSendHook!=='1'){alert('Secure messaging is not ready yet for this group — please wait a moment and try again, or reload the page.');return}
-  // SECURITY FIX (GROUP-MESSAGES-SENT-PLAINTEXT): `content` used to go
-  // straight into the POST body below with no encryption step at all —
-  // window.KynectaGroupE2E (js/groupEncryption.client.js) was never even
-  // called. Encrypt first and fail loudly (no silent plaintext fallback,
-  // matching js/message-client.js's rule for 1:1 chat) rather than send.
-  let outgoingContent;
+function makeGroupClientId(){return 'group-'+(crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random().toString(36).slice(2));}
+async function sendMessage(){
+  if(S.sending||!S.current?.id)return;const input=$('input'),plain=input.value.trim();if(!plain)return;S.sending=true;$('send').disabled=true;
   try{
-    if(!(await ensureE2EReady())||!window.KynectaGroupE2E)throw new Error('Secure messaging is not ready yet');
-    outgoingContent=await window.KynectaGroupE2E.encryptForGroup(S.current.id,content,groupMemberIds(S.current));
-  }catch(e){alert(`Unable to send message: ${e.message||'could not secure this message for the group'}`);return}
-  S.sending=true;$('send').disabled=true;try{const r=await api('/messages',{method:'POST',body:JSON.stringify({chatId:Number(S.current.id),content:outgoingContent,type:'text',clientMessageId:`group-${Date.now()}-${Math.random().toString(36).slice(2)}`})});const message=r?.data?.message||r?.data;if(message&&String(message.chatId||S.current.id)===String(S.current.id)){const exists=S.messages.some(m=>String(m.id||m.messageId)===String(message.id||message.messageId));if(!exists){S.messages.push(Object.assign({},message,{content}));renderMessages(true)}}input.value='';await loadMessages()}catch(e){alert(`Unable to send message: ${e.message}`)}finally{S.sending=false;$('send').disabled=!S.current}}
+    if(!(await ensureE2EReady())||!window.KynectaGroupE2E?.encryptForGroup)throw new Error('Secure group messaging is not ready yet');
+    const encrypted=await window.KynectaGroupE2E.encryptForGroup(Number(S.current.id),plain,groupMemberIds(S.current));
+    const r=await api('/messages',{method:'POST',body:JSON.stringify({chatId:Number(S.current.id),content:encrypted,type:'text',clientMessageId:makeGroupClientId(),metadata:{groupId:Number(S.current.id)}})});
+    const serverMessage=r?.data?.message||r?.data;if(!serverMessage?.id)throw new Error('Server did not return the saved group message');
+    mergeGroupMessages([{...serverMessage,content:plain,displayContent:plain}]);input.value='';await loadMessages();
+  }catch(error){alert('Unable to send message: '+(error?.message||error));}finally{S.sending=false;$('send').disabled=!S.current;}
+}
+async function sendGroupPayload(plain,type='text',metadata=null){
+  if(!S.current?.id)throw new Error('No group is open');const text=String(plain||'').trim();if(type==='text'&&!text)throw new Error('Message cannot be empty');
+  if(!(await ensureE2EReady())||!window.KynectaGroupE2E?.encryptForGroup)throw new Error('Secure group messaging is not ready yet');
+  const encrypted=text?await window.KynectaGroupE2E.encryptForGroup(Number(S.current.id),text,groupMemberIds(S.current)):'';
+  const r=await api('/messages',{method:'POST',body:JSON.stringify({chatId:Number(S.current.id),content:encrypted,type,clientMessageId:makeGroupClientId(),metadata:{...(metadata||{}),groupId:Number(S.current.id)}})});
+  const message=r?.data?.message||r?.data;if(!message?.id)throw new Error('Server did not return the saved group message');
+  mergeGroupMessages([{...message,content:text,displayContent:text}]);await loadMessages();return message;
+}
+window.__NECPRA_GROUP_SEND=sendGroupPayload;
+
 async function loadFriends(){try{const r=await api('/friends?status=accepted');const rows=r?.data?.friends||r?.friends||r?.data||[];S.friends=Array.isArray(rows)?rows.map(x=>x.friend||x.user||x):[];const box=$('friends');box.replaceChildren();for(const f of S.friends){const id=f.id||f.userId;if(String(id)===uid())continue;const row=document.createElement('label');row.className='member';row.innerHTML=`<input type="checkbox" value="${esc(id)}"><div class="who"><b>${esc(f.displayName||f.name||f.username||'User')}</b><small>@${esc(f.username||'user')}</small></div>`;box.append(row)}}catch(e){$('friends').innerHTML='<div class="empty">No friends available.</div>'}}
 function showCreate(){loadFriends();$('create').classList.remove('hidden')}function hideCreate(){$('create').classList.add('hidden')}
 async function createGroup(e){e.preventDefault();const ids=[...document.querySelectorAll('#friends input:checked')].map(x=>Number(x.value)).filter(Number.isInteger);if(!ids.length)return alert('Select at least one member.');try{const r=await api('/chats',{method:'POST',body:JSON.stringify({type:'group',name:$('gname').value.trim(),description:$('gdesc').value.trim(),participantIds:ids})});const g=unwrap(r?.data?.chat||r?.data);hideCreate();$('createForm').reset();await loadGroups();if(g?.id)openGroup(g.id)}catch(e){alert(e.message)}}
@@ -411,9 +318,6 @@ function handleRealtime(ev){
     if(groupId==null||!message?.id)return;
     if(S.current&&String(groupId)===String(S.current.id)){
         const exists=S.messages.some(m=>String(m.id||m.messageId)===String(message.id));
-        // SECURITY FIX (GROUP-MESSAGES-SENT-PLAINTEXT): `message.content`
-        // arriving here is still the server's ciphertext — this used to
-        // push it straight into S.messages/render with no decrypt step.
         if(!exists){decryptRow(message).then(dm=>{
             if(!S.current||String(groupId)!==String(S.current.id))return;
             if(S.messages.some(m=>String(m.id||m.messageId)===String(dm.id||dm.messageId)))return;
@@ -465,8 +369,6 @@ window.__GROUP_LOAD_GROUPS=loadGroups;window.__GROUP_REFRESH_MESSAGES=loadMessag
      back-nav.js was never loaded here. See chat.html's
      handleAppBackNavigation() and back-nav.js's _visibleGenericModal() for
      the other half of this fix. -->
-<script src="js/group-mobile-navigation.js"></script>
 <script src="js/group-message-local-db.js"></script>
-<script src="js/group-history-cache-fix.js"></script>
 <script src="back-nav.js"></script>
 </body></html>

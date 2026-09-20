@@ -28,14 +28,9 @@
         connectionState: 'disconnected',
     };
 
-    // FIX (CANONICAL-E2E-RACE): js/e2e-session-init.js patches window.KynectaE2E
-    // with the canonical private-message implementation asynchronously (it
-    // dynamically loads js/e2e-identity-core.js + js/message-e2e-core.js over
-    // the network, then swaps the encrypt/decrypt functions in). Until that
-    // patch lands, window.KynectaE2E is already truthy — it's the object
-    // js/e2e-encryption.js created — so a naive `if (window.KynectaE2E)` check
-    // is not a valid readiness signal. Every call site below that touches
-    // encryption must wait on this instead of just checking truthiness.
+    const decryptFlights = new Map();
+    const decryptResults = new Map();
+
     function waitForMessageE2E(timeoutMs) {
         timeoutMs = timeoutMs || 8000;
         if (typeof window.KynectaMessageE2EReady === 'function') {
@@ -191,30 +186,25 @@
         const chatId = message.chatId;
         const bucket = getOrCreateConversationBucket(chatId);
 
-        // ROOT-CAUSE FIX (stale "failed" bubble never clears / duplicate
-        // bubble once the real message shows up): this function is keyed
-        // purely by the server's numeric message.id, never by
-        // clientMessageId, despite this function's own header comment
-        // claiming "dedup by clientMessageId (optimistic reconciliation)"
-        // happens here — it never actually did. sendMessage() only deletes
-        // the matching `optimistic:<clientMessageId>` stub on its OWN
-        // immediate REST success (see below); if that REST call instead
-        // timed out locally (see _directRequest's watchdog above) while the
-        // send in fact succeeded server-side, the stub stayed in the
-        // bucket marked 'failed' forever. The real message (which DOES
-        // carry the same clientMessageId — see messageBroadcast.js /
-        // Message model) then arrives later via a socket 'message:new'
-        // echo or the next loadHistory()/getMessages() call and was simply
-        // added alongside it as a second, separate entry — the exact
-        // "both sides showing not delivered, but it was delivered" symptom.
-        // Clear out any matching optimistic stub before the real message
-        // lands, so the false failure is replaced rather than duplicated.
         if (message.clientMessageId) {
             const staleOptimisticId = `optimistic:${message.clientMessageId}`;
             if (bucket.has(staleOptimisticId)) bucket.delete(staleOptimisticId);
         }
 
         message = applyBufferedDelivery(Object.assign({}, message));
+        if (message.type === 'status_reply') {
+            let meta = message.metadata;
+            if (typeof meta === 'string') { try { meta = JSON.parse(meta); } catch (_) { meta = null; } }
+            let interaction = meta?.statusInteraction || null;
+            for (const candidate of [message.displayContent, message.content]) {
+                if (interaction || typeof candidate !== 'string') continue;
+                try {
+                    const parsed = JSON.parse(candidate);
+                    if (parsed && typeof parsed === 'object' && (parsed.statusId != null || parsed.kind === 'reaction' || parsed.kind === 'comment')) interaction = parsed;
+                } catch (_) {}
+            }
+            if (interaction) message.metadata = Object.assign({}, meta || {}, { statusInteraction: interaction, statusId: interaction.statusId, statusType: interaction.statusType || null, kind: interaction.kind || 'comment' });
+        }
 
         if (bucket.has(message.id)) {
             bucket.set(message.id, Object.assign({}, bucket.get(message.id), message));
@@ -315,133 +305,66 @@
     // message if it isn't already present, so the gate can never suppress a
     // genuine result again.
     async function decryptForDisplay(chatId, message) {
-        if (message.displayContent !== undefined) return; // already resolved (e.g. our own just-sent message)
-        if (!looksLikeEnvelope(message.content)) {
+        if (!message || message.id == null || message.displayContent !== undefined) return;
+        const key = String(chatId) + ':' + String(message.id);
+        const ciphertext = typeof message.content === 'string' ? message.content : '';
+        if (!looksLikeEnvelope(ciphertext)) {
             const bucket = getOrCreateConversationBucket(chatId);
-            if (!bucket.has(message.id)) bucket.set(message.id, message);
-            bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: message.content }));
-            syncLastMessageDisplay(chatId, message.id, message.content);
+            const current = bucket.get(message.id) || message;
+            bucket.set(message.id, Object.assign({}, current, { displayContent: ciphertext }));
+            syncLastMessageDisplay(chatId, message.id, ciphertext, true);
             persistMessage(chatId, bucket.get(message.id));
             return;
         }
-        // FIX (CANONICAL-E2E-RACE): wait for the canonical core to be patched
-        // in before deciding KynectaE2E isn't available. Without this, a
-        // message that arrives before js/e2e-session-init.js finishes its
-        // async load either silently ran through the legacy decrypt path
-        // (mismatched key derivation -> OperationError) or hit an undefined
-        // function — both permanently mis-rendered the message with no retry.
-        const ready = await waitForMessageE2E();
-        if (!ready || !window.KynectaE2E || typeof window.KynectaE2E.decryptMessageForDisplay !== 'function') {
-            // Canonical core genuinely unavailable (or timed out) — leave the
-            // message unresolved (displayContent stays undefined) rather than
-            // rendering raw ciphertext, so the kyn:canonicalMessageE2EReady
-            // listener above can retry it once the core does load.
+        const cached = decryptResults.get(key);
+        if (cached && cached.ciphertext === ciphertext) {
+            const bucket = getOrCreateConversationBucket(chatId);
+            bucket.set(message.id, Object.assign({}, bucket.get(message.id) || message, cached.value));
             return;
         }
-        const conv = state.conversations.get(chatId);
-        const DECRYPT_FALLBACK = '🔒 Encrypted message';
-        try {
-            const plaintext = await window.KynectaE2E.decryptMessageForDisplay(message, chatId, window._kynCurrentUserId, {
-                activeConversation: conv ? { otherUserId: conv.otherUser && conv.otherUser.id } : null,
-                fallbackText: DECRYPT_FALLBACK,
-                // FEATURE (WHICH-VERSION-DECRYPTED-THIS, requested behavior):
-                // the canonical core now reports which decrypt path actually
-                // produced this plaintext ('v3' clean ratchet decrypt,
-                // 'v2-fallback' recovered after a v3 failure, or 'v2' for a
-                // message that was always v2) as a second onResolved arg.
-                // Stored on the message itself so message.html can render a
-                // small per-bubble indicator instead of leaving the person
-                // guessing which scheme actually protected a given message.
-                onResolved: (resolvedText, decryptVersion) => {
-                    // See ROOT-CAUSE FIX (SIDEBAR-STUCK-ON-"Decrypting…") above
-                    // decryptForDisplay()'s declaration — same get-or-create,
-                    // same reason: this must not silently drop a genuine
-                    // result just because the chat has never been opened.
-                    const bucket = getOrCreateConversationBucket(chatId);
-                    if (!bucket.has(message.id)) bucket.set(message.id, message);
-                    bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: resolvedText, decryptVersion: decryptVersion || bucket.get(message.id).decryptVersion || null }));
-                    syncLastMessageDisplay(chatId, message.id, resolvedText);
-                    notify('message:decrypted', { chatId, messageId: message.id });
-                    persistMessage(chatId, bucket.get(message.id));
-                },
-            });
-            const isQueued = typeof window.KynectaE2E.isMessageQueued === 'function' && window.KynectaE2E.isMessageQueued(message);
-            const isFailed = typeof window.KynectaE2E.isMessageFailed === 'function' && window.KynectaE2E.isMessageFailed(message);
-            // FIX (INFINITE-DECRYPTING-PLACEHOLDER): previously this only had
-            // two states — queued ("Decrypting…") or resolved (plaintext) —
-            // so a message the queue had permanently given up on stayed
-            // rendered as plaintext === DECRYPT_FALLBACK forever, which this
-            // line then displayed as "Decrypting…" indefinitely. isFailed
-            // gives a third, final state.
-            const displayValue = isFailed ? '🔒 Unable to decrypt this message'
-              : (isQueued && plaintext === DECRYPT_FALLBACK) ? 'Decrypting…' : plaintext;
-            const bucket = getOrCreateConversationBucket(chatId);
-            if (!bucket.has(message.id)) bucket.set(message.id, message);
-            {
-                // Covers the cache-hit path above: decryptMessageForDisplay()
-                // returns straight from its internal cache without ever
-                // calling onResolved when a message was already decrypted
-                // earlier this session, so the version wasn't attached there.
-                // getDecryptVersion() reads the same id-keyed record either way.
-                const cachedVersion = typeof window.KynectaE2E.getDecryptVersion === 'function' ? window.KynectaE2E.getDecryptVersion(message.id) : null;
-                bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: displayValue, decryptVersion: bucket.get(message.id).decryptVersion || cachedVersion || null }));
-                const isGenuineSuccess = !isFailed && displayValue !== 'Decrypting…' && displayValue !== DECRYPT_FALLBACK;
-                syncLastMessageDisplay(chatId, message.id, displayValue, isGenuineSuccess);
-                notify('message:decrypted', { chatId, messageId: message.id });
-                // ROOT-CAUSE FIX (REGRESSION — a decrypt failure that used to
-                // self-heal on the next reload now got stuck forever): this
-                // used to also persist the terminal "🔒 Unable to decrypt
-                // this message" state (guarded only against the transient
-                // "Decrypting…" one). Before the local cache existed, EVERY
-                // reload did a fresh loadHistory() + fresh decrypt attempt
-                // for every message with no memory of a prior failure — so a
-                // message that failed once (key not warmed yet, a transient
-                // fetch timeout, etc.) got a clean retry next time and often
-                // succeeded, which is exactly the "fails, then a refresh
-                // fixes it" behavior this app is supposed to have. Caching
-                // the failure broke that: decryptForDisplay's very first
-                // line (`if (message.displayContent !== undefined) return`)
-                // now short-circuited on the cached "Unable to decrypt"
-                // value on every future load, so it could never even
-                // attempt to re-decrypt again — a message stuck there was
-                // stuck there permanently, reload or not. Only a genuine,
-                // resolved plaintext is ever written to disk now; both the
-                // queued and the terminal-failure states are left
-                // unpersisted on purpose (same guard now shared with the
-                // sidebar-preview cache above), so either one always gets a
-                // fresh, real retry next time this chat is opened.
-                if (isGenuineSuccess) {
-                    persistMessage(chatId, bucket.get(message.id));
+        if (decryptFlights.has(key)) { await decryptFlights.get(key); return; }
+        const flight=(async()=>{
+            const ready=await waitForMessageE2E();
+            if(!ready||typeof window.KynectaE2E?.decryptMessageForDisplay!=='function')return;
+            const conv=state.conversations.get(chatId),fallback='🔒 Encrypted message';
+            try{
+                const plaintext=await window.KynectaE2E.decryptMessageForDisplay(message,chatId,window._kynCurrentUserId,{
+                    activeConversation:conv?{otherUserId:conv.otherUser?.id}:null,
+                    fallbackText:fallback,
+                    onResolved:(resolvedText,decryptVersion)=>{
+                        const bucket=getOrCreateConversationBucket(chatId),current=bucket.get(message.id)||message;
+                        const next=Object.assign({},current,{displayContent:resolvedText,decryptVersion:decryptVersion||current.decryptVersion||null});
+                        bucket.set(message.id,next);syncLastMessageDisplay(chatId,message.id,resolvedText,true);persistMessage(chatId,next);notify('message:decrypted',{chatId,messageId:message.id});
+                    }
+                });
+                const failed=typeof window.KynectaE2E.isMessageFailed==='function'&&window.KynectaE2E.isMessageFailed(message);
+                const queued=typeof window.KynectaE2E.isMessageQueued==='function'&&window.KynectaE2E.isMessageQueued(message);
+                if(failed){
+                    const bucket=getOrCreateConversationBucket(chatId),current=bucket.get(message.id)||message;
+                    bucket.set(message.id,Object.assign({},current,{displayContent:fallback}));
+                    syncLastMessageDisplay(chatId,message.id,fallback,false);notify('message:decrypted',{chatId,messageId:message.id});return;
                 }
-            }
-        } catch (_) {
-            const bucket = getOrCreateConversationBucket(chatId);
-            if (!bucket.has(message.id)) bucket.set(message.id, message);
-            bucket.set(message.id, Object.assign({}, bucket.get(message.id), { displayContent: '🔒 Encrypted message' }));
-            syncLastMessageDisplay(chatId, message.id, '🔒 Encrypted message', false);
-        }
+                if(queued||plaintext===undefined||plaintext===fallback)return;
+                const bucket=getOrCreateConversationBucket(chatId),current=bucket.get(message.id)||message;
+                const version=current.decryptVersion||(typeof window.KynectaE2E.getDecryptVersion==='function'?window.KynectaE2E.getDecryptVersion(message.id):null);
+                const next=Object.assign({},current,{displayContent:plaintext,decryptVersion:version});
+                bucket.set(message.id,next);decryptResults.set(key,{ciphertext,value:{displayContent:plaintext,decryptVersion:version}});
+                syncLastMessageDisplay(chatId,message.id,plaintext,true);persistMessage(chatId,next);notify('message:decrypted',{chatId,messageId:message.id});
+            }catch(error){console.warn('[MessageE2E] decrypt deferred for',message.id,error?.message||error);}
+        })();
+        decryptFlights.set(key,flight);try{await flight;}finally{decryptFlights.delete(key);}
     }
 
-    // Gives the user an actual recovery path when decryption failed
-    // (e.g. the key exchange completes later) instead of leaving the
-    // "🔒 Encrypted message" placeholder as a permanent dead end.
     async function retryDecrypt(chatId, messageId) {
         const bucket = state.messagesByConversation.get(chatId);
         if (!bucket || !bucket.has(messageId)) return;
         const message = bucket.get(messageId);
+        decryptResults.delete(String(chatId) + ':' + String(messageId));
         bucket.set(messageId, Object.assign({}, message, { displayContent: undefined }));
         await decryptForDisplay(chatId, bucket.get(messageId));
         notify('message:decrypted', { chatId, messageId });
     }
 
-    // FIX (INFINITE-DECRYPTING-PLACEHOLDER): e2e-encryption.js's retry queue
-    // now gives up on a message after MAX_QUEUE_ATTEMPTS and fires this
-    // event once, instead of retrying every 15s forever. Without this
-    // listener, a message that failed permanently would sit rendered with
-    // whatever displayContent it last had ("Decrypting…") until something
-    // else happened to re-run decryptForDisplay for it. This makes the "🔒
-    // Unable to decrypt this message" state (see decryptForDisplay above)
-    // show up immediately instead of only on next reload/re-render.
     document.addEventListener('kyn:messageDecryptFailed', (e) => {
         const failedId = e?.detail?.messageId;
         if (!failedId) return;
@@ -454,6 +377,12 @@
         for (const [chatId, bucket] of state.messagesByConversation.entries()) {
             for (const [key, message] of bucket.entries()) {
                 if (String(key) !== String(failedId)) continue;
+                if (message.displayContent !== undefined &&
+                    message.displayContent !== '🔒 Encrypted message' &&
+                    message.displayContent !== '🔒 Unable to decrypt this message' &&
+                    message.displayContent !== 'Decrypting…') {
+                    continue;
+                }
                 const displayValue = '🔒 Unable to decrypt this message';
                 // FIX (SHOW-WHY-V3-FAILED, requested behavior): message-e2e-
                 // core.js's decryptFromChat now names exactly which stage
@@ -854,10 +783,6 @@
                 return { success: false, error: 'Could not determine the recipient to encrypt this message for — message was not sent' };
             }
             try {
-                // FIX (CANONICAL-E2E-RACE): see waitForMessageE2E() above —
-                // don't gate only on window.KynectaE2E truthiness, which is
-                // set synchronously by the legacy file long before the
-                // canonical encryptForChat is actually patched in.
                 const ready = await waitForMessageE2E();
                 if (!ready || typeof window.KynectaE2E?.encryptForChat !== 'function') {
                     throw new Error('Secure messaging is not ready yet');
@@ -908,7 +833,6 @@
             if (isAlreadyDelivered(bucket, clientMessageId)) {
                 return { success: true, alreadyDelivered: true };
             }
-            if(isAlreadyDelivered(bucket,clientMessageId))return {success:true,alreadyDelivered:true};
             bucket.set(optimisticId,Object.assign({},optimisticMessage,{status:'failed'}));
             notify('message:failed',{chatId:optimisticMessage.chatId,clientMessageId});
             return { success: false, error: res && res.message };
@@ -916,7 +840,6 @@
             if (isAlreadyDelivered(bucket, clientMessageId)) {
                 return { success: true, alreadyDelivered: true };
             }
-            if(isAlreadyDelivered(bucket,clientMessageId))return {success:true,alreadyDelivered:true};
             bucket.set(optimisticId,Object.assign({},optimisticMessage,{status:'failed'}));
             notify('message:failed',{chatId:optimisticMessage.chatId,clientMessageId});
             return { success: false, error: err.message };

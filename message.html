@@ -932,29 +932,21 @@
     });
 
     function statusReplyHtml(m, isMine) {
-      if (m?.type !== 'status_reply') return '';
-      let meta = m.metadata;
-      if (typeof meta === 'string') { try { meta = JSON.parse(meta); } catch (_) { meta = null; } }
-      let interaction = meta?.statusInteraction || null;
-      for (const candidate of [m.displayContent, m.content]) {
-        if (interaction || typeof candidate !== 'string') continue;
-        try {
-          const parsed = JSON.parse(candidate);
-          if (parsed && typeof parsed === 'object' && (parsed.statusId != null || parsed.kind === 'reaction' || parsed.kind === 'comment')) interaction = parsed;
-        } catch (_) {}
+      let meta=m?.metadata;if(typeof meta==='string'){try{meta=JSON.parse(meta)}catch(_){meta=null}}
+      let interaction=meta?.statusInteraction||null;
+      for(const candidate of [m?.displayContent,m?.content]){
+        if(interaction||typeof candidate!=='string')continue;
+        try{const parsed=JSON.parse(candidate);if(parsed&&typeof parsed==='object'&&(parsed.statusId!=null||parsed.kind==='reaction'||parsed.kind==='comment'))interaction=parsed}catch(_){}
       }
-      if (!interaction) return '';
-      const kind = interaction.kind === 'reaction' ? 'reaction' : 'comment';
-      const emoji = kind === 'reaction' ? String(interaction.emoji || '❤️') : '';
-      const text = kind === 'comment' ? String(interaction.text || '').trim() : '';
-      const caption = String(interaction.caption || '').trim();
-      const heading = isMine ? (kind === 'reaction' ? 'You reacted to a status' : 'You replied to a status') : (kind === 'reaction' ? 'Reacted to your status' : 'Replied to your status');
-      const body = kind === 'reaction'
-        ? '<div class="status-reply-emoji">'+escapeHtml(emoji)+'</div>'
-        : '<div class="status-reply-text">'+escapeHtml(text || 'Replied to your status')+'</div>';
-      return '<div class="status-reply-card" data-status-id="'+escapeHtml(interaction.statusId || '')+'">' +
-        '<div class="status-reply-head"><span class="status-reply-icon">◉</span><b>'+escapeHtml(heading)+'</b></div>' +
-        (caption ? '<div class="status-reply-caption">'+escapeHtml(caption.slice(0,180))+'</div>' : '') + body + '</div>';
+      if(!interaction&&m?.type!=='status_reply')return '';
+      if(!interaction)return '<div class="status-reply-card"><div class="status-reply-head"><span class="status-reply-icon">↩</span><b>Status interaction</b></div><div class="status-reply-text">Unable to load the status reply details.</div></div>';
+      const kind=interaction.kind==='reaction'?'reaction':'comment';
+      const emoji=kind==='reaction'?String(interaction.emoji||'❤️'):'';
+      const text=kind==='comment'?String(interaction.text||'').trim():'';
+      const caption=String(interaction.caption||'').trim();
+      const heading=isMine?(kind==='reaction'?'You reacted to a status':'You replied to a status'):(kind==='reaction'?'Reacted to your status':'Replied to your status');
+      const body=kind==='reaction'?'<div class="status-reply-emoji">'+escapeHtml(emoji)+'</div>':'<div class="status-reply-text">'+escapeHtml(text||'Replied to your status')+'</div>';
+      return '<div class="status-reply-card" data-status-id="'+escapeHtml(String(interaction.statusId??''))+'"><div class="status-reply-head"><span class="status-reply-icon">↩</span><b>'+escapeHtml(heading)+'</b></div>'+(caption?'<div class="status-reply-caption">'+escapeHtml(caption.slice(0,180))+'</div>':'')+body+'</div>';
     }
 
     function attachmentHtml(m) {
@@ -989,26 +981,10 @@
       const statusTick = isMine ? ({ sending: '…', sent: '✓', delivered: '✓✓', read: '✓✓', failed: '⚠' }[m.status] || '') : '';
       const editedTag = m.isEdited ? ' (edited)' : '';
       const isDeletedForEveryone = m.deleted && m.deleteForEveryone;
-      // FIX (retry-tap silently did nothing on a truly-failed message):
-      // this only matched '🔒 Encrypted message' — decryptForDisplay's
-      // catch-block fallback for an unexpected exception — but the actual
-      // terminal "the queue gave up on this message" state (see
-      // message-client.js's isFailed branch and its kyn:messageDecryptFailed
-      // listener) sets displayContent to '🔒 Unable to decrypt this
-      // message' instead. That string never matched here, so a genuinely,
-      // permanently failed message rendered without the decrypt-retry
-      // class/handler at all — it looked like plain text with no way to
-      // retry it.
       const decryptFailed = m.displayContent === '🔒 Encrypted message' || m.displayContent === '🔒 Unable to decrypt this message';
       const decryptPending = m.displayContent === 'Decrypting…';
       const content = isDeletedForEveryone ? 'This message was deleted' : (m.displayContent !== undefined ? m.displayContent : '…');
       const statusCard = isDeletedForEveryone ? '' : statusReplyHtml(m, isMine);
-      // FIX (SHOW-WHY-V3-FAILED, requested behavior): message-client.js's
-      // kyn:messageDecryptFailed listener now stores the exact reason
-      // (which stage — Double Ratchet v3, legacy v2 fallback, or both —
-      // failed and why) on m.decryptFailureReason. Surface it as a tooltip
-      // instead of only "Tap to retry decryption", so a genuinely failed
-      // message tells you what actually went wrong, not just that it did.
       const retryTitle = m.decryptFailureReason
         ? `Tap to retry decryption — ${escapeHtml(m.decryptFailureReason)}`
         : 'Tap to retry decryption';
@@ -1046,7 +1022,7 @@
             ${!isDeletedForEveryone ? replyPreviewHtml(m, chatId) : ''}
             ${!isDeletedForEveryone ? attachmentHtml(m) : ''}
             ${statusCard}
-            ${m.type === 'status_reply' && statusCard ? '' : '<span'+contentAttrs+'>'+ (content ? escapeHtml(content) : '') +'</span>'}${!isDeletedForEveryone ? editedTag : ''}
+            ${statusCard ? '' : '<span'+contentAttrs+'>'+ (content ? escapeHtml(content) : '') +'</span>'}${!isDeletedForEveryone ? editedTag : ''}
             ${reactionsHtml}
             <div class="bubble-meta">${time} ${statusTick}${m.starred ? ' ⭐' : ''}${decryptVersionBadge}</div>
 
