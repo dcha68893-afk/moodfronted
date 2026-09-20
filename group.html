@@ -412,10 +412,37 @@ async function sendMessage(){
   S.messages.push(makeOptimisticMessage(cid,plain,groupId));renderMessages(true);
   queueOptimisticSend(cid,groupId,plain);
 }
+// FIX (GROUP-SEND-STALE-MEMBERS): S.current.participants is a one-time
+// snapshot taken when the group panel was opened (loadGroups()/openGroup()),
+// and nothing in this file ever refreshes it afterwards — there is no
+// socket listener for GROUP_MEMBER_ADDED/REMOVED and the 5s poll interval
+// (S.poll) only calls loadMessages(), never re-fetches the group's member
+// list. So groupMemberIds(S.current), used to build the sender-key
+// distribution, silently drifts out of sync the moment anyone joins or
+// leaves the group after it was opened. The backend's rotateSenderKey()
+// (src/services/groupMessagingService.js) checks the *live* membership on
+// every request and rejects the key rotation as incomplete if any current
+// member is missing a distribution — which is exactly the "Every current
+// group member must receive this sender key before it can be used" error.
+// Refetching the chat right before encrypting keeps the member list the
+// client encrypts for in sync with what the backend will actually enforce.
+async function refreshCurrentGroupMembers(gid){
+  try{
+    const r=await api('/chats/'+encodeURIComponent(gid));
+    const fresh=unwrap(r?.data?.chat||r?.data);
+    if(fresh&&Array.isArray(fresh.participants)&&S.current&&String(S.current.id)===String(gid)){
+      S.current.participants=fresh.participants;
+      S.current.participantCount=fresh.participantCount??fresh.participants.length;
+      const idx=S.groups.findIndex(g=>String(g.id)===String(gid));
+      if(idx!==-1)S.groups[idx]={...S.groups[idx],participants:fresh.participants,participantCount:S.current.participantCount};
+    }
+  }catch(_){/* offline or request failed — fall back to the cached member list */}
+}
 async function sendGroupPayload(plain,type='text',metadata=null){
   if(!S.current?.id)throw new Error('No group is open');const text=String(plain||'').trim();if(type==='text'&&!text)throw new Error('Message cannot be empty');
   if(!(await ensureE2EReady())||!window.KynectaGroupE2E?.encryptForGroup)throw new Error(e2eNotReadyMessage());
   const gid=Number(S.current.id),cid=makeGroupClientId();
+  await refreshCurrentGroupMembers(gid);
   const encrypted=text?await window.KynectaGroupE2E.encryptForGroup(gid,text,groupMemberIds(S.current)):'';
   const r=await apiRetry('/group-messages/'+encodeURIComponent(groupId)+'/messages',{method:'POST',body:JSON.stringify({chatId:gid,content:encrypted,type,clientMessageId:cid,metadata:{...(metadata||{}),groupId:gid}})});
   const message=r?.data?.message||r?.data;if(!message?.id)throw new Error('Server did not return the saved group message');
