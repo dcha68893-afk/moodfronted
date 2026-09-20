@@ -61,7 +61,7 @@
     </style>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Necpa - Chat, Calls & Marketplace</title>
+    <title>Necpa - Chat, Friends & Marketplace</title>
     <!-- PWA: manifest MUST be linked from the main shell so beforeinstallprompt fires -->
     <link rel="manifest" href="/manifest.json">
     <!-- theme-color is now set dynamically by theme.engine.js to match the saved theme -->
@@ -439,107 +439,6 @@
             color: white;
         }
 
-        /* Call button animations */
-        .nav-icon[data-page="calls"].call-incoming {
-            animation: callPulse 1s ease infinite;
-            background: rgba(124, 58, 237, 0.3);
-        }
-
-        @keyframes callPulse {
-            0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.1); background: rgba(124, 58, 237, 0.5); }
-        }
-
-        /* Call active indicator */
-        .call-active-indicator {
-            position: absolute;
-            top: -2px;
-            right: -2px;
-            width: 12px;
-            height: 12px;
-            background: #10b981;
-            border-radius: 50%;
-            border: 2px solid white;
-            animation: callActivePulse 1.5s infinite;
-        }
-
-        @keyframes callActivePulse {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.5; transform: scale(1.2); }
-        }
-
-        /* INCOMING CALL BANNER - GLOBAL */
-        #kyn-call-banner {
-            position: fixed;
-            bottom: 90px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: linear-gradient(135deg, #1f2937, #111827);
-            color: white;
-            padding: 12px 24px;
-            border-radius: 60px;
-            display: none;
-            align-items: center;
-            gap: 20px;
-            z-index: 10001;
-            box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3);
-            backdrop-filter: blur(8px);
-            border: 1px solid rgba(255,255,255,0.2);
-        }
-        .call-banner-actions button {
-            background: white;
-            border: none;
-            padding: 6px 18px;
-            border-radius: 30px;
-            font-weight: 600;
-            cursor: pointer;
-            margin-left: 10px;
-        }
-        .call-banner-actions .accept-call {
-            background: #10b981;
-            color: white;
-        }
-        .call-banner-actions .decline-call {
-            background: #ef4444;
-            color: white;
-        }
-
-        .incoming-call-toast {
-            position: fixed;
-            bottom: 80px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            color: white;
-            padding: 12px 20px;
-            border-radius: 50px;
-            display: flex;
-            align-items: center;
-            gap: 16px;
-            z-index: 10000;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
-            animation: slideUp 0.3s ease;
-        }
-
-        .incoming-call-toast button {
-            background: white;
-            border: none;
-            padding: 6px 16px;
-            border-radius: 20px;
-            cursor: pointer;
-            font-weight: 500;
-        }
-
-        .incoming-call-toast button.accept {
-            background: #10b981;
-            color: white;
-        }
-
-        .incoming-call-toast button.decline {
-            background: #ef4444;
-            color: white;
-        }
-
         @keyframes slideUp {
             from {
                 opacity: 0;
@@ -585,36 +484,6 @@
             visibility: hidden !important;
             pointer-events: none !important;
             /* Keep display:block so the iframe document loads & runs */
-        }
-
-        /* ── CALL SCREEN: full screen on ALL screen sizes ── */
-        /* When a call is active the calls iframe must cover  */
-        /* the entire viewport — header, sidebar, nav bar     */
-        /* must all be hidden behind the call panel.          */
-        body.call-screen-active #callsContent {
-            top: 0 !important;
-            bottom: 0 !important;
-            left: 0 !important;
-            right: 0 !important;
-            z-index: 10000 !important;
-            background: transparent !important;
-            /* Override .hidden — the iframe MUST be visible during a call */
-            visibility: visible !important;
-            pointer-events: auto !important;
-            display: block !important;
-        }
-        body.call-screen-active #globalHeader {
-            opacity: 0 !important;
-            pointer-events: none !important;
-            visibility: hidden !important;
-        }
-        body.call-screen-active #permanentSidebar {
-            z-index: 0 !important;
-            opacity: 0 !important;
-            pointer-events: none !important;
-        }
-        body.call-screen-active .mobile-nav-bar {
-            z-index: 0 !important;
         }
 
         .content-iframe {
@@ -675,7 +544,6 @@
             text-transform: uppercase;
             opacity: 0.8;
         }
-        .center-menu-calls i { color: #34d399; }
         .center-menu-group i { color: #60a5fa; }
         .center-menu-games i { color: #f59e0b; }
         /* FIX (FRIENDS-ICON-INVISIBLE-IN-LIGHT-THEME): unlike calls/group/games,
@@ -893,7 +761,6 @@
 
         /* Hide with smooth slide animation on chat/call screens */
         body.chat-panel-active .mobile-nav-bar,
-        body.call-screen-active .mobile-nav-bar,
         body.group-panel-active .mobile-nav-bar,
         body.status-panel-active .mobile-nav-bar {
             transform: translateY(100%) !important;
@@ -907,7 +774,6 @@
                 display: flex !important;
             }
             body.chat-panel-active .mobile-nav-bar,
-            body.call-screen-active .mobile-nav-bar,
             body.group-panel-active .mobile-nav-bar,
             body.status-panel-active .mobile-nav-bar {
                 display: flex !important;
@@ -1176,30 +1042,10 @@
                 bottom: 0;
             }
 
-            /* ── CALL SCREEN: calls iframe goes TRULY full screen ── */
-            body.call-screen-active #callsContent {
-                top: 0 !important;
-                bottom: 0 !important;
-                left: 0 !important;
-                right: 0 !important;
-                z-index: 10000 !important;
-                visibility: visible !important;
-                pointer-events: auto !important;
-                display: block !important;
-                /* FIX (call-header-bleed-through): belt-and-suspenders — the
-                   iframe itself has no opaque background by default, so if
-                   anything underneath ever painted before the in-call UI
-                   loaded, it could show through the edges. Force transparent
-                   here (the call UI inside the iframe supplies its own
-                   opaque background) rather than relying on paint order. */
-                background: transparent !important;
-            }
-
             #globalHeader {
                 left: 0;
                 padding: 0 14px;
             }
-            body.call-screen-active #globalHeader,
             body.status-panel-active #globalHeader {
                 opacity: 0 !important;
                 pointer-events: none !important;
@@ -1218,20 +1064,6 @@
                 opacity: 1 !important;
                 visibility: visible !important;
                 pointer-events: auto !important;
-            }
-            /* FIX (call-header-bleed-through): body.call-screen-active and
-               body.chat-panel-active #globalHeader rules above have identical
-               specificity. When a call starts from inside an already-open
-               chat, both classes land on <body> at once, and because the
-               chat-panel-active rule appears later in this stylesheet it won
-               the cascade — leaving the old chat header (name/avatar/message
-               icon) visibly bleeding through on top of the fullscreen call
-               UI. An active call must always win regardless of source order. */
-            body.call-screen-active.chat-panel-active #globalHeader,
-            body.call-screen-active.group-panel-active #globalHeader {
-                opacity: 0 !important;
-                visibility: hidden !important;
-                pointer-events: none !important;
             }
             .header-module-subtitle {
                 display: none;
@@ -1356,14 +1188,6 @@
         }
         .hgm-btn:hover { background: rgba(255,255,255,.16); border-color: rgba(255,255,255,.24); }
         .hgm-btn:active { transform: scale(.92); }
-        /* Voice/video call icons get a light brand-green tint so they read
-           as the "primary" actions in the row, distinct from back/more. */
-        #hdrChatCall, #hdrChatVideo, #hdrGroupCall, #hdrGroupVideo {
-            background: rgba(34,197,94,.14); border-color: rgba(34,197,94,.22); color: #4ade80;
-        }
-        #hdrChatCall:hover, #hdrChatVideo:hover, #hdrGroupCall:hover, #hdrGroupVideo:hover {
-            background: rgba(34,197,94,.24); border-color: rgba(34,197,94,.34);
-        }
         /* FIX (GROUP-HEADER-HARDCODED-DARK): this rule used to apply
            unconditionally with !important the moment a group conversation
            opened — regardless of data-theme — so the group panel header
@@ -1658,8 +1482,6 @@
                 <div id="hdrChatName" style="font-weight:600;font-size:14px;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;">Chat</div>
                 <div id="hdrChatStatus" style="font-size:11px;color:var(--text-secondary);line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Offline</div>
             </div>
-            <button class="hgm-btn" id="hdrChatCall"  title="Voice call"><i class="fas fa-phone"></i></button>
-            <button class="hgm-btn" id="hdrChatVideo" title="Video call"><i class="fas fa-video"></i></button>
             <button class="hgm-btn" id="hdrChatMore" title="More options"><i class="fas fa-ellipsis-v"></i></button>
         </div>
 
@@ -1677,8 +1499,6 @@
                 <div id="hdrGroupMeta" style="font-size:11px;color:var(--text-secondary);line-height:1.2;">0 members</div>
             </div>
             <!-- Actions -->
-            <button class="hgm-btn" id="hdrGroupCall"  title="Voice call"><i class="fas fa-phone"></i></button>
-            <button class="hgm-btn" id="hdrGroupVideo" title="Video call"><i class="fas fa-video"></i></button>
             <div style="position:relative;">
                 <button class="hgm-btn" id="hdrGroupMore" title="More options"><i class="fas fa-ellipsis-v"></i></button>
                 <div id="hdrGroupMenu" style="display:none;position:fixed;min-width:175px;background:var(--surface-color);border:1px solid var(--border-color);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:9999;overflow:hidden;padding:4px 0;">
@@ -1775,15 +1595,6 @@
         </div>
     </div>
 
-    <!-- Global Incoming Call Banner -->
-    <div id="kyn-call-banner">
-        <div><i class="fas fa-phone-alt"></i> <strong id="callerName">Unknown</strong> is calling...</div>
-        <div class="call-banner-actions">
-            <button class="accept-call" id="bannerAcceptCall"><i class="fas fa-check"></i> Accept</button>
-            <button class="decline-call" id="bannerDeclineCall"><i class="fas fa-times"></i> Decline</button>
-        </div>
-    </div>
-
     <!-- Permanent Sidebar (Desktop) -->
     <div id="permanentSidebar">
         <button class="nav-icon active" data-page="messages"><i class="fas fa-comments"></i></button>
@@ -1791,7 +1602,6 @@
         <button class="nav-icon" data-page="group"><i class="fas fa-users"></i></button>
         <button class="nav-icon" data-page="friends"><i class="fas fa-user-friends"></i></button>
         <button class="nav-icon" data-page="games"><i class="fas fa-gamepad"></i></button>
-        <button class="nav-icon" data-page="calls"><i class="fas fa-phone"></i></button>
         <button class="nav-icon" data-page="settings"><i class="fas fa-cog"></i></button>
         <button class="nav-icon" data-page="tools"><i class="fas fa-tools"></i></button>
         <div class="mt-auto mb-4 relative">
@@ -1834,10 +1644,6 @@
     <!-- Center Action Popup Menu -->
     <div id="centerMenuOverlay" onclick="closeCenterMenu()"></div>
     <div id="centerActionMenu">
-        <div class="center-menu-item center-menu-calls" onclick="closeCenterMenu(); navigateToPage('calls');">
-            <i class="fas fa-phone-alt"></i>
-            <span>Calls</span>
-        </div>
         <div class="center-menu-item center-menu-group" onclick="closeCenterMenu(); navigateToPage('group');">
             <i class="fas fa-users"></i>
             <span>Groups</span>
@@ -1898,13 +1704,6 @@
     <div id="friendsContent" class="iframe-container hidden">
         <iframe id="friendsIframe" class="content-iframe" src="friend.html" data-module="friends" allow="camera; microphone; geolocation"></iframe>
     </div>
-    <div id="callsContent" class="iframe-container hidden">
-        <!-- FIX-DEAD-CALLS-REQUEST: calls.html was deleted (calls are retired
-             app-wide); this iframe is removed at runtime by config.js's
-             removeCalls() anyway, but a src here fired a 404 request on
-             every chat.html load before that runtime removal ran. -->
-        <iframe id="callsIframe" class="content-iframe" data-module="calls" allow="camera; microphone"></iframe>
-    </div>
     <div id="settingsContent" class="iframe-container hidden">
         <iframe id="settingsIframe" class="content-iframe" src="settings.html" data-module="settings"></iframe>
     </div>
@@ -1913,7 +1712,7 @@
     </div>
 
     <!-- ── Add Friend FAB (fixed, bottom-right, above the bottom nav) ── -->
-    <!-- Shown only on messages and calls modules via JS below.
+    <!-- Shown only on the messages module via JS below.
          FIX-FAB-POSITION: previously pinned at top:112px;right:14px, which sat
          directly on top of the calls-module's quick-actions row (Voice/Video/
          Group Call) and category tabs, overlapping real content. A standard
@@ -1959,9 +1758,6 @@
             box-shadow: 0 6px 24px rgba(102,126,234,.65) !important;
         }
         #fabAddFriend:active { transform: scale(.94); }
-        /* Hide FAB while a call is active */
-        body.call-active #fabAddFriend,
-        body.in-call-screen #fabAddFriend { display: none !important; }
         /* Desktop: sit left of sidebar, vertically centered */
         @media (min-width: 768px) {
             #fabAddFriend { top: 50% !important; left: 80px !important; right: auto !important; bottom: auto !important; transform: translateY(-50%) !important; }
@@ -2025,9 +1821,6 @@
             'friends':   'friendsIframe',
             'friend':    'friendsIframe',
             'friend-core':'friendsIframe',
-            'calls':     'callsIframe',
-            'call':      'callsIframe',
-            'calls-core':'callsIframe',
             'settings':  'settingsIframe',
             'setting':   'settingsIframe',
             'tools':     'toolsIframe',
@@ -2098,7 +1891,7 @@
             if (_wins.length >= 30) {
                 // Storm detected — only drop low-priority setting floods, never real-time data
                 const _t = message && message.type;
-                const _isCritical = !_t || _t === 'message:new' || _t === 'new_message' || _t === 'CALL_INCOMING' || _t === 'call:incoming' || _t === 'CALL_INCOMING' || _t === 'FRIENDS_LIST_UPDATE' || _t === 'SESSION_DATA' || _t === 'AUTH_READY' || _t === 'PARENT_READY';
+                const _isCritical = !_t || _t === 'message:new' || _t === 'new_message' || _t === 'FRIENDS_LIST_UPDATE' || _t === 'SESSION_DATA' || _t === 'AUTH_READY' || _t === 'PARENT_READY';
                 if (!_isCritical && (_t === 'SETTING_CHANGED' || _t === 'SETTINGS_GLOBAL_UPDATE')) {
                     console.warn('[IframeQueue] postMessage storm — dropped', _t, 'for', moduleName);
                     return;
@@ -2242,39 +2035,6 @@
                 } catch (_) {}
             }
             return [];
-        }
-
-        function loadCachedCallHistoryFromStorage() {
-            try {
-                const parsed = JSON.parse(localStorage.getItem('cached_call_history') || 'null');
-                if (parsed && Array.isArray(parsed.calls)) {
-                    // CRITICAL FIX: Filter out permanently deleted calls
-                    const deletedIds = new Set();
-                    try {
-                        const dl = JSON.parse(localStorage.getItem('kyn_deleted_calls_v1') || '[]');
-                        dl.forEach(id => deletedIds.add(String(id)));
-                    } catch(_) {}
-                    return deletedIds.size > 0
-                        ? parsed.calls.filter(c => c && c.id && !deletedIds.has(String(c.id)))
-                        : parsed.calls;
-                }
-            } catch (_) {}
-            return [];
-        }
-
-        function saveCachedCallHistoryToStorage(calls) {
-            try {
-                // Filter deleted before saving
-                const deletedIds = new Set();
-                try {
-                    const dl = JSON.parse(localStorage.getItem('kyn_deleted_calls_v1') || '[]');
-                    dl.forEach(id => deletedIds.add(String(id)));
-                } catch(_) {}
-                const filtered = Array.isArray(calls)
-                    ? calls.filter(c => c && c.id && !deletedIds.has(String(c.id)))
-                    : [];
-                localStorage.setItem('cached_call_history', JSON.stringify({ calls: filtered, savedAt: Date.now() }));
-            } catch(_) {}
         }
 
         function loadUserProfileFromStorage() {
@@ -2540,207 +2300,6 @@
         }
 
         // ======================================================================
-        // GLOBAL CALL BANNER
-        // ======================================================================
-        let pendingIncomingCall = null;
-        
-        function hideGlobalBanner() {
-            const banner = document.getElementById('kyn-call-banner');
-            if (banner) banner.style.display = 'none';
-            pendingIncomingCall = null;
-            logProcessStatus('call-banner', true, 'dismissed');
-        }
-        
-        function setupGlobalCallBanner() {
-            const banner = document.getElementById('kyn-call-banner');
-            const acceptBtn = document.getElementById('bannerAcceptCall');
-            const declineBtn = document.getElementById('bannerDeclineCall');
-            
-            function hideBanner() {
-                banner.style.display = 'none';
-                pendingIncomingCall = null;
-            }
-            
-            acceptBtn.onclick = async () => {
-                if (pendingIncomingCall) {
-                    const callId = pendingIncomingCall.callId || pendingIncomingCall.id;
-                    if (callId) {
-                        const baseUrl = window.__getApiBase();
-                        const token = localStorage.getItem('authToken') || localStorage.getItem('token');
-                        try {
-                            await fetch(`${baseUrl}/calls/${callId}/answer`, {
-                                method: 'POST',
-                                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                                body: JSON.stringify({})
-                            });
-                        } catch(e) {}
-                    }
-                    // ── FIX: Do NOT navigate to 'calls' page here.
-                    // Navigating to 'calls' destroys/reloads the iframe, wiping all call state.
-                    // The calls iframe is ALREADY active (it received the incoming call).
-                    // Just mark the call as active and send AUTO_ACCEPT_CALL to the live iframe.
-                    document.body.classList.add('call-screen-active');
-                    window.__activeCallInProgress = true;
-                    // ── FIX: remove .hidden so callsContent iframe is actually visible ──
-                    var _bannerCC = document.getElementById('callsContent');
-                    if (_bannerCC) _bannerCC.classList.remove('hidden');
-                    const callsIframe = document.getElementById('callsIframe');
-                    if (callsIframe && callsIframe.contentWindow) {
-                        callsIframe.contentWindow.postMessage({
-                            type: 'AUTO_ACCEPT_CALL',
-                            payload: pendingIncomingCall
-                        }, '*');
-                    } else {
-                        // Fallback: iframe not ready, navigate then send
-                        navigateToPage('calls');
-                        setTimeout(() => {
-                            const _f = document.getElementById('callsIframe');
-                            if (_f && _f.contentWindow) {
-                                _f.contentWindow.postMessage({ type: 'AUTO_ACCEPT_CALL', payload: pendingIncomingCall }, '*');
-                            }
-                        }, 800);
-                    }
-                    hideBanner();
-                }
-            };
-            
-            declineBtn.onclick = async () => {
-                if (pendingIncomingCall) {
-                    const callId = pendingIncomingCall.callId || pendingIncomingCall.id;
-                    if (callId) {
-                        const baseUrl = window.__getApiBase();
-                        const token = localStorage.getItem('authToken') || localStorage.getItem('token');
-                        try {
-                            await fetch(`${baseUrl}/calls/${callId}/reject`, {
-                                method: 'POST',
-                                headers: { 'Authorization': `Bearer ${token}` }
-                            });
-                        } catch(e) {}
-                    }
-                    hideBanner();
-                } else {
-                    hideBanner();
-                }
-            };
-            
-            window.showIncomingCallBanner = (callData) => {
-                // Dedup: ignore if same call already being shown
-                if (pendingIncomingCall && (pendingIncomingCall.callId || pendingIncomingCall.id) === (callData.callId || callData.id)) return;
-                pendingIncomingCall = callData;
-                const nameEl = document.getElementById('callerName');
-                if (nameEl) nameEl.innerText = callData.callerName || callData.fromUserName || 'Someone';
-
-                const _appVisible = document.visibilityState === 'visible' && !document.hidden;
-                const _onCallsPage = (window.__currentPage === 'calls');
-                // ── FIX: Always tag the receiver's current page, even when backgrounded,
-                // so calls-core.js knows where to navigate back to after the call ends.
-                callData._receiverReturnTo = window.__currentPage || 'messages';
-                // FIX (call-end return navigation — receiver side): also carry
-                // the SPECIFIC chat that was open (if any), not just the page,
-                // so ending the call can return to that exact conversation.
-                if (window.__currentPage === 'messages' && window.__lastOpenChatUserId) {
-                    callData._receiverReturnChatUserId = window.__lastOpenChatUserId;
-                    callData._receiverReturnChatName = window.__lastOpenChatName;
-                }
-
-                // Hidden / backgrounded app: show only the OS notification, never force-open the call page.
-                if (!_appVisible) {
-                    if (window.Notification && Notification.permission === 'granted') {
-                        try {
-                            new Notification(callData.callerName || 'Incoming call', {
-                                body: `${(callData.callType || 'voice').toString().replace(/^./, c => c.toUpperCase())} call`,
-                                silent: false,
-                                tag: `incoming-call-${callData.callId || callData.id || Date.now()}`
-                            });
-                        } catch (_) {}
-                    }
-                } else {
-                    // Visible / inside app: mark call-screen-active but do NOT navigate to
-                    // 'calls' page — that would reload the iframe and lose call state.
-                    // The calls iframe is always loaded in the background and has already
-                    // received the incoming call event.
-                    document.body.classList.add('call-screen-active');
-                    window.__activeCallInProgress = true;
-                    // FIX: Set __callActive = true so _onIframeVisible in calls.html
-                    // sees a call in progress and does NOT reset to idle screen.
-                    window.__callActive = true;
-                    window.__callInitiatedAt = Date.now(); // used by 5s recency guard
-                    window.__callDispatchedAt = Date.now(); // suppress stale CALL_FORCE_ENDED echoes for 15s
-                    window.__lastActivePage = window.__currentPage || 'messages';
-                    // ── FIX: Tag the receiver's current page onto callData so calls-core.js
-                    // (running in the iframe) can store it as pendingCallReturnTo. Without
-                    // this, the receiver always returns to 'messages' after the call ends,
-                    // regardless of where they actually were (friends, group, calls, etc).
-                    callData._receiverReturnTo = window.__currentPage || 'messages';
-                // FIX (call-end return navigation — receiver side): also carry
-                // the SPECIFIC chat that was open (if any), not just the page,
-                // so ending the call can return to that exact conversation.
-                if (window.__currentPage === 'messages' && window.__lastOpenChatUserId) {
-                    callData._receiverReturnChatUserId = window.__lastOpenChatUserId;
-                    callData._receiverReturnChatName = window.__lastOpenChatName;
-                }
-                    banner.style.display = 'none';
-                    // ── FIX: callsContent visibility — .hidden sets visibility:hidden
-                    // which hides the iframe even with call-screen-active fullscreen CSS.
-                    // Must make the callsContent actually visible for the receiver's
-                    // incoming call screen to show.
-                    var _incCC = document.getElementById('callsContent');
-                    if (_incCC) _incCC.classList.remove('hidden');
-                }
-
-                // ── RELIABLE DELIVERY: wait for iframe to signal it's ready ──
-                // call_patches.js (or calls-ui.js) posts CALLS_IFRAME_READY when loaded.
-                // If already ready, deliver after 100ms settle time.
-                // If not ready within 1500ms, deliver anyway as fallback.
-                let _delivered = false;
-                let _fallbackTimer = null;
-                function _onIframeReady(evt) {
-                    if (evt.data && evt.data.type === 'CALLS_IFRAME_READY') {
-                        setTimeout(_deliverToIframe, 80);
-                    }
-                }
-                function _deliverToIframe() {
-                    if (_delivered) return;
-                    _delivered = true;
-                    // FIX-LEAK: tear down the ready-listener here, unconditionally, so it
-                    // is removed whichever path triggered delivery (ready signal OR the
-                    // fallback timer). Previously it was only removed inside _onIframeReady,
-                    // so when the fallback fired first the listener stayed attached forever —
-                    // a stale one accumulated per incoming call, and all of them fired together
-                    // (re-posting old callData) the next time CALLS_IFRAME_READY was seen.
-                    clearTimeout(_fallbackTimer);
-                    window.removeEventListener('message', _onIframeReady);
-                    const callsIframe = document.getElementById('callsIframe');
-                    if (callsIframe && callsIframe.contentWindow) {
-                        // FIX: Send all variant names — calls.html switch now handles all of them
-                        callsIframe.contentWindow.postMessage(
-                            { type: 'CALL_INCOMING', payload: callData, source: 'banner-bridge' }, '*'
-                        );
-                        callsIframe.contentWindow.postMessage(
-                            { type: 'INCOMING_CALL', payload: callData, source: 'banner-bridge' }, '*'
-                        );
-                        callsIframe.contentWindow.postMessage(
-                            { type: 'call:incoming', payload: callData, source: 'banner-bridge' }, '*'
-                        );
-                    }
-                }
-
-                if (window.__callsIframeReady) {
-                    setTimeout(_deliverToIframe, 100);
-                } else {
-                    // Listen for the ready signal
-                    _fallbackTimer = setTimeout(_deliverToIframe, 1500);
-                    window.addEventListener('message', _onIframeReady);
-                }
-
-                // Background notification should self-clear from pending state if unanswered.
-                setTimeout(() => {
-                    if (pendingIncomingCall === callData && !_appVisible) hideBanner();
-                }, 180000);
-            };
-        }
-
-        // ======================================================================
         // CENTRALIZED EVENT DISPATCHER
         // ======================================================================
         function dispatchEventToModules(event) {
@@ -2810,26 +2369,6 @@
             }
         }
         
-        function sendFriendsToCallsIframe(friends) {
-            const iframe = document.getElementById('callsIframe');
-            if (iframe && iframe.contentWindow) {
-                const friendsToSend = friends || (typeof cachedFriendsList !== 'undefined' ? cachedFriendsList : []);
-                const formattedFriends = friendsToSend.map(friend => ({
-                    id: friend.id || friend.userId,
-                    name: friend.displayName || friend.username || friend.name || 'User',
-                    displayName: friend.displayName || friend.username || friend.name,
-                    username: friend.username,
-                    avatar: normalizeAvatarUrl(friend.avatar || friend.photoURL, friend.displayName || friend.username || friend.name || 'User', '#2563eb'),
-                    online: friend.online || false,
-                    status: friend.status || (friend.online ? 'online' : 'offline')
-                }));
-                iframe.contentWindow.postMessage({
-                    type: 'CONTACTS_UPDATE',
-                    payload: { contacts: formattedFriends, timestamp: Date.now() }
-                }, '*');
-            }
-        }
-        
         function sendFriendsToToolsIframe(friends) {
             const iframe = document.getElementById('toolsIframe');
             if (iframe && iframe.contentWindow) {
@@ -2852,7 +2391,6 @@
             group:    { icon: 'fa-users', title: 'Groups', subtitle: 'Communities stay responsive with local-first hydration.' },
             groups:   { icon: 'fa-users', title: 'Groups', subtitle: 'Communities stay responsive with local-first hydration.' },
             friends:  { icon: 'fa-user-friends', title: 'Friends', subtitle: 'Contacts, requests, and discovery live in one place.' },
-            calls:    { icon: 'fa-phone', title: 'Calls', subtitle: 'Recent calls and live call actions are coordinated here.' },
             settings: { icon: 'fa-cog', title: 'Settings', subtitle: 'Profile, privacy, and preferences for the whole app.' },
             tools:    { icon: 'fa-tools', title: 'Tools', subtitle: 'Utilities and marketplace actions for power users.' },
             games:    { icon: 'fa-gamepad', title: 'Games', subtitle: 'Play pool and more — unlimited stages, real physics.' }
@@ -2885,9 +2423,6 @@
             // directly). Left empty like tools/games — friend.html's search
             // bar covers finding people, and #friendsHeaderNav covers the tabs.
             friends: [],
-            calls: [
-                { btnId: 'newCallBtn', icon: 'fa-phone-plus', title: 'New call' }
-            ],
             group: [
                 { btnId: 'createGroupBtn', icon: 'fa-users', title: 'Create group' }
             ],
@@ -3023,16 +2558,6 @@
             }
         }
 
-        function notifyCallsCloseScreen() {
-            const callsIframe = document.getElementById('callsIframe');
-            if (callsIframe && callsIframe.contentWindow) {
-                callsIframe.contentWindow.postMessage({
-                    type: 'CLOSE_CALL_SCREEN',
-                    timestamp: Date.now()
-                }, '*');
-            }
-        }
-
         function getReturnPage() {
             // PHASE15 FIX: Use navigation history stack if available
             if (window.__navHistory && window.__navHistory.length > 0) {
@@ -3120,18 +2645,6 @@
                 return true;
             }
 
-            if (document.body.classList.contains('call-screen-active') || window.__activeCallInProgress) {
-                notifyCallsCloseScreen();
-                document.body.classList.remove('call-screen-active');
-                window.__activeCallInProgress = false;
-                const returnPage = getReturnPage();
-                if (window.__currentPage !== returnPage) {
-                    navigateToPage(returnPage);
-                }
-                logProcessStatus('back-navigation', true, 'closed-call-screen');
-                return true;
-            }
-
             // FIX (BACK-STACK-EXACT-RESTORE, Tools module): Tools' sub-tabs
             // (home/categories/cart/wishlist/account) are parent-driven via
             // toolsNavTo()/TOOLS_NAV, not a local panel back-nav.js already
@@ -3198,10 +2711,10 @@
                 console.warn('[Navigation] No page provided to navigateToPage');
                 return;
             }
-            // ── FAB visibility: show only on messages + calls modules ──
+            // ── FAB visibility: show only on the messages module ──
             var _fab = document.getElementById('fabAddFriend');
             if (_fab) {
-                var _fabPages = ['messages', 'calls'];
+                var _fabPages = ['messages'];
                 _fab.style.display = _fabPages.includes(page) ? 'flex' : 'none';
             }
             // FIX: clear the mirrored friend-request badge once the user
@@ -3252,18 +2765,6 @@
                 window.__chatHdrHide();
             }
 
-            // Handle mobile panel states - CRITICAL FIX
-            // NEVER remove call-screen-active while a call is in progress.
-            // __activeCallInProgress is set by CALL_SCREEN_ACTIVE messages from the iframe.
-            if (page !== 'calls') {
-                if (!window.__activeCallInProgress) {
-                    document.body.classList.remove('call-screen-active');
-                }
-            }
-            // When navigating TO calls page, always ensure callsContent is fully visible
-            if (page === 'calls' && window.__activeCallInProgress) {
-                document.body.classList.add('call-screen-active');
-            }
 
             // FIX: Clean up group/status panel classes when navigating away from those modules
             if (page !== 'group') {
@@ -3368,7 +2869,6 @@
                 }
             }
 
-            if (page === 'calls')    sendFriendsToCallsIframe();
             if (page === 'messages') sendFriendsToMessagesIframe();
             if (page === 'group')    sendFriendsToGroupIframe();
             if (page === 'status')   sendFriendsToStatusIframe();
@@ -3647,7 +3147,7 @@
         // the login page," never an overlap of old and new screens.
         function _teardownAllPanelsForLogout() {
             try {
-                document.body.classList.remove('chat-panel-active', 'group-panel-active', 'status-panel-active', 'call-screen-active');
+                document.body.classList.remove('chat-panel-active', 'group-panel-active', 'status-panel-active');
                 document.querySelectorAll('.iframe-container').forEach(function (el) {
                     el.classList.add('hidden');
                     el.style.setProperty('display', 'none', 'important');
@@ -3848,11 +3348,7 @@
                     // online status), it just no longer has to be the *first*
                     // thing that ever populates the header.
                     var _coInfo = data.payload || {};
-                    // FIX (call-end return navigation — receiver side): remember
-                    // exactly which chat is open, not just that the Messages page
-                    // is active, so an incoming call that interrupts a specific
-                    // conversation can return the receiver to that same
-                    // conversation afterward instead of just the chat list.
+                    // Remember exactly which chat is open, not just that the Messages page is active.
                     if (_coInfo.userId || _coInfo.chatId) {
                         window.__lastOpenChatUserId = _coInfo.userId || _coInfo.chatId;
                         window.__lastOpenChatName = _coInfo.name || null;
@@ -3929,137 +3425,19 @@
                     }
                 }
 
-                // ── IN-CALL SCREEN: keep nav hidden while call is live ──
-                // call-screen-active is already set by CALL_SCREEN_ACTIVE above.
-                // CALL_ACCEPTED (in-call) — ensure nav stays hidden on both sides
-                if (data.type === 'CALL_ACCEPTED' || data.type === 'CALL_ANSWERED') {
-                    document.body.classList.add('call-screen-active');
-                }
-
-                // Handle call screen active state - CRITICAL FOR ICON HIDING
-                if (data.type === 'CALL_SCREEN_ACTIVE') {
-                    if (data.payload && data.payload.active === true) {
-                        window.__activeCallInProgress = true;
-                        document.body.classList.add('call-screen-active');
-                        // ── FIX: callsContent must NOT have .hidden when a call is active.
-                        var _cc = document.getElementById('callsContent');
-                        if (_cc) {
-                            _cc.classList.remove('hidden');
-                            _cc.style.setProperty('position', 'fixed', 'important');
-                            _cc.style.setProperty('top', '0', 'important');
-                            _cc.style.setProperty('left', '0', 'important');
-                            _cc.style.setProperty('right', '0', 'important');
-                            _cc.style.setProperty('bottom', '0', 'important');
-                            _cc.style.setProperty('z-index', '99999', 'important');
-                            _cc.style.setProperty('display', 'block', 'important');
-                            _cc.style.setProperty('visibility', 'visible', 'important');
-                        }
-                        logProcessStatus('call-screen', true, 'active');
-                    } else {
-                        // ── Guard: if a call was just dispatched within 15s, this inactive
-                        // signal is a stale echo from the iframe resetting after a prior
-                        // CALL_FORCE_ENDED — do NOT remove call-screen-active.
-                        var _sinceDispatchCSA = window.__callDispatchedAt ? Date.now() - window.__callDispatchedAt : 99999;
-                        if (_sinceDispatchCSA < 4000) {
-                            console.warn('[Parent] CALL_SCREEN_ACTIVE(false) ignored — call dispatched only ' + Math.round(_sinceDispatchCSA/1000) + 's ago (stale idle reset)');
-                            if (window._kynDeferStaleCallEvent) window._kynDeferStaleCallEvent(data, 4000 - _sinceDispatchCSA);
-                        } else {
-                            window.__activeCallInProgress = false;
-                            document.body.classList.remove('call-screen-active');
-                            logProcessStatus('call-screen', true, 'inactive');
-                        }
-                    }
-                }
-                
-                                
-                // Handle call termination events from child
-                if (data.type === 'CALL_ENDED' || data.type === 'CALL_FORCE_ENDED' || data.type === 'CALL_REJECTED') {
-                    // ── Guard: ignore stale echoes within 15s of call dispatch ──
-                    var _sinceDispatchCE = window.__callDispatchedAt ? Date.now() - window.__callDispatchedAt : 99999;
-                    if (_sinceDispatchCE < 4000 && data.source !== 'end-btn' && data.source !== 'parent-echo') {
-                        console.warn('[Parent] Early CALL_ENDED/FORCE_ENDED ignored — call dispatched only', Math.round(_sinceDispatchCE/1000)+'s ago');
-                        if (window._kynDeferStaleCallEvent) window._kynDeferStaleCallEvent(data, 4000 - _sinceDispatchCE);
-                        return;
-                    }
-                    hideGlobalBanner();
-                    document.body.classList.remove('call-screen-active');
-                    window.__activeCallInProgress = false;
-                }
-
-                // CALLS_IFRAME_READY handshake - calls iframe signals it is ready to receive CALL_INCOMING
-                if (data.type === 'CALLS_IFRAME_READY') {
-                    window.__callsIframeReady = true;
-                }
-
-                // CALL_ACCEPT / CALL_REJECT forwarded from iframe buttons
-                if (data.type === 'CALL_ACCEPT' && data.payload) {
-                    typeof window._handleCallAcceptFromIframe === 'function' && window._handleCallAcceptFromIframe(data.payload);
-                    typeof hideBanner === 'function' && hideBanner();
-                }
-                if (data.type === 'CALL_REJECT' && data.payload) {
-                    typeof window._handleCallRejectFromIframe === 'function' && window._handleCallRejectFromIframe(data.payload);
-                    typeof hideBanner === 'function' && hideBanner();
-                }
-
-                // ── FIX 1: Echo CALL_ACCEPTED back so CALLER transitions to in-call ──
-                // The receiver's acceptIncomingCallGeneric posts CALL_ACCEPTED to parent.
-                // FIX-CALL1: broadcast to ALL iframes so whatever iframe the caller is in also gets it.
-                if (data.type === 'CALL_ACCEPTED' && data.source !== 'parent-echo' && data.source !== 'ws-bridge' && data.source !== 'parent-accept-broadcast') {
-                    document.querySelectorAll('iframe').forEach(function(f) {
-                        if (f.contentWindow && f.contentWindow !== event.source) {
-                            f.contentWindow.postMessage({
-                                type: 'CALL_ACCEPTED',
-                                payload: data.payload || {},
-                                source: 'parent-accept-broadcast'
-                            }, '*');
-                        }
-                    });
-                    typeof hideBanner === 'function' && hideBanner();
-                    window.__activeCallInProgress = true;
-                    // ── Ensure callsContent is visible for in-call screen ──
-                    var _earlyCC = document.getElementById('callsContent');
-                    if (_earlyCC) _earlyCC.classList.remove('hidden');
-                    document.body.classList.add('call-screen-active');
-                }
-
-                // Do not echo VIDEO_UPGRADE_REQUEST back into the same iframe.
-                // The actual remote upgrade now rides on the WebRTC renegotiation
-                // offer/answer flow; local echoing caused the caller to see their own
-                // "incoming video" notification and mis-render the preview.
-                if (data.type === 'VIDEO_UPGRADE_REQUEST') {
-                    return;
-                }
-
-                // ── FIX 3: When end-btn fires CALL_ENDED, broadcast to ALL other iframes ──
-                // FIX-CALL3: The old code only echoed to callsIframe. When the sender is
-                // in a different iframe (receiver in calls.html), the caller never got it.
-                if (data.type === 'CALL_ENDED' && data.source === 'end-btn') {
-                    document.querySelectorAll('iframe').forEach(function(f) {
-                        if (f.contentWindow && f.contentWindow !== event.source) {
-                            f.contentWindow.postMessage({
-                                type: 'CALL_ENDED',
-                                payload: data.payload || {},
-                                source: 'parent-end-broadcast'
-                            }, '*');
-                        }
-                    });
-                }
             });
         }
         
         document.addEventListener('DOMContentLoaded', function() {
             setupPanelDetection();
             dismissLoadingScreen(0);
-            // NOTE: Only strip chat-panel-active on load — never call-screen-active,
-            // because a call may have already been initiated before DOMContentLoaded fires.
+            // Only strip chat-panel-active on load.
             if (window.innerWidth <= 768) {
                 document.body.classList.remove('chat-panel-active');
             }
         });
         
         window.addEventListener('resize', function() {
-            // NOTE: Never remove call-screen-active on resize — an active call
-            // must keep its fullscreen overlay regardless of viewport width.
             // FIX: this used to unconditionally strip chat-panel-active on any
             // resize while the viewport was desktop-width, on the old assumption
             // that "there's no chat panel on desktop". That assumption is wrong —
@@ -4506,47 +3884,6 @@
             window.__kynCrossContextClaim = _crossContextClaim;
         })();
 
-        // ── FIX (CALL-EVENT-RELAY-CONSOLIDATION): same class of bug as the
-        // message:new relay above, but for call lifecycle events. THREE
-        // independent, uncoordinated paths each deliver the same underlying
-        // call:ended/call:accepted/call:rejected/etc. server event into the
-        // calls iframe: (1) the direct socket listener → _fwdEnded/
-        // _fwdAccepted/_fwdForceEnded in this file, (2) the generic "fan out
-        // ALL call events" block in app.realtime.socket.js's _routeMessage
-        // (which additionally re-sends the SAME event under 3-4 different
-        // type-string aliases — colon form, underscore form, REALTIME_EVENT:
-        // prefix — because different receivers key off different alias
-        // names), and (3) the kyn:* CustomEvent bridge installed below
-        // (_installKynBridge). Because calls-core.part8.js and calls-ui.js
-        // separately register listeners for BOTH the colon form ('call:ended')
-        // and the underscore form ('call_ended') of the same event, a single
-        // real server event could trigger handleCallEnded 3+ times in a row —
-        // confirmed live via console trace (three consecutive "handleCallEnded:
-        // no active call screen visible" warnings for one call end). Racing,
-        // redundant handleCallEnded/handleCallAccepted invocations are what
-        // caused calls to appear to end prematurely ("no session") while still
-        // being set up, and a fresh duplicate call session to spin back up
-        // right after a call was ended.
-        //
-        // window.__kynRelayCallEventOnce(type, payload) is the single gate all
-        // three paths now route through: it claims a (canonicalType + callId)
-        // key and returns true only for the FIRST caller, so the other paths
-        // (and their internal aliases) become safe no-ops instead of duplicate
-        // deliveries. Nothing is deleted — every path still runs — but only one
-        // of them actually reaches the iframe per real event.
-        window.__kynRelayedCallEventKeys = window.__kynRelayedCallEventKeys || new Set();
-        window.__kynRelayCallEventOnce = function (type, payload) {
-            try {
-                const p = (payload && payload.payload) ? payload.payload : (payload || {});
-                const canonical = String(type || '').replace(/_/g, ':');
-                const callId = String(p.callId || p.call_id || p.id || 'none');
-                const key = canonical + ':' + callId;
-                if (window.__kynRelayedCallEventKeys.has(key)) return false; // already delivered by another path
-                window.__kynRelayedCallEventKeys.add(key);
-                setTimeout(function () { window.__kynRelayedCallEventKeys.delete(key); }, 4000);
-                return true;
-            } catch (_) { return true; } // fail open — never block a real call event
-        };
     </script>
     <script>
         (function() {
@@ -4564,11 +3901,9 @@
             function hasOfflineBootCache() {
                 try {
                     const chatCache = JSON.parse(localStorage.getItem('kynecta_chats_cache_v8') || localStorage.getItem('knecta_chats_cache_v8') || 'null');
-                    const callCache = JSON.parse(localStorage.getItem('cached_call_history') || 'null');
                     const friends = JSON.parse(localStorage.getItem('friends') || '[]');
                     return !!(
                         (chatCache && Array.isArray(chatCache.conversations) && chatCache.conversations.length > 0) ||
-                        (callCache && Array.isArray(callCache.calls) && callCache.calls.length > 0) ||
                         (Array.isArray(friends) && friends.length > 0)
                     );
                 } catch (_) {
@@ -4761,8 +4096,7 @@
                 '/status/drafts': '/status/drafts',
                 '/api/status/scheduled': '/status/scheduled',
                 '/status/scheduled': '/status/scheduled',
-                '/api/auth/me': '/auth/me',
-                '/calls/history': '/calls/history'
+                '/api/auth/me': '/auth/me'
             };
 
             function shouldPreferDirectApi(endpoint, method) {
@@ -4780,7 +4114,7 @@
                 // Every module's own friends list should be resolved the
                 // same well-tested way, not just the ones that happened to
                 // already be listed here.
-                return ['/groups', '/status', '/calls', '/tools', '/marketplace', '/friends']
+                return ['/groups', '/status', '/tools', '/marketplace', '/friends']
                     .some(prefix => endpoint === prefix || endpoint.startsWith(prefix + '/'));
             }
 
@@ -5058,7 +4392,6 @@
             }
 
             function broadcastFriendsToAllModules(friends) {
-                sendFriendsToCallsIframe(friends);
                 sendFriendsToMessagesIframe(friends);
                 sendFriendsToGroupIframe(friends);
                 sendFriendsToStatusIframe(friends);
@@ -5172,7 +4505,6 @@
                 }, '*');
                 
                 setTimeout(() => {
-                    if (moduleName === 'calls') sendFriendsToCallsIframe();
                     if (moduleName === 'messages') sendFriendsToMessagesIframe();
                     if (moduleName === 'group') sendFriendsToGroupIframe();
                     if (moduleName === 'status') sendFriendsToStatusIframe();
@@ -5320,106 +4652,6 @@
                 setTimeout(() => requestFriendsFromFriendIframe(), 1000);
             }
 
-            // FIX: Throttle call history refresh — CALL_ENDED echoes create infinite loops
-            // where each iframe CALL_ENDED triggers another broadcast → another refresh.
-            // Allow at most one real API fetch per 8 seconds.
-            let _lastCallHistoryRefresh = 0;
-            let _callHistoryPending = false;
-
-            async function refreshCallHistoryForUser(userId) {
-                const _now = Date.now();
-                if (_now - _lastCallHistoryRefresh < 8000) return;
-                if (_callHistoryPending) return;
-                _lastCallHistoryRefresh = _now;
-                _callHistoryPending = true;
-                const cachedCalls = loadCachedCallHistoryFromStorage();
-                const callsIframe = document.getElementById('callsIframe');
-                if (callsIframe && callsIframe.contentWindow && cachedCalls.length > 0) {
-                    callsIframe.contentWindow.postMessage({
-                        type: 'CALL_HISTORY_UPDATE',
-                        payload: { calls: cachedCalls, loading: false, cached: true, timestamp: Date.now() }
-                    }, '*');
-                }
-                if (!cachedToken) {
-                    return cachedCalls;
-                }
-                try {
-                    // suppressed: [Parent] Refreshing call history
-                    const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:4000/api';
-
-                    if (callsIframe && callsIframe.contentWindow && navigator.onLine) {
-                        callsIframe.contentWindow.postMessage({
-                            type: 'CALL_HISTORY_UPDATE',
-                            payload: { calls: cachedCalls, loading: true, cached: cachedCalls.length > 0, timestamp: Date.now() }
-                        }, '*');
-                    }
-
-                    if (!navigator.onLine) {
-                        return cachedCalls;
-                    }
-
-                    let response = await fetch(`${baseUrl}/calls/history?limit=50`, {
-                        headers: { 'Authorization': `Bearer ${cachedToken}` }
-                    });
-                    
-                    // Handle 404 fallback
-                    if (!response.ok && response.status === 404) {
-                        response = await fetch(`${baseUrl}/calls?limit=50&page=1`, {
-                            headers: { 'Authorization': `Bearer ${cachedToken}` }
-                        });
-                    }
-                    
-                    // Handle 429 rate limiting with exponential backoff
-                    if (!response.ok && response.status === 429) {
-                        console.warn('[Parent] Rate limited (429), retrying with backoff...');
-                        await new Promise(resolve => setTimeout(resolve, 2000)); // 2s delay
-                        response = await fetch(`${baseUrl}/calls/history?limit=50`, {
-                            headers: { 'Authorization': `Bearer ${cachedToken}` }
-                        });
-                        
-                        // Second retry with longer delay if still rate limited
-                        if (!response.ok && response.status === 429) {
-                            console.warn('[Parent] Still rate limited, retrying with longer backoff...');
-                            await new Promise(resolve => setTimeout(resolve, 5000)); // 5s delay
-                            response = await fetch(`${baseUrl}/calls/history?limit=50`, {
-                                headers: { 'Authorization': `Bearer ${cachedToken}` }
-                            });
-                        }
-                    }
-
-                    if (response.ok) {
-                        const data = await response.json();
-                        const calls = data?.data?.calls || data?.calls || [];
-                        // suppressed: [Parent] Loaded call history
-                        if (callsIframe && callsIframe.contentWindow) {
-                            callsIframe.contentWindow.postMessage({
-                                type: 'CALL_HISTORY_UPDATE',
-                                payload: { calls: Array.isArray(calls) ? calls : [], loading: false, timestamp: Date.now() }
-                            }, '*');
-                        }
-                        return Array.isArray(calls) ? calls : [];
-                    } else {
-                        console.warn('[Parent] Failed to load call history:', response.status);
-                        if (callsIframe && callsIframe.contentWindow) {
-                            callsIframe.contentWindow.postMessage({
-                                type: 'CALL_HISTORY_UPDATE',
-                                payload: { calls: cachedCalls, loading: false, error: true, cached: cachedCalls.length > 0, timestamp: Date.now() }
-                            }, '*');
-                        }
-                    }
-                } catch (err) {
-                    console.warn('[Parent] Failed to refresh call history:', err);
-                    if (callsIframe && callsIframe.contentWindow) {
-                        callsIframe.contentWindow.postMessage({
-                            type: 'CALL_HISTORY_UPDATE',
-                            payload: { calls: cachedCalls, loading: false, error: true, cached: cachedCalls.length > 0, timestamp: Date.now() }
-                        }, '*');
-                    }
-                } finally {
-                    _callHistoryPending = false;
-                }
-                return cachedCalls;
-            }
 
             async function refreshAuthToken() {
                 try {
@@ -5483,135 +4715,6 @@
             // ======================================================================
             // MAIN MESSAGE HANDLER - WITH WS-BRIDGE SOURCE DETECTION
             // ======================================================================
-            // FIX-CALL-RETURN-ALL-PATHS: the exact-return-to-origin logic below used to
-            // live ONLY inline inside the CALL_ENDED handler (as a couple of duplicated
-            // IIFEs). That meant a normal hangup restored nav icons + returned each user
-            // to exactly where they were, but CALL_CANCELLED, CALL_REJECTED and
-            // CALL_FORCE_ENDED — which fire when a call is cancelled before pickup or
-            // declined — only dismissed the banner and never navigated back, leaving nav
-            // icons hidden (call-screen-active removed, but the origin screen/iframe was
-            // never re-shown) and the user stuck on the calls screen. Extracted here so
-            // ALL termination paths restore the exact same way.
-            // FIX (nav-icons/sidebar-stuck-hidden): __dispatchCallToIframe and the
-            // CALL_SCREEN_ACTIVE(true) handler both force #callsContent into a
-            // fullscreen fixed overlay (position:fixed, inset:0, z-index:99999)
-            // via inline !important styles so the call UI can cover the whole
-            // viewport. Those inline styles were never removed when the call
-            // ended — so even after the code below correctly navigated back to
-            // the right module, callsContent (by then just showing the calls
-            // module's own idle screen underneath) stayed pinned on top of
-            // everything at z-index 99999, permanently covering #globalHeader/
-            // #permanentSidebar and .mobile-nav-bar no matter which page was
-            // actually restored. Clearing the inline overrides here lets the
-            // normal .iframe-container / .hidden CSS rules (position:fixed;
-            // top:56px;left:60px;z-index:90, or visibility:hidden when not on
-            // the calls page) take back over.
-            function _kynResetCallsContentOverlay() {
-                const _cc = document.getElementById('callsContent');
-                if (_cc) {
-                    ['position','top','left','right','bottom','z-index','display','visibility','pointer-events'].forEach(p => _cc.style.removeProperty(p));
-                    if (window.__currentPage !== 'calls') _cc.classList.add('hidden');
-                }
-            }
-
-            // FIX (return-to-wrong-module): accepts an optional override —
-            // {returnTo, chatUserId, userName} — sourced from the calls
-            // iframe's OWN tracked origin (window.__callOriginReturnTo /
-            // __pendingCallReturnTo, populated correctly for BOTH the caller
-            // and the receiver — see calls-ui.js). That value is fresher and
-            // more reliable than this parent's independent ctx/lastActivePage
-            // guess, which is a second, separate tracking system that can
-            // disagree with the iframe's and was the root cause of both sides
-            // landing back on the calls idle screen instead of their real
-            // origin. Prefer the override when supplied; fall back to the
-            // parent's own tracking otherwise.
-            function _kynReturnFromCallToOrigin(override) {
-                const _ceNow = Date.now();
-                if (window.__callEndedNavAt && (_ceNow - window.__callEndedNavAt) < 3000) return; // debounce
-                window.__callEndedNavAt = _ceNow;
-                setTimeout(() => { window.__callEndedNavAt = 0; }, 4000);
-                let _ctx = window.__callReturnContext;
-                if (!_ctx) { try { const _s = sessionStorage.getItem('call_return_ctx'); if (_s) _ctx = JSON.parse(_s); } catch(e) {} }
-                const _returnTo = (override && override.returnTo) || (_ctx && _ctx.returnTo) || window.__lastActivePage || 'messages';
-                if (override) { if (!_ctx) _ctx = {}; if (override.chatUserId) _ctx.chatUserId = _ctx.chatUserId || override.chatUserId; if (override.userName) _ctx.userName = _ctx.userName || override.userName; }
-                window.__callReturnContext = null;
-                window.__moduleSessionDispatchCache = {};
-                try { sessionStorage.removeItem('call_return_ctx'); } catch(e) {}
-                _kynResetCallsContentOverlay();
-                if (_returnTo === 'group') {
-                    navigateToPage('group');
-                    const _gf = document.getElementById('groupIframe');
-                    if (_gf && _gf.contentWindow) setTimeout(() => _gf.contentWindow.postMessage({ type: 'RETURN_FROM_CALL', payload: { returnFromCall: true, groupId: _ctx && _ctx.groupId, timestamp: Date.now() }, source: 'parent-frame' }, '*'), 300);
-                } else if (_returnTo === 'friends') {
-                    navigateToPage('friends');
-                    const _ff = document.getElementById('friendsIframe');
-                    if (_ff && _ff.contentWindow) setTimeout(() => _ff.contentWindow.postMessage({ type: 'RETURN_FROM_CALL', payload: { returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*'), 300);
-                } else if (_returnTo === 'messages') {
-                    const _naChatUserId = (_ctx && _ctx.chatUserId) || window.__lastOpenChatUserId;
-                    const _naChatUserName = (_ctx && _ctx.userName) || window.__lastOpenChatName;
-                    if (_naChatUserId) _veilMessagesUntilChatOpen();
-                    navigateToPage('messages');
-                    // _ctx.chatUserId only exists for the call's initiator. Fall back to the
-                    // last chat this parent frame saw opened (captured from CHAT_OPENED) for
-                    // the receiver's case — so the receiver also lands exactly where they were.
-                    if (_naChatUserId) {
-                        const _mf = document.getElementById('messagesIframe');
-                        if (_mf && _mf.contentWindow) setTimeout(() => { _mf.contentWindow.postMessage({ type: 'OPEN_CHAT_WITH_USER', payload: { userId: _naChatUserId, userName: _naChatUserName || 'User', returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*'); document.body.classList.add('chat-panel-active'); }, 300);
-                    } else {
-                        document.body.classList.remove('chat-panel-active');
-                    }
-                } else if (_returnTo && _returnTo !== 'calls') {
-                    navigateToPage(_returnTo);
-                }
-                // ── FIX: explicitly restore nav icon visibility. Removing
-                // call-screen-active alone relies on CSS cascade; on some paths a
-                // stale inline opacity/pointer-events (set by other call-UI code
-                // while the call screen was up) survives the class removal.
-                clearTimeout(window.__navHideWatchdog);
-                document.querySelectorAll('.nav-icon, .mobile-nav-icon, .sidebar-nav .nav-item').forEach(el => { el.style.opacity = ''; el.style.pointerEvents = ''; });
-            }
-
-            // FIX-CALL-STUCK-WATCHDOG: this app has many different event-name
-            // variants for a call ending (CALL_CANCELLED, CALL_REJECTED,
-            // CALL_ENDED, CALL_FORCE_ENDED, CALL_MISSED, CALL_NO_ANSWER,
-            // ws-bridge snake_case aliases of all of the above...), each
-            // reachable from a different trigger (local button vs remote
-            // event vs a ring timing out). Rather than assume every single
-            // path funnels through one of the handlers above, this checks
-            // for the actual stuck STATE every couple seconds — call-screen-
-            // active still set on body, but __activeCallInProgress (already
-            // reliably cleared to false by every termination handler in this
-            // file) says no call is actually running — and self-corrects
-            // regardless of which specific event was supposed to fire.
-            setInterval(() => {
-                if (document.body.classList.contains('call-screen-active') && !window.__activeCallInProgress) {
-                    _chatLog('[Parent] Watchdog: call-screen-active stuck with no active call — force-restoring nav');
-                    document.body.classList.remove('call-screen-active');
-                    _kynResetCallsContentOverlay();
-                    _kynReturnFromCallToOrigin();
-                }
-            }, 1500);
-
-            // FIX-NAV-STUCK: several guards below suppress CALL_ENDED / CALL_FORCE_ENDED /
-            // CALL_SCREEN_ACTIVE(false) when they land within __callDispatchedAt's
-            // anti-echo window (protects a freshly-started call from a trailing signal
-            // left over from the PREVIOUS call). That's correct when it really is a
-            // stale echo — but when the signal is genuine (e.g. the call is legitimately
-            // very short: instant decline/cancel, or just signaling latency), the event
-            // was being dropped with no fallback, so nothing ever cleared
-            // 'call-screen-active' / __activeCallInProgress — leaving both sidebar/bottom
-            // nav hidden and the caller/receiver stuck on the call screen indefinitely.
-            // Instead of dropping it, re-deliver the same message once the suppression
-            // window has passed. A one-shot flag prevents this from ever looping.
-            function _kynDeferStaleCallEvent(data, remainingMs) {
-                if (data && data.__staleRetried) return; // already retried once — don't loop
-                var _redelivered = Object.assign({}, data, { __staleRetried: true });
-                setTimeout(function() {
-                    window.postMessage(_redelivered, window.location.origin);
-                }, Math.max(50, remainingMs) + 50);
-            }
-            window._kynDeferStaleCallEvent = _kynDeferStaleCallEvent;
-
             window.addEventListener('message', async function(event) {
                 if (!isTrustedOrigin(event.origin)) return;
 
@@ -5772,656 +4875,6 @@
                     }, { async: true });
                 }
 
-                // ==================================================================
-                // CALL ENDED HANDLER - ONLY POST TO API IF SOURCE IS NOT 'ws-bridge'
-                // ==================================================================
-                if (data.type === 'CALL_ENDED' && data.source !== 'ws-bridge') {
-                    // FIX: Ignore echoes that the parent itself broadcast — iframes send them
-                    // back to parent, which would re-broadcast → infinite loop of refreshes.
-                    if (data.source === 'parent-end-broadcast' || data.source === 'parent-ws-broadcast' || data.source === 'parent-accept-broadcast') {
-                        return;
-                    }
-                    const callId = data.payload?.callId || data.callId;
-                    // ── Guard: ignore stale CALL_ENDED echoes within 15s of call dispatch,
-                    // UNLESS this came from the end-btn (user deliberately ended the call).
-                    var _sinceDispatchWS = window.__callDispatchedAt ? Date.now() - window.__callDispatchedAt : 99999;
-                    if (_sinceDispatchWS < 4000 && data.source !== 'end-btn') {
-                        console.warn('[Parent] CALL_ENDED (non-ws) ignored — call dispatched only', Math.round(_sinceDispatchWS/1000)+'s ago (stale echo)');
-                        _kynDeferStaleCallEvent(data, 4000 - _sinceDispatchWS);
-                        return;
-                    }
-                    if (callId) {
-                        const baseUrl = window.__getApiBase();
-                        const token = localStorage.getItem('authToken') || localStorage.getItem('token') || cachedToken;
-                        try {
-                            await fetch(`${baseUrl}/calls/${callId}/end`, {
-                                method: 'POST',
-                                headers: { 'Authorization': `Bearer ${token}` }
-                            });
-                            _chatLog('[Parent] Call ended via API (non-ws source)');
-                        } catch(e) { console.warn('[Parent] Failed to POST /calls/end:', e); }
-
-                        // FIX-CALLID-MISMATCH-ROOT-CAUSE: the REST /calls/:id/end route above
-                        // only notifies the *remote* participant when a matching row exists in
-                        // the Calls DB table (id: UUID). Direct calls started via the socket
-                        // 'call:initiate' path (CallSignalingService, in-memory, hex callId like
-                        // call_<timestamp>_<random>) never get a DB row, so that POST silently
-                        // no-ops server-side and the remote party never receives ANY end signal
-                        // for the vast majority of calls — leaving their screen dark and their
-                        // nav icons hidden forever, since the icon-restore code only runs after
-                        // handleCallEnded's callId match succeeds, and it never even fires.
-                        // CallSignalingService already has a complete, correctly-ID'd socket
-                        // 'call:end' handler (broadcasts 'call:ended' with this same hex callId
-                        // to every other participant) — the frontend just never called it. This
-                        // sends the call-end over the same channel the call was established on,
-                        // so the remote party gets a callId that actually matches their
-                        // UIState.activeCallId instead of nothing (or, on calls that DO have a
-                        // stale/unrelated DB row, a foreign UUID).
-                        try {
-                            if (window.wsService && typeof window.wsService.emit === 'function') {
-                                window.wsService.emit('call:end', { callId, reason: data.payload?.reason || 'ended' });
-                            }
-                        } catch (e) { console.warn('[Parent] Failed to emit call:end over socket:', e); }
-                    }
-                    // ── CRITICAL FIX: Broadcast CALL_ENDED to ALL iframes so
-                    // the remote side (caller or receiver) also resets when
-                    // the other party clicks End Call. Without this only the
-                    // person who pressed End sees the screen close.
-                    document.querySelectorAll('iframe').forEach(f => {
-                        if (f.contentWindow && f.contentWindow !== event.source) {
-                            f.contentWindow.postMessage({
-                                type: 'CALL_ENDED',
-                                payload: { callId, reason: 'ended', status: 'ended' },
-                                source: 'parent-end-broadcast'
-                            }, '*');
-                        }
-                    });
-                    hideGlobalBanner();
-                    document.body.classList.remove('call-screen-active');
-                    window.__activeCallInProgress = false;
-                    await refreshCallHistoryForUser(cachedUserId);
-                    // ── Navigate back to origin page after CALL_ENDED (non-ws) ──
-                    // FIX-CONSOLIDATE: this used to be its own copy-pasted IIFE that had
-                    // drifted from _kynReturnFromCallToOrigin() (missing its nav-icon
-                    // opacity/pointer-events restoration), which was exactly the kind of
-                    // "different behavior depending on which path ended the call" bug
-                    // this app has struggled with. Route through the one shared function.
-                    _kynReturnFromCallToOrigin();
-                    return;
-                }
-                
-                // Handle ws-bridge sourced events - dismiss banner but DON'T POST to /calls/:id/end
-                if (data.type === 'CALL_ENDED' && data.source === 'ws-bridge') {
-                    _chatLog('[Parent] CALL_ENDED from ws-bridge - broadcasting to all iframes');
-                    hideGlobalBanner();
-                    document.body.classList.remove('call-screen-active');
-                    window.__activeCallInProgress = false;
-                    // Broadcast to all iframes (ws-bridge re-entry from WS event)
-                    document.querySelectorAll('iframe').forEach(f => {
-                        if (f.contentWindow) {
-                            f.contentWindow.postMessage({
-                                type: 'CALL_ENDED',
-                                payload: data.payload || {},
-                                source: 'parent-ws-broadcast'
-                            }, '*');
-                        }
-                    });
-                    await refreshCallHistoryForUser(cachedUserId);
-                    // ── ws-bridge CALL_ENDED: also navigate back ──────────────────
-                    // FIX-CONSOLIDATE: same drift/duplication problem as the non-ws
-                    // CALL_ENDED path above — route through the one shared function.
-                    _kynReturnFromCallToOrigin();
-                    return;
-                }
-                
-                // ==================================================================
-                // CALL ANSWERED HANDLER
-                // ==================================================================
-                if (data.type === 'CALL_ANSWERED' || data.type === 'CALL_ACCEPTED') {
-                    _chatLog('[Parent] Call answered - dismissing banner, broadcasting CALL_ACCEPTED to ALL iframes');
-                    hideGlobalBanner();
-                    window.__activeCallInProgress = true;
-                    document.body.classList.add('call-screen-active');
-                    // ── Remove .hidden from callsContent so the screen is visible ──
-                    var _ansCC = document.getElementById('callsContent');
-                    if (_ansCC) _ansCC.classList.remove('hidden');
-                    // Broadcast CALL_ACCEPTED to ALL iframes — both caller and receiver
-                    // must transition to in-call. Do NOT filter by event.source here:
-                    // both sides live in the same calls iframe instance.
-                    const _acceptPayload = data.payload || {};
-                    document.querySelectorAll('iframe').forEach(f => {
-                        if (f.contentWindow) {
-                            f.contentWindow.postMessage({
-                                type: 'CALL_ACCEPTED',
-                                payload: _acceptPayload,
-                                source: 'parent-accept-broadcast'
-                            }, '*');
-                        }
-                    });
-                    return;
-                }
-                
-                // ==================================================================
-                // CALL REJECTED HANDLER
-                // ==================================================================
-                if (data.type === 'CALL_REJECTED') {
-                    _chatLog('[Parent] Call rejected - dismissing banner');
-                    hideGlobalBanner();
-                    document.body.classList.remove('call-screen-active');
-                    window.__activeCallInProgress = false;
-                    _kynReturnFromCallToOrigin();
-                    return;
-                }
-                
-                // ==================================================================
-                // CALL FORCE ENDED HANDLER - unified
-                // ==================================================================
-                function handleForceEnded(callData, source) {
-                    _chatLog('[Parent] Force ended call - dismissing banner, source:', source);
-                    hideGlobalBanner();
-                    document.body.classList.remove('call-screen-active');
-                    window.__activeCallInProgress = false;
-                    refreshCallHistoryForUser(cachedUserId);
-                    _kynReturnFromCallToOrigin();
-                }
-                
-                if (data.type === 'CALL_FORCE_ENDED') {
-                    // ── GUARD: stale WS echoes arrive within seconds of call:initiate.
-                    // If we dispatched a call less than 15s ago, this is a ghost signal
-                    // from a previous session — ignore it so the new call isn't killed.
-                    var _sinceDispatchFE = window.__callDispatchedAt ? Date.now() - window.__callDispatchedAt : 99999;
-                    if (_sinceDispatchFE < 4000) {
-                        console.warn('[Parent] CALL_FORCE_ENDED ignored — call dispatched only', Math.round(_sinceDispatchFE/1000)+'s ago (stale echo)');
-                        _kynDeferStaleCallEvent(data, 4000 - _sinceDispatchFE);
-                        return;
-                    }
-                    handleForceEnded(data.payload, data.source);
-                    return;
-                }
-                
-                if (data.type === 'call:force_end' || data.type === 'call_force_ended') {
-                    // ── Same stale-echo guard for alias event names ──
-                    var _sinceDispatchFE2 = window.__callDispatchedAt ? Date.now() - window.__callDispatchedAt : 99999;
-                    if (_sinceDispatchFE2 < 4000) {
-                        console.warn('[Parent] call_force_ended alias ignored — call dispatched only', Math.round(_sinceDispatchFE2/1000)+'s ago (stale echo)');
-                        _kynDeferStaleCallEvent(data, 4000 - _sinceDispatchFE2);
-                        return;
-                    }
-                    _chatLog('[Parent] Force end alias received:', data.type);
-                    handleForceEnded(data.payload, 'alias');
-                    return;
-                }
-                
-                // ==================================================================
-                // CALL NAVIGATION HANDLER - CRITICAL FIX FOR CALL SCREEN
-                // ==================================================================
-                if (data.type === 'NAVIGATE_TO_CALLS_FOR_CALL') {
-                    _chatLog('[Parent] Navigation request for call:', data.payload);
-                    
-                    // CRITICAL: Set __activeCallInProgress BEFORE navigating
-                    window.__activeCallInProgress = true;
-                    window.__callDispatchedAt = Date.now();
-                    document.body.classList.add('call-screen-active');
-
-                    // Navigate to calls page so the iframe becomes visible
-                    navigateToPage('calls');
-
-                    // ── FIX: ensure callsContent is NOT hidden after navigation ──
-                    var _navCC = document.getElementById('callsContent');
-                    if (_navCC) _navCC.classList.remove('hidden');
-                    
-                    _chatLog('[Parent] callsContent visible:', document.getElementById('callsContent')?.className);
-                    return;
-                }
-                
-                // ==================================================================
-                // CALL CANCELLED HANDLER
-                // ==================================================================
-                if (data.type === 'CALL_CANCELLED' || data.type === 'call:cancelled') {
-                    _chatLog('[Parent] Call cancelled - dismissing banner');
-                    hideGlobalBanner();
-                    document.body.classList.remove('call-screen-active');
-                    window.__activeCallInProgress = false;
-                    _kynReturnFromCallToOrigin();
-                    return;
-                }
-
-                // ==================================================================
-                // CALL INCOMING HANDLER - Show on ALL pages (including calls page)
-                // ==================================================================
-                if (data.type === 'call:incoming' || data.type === 'CALL_INCOMING' ||
-                    data.type === 'incoming_call' || data.type === 'call_incoming') {
-                    const raw = data.payload || data;
-                    // ── Normalise payload ───────────────────────────────────────
-                    const callData = {
-                        ...raw,
-                        callerName:   raw.callerName   || (raw.caller && raw.caller.username) || raw.fromUserName || 'Unknown',
-                        callerAvatar: raw.callerAvatar || (raw.caller && raw.caller.avatar)   || null,
-                        callType:     raw.callType     || raw.type || 'voice',
-                    };
-                    _chatLog('[Parent] 📞 CALL_INCOMING postMessage — callerName:', callData.callerName);
-                    // Delegate entirely to showIncomingCallBanner which handles
-                    // navigation, fullscreen, delayed iframe postMessage, and banner
-                    if (window.showIncomingCallBanner) {
-                        window.showIncomingCallBanner(callData);
-                    }
-                    return;
-                }
-
-                // ==================================================================
-                // CALL SCREEN ACTIVE - Control icon visibility
-                // ==================================================================
-                // FIX-CALL-DUPLICATE-STATE-MACHINE: this handler used to be a full
-                // second, independently-written copy of the CALL_SCREEN_ACTIVE
-                // handler that already lives in the FIRST window.addEventListener
-                // ('message', ...) registered above (search for "CRITICAL FOR ICON
-                // HIDING" in this file). Because this file has that many separate
-                // top-level message listeners, BOTH ran on every single
-                // CALL_SCREEN_ACTIVE postMessage — each independently reading and
-                // writing the SAME window.__activeCallInProgress flag and the same
-                // 'call-screen-active' body class, and each with its own copy of
-                // the stale-idle-reset guard. That's the literal cause of the
-                // paired "CALL_SCREEN_ACTIVE(false) ignored" / "...#2 ignored"
-                // console lines, and made "no active call to end" more likely,
-                // since it left two independently-timed copies of the same state
-                // able to disagree with each other and with calls-ui.js's own
-                // UIState.activeCallId. The first listener's handler is now the
-                // single canonical implementation; this one just returns so the
-                // event isn't processed twice.
-                if (data.type === 'CALL_SCREEN_ACTIVE') {
-                    return;
-                }
-
-                // ── CALL_MINIMISED: show slim green "Call in progress" tap-to-return bar ──
-                if (data.type === 'CALL_MINIMISED') {
-                    const peerName = (data.payload && data.payload.peer) || 'User';
-                    let miniBar = document.getElementById('_kynMiniCallBar');
-                    if (!miniBar) {
-                        miniBar = document.createElement('div');
-                        miniBar.id = '_kynMiniCallBar';
-                        miniBar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:8500;background:linear-gradient(90deg,#34c759,#28a745);color:#fff;padding:9px 16px;font-size:13px;font-weight:600;display:none;align-items:center;justify-content:space-between;box-shadow:0 2px 8px rgba(0,0,0,.3);cursor:pointer;';
-                        miniBar.innerHTML = '<div style="display:flex;align-items:center;gap:8px"><i class="fas fa-phone-alt" style="font-size:14px"></i><span id="_kynMiniBarName">Call in progress</span></div><span style="font-size:11px;opacity:.85">Tap to return →</span>';
-                        miniBar.addEventListener('click', () => { navigateToPage('calls'); miniBar.style.display = 'none'; });
-                        document.body.appendChild(miniBar);
-                    }
-                    const nameSpan = document.getElementById('_kynMiniBarName');
-                    if (nameSpan) nameSpan.textContent = 'Call in progress with ' + peerName;
-                    miniBar.style.display = 'flex';
-                    return;
-                }
-
-                // Hide mini bar when call fully ends
-                if (data.type === 'CALL_ENDED' || data.type === 'CALL_FORCE_ENDED' || data.type === 'CALL_REJECTED') {
-                    const miniBar = document.getElementById('_kynMiniCallBar');
-                    if (miniBar) miniBar.style.display = 'none';
-                }
-
-                // ==================================================================
-                // CALL ACCEPT HANDLER - POST /calls/:id/answer (with endpoint fallback)
-                // ==================================================================
-                if (data.type === 'CALL_ACCEPT' || data.type === 'call:accept') {
-                    const callId = data.payload?.callId;
-                    const baseUrl = window.__getApiBase();
-                    const token = localStorage.getItem('authToken') || localStorage.getItem('token') || cachedToken;
-                    let success = false;
-                    let resultData = null;
-                    if (callId) {
-                        // Try multiple endpoint variants — server may use /accept instead of /answer
-                        const endpoints = [
-                            `${baseUrl}/calls/${callId}/answer`,
-                            `${baseUrl}/calls/${callId}/accept`,
-                            `${baseUrl}/calls/accept/${callId}`,
-                            `${baseUrl}/calls/${callId}/respond`
-                        ];
-                        for (const endpoint of endpoints) {
-                            try {
-                                const res = await fetch(endpoint, {
-                                    method: 'POST',
-                                    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ accepted: true, timestamp: Date.now() })
-                                });
-                                resultData = await res.json().catch(()=>({}));
-                                if (res.ok || res.status === 200) {
-                                    success = true;
-                                    _chatLog('[Parent] Call accept result OK via:', endpoint);
-                                    break;
-                                }
-                                if (res.status !== 404) break; // Non-404 error — stop trying
-                            } catch(e) { console.warn('[Parent] CALL_ACCEPT error on', endpoint, ':', e.message); }
-                        }
-                        // If all REST endpoints failed, signal via WebSocket directly
-                        if (!success && window.wsService) {
-                            try {
-                                window.wsService.emit('call:accepted', { callId, timestamp: Date.now() });
-                                success = true;
-                                _chatLog('[Parent] Call accept signaled via WebSocket fallback');
-                            } catch(e) {}
-                        }
-                    }
-                    if (event.source) {
-                        event.source.postMessage({
-                            type: 'CALL_ACCEPT_RESULT',
-                            payload: { success, callId, data: resultData, timestamp: Date.now() }
-                        }, '*');
-                    }
-                    hideGlobalBanner();
-                    await refreshCallHistoryForUser(cachedUserId);
-                    return;
-                }
-
-                // ==================================================================
-                // CALL REJECT HANDLER - POST /calls/:id/reject
-                // ==================================================================
-                if (data.type === 'CALL_REJECT' || data.type === 'call:reject') {
-                    const callId = data.payload?.callId;
-                    const baseUrl = window.__getApiBase();
-                    const token = localStorage.getItem('authToken') || localStorage.getItem('token') || cachedToken;
-                    let success = false;
-                    if (callId) {
-                        try {
-                            const res = await fetch(`${baseUrl}/calls/${callId}/reject`, {
-                                method: 'POST',
-                                headers: { 'Authorization': `Bearer ${token}` }
-                            });
-                            success = res.ok;
-                            _chatLog('[Parent] Call reject result:', success);
-                        } catch(e) { console.warn('[Parent] CALL_REJECT error:', e); }
-                    }
-                    if (event.source) {
-                        event.source.postMessage({
-                            type: 'CALL_REJECT_RESULT',
-                            payload: { success, callId, timestamp: Date.now() }
-                        }, '*');
-                    }
-                    hideGlobalBanner();
-                    document.body.classList.remove('call-screen-active');
-                    // FIX (nav-icons-stuck-hidden): reset the flag alongside the
-                    // class — see the matching fix on POST_CALL_RESTORE above for
-                    // why leaving this stale=true breaks the stuck-nav watchdog.
-                    window.__activeCallInProgress = false;
-                    // Broadcast CALL_ENDED to all iframes so the CALLER side resets when declined
-                    const _rCallId = callId;
-                    document.querySelectorAll('iframe').forEach(f => {
-                        if (f.contentWindow) f.contentWindow.postMessage({
-                            type: 'CALL_ENDED',
-                            payload: { callId: _rCallId, reason: 'declined', status: 'declined' },
-                            source: 'parent-reject-broadcast'
-                        }, '*');
-                    });
-                    await refreshCallHistoryForUser(cachedUserId);
-                    return;
-                }
-
-                // ==================================================================
-                // CALL DISPATCH LOGIC
-                // ==================================================================
-                if (!window.__callDispatchLock) window.__callDispatchLock = { ts: 0, userId: null };
-
-                function __isCallDuplicate(userId) {
-                    const lock = window.__callDispatchLock;
-                    return lock.userId === String(userId) && (Date.now() - lock.ts) < 2000;
-                }
-
-                function __dispatchCallToIframe(userId, userName, callType, returnTo, chatUserId, source, extraCtx) {
-                    if (__isCallDuplicate(userId)) {
-                        _chatLog('[Parent] ⏭ Duplicate call dispatch suppressed');
-                        return;
-                    }
-                    window.__callDispatchLock = { ts: Date.now(), userId: String(userId) };
-
-                    // Normalise returnTo aliases
-                    if (returnTo === 'friends-page' || returnTo === 'friend') returnTo = 'friends';
-                    else if (returnTo === 'chat' || returnTo === 'message') returnTo = 'messages';
-                    // If not set, use the current page (so calls from calls module return to calls)
-                    else if (!returnTo || returnTo === 'undefined') {
-                        returnTo = window.__currentPage || window.__lastActivePage || 'calls';
-                    }
-                    // 'calls' is valid — user started from calls module, return there after
-
-                    const ctx = { returnTo, chatUserId: chatUserId || userId, userName, source, ts: Date.now(), ...(extraCtx || {}) };
-                    window.__callReturnContext = ctx;
-                    try { sessionStorage.setItem('call_return_ctx', JSON.stringify(ctx)); } catch(e) {}
-
-                    _chatLog('[Parent] Dispatching call → user=' + userName + '(' + userId + ') type=' + callType + ' returnTo=' + returnTo);
-
-                    // ✅ FIX: Set ALL call flags BEFORE navigation so the iframe's
-                    // IntersectionObserver/_onIframeVisible sees callActive=true and
-                    // does NOT reset to idle. Previously __callActive was set after
-                    // navigateToPage(), causing the outgoing screen to be wiped.
-                    window.__callActive = true;
-                    window.__activeCallInProgress = true;
-                    window.__callDispatchedAt = Date.now();
-                    document.body.classList.add('call-screen-active');
-
-                    // Pre-seed peer info so calling screen can populate instantly
-                    window.__activePeerName   = userName;
-                    window.__activePeerType   = callType;
-                    window.__activePeerAvatar = null;
-
-                    navigateToPage('calls');
-
-                    // ── FIX: ensure callsContent is fully visible with correct positioning
-                    var _callsCC = document.getElementById('callsContent');
-                    if (_callsCC) {
-                        _callsCC.classList.remove('hidden');
-                        _callsCC.style.setProperty('position', 'fixed', 'important');
-                        _callsCC.style.setProperty('top', '0', 'important');
-                        _callsCC.style.setProperty('left', '0', 'important');
-                        _callsCC.style.setProperty('right', '0', 'important');
-                        _callsCC.style.setProperty('bottom', '0', 'important');
-                        _callsCC.style.setProperty('z-index', '99999', 'important');
-                        _callsCC.style.setProperty('display', 'block', 'important');
-                        _callsCC.style.setProperty('visibility', 'visible', 'important');
-                    }
-
-                    const callsIframe = document.getElementById('callsIframe');
-                    if (!callsIframe) return;
-
-                    // FIX-GROUP-CALL-NOTICE: previously extraCtx (which carries groupId/
-                    // groupName for group calls) was captured into ctx/call_return_ctx but
-                    // silently dropped from the payload actually posted to the calls iframe.
-                    // Without groupId reaching calls-ui.js, a "start call" from a group chat
-                    // was indistinguishable from a 1:1 call to a user whose id happened to
-                    // equal the group's id — so no real members were notified.
-                    const payload = { userId, userName, callType, returnTo, chatUserId: chatUserId || userId, source, timestamp: Date.now(), ...(extraCtx || {}) };
-
-                    try { sessionStorage.setItem('pending_call', JSON.stringify(payload)); } catch(e) {}
-
-                    // FIX-CALL-DISPATCH-RACE: this used to postMessage straight into the
-                    // iframe after a blind 400ms setTimeout, instead of going through the
-                    // same _postToModule/_iframeReady/_iframeQueue system every other
-                    // module (messages, tools, groups, friends) already uses. Under real
-                    // load — many scripts and API calls competing at page load — calls.html
-                    // routinely takes longer than 400ms to finish loading and mount its
-                    // message listener, so CALL_ORIGIN/OPEN_CALL_WITH_USER were posted into
-                    // a target that wasn't listening yet and silently dropped. calls-core.js
-                    // then sat waiting forever for the parent handshake, stuck in BOOT/
-                    // WAIT_PARENT — this is why calls intermittently failed to reach the
-                    // active stage, or never did ("Timeout waiting for core"). _postToModule
-                    // queues the message if 'calls' isn't ready yet and the existing
-                    // CHILD_READY handler automatically flushes it the instant calls.html
-                    // signals it's actually ready, removing the race entirely.
-                    _postToModule('calls', 'callsIframe', { type: 'CALL_ORIGIN', origin: returnTo, source: 'parent-frame' });
-                    _postToModule('calls', 'callsIframe', { type: 'OPEN_CALL_WITH_USER', payload, source: 'parent-frame' });
-                }
-
-                if (data.type === 'SWITCH_MODULE' && data.module === 'calls') {
-                    const p = data.payload || {};
-                    const _swReturnTo = p.returnTo || window.__currentPage || 'messages';
-                    const _swExtra = p.groupId ? { groupId: p.groupId, groupName: p.groupName || p.userName, isGroupCall: true } : {};
-                    // FIX-CALL-LINK-JOIN: forward joinCallId through so calls-ui.js can
-                    // tell "join this existing in-progress call" apart from "start a new
-                    // outgoing call to userId" — both currently ride the same
-                    // OPEN_CALL_WITH_USER message, distinguished only by this field.
-                    if (p.joinCallId) { _swExtra.joinCallId = p.joinCallId; }
-                    __dispatchCallToIframe(p.userId, p.userName || 'User', p.callType || 'voice', _swReturnTo, p.chatUserId || p.userId, 'messages-module', _swExtra);
-                    return;
-                }
-
-                if (data.type === 'INITIATE_CALL') {
-                    const p = data.payload || {};
-                    const _iciReturnTo = p.returnTo || (p.isGroup ? 'group' : 'messages');
-                    const _iciExtra = p.isGroup ? { groupId: p.groupId || p.userId, groupName: p.userName, isGroupCall: true } : {};
-                    __dispatchCallToIframe(p.userId, p.userName || 'User', p.callType || 'voice', _iciReturnTo, p.userId, 'messages-module', _iciExtra);
-                }
-
-                // Receiver-side missed call recording — fired by calls-core when 3-min timeout expires
-                if (data.type === 'RECORD_MISSED_CALL') {
-                    _chatLog('[Parent] Recording receiver-side missed call:', data.payload);
-                    // Forward to calls iframe to add to recent-calls list as missed
-                    const callsIframe = document.getElementById('callsIframe');
-                    if (callsIframe && callsIframe.contentWindow) {
-                        callsIframe.contentWindow.postMessage({
-                            type: 'RECORD_MISSED_CALL',
-                            payload: data.payload || {},
-                            source: 'parent-frame'
-                        }, '*');
-                    }
-                    // Also notify via ws-bridge if available
-                    if (window.wssBridge && window.wssBridge.emit) {
-                        window.wssBridge.emit('missed_call', data.payload || {});
-                    }
-                }
-
-                if (data.type === 'CALLS_IDLE_SCREEN_SHOWN') {
-                    // FIX (post-call stuck-on-calls-screen audit): see calls-ui.js
-                    // for the full rationale — this fires unconditionally every
-                    // time the calls iframe resets to its own idle screen after a
-                    // call ends, regardless of whether CALL_ENDED/CALL_ENDED_RETURN
-                    // got through. If we're still showing the full-screen call UI
-                    // at this point, the iframe clearly isn't in a call anymore —
-                    // restore nav and navigate back now instead of waiting for the
-                    // 1500ms watchdog poll (or, if some other guard swallowed every
-                    // other signal, at all).
-                    if (document.body.classList.contains('call-screen-active')) {
-                        window.__activeCallInProgress = false;
-                        document.body.classList.remove('call-screen-active');
-                        _kynReturnFromCallToOrigin(data.returnTo ? { returnTo: data.returnTo, chatUserId: data.chatUserId, userName: data.chatUserName } : undefined);
-                    }
-                }
-
-                if (data.type === 'CALL_ENDED_RETURN' || data.type === 'CALL_ENDED_NAVIGATE_BACK') {
-                    // ── GUARD: ignore if a call was just dispatched in the last 3s ───────
-                    // CALL_ENDED_RETURN fires from stale WS echoes during call SETUP, not
-                    // just after call ends. Only drop signals within the first 3 seconds
-                    // (true instantaneous echoes). 10s was too long — it blocked short calls.
-                    // FIX-NAV-BACK: previously this *dropped* the signal outright, so a call
-                    // that was genuinely declined/cancelled within the first 3s never navigated
-                    // the user back at all (permanently stuck on the calls screen). Instead,
-                    // re-deliver the same signal once the guard window has passed.
-                    const _sinceDispatch = window.__callDispatchedAt ? Date.now() - window.__callDispatchedAt : 99999;
-                    if (_sinceDispatch < 3000) {
-                        console.warn('[Parent] CALL_ENDED_RETURN deferred — call dispatched only', Math.round(_sinceDispatch/1000)+'s ago (possible stale echo), retrying shortly');
-                        setTimeout(() => {
-                            try { window.postMessage({ type: data.type, returnTo: data.returnTo, payload: data.payload, source: 'stale-echo-retry' }, '*'); } catch(_e) {}
-                        }, 3000 - _sinceDispatch + 50);
-                        return;
-                    }
-
-                    let ctx = window.__callReturnContext;
-                    if (!ctx) {
-                        try { const s = sessionStorage.getItem('call_return_ctx'); if (s) ctx = JSON.parse(s); } catch(e) {}
-                    }
-                    window.__callReturnContext = null;
-                    window.__callDispatchLock = { ts: 0, userId: null };
-                    window.__callDispatchedAt = 0;
-                    try { sessionStorage.removeItem('call_return_ctx'); } catch(e) {}
-
-                    // Debounce: ignore duplicate navigation within 3s
-                    const _ceNow = Date.now();
-                    if (window.__callEndedNavAt && (_ceNow - window.__callEndedNavAt) < 3000) return;
-                    window.__callEndedNavAt = _ceNow;
-                    setTimeout(() => { window.__callEndedNavAt = 0; }, 5000);
-
-                    // Clear in-progress flag — call is truly done
-                    window.__activeCallInProgress = false;
-                    document.body.classList.remove('call-screen-active');
-                    _kynResetCallsContentOverlay();
-
-                    // FIX: Always restore nav icons when call ends
-                    clearTimeout(window.__navHideWatchdog);
-                    document.querySelectorAll('.nav-icon, .mobile-nav-icon, .sidebar-nav .nav-item').forEach(el => { el.style.opacity = ''; el.style.pointerEvents = ''; });
-
-                    // Navigate back to where the call was triggered from.
-                    // 'calls'    → calls sidebar (call started from calls module)
-                    // 'messages' → messages, re-open specific chat
-                    // 'friends'  → friends sidebar
-                    // FIX (return-to-wrong-module): prefer the value the calls
-                    // iframe itself just computed and attached to this message
-                    // (data.returnTo/data.chatUserId/data.chatUserName) — it's
-                    // tracked correctly for BOTH the caller and the receiver.
-                    // ctx (this parent's own separate tracking) and
-                    // __lastActivePage remain as fallbacks for messages that
-                    // predate this fix or didn't carry the context.
-                    const returnTo = data.returnTo
-                        || ctx?.returnTo
-                        || window.__lastActivePage
-                        || 'messages';
-                    const _cerChatUserId = data.chatUserId || ctx?.chatUserId;
-                    const _cerChatUserName = data.chatUserName || ctx?.userName;
-                    _chatLog('[Parent] Call ended → returnTo=' + returnTo);
-
-                    // CRITICAL: Clear session dispatch cache so the next navigateToPage
-                    // ALWAYS sends a fresh token — prevents hasToken:false rejection in modules
-                    window.__moduleSessionDispatchCache = {};
-
-                    if (returnTo === 'calls') {
-                        navigateToPage('calls');
-                    } else if (returnTo === 'messages') {
-                        if (_cerChatUserId) _veilMessagesUntilChatOpen();
-                        navigateToPage('messages');
-                        if (_cerChatUserId) {
-                            const msgIframe = document.getElementById('messagesIframe');
-                            if (msgIframe && msgIframe.contentWindow) {
-                                setTimeout(() => {
-                                    msgIframe.contentWindow.postMessage({
-                                        type: 'OPEN_CHAT_WITH_USER',
-                                        payload: { userId: _cerChatUserId, userName: _cerChatUserName || 'User', returnFromCall: true, timestamp: Date.now() },
-                                        source: 'parent-frame'
-                                    }, '*');
-                                    document.body.classList.add('chat-panel-active'); /* FIX: was gated to mobile-only (window.innerWidth<=768), so desktop never got this flag and the header/avatar/call/video/more icons never fully activated on wide screens for these code paths. Now applied on all widths, matching group-panel-active. */
-                                }, 300);
-                            }
-                        }
-                    } else if (returnTo === 'friends') {
-                        navigateToPage('friends');
-                        const friendsIframe = document.getElementById('friendsIframe');
-                        if (friendsIframe && friendsIframe.contentWindow) {
-                            setTimeout(() => {
-                                friendsIframe.contentWindow.postMessage({ type: 'RETURN_FROM_CALL', payload: { returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*');
-                            }, 300);
-                        }
-                    } else if (returnTo === 'group') {
-                        // Return to group panel — navigate to group module then re-open the specific group
-                        navigateToPage('group');
-                        const groupIframe = document.getElementById('groupIframe');
-                        if (groupIframe && groupIframe.contentWindow) {
-                            setTimeout(() => {
-                                groupIframe.contentWindow.postMessage({
-                                    type: 'RETURN_FROM_CALL',
-                                    payload: {
-                                        returnFromCall: true,
-                                        // FIX (CALL-END-NAV-CRASH): ctx is legitimately null here on
-                                        // the receiver side of a call (see "Receiver side has no ctx"
-                                        // comment above) — this branch dereferenced ctx.groupId/
-                                        // groupName directly instead of using optional chaining like
-                                        // the sibling 'messages' branch does, so returning from a call
-                                        // that was answered (not started) from the group module threw
-                                        // "Cannot read properties of null (reading 'groupId')" and
-                                        // aborted the whole post-call navigation.
-                                        groupId: ctx?.groupId || null,
-                                        groupName: ctx?.groupName || null,
-                                        timestamp: Date.now()
-                                    },
-                                    source: 'parent-frame'
-                                }, '*');
-                            }, 300);
-                        }
-                    } else {
-                        navigateToPage(returnTo || 'messages');
-                    }
-                }
-
                 // VERIFY SESSION HANDLER
                 if (data.type === 'VERIFY_SESSION') {
                     const requestId = data.payload?.requestId || data.requestId;
@@ -6430,30 +4883,6 @@
                             type: 'VERIFY_RESPONSE',
                             requestId: requestId,
                             payload: { valid: true, timestamp: Date.now(), module: data.source }
-                        }, '*');
-                    }
-                    return;
-                }
-
-                // CHECK FRIEND HANDLER — lets the calls iframe enforce the
-                // "Friends Only" calling setting, which previously had no way
-                // to check the friends list across the iframe boundary.
-                if (data.type === 'CHECK_FRIEND') {
-                    const requestId = data.payload?.requestId || data.requestId;
-                    const callerId = data.payload?.callerId;
-                    let isFriend = true; // fail open: unknown -> treat as friend, never wrongly block
-                    try {
-                        if (Array.isArray(window.friends) && callerId != null) {
-                            isFriend = window.friends.some(f =>
-                                String(f.id) === String(callerId) || String(f.userId) === String(callerId)
-                            );
-                        }
-                    } catch (e) { /* keep fail-open default */ }
-                    if (event.source && event.source.postMessage) {
-                        event.source.postMessage({
-                            type: 'CHECK_FRIEND_RESPONSE',
-                            requestId: requestId,
-                            payload: { isFriend: isFriend }
                         }, '*');
                     }
                     return;
@@ -6758,10 +5187,6 @@
                     // ── chat ───────────────────────────────────────────────────
                     if (section === 'chat') {
                         document.documentElement.setAttribute(`data-chat-${key}`, value === true ? 'true' : value === false ? 'false' : String(value));
-                    }
-                    // ── calls ──────────────────────────────────────────────────
-                    if (section === 'calls') {
-                        document.documentElement.setAttribute(`data-calls-${key}`, value === true ? 'true' : value === false ? 'false' : String(value));
                     }
                     // ── groups ─────────────────────────────────────────────────
                     if (section === 'groups') {
@@ -7111,54 +5536,14 @@
                 }
 
                 // MODULE SWITCHING
-                if (data.type === 'SWITCH_MODULE' && data.module !== 'calls') {
-                    // FIX: avoid double-navigation right after a call ends. The
-                    // CALL_ENDED_RETURN handler (fired moments earlier) already
-                    // navigated using its own tracked return-context; this
-                    // follow-up SWITCH_MODULE message uses a separate, older
-                    // tracking mechanism in calls-ui.js and can disagree on the
-                    // destination, causing a visible flash between two pages.
-                    const _isPostCallFollowup = !!(data.payload && data.payload.returnFromCall);
-                    const _justNavigatedFromCallEnd = window.__callEndedNavAt && (Date.now() - window.__callEndedNavAt) < 1500;
-                    if (!(_isPostCallFollowup && _justNavigatedFromCallEnd)) {
-                        navigateToPage(data.module);
-                    }
+                if (data.type === 'SWITCH_MODULE') {
+                    navigateToPage(data.module);
                     
                     // ✅ FIXED: Handle chat opening for messages module from friends/calls
                     if (data.module === 'messages' && data.payload) {
                         const payload = data.payload;
                         
-                        if (payload.returnFromCall && payload.openChatWith) {
-                            // Return from call - open specific chat
-                            const _callChatPayload = {
-                                userId: payload.openChatWith,
-                                userName: payload.openChatWithName || 'User',
-                                returnFromCall: true,
-                                timestamp: Date.now()
-                            };
-                            sessionStorage.setItem('pending_chat', JSON.stringify(_callChatPayload));
-                            _veilMessagesUntilChatOpen();
-                            document.body.classList.add('chat-panel-active'); /* FIX: was gated to mobile-only (window.innerWidth<=768), so desktop never got this flag and the header/avatar/call/video/more icons never fully activated on wide screens for these code paths. Now applied on all widths, matching group-panel-active. */
-                            // Retry until iframe ACKs (clears pending_chat via CHAT_OPENED)
-                            let _rfcAttempts = 0;
-                            const _postRFC = () => {
-                                const msgIframe = document.getElementById('messagesIframe');
-                                if (msgIframe && msgIframe.contentWindow) {
-                                    msgIframe.contentWindow.postMessage({
-                                        type: 'OPEN_CHAT_WITH_USER',
-                                        payload: _callChatPayload,
-                                        source: 'parent-frame'
-                                    }, '*');
-                                }
-                                if (_rfcAttempts++ < 10) {
-                                    setTimeout(() => { if (sessionStorage.getItem('pending_chat')) _postRFC(); }, 800);
-                                }
-                            };
-                            // FIX: was delayed 400ms before the FIRST attempt too, widening
-                            // the visible list-flash window for no benefit — fire immediately,
-                            // the veil above is what actually hides the gap now.
-                            _postRFC();
-                        } else if (payload.userId || payload.userName || payload.conversationId) {
+                        if (payload.userId || payload.userName || payload.conversationId) {
                             // ✅ FIXED: Regular navigation from friends/calls - open chat with user
                             // FIX (notification-click-drops-target): this previously always
                             // dropped conversationId/messageId even when the caller supplied
@@ -7199,9 +5584,6 @@
                             // instead of waiting 400ms before even trying.
                             _postChatOpen();
                         }
-                    } else if (data.module === 'friends' && data.payload?.returnFromCall) {
-                        const friendsIframe = document.getElementById('friendsIframe');
-                        if (friendsIframe && friendsIframe.contentWindow) setTimeout(() => friendsIframe.contentWindow.postMessage({ type: 'RETURN_FROM_CALL', payload: { returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*'), 300);
                     }
                     // FIX (GROUP-CLICK-NOT-OPENING): navigateToPage(data.module) above only
                     // ever switches the visible module container — it never opens a specific
@@ -7365,28 +5747,6 @@
                     }
                 }
 
-                if (data.type === 'DIRECT_CALL_REQUEST') {
-                    const p = data.payload || {};
-                    // Always return to friends after a direct call from friends module
-                    sendFriendsToCallsIframe();
-                    __dispatchCallToIframe(p.userId, p.userName || p.name || 'User', p.callType || 'voice', 'friends', p.userId, 'friends-module');
-                }
-
-                // FIX-INCALL-CHAT-BROKEN (send side): calls.html's in-call chat
-                // falls back to posting this message up when it has no direct
-                // socket (which is always, inside that iframe). Relay it out
-                // through the one real socket connection, which lives here.
-                if (data.type === 'CALL_CHAT_MESSAGE') {
-                    const p = data.payload || {};
-                    if (window.wsService && typeof window.wsService.emit === 'function') {
-                        window.wsService.emit('call:chat_message', p);
-                    } else if (window.KynectaRealtime && window.KynectaRealtime._socket) {
-                        window.KynectaRealtime._socket.emit('call:chat_message', p);
-                    } else {
-                        console.warn('[Parent] CALL_CHAT_MESSAGE: no socket available to send');
-                    }
-                }
-
                 // FIX-MSG-DELIVERY-ACK-RELAY: message.html (messagesIframe) keeps its own
                 // independent socket connection, which can be momentarily disconnected or
                 // still reconnecting when a message arrives — silently no-op'ing the direct
@@ -7394,7 +5754,7 @@
                 // fallback up to us as a safety net (see FIX-ACK-SILENT-FAIL there), but until
                 // now nothing here ever listened for it, so the sender's 10s delivery timeout
                 // fired anyway even though the receiver had the message. Same root cause and
-                // same fix pattern as CALL_CHAT_MESSAGE above: relay it out through the one
+                // same fix pattern as the other relays: relay it out through the one
                 // real, always-on socket connection, which lives here in chat.html.
                 if (data.type === 'message:client_delivery_ack') {
                     const p = data.payload || {};
@@ -7409,28 +5769,6 @@
                     }
                 }
 
-
-                // ── GROUP CALL — triggered by parent header call/video buttons ──────────
-                // postToGroup sends PARENT_GROUP_CALL to group iframe, which re-posts
-                // INITIATE_CALL to parent. But we also handle it directly here so the
-                // group header buttons in chat.html can dispatch calls without a round-trip.
-                if (data.type === 'PARENT_GROUP_CALL') {
-                    const p = data.payload || {};
-                    const grp = window.__gcCurrentGroup || {};
-                    const groupId   = p.groupId   || grp.id   || null;
-                    const groupName = p.groupName  || grp.name || 'Group';
-                    const callType  = p.type || p.callType || 'voice';
-                    if (groupId) {
-                        sendFriendsToCallsIframe();
-                        __dispatchCallToIframe(
-                            groupId, groupName, callType,
-                            'group',          // returnTo
-                            groupId,          // chatUserId
-                            'group-hdr',      // source
-                            { groupId, groupName, isGroup: true }
-                        );
-                    }
-                }
 
                 // ── STATUS_REPLY_RECEIVED / OPEN_CHAT ─────────────────────────────────────
                 // Fired by status-ui.js when a user replies to a status.
@@ -7487,10 +5825,6 @@
                 if (data.type === 'CHILD_CLOSING') {
                     const returnPage = data.returnTo || window.__lastActivePage || 'messages';
                     navigateToPage(returnPage);
-                    if (returnPage === 'messages') {
-                        const messagesIframe = document.getElementById('messagesIframe');
-                        if (messagesIframe && messagesIframe.contentWindow) setTimeout(() => messagesIframe.contentWindow.postMessage({ type: 'CALL_ENDED_RETURN', timestamp: Date.now() }, '*'), 200);
-                    }
                 }
 
                 if (data.type === 'HIDE_SIDEBAR_ICONS') {
@@ -7505,11 +5839,6 @@
                 if (data.type === 'SHOW_SIDEBAR_ICONS') {
                     clearTimeout(window.__navHideWatchdog);
                     document.querySelectorAll('.nav-icon, .mobile-nav-icon, .sidebar-nav .nav-item').forEach(el => { el.style.opacity = ''; el.style.pointerEvents = ''; });
-                    // FIX (nav-icons/sidebar-stuck-hidden): this fires earliest and
-                    // most reliably of any post-hangup signal (see calls-ui.js
-                    // handleCallEnded) — reset the callsContent fullscreen overlay
-                    // here too so the sidebar/bottom-nav are never left covered.
-                    _kynResetCallsContentOverlay();
                 }
 
                 if (data.type === 'API_RESPONSE' && data.status === 401) await refreshAuthToken();
@@ -7526,228 +5855,6 @@
                             source: 'ws-bridge'
                         }, '*');
                     }
-                }
-
-                if (data.type === 'REFRESH_CALL_HISTORY') {
-                    const userId = data.payload?.userId || cachedUserId;
-                    if (userId) await refreshCallHistoryForUser(userId);
-                }
-
-                if (data.type === 'CALL_INITIATE' || data.type === 'call:initiate') {
-                    const localCallId = data.payload?.callId;
-                    const callType = data.payload?.callType || data.payload?.type || 'audio';
-                    const calleeId = data.payload?.calleeId;
-                    const participantIds = data.payload?.participantIds;
-                    const isGroupCall = data.payload?.isGroupCall || false;
-                    // FIX-GROUP-CALL-NOTICE: groupId was previously never read here at all,
-                    // so the backend had no way to resolve the group's member list or know
-                    // which group's room to broadcast group:call-started to.
-                    const groupId = data.payload?.groupId || null;
-                    const callOriginPage = data.payload?.returnTo || window.__currentPage || window.__lastActivePage || 'calls';
-                    window.__pendingCallOrigin = callOriginPage;
-                    const baseUrl = window.__getApiBase();
-                    let token = cachedToken;
-                    try { if (!token) token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('necpa_token') || localStorage.getItem('accessToken'); } catch(e) {}
-                    try {
-                        const body = { callType: callType === 'voice' ? 'audio' : callType, isGroupCall: isGroupCall };
-                        if (isGroupCall && groupId) body.groupId = parseInt(groupId, 10);
-                        if (isGroupCall && participantIds) body.participantIds = participantIds;
-                        else if (calleeId && !isGroupCall) body.participantIds = [parseInt(calleeId)];
-                        const resp = await fetch(`${baseUrl}/calls`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify(body) });
-                        const respData = await resp.json();
-                        const callsIframe = document.getElementById('callsIframe');
-
-                        // Offline fix: backend returns HTTP 200 with success:false + offline:true
-                        // when the callee has no active socket.
-                        // NOTE: receiverOnline is an advisory hint only — the backend ALWAYS creates
-                        // the call and fires the socket notification regardless. We never abort here.
-                        // Genuine no-answer is handled by the 30-second ring timeout on the caller side.
-                        if (resp.ok && (respData.data?.call?.id || respData.data?.callId)) {
-                            const serverCallId = respData.data?.call?.id || respData.data?.callId;
-                            window.__callIdMap = window.__callIdMap || {};
-                            window.__callIdMap[localCallId] = serverCallId;
-
-                            // ── FIX: Also emit call:initiate via Socket.IO so CallSignalingService
-                            // can set up the call room and route signals without HTTP round-trips.
-                            // This ensures the receiver gets call:incoming even if the HTTP notification
-                            // races with a brief socket reconnect on the backend.
-                            try {
-                                const _rtSocket = window.KynectaRealtime && window.KynectaRealtime._socket;
-                                if (_rtSocket && _rtSocket.connected) {
-                                    _rtSocket.emit('call:initiate', {
-                                        callId: serverCallId,
-                                        targetUserId: calleeId || (participantIds && participantIds[0]),
-                                        callType: callType === 'voice' ? 'audio' : callType,
-                                        callerName: respData.data?.callerName || null,
-                                        isGroupCall,
-                                        participantIds: participantIds || (calleeId ? [parseInt(calleeId)] : []),
-                                        timestamp: Date.now()
-                                    });
-                                }
-                            } catch(_socketCallErr) {}
-
-                            if (callsIframe && callsIframe.contentWindow) callsIframe.contentWindow.postMessage({ type: 'CALL_INITIATED', payload: { ...(respData.data?.call || respData.data), calleeName: respData.data?.calleeName || null, calleeAvatar: respData.data?.calleeAvatar || null, callId: serverCallId, localCallId: localCallId, callType: callType, returnTo: callOriginPage, receiverOnline: true, success: true } }, '*');
-                        } else {
-                            if (callsIframe && callsIframe.contentWindow) callsIframe.contentWindow.postMessage({ type: 'CALL_INITIATED', payload: { success: false, error: respData?.message || 'Failed to start call', localCallId } }, '*');
-                        }
-                    } catch(err) {
-                        const callsIframe = document.getElementById('callsIframe');
-                        if (callsIframe && callsIframe.contentWindow) callsIframe.contentWindow.postMessage({ type: 'CALL_INITIATED', payload: { success: false, error: err.message, localCallId } }, '*');
-                    }
-                }
-
-                if (data.type === 'API_REQUEST' && window.__callIdMap) {
-                    let ep = data.payload?.endpoint || '';
-                    Object.entries(window.__callIdMap).forEach(([local, server]) => { if (ep.includes(local)) data.payload.endpoint = ep.replace(local, server); });
-                }
-
-                // WebRTC Signaling Bridge
-                if (data.type === 'SIGNAL_OFFER' || data.type === 'SIGNAL_ANSWER' || data.type === 'ICE_CANDIDATE') {
-                    const payload = data.payload || {};
-                    const localOrServerCallId = payload.callId || payload.id || null;
-                    const resolvedCallId = (window.__callIdMap && window.__callIdMap[localOrServerCallId]) || localOrServerCallId;
-                    const baseUrl = window.__getApiBase();
-                    let token = cachedToken;
-                    try {
-                        if (!token) token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('necpa_token') || localStorage.getItem('accessToken');
-                    } catch(e) {}
-
-                    if (!resolvedCallId) {
-                        console.warn('[Parent] WebRTC signal dropped - missing callId', { type: data.type });
-                        return;
-                    }
-
-                    // ── PRIMARY PATH: Socket.IO (real-time, low-latency) ────────────────
-                    // Always try Socket.IO first — this is the correct path for WebRTC signals.
-                    // HTTP REST was the only path before, which caused race conditions and
-                    // call setup failures when the socket was briefly unstable.
-                    let socketRelayed = false;
-                    try {
-                        const _rtSocket = window.KynectaRealtime && window.KynectaRealtime._socket;
-                        if (_rtSocket && _rtSocket.connected) {
-                            if (data.type === 'ICE_CANDIDATE') {
-                                _rtSocket.emit('webrtc:signal', {
-                                    callId: resolvedCallId,
-                                    type: 'ice-candidate',
-                                    candidate: payload.candidate,
-                                    targetUserId: payload.targetUserId || payload.toUserId || null,
-                                    timestamp: Date.now()
-                                });
-                            } else {
-                                const signalType = data.type === 'SIGNAL_OFFER' ? 'offer' : 'answer';
-                                const sdpPayload = data.type === 'SIGNAL_OFFER' ? payload.offer : payload.answer;
-                                // FIX (answer-mislabeled-as-offer): this used to always emit
-                                // 'call:webrtc_offer', even when relaying an ANSWER — so on the
-                                // caller's side a real answer arrived under the 'call:webrtc_offer'
-                                // event name (or, before CallSignalingService gained a
-                                // 'call:webrtc_answer' listener, was dropped with no listener at
-                                // all). Also emit call:webrtc_offer / call:webrtc_answer for
-                                // CallSignalingService, using the event name (and field name) that
-                                // actually matches what's being sent.
-                                _rtSocket.emit(signalType === 'offer' ? 'call:webrtc_offer' : 'call:webrtc_answer', {
-                                    callId: resolvedCallId,
-                                    targetUserId: payload.targetUserId || payload.toUserId || null,
-                                    [signalType]: sdpPayload,
-                                    type: signalType,
-                                    timestamp: Date.now()
-                                });
-                                _rtSocket.emit('webrtc:signal', {
-                                    callId: resolvedCallId,
-                                    type: signalType,
-                                    sdp: typeof sdpPayload === 'string' ? sdpPayload : JSON.stringify(sdpPayload),
-                                    targetUserId: payload.targetUserId || payload.toUserId || null,
-                                    timestamp: Date.now()
-                                });
-                            }
-                            socketRelayed = true;
-                        }
-                    } catch(_socketErr) {
-                        console.warn('[Parent] Socket.IO signal relay failed:', _socketErr.message);
-                    }
-
-                    // ── FALLBACK PATH: HTTP REST ─────────────────────────────────────────
-                    // Only use HTTP if Socket.IO failed/unavailable AND we have a token.
-                    if (!socketRelayed && token) {
-                        try {
-                            if (data.type === 'ICE_CANDIDATE') {
-                                const iceResp = await fetch(`${baseUrl}/calls/${resolvedCallId}/ice`, {
-                                    method: 'POST',
-                                    headers: {
-                                        'Content-Type': 'application/json',
-                                        'Authorization': `Bearer ${token}`
-                                    },
-                                    body: JSON.stringify({
-                                        candidate: payload.candidate,
-                                        timestamp: payload.timestamp || Date.now()
-                                    })
-                                });
-                                if (!iceResp.ok) throw new Error(`ICE relay failed with ${iceResp.status}`);
-                            } else {
-                                const signalType = data.type === 'SIGNAL_OFFER' ? 'offer' : 'answer';
-                                const sdpPayload = data.type === 'SIGNAL_OFFER' ? payload.offer : payload.answer;
-                                const signalResp = await fetch(`${baseUrl}/calls/${resolvedCallId}/signal`, {
-                                    method: 'POST',
-                                    headers: {
-                                        'Content-Type': 'application/json',
-                                        'Authorization': `Bearer ${token}`
-                                    },
-                                    body: JSON.stringify({
-                                        type: signalType,
-                                        sdp: typeof sdpPayload === 'string' ? sdpPayload : JSON.stringify(sdpPayload),
-                                        targetUserId: payload.targetUserId || payload.toUserId || null,
-                                        timestamp: payload.timestamp || Date.now()
-                                    })
-                                });
-                                if (!signalResp.ok) throw new Error(`${signalType} relay failed with ${signalResp.status}`);
-                            }
-                        } catch(sigErr) {
-                            console.warn('[Parent] WebRTC signal HTTP fallback failed:', sigErr.message);
-                        }
-                    }
-                    return;
-                }
-
-                // ── ADD PARTICIPANT to an existing call (group call) ─────────────
-                if (data.type === 'CALL_ADD_PARTICIPANT') {
-                    const payload = data.payload || {};
-                    const localOrServerCallId = payload.callId || null;
-                    const resolvedCallId = (window.__callIdMap && window.__callIdMap[localOrServerCallId]) || localOrServerCallId;
-                    const baseUrl = window.__getApiBase();
-                    let token = cachedToken;
-                    try {
-                        if (!token) token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('necpa_token') || localStorage.getItem('accessToken');
-                    } catch(e) {}
-
-                    _chatLog('[Parent] Adding participant to call', payload);
-
-                    if (!resolvedCallId || !payload.targetUserId || !token) {
-                        console.warn('[Parent] call participant invite dropped - missing callId, targetUserId, or token');
-                        return;
-                    }
-
-                    try {
-                        const inviteResp = await fetch(`${baseUrl}/calls/${resolvedCallId}/participants`, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'Authorization': `Bearer ${token}`
-                            },
-                            body: JSON.stringify({
-                                targetUserId: payload.targetUserId,
-                                targetUserName: payload.targetUserName || null,
-                                callType: payload.existingCallType || 'voice',
-                                invitedBy: window.__currentUserId || null
-                            })
-                        });
-                        const inviteData = await inviteResp.json().catch(() => ({}));
-                        if (!inviteResp.ok || inviteData.success === false || inviteData.status === 'error') {
-                            throw new Error(inviteData.message || 'Invite failed');
-                        }
-                        _chatLog('[Parent] participant invite sent successfully -> userId', payload.targetUserId);
-                    } catch(e) {
-                        console.warn('[Parent] call participant invite failed:', e.message);
-                    }
-                    return;
                 }
 
                 if (data.type === 'GET_FRIENDS_LIST') {
@@ -7902,287 +6009,26 @@
             });
 
             // ======================================================================
-            // WEBSOCKET CALL EVENT LISTENERS WITH SOURCE: 'ws-bridge'
+            // WEBSOCKET EVENT LISTENERS WITH SOURCE: 'ws-bridge'
             // ── Bound once; re-bound if KynectaRealtime initialises late ────────
             // ======================================================================
         const _chatLog = (...a) => { if (window.__CHAT_DEBUG__) console.log(...a); };
-            var _wsCallListenersBound = false;
-            function _bindWsCallListeners() {
-                if (_wsCallListenersBound) return;
+            var _wsRealtimeListenersBound = false;
+            function _bindWsRealtimeListeners() {
+                if (_wsRealtimeListenersBound) return;
                 if (!window.wsService || typeof window.wsService.on !== 'function') {
                     // wsService not ready yet — retry every 150ms for up to 6s
                     if (!window._wsBindRetryCount) window._wsBindRetryCount = 0;
                     if (window._wsBindRetryCount < 120) {  // FIX Bug4: was 40 (6s) → 120 (18s)
                         window._wsBindRetryCount++;
-                        setTimeout(_bindWsCallListeners, 150);
+                        setTimeout(_bindWsRealtimeListeners, 150);
                     } else {
-                        console.warn('[Parent] wsService never became available — incoming call notifications may not work');
+                        console.warn('[Parent] wsService never became available — realtime notifications may not work');
                     }
                     return;
                 }
-                _wsCallListenersBound = true;
+                _wsRealtimeListenersBound = true;
                 window._wsBindRetryCount = 0;
-
-                // Dedup log: only log incoming_call once per callId
-                const _fwdIncomingLogged = new Set();
-                // Track page-load time to reject stale replayed calls
-                const _pageLoadTime = Date.now();
-                function _fwdIncoming(callData) {
-                    // ── STALE CALL GUARD: reject call events from before page loaded ──
-                    // Without this, reconnect replays the last call:incoming, re-ringing
-                    // the user for a call that already ended.
-                    const callTs = callData.timestamp || callData.ts || callData.startedAt || 0;
-                    const callAge = callTs ? (Date.now() - Number(callTs)) : 0;
-                    if (callTs && callAge > 30000) {
-                        _chatLog('[Parent] ⚠️ Stale call ignored (age=' + Math.round(callAge/1000) + 's) callId=' + (callData.callId || callData.id));
-                        return;
-                    }
-                    const payload = {
-                        ...callData,
-                        callerName:   callData.callerName   || (callData.caller && callData.caller.username) || callData.fromUserName || 'Unknown',
-                        callerAvatar: callData.callerAvatar || (callData.caller && callData.caller.avatar)   || null,
-                        callType:     callData.callType     || callData.type || 'voice',
-                        // FIX (return-to-origin, receiver side): this is the primary
-                        // websocket incoming-call path (wsService 'incoming_call' →
-                        // _fwdIncoming), and unlike the banner-bridge path further up in
-                        // this file it was never tagging _receiverReturnTo at all — so
-                        // calls-core.js's POST_CALL_RESTORE logic (which reads exactly
-                        // that field) had nothing to restore to and fell back to
-                        // 'messages' regardless of what the receiver was actually doing.
-                        _receiverReturnTo: window.__currentPage || window.__lastActivePage || 'messages',
-                        // FIX (same as banner-bridge path above): carry the specific
-                        // open chat too, not just the page.
-                        _receiverReturnChatUserId: (window.__currentPage === 'messages' && window.__lastOpenChatUserId) ? window.__lastOpenChatUserId : undefined,
-                        _receiverReturnChatName: (window.__currentPage === 'messages' && window.__lastOpenChatUserId) ? window.__lastOpenChatName : undefined,
-                    };
-                    const callKey = payload.callId || payload.id || payload.callerName;
-                    if (!_fwdIncomingLogged.has(callKey)) {
-                        _fwdIncomingLogged.add(callKey);
-                        _chatLog('[Parent] 📞 Incoming call from:', payload.callerName, '| callId:', callKey);
-                    }
-                    // ── FORENSIC LOG: CALL_SIGNAL_RECEIVED ───────────────────────────
-                    _chatLog(`[FORENSIC] CALL_SIGNAL_RECEIVED | callId=${callKey} | callerName=${payload.callerName} | callType=${payload.callType} | ts=${Date.now()}`);
-                    // FIX Bug #3: MUST postMessage INCOMING_CALL to callsIframe BEFORE showing banner.
-                    // calls-core.js inside the iframe listens for postMessage type 'INCOMING_CALL'
-                    // (and the alias 'call:incoming') to trigger handleIncomingCall() and show the
-                    // ring screen. Without this postMessage the iframe never receives the event and
-                    // the call is silently dropped — the receiver sees nothing.
-                    // FIX BUG #7: Guard against iframe JS not loaded yet — queue the message
-                    // until CALLS_IFRAME_READY fires, with a 2s fallback.
-                    const _callsIframe = document.getElementById('callsIframe');
-                    let _ws2Delivered = false;
-                    let _callFallback = null;
-                    function _onCallIframeReady(evt) {
-                        if (evt.data && evt.data.type === 'CALLS_IFRAME_READY') {
-                            _deliverCallToIframe();
-                        }
-                    }
-                    function _deliverCallToIframe() {
-                        if (_ws2Delivered) return;
-                        _ws2Delivered = true;
-                        // FIX-LEAK: remove the ready-listener here unconditionally so it's torn
-                        // down whichever path delivers (ready signal OR the 2s fallback timer).
-                        // Previously it was only removed inside _onCallIframeReady, so when the
-                        // fallback fired first the listener stayed attached forever — stale
-                        // listeners accumulated across calls and all fired together the next
-                        // time CALLS_IFRAME_READY was seen, re-posting old/expired call payloads.
-                        if (_callFallback) clearTimeout(_callFallback);
-                        window.removeEventListener('message', _onCallIframeReady);
-                        const _fi = document.getElementById('callsIframe');
-                        if (_fi && _fi.contentWindow) {
-                            // FIX: Send ALL variant names so calls.html switch catches it regardless
-                            // of which case is present. CALL_INCOMING is the canonical handled case.
-                            _fi.contentWindow.postMessage({ type: 'CALL_INCOMING',  payload, source: 'ws-bridge' }, '*');
-                            _fi.contentWindow.postMessage({ type: 'INCOMING_CALL',  payload, source: 'ws-bridge' }, '*');
-                            _fi.contentWindow.postMessage({ type: 'call:incoming',  payload, source: 'ws-bridge' }, '*');
-                            _fi.contentWindow.postMessage({ type: 'call_incoming',  payload, source: 'ws-bridge' }, '*');
-                        }
-                    }
-                    if (window.__callsIframeReady) {
-                        // Iframe already ready — deliver immediately
-                        _deliverCallToIframe();
-                    } else if (_callsIframe && _callsIframe.contentWindow) {
-                        // Iframe exists but JS may not be initialized — wait for CALLS_IFRAME_READY
-                        _callFallback = setTimeout(_deliverCallToIframe, 2000);
-                        window.addEventListener('message', _onCallIframeReady);
-                    }
-                    // Also show the parent-frame banner (existing behaviour preserved)
-                    if (window.showIncomingCallBanner) {
-                        // ── FORENSIC LOG: CALL_UI_RENDERED ───────────────────────────
-                        _chatLog(`[FORENSIC] CALL_UI_RENDERED | callId=${callKey} | callerName=${payload.callerName} | ts=${Date.now()}`);
-                        window.showIncomingCallBanner(payload);
-                    }
-                }
-                function _fwdAccepted(callData) {
-                    hideGlobalBanner();
-                    // FIX (CALL-EVENT-RELAY-CONSOLIDATION): only the first of the 3
-                    // independent relay paths for this event actually broadcasts.
-                    if (!window.__kynRelayCallEventOnce('call:accepted', callData)) return;
-                    // Broadcast to ALL iframes so caller's calling screen → in-call
-                    document.querySelectorAll('iframe').forEach(f => {
-                        if (f.contentWindow) f.contentWindow.postMessage({ type: 'CALL_ACCEPTED', payload: callData, source: 'ws-bridge' }, '*');
-                    });
-                    setTimeout(() => refreshCallHistoryForUser(cachedUserId), 1000);
-                }
-                function _fwdEnded(callData) {
-                    // Deduplicate: skip if same callId ended within last 3s
-                    const _eid = callData && (callData.callId || callData.id || '');
-                    const _en  = Date.now();
-                    if (_eid && window.__lastEndedCallId === _eid && (_en - (window.__lastEndedCallTime || 0)) < 3000) return;
-                    if (_eid) { window.__lastEndedCallId = _eid; window.__lastEndedCallTime = _en; }
-                    hideGlobalBanner();
-                    document.body.classList.remove('call-screen-active');
-                    window.__activeCallInProgress = false;
-                    // FIX (CALL-EVENT-RELAY-CONSOLIDATION): only the first of the 3
-                    // independent relay paths for this event actually broadcasts —
-                    // this is what was causing handleCallEnded to fire 3x per real
-                    // call end (confirmed via console trace), which is what made
-                    // calls appear to end prematurely and a duplicate call spin up
-                    // right after ending.
-                    if (!window.__kynRelayCallEventOnce('call:ended', callData)) { setTimeout(() => refreshCallHistoryForUser(cachedUserId), 500); return; }
-                    // Broadcast CALL_ENDED to ALL iframes — both caller and receiver reset
-                    document.querySelectorAll('iframe').forEach(f => {
-                        if (f.contentWindow) f.contentWindow.postMessage({ type: 'CALL_ENDED', payload: callData, source: 'ws-bridge' }, '*');
-                    });
-                    setTimeout(() => refreshCallHistoryForUser(cachedUserId), 500);
-                }
-                function _fwdForceEnded(callData) {
-                    hideGlobalBanner();
-                    document.body.classList.remove('call-screen-active');
-                    window.__activeCallInProgress = false;
-                    // FIX (CALL-EVENT-RELAY-CONSOLIDATION): dedup this path too.
-                    if (!window.__kynRelayCallEventOnce('call:force_ended', callData)) return;
-                    // PHASE15 FIX: Broadcast to ALL iframes (not just callsIframe) so both
-                    // caller and receiver screens reset when call is force-ended.
-                    document.querySelectorAll('iframe').forEach(f => {
-                        if (f.contentWindow) {
-                            f.contentWindow.postMessage({ type: 'CALL_FORCE_ENDED', payload: callData, source: 'ws-bridge' }, '*');
-                            f.contentWindow.postMessage({ type: 'CALL_ENDED',       payload: callData, source: 'ws-bridge' }, '*');
-                        }
-                    });
-                    setTimeout(() => refreshCallHistoryForUser(cachedUserId), 500);
-                }
-                function _fwdRejected(callData) {
-                    hideGlobalBanner();
-                    document.body.classList.remove('call-screen-active');
-                    window.__activeCallInProgress = false;
-                    document.querySelectorAll('iframe').forEach(f => {
-                        if (f.contentWindow) f.contentWindow.postMessage({ type: 'CALL_REJECTED', payload: callData, source: 'ws-bridge' }, '*');
-                    });
-                    setTimeout(() => refreshCallHistoryForUser(cachedUserId), 1000);
-                }
-                function _fwdCancelled(callData) {
-                    hideGlobalBanner();
-                    document.body.classList.remove('call-screen-active');
-                    window.__activeCallInProgress = false;
-                    // PHASE15 FIX: Broadcast to ALL iframes so caller AND receiver screens reset
-                    document.querySelectorAll('iframe').forEach(f => {
-                        if (f.contentWindow) {
-                            f.contentWindow.postMessage({ type: 'CALL_CANCELLED', payload: callData, source: 'ws-bridge' }, '*');
-                            f.contentWindow.postMessage({ type: 'CALL_ENDED',     payload: callData, source: 'ws-bridge' }, '*');
-                        }
-                    });
-                    setTimeout(() => refreshCallHistoryForUser(cachedUserId), 500);
-                }
-                function _fwdToCallsIframe(type, payload) {
-                    const f = document.getElementById('callsIframe');
-                    if (f && f.contentWindow) f.contentWindow.postMessage({ type, payload, source: 'ws-bridge' }, '*');
-                }
-                function _normalizeSignalSdp(raw) {
-                    if (!raw) return null;
-                    if (typeof raw === 'string') {
-                        try { return JSON.parse(raw); } catch (_) { return raw; }
-                    }
-                    return raw;
-                }
-                function _fwdWebrtcSignal(signal) {
-                    const signalType = String(signal?.type || signal?.signalType || '').toLowerCase();
-                    if (signalType === 'offer') {
-                        _fwdToCallsIframe('SIGNAL_OFFER', {
-                            ...signal,
-                            offer: _normalizeSignalSdp(signal.sdp || signal.offer)
-                        });
-                        return;
-                    }
-                    if (signalType === 'answer') {
-                        _fwdToCallsIframe('SIGNAL_ANSWER', {
-                            ...signal,
-                            answer: _normalizeSignalSdp(signal.sdp || signal.answer)
-                        });
-                        return;
-                    }
-                    if (signalType === 'ice' || signalType === 'ice_candidate' || signalType === 'ice-candidate' || signalType === 'candidate') {
-                        _fwdToCallsIframe('ICE_CANDIDATE', {
-                            ...signal,
-                            candidate: signal.candidate || signal.iceCandidate || null
-                        });
-                    }
-                }
-
-                // ── Incoming call — all naming conventions ────────────────────
-                window.wsService.on('call:incoming',  _fwdIncoming);
-                window.wsService.on('incoming_call',  _fwdIncoming);
-                window.wsService.on('call_incoming',  _fwdIncoming);
-
-                // ── Answered / accepted ───────────────────────────────────────
-                window.wsService.on('call:answered',  _fwdAccepted);
-                window.wsService.on('call:accepted',  _fwdAccepted);
-                window.wsService.on('call_accepted',  _fwdAccepted);
-                window.wsService.on('call_answered',  _fwdAccepted);
-
-                // ── Rejected ──────────────────────────────────────────────────
-                window.wsService.on('call:rejected',  _fwdRejected);
-                window.wsService.on('call_rejected',  _fwdRejected);
-
-                // ── Ended ─────────────────────────────────────────────────────
-                window.wsService.on('call:ended',     _fwdEnded);
-                window.wsService.on('call_ended',     _fwdEnded);
-
-                // ── Force ended ───────────────────────────────────────────────
-                window.wsService.on('call_force_ended',  _fwdForceEnded);
-                window.wsService.on('call:force_end',    _fwdForceEnded);
-                window.wsService.on('call:force_ended',  _fwdForceEnded);
-
-                // ── Cancelled ─────────────────────────────────────────────────
-                window.wsService.on('call:cancelled', _fwdCancelled);
-                window.wsService.on('call_cancelled', _fwdCancelled);
-
-                // ── Participant lifecycle ────────────────────────────────────
-                window.wsService.on('call_participant_joined', d => _fwdToCallsIframe('CALL_PARTICIPANT_JOINED', d));
-                window.wsService.on('call:participant_joined', d => _fwdToCallsIframe('CALL_PARTICIPANT_JOINED', d));
-                window.wsService.on('call_participant_left', d => _fwdToCallsIframe('CALL_PARTICIPANT_LEFT', d));
-                window.wsService.on('call:participant_left', d => _fwdToCallsIframe('CALL_PARTICIPANT_LEFT', d));
-
-                // ── WebRTC Signaling Bridge ────────────────────────────────────
-                window.wsService.on('call_offer',          d => _fwdToCallsIframe('SIGNAL_OFFER',   d));
-                window.wsService.on('call_answer',         d => _fwdToCallsIframe('SIGNAL_ANSWER',  d));
-                window.wsService.on('ice_candidate',       d => _fwdToCallsIframe('ICE_CANDIDATE',  d));
-                window.wsService.on('call:offer',          d => _fwdToCallsIframe('SIGNAL_OFFER',   d));
-                window.wsService.on('call:answer',         d => _fwdToCallsIframe('SIGNAL_ANSWER',  d));
-                window.wsService.on('call:ice_candidate',  d => _fwdToCallsIframe('ICE_CANDIDATE',  d));
-                window.wsService.on('webrtc:signal',       d => _fwdWebrtcSignal(d));
-                window.wsService.on('webrtc_signal',       d => _fwdWebrtcSignal(d));
-                // FIX: call:webrtc_offer is emitted by CallSignalingService — must forward to calls iframe
-                window.wsService.on('call:webrtc_offer',   d => _fwdWebrtcSignal({ ...d, type: 'offer' }));
-                window.wsService.on('call:webrtc_answer',  d => _fwdWebrtcSignal({ ...d, type: 'answer' }));
-                // FIX: also relay the canonical webrtc:signal event (server consolidates both)
-                window.wsService.on('call:ice_candidate',  d => _fwdToCallsIframe('ICE_CANDIDATE', d));
-                window.wsService.on('ice_candidate',       d => _fwdToCallsIframe('ICE_CANDIDATE', d));
-                window.wsService.on('call_ice_candidate',  d => _fwdToCallsIframe('ICE_CANDIDATE', d));
-                window.wsService.on('call:receiver_offline', d => _fwdToCallsIframe('CALL_RECEIVER_OFFLINE', d));
-                window.wsService.on('call:no_answer',      d => _fwdToCallsIframe('CALL_NO_ANSWER', d));
-                window.wsService.on('call:receiver_ack',   d => _fwdToCallsIframe('CALL_RECEIVER_ACK', d));
-
-                // FIX-INCALL-CHAT-BROKEN: in-call text chat was fully non-functional.
-                // calls.html tries to send/receive via a direct socket.io connection
-                // (`sock.emit('call:chat_message', ...)`), but no such connection
-                // exists inside the calls.html iframe at all — the only real socket
-                // lives here in chat.html (app.realtime.socket.js is never loaded in
-                // the iframe). The send side already had a postMessage fallback for
-                // this reason, but nothing here ever listened for it, and the
-                // receive side had no bridge whatsoever. Both directions now go
-                // through the same iframe bridge everything else in this app uses.
-                window.wsService.on('call:chat_message', d => _fwdToCallsIframe('CALL_CHAT_MESSAGE', d));
 
                 // ── REAL-TIME MESSAGE BRIDGE ──────────────────────────────────
                 // Forward incoming chat messages from WebSocket to the messages iframe.
@@ -8539,21 +6385,6 @@
                 // happened to be true at page load / last full refresh, drifting
                 // further out of sync with reality the longer the tab stayed
                 // open. Wire the same relay already used for friends/messages.
-                function _fwdPresenceToCalls(presPayload) {
-                    const uid = presPayload && (presPayload.userId || presPayload.id || presPayload.friendId);
-                    if (!uid) return;
-                    const online = presPayload && (presPayload.online !== false && presPayload.status !== 'offline');
-                    const callsIf = document.getElementById('callsIframe');
-                    if (!callsIf || !callsIf.contentWindow) return;
-                    callsIf.contentWindow.postMessage({
-                        type: online ? 'FRIEND_ONLINE' : 'FRIEND_OFFLINE',
-                        payload: { userId: uid, online: online, lastSeen: presPayload.lastSeen || null }
-                    }, '*');
-                }
-                window.wsService.on('user:online',     _fwdPresenceToCalls);
-                window.wsService.on('user:offline',    function(d) { _fwdPresenceToCalls(Object.assign({}, d, { online: false })); });
-                window.wsService.on('presence:update', _fwdPresenceToCalls);
-
                 function _fwdPresenceToStatus(presPayload) {
                     const uid = presPayload && (presPayload.userId || presPayload.id || presPayload.friendId);
                     if (!uid) return;
@@ -8863,13 +6694,13 @@
             }
 
             // Bind now if wsService is already real
-            _bindWsCallListeners();
+            _bindWsRealtimeListeners();
 
             // ✅ FIX 2a: Retry loop — handles race where wsService isn’t real yet when this script runs.
             (function _retryBindLoop() {
-                if (_wsCallListenersBound) return;
-                _bindWsCallListeners();
-                if (!_wsCallListenersBound) setTimeout(_retryBindLoop, 250);
+                if (_wsRealtimeListenersBound) return;
+                _bindWsRealtimeListeners();
+                if (!_wsRealtimeListenersBound) setTimeout(_retryBindLoop, 250);
             })();
 
             // ✅ FIX 2b: Re-bind on EVERY kyn:realtimeReady (not just once).
@@ -8881,16 +6712,6 @@
                 // the receiver to get double/triple events and ghost messages.
                 if (window.wsService && typeof window.wsService.off === 'function') {
                     const _rebindEvents = [
-                        'call:incoming','incoming_call','call_incoming',
-                        'call:answered','call:accepted','call_accepted','call_answered',
-                        'call:rejected','call_rejected','call:ended','call_ended',
-                        'call_force_ended','call:force_end','call:force_ended',
-                        'call:cancelled','call_cancelled',
-                        'call_participant_joined','call:participant_joined',
-                        'call_participant_left','call:participant_left',
-                        'call_offer','call_answer','ice_candidate',
-                        'call:offer','call:answer','call:ice_candidate',
-                        'webrtc:signal','webrtc_signal',
                         'message:sent','message_sent',
                         'message:new','new_message','newMessage','chat:message',
                         'receive_message','message:received',
@@ -8911,8 +6732,8 @@
                         try { window.wsService.off(ev); } catch(_) {}
                     });
                 }
-                _wsCallListenersBound = false; // allow re-bind with the real service
-                _bindWsCallListeners();
+                _wsRealtimeListenersBound = false; // allow re-bind with the real service
+                _bindWsRealtimeListeners();
 
                 // Forward ready signal into status iframe (same-origin + postMessage fallback)
                 const statusIframe = document.getElementById('statusIframe');
@@ -8924,53 +6745,9 @@
                 }
             }); // ✅ { once: true } REMOVED — must fire on every reconnect
 
-            // FIX-STALE-CALL-REPLAY: pending_call was being replayed to the calls
-            // iframe from TWO independent places on every page load — this listener
-            // (fires on callsIframe 'load') and a second, separate handler further
-            // below. Both read sessionStorage.getItem('pending_call') with no check
-            // on how old the entry was, and neither guarded against the other also
-            // firing. Since sessionStorage persists across a same-tab refresh, ANY
-            // earlier call — including one that had already ended — left this key
-            // behind whenever normal call-end cleanup didn't get a chance to run
-            // before the page reloaded, silently re-dialing that old call on
-            // refresh (sometimes twice). Fixed by routing both call sites through a
-            // single, idempotent, staleness-checked replay function.
-            window.__kynReplayPendingCall = function(callsIframeEl) {
-                if (window.__pendingCallReplayDone) return; // only one of the two triggers may act
-                const raw = sessionStorage.getItem('pending_call');
-                if (!raw) return;
-                sessionStorage.removeItem('pending_call'); // consume immediately either way
-                let callData;
-                try { callData = JSON.parse(raw); } catch (e) { return; }
-                // Staleness guard: only makes sense if written moments ago (the brief
-                // window while the calls iframe was still loading right after the
-                // user tapped "call"). 15s covers slow iframe loads with margin.
-                const age = Date.now() - (callData && callData.timestamp || 0);
-                if (!callData || !callData.timestamp || age > 15000 || age < 0) {
-                    _chatLog && _chatLog('[Parent] Discarding stale pending_call (age=' + age + 'ms) — not replaying');
-                    return;
-                }
-                if (!callsIframeEl || !callsIframeEl.contentWindow) return;
-                window.__pendingCallReplayDone = true;
-                callsIframeEl.contentWindow.postMessage({ type: 'OPEN_CALL_WITH_USER', payload: callData, source: 'parent-frame', timestamp: Date.now() }, '*');
-            };
-
-            // Calls iframe load handler
-            const callsIframe = document.getElementById('callsIframe');
-            if (callsIframe) {
-                callsIframe.addEventListener('load', function() {
-                    if (cachedToken && cachedUserId) {
-                        callsIframe.contentWindow.postMessage({ type: 'SESSION_DATA', payload: { token: cachedToken, userId: cachedUserId, user: cachedUser, authenticated: true }, timestamp: Date.now() }, '*');
-                    }
-                    setTimeout(() => sendFriendsToCallsIframe(), 500);
-                    window.__kynReplayPendingCall(callsIframe);
-                });
-            }
-
             setTimeout(() => {
                 sendToAllModulesIfNeeded(true);
                 requestFriendsFromFriendIframe();
-                if (cachedUserId) setTimeout(() => refreshCallHistoryForUser(cachedUserId), 2000);
             }, 1000);
         })();
 
@@ -8978,7 +6755,7 @@
         document.addEventListener('DOMContentLoaded', function() {
 
             // FIX Bug4: Ensure window.wsService alias is set as soon as KynectaRealtime
-            // becomes available. Without this, _bindWsCallListeners can miss the window
+            // becomes available. Without this, _bindWsRealtimeListeners can miss the window
             // entirely during slow-loading iframes, causing incoming calls to be silent.
             (function _ensureWsService() {
                 if (window.KynectaRealtime) {
@@ -9005,7 +6782,6 @@
             updateHeaderActions(window.__currentPage || 'messages');
             loadUserProfileFromStorage();
             setupProfileModal();
-            setupGlobalCallBanner();
 
             // ================================================================
             // GLOBAL KYN:* REALTIME BRIDGE
@@ -9018,82 +6794,6 @@
                     const f = document.getElementById(iframeId);
                     if (f && f.contentWindow) f.contentWindow.postMessage({ type, payload, source: 'kyn-global-bridge' }, '*');
                 }
-                function _normCall(d) {
-                    return {
-                        ...d,
-                        callerName:   d.callerName   || (d.caller && d.caller.username) || d.fromUserName || 'Unknown',
-                        callerAvatar: d.callerAvatar || (d.caller && d.caller.avatar)   || null,
-                        callType:     d.callType     || d.type || 'voice',
-                    };
-                }
-
-                // Incoming call — delegate to showIncomingCallBanner (handles all)
-                ['kyn:call:incoming', 'kyn:incoming_call', 'kyn:call_incoming'].forEach(evt => {
-                    window.addEventListener(evt, (e) => {
-                        const payload = _normCall(e.detail || {});
-                        _chatLog('[Parent] 📞 kyn-bridge:', evt, '→ callerName:', payload.callerName);
-                        if (window.showIncomingCallBanner) window.showIncomingCallBanner(payload);
-                    });
-                });
-
-                // Call state → calls iframe
-                [
-                    ['kyn:call:accepted',    'CALL_ACCEPTED'],  ['kyn:call_accepted',    'CALL_ACCEPTED'],
-                    ['kyn:call_answered',    'CALL_ACCEPTED'],
-                    ['kyn:call:rejected',    'CALL_REJECTED'],  ['kyn:call_rejected',    'CALL_REJECTED'],
-                    ['kyn:call:ended',       'CALL_ENDED'],     ['kyn:call_ended',       'CALL_ENDED'],
-                    ['kyn:call_force_ended', 'CALL_FORCE_ENDED'],
-                    ['kyn:call:cancelled',   'CALL_CANCELLED'], ['kyn:call_cancelled',   'CALL_CANCELLED'],
-                    ['kyn:call:initiated',   'CALL_INITIATED'], ['kyn:call_initiated',   'CALL_INITIATED'],
-                    ['kyn:call:missed',      'CALL_MISSED'],    ['kyn:call_missed',      'CALL_MISSED'],
-                ].forEach(([evt, type]) => {
-                    // FIX (CALL-EVENT-RELAY-CONSOLIDATION): this bridge is one of 3
-                    // independent paths that deliver the same call-state event to the
-                    // calls iframe (see __kynRelayCallEventOnce definition above for the
-                    // full explanation). Gate every dispatch through it so only the
-                    // first path to see a given real event actually posts to the iframe.
-                    window.addEventListener(evt, (e) => {
-                        if (!window.__kynRelayCallEventOnce(type, e.detail || {})) return;
-                        _post('callsIframe', type, e.detail || {});
-                    });
-                });
-
-                // WebRTC signals → calls iframe
-                [
-                    ['kyn:call:offer',         'SIGNAL_OFFER'],  ['kyn:call_offer',         'SIGNAL_OFFER'],
-                    ['kyn:call:answer',        'SIGNAL_ANSWER'], ['kyn:call_answer',        'SIGNAL_ANSWER'],
-                    ['kyn:call:ice',           'ICE_CANDIDATE'], ['kyn:call_ice',           'ICE_CANDIDATE'],
-                    ['kyn:call_ice_candidate', 'ICE_CANDIDATE'],
-                ].forEach(([evt, type]) => {
-                    window.addEventListener(evt, (e) => _post('callsIframe', type, e.detail || {}));
-                });
-                ['kyn:webrtc:signal', 'kyn:webrtc_signal'].forEach((evt) => {
-                    window.addEventListener(evt, (e) => {
-                        const signal = e.detail || {};
-                        const signalType = String(signal.type || signal.signalType || '').toLowerCase();
-                        let parsedSdp = signal.sdp;
-                        if (typeof parsedSdp === 'string') {
-                            try { parsedSdp = JSON.parse(parsedSdp); } catch (_) {}
-                        }
-                        if (signalType === 'offer') {
-                            _post('callsIframe', 'SIGNAL_OFFER', {
-                                ...signal,
-                                offer: parsedSdp || signal.offer
-                            });
-                        } else if (signalType === 'answer') {
-                            _post('callsIframe', 'SIGNAL_ANSWER', {
-                                ...signal,
-                                answer: parsedSdp || signal.answer
-                            });
-                        } else if (signalType === 'ice' || signalType === 'ice_candidate' || signalType === 'candidate') {
-                            _post('callsIframe', 'ICE_CANDIDATE', {
-                                ...signal,
-                                candidate: signal.candidate || signal.iceCandidate || null
-                            });
-                        }
-                    });
-                });
-
                 // Messages → messages iframe
                 ['kyn:message:received', 'kyn:message:new', 'kyn:new_message'].forEach(evt => {
                     window.addEventListener(evt, (e) => {
@@ -9158,11 +6858,11 @@
                     });
                 });
 
-                // Presence → messages + friends + calls
+                // Presence → messages + friends
                 ['kyn:user:online','kyn:user:offline','kyn:presence:update','kyn:PRESENCE_UPDATE'].forEach(evt => {
                     window.addEventListener(evt, (e) => {
                         const type = evt.includes('online') ? 'FRIEND_ONLINE' : evt.includes('offline') ? 'FRIEND_OFFLINE' : 'PRESENCE_UPDATE';
-                        ['messagesIframe','friendsIframe','callsIframe'].forEach(id => _post(id, type, e.detail || {}));
+                        ['messagesIframe','friendsIframe'].forEach(id => _post(id, type, e.detail || {}));
                     });
                 });
 
@@ -9245,12 +6945,6 @@
                     setTimeout(_postPending, 600);
                 } catch(e) {}
             }
-            // FIX-STALE-CALL-REPLAY: routed through the single guarded helper above
-            // instead of independently re-reading/re-posting/re-deleting the key.
-            setTimeout(() => {
-                const _ci = document.getElementById('callsIframe');
-                if (_ci && window.__kynReplayPendingCall) window.__kynReplayPendingCall(_ci);
-            }, 1000);
         });
         
     </script>
@@ -9262,8 +6956,7 @@
    • Listens for GROUP_PANEL_CLOSE → restores default header
    • Back / Call / Video / More buttons forwarded to group iframe
    • GROUP_DELETED → clear all group storage caches
-   • CALL_ENDED duplicate refresh already debounced in main script
-   =================================================================== */
+      =================================================================== */
 (function () {
 'use strict';
 
@@ -9337,25 +7030,6 @@ function wireButtons() {
             postToGroup('PARENT_GROUP_CLOSE', {});
             hideGroupHeader();
         });
-    }
-    /* Voice call */
-    var call = document.getElementById('hdrGroupCall');
-    if (call && !call._ghw) { call._ghw = true;
-        // ROOT-CAUSE FIX (GROUP-CALL-BUTTON-NOT-RESPONDING): postToGroup()
-        // only ever posts INTO the group iframe's contentWindow — but
-        // group.html has no listener for 'PARENT_GROUP_CALL' at all, so the
-        // message went nowhere and nothing happened. The code to actually
-        // start a call already exists right here in this same file's own
-        // window.addEventListener('message', ...) handler for
-        // 'PARENT_GROUP_CALL' (which calls __dispatchCallToIframe) — it was
-        // just never reachable, because nothing was posting that message
-        // type back to this window itself. Self-dispatching it is the fix.
-        call.addEventListener('click', function () { window.postMessage({ type: 'PARENT_GROUP_CALL', payload: { type: 'voice' } }, '*'); });
-    }
-    /* Video call */
-    var vid = document.getElementById('hdrGroupVideo');
-    if (vid && !vid._ghw) { vid._ghw = true;
-        vid.addEventListener('click', function () { window.postMessage({ type: 'PARENT_GROUP_CALL', payload: { type: 'video' } }, '*'); });
     }
     /* Three-dots — opens the local dropdown menu that already sits right next
        to this button in the markup (#hdrGroupMenu). This used to call
@@ -9468,109 +7142,6 @@ window.addEventListener('message', function (e) {
         return;
     }
 
-    // ── PHASE15 FIX-PHASE-C: Post-call UI restoration ────────────────────────
-    if (d.type === 'POST_CALL_RESTORE') {
-        // ── FIX: A single hangup can trigger this from both the local endCall()
-        // path AND a remote call:ended echo. Dedup within 1.5s so we don't fire
-        // navigateToPage() twice for the same hangup.
-        var _pcrNow = Date.now();
-        if (window.__lastPostCallRestoreAt && (_pcrNow - window.__lastPostCallRestoreAt) < 1500) {
-            return;
-        }
-        window.__lastPostCallRestoreAt = _pcrNow;
-
-        // FIX (second-call outgoing screen flashes then hides): this restore
-        // message is generated by teardown code in the calls iframe for the call
-        // that JUST ended, but it can still be in flight (some send paths use a
-        // short setTimeout) when the user immediately places another call. If a
-        // newer call was already dispatched by the time this arrives, it belongs
-        // to the previous call and must not navigate the user away from the one
-        // that's now actively ringing/connecting.
-        if (window.__callDispatchedAt && d.timestamp && window.__callDispatchedAt > d.timestamp) {
-            console.warn('[Parent] POST_CALL_RESTORE ignored — stale, a newer call was already dispatched');
-            return;
-        }
-
-        // Remove call-screen body classes so sidebar/nav reappear
-        document.body.classList.remove('call-screen-active', 'in-call-active');
-        if (typeof _kynResetCallsContentOverlay === 'function') _kynResetCallsContentOverlay();
-        // FIX (nav-icons-stuck-hidden): this is the definitive final cleanup
-        // step for a hangup (per the dedup comment above, it fires from both
-        // the local endCall() path and a remote call:ended echo), but it
-        // never reset window.__activeCallInProgress. That flag staying
-        // stale=true defeats the FIX-CALL-STUCK-WATCHDOG a few hundred lines
-        // up (which only force-restores nav when call-screen-active is
-        // present AND __activeCallInProgress is false) for any later,
-        // genuinely-stuck occurrence, and also makes navigateToPage()'s own
-        // call-screen-active guards misbehave afterward, since those branch
-        // directly on this flag.
-        window.__activeCallInProgress = false;
-
-        // FIX-EXACT-RETURN: Use the context saved at call start (__callReturnContext /
-        // sessionStorage 'call_return_ctx') so we reopen the EXACT chat/group/friend
-        // screen the call was triggered from, not just the generic 'messages' tab.
-        // Previously this handler ignored that context entirely and only ever did
-        // navigateToPage(d.returnTo || 'messages'), which always landed on the
-        // messages list instead of the specific conversation.
-        var _pcCtx = window.__callReturnContext;
-        if (!_pcCtx) { try { var _pcS = sessionStorage.getItem('call_return_ctx'); if (_pcS) _pcCtx = JSON.parse(_pcS); } catch(e) {} }
-        window.__callReturnContext = null;
-        try { sessionStorage.removeItem('call_return_ctx'); } catch(e) {}
-
-        var _pcReturnTo = (_pcCtx && _pcCtx.returnTo) || d.returnTo || window.__lastActivePage || 'messages';
-        var _pcPageMap = { conversations: 'messages', chats: 'messages', home: 'messages' };
-        var _pcPage = _pcPageMap[_pcReturnTo] || _pcReturnTo;
-
-        if (_pcPage === 'group') {
-            navigateToPage('group');
-            var _pcGf = document.getElementById('groupIframe');
-            if (_pcGf && _pcGf.contentWindow) {
-                setTimeout(function() {
-                    _pcGf.contentWindow.postMessage({ type: 'RETURN_FROM_CALL', payload: { returnFromCall: true, groupId: _pcCtx && _pcCtx.groupId, timestamp: Date.now() }, source: 'parent-frame' }, '*');
-                }, 300);
-            }
-        } else if (_pcPage === 'friends') {
-            navigateToPage('friends');
-            var _pcFf = document.getElementById('friendsIframe');
-            if (_pcFf && _pcFf.contentWindow) {
-                setTimeout(function() {
-                    _pcFf.contentWindow.postMessage({ type: 'RETURN_FROM_CALL', payload: { returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*');
-                }, 300);
-            }
-        } else if (_pcPage === 'messages') {
-            var _pcChatUserId = (_pcCtx && _pcCtx.chatUserId) || d.chatUserId;
-            var _pcChatUserName = (_pcCtx && _pcCtx.userName) || d.chatUserName;
-            if (_pcChatUserId && typeof _veilMessagesUntilChatOpen === 'function') _veilMessagesUntilChatOpen();
-            navigateToPage('messages');
-            // FIX (receiver-side exact return): _pcCtx.chatUserId only exists
-            // when the CURRENT user initiated the call (__dispatchCallToIframe
-            // sets it). For the receiver of a call, the specific chat they were
-            // in — if any — comes through as d.chatUserId instead (threaded via
-            // calls-core.js's pendingCallReturnChatUserId, itself set from
-            // chat.html's callData._receiverReturnChatUserId at the moment the
-            // incoming call interrupted them).
-            if (_pcChatUserId) {
-                var _pcMf = document.getElementById('messagesIframe');
-                if (_pcMf && _pcMf.contentWindow) {
-                    setTimeout(function() {
-                        _pcMf.contentWindow.postMessage({ type: 'OPEN_CHAT_WITH_USER', payload: { userId: _pcChatUserId, userName: _pcChatUserName || 'User', returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*');
-                        document.body.classList.add('chat-panel-active'); /* FIX: was gated to mobile-only (window.innerWidth<=768), so desktop never got this flag and the header/avatar/call/video/more icons never fully activated on wide screens for these code paths. Now applied on all widths, matching group-panel-active. */
-                    }, 300);
-                }
-            } else {
-                // BUG FIX: returning to the general chats list (not a specific
-                // chat) — navigateToPage() only clears chat-panel-active when
-                // leaving 'messages', not when landing on it, so a stale class
-                // from before the call could still hide the nav bar here.
-                document.body.classList.remove('chat-panel-active');
-            }
-        } else if (typeof navigateToPage === 'function') {
-            setTimeout(function() { navigateToPage(_pcPage); }, 100);
-        }
-        _chatLog('[chat.html] PHASE15 ✅ POST_CALL_RESTORE → navigating to: ' + _pcPage + (_pcCtx && _pcCtx.chatUserId ? (' (chatUserId=' + _pcCtx.chatUserId + ')') : ''));
-        return;
-    }
-    // ── END PHASE15 FIX-PHASE-C ──────────────────────────────────────────────
 }, true);
 
 /* ── Purge a group from every localStorage / sessionStorage key ─ */
@@ -9732,38 +7303,6 @@ window.__groupHdrHide = hideGroupHeader;
                 remoteClickMessage('backBtn');
                 hideChatHeader();
             });
-        }
-        // FIX-DEAD-CALL-BUTTONS: these used to postToMessage('PARENT_CHAT_ACTION', ...)
-        // into #messagesIframe (message.html). Nothing in message.html — or anywhere
-        // else in the app — ever listened for 'PARENT_CHAT_ACTION', so clicking these
-        // icons silently did nothing. message.html's OWN in-conversation call buttons
-        // (voiceCallBtn/videoCallBtn) already dispatch a call correctly by posting
-        // 'SWITCH_MODULE' to this same top-level window (handled at the
-        // "SWITCH_MODULE && module === 'calls'" listener further down this file,
-        // which calls __dispatchCallToIframe — the single real call-dispatch path).
-        // Reuse that exact mechanism here instead of a second, dead one, using the
-        // currently-open chat's user id/name that CHAT_OPENED already records on
-        // window.__lastOpenChatUserId / window.__lastOpenChatName.
-        function _dispatchHeaderCall(callType) {
-            var userId = window.__lastOpenChatUserId;
-            if (!userId) {
-                console.warn('[chat.html] Call button clicked but no chat is currently open');
-                return;
-            }
-            var userName = window.__lastOpenChatName || 'User';
-            window.postMessage({
-                type: 'SWITCH_MODULE',
-                module: 'calls',
-                payload: { userId: userId, userName: userName, callType: callType, returnTo: 'messages' }
-            }, '*');
-        }
-        var call = document.getElementById('hdrChatCall');
-        if (call && !call._chw) { call._chw = true;
-            call.addEventListener('click', function () { _dispatchHeaderCall('voice'); });
-        }
-        var vid = document.getElementById('hdrChatVideo');
-        if (vid && !vid._chw) { vid._chw = true;
-            vid.addEventListener('click', function () { _dispatchHeaderCall('video'); });
         }
         var more = document.getElementById('hdrChatMore');
         if (more && !more._chw) { more._chw = true;
@@ -9996,140 +7535,6 @@ window.__groupHdrHide = hideGroupHeader;
     <script src="js/push-init.js" defer></script>
     <script src="js/multi-device-sync.js" defer></script>
 
-    <!-- FIX-CALL-LINK-SECURITY: handles the handoff from join-call.html (a
-         secure call link's landing page). Resolves the link token, prompts
-         for a passcode if the host set one, submits the join request, and —
-         if the host requires approval — shows a waiting screen and listens
-         for the real admit/reject events before actually opening the call.
-         This is the piece that makes "only people I gave the link to, who
-         also know the passcode, and who I've approved" actually true instead
-         of just a UI label. -->
-    <script>
-    (function () {
-        function getParam(name) {
-            try { return new URLSearchParams(window.location.search).get(name); } catch (_) { return null; }
-        }
-        var joinToken = getParam('joinCallToken');
-        if (!joinToken) {
-            try {
-                joinToken = localStorage.getItem('pendingJoinCallToken');
-                if (joinToken) localStorage.removeItem('pendingJoinCallToken');
-            } catch (_) {}
-        }
-        if (!joinToken) return;
-
-        // Strip the token from the URL immediately so refreshing the page
-        // doesn't re-trigger this flow.
-        try {
-            var url = new URL(window.location.href);
-            if (url.searchParams.has('joinCallToken')) {
-                url.searchParams.delete('joinCallToken');
-                window.history.replaceState({}, '', url.toString());
-            }
-        } catch (_) {}
-
-        var authTok = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
-
-        function showModal(html) {
-            var old = document.getElementById('joinCallLinkModal');
-            if (old) old.remove();
-            var modal = document.createElement('div');
-            modal.id = 'joinCallLinkModal';
-            modal.style.cssText = 'position:fixed;inset:0;z-index:999999;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;';
-            modal.innerHTML = '<div style="background:#1e293b;border-radius:20px;padding:28px;width:320px;max-width:90vw;color:#fff;text-align:center;font-family:inherit;">' + html + '</div>';
-            document.body.appendChild(modal);
-            return modal;
-        }
-
-        function openCall(callId, hostName, callType) {
-            window.postMessage({
-                type: 'SWITCH_MODULE',
-                module: 'calls',
-                payload: { userId: callId, userName: hostName || 'Call', callType: callType, returnTo: 'messages', joinCallId: callId }
-            }, '*');
-        }
-
-        fetch('/api/calls/link/' + encodeURIComponent(joinToken), { headers: { 'Authorization': 'Bearer ' + authTok } })
-            .then(function (r) { return r.json(); })
-            .then(function (d) {
-                if (!d || !d.success) {
-                    var m = showModal('<p>This call link is no longer valid.</p><button id="jclClose" style="margin-top:14px;padding:9px 18px;border-radius:10px;border:none;background:#667eea;color:#fff;font-weight:600;cursor:pointer;">OK</button>');
-                    document.getElementById('jclClose').onclick = function () { m.remove(); };
-                    return;
-                }
-                var info = d.data;
-                if (info.alreadyJoined) { openCall(info.callId, info.hostName, info.callType); return; }
-
-                var passField = info.requiresPasscode
-                    ? '<input id="jclPasscode" type="text" inputmode="numeric" placeholder="Enter passcode" style="width:100%;padding:11px;border-radius:10px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.06);color:#fff;font-size:16px;text-align:center;letter-spacing:3px;box-sizing:border-box;margin:14px 0;">'
-                    : '<div style="height:6px;"></div>';
-
-                var modal = showModal(
-                    '<div style="width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#667eea,#764ba2);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;font-size:22px;">' +
-                    (info.callType === 'video' ? '📹' : '📞') + '</div>' +
-                    '<h3 style="margin:0 0 4px;font-size:17px;">' + String(info.hostName || 'Someone').replace(/</g, '&lt;') + '</h3>' +
-                    '<p style="color:#9ca3af;font-size:13px;margin:0;">invited you to a ' + (info.callType === 'video' ? 'video' : 'voice') + ' call</p>' +
-                    passField +
-                    '<div style="display:flex;gap:8px;margin-top:8px;">' +
-                    '<button id="jclCancel" style="flex:1;padding:11px;border-radius:10px;border:none;background:rgba(255,255,255,0.08);color:#9ca3af;font-weight:600;cursor:pointer;">Cancel</button>' +
-                    '<button id="jclJoin" style="flex:1;padding:11px;border-radius:10px;border:none;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;font-weight:700;cursor:pointer;">Join</button>' +
-                    '</div>'
-                );
-
-                document.getElementById('jclCancel').onclick = function () { modal.remove(); };
-                document.getElementById('jclJoin').onclick = function () {
-                    var passcode = info.requiresPasscode ? ((document.getElementById('jclPasscode') || {}).value || '') : undefined;
-                    fetch('/api/calls/link/' + encodeURIComponent(joinToken) + '/join', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + authTok },
-                        body: JSON.stringify({ passcode: passcode })
-                    }).then(function (r) { return r.json(); }).then(function (jd) {
-                        if (!jd || !jd.success) { alert((jd && jd.message) || 'Could not join this call'); return; }
-
-                        if (jd.data.status === 'approved') {
-                            modal.remove();
-                            openCall(jd.data.callId, info.hostName, info.callType);
-                            return;
-                        }
-
-                        // Waiting for host approval — reuses the same
-                        // waiting-room admit/reject events the host's
-                        // Admit/Deny buttons in calls.html trigger.
-                        var callIdToWatch = jd.data.callId;
-                        modal.innerHTML =
-                            '<h3 style="margin:0 0 14px;">Waiting for ' + String(info.hostName || 'the host').replace(/</g, '&lt;') + ' to let you in…</h3>' +
-                            '<div style="width:30px;height:30px;border:3px solid rgba(255,255,255,0.2);border-top-color:#667eea;border-radius:50%;margin:0 auto;animation:jclspin 0.8s linear infinite;"></div>' +
-                            '<style>@keyframes jclspin{to{transform:rotate(360deg)}}</style>' +
-                            '<button id="jclCancelWait" style="margin-top:18px;padding:9px 18px;border-radius:10px;border:none;background:rgba(255,255,255,0.08);color:#9ca3af;font-weight:600;cursor:pointer;">Cancel</button>';
-
-                        function cleanup() {
-                            if (window.wsService && typeof window.wsService.off === 'function') {
-                                try { window.wsService.off('call:admitted', onAdmitted); } catch (_) {}
-                                try { window.wsService.off('call:rejected_from_waiting_room', onRejected); } catch (_) {}
-                            }
-                        }
-                        function onAdmitted(payload) {
-                            if (String((payload || {}).callId) !== String(callIdToWatch)) return;
-                            cleanup(); modal.remove();
-                            openCall(callIdToWatch, info.hostName, info.callType);
-                        }
-                        function onRejected(payload) {
-                            if (String((payload || {}).callId) !== String(callIdToWatch)) return;
-                            cleanup();
-                            var m2 = showModal('<p>' + String(info.hostName || 'The host').replace(/</g, '&lt;') + ' declined your request to join.</p><button id="jclClose2" style="margin-top:14px;padding:9px 18px;border-radius:10px;border:none;background:#667eea;color:#fff;font-weight:600;cursor:pointer;">OK</button>');
-                            document.getElementById('jclClose2').onclick = function () { m2.remove(); };
-                        }
-                        document.getElementById('jclCancelWait').onclick = function () { cleanup(); modal.remove(); };
-                        if (window.wsService && typeof window.wsService.on === 'function') {
-                            window.wsService.on('call:admitted', onAdmitted);
-                            window.wsService.on('call:rejected_from_waiting_room', onRejected);
-                        }
-                    }).catch(function () { alert('Could not join this call'); });
-                };
-            })
-            .catch(function () {});
-    })();
-    </script>
 
 <script id="statusRealtimeBridge">
 (function(){

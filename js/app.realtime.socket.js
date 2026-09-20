@@ -234,7 +234,6 @@
             this._sessionToken = null;
             this._listeners = new Map();
             this._onlineUsers = new Set();
-            this._lastSignalPayload = null;
             this._manualDisconnect = false;
             this._lastParseErrorAt = null;
             this._isConnecting = false; // FIX: mutex to prevent concurrent _connectInternal() races
@@ -436,12 +435,6 @@
         isConnected() { return this._state === CONNECTION_STATE.AUTHENTICATED; }
         isUserOnline(u) { return this._onlineUsers.has(String(u)); }
         emit(type, payload = {}, options = {}) { return this.send(type, payload, options); }
-
-        sendSignal(signalType, payload = {}, options = {}) {
-            this._lastSignalPayload = { signalType, payload, options, timestamp: Date.now() };
-            const eventType = payload.eventType || payload.type || signalType || 'call:signal';
-            return this.send(eventType, { ...payload, signalType }, options);
-        }
 
         handleReconnect(meta = {}) {
             // ROOT-CAUSE FIX (zombie-reconnect-without-token): handleReconnect used
@@ -1171,16 +1164,6 @@
                 'message_seen':      'message:read',
                 'message_read':      'message:read',
                 'message_delivered': 'message:delivered',
-                'incoming_call':     'call:incoming',
-                'CALL_INCOMING':     'call:incoming',
-                'call_incoming':     'call:incoming',
-                'call_accepted':     'call:accepted',
-                'call_answered':     'call:accepted',
-                'call_rejected':     'call:rejected',
-                'call_cancelled':    'call:cancelled',
-                'call_ended':        'call:ended',
-                'call_force_ended':  'call:ended',
-                'webrtc_signal':     'webrtc:signal',
             };
             const canonicalType = EVENT_CANONICAL[message.type] || message.type;
             if (canonicalType !== message.type) {
@@ -1189,13 +1172,11 @@
 
             // FIX #15 — DEDUP: drop identical payloads arriving within dedup window
             // Different event types get different windows:
-            //   - call:incoming / call events: 5000ms (multiple socket bindings fire at once)
             //   - message events: 800ms (normal duplicate suppression)
             if (!this._recentRouted) this._recentRouted = new Map();
-            if (message.payload?.id || message.payload?.messageId || message.payload?.callId) {
-                const _isCallEvent = canonicalType.startsWith('call:') || canonicalType.startsWith('call_') || canonicalType.includes('call');
-                const _dedupWindow = _isCallEvent ? 5000 : 800;
-                const dedupKey = canonicalType + ':' + (message.payload.callId || message.payload.id || message.payload.messageId);
+            if (message.payload?.id || message.payload?.messageId) {
+                const _dedupWindow = 800;
+                const dedupKey = canonicalType + ':' + (message.payload.id || message.payload.messageId);
                 const lastSeen = this._recentRouted.get(dedupKey) || 0;
                 if (Date.now() - lastSeen < _dedupWindow) return; // duplicate — drop
                 this._recentRouted.set(dedupKey, Date.now());
@@ -1240,36 +1221,6 @@
                 // Always dispatch kyn:<original> form
                 try { window.dispatchEvent(new CustomEvent('kyn:' + evType, { detail: payload })); } catch (_) {}
 
-                // For call events: also normalize underscore→colon so 'call_ended' fires 'kyn:call:ended'
-                // FIX-PHASE15: Fan out call:incoming and message:new to ALL iframes immediately.
-                // calls.html and message.html run in iframes and MUST receive these events.
-                if (evType === 'call:incoming' || evType === 'incoming_call' || evType === 'call_incoming') {
-                    try {
-                        var _callFrames = document.querySelectorAll('iframe');
-                        _callFrames.forEach(function(f) {
-                            try {
-                                f.contentWindow.postMessage({ type: 'REALTIME_EVENT:call:incoming', payload: payload }, '*');
-                                f.contentWindow.postMessage({ type: 'REALTIME_EVENT:incoming_call', payload: payload }, '*');
-                                f.contentWindow.postMessage({ type: evType, payload: payload }, '*');
-                            } catch(_) {}
-                        });
-                        window.dispatchEvent(new CustomEvent('kyn:call:incoming', { detail: payload }));
-                        window.dispatchEvent(new CustomEvent('kyn:incoming_call',  { detail: payload }));
-
-                        // FIX (NOTIFICATIONS-DM-FRIEND-CALL-MISSING): calls never reached
-                        // the shared notification system — only kyn:group:*/kyn:status:*
-                        // did. Route through notifyApp() so an incoming call shows the
-                        // top banner even if the user isn't already on the calls screen.
-                        try {
-                            var _callerName = (payload && (payload.callerName || payload.fromName || payload.name)) || 'Someone';
-                            window.__NotificationStabilizationLayer && window.__NotificationStabilizationLayer.notifyApp(
-                                '📞 Incoming Call',
-                                _callerName + ' is calling you',
-                                { module: 'call', contextId: payload && (payload.callId || payload.callerId) }
-                            );
-                        } catch(_) {}
-                    } catch(_) {}
-                }
 
                 if (evType === 'message:new' || evType === 'new_message' || evType === 'chat:message') {
                     try {
@@ -1425,56 +1376,6 @@
                                 }
                             }
                         } catch(_) {}
-                    } catch(_) {}
-                }
-
-                // PHASE15 FIX: Fan out ALL call and webrtc events to ALL iframes.
-                // Previously only call:incoming was fanned out — this meant the calls.html
-                // iframe NEVER received call:accepted, call:ended, call:rejected etc.
-                // Result: caller stayed stuck on outgoing screen; ending/rejecting only
-                // closed one side. Now every call-related event is forwarded in both
-                // colon (call:accepted) and underscore (call_accepted) forms so all
-                // listener patterns in calls-core.js and calls-ui.js are satisfied.
-                if (evType.startsWith('call') || evType.startsWith('webrtc') || evType.startsWith('ice')) {
-                    try {
-                        // FIX (CALL-EVENT-RELAY-CONSOLIDATION): this fan-out is one of 3
-                        // independent paths that deliver the same call-state event to the
-                        // calls iframe (chat.html's _fwdEnded/_fwdAccepted/_fwdForceEnded
-                        // and the kyn: CustomEvent bridge are the other two) — AND it
-                        // already re-sends each event under 3-4 aliases (colon/underscore/
-                        // REALTIME_EVENT: forms) on top of that, because different
-                        // receivers listen for different alias names. That combination
-                        // was confirmed (via console trace) to fire handleCallEnded 3x for
-                        // a single real call end, which is what made calls appear to end
-                        // prematurely and a duplicate call spin up right after ending.
-                        // Only gate discrete call-STATE events here (ended/accepted/
-                        // rejected/cancelled/initiated/missed/force_ended) — NOT webrtc/ice
-                        // signaling, where every offer/answer/candidate is unique and must
-                        // always be delivered.
-                        var _callStateEvents = ['call:ended','call:accepted','call:rejected','call:cancelled','call:initiated','call:missed','call:force_ended'];
-                        var _colonForm = evType.indexOf('_') !== -1 ? evType.replace(/_/g, ':') : evType;
-                        var _underForm = evType.indexOf(':') !== -1 ? evType.replace(/:/g, '_') : evType;
-                        var _isDupClaimedElsewhere = _callStateEvents.indexOf(_colonForm) !== -1 &&
-                            window.__kynRelayCallEventOnce && !window.__kynRelayCallEventOnce(_colonForm, payload);
-                        if (!_isDupClaimedElsewhere) {
-                            var _callAllFrames = document.querySelectorAll('iframe');
-                            _callAllFrames.forEach(function(f) {
-                                try {
-                                    // Always send original form
-                                    f.contentWindow.postMessage({ type: evType, payload: payload }, '*');
-                                    // Send colon form if different
-                                    if (_colonForm !== evType) f.contentWindow.postMessage({ type: _colonForm, payload: payload }, '*');
-                                    // Send underscore form if different
-                                    if (_underForm !== evType) f.contentWindow.postMessage({ type: _underForm, payload: payload }, '*');
-                                    // Also REALTIME_EVENT prefix form for compatibility
-                                    f.contentWindow.postMessage({ type: 'REALTIME_EVENT:' + evType, payload: payload }, '*');
-                                } catch(_) {}
-                            });
-                            // Also normalise kyn: dispatch for same-frame listeners
-                            if (_colonForm !== evType) {
-                                try { window.dispatchEvent(new CustomEvent('kyn:' + _colonForm, { detail: payload })); } catch (_) {}
-                            }
-                        }
                     } catch(_) {}
                 }
 
@@ -1833,32 +1734,6 @@
                 'lan:message',
             ];
 
-            const callEvents = [
-                'call:incoming', 'call_incoming', 'incoming_call', 'CALL_INCOMING',
-                'call:accepted', 'call_accepted', 'call:answered', 'call_answered',
-                'call:rejected', 'call_rejected',
-                'call:ended', 'call_ended', 'call_force_ended',
-                'call:cancelled', 'call_cancelled',
-                'call:initiated', 'call_initiated',
-                // FIX-CALLID-MISMATCH: the server emits 'call:initiated_ack' with the
-                // real server-generated callId right after 'call:initiated', but this
-                // event was never in the forwarded-events list — so the socket never
-                // subscribed to it, calls-core.js's ready-and-waiting
-                // handleCallInitiatedAck() never ran, and the client kept tracking
-                // every call under its own locally-generated id forever. Every real
-                // signal about that call from then on (accept/end/offer/answer) arrives
-                // tagged with the server's real UUID, never matches, and gets rejected
-                // as "mismatched callId" — which is also what causes the call to look
-                // like it self-terminates almost immediately on the other end.
-                'call:initiated_ack', 'call_initiated_ack',
-                'webrtc:signal', 'webrtc_signal',
-                'call:ringing', 'call_ringing',
-                // FIX: These were missing — calls-core.js emits and listens for these
-                'call:webrtc_offer', 'call:webrtc_answer',
-                'call:ice_candidate', 'call_ice_candidate', 'ice_candidate',
-                'call:receiver_offline', 'call:no_answer', 'call:receiver_ack',
-            ];
-
             // FIX: friend events were missing — without these the socket never
             // forwards friend:accepted / friend:request to the iframe bridge,
             // so the sender's client never knew their request was accepted.
@@ -1918,7 +1793,7 @@
                 'chat:read',
             ];
 
-            const allEvents = [...messageEvents, ...callEvents, ...friendEvents, ...marketplaceEvents, ...groupEvents, ...statusEvents, ...phase5Events,
+            const allEvents = [...messageEvents, ...friendEvents, ...marketplaceEvents, ...groupEvents, ...statusEvents, ...phase5Events,
                 // FIX-GROUP-INVITE: group invitation events were never forwarded to iframes
                 'group:invitation', 'group:invite', 'group_invitation', 'group_invite',
                 'group:invitation_received', 'invitation:received', 'group:invitation_sent',
@@ -2188,7 +2063,6 @@
         connect: realtimeManager.connect.bind(realtimeManager),
         disconnect: realtimeManager.disconnect.bind(realtimeManager),
         send: realtimeManager.send.bind(realtimeManager),
-        sendSignal: realtimeManager.sendSignal.bind(realtimeManager),
         emit: realtimeManager.emit.bind(realtimeManager),
         on: realtimeManager.on.bind(realtimeManager),
         off: realtimeManager.off.bind(realtimeManager),
@@ -2586,16 +2460,15 @@
             setTimeout(_broadcastParentReady, 8000);
         })();
 
-        // ── FIX-6B: Guaranteed new_message / incoming_call fan-out ──────────────────
+        // ── FIX-6B: Guaranteed new_message fan-out ──────────────────
         // Intercept KynectaRealtime events at the source and push to ALL iframes.
         // This supplements the wildcard .on('*') bridge but fires EARLIER, directly
-        // from the socket event, ensuring calls.html and message.html receive events
+        // from the socket event, ensuring message.html receives events
         // even if the wildcard bridge hasn't initialised yet.
         (function _installGuaranteedFanOut() {
             var _origOn = realtimeManager.on.bind(realtimeManager);
             var _fanOutEvents = new Set([
-                'new_message', 'message:new', 'chat:message',
-                'incoming_call', 'call:incoming', 'call_incoming'
+                'new_message', 'message:new', 'chat:message'
             ]);
             // Monkey-patch on() so every time these events register we also fan-out
             // We do this by registering our own always-active listeners
@@ -2616,21 +2489,6 @@
                             f.contentWindow.postMessage({ type: 'new_message',  payload: payload || {} }, '*');
                         } catch(_) {}
                     });
-                });
-            });
-            ['incoming_call', 'call:incoming', 'call_incoming'].forEach(function(evt) {
-                _origOn(evt, function(payload) {
-                    var iframes = document.querySelectorAll('iframe');
-                    iframes.forEach(function(f) {
-                        try {
-                            f.contentWindow.postMessage({ type: 'incoming_call',              payload: payload || {} }, '*');
-                            f.contentWindow.postMessage({ type: 'call:incoming',              payload: payload || {} }, '*');
-                            f.contentWindow.postMessage({ type: 'REALTIME_EVENT:call:incoming', payload: payload || {} }, '*');
-                            f.contentWindow.postMessage({ type: 'REALTIME_EVENT:incoming_call', payload: payload || {} }, '*');
-                        } catch(_) {}
-                    });
-                    // Also dispatch as window CustomEvent for top-frame listeners
-                    try { window.dispatchEvent(new CustomEvent('kyn:incoming_call', { detail: payload || {} })); } catch(_) {}
                 });
             });
         })();

@@ -90,17 +90,6 @@
         try { document.querySelectorAll('link[rel="icon"],link[rel="shortcut icon"]').forEach(function (node) { node.href = '/icons/necpa-192.png'; }); } catch (_) {}
     }
 
-    function removeCalls(root) {
-        try {
-            var doc = root || document;
-            doc.querySelectorAll('#hdrChatCall,#hdrChatVideo,#hdrGroupCall,#hdrGroupVideo,[data-page="calls"],.center-menu-calls,#_kynMiniCallBar,#kyn-call-banner,#bannerAcceptCall,#bannerDeclineCall').forEach(function (node) { node.remove(); });
-            doc.querySelectorAll('button,a').forEach(function (node) {
-                var text = (node.textContent || '').trim().toLowerCase(), title = (node.getAttribute('title') || '').trim().toLowerCase();
-                if (['calls', 'new call', 'voice call', 'video call'].indexOf(text) !== -1 || ['voice call', 'video call'].indexOf(title) !== -1) node.remove();
-            });
-        } catch (_) {}
-    }
-
     function fixBrokenImages(root) {
         try {
             (root || document).querySelectorAll('img').forEach(function (img) {
@@ -121,11 +110,6 @@
         if (document.querySelector('script[data-necpra-loader="' + safe + '"]')) return;
         var script = document.createElement('script'); script.src = src; script.async = false; script.setAttribute('data-necpra-loader', safe);
         (document.head || document.documentElement).appendChild(script);
-    }
-
-    function disableLegacyCallHandlers() {
-        try { window.setupGlobalCallBanner = function () {}; window.hideGlobalBanner = function () {}; window.showIncomingCallBanner = function () {}; window.pendingIncomingCall = null; window.__activeCallInProgress = false; } catch (_) {}
-        removeCalls();
     }
 
     window.__rewriteApiUrl = function (input) {
@@ -236,9 +220,6 @@
             try {
                 var rawUrl = typeof input === 'string' ? input : (input && input.url) || '';
                 var pathname = new URL(rawUrl, window.location.origin).pathname;
-                if (/^\/api\/calls(?:\/|$)/i.test(pathname)) {
-                    return Promise.resolve(new Response(JSON.stringify({ success: true, disabled: true, data: [], listings: [], message: 'Calling is disabled' }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
-                }
             } catch (_) {}
             return nativeFetch(window.__rewriteApiUrl(input), withAuth(input, init));
         };
@@ -310,7 +291,7 @@
     function init() {
         try { var saved = localStorage.getItem('app_theme') || localStorage.getItem('theme'), prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches, theme = saved === 'dark' || saved === 'light' ? saved : (prefersDark ? 'dark' : 'light'); document.documentElement.setAttribute('data-theme', theme); document.documentElement.style.colorScheme = theme; } catch (_) {}
         installFriendsHandshakeRecovery();
-        applyBrand(document); normalizeIcons(); disableLegacyCallHandlers(); fixBrokenImages(document); installMessageStabilization(); installAccessibilityGuards();
+        applyBrand(document); normalizeIcons(); fixBrokenImages(document); installMessageStabilization(); installAccessibilityGuards();
         loadOnce('/js/admin-support-bridge.js?v=20260916-5', 'admin_support_bridge');
         // ROOT-CAUSE FIX (PWA install prompt appears on desktop but never on
         // mobile): pwa-manager.js — the DESKTOP install banner — is loaded
@@ -333,6 +314,6 @@
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true }); else init();
-    if (window.MutationObserver) new MutationObserver(function (mutations) { mutations.forEach(function (mutation) { mutation.addedNodes && mutation.addedNodes.forEach(function (node) { if (node.nodeType === 1) { applyBrand(node); removeCalls(node); fixBrokenImages(node); } }); }); }).observe(document.documentElement, { childList: true, subtree: true });
+    if (window.MutationObserver) new MutationObserver(function (mutations) { mutations.forEach(function (mutation) { mutation.addedNodes && mutation.addedNodes.forEach(function (node) { if (node.nodeType === 1) { applyBrand(node); fixBrokenImages(node); } }); }); }).observe(document.documentElement, { childList: true, subtree: true });
     console.log('[Config] Necpa runtime configuration loaded. Backend:', configuredOrigin || '(missing)');
 })();

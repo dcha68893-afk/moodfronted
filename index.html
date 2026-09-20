@@ -80,10 +80,10 @@
     <link rel="apple-touch-icon" href="icons/necpa-192.png">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Necpa - Global Chat Platform | Messaging, Calls & Marketplace</title>
+    <title>Necpa - Messaging, Friends, Accommodation & Marketplace</title>
 
     <!-- SEO: description + canonical -->
-    <meta name="description" content="Necpa brings your chats, voice & video calls, groups and shopping into one fast, private app. Download Necpa free for web, Android and desktop.">
+    <meta name="description" content="Necpa brings your chats, friends, accommodation search and marketplace into one fast, private app. Download Necpa free for web, Android and desktop.">
     <link rel="canonical" href="https://necpra.co.ke/">
     <meta name="robots" content="index, follow">
 
@@ -91,14 +91,14 @@
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="Necpa">
     <meta property="og:title" content="Necpa - Global Chat Platform">
-    <meta property="og:description" content="One app for messaging, calls, communities and marketplace. Fast, private, and free.">
+    <meta property="og:description" content="One app for messaging, friends, accommodation and marketplace. Fast, private, and free.">
     <meta property="og:url" content="https://necpra.co.ke/">
     <meta property="og:image" content="https://necpra.co.ke/icons/necpa-512.png">
 
     <!-- Twitter / X card -->
     <meta name="twitter:card" content="summary">
     <meta name="twitter:title" content="Necpa - Global Chat Platform">
-    <meta name="twitter:description" content="One app for messaging, calls, communities and marketplace.">
+    <meta name="twitter:description" content="One app for messaging, friends, accommodation and marketplace.">
     <meta name="twitter:image" content="https://necpra.co.ke/icons/necpa-512.png">
 
     <!-- Structured data so Google can build a rich result (icon, app info, download links) -->
@@ -108,7 +108,7 @@
       "@type": "WebApplication",
       "name": "Necpa",
       "url": "https://necpra.co.ke/",
-      "description": "Real-time mood-based chat and marketplace platform: messaging, voice & video calls, groups and shopping in one app.",
+      "description": "Real-time chat and marketplace platform: messaging, friends, accommodation and shopping in one app.",
       "applicationCategory": "SocialNetworkingApplication",
       "operatingSystem": "Web, Android",
       "image": "https://necpra.co.ke/icons/necpa-512.png",
@@ -1664,8 +1664,8 @@
                             <div class="landing-phone-notch"></div>
                             <div class="landing-phone-tabs">
                                 <span class="landing-phone-tab active" data-screen="chat" title="Chat"><i class="fas fa-comment-dots"></i></span>
-                                <span class="landing-phone-tab" data-screen="voice" title="Voice call"><i class="fas fa-phone"></i></span>
-                                <span class="landing-phone-tab" data-screen="video" title="Video call"><i class="fas fa-video"></i></span>
+                                <span class="landing-phone-tab" data-screen="friends" title="Friends"><i class="fas fa-user-plus"></i></span>
+                                <span class="landing-phone-tab" data-screen="accommodation" title="Accommodation"><i class="fas fa-bed"></i></span>
                                 <span class="landing-phone-tab" data-screen="market" title="Marketplace"><i class="fas fa-store"></i></span>
                                 <span class="landing-phone-tab" data-screen="community" title="Communities"><i class="fas fa-users"></i></span>
                                 <span class="landing-phone-tab" data-screen="status" title="Status"><i class="fas fa-circle-play"></i></span>
@@ -1677,20 +1677,21 @@
                                     <div class="lp-bubble mine lp-slide-in" style="animation-delay:.55s">On my way 🎉</div>
                                     <div class="lp-bubble other lp-typing lp-slide-in" style="animation-delay:.95s"><span></span><span></span><span></span></div>
                                 </div>
-                                <div class="landing-phone-screen" data-screen="voice">
-                                    <div class="lp-call-avatar"><i class="fas fa-user"></i><span class="lp-call-pulse"></span><span class="lp-call-pulse lp-call-pulse-2"></span></div>
-                                    <div class="lp-call-name">denis chacha</div>
-                                    <div class="lp-call-status"><i class="fas fa-phone"></i> Voice call · 03:42</div>
-                                    <div class="lp-call-actions"><span class="lp-call-btn mute"><i class="fas fa-microphone"></i></span><span class="lp-call-btn end"><i class="fas fa-phone"></i></span><span class="lp-call-btn speaker"><i class="fas fa-volume-up"></i></span></div>
+                                <div class="landing-phone-screen" data-screen="friends">
+                                    <div class="lp-fr-head"><i class="fas fa-user-plus"></i><span>Friend requests</span><span class="lp-fr-badge">2</span></div>
+                                    <div class="lp-fr-row"><span class="lp-avatar-chip a"></span><span class="lp-line w60"></span><span class="lp-fr-btn">Accept</span></div>
+                                    <div class="lp-fr-label">Suggested for you</div>
+                                    <div class="lp-fr-row"><span class="lp-avatar-chip b"></span><span class="lp-line w40"></span><span class="lp-fr-btn add">Add</span></div>
+                                    <div class="lp-community-tag"><i class="fas fa-location-dot"></i> 5 people nearby</div>
                                 </div>
-                                <div class="landing-phone-screen" data-screen="video">
-                                    <div class="lp-video-remote">
-                                        <div class="lp-video-self"><i class="fas fa-user"></i></div>
-                                        <span class="lp-call-pulse lp-video-pulse"></span>
+                                <div class="landing-phone-screen" data-screen="accommodation">
+                                    <div class="lp-ac-search"><i class="fas fa-magnifying-glass"></i><span>Rooms near campus</span></div>
+                                    <div class="lp-ac-card">
+                                        <div class="lp-ac-photo"><i class="fas fa-bed"></i></div>
+                                        <div class="lp-ac-title">Furnished student room, Kilimani</div>
+                                        <div class="lp-ac-price">KSh 8,500 / month</div>
+                                        <div class="lp-ac-btn">Check availability &amp; book</div>
                                     </div>
-                                    <div class="lp-call-name">denis · Video</div>
-                                    <div class="lp-call-status"><i class="fas fa-video"></i> Connecting HD…</div>
-                                    <div class="lp-call-actions"><span class="lp-call-btn mute"><i class="fas fa-microphone"></i></span><span class="lp-call-btn end"><i class="fas fa-phone"></i></span><span class="lp-call-btn cam active"><i class="fas fa-video"></i></span></div>
                                 </div>
                                 <div class="landing-phone-screen" data-screen="market">
                                     <div class="lp-market-grid">
@@ -1720,8 +1721,8 @@
                         <p class="landing-mockup-caption" id="landingMockupCaption" aria-live="polite">Chat</p>
                     </div>
 
-                    <h1 class="landing-headline">One app for Messaging, Calls, Communities and Marketplace.</h1>
-                    <p class="landing-subtitle">Necpa brings your chats, voice &amp; video calls, groups and shopping into one fast, secure workspace — on any device.</p>
+                    <h1 class="landing-headline">One app for Messaging, Friends, Accommodation and Marketplace.</h1>
+                    <p class="landing-subtitle">Necpa brings your chats, friends, places to stay and shopping into one fast, secure app — on any device.</p>
 
                     <div class="landing-stat-row" aria-label="Necpa by the numbers">
                         <div class="landing-stat"><span class="landing-stat-num"><i class="fas fa-star"></i> 4.8</span><span class="landing-stat-label">User rating</span></div>
@@ -1785,22 +1786,38 @@
 
                 <div class="showcase-item reveal reverse">
                     <div class="showcase-art" aria-hidden="true">
-                        <svg viewBox="0 0 200 160" class="il-calls">
+                        <svg viewBox="0 0 200 160" class="il-friends">
                             <circle cx="100" cy="80" r="46" class="il-ring il-ring-pulse"/>
                             <circle cx="100" cy="80" r="46" class="il-ring"/>
-                            <rect x="76" y="56" width="48" height="48" rx="24" class="il-badge"/>
-                            <path d="M89 72c0-3 2-5 5-5h4l3 8-4 3c2 5 5 8 10 10l3-4 8 3v4c0 3-2 5-5 5-14-1-24-11-24-24z" class="il-icon-shape"/>
-                            <rect x="24" y="112" width="34" height="24" rx="6" class="il-tile"/>
-                            <rect x="142" y="112" width="34" height="24" rx="6" class="il-tile"/>
+                            <circle cx="100" cy="68" r="14" class="il-avatar il-avatar-1"/>
+                            <path d="M74 104q26-26 52 0" class="il-arc"/>
+                            <circle cx="42" cy="124" r="12" class="il-avatar il-avatar-2"/>
+                            <circle cx="158" cy="124" r="12" class="il-avatar il-avatar-3"/>
                         </svg>
                     </div>
                     <div class="showcase-copy">
-                        <h3>Crystal-Clear Voice &amp; Video Calls</h3>
-                        <p>One-on-one or group calls with adaptive quality that holds up on slow connections, not just fast ones.</p>
+                        <h3>Friends</h3>
+                        <p>Send and accept friend requests, find people you may know from suggestions, and see who is nearby — all in one place.</p>
                     </div>
                 </div>
 
                 <div class="showcase-item reveal">
+                    <div class="showcase-art" aria-hidden="true">
+                        <svg viewBox="0 0 200 160" class="il-accommodation">
+                            <path d="M40 84L100 36l60 48" class="il-bag-handle"/>
+                            <rect x="56" y="82" width="88" height="54" rx="6" class="il-tile"/>
+                            <rect x="88" y="104" width="24" height="32" rx="4" class="il-badge"/>
+                            <rect x="126" y="30" width="40" height="24" rx="6" class="il-tag"/>
+                            <circle cx="136" cy="42" r="3" class="il-tag-hole"/>
+                        </svg>
+                    </div>
+                    <div class="showcase-copy">
+                        <h3>Accommodation &amp; Rentals</h3>
+                        <p>Search rooms and rentals by area, check availability and book — or list your own place — without leaving the app.</p>
+                    </div>
+                </div>
+
+                <div class="showcase-item reveal reverse">
                     <div class="showcase-art" aria-hidden="true">
                         <svg viewBox="0 0 200 160" class="il-groups">
                             <circle cx="76" cy="60" r="26" class="il-avatar il-avatar-1"/>
@@ -1815,7 +1832,7 @@
                     </div>
                 </div>
 
-                <div class="showcase-item reveal reverse">
+                <div class="showcase-item reveal">
                     <div class="showcase-art" aria-hidden="true">
                         <svg viewBox="0 0 200 160" class="il-marketplace">
                             <path d="M52 56h96l-8 68a10 10 0 01-10 9H70a10 10 0 01-10-9z" class="il-bag"/>
@@ -1831,7 +1848,7 @@
                     </div>
                 </div>
 
-                <div class="showcase-item reveal">
+                <div class="showcase-item reveal reverse">
                     <div class="showcase-art" aria-hidden="true">
                         <svg viewBox="0 0 200 160" class="il-status">
                             <circle cx="70" cy="80" r="30" class="il-story-ring"/>
@@ -1846,7 +1863,7 @@
                     </div>
                 </div>
 
-                <div class="showcase-item reveal reverse">
+                <div class="showcase-item reveal">
                     <div class="showcase-art" aria-hidden="true">
                         <svg viewBox="0 0 200 160" class="il-security">
                             <path d="M100 24l52 18v34c0 38-22 62-52 74-30-12-52-36-52-74V42z" class="il-shield"/>
@@ -2103,33 +2120,23 @@
         @keyframes lpBubbleInLeft { from { opacity: 0; transform: translateX(-14px) scale(0.94); } to { opacity: 1; transform: translateX(0) scale(1); } }
         @keyframes lpBubbleInRight { from { opacity: 0; transform: translateX(14px) scale(0.94); } to { opacity: 1; transform: translateX(0) scale(1); } }
 
-        /* -- voice call mini-screen -- */
-        .landing-phone-screen[data-screen="voice"],
-        .landing-phone-screen[data-screen="video"] { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: linear-gradient(160deg,#1f2540,#2d3358); }
-        .lp-call-avatar { position: relative; width: 52px; height: 52px; border-radius: 50%; background: rgba(255,255,255,0.12); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 1.2rem; margin-bottom: 8px; }
-        .lp-call-pulse { position: absolute; inset: -8px; border-radius: 50%; border: 2px solid rgba(102,126,234,0.6); animation: lpPulse 1.8s infinite ease-out; }
-        .lp-call-pulse-2 { animation-delay: 0.6s; border-color: rgba(102,126,234,0.4); }
-        @keyframes lpPulse { 0% { transform: scale(0.9); opacity: 0.9; } 100% { transform: scale(1.6); opacity: 0; } }
-        .lp-call-name { color: #fff; font-weight: 700; font-size: 0.78rem; margin-bottom: 2px; }
-        .lp-call-status { color: #a5b4fc; font-size: 0.6rem; margin-bottom: 14px; }
-        .lp-call-actions { display: flex; gap: 10px; }
-        .lp-call-btn { width: 26px; height: 26px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 0.65rem; color: #fff; background: rgba(255,255,255,0.15); }
-        .lp-call-btn.end { background: #ef4444; transform: rotate(135deg); }
-        .lp-call-btn.cam.active { background: #667eea; }
+        /* -- friends mini-screen -- */
+        .lp-fr-head { display: flex; align-items: center; gap: 6px; color: #667eea; font-size: 0.7rem; font-weight: 700; margin-bottom: 8px; }
+        .lp-fr-badge { margin-left: auto; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: #ef4444; color: #fff; font-size: 0.55rem; display: inline-flex; align-items: center; justify-content: center; }
+        .lp-fr-row { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; }
+        .lp-fr-row .lp-avatar-chip { margin-left: 0; flex: none; }
+        .lp-fr-row .lp-line { flex: 1; }
+        .lp-fr-btn { flex: none; font-size: 0.5rem; font-weight: 700; padding: 3px 7px; border-radius: 10px; background: #667eea; color: #fff; }
+        .lp-fr-btn.add { background: #eef1ff; color: #667eea; }
+        .lp-fr-label { font-size: 0.55rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.4px; margin: 8px 0 5px; }
 
-        /* -- video call mini-screen -- */
-        .lp-video-remote {
-            position: relative; width: 84px; height: 60px; border-radius: 12px; margin-bottom: 10px;
-            background: linear-gradient(135deg,#4338ca,#7c3aed);
-            display: flex; align-items: flex-end; justify-content: flex-end; padding: 5px;
-        }
-        .lp-video-self {
-            width: 26px; height: 20px; border-radius: 5px; background: rgba(255,255,255,0.2);
-            display: flex; align-items: center; justify-content: center; color: #fff; font-size: 0.6rem;
-            border: 1px solid rgba(255,255,255,0.4);
-        }
-        .lp-video-pulse { inset: auto; top: -6px; left: -6px; width: 14px; height: 14px; border: none; background: #34d399; border-radius: 50%; animation: lpBlink 1.4s infinite ease-in-out; }
-        @keyframes lpBlink { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+        /* -- accommodation mini-screen -- */
+        .lp-ac-search { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 10px; background: #f1f5f9; color: #64748b; font-size: 0.55rem; margin-bottom: 8px; }
+        .lp-ac-card { border-radius: 10px; border: 1px solid #e2e8f0; overflow: hidden; background: #fff; }
+        .lp-ac-photo { height: 40px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 1rem; background: linear-gradient(135deg,#0ea5e9,#6366f1); }
+        .lp-ac-title { font-size: 0.58rem; font-weight: 700; color: #1e293b; padding: 5px 7px 0; }
+        .lp-ac-price { font-size: 0.55rem; color: #059669; font-weight: 700; padding: 1px 7px 5px; }
+        .lp-ac-btn { margin: 0 7px 7px; text-align: center; font-size: 0.52rem; font-weight: 700; padding: 5px 4px; border-radius: 8px; background: #667eea; color: #fff; }
 
         /* -- marketplace mini-screen -- */
         .lp-market-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -2434,7 +2441,7 @@
                animated fade/slide/pulse, an instant swap instead. */
             .landing-phone-screen { transition: none; transform: none; }
             .lp-bubble.lp-slide-in { animation: none; opacity: 1; transform: none; }
-            .lp-call-pulse, .lp-video-pulse, .lp-market-thumb, .landing-phone-tab { animation: none; }
+            .lp-market-thumb, .landing-phone-tab { animation: none; }
         }
 
         /* Install affordance inside the login/register panel — the fallback
@@ -2622,7 +2629,7 @@
                 <div class="feature-grid">
                     <div class="feature-card"><div class="feature-icon"><i class="fas fa-globe"></i></div><div class="feature-content"><h3>Global Chat</h3><p>Connect worldwide instantly</p></div></div>
                     <div class="feature-card"><div class="feature-icon"><i class="fas fa-language"></i></div><div class="feature-content"><h3>AI Translation</h3><p>Real-time language support</p></div></div>
-                    <div class="feature-card"><div class="feature-icon"><i class="fas fa-video"></i></div><div class="feature-content"><h3>HD Video Calls</h3><p>Crystal clear quality</p></div></div>
+                    <div class="feature-card"><div class="feature-icon"><i class="fas fa-user-plus"></i></div><div class="feature-content"><h3>Find Friends</h3><p>Requests, suggestions &amp; people nearby</p></div></div>
                 </div>
             </div>
             
@@ -2631,7 +2638,7 @@
                 <div class="tips-list">
                     <div class="tip-card"><div class="tip-number">1</div><div class="tip-text">Turn on <strong>AI Translation</strong> in a chat's settings before joining a global room — messages arrive already translated, no copy-pasting.</div></div>
                     <div class="tip-card"><div class="tip-number">2</div><div class="tip-text">Add 2–3 interests to your profile first. Rooms and people are suggested from them, so a filled-out profile means better matches from minute one.</div></div>
-                    <div class="tip-card"><div class="tip-number">3</div><div class="tip-text">On video calls, join with your mic muted and camera off — you can turn both on once you're in, and it avoids a noisy entrance.</div></div>
+                    <div class="tip-card"><div class="tip-number">3</div><div class="tip-text">Use <strong>Friends</strong> to accept requests and check people suggested for you — adding a few friends first makes your chat list useful straight away.</div></div>
                 </div>
             </div>
 
@@ -2674,7 +2681,7 @@
                 <div class="feature-grid">
                     <div class="feature-card"><div class="feature-icon"><i class="fas fa-globe-americas"></i></div><div class="feature-content"><h3>Global Chat Rooms</h3><p>Join topic-based rooms worldwide</p></div></div>
                     <div class="feature-card"><div class="feature-icon"><i class="fas fa-language"></i></div><div class="feature-content"><h3>Real-time Translation</h3><p>AI-powered multilingual chat</p></div></div>
-                    <div class="feature-card"><div class="feature-icon"><i class="fas fa-video"></i></div><div class="feature-content"><h3>Video & Voice Chat</h3><p>HD quality with 8 participants</p></div></div>
+                    <div class="feature-card"><div class="feature-icon"><i class="fas fa-bed"></i></div><div class="feature-content"><h3>Accommodation &amp; Rentals</h3><p>Search rooms, check availability &amp; book</p></div></div>
                 </div>
             </div>
             
@@ -2683,7 +2690,7 @@
                 <div class="tips-list">
                     <div class="tip-card"><div class="tip-number">1</div><div class="tip-text">Turn on <strong>AI Translation</strong> in a chat's settings before joining a global room — messages arrive already translated, no copy-pasting.</div></div>
                     <div class="tip-card"><div class="tip-number">2</div><div class="tip-text">Add 2–3 interests to your profile first. Rooms and people are suggested from them, so a filled-out profile means better matches from minute one.</div></div>
-                    <div class="tip-card"><div class="tip-number">3</div><div class="tip-text">On video calls, join with your mic muted and camera off — you can turn both on once you're in, and it avoids a noisy entrance.</div></div>
+                    <div class="tip-card"><div class="tip-number">3</div><div class="tip-text">Use <strong>Friends</strong> to accept requests and check people suggested for you — adding a few friends first makes your chat list useful straight away.</div></div>
                     <div class="tip-card"><div class="tip-number">4</div><div class="tip-text">Pin your most active chats from the chat list menu so they stay at the top instead of getting buried by new conversations.</div></div>
                 </div>
             </div>
@@ -2845,7 +2852,7 @@
                                 <h3>Premium Trial Activated!</h3>
                                 <p>Sign up today for exclusive features</p>
                                 <div class="premium-features">
-                                    <div class="premium-feature"><i class="fas fa-check-circle"></i><span>HD video calls (up to 8 people)</span></div>
+                                    <div class="premium-feature"><i class="fas fa-check-circle"></i><span>Priority accommodation &amp; marketplace listings</span></div>
                                     <div class="premium-feature"><i class="fas fa-check-circle"></i><span>AI chat assistant</span></div>
                                     <div class="premium-feature"><i class="fas fa-check-circle"></i><span>Custom themes & backgrounds</span></div>
                                 </div>
@@ -3033,7 +3040,8 @@
                 <h2>Why people choose Necpa</h2>
                 <div class="feature-grid">
                     <div class="feature-card"><div class="feature-icon"><i class="fas fa-lock"></i></div><div class="feature-content"><h3>End-to-End Encrypted</h3><p>Your messages stay private, always</p></div></div>
-                    <div class="feature-card"><div class="feature-icon"><i class="fas fa-phone-volume"></i></div><div class="feature-content"><h3>Crystal-Clear Calls</h3><p>HD voice &amp; video, no lag</p></div></div>
+                    <div class="feature-card"><div class="feature-icon"><i class="fas fa-user-plus"></i></div><div class="feature-content"><h3>Friends</h3><p>Requests, suggestions &amp; people nearby</p></div></div>
+                    <div class="feature-card"><div class="feature-icon"><i class="fas fa-bed"></i></div><div class="feature-content"><h3>Accommodation &amp; Rentals</h3><p>Find a room, check availability &amp; book</p></div></div>
                     <div class="feature-card"><div class="feature-icon"><i class="fas fa-users"></i></div><div class="feature-content"><h3>Group &amp; Community Chats</h3><p>Stay close with everyone that matters</p></div></div>
                     <div class="feature-card"><div class="feature-icon"><i class="fas fa-language"></i></div><div class="feature-content"><h3>Real-time Translation</h3><p>AI-powered multilingual chat</p></div></div>
                 </div>
@@ -3065,7 +3073,8 @@
                 </div>
                 <div class="feature-grid">
                     <div class="feature-card"><div class="feature-icon"><i class="fas fa-lock"></i></div><div class="feature-content"><h3>End-to-End Encrypted</h3><p>Your messages stay private, always</p></div></div>
-                    <div class="feature-card"><div class="feature-icon"><i class="fas fa-phone-volume"></i></div><div class="feature-content"><h3>Crystal-Clear Calls</h3><p>HD voice &amp; video, no lag</p></div></div>
+                    <div class="feature-card"><div class="feature-icon"><i class="fas fa-user-plus"></i></div><div class="feature-content"><h3>Friends</h3><p>Requests, suggestions &amp; people nearby</p></div></div>
+                    <div class="feature-card"><div class="feature-icon"><i class="fas fa-bed"></i></div><div class="feature-content"><h3>Accommodation &amp; Rentals</h3><p>Find a room, check availability &amp; book</p></div></div>
                     <div class="feature-card"><div class="feature-icon"><i class="fas fa-users"></i></div><div class="feature-content"><h3>Group &amp; Community Chats</h3><p>Stay close with everyone that matters</p></div></div>
                     <div class="feature-card"><div class="feature-icon"><i class="fas fa-language"></i></div><div class="feature-content"><h3>Real-time Translation</h3><p>AI-powered multilingual chat</p></div></div>
                 </div>
@@ -3085,7 +3094,7 @@
                         <div class="testimonial-author"><div class="testimonial-avatar">SR</div><div class="testimonial-info"><h4>jackson elvis</h4><p>Spain • Regular User</p></div></div>
                     </div>
                     <div class="testimonial">
-                        <div class="testimonial-content">"Calls are clearer than what I used before, even on weak wifi."</div>
+                        <div class="testimonial-content">"I found a furnished room near campus and booked it without leaving the app."</div>
                         <div class="testimonial-author"><div class="testimonial-avatar">DK</div><div class="testimonial-info"><h4>eliza mwita</h4><p>South Korea • Regular User</p></div></div>
                     </div>
                 </div>
@@ -3100,7 +3109,8 @@
                     <h2><i class="fas fa-mobile-screen-button"></i> See Necpa In Action</h2>
                     <div class="mmp-screens-strip">
                         <div class="mmp-screen-card"><div class="mmp-screen-icon chat"><i class="fas fa-comment-dots"></i></div><span>Chat</span></div>
-                        <div class="mmp-screen-card"><div class="mmp-screen-icon call"><i class="fas fa-video"></i></div><span>Calls</span></div>
+                        <div class="mmp-screen-card"><div class="mmp-screen-icon friends"><i class="fas fa-user-plus"></i></div><span>Friends</span></div>
+                        <div class="mmp-screen-card"><div class="mmp-screen-icon accom"><i class="fas fa-bed"></i></div><span>Accommodation</span></div>
                         <div class="mmp-screen-card"><div class="mmp-screen-icon market"><i class="fas fa-store"></i></div><span>Marketplace</span></div>
                         <div class="mmp-screen-card"><div class="mmp-screen-icon community"><i class="fas fa-users"></i></div><span>Communities</span></div>
                         <div class="mmp-screen-card"><div class="mmp-screen-icon status"><i class="fas fa-circle-play"></i></div><span>Status</span></div>
@@ -3112,7 +3122,7 @@
                     <h2><i class="fas fa-circle-question"></i> Frequently Asked Questions</h2>
                     <details class="mmp-faq-item">
                         <summary>Is Necpa free to use?</summary>
-                        <p>Yes — messaging, calls, groups and communities are free. Some marketplace and premium tools may have their own pricing.</p>
+                        <p>Yes — messaging, friends, groups and communities are free. Some marketplace and premium tools may have their own pricing.</p>
                     </details>
                     <details class="mmp-faq-item">
                         <summary>Are my messages private?</summary>
@@ -3120,7 +3130,7 @@
                     </details>
                     <details class="mmp-faq-item">
                         <summary>Can I use Necpa on multiple devices?</summary>
-                        <p>Yes — sign in on any device and your chats, calls and groups stay in sync.</p>
+                        <p>Yes — sign in on any device and your chats, friends and groups stay in sync.</p>
                     </details>
                     <details class="mmp-faq-item">
                         <summary>Does Necpa work offline?</summary>
@@ -3272,7 +3282,8 @@
                 box-shadow: 0 6px 16px rgba(0,0,0,0.12);
             }
             .mmp-screen-icon.chat { background: linear-gradient(160deg,#667eea,#764ba2); }
-            .mmp-screen-icon.call { background: linear-gradient(160deg,#1f2540,#2d3358); }
+            .mmp-screen-icon.friends { background: linear-gradient(160deg,#667eea,#7c3aed); }
+            .mmp-screen-icon.accom { background: linear-gradient(160deg,#0ea5e9,#6366f1); }
             .mmp-screen-icon.market { background: linear-gradient(160deg,#f97316,#fbbf24); }
             .mmp-screen-icon.community { background: linear-gradient(160deg,#059669,#34d399); }
             .mmp-screen-icon.status { background: linear-gradient(160deg,#db2777,#f472b6); }
@@ -4858,7 +4869,7 @@
                     var faqs = [
                         { q: 'How do I reset my password?', a: 'On the login screen click "Forgot password?", enter your email, and follow the link we send you.' },
                         { q: 'Why can\'t I log in?', a: 'Ensure your email and password are correct. If the server is starting from sleep mode (free tier), wait 30 seconds and try again. Check CAPS LOCK.' },
-                        { q: 'How do I start a video call?', a: 'Open a chat conversation and tap the camera icon in the top-right. Both users must allow camera/microphone access.' },
+                        { q: 'How do I find and add friends?', a: 'Open Friends, then use Discover or search by username. You can also add people suggested for you or people from a group you share. Accept requests from the bell icon.' },
                         { q: 'Can I use Necpa on multiple devices?', a: 'Yes. You can be signed in on up to 2 devices per account simultaneously.' },
                         { q: 'How do I delete my account?', a: 'Go to Settings → Account → Delete Account. This is permanent after 30 days.' },
                         { q: 'Why are my messages disappearing?', a: 'This can happen if you have Auto-Delete enabled, or if the app was refreshed during a sync. Check Settings → Privacy → Auto-Delete Messages.' },
@@ -5192,10 +5203,7 @@ document.addEventListener('click',function(e){
 window.__socketCanonical={
   'new_message':'message:new','chat:message':'message:new','MESSAGE_RECEIVED':'message:new',
   'message_deleted':'message:delete','message_seen':'message:read','message_read':'message:read',
-  'message_delivered':'message:delivered','incoming_call':'call:incoming','CALL_INCOMING':'call:incoming',
-  'call_incoming':'call:incoming','call_accepted':'call:accepted','call_answered':'call:accepted',
-  'call_rejected':'call:rejected','call_cancelled':'call:cancelled','call_ended':'call:ended',
-  'call_force_ended':'call:ended','webrtc_signal':'webrtc:signal'
+  'message_delivered':'message:delivered'
 };
 
 /* ── FIX #3: Multi-send model ── */
@@ -5402,7 +5410,7 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
         // second, competing GSI render pass from the landing screen itself.
         if (googleBtn) googleBtn.addEventListener('click', function () { goToForm('login'); });
 
-        // ---- hero phone mockup: auto-cycle Chat -> Voice -> Video -> Marketplace
+        // ---- hero phone mockup: auto-cycle Chat -> Friends -> Accommodation -> Marketplace
         // -> Communities -> Status, repeating. Runs identically on mobile and
         // desktop (same DOM/JS, no viewport branching) so the hero always
         // demonstrates what the app does instead of sitting on one screen.
@@ -5416,8 +5424,8 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
         // for the hero to communicate the product. So the interval now always
         // runs; only the CSS transition/animation gets suppressed.
         (function () {
-            var order = ['chat', 'voice', 'video', 'market', 'community', 'status'];
-            var labels = { chat: 'Chat', voice: 'Voice Call', video: 'Video Call', market: 'Marketplace', community: 'Communities', status: 'Status' };
+            var order = ['chat', 'friends', 'accommodation', 'market', 'community', 'status'];
+            var labels = { chat: 'Chat', friends: 'Friends', accommodation: 'Accommodation', market: 'Marketplace', community: 'Communities', status: 'Status' };
             var tabs = document.querySelectorAll('.landing-phone-tab');
             var screens = document.querySelectorAll('.landing-phone-screen');
             var caption = document.getElementById('landingMockupCaption');

@@ -3842,20 +3842,6 @@ input:focus + .toggle-slider,
     align-items: center;
 }
 
-.jm-call-btn {
-    background: #f3f4f6;
-    border: 1px solid var(--jm-border);
-    border-radius: 8px;
-    width: 44px;
-    height: 44px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    font-size: 18px;
-    color: var(--jm-text2);
-}
-
 .jm-checkout-btn {
     flex: 1;
     background: var(--jm-orange);

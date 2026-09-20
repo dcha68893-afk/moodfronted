@@ -228,7 +228,7 @@
      parent's default "Messages" bar plus this iframe's own back/name/
      call/video/more row underneath it). This block hides #chatHeader's
      own visible presentation only — every element inside it (backBtn,
-     chatHeaderName, searchInChatBtn, voiceCallBtn, videoCallBtn,
+     chatHeaderName, searchInChatBtn,
      chatMoreBtn) stays in the DOM, fully functional, with its existing
      click handlers untouched, because chat.html remote-clicks these exact
      elements the same way it already does for #newChatBtn/
@@ -1094,8 +1094,6 @@
           <strong id="chatHeaderName" style="cursor:${hasChat ? 'pointer' : 'default'};">${escapeHtml(headerName)}</strong>
           <div id="chatHeaderActions">
             <button class="header-icon-btn" id="searchInChatBtn" title="Search"${hasChat ? '' : ' disabled style="visibility:hidden;"'}>🔍</button>
-            <button class="header-icon-btn" id="voiceCallBtn" title="Voice call"${hasChat ? '' : ' disabled'}>📞</button>
-            <button class="header-icon-btn" id="videoCallBtn" title="Video call"${hasChat ? '' : ' disabled'}>🎥</button>
             <button class="header-icon-btn" id="chatMoreBtn" title="More">⋮</button>
           </div>
           <div id="selectionActions" class="hidden">
@@ -1187,16 +1185,6 @@
       }
 
       const otherUserId = conv?.otherUser?.id;
-      function startCall(callType) {
-        if (!hasChat) return;
-        window.parent.postMessage({
-          type: 'SWITCH_MODULE', module: 'calls',
-          payload: { userId: otherUserId, userName: conv?.otherUser?.username || 'User', callType, returnTo: 'messages' },
-        }, '*');
-      }
-      document.getElementById('voiceCallBtn').addEventListener('click', () => startCall('voice'));
-      document.getElementById('videoCallBtn').addEventListener('click', () => startCall('video'));
-
       document.getElementById('chatHeaderName').addEventListener('click', () => {
         if (!hasChat) return;
         openChatInfoPanel(chatId, conv);
@@ -1273,7 +1261,7 @@
           }
         } else if (action === 'block') {
           if (!otherUserId) { alert('Cannot block: unknown user for this conversation.'); return; }
-          if (!confirm(`Block ${conv?.otherUser?.username || 'this user'}? They won't be able to message or call you.`)) return;
+          if (!confirm(`Block ${conv?.otherUser?.username || 'this user'}? They won't be able to message you.`)) return;
           try {
             const res = await window.MessageModule.request().post(`/friends/${otherUserId}/block`);
             if (res && res.success !== false) {

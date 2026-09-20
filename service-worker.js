@@ -32,16 +32,13 @@ const SW_VERSION = '19.29.0';
 // app log image set) cached under the old name gets a clean break on next
 // load, instead of waiting on the 7-day CACHE_MAX_AGE staleness check or a
 // lucky reinstall.
-const CACHE_NAME = 'necpa-static-v54';
+const CACHE_NAME = 'necpa-static-v55';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
   '/index.html','/manifest.json','/icons/necpa-192.png','/icons/necpa-512.png',
   '/Tool.css','/Tool-ui.js','/Tool-core.part1.js','/Tool-core.part2.js','/Tool-core.part3.js',
-  '/friend.html','/chat.html','/calls.html',
-  '/calls-core.part1.js','/calls-core.part2.js','/calls-core.part3.js','/calls-core.part4.js',
-  '/calls-core.part5.js','/calls-core.part6.js','/calls-core.part7.js','/calls-core.part8.js',
-  '/calls-ui.js','/calls.css','/callSession.manager.js','/callRetry.engine.js','/localStore.calls.js',
+  '/friend.html','/chat.html',
   '/js/api.core.js','/js/api.request.js','/js/api.auth.js','/js/api.messages.js',
   '/js/app.core.bootstrap.js','/js/app.core.session.js','/js/app.core.ui.js','/js/app.ui.auth.js',
   '/js/app.cache.js','/js/app.cache.unified.js','/js/authStorage.js','/js/app.offline.queue.js','/js/auth.session.manager.js',
@@ -99,8 +96,7 @@ const NETWORK_FIRST_PATTERNS = [
   /\/friend-ui\.js/i,/\/friend-core\.bootstrap\.js/i,/\/friend-core\.operations\.js/i,
   /\/friendSync\.engine\.js/i,/\/friendQueue\.manager\.js/i,/\/localStore\.friends\.js/i,
   /\/Tool-core\.part3\.js/i,/\/Tool-ui\.js/i,/\/pwa-manager\.js/i,/\/js\/kynecta\.safety\.layer\.js/i,
-  /\/calls-core\.part[1-8]\.js/i,/\/calls-ui\.js/i,/\/callSession\.manager\.js/i,
-  /\/callRetry\.engine\.js/i,/\/settings-ui\.js/i,/\/js\/settings-ui\.local-first\.patch\.js/i,
+  /\/settings-ui\.js/i,/\/js\/settings-ui\.local-first\.patch\.js/i,
   /\/chat\.html/i,
   // ROOT-CAUSE FIX (Product Management admin page showing raw JS/template-literal
   // source as visible page text; wrong/mismatched product images on marketplace

@@ -385,7 +385,6 @@
       session: [],
       ui: [],
       iframes: [],
-      calls: [],
     },
 
     setReady: function (component) {
@@ -453,9 +452,6 @@
     },
     waitForIframes: function (timeoutMs = 10000) {
       return window.AppBootContext.waitFor("iframes", timeoutMs);
-    },
-    waitForCalls: function (timeoutMs = 10000) {
-      return window.AppBootContext.waitFor("calls", timeoutMs);
     },
     waitForAll: function (components, timeoutMs = 20000) {
       return Promise.all(
@@ -2014,16 +2010,6 @@
             loadOrder: 4,
             container: "#iframe-container, .page-container",
           },
-          calls: {
-            id: "calls-page",
-            file: "calls.html",
-            requiresAuth: true,
-            isIframe: true,
-            icon: "📞",
-            title: "Calls",
-            loadOrder: 5,
-            container: "#iframe-container, .page-container",
-          },
           settings: {
             id: "settings-page",
             file: "settings.html",
@@ -2075,7 +2061,7 @@
 
         defaultPage: "chat.html",
         defaultPageKey: "chat",
-        modules: ["chat", "group", "message", "friend", "calls", "settings", "status", "tool"],
+        modules: ["chat", "group", "message", "friend", "settings", "status", "tool"],
         apiBaseUrl: window.location.origin,
         allowedOrigins: [window.location.origin],
       };
@@ -2129,7 +2115,6 @@
             "group.html": { id: "group-page", isIframe: true, icon: "👥", container: "#iframe-container" },
             "message.html": { id: "message-page", isIframe: true, icon: "✉️", container: "#iframe-container" },
             "friend.html": { id: "friend-page", isIframe: true, icon: "👤", container: "#iframe-container" },
-            "calls.html": { id: "calls-page", isIframe: true, icon: "📞", container: "#iframe-container" },
             "settings.html": { id: "settings-page", isIframe: true, icon: "⚙️", container: "#iframe-container" },
             "status.html": { id: "status-page", isIframe: true, icon: "🟢", container: "#iframe-container" },
             "Tool.html": { id: "tool-page", isIframe: true, icon: "🛠️", container: "#iframe-container" },
@@ -2178,7 +2163,7 @@
       }
 
       if (!APP_CONFIG.modules) {
-        APP_CONFIG.modules = ["chat", "group", "message", "friend", "calls", "settings", "status", "tool"];
+        APP_CONFIG.modules = ["chat", "group", "message", "friend", "settings", "status", "tool"];
         console.log("✅ Added modules list");
       }
 
@@ -2664,7 +2649,7 @@
       BOOTSTRAP_STATE_MACHINE.transitionTo(BOOTSTRAP_CONSTANTS.STATES.LOADING, "module_registration");
 
       if (!window.APP_CONFIG.modules) {
-        window.APP_CONFIG.modules = ["chat", "group", "message", "friend", "calls", "settings", "status", "tool"];
+        window.APP_CONFIG.modules = ["chat", "group", "message", "friend", "settings", "status", "tool"];
       }
 
       window.__REGISTERED_MODULES = new Set();

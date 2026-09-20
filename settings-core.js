@@ -1361,10 +1361,6 @@ function updateUIWithSettings(settings) {
                 groupNotifications.checked = settings.notifications.groupNotifications !== false;
             }
             
-            const callNotifications = document.getElementById('callNotifications');
-            if (callNotifications) {
-                callNotifications.checked = settings.notifications.callNotifications !== false;
-            }
         }
         
         if (settings.appearance) {
@@ -5560,12 +5556,6 @@ const UIBridge = {
             } catch (error) {}
         });
         
-        this.register('updateCalls', async (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
-            try {
-                await updateSetting('calls', data.key, data.value);
-            } catch (error) {}
-        });
         
         this.register('updateStatus', async (data) => {
             if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
@@ -5916,7 +5906,6 @@ const SETTINGS_MENU = [
     { id: 'chat', icon: 'fas fa-comments', title: 'Chat' },
     { id: 'friends', icon: 'fas fa-user-friends', title: 'Friends' },
     { id: 'groups', icon: 'fas fa-users', title: 'Groups' },
-    { id: 'calls', icon: 'fas fa-phone', title: 'Calls' },
     { id: 'status', icon: 'fas fa-circle', title: 'Status' },
     { id: 'notifications', icon: 'fas fa-bell', title: 'Notifications' },
     { id: 'appearance', icon: 'fas fa-palette', title: 'Appearance' },
@@ -7568,7 +7557,6 @@ const DEFAULT_SETTINGS = {
         notificationVibration: true,
         messageNotifications: true,
         groupNotifications: true,
-        callNotifications: true,
         mentionNotifications: true,
         emailNotifications: false
     },
@@ -7588,21 +7576,6 @@ const DEFAULT_SETTINGS = {
         showTimestamps: true,
         showReadReceipts: true,
         allowReactions: true
-    },
-    calls: {
-        allowIncomingCalls: true,
-        whoCanCallMe: 'friendsOnly',
-        autoAnswer: false,
-        autoReject: false,
-        callRingtone: 'default',
-        vibrateOnCall: true,
-        cameraOnStart: false,
-        videoQuality: 'auto',
-        voiceQuality: 'high',
-        noiseCancellation: true,
-        echoCancellation: true,
-        speakerDefault: true,
-        allowScreenShare: true
     },
     friends: {
         discoverByPhone: true,

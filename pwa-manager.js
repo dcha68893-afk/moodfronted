@@ -132,21 +132,8 @@
   let refreshing = false;
   const hadControllerOnLoad = !!navigator.serviceWorker.controller;
 
-  function isCallActive() {
-    return !!(window.__callActive || (document.body && (document.body.classList.contains('call-screen-active') || document.body.classList.contains('in-call-active'))));
-  }
-
   function reloadOnce() {
     if (refreshing) return;
-    if (isCallActive()) {
-      const waitForEnd = function () {
-        window.removeEventListener('kyn:call:ended', waitForEnd);
-        reloadOnce();
-      };
-      window.addEventListener('kyn:call:ended', waitForEnd, { once: true });
-      setTimeout(function () { if (!isCallActive()) reloadOnce(); }, 5000);
-      return;
-    }
     refreshing = true;
     window.location.reload();
   }

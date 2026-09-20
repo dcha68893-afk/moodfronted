@@ -6937,7 +6937,6 @@ function _renderCart() {
                 }).join('')}
             </div>
             <div class="jm-cart-footer">
-                <button class="jm-call-btn" title="Call support"><i class="fas fa-phone"></i></button>
                 <button class="jm-checkout-btn" onclick="window._jmCheckout()" ${cart.items.some(i=>(i.product?.stock_quantity??999)<=0)?'disabled':''}>
                     Checkout — ${_fmt(cart.total)}
                 </button>

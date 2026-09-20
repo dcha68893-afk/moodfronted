@@ -600,16 +600,6 @@ if (typeof APP_CONFIG === 'undefined') {
         loadOrder: 4,
         container: '#iframe-container, .page-container'
       },
-      calls: {
-        id: 'calls-page',
-        file: 'calls.html',
-        requiresAuth: true,
-        isIframe: true,
-        icon: '📞',
-        title: 'Calls',
-        loadOrder: 5,
-        container: '#iframe-container, .page-container'
-      },
       settings: {
         id: 'settings-page',
         file: 'settings.html',
@@ -716,7 +706,6 @@ if (typeof APP_CONFIG === 'undefined') {
         'group.html': { id: 'group-page', isIframe: true, icon: '👥', container: '#iframe-container' },
         'message.html': { id: 'message-page', isIframe: true, icon: '✉️', container: '#iframe-container' },
         'friend.html': { id: 'friend-page', isIframe: true, icon: '👤', container: '#iframe-container' },
-        'calls.html': { id: 'calls-page', isIframe: true, icon: '📞', container: '#iframe-container' },
         'settings.html': { id: 'settings-page', isIframe: true, icon: '⚙️', container: '#iframe-container' },
         'status.html': { id: 'status-page', isIframe: true, icon: '🟢', container: '#iframe-container' },
         'Tool.html': { id: 'tool-page', isIframe: true, icon: '🛠️', container: '#iframe-container' }

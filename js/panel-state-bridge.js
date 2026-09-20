@@ -312,7 +312,6 @@
             if (page === 'message') return 'messages';
             if (page === 'tool' || page === 'marketplace') return 'tools';
             if (page === 'setting') return 'settings';
-            if (page === 'call' || page === 'calls-core') return 'calls';
             if (page === 'game') return 'games';
             return page || 'messages';
         }
@@ -388,10 +387,7 @@
                     screen = (window.__kynPanelState.status && window.__kynPanelState.status.panel) || 'view';
                     if (screen === true) screen = 'view';
                 }
-            } else if (page === 'calls') {
-                if (document.body.classList.contains('call-screen-active') || window.__activeCallInProgress) screen = 'call';
             } else {
-                var ps = window.__kynPanelState[page];
                 if (ps && ps.panel) screen = ps.panel === true ? 'panel' : String(ps.panel);
             }
 
@@ -417,7 +413,7 @@
 
         function postToIframe(module, message) {
             try {
-                var map = { messages:'messagesIframe', group:'groupIframe', status:'statusIframe', calls:'callsIframe', friends:'friendsIframe', tools:'toolsIframe' };
+                var map = { messages:'messagesIframe', group:'groupIframe', status:'statusIframe', friends:'friendsIframe', tools:'toolsIframe' };
                 var iframe = document.getElementById(map[module]);
                 if (iframe && iframe.contentWindow) iframe.contentWindow.postMessage(message, '*');
                 return !!iframe;
@@ -477,12 +473,6 @@
                     postToIframe('status', { type:'GO_BACK_TO_LIST', source:'exact-nav', timestamp:Date.now() });
                     document.body.classList.remove('status-panel-active');
                 } else document.body.classList.add('status-panel-active');
-                return;
-            }
-            if (module === 'calls' && screen === 'sidebar') {
-                postToIframe('calls', { type:'CLOSE_CALL_SCREEN', source:'exact-nav', timestamp:Date.now() });
-                document.body.classList.remove('call-screen-active');
-                window.__activeCallInProgress = false;
                 return;
             }
             if (module === 'friends') {
