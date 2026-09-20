@@ -7,6 +7,39 @@
     var configuredOrigin = String(runtime.BACKEND_URL || window.BACKEND_URL || '').trim().replace(/\/+$/, '');
     var warned = false;
 
+    // THEME BOOT AUTHORITY: resolve and paint the user's saved theme before
+    // DOMContentLoaded or any module/bootstrap code runs. This is the only
+    // first-paint theme source; ThemeEngine consumes this value instead of
+    // independently racing settings/module initialization.
+    (function bootstrapThemeBeforePaint() {
+        try {
+            var raw = localStorage.getItem('app_theme');
+            var theme = raw === 'dark' || raw === 'light' ? raw : null;
+            if (!theme) {
+                var cached = localStorage.getItem('knecta_settings_cache') || localStorage.getItem('app_settings_global') || localStorage.getItem('necpa_settings_default');
+                if (cached) {
+                    try {
+                        var parsed = JSON.parse(cached), settings = parsed && (parsed.data || parsed), appearance = settings && settings.appearance;
+                        var cachedTheme = appearance && appearance.theme || settings && settings.theme;
+                        if (cachedTheme === 'dark' || cachedTheme === 'light') theme = cachedTheme;
+                    } catch (_) {}
+                }
+            }
+            if (!theme) theme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            window.__NECPRA_INITIAL_THEME__ = theme;
+            var root = document.documentElement;
+            root.setAttribute('data-theme', theme);
+            root.style.colorScheme = theme;
+            root.classList.add('kyn-theme-boot');
+            if (document.head) {
+                var boot = document.createElement('style');
+                boot.id = 'kyn-config-theme-boot';
+                boot.textContent = 'html.kyn-theme-boot,html.kyn-theme-boot *{transition:none!important;animation:none!important}html.kyn-theme-boot{color-scheme:' + theme + '!important}';
+                document.head.appendChild(boot);
+            }
+        } catch (_) {}
+    })();
+
     function backendOrigin() {
         if (configuredOrigin) return configuredOrigin;
         if (!warned) {

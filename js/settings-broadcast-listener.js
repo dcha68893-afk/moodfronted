@@ -33,16 +33,23 @@
         // — appearance —
         var ap = settings.appearance || {};
         if (ap.theme) {
-            // Paint + persist now go through the single canonical engine
-            // (js/theme.engine.js / window.ThemeManager) instead of this
-            // listener keeping its own copy.
-            var th = window.ThemeManager ? window.ThemeManager.setTheme(ap.theme) : _resolveTheme(ap.theme);
+            // The parent shell/config bootstrap owns theme state. Embedded
+            // modules must never turn a settings broadcast into a theme write
+            // or REQUEST back to the shell; that feedback loop caused the
+            // first-paint flash/storm. The shell will repaint this frame through
+            // its canonical NECPRA_THEME_APPLIED delivery.
+            var th = _resolveTheme(ap.theme);
+            if (window.parent !== window) {
+                var shellTheme = null;
+                try { shellTheme = window.parent.ThemeManager && window.parent.ThemeManager.getTheme ? window.parent.ThemeManager.getTheme() : null; } catch (_) {}
+                if (shellTheme === 'dark' || shellTheme === 'light') th = shellTheme;
+            }
             if (!window.ThemeManager) {
                 root.setAttribute('data-theme', th);
                 root.classList.toggle('theme-dark', th === 'dark');
                 root.classList.toggle('dark-theme', th === 'dark');
                 if (body) body.setAttribute('data-theme', th);
-                try { (window.ThemeManager ? window.ThemeManager.setTheme(th) : localStorage.setItem('app_theme', th)); } catch (_) {}
+                // No local theme persistence here. Config/ThemeEngine owns it.
 
                 if (th === 'dark') {
                     root.style.setProperty('--kyn-bg-root', '#0f172a');
