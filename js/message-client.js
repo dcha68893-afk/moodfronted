@@ -556,71 +556,36 @@
     // ═══════════════════════════════════════════════════════════════════════
 
     async function _directRequest(method, path, body) {
-        return new Promise((resolve, reject) => {
-            const requestId = 'msg_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
-            let settled = false;
-            // ROOT-CAUSE FIX (FALSE-"FAILED"-DESPITE-DELIVERED / send button
-            // stuck disabled for the full wait): this local watchdog used to
-            // fire at 30000ms, but chat.html's actual underlying fetch (the
-            // one that really talks to the backend on the other end of this
-            // postMessage bridge) uses AbortSignal.timeout(45000) — see
-            // js/api.core.js's own "was 10000 — too short for 1KB/s links or
-            // Render cold start" fix. Because 30000 < 45000, on any slow
-            // link or Render cold start this promise rejected and detached
-            // its listener a full 15s BEFORE the real request could
-            // possibly have failed on its own — so a request that was still
-            // in flight and about to succeed got reported here as failed,
-            // the optimistic bubble got marked 'failed', and the real
-            // success (posted back by chat.html 15-ish seconds later) had
-            // nowhere to go, since the listener was already removed. This
-            // is also why the send button (disabled for the duration of
-            // this await in message.html's doSend()) appeared to "hang"
-            // for exactly this same window before giving up. Raised above
-            // chat.html's real ceiling with margin for the postMessage
-            // round-trip itself.
-            const timeoutId = setTimeout(() => {
-                if (settled) return;
-                settled = true;
-                window.removeEventListener('message', handler);
-                reject(new Error('API request timeout'));
-            }, 50000);
-            const handler = (event) => {
-                if (settled) return;
-                const msg = event.data;
-                if (!msg || msg.type !== 'API_RESPONSE' || msg.requestId !== requestId) return;
-                settled = true;
-                clearTimeout(timeoutId);
-                window.removeEventListener('message', handler);
-                const payload = msg.payload || {};
-                // chat.html's own handler is supposed to normalize whatever
-                // shape its underlying call returned into {success, data,
-                // error, statusCode} with data already unwrapped to the
-                // backend's inner data object (see responsePayload
-                // construction around chat.html:6612). In practice that
-                // pipeline has several legacy layers between here and the
-                // actual fetch, and this couldn't be fully verified without
-                // running it live — so defend against payload.data still
-                // being the raw, doubly-wrapped backend body
-                // ({success,data:{...}}) rather than already unwrapped: if
-                // it looks wrapped (has both a nested .data and .success),
-                // take the inner one. A real single-level payload like
-                // {chatId:1} or {users:[...]} never has its own .success
-                // key, so this can't misfire on correctly-shaped data.
-                let d = payload.data;
-                if (d && typeof d === 'object' && 'data' in d && 'success' in d) d = d.data;
-                resolve({
-                    ok: payload.success !== false,
-                    success: payload.success !== false,
-                    status: payload.statusCode || (payload.success !== false ? 200 : 500),
-                    data: d ?? {},
-                    message: payload.error || null,
+        // /chats is the Message Module's critical-path read. Use the shared
+        // runtime-config fetch transport directly so iframe bootstrap timing
+        // cannot strand the conversation list behind a postMessage relay.
+        if (method === 'GET' && /^\/chats(?:\?|$)/.test(path) && typeof window.__getApiBase === 'function') {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 45000);
+            try {
+                const headers = { 'Accept': 'application/json' };
+                const token = window.__kynToken || window.__accessToken || window.AuthSessionManager?.getToken?.() ||
+                    window.authToken || localStorage.getItem('authToken') || localStorage.getItem('accessToken') || localStorage.getItem('token') || '';
+                if (token) headers.Authorization = 'Bearer ' + token;
+                const response = await fetch(window.__getApiBase() + path, {
+                    method: 'GET', headers, credentials: 'include', cache: 'no-store', signal: controller.signal
                 });
-            };
-            window.addEventListener('message', handler);
-            window.parent.postMessage({ type: 'API_REQUEST', payload: { endpoint: path, method, body, requestId } }, '*');
-        });
-    }
-
+                const payload = await response.json().catch(() => ({}));
+                return {
+                    ok: response.ok && payload?.success !== false,
+                    success: response.ok && payload?.success !== false,
+                    status: response.status,
+                    data: payload?.data ?? {},
+                    message: payload?.message || payload?.error || null
+                };
+            } catch (error) {
+                if (error?.name === 'AbortError') throw new Error('Conversation list request timed out');
+                throw error;
+            } finally {
+                clearTimeout(timeoutId);
+            }
+        }
+        return new Promise((resolve, reject) => {
     function api() {
         return {
             get: (path) => _directRequest('GET', path),
@@ -1816,7 +1781,7 @@
     // with backoff instead of giving up after one try.
     async function loadConversations(attempt = 0) {
         try {
-            const res = await api().get('/chats?limit=50');
+            const res = await api().get('/chats?summary=1&limit=50');
             if (!res || res.success === false) throw new Error((res && res.message) || 'Failed to load conversation list');
             const chats = (res.data && Array.isArray(res.data.chats)) ? res.data.chats : [];
             _warmupKnownContactKeys(chats);
@@ -1843,10 +1808,10 @@
             });
         } catch (err) {
             console.error(`[MessageModule] Failed to load conversation list (attempt ${attempt + 1}):`, err.message);
-            if (attempt < 5) {
+            if (attempt < 2) {
                 setTimeout(() => loadConversations(attempt + 1), Math.min(1000 * (attempt + 1), 5000));
             } else {
-                console.error('[MessageModule] Giving up on loading conversation list after 6 attempts');
+                console.error('[MessageModule] Giving up on loading conversation list after 3 attempts');
             }
         }
     }

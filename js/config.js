@@ -308,7 +308,7 @@
         // is loaded, so mobile gets the same opportunities to prompt.
         if (/\/index\.html$/i.test(location.pathname) || location.pathname === '/') loadOnce('/js/pwa-identity.js?v=20260916-5', 'pwa_identity');
         if (/\/index\.html$/i.test(location.pathname) || location.pathname === '/' || /\/(chat|Tools|tools|status|settings)\.html$/i.test(location.pathname)) loadOnce('/js/pwa-mobile-install.js?v=20260916-1', 'pwa_mobile_install');
-        if (/\/group\.html$/i.test(location.pathname)) { loadOnce('/js/group-panel-cleanup.js?v=20260916-5', 'group_panel_cleanup'); loadOnce('/js/group-mobile-navigation.js?v=20260916-6', 'group_mobile_navigation'); }
+        if (/\/group\.html$/i.test(location.pathname)) { loadOnce('/js/group-panel-cleanup.js?v=20260916-5', 'group_panel_cleanup'); }
         if (/\/chat\.html$/i.test(location.pathname)) loadOnce('/js/friend-request-center-action.js?v=20260916-5', 'friend_request_center_action');
         if (/\/Tools\.html$/i.test(location.pathname) || /\/tools\.html$/i.test(location.pathname)) { loadOnce('/js/marketplace-accommodation-service.js?v=20260916-6', 'marketplace_accommodation_service'); loadOnce('/js/accommodation-marketplace-surface.js?v=20260916-6', 'accommodation_marketplace_surface'); loadOnce('/js/invoice-ui.js?v=20260916-5', 'invoice_ui'); loadOnce('/js/marketplace-image-hardening.js?v=20260916-5', 'marketplace_image_hardening'); }
     }

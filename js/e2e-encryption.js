@@ -925,8 +925,12 @@
   // (above) already overwrites both the in-memory and persisted cache for
   // this userId — so a rotation is picked up instantly with no separate
   // purge step needed.
+  const _keyAnnouncementSeen = new Map();
   function _handleKeyAnnouncement(payload) {
     if (!payload || !payload.userId || !payload.publicKey) return;
+    const fingerprint = String(payload.userId) + ':' + String(payload.keyId || '') + ':' + String(payload.publicKey);
+    if (_keyAnnouncementSeen.get(String(payload.userId)) === fingerprint) return;
+    _keyAnnouncementSeen.set(String(payload.userId), fingerprint);
     cacheRecipientKey(payload.userId, { publicKey: payload.publicKey, keyId: payload.keyId })
       .then((ok) => { if (ok) console.log(`[E2E] 🔑 Live key update applied for user ${payload.userId}`); });
   }
