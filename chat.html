@@ -5732,6 +5732,37 @@
                     reapplyThemeToAllIframes();
                     return;
                 }
+                // FIX (dead NECPRA_*_REQUEST protocol): theme.engine.js's
+                // embedded-module proxy (used by every module iframe) turns
+                // window.ThemeManager.setTheme()/setFontSize()/setIconScale()/
+                // setAccentColor() calls into these four postMessage requests —
+                // but until now the shell never listened for any of them, so
+                // that documented, generic API was a silent no-op for any
+                // module code that used it directly instead of going through
+                // settings-ui.js's own separate THEME_CHANGED-style messages
+                // above. Route them through the exact same real setters +
+                // reapplyThemeToAllIframes() those already use, so the one
+                // documented API actually works everywhere it's called from.
+                if (data.type === 'NECPRA_THEME_REQUEST' && data.theme && window.ThemeManager) {
+                    window.ThemeManager.setTheme(data.theme);
+                    reapplyThemeToAllIframes();
+                    return;
+                }
+                if (data.type === 'NECPRA_FONT_REQUEST' && data.value && window.ThemeManager) {
+                    window.ThemeManager.setFontSize(data.value);
+                    reapplyThemeToAllIframes();
+                    return;
+                }
+                if (data.type === 'NECPRA_ICON_REQUEST' && data.value && window.ThemeManager) {
+                    window.ThemeManager.setIconScale(data.value);
+                    reapplyThemeToAllIframes();
+                    return;
+                }
+                if (data.type === 'NECPRA_ACCENT_REQUEST' && data.value && window.ThemeManager) {
+                    window.ThemeManager.setAccentColor(data.value);
+                    reapplyThemeToAllIframes();
+                    return;
+                }
                 if (data.type) {
                     emitGlobalAppEvent('MODULE_MESSAGE', {
                         type: data.type,

@@ -234,11 +234,23 @@ function showViewer(){
  }).catch(()=>{});
  clearInterval(state.timer);if(!isReplay&&!state.replyingStatusId)state.timer=setTimeout(()=>move(1),Math.max(3000,(Number(s.durationSeconds)||7)*1000));
 }
+// Referenced by viewerVisual()'s onerror handlers below — kept as a real
+// function call (not inlined HTML-in-an-attribute) specifically so nothing
+// here can ever collide with the surrounding onerror="..." attribute's own
+// quoting, however the error markup changes in future.
+window.__necpaStatusMediaError=function(el){
+ if(!el)return;
+ const div=document.createElement('div');
+ div.className='ns-media-error';
+ div.setAttribute('role','alert');
+ div.textContent='This media could not be loaded';
+ if(el.parentNode)el.parentNode.replaceChild(div,el);else el.replaceWith?.(div);
+};
 function viewerVisual(s){
  const failed='<div class="ns-media-error" role="alert">This media could not be loaded</div>';
- if(s.type==='image'&&s.mediaUrl)return '<img class="ns-viewer-media" src="'+esc(s.mediaUrl)+'" alt="" onerror="this.outerHTML=\''+failed+'\'">';
+ if(s.type==='image'&&s.mediaUrl)return '<img class="ns-viewer-media" src="'+esc(s.mediaUrl)+'" alt="" onerror="window.__necpaStatusMediaError(this)">';
  if(s.type==='image'&&!s.mediaUrl)return failed;
- if(s.type==='video'&&s.mediaUrl)return '<video class="ns-viewer-media" src="'+esc(s.mediaUrl)+'" controls autoplay playsinline onerror="this.outerHTML=\''+failed+'\'"></video>';
+ if(s.type==='video'&&s.mediaUrl)return '<video class="ns-viewer-media" src="'+esc(s.mediaUrl)+'" controls autoplay playsinline onerror="window.__necpaStatusMediaError(this)"></video>';
  if(s.type==='video'&&!s.mediaUrl)return failed;
  if(s.type==='poll'){const p=Array.isArray(s.pollOptions)?s.pollOptions:[];return '<div class="ns-viewer-text" style="background:'+(s.background||bg[0])+';max-width:none;width:100%;height:100%;display:flex;flex-direction:column;justify-content:center;align-items:center"><div>'+esc(s.content||'Poll')+'</div>'+p.map(x=>'<div style="margin:7px;padding:12px 22px;border-radius:999px;background:rgba(255,255,255,.16);font-size:17px">'+esc(x)+'</div>').join('')+'</div>'}
  return '<div class="ns-viewer-text" style="background:'+(s.background||bg[0])+';width:100%;height:100%;display:grid;place-items:center;font-family:'+esc(s.font||'system-ui')+'">'+esc(s.content||s.caption||'')+'</div>';
