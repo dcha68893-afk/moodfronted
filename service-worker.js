@@ -1,4 +1,4 @@
-// Kynecta service worker — v19.29.0
+// Kynecta service worker — v19.29.1
 // Critical runtime/theme/encryption/account-isolation assets are network-first
 // so an installed PWA cannot silently execute week-old code after a deploy.
 'use strict';
@@ -24,7 +24,7 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.29.0';
+const SW_VERSION = '19.29.1';
 // FIX: bumped so activate() drops every existing cache immediately on this
 // deploy — anyone with a stale pre-rebuild group.html (or the old, now-
 // deleted group-core-*/group-os-* files, or the misspelled necpra-* icons
@@ -32,7 +32,7 @@ const SW_VERSION = '19.29.0';
 // app log image set) cached under the old name gets a clean break on next
 // load, instead of waiting on the 7-day CACHE_MAX_AGE staleness check or a
 // lucky reinstall.
-const CACHE_NAME = 'necpa-static-v55';
+const CACHE_NAME = 'necpa-static-v56';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -78,7 +78,7 @@ const NETWORK_FIRST_PATTERNS = [
   // already hit and fixed for the friend module and marketplace files
   // below. Swapped the dead legacy entries for the real, still-actively-
   // edited files group.html depends on today.
-  /\/group\.html/i,/\/js\/groupEncryption\.client\.js/i,/\/js\/group-platform\.js/i,/\/js\/group-message-local-db\.js/i,/\/js\/group-chat-features\.js/i,/\/js\/group-message-cache\.js/i,
+  /\/group\.html/i,/\/js\/groupMessaging\.client\.js/i,/\/js\/groupEncryption\.client\.js/i,/\/js\/group-platform\.js/i,/\/js\/group-message-local-db\.js/i,/\/js\/group-chat-features\.js/i,/\/js\/group-message-cache\.js/i,
   /\/js\/group-media-render\.js/i,/\/friend-core\.ui-bridge\.js/i,
   // ROOT-CAUSE FIX (fixes to the friend module silently not appearing after
   // deploy — "some changes show, others don't"): friend.html and friend.css
