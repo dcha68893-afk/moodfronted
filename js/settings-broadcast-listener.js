@@ -32,44 +32,9 @@
 
         // — appearance —
         var ap = settings.appearance || {};
-        if (ap.theme) {
-            // The parent shell/config bootstrap owns theme state. Embedded
-            // modules must never turn a settings broadcast into a theme write
-            // or REQUEST back to the shell; that feedback loop caused the
-            // first-paint flash/storm. The shell will repaint this frame through
-            // its canonical NECPRA_THEME_APPLIED delivery.
-            var th = _resolveTheme(ap.theme);
-            if (window.parent !== window) {
-                var shellTheme = null;
-                try { shellTheme = window.parent.ThemeManager && window.parent.ThemeManager.getTheme ? window.parent.ThemeManager.getTheme() : null; } catch (_) {}
-                if (shellTheme === 'dark' || shellTheme === 'light') th = shellTheme;
-            }
-            if (!window.ThemeManager) {
-                root.setAttribute('data-theme', th);
-                root.classList.toggle('theme-dark', th === 'dark');
-                root.classList.toggle('dark-theme', th === 'dark');
-                if (body) body.setAttribute('data-theme', th);
-                // No local theme persistence here. Config/ThemeEngine owns it.
-
-                if (th === 'dark') {
-                    root.style.setProperty('--kyn-bg-root', '#0f172a');
-                    root.style.setProperty('--kyn-bg-chat', '#020617');
-                    root.style.setProperty('--kyn-bg-header', '#0f172a');
-                    root.style.setProperty('--kyn-text-primary', '#e5e7eb');
-                    root.style.setProperty('--kyn-text-secondary', '#9ca3af');
-                    root.style.setProperty('--kyn-border', '#374151');
-                } else {
-                    root.style.setProperty('--kyn-bg-root', '#ffffff');
-                    root.style.setProperty('--kyn-bg-chat', '#efeae2');
-                    root.style.setProperty('--kyn-bg-header', '#f0f2f5');
-                    root.style.setProperty('--kyn-text-primary', '#111b21');
-                    root.style.setProperty('--kyn-text-secondary', '#667781');
-                    root.style.setProperty('--kyn-border', '#e9edef');
-                }
-            } else if (body) {
-                body.setAttribute('data-theme', th);
-            }
-        }
+        /* Theme is owned by config.js/ThemeEngine + the parent shell. This
+         * listener consumes NECPRA_THEME_APPLIED; it never paints or persists
+         * a competing theme. */
         if (ap.accentColor) {
             if (window.ThemeManager) window.ThemeManager.setAccentColor(ap.accentColor);
             root.style.setProperty('--accent-color', ap.accentColor);

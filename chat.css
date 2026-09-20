@@ -1,25 +1,15 @@
 
-/* ========== CSS VARIABLES ========== */
+/* ========== SHARED THEME TOKENS ========== */
+/* Theme authority: config.js -> ThemeEngine -> parent shell. */
 :root {
-    --kynecta-primary: #7C3AED;
-    --kynecta-secondary: #10B981;
-    --kynecta-accent: #F59E0B;
-    --kynecta-dark: #1F2937;
-    --kynecta-light: #F9FAFB;
-    --kynecta-border: #E5E7EB;
-    --kynecta-info: #3B82F6;
-    --kynecta-danger: #EF4444;
-}
-
-[data-theme="dark"] {
-    --kynecta-primary: #8B5CF6;
-    --kynecta-secondary: #34D399;
-    --kynecta-accent: #FBBF24;
-    --kynecta-dark: #F9FAFB;
-    --kynecta-light: #111827;
-    --kynecta-border: #374151;
-    --kynecta-info: #60A5FA;
-    --kynecta-danger: #F87171;
+    --kynecta-primary: var(--kyn-accent-purple);
+    --kynecta-secondary: var(--kyn-accent-primary);
+    --kynecta-accent: var(--kyn-accent-warning);
+    --kynecta-dark: var(--kyn-text-primary);
+    --kynecta-light: var(--kyn-bg-root);
+    --kynecta-border: var(--kyn-border);
+    --kynecta-info: var(--kyn-accent-info);
+    --kynecta-danger: var(--kyn-accent-danger);
 }
 
 /* ========== GLOBAL LAYOUT SYSTEM ========== */

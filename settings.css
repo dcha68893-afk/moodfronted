@@ -6,40 +6,30 @@
         }
         
         :root {
-            --primary-color: #0084ff;
-            --primary-dark: #0066cc;
-            --secondary-color: #f0f2f5;
-            --secondary-dark: #e4e6e9;
-            --danger-color: #ff3b30;
-            --danger-dark: #d70015;
-            --success-color: #34c759;
-            --warning-color: #ff9500;
-            --info-color: #5ac8fa;
-            --text-primary: #050505;
-            --text-secondary: #65676b;
-            --text-tertiary: #8e8e93;
-            --bg-color: #ffffff;
-            --bg-secondary: #f8f9fa;
-            --border-color: #dddfe2;
-            --border-light: #e9ebee;
-            --settings-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            --shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-            --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.2);
-            --shadow-inner: inset 0 1px 3px rgba(0, 0, 0, 0.1);
-            --radius-sm: 8px;
-            --radius-md: 12px;
-            --radius-lg: 16px;
-            --radius-full: 9999px;
-            
-            /* Mood Colors */
-            --mood-happy: #FFD700;
-            --mood-calm: #4A90E2;
-            --mood-energetic: #FF6B6B;
-            --mood-focused: #7B68EE;
-            --mood-relaxed: #4ECDC4;
-            --mood-stressed: #FF8C00;
-            --mood-tired: #A9A9A9;
-            --mood-excited: #FF1493;
+            --primary-color: var(--kyn-accent-secondary);
+            --primary-dark: var(--kyn-accent-secondary);
+            --secondary-color: var(--kyn-bg-hover);
+            --secondary-dark: var(--kyn-border-strong);
+            --danger-color: var(--kyn-accent-danger);
+            --danger-dark: var(--kyn-accent-danger);
+            --success-color: var(--kyn-accent-primary);
+            --warning-color: var(--kyn-accent-warning);
+            --info-color: var(--kyn-accent-info);
+            --text-primary: var(--kyn-text-primary);
+            --text-secondary: var(--kyn-text-secondary);
+            --text-tertiary: var(--kyn-text-muted);
+            --bg-color: var(--kyn-bg-root);
+            --bg-secondary: var(--kyn-bg-panel);
+            --border-color: var(--kyn-border);
+            --border-light: var(--kyn-border-light);
+            --settings-gradient: var(--kyn-gradient-primary);
+            --shadow: var(--kyn-shadow-sm);
+            --shadow-lg: var(--kyn-shadow-lg);
+            --shadow-inner: var(--kyn-shadow-sm);
+            --radius-sm: 8px; --radius-md: 12px; --radius-lg: 16px; --radius-full: 9999px;
+            --mood-happy: #FFD700; --mood-calm: #4A90E2; --mood-energetic: #FF6B6B;
+            --mood-focused: #7B68EE; --mood-relaxed: #4ECDC4; --mood-stressed: #FF8C00;
+            --mood-tired: #A9A9A9; --mood-excited: #FF1493;
         }
         
         body {
@@ -1666,40 +1656,7 @@ body[data-module="friends"] .friend-item:hover {
   color: var(--color-primary) !important;
 }
 
-/* ================================================================
-   DARK MODE OVERRIDES
-   ================================================================ */
-
-[data-theme="dark"] {
-  --bubble-sent-bg: #16a34a;
-  --bubble-received-bg: #374151;
-  --bubble-received-text: #f9fafb;
-  --color-friend-bg: #1f2937;
-  --color-friend-card: #111827;
-  --color-friend-border: #374151;
-  /* FIX (theme audit): --bg-color/--bg-secondary/--text-primary/
-     --text-secondary/--border-color were only ever declared once at
-     :root (light values) and never redefined here, so every Settings
-     screen — including the header via --header-settings, which falls
-     back to --bg-color — stayed light regardless of the theme picked
-     in Settings > Appearance. */
-  --text-primary: #e9edef;
-  --text-secondary: #8696a0;
-  --bg-color: #111b21;
-  --bg-secondary: #1f2c34;
-  --border-color: #2a3942;
-}
-
-[data-theme="dark"] .message-bubble.sent,
-[data-theme="dark"] .message.sent .message-bubble {
-  background-color: #16a34a !important;
-}
-
-[data-theme="dark"] .message-bubble.received,
-[data-theme="dark"] .message.received .message-bubble {
-  background-color: #374151 !important;
-  color: #f9fafb !important;
-}
+/* Theme overrides removed: Settings consumes canonical shell tokens. */
 
 /* ================================================================
    MOBILE VIEW — ensure consistent colors on small screens

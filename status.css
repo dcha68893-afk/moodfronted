@@ -6,75 +6,37 @@
 }
 
 :root {
-    --primary-color: #00a884;
-    --secondary-color: #2a3942;
-    --danger-color: #ff3b30;
-    --success-color: #34c759;
-    --warning-color: #ff9500;
-    --info-color: #5ac8fa;
-    --text-primary: #e9edef;
-    --text-secondary: #8696a0;
-    --bg-color: #111b21;
-    --surface-color: #1f2c34;
-    --surface-alt: #2a3942;
-    --border-color: #2a3942;
-    --status-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    --shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-    --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.2);
+    --primary-color: var(--kyn-accent-primary);
+    --secondary-color: var(--kyn-bg-panel);
+    --danger-color: var(--kyn-accent-danger);
+    --success-color: var(--kyn-accent-primary);
+    --warning-color: var(--kyn-accent-warning);
+    --info-color: var(--kyn-accent-info);
+    --text-primary: var(--kyn-text-primary);
+    --text-secondary: var(--kyn-text-secondary);
+    --bg-color: var(--kyn-bg-root);
+    --surface-color: var(--kyn-bg-panel);
+    --surface-alt: var(--kyn-bg-hover);
+    --border-color: var(--kyn-border);
+    --status-gradient: var(--kyn-gradient-primary);
+    --shadow: var(--kyn-shadow-sm);
+    --shadow-lg: var(--kyn-shadow-lg);
+    --viewed-story-ring: var(--kyn-text-muted);
     --story-ring: linear-gradient(45deg, #ff6b6b, #ffa726, #4ecdc4, #45b7d1);
-    --viewed-story-ring: #e4e6eb;
     --highlight-gradient: linear-gradient(45deg, #f6d365, #fda085);
-    --mood-happy: #ffd700;
-    --mood-stressed: #ff6b6b;
-    --mood-motivated: #4ecdc4;
-    --mood-lonely: #95a5a6;
-    --mood-excited: #ff9ff3;
-    --mood-calm: #54a0ff;
-    --mood-sad: #5f27cd;
-    --mood-angry: #ff3838;
-    --intent-feedback: #3498db;
-    --intent-achievement: #2ecc71;
-    --intent-advice: #9b59b6;
-    --intent-chat: #1abc9c;
-    --intent-venting: #34495e;
-    --intent-reflection: #16a085;
-    --intent-question: #f39c12;
-    --intent-celebration: #e74c3c;
-    --category-life: #3498db;
-    --category-business: #2ecc71;
-    --category-study: #9b59b6;
-    --category-motivation: #e74c3c;
-    --category-event: #f39c12;
-    --status-bg-1: #ff6b6b;
-    --status-bg-2: #48dbfb;
-    --status-bg-3: #1dd1a1;
-    --status-bg-4: #feca57;
-    --status-bg-5: #ff9ff3;
-    --status-bg-6: #54a0ff;
-    --status-bg-7: #5f27cd;
-    --status-bg-8: #c8d6e5;
+    --mood-happy: #ffd700; --mood-stressed: #ff6b6b; --mood-motivated: #4ecdc4;
+    --mood-lonely: #95a5a6; --mood-excited: #ff9ff3; --mood-calm: #54a0ff;
+    --mood-sad: #5f27cd; --mood-angry: #ff3838;
+    --intent-feedback: #3498db; --intent-achievement: #2ecc71; --intent-advice: #9b59b6;
+    --intent-chat: #1abc9c; --intent-venting: #34495e; --intent-reflection: #16a085;
+    --intent-question: #f39c12; --intent-celebration: #e74c3c;
+    --category-life: #3498db; --category-business: #2ecc71; --category-study: #9b59b6;
+    --category-motivation: #e74c3c; --category-event: #f39c12;
+    --status-bg-1: #ff6b6b; --status-bg-2: #48dbfb; --status-bg-3: #1dd1a1;
+    --status-bg-4: #feca57; --status-bg-5: #ff9ff3; --status-bg-6: #54a0ff;
+    --status-bg-7: #5f27cd; --status-bg-8: #c8d6e5;
 }
 
-/* FIX (theme audit): :root above declares dark colors (bg-color: #111b21,
-   etc.) as the unconditional default with no light counterpart anywhere
-   in this file — every element correctly using var(--bg-color) etc. was
-   still stuck dark regardless of what theme the user selected in
-   Settings > Appearance, because there was nothing here for
-   data-theme="light" to actually override. This block restores the
-   light palette (same convention Tool.css and theme.colors.css use:
-   :root/light = light values, [data-theme="dark"] = dark override). */
-html[data-theme="light"],
-body[data-theme="light"],
-[data-theme="light"] {
-    --secondary-color: #f0f2f5;
-    --text-primary: #111b21;
-    --text-secondary: #667781;
-    --bg-color: #ffffff;
-    --surface-color: #ffffff;
-    --surface-alt: #f0f2f5;
-    --border-color: #e9edef;
-    --viewed-story-ring: #8696a0;
-}
 
 body {
     background-color: var(--bg-color);
@@ -3129,29 +3091,7 @@ body[data-module="friends"] .friend-item:hover {
   color: var(--color-primary) !important;
 }
 
-/* ================================================================
-   DARK MODE OVERRIDES
-   ================================================================ */
-
-[data-theme="dark"] {
-  --bubble-sent-bg: #16a34a;
-  --bubble-received-bg: #374151;
-  --bubble-received-text: #f9fafb;
-  --color-friend-bg: #1f2937;
-  --color-friend-card: #111827;
-  --color-friend-border: #374151;
-}
-
-[data-theme="dark"] .message-bubble.sent,
-[data-theme="dark"] .message.sent .message-bubble {
-  background-color: #16a34a !important;
-}
-
-[data-theme="dark"] .message-bubble.received,
-[data-theme="dark"] .message.received .message-bubble {
-  background-color: #374151 !important;
-  color: #f9fafb !important;
-}
+/* Theme overrides removed: status consumes canonical shell tokens. */
 
 /* ================================================================
    MOBILE VIEW — ensure consistent colors on small screens
