@@ -351,9 +351,41 @@ function makeOptimisticMessage(cid,plain,groupId){
   const me=Number(uid())||uid();
   return {id:'local:'+cid,localId:cid,clientMessageId:cid,chatId:groupId,senderId:me,userId:me,content:plain,type:'text',metadata:null,createdAt:new Date().toISOString(),status:'sending',_optimistic:true};
 }
+// FIX (GROUP-SEND-STALE-MEMBERS): S.current.participants is a one-time
+// snapshot taken when the group panel was opened (loadGroups()/openGroup()).
+// Nothing in this file ever refreshes it afterwards — there is no socket
+// listener for membership-changed events and the 5s poll interval (S.poll)
+// only calls loadMessages(), never re-fetches the group's member list. So
+// groupMemberIds(S.current), used to build the sender-key distribution,
+// can silently drift from the server's live ChatParticipant table — which
+// is exactly what the backend enforces on every send: rotateSenderKey()
+// (src/services/groupMessagingService.js) checks the LIVE membership and
+// rejects with GROUP_SENDER_KEY_INCOMPLETE + missingMemberIds if any
+// current member lacks a distribution. The identical missingMemberIds
+// coming back on every retry (not a different/shrinking set) confirms
+// this is a standing mismatch between what the client thinks the group
+// looks like and what the server has — not a one-off timing race.
+// Refetching the chat right before encrypting keeps the two in sync.
+async function refreshCurrentGroupMembers(gid){
+  try{
+    const r=await api('/chats/'+encodeURIComponent(gid));
+    const fresh=unwrap(r?.data?.chat||r?.data);
+    if(fresh&&Array.isArray(fresh.participants)&&S.current&&String(S.current.id)===String(gid)){
+      S.current.participants=fresh.participants;
+      S.current.participantCount=fresh.participantCount??fresh.participants.length;
+      const idx=S.groups.findIndex(g=>String(g.id)===String(gid));
+      if(idx!==-1)S.groups[idx]={...S.groups[idx],participants:fresh.participants,participantCount:S.current.participantCount};
+    }
+  }catch(_){/* offline or request failed — fall back to the cached member list */}
+}
 async function deliverOptimistic(cid,groupId,plain){
   try{
     if(!(await ensureE2EReady())||!window.KynectaGroupE2E?.encryptForGroup)throw new Error(e2eNotReadyMessage());
+    // FIX (GROUP-SEND-STALE-MEMBERS): this call previously used whatever
+    // S.current.participants happened to hold from when the panel was
+    // opened — see refreshCurrentGroupMembers() above for why that goes
+    // stale and causes GROUP_SENDER_KEY_INCOMPLETE on every send.
+    await refreshCurrentGroupMembers(groupId);
     const encrypted=await window.KynectaGroupE2E.encryptForGroup(groupId,plain,groupMemberIds(groupObjectFor(groupId)));
     const r=await apiRetry('/group-messages/'+encodeURIComponent(groupId)+'/messages',{method:'POST',body:JSON.stringify({chatId:groupId,content:encrypted,type:'text',clientMessageId:cid,metadata:{groupId}})});
     const serverMessage=r?.data?.message||r?.data;
@@ -411,32 +443,6 @@ async function sendMessage(){
   input.value='';$('mentionSuggest')?.classList.remove('open');
   S.messages.push(makeOptimisticMessage(cid,plain,groupId));renderMessages(true);
   queueOptimisticSend(cid,groupId,plain);
-}
-// FIX (GROUP-SEND-STALE-MEMBERS): S.current.participants is a one-time
-// snapshot taken when the group panel was opened (loadGroups()/openGroup()),
-// and nothing in this file ever refreshes it afterwards — there is no
-// socket listener for GROUP_MEMBER_ADDED/REMOVED and the 5s poll interval
-// (S.poll) only calls loadMessages(), never re-fetches the group's member
-// list. So groupMemberIds(S.current), used to build the sender-key
-// distribution, silently drifts out of sync the moment anyone joins or
-// leaves the group after it was opened. The backend's rotateSenderKey()
-// (src/services/groupMessagingService.js) checks the *live* membership on
-// every request and rejects the key rotation as incomplete if any current
-// member is missing a distribution — which is exactly the "Every current
-// group member must receive this sender key before it can be used" error.
-// Refetching the chat right before encrypting keeps the member list the
-// client encrypts for in sync with what the backend will actually enforce.
-async function refreshCurrentGroupMembers(gid){
-  try{
-    const r=await api('/chats/'+encodeURIComponent(gid));
-    const fresh=unwrap(r?.data?.chat||r?.data);
-    if(fresh&&Array.isArray(fresh.participants)&&S.current&&String(S.current.id)===String(gid)){
-      S.current.participants=fresh.participants;
-      S.current.participantCount=fresh.participantCount??fresh.participants.length;
-      const idx=S.groups.findIndex(g=>String(g.id)===String(gid));
-      if(idx!==-1)S.groups[idx]={...S.groups[idx],participants:fresh.participants,participantCount:S.current.participantCount};
-    }
-  }catch(_){/* offline or request failed — fall back to the cached member list */}
 }
 async function sendGroupPayload(plain,type='text',metadata=null){
   if(!S.current?.id)throw new Error('No group is open');const text=String(plain||'').trim();if(type==='text'&&!text)throw new Error('Message cannot be empty');
