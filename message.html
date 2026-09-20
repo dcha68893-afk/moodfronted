@@ -555,8 +555,43 @@
     const DECRYPT_PLACEHOLDER_MS = 2000;
     const _decryptSeen = new Map();
     const _decryptTimers = new Set();
+    // FIX (status reaction shows raw JSON in the chat list): a status
+    // reaction/comment is delivered as a `status_reply` message whose
+    // decrypted text is a small JSON blob (e.g.
+    // {"statusId":7,"statusType":"video","kind":"reaction","emoji":"😍",...}).
+    // The chat bubble already has a friendly card for this
+    // (see statusReplyHtml below), but this list preview was returning
+    // lastMessage.displayContent as-is once decrypted, so the raw JSON
+    // leaked straight into the conversation list. Detect the same shape
+    // statusReplyHtml looks for and render the same friendly summary here.
+    function _statusReplyPreviewText(lastMessage) {
+      if (!lastMessage) return null;
+      let interaction = null;
+      for (const candidate of [lastMessage.displayContent, lastMessage.content]) {
+        if (typeof candidate !== 'string') continue;
+        try {
+          const parsed = JSON.parse(candidate);
+          if (parsed && typeof parsed === 'object' && (parsed.statusId != null || parsed.kind === 'reaction' || parsed.kind === 'comment')) {
+            interaction = parsed;
+            break;
+          }
+        } catch (_) {}
+      }
+      if (!interaction && lastMessage.type !== 'status_reply') return null;
+      if (!interaction) return 'Status interaction';
+      const isMine = lastMessage.senderId != null && window._kynCurrentUserId != null && String(lastMessage.senderId) === String(window._kynCurrentUserId);
+      const kind = interaction.kind === 'reaction' ? 'reaction' : 'comment';
+      if (kind === 'reaction') {
+        const emoji = String(interaction.emoji || '❤️');
+        return isMine ? `You reacted ${emoji} to a status` : `Reacted ${emoji} to your status`;
+      }
+      const text = String(interaction.text || '').trim();
+      return isMine ? `You replied to a status${text ? ': ' + text : ''}` : `Replied to your status${text ? ': ' + text : ''}`;
+    }
     function safeConvPreview(lastMessage, chatId) {
       if (!lastMessage) return '';
+      const statusPreview = _statusReplyPreviewText(lastMessage);
+      if (statusPreview !== null) return statusPreview;
       if (lastMessage.displayContent !== undefined && lastMessage.displayContent !== 'Decrypting…') return lastMessage.displayContent;
       const c = lastMessage.content;
       const looksEncrypted = typeof c === 'string' && /^\s*\{/.test(c) && c.indexOf('"v"') !== -1;

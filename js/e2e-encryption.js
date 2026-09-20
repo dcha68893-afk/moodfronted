@@ -1557,6 +1557,16 @@
     return subtle.importKey('raw', unb64(rawB64), { name: 'AES-GCM' }, true, ['encrypt', 'decrypt']);
   }
 
+  // Inverse of importSenderKey — recovers the raw base64 bytes of an
+  // already-imported Sender Key CryptoKey. Needed when a member who already
+  // holds the current group key wants to top up a straggler who wasn't
+  // reachable at rotation time (see groupEncryption.client.js
+  // distributeMissing()) without generating a whole new key/version.
+  async function exportSenderKey(senderKey) {
+    const raw = await subtle.exportKey('raw', senderKey);
+    return b64(raw);
+  }
+
   // Wrap (encrypt) a Sender Key's raw bytes so ONLY recipientUserId can
   // read it — reuses the exact same ECDH shared-secret + HKDF derivation
   // as 1:1 message encryption, just keyed by a fixed context string
@@ -1671,6 +1681,7 @@
     // Group encryption (Sender Keys)
     generateSenderKey,
     importSenderKey,
+    exportSenderKey,
     encryptSenderKeyFor,
     decryptSenderKeyFrom,
     encryptGroupMessage,

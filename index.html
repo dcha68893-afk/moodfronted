@@ -1751,7 +1751,7 @@
                     </div>
                     <div class="landing-cta-row landing-cta-row-secondary">
                         <button type="button" class="landing-ghost-btn" id="landingGoogleBtn"><i class="fab fa-google"></i> Continue with Google</button>
-                        <button type="button" class="landing-ghost-btn" id="landingInstallBtn" hidden><i class="fas fa-arrow-down"></i> Install App</button>
+                        <button type="button" class="landing-ghost-btn" id="landingInstallBtn"><i class="fas fa-arrow-down"></i> Install App</button>
                         <div class="pwa-status" id="landingPwaStatus" hidden>
                             <span class="pwa-status-badge"><i class="fas fa-check-circle"></i> Installed</span>
                             <button type="button" class="pwa-status-btn" id="landingOpenAppBtn"><i class="fas fa-external-link-alt"></i> Open App</button>
@@ -2763,7 +2763,7 @@
             
             <div class="auth-container" id="auth-container">
                 <div class="auth-header">
-                    <button type="button" class="auth-install-btn" id="authInstallBtn" hidden title="Install Necpa"><i class="fas fa-arrow-down"></i> Install App</button>
+                    <button type="button" class="auth-install-btn" id="authInstallBtn" title="Install Necpa"><i class="fas fa-arrow-down"></i> Install App</button>
                     <div class="pwa-status" id="authPwaStatus" hidden>
                         <span class="pwa-status-badge"><i class="fas fa-check-circle"></i> Installed</span>
                         <button type="button" class="pwa-status-btn" id="authOpenAppBtn"><i class="fas fa-external-link-alt"></i> Open</button>
@@ -5456,14 +5456,30 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
                 });
             });
             var intervalMs = reduceMotion ? 3000 : 3000;
-            var timer = setInterval(function () {
-                if (document.hidden) return;
+            var timer = null;
+            function tick() {
                 idx = (idx + 1) % order.length;
                 show(order[idx]);
-            }, intervalMs);
+            }
+            function startTimer() {
+                if (timer) return; // already running
+                timer = setInterval(tick, intervalMs);
+            }
+            function stopTimer() {
+                if (!timer) return;
+                clearInterval(timer);
+                timer = null;
+            }
+            // FIX (landing animation freezes for good): this used to
+            // clearInterval() on hidden and never set a new one back up, so
+            // once the tab was hidden even briefly — e.g. behind the Google
+            // sign-in popup — the slideshow stopped forever, even after the
+            // user returned to the tab. Now visibilitychange both stops AND
+            // restarts the same timer depending on the current state.
             document.addEventListener('visibilitychange', function () {
-                if (document.hidden) { clearInterval(timer); }
+                if (document.hidden) stopTimer(); else startTimer();
             });
+            startTimer();
         })();
 
         // ---- returning-user shortcut -------------------------------------------
@@ -5508,7 +5524,17 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
         var landingInstallBtn = document.getElementById('landingInstallBtn');
         var authInstallBtn = document.getElementById('authInstallBtn');
         var installButtons = [landingInstallBtn, authInstallBtn].filter(Boolean);
-        var deferredInstallPrompt = null;
+        // FIX (install button missing on mobile): this page used to keep both
+        // buttons hidden-by-default and only reveal them once
+        // beforeinstallprompt fired, with a 4s "not supported" timer racing
+        // against install-chooser.js's own 600/4600/9000ms re-show passes. On
+        // a real phone getInstalledRelatedApps() (awaited below) can be slow,
+        // so that 4s hide timer could fire *after* install-chooser.js's last
+        // re-show — hiding the button for good with nothing left to bring it
+        // back. The buttons are now visible by default in the HTML; this
+        // script's only job is to hide them when the app is genuinely
+        // installed. Click handling and "why can't I install" messaging both
+        // belong to install-chooser.js, which owns clicks on these buttons.
 
         // ---- Install-state UI (Phase 17, Step 5) ---------------------------
         // Once installed, the Install button is replaced with a small status
@@ -5612,33 +5638,6 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
             if (b) b.remove();
         });
 
-        async function handleInstallClick() {
-            if (!deferredInstallPrompt) return;
-            var clickedBtns = installButtons.filter(function (b) { return !b.hidden; });
-            var originalLabels = clickedBtns.map(function (b) { return b.innerHTML; });
-            clickedBtns.forEach(function (b) {
-                b.disabled = true;
-                b.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Installing…';
-            });
-            try {
-                deferredInstallPrompt.prompt();
-                var choice = await deferredInstallPrompt.userChoice;
-                if (choice && choice.outcome === 'accepted') {
-                    try { localStorage.setItem('pwa_installed', '1'); } catch (_) {}
-                    // renderInstalledState() will also run from the 'appinstalled'
-                    // event, but call it here too so the UI updates immediately
-                    // rather than waiting on that event to fire.
-                    renderInstalledState();
-                } else {
-                    clickedBtns.forEach(function (b, i) { b.disabled = false; b.innerHTML = originalLabels[i]; });
-                }
-            } catch (_) {
-                clickedBtns.forEach(function (b, i) { b.disabled = false; b.innerHTML = originalLabels[i]; });
-            } finally {
-                deferredInstallPrompt = null;
-            }
-        }
-
         // ---- "Update available" detection ---------------------------------------
         // A service worker registration exposes an update the moment it's
         // downloaded and waiting to activate (registration.waiting / the
@@ -5713,37 +5712,14 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
             try { localStorage.removeItem('pwa_installed'); } catch (_) {}
 
             if (!installButtons.length) return;
-            if (isIOS()) {
-                renderIOSHint();
-            } else {
-                window.addEventListener('beforeinstallprompt', function (e) {
-                    e.preventDefault();
-                    deferredInstallPrompt = e;
-                    setInstallButtonsVisible(true);
-                });
-                installButtons.forEach(function (btn) { btn.addEventListener('click', handleInstallClick); });
-                // Give the browser a reasonable window to fire
-                // beforeinstallprompt (it can take a moment after load, or
-                // never fire at all if this browser/context doesn't support
-                // installable PWAs — e.g. desktop Firefox, most in-app
-                // browsers). If it hasn't shown up by then, say so plainly
-                // instead of leaving a dead, permanently-hidden button.
-                setTimeout(function () {
-                    if (deferredInstallPrompt || isRunningInstalled()) return;
-                    // Read as a helpful tip, not a persistent error banner —
-                    // it also hides the (now dead) Install button so there's
-                    // no button sitting there implying installation works.
-                    setInstallButtonsVisible(false);
-                    statusGroups.forEach(function (g) {
-                        if (g.hint) {
-                            g.hint.innerHTML = '<i class="fas fa-info-circle"></i> This browser doesn\'t support installation. Try Chrome or Edge.';
-                            g.hint.hidden = false;
-                        }
-                    });
-                }, 4000);
-            }
+            // Buttons are visible by default in the HTML. On iOS, swap in the
+            // Share-sheet hint (no beforeinstallprompt there ever). Everywhere
+            // else, leave the button showing — install-chooser.js owns clicks
+            // and, for browsers that never offer a native prompt, explains why
+            // and offers the Google Play / manual-install routes instead of
+            // hiding the button.
+            if (isIOS()) renderIOSHint();
             window.addEventListener('appinstalled', function () {
-                deferredInstallPrompt = null;
                 try { localStorage.setItem('pwa_installed', '1'); } catch (_) {}
                 renderInstalledState();
             });
