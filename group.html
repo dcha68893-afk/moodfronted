@@ -74,14 +74,37 @@ function postParent(type,payload){try{if(window.parent&&window.parent!==window)w
 function postSelf(type,payload){try{window.postMessage({type,payload:payload||{}},'*')}catch(_){}}
 function currentGroupMeta(g){return{id:g.id,name:g.name||g.groupName||'Group',memberCount:Number(g.participantCount??g.participants?.length??0),stats:{totalMembers:Number(g.participantCount??g.participants?.length??0)}}}
 
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+// FIX ("Secure messaging is not ready yet"): this used to answer "no" the instant init() returned
+// false once — which happens legitimately while a key is still being restored/registered with the
+// server (init() then finishes in the background and flips `enabled` a moment later). Sending in
+// that window failed outright. Now: share ONE in-flight attempt, retry init() a few times
+// (sequentially, never overlapping), and also accept `enabled` turning true on its own.
+let e2eReadyPromise=null;
+function e2eNotReadyMessage(){let pw=null;try{pw=sessionStorage.getItem('kyn_e2e_pw_session')}catch(_){}return pw?'Secure messaging is still unlocking. Please try again in a moment.':'Secure messaging is locked. Please sign in again to unlock it.'}
 async function ensureE2EReady(){
   if(window.KynectaE2E?.enabled)return true;
-  if(!window.KynectaE2E||typeof window.KynectaE2E.init!=='function')return false;
-  let pw=null;try{pw=sessionStorage.getItem('kyn_e2e_pw_session')}catch(_){}
-  if(!pw)return false;
-  let legacyPw=null;try{legacyPw=sessionStorage.getItem('kyn_e2e_pw_legacy_session')}catch(_){}
-  try{return !!(await window.KynectaE2E.init(pw,legacyPw||undefined))}catch(_){return false}
+  if(e2eReadyPromise)return e2eReadyPromise;
+  e2eReadyPromise=(async()=>{
+    const started=Date.now();
+    try{
+      for(let attempt=0;attempt<4;attempt++){
+        if(window.KynectaE2E?.enabled)return true;
+        let pw=null,legacyPw=null;
+        try{pw=sessionStorage.getItem('kyn_e2e_pw_session');legacyPw=sessionStorage.getItem('kyn_e2e_pw_legacy_session')}catch(_){}
+        if(window.KynectaE2E&&typeof window.KynectaE2E.init==='function'&&pw){
+          try{const ok=await window.KynectaE2E.init(pw,legacyPw||undefined);if(ok&&window.KynectaE2E.enabled)return true}catch(_){}
+        }else if(Date.now()-started>3000){break} // core not loaded / nothing to unlock with: don't make people wait
+        // init() may have kicked off background registration — give `enabled` time to flip.
+        const until=Date.now()+2500;
+        while(Date.now()<until&&!window.KynectaE2E?.enabled)await sleep(200);
+      }
+      return !!window.KynectaE2E?.enabled;
+    }finally{e2eReadyPromise=null}
+  })();
+  return e2eReadyPromise;
 }
+window.__NECPRA_ENSURE_E2E=ensureE2EReady;
 ensureE2EReady();
 function groupMemberIds(g){const list=Array.isArray(g?.participants)?g.participants:[];return[...new Set(list.map(p=>Number((p.user||p).id??p.userId)).filter(n=>Number.isInteger(n)&&n>0))]}
 
@@ -101,16 +124,27 @@ async function decryptGroupContent(message){
 }
 const groupMessageState={decryptInFlight:new Map(),plaintext:new Map(),lastCiphertext:new Map()};
 async function decryptRows(list){return Promise.all(list.map(decryptGroupContent))}
+// FIX (LIVE GROUP MESSAGES NEVER APPEARED UNTIL THE 5s POLL): handleRealtime() below has been calling
+// decryptRow(message), but only decryptRows()/decryptGroupContent() exist — the group rebuild renamed
+// it and missed this call site, so every live 'GROUP_MESSAGE' threw a ReferenceError and the message
+// only showed up when the next poll happened to fetch it.
+function decryptRow(message){return decryptGroupContent(message)}
 function mergeGroupMessages(incoming){
   const byId=new Map();
-  for(const message of S.messages){const id=String(message.localId||message.id||message.messageId||'');if(id)byId.set(id,message);}
+  // A local (optimistic) echo is replaced by the real server message carrying the same clientMessageId.
+  const doneCids=new Set(incoming.map(m=>m&&(m.clientMessageId||m.metadata?.localId)).filter(Boolean).map(String));
+  for(const message of S.messages){if(message._optimistic&&doneCids.has(String(message.localId)))continue;const id=String(message.localId||message.id||message.messageId||'');if(id)byId.set(id,message);}
   for(const message of incoming){
     const id=String(message.localId||message.id||message.messageId||'');if(!id)continue;
     const existing=byId.get(id);
     if(existing&&message._decryptPending&&typeof existing.content==='string'&&existing.content!==message.content)byId.set(id,{...existing,...message,content:existing.content,_decryptPending:false});
     else byId.set(id,existing?{...existing,...message}:message);
   }
-  const merged=[...byId.values()].sort((a,b)=>{const ai=Number(a.id),bi=Number(b.id);if(Number.isFinite(ai)&&Number.isFinite(bi))return ai-bi;return new Date(a.createdAt||a.sentAt||0)-new Date(b.createdAt||b.sentAt||0);});
+  const merged=[...byId.values()].sort((a,b)=>{
+    // not-yet-confirmed local rows always sit after confirmed ones (keeps the comparator consistent)
+    const ao=a._optimistic?1:0,bo=b._optimistic?1:0;if(ao!==bo)return ao-bo;
+    const ai=Number(a.id),bi=Number(b.id);if(!ao&&Number.isFinite(ai)&&Number.isFinite(bi))return ai-bi;
+    return new Date(a.createdAt||a.sentAt||0)-new Date(b.createdAt||b.sentAt||0);});
   const changed=merged.length!==S.messages.length||merged.some((m,i)=>{const old=S.messages[i];return !old||String(m.id||m.messageId||m.localId)!==String(old.id||old.messageId||old.localId)||m.content!==old.content||m.status!==old.status||m.isEdited!==old.isEdited;});
   if(changed){S.messages=merged;renderMessages(false);}return merged;
 }
@@ -118,8 +152,19 @@ function renderMessages(scroll=true){
   const box=$('messages');if(!box)return;box.replaceChildren();
   if(!S.messages.length)box.innerHTML='<div class="empty">No messages yet.</div>';else S.messages.forEach(m=>box.append(buildRow(m)));
   if(scroll)box.scrollTop=box.scrollHeight;
-  window.__GROUP_MESSAGES_CACHE=S.messages.slice();window.__GROUP_REFRESH_MESSAGES=loadMessages;
-  const gid=window.__GROUP_CHAT_ID;if(gid&&window.KynectaGroupMessageCache)window.KynectaGroupMessageCache.putMessages(gid,S.messages);
+  const confirmed=S.messages.filter(m=>!m._optimistic);
+  window.__GROUP_MESSAGES_CACHE=confirmed.slice();window.__GROUP_REFRESH_MESSAGES=loadMessages;
+  const gid=window.__GROUP_CHAT_ID;if(gid&&window.KynectaGroupMessageCache)window.KynectaGroupMessageCache.putMessages(gid,confirmed);
+  schedulePendingRetry();
+}
+// FIX (MESSAGE-HIDDEN-THEN-APPEARS-LATER): a message whose decryption isn't ready used to render as an
+// EMPTY bubble and only got another attempt on the next 5-second poll. Show a placeholder and retry
+// quickly a few times instead.
+function schedulePendingRetry(){
+  if(!S.messages.some(m=>m._decryptPending)){S._pendTries=0;return}
+  if(S._pendTimer||(S._pendTries||0)>=6)return;
+  S._pendTries=(S._pendTries||0)+1;
+  S._pendTimer=setTimeout(()=>{S._pendTimer=null;loadMessages()},1200*S._pendTries);
 }
 async function loadMessages(){
   if(!S.current?.id)return;const gid=String(S.current.id);
@@ -159,12 +204,21 @@ function toggleMsgMenu(id){const willOpen=S.openMenuId!==id;closeMsgMenu();if(!w
 })}
 document.addEventListener('click',e=>{if(!e.target.closest?.('.msg-more, .msg-menu'))closeMsgMenu()});
 
-function buildRow(m){const id=String(m.id||m.messageId||'');const pendingDecrypt=!!m._decryptPending;const row=document.createElement('div');const mine=String(m.senderId||m.userId)===uid();row.className='row'+(mine?' mine':'');row.dataset.messageId=id;const b=document.createElement('div');b.className='bubble';if(!mine){const s=document.createElement('div');s.className='sender';s.textContent=m.sender?.displayName||m.sender?.username||m.senderUsername||'Member';b.append(s)}const media=m.metadata?.media;if(media?.url){const mime=String(media.mimeType||'');if(mime.startsWith('image/')){const x=document.createElement('img');x.src=media.url;x.loading='lazy';x.style.cssText='max-width:420px;max-height:360px;border-radius:12px';b.append(x)}else if(mime.startsWith('video/')){const x=document.createElement('video');x.src=media.url;x.controls=true;x.style.cssText='max-width:420px;max-height:360px';b.append(x)}else if(mime.startsWith('audio/')){const x=document.createElement('audio');x.src=media.url;x.controls=true;b.append(x)}else{const x=document.createElement('a');x.href=media.url;x.target='_blank';x.rel='noopener';x.textContent=media.name||m.content||'Open attachment';b.append(x)}}else{const x=document.createElement('div');x.className='msg-text';x.innerHTML=highlightMentions(esc(pendingDecrypt?'':m.content||''));if(pendingDecrypt){x.className='msg-text decrypt-pending';x.textContent='';}b.append(x)}
+function buildRow(m){const id=String(m.id||m.messageId||'');const pendingDecrypt=!!m._decryptPending;const row=document.createElement('div');const mine=String(m.senderId||m.userId)===uid();row.className='row'+(mine?' mine':'');row.dataset.messageId=id;const b=document.createElement('div');b.className='bubble';if(!mine){const s=document.createElement('div');s.className='sender';s.textContent=m.sender?.displayName||m.sender?.username||m.senderUsername||'Member';b.append(s)}const media=m.metadata?.media;if(media?.url){const mime=String(media.mimeType||'');if(mime.startsWith('image/')){const x=document.createElement('img');x.src=media.url;x.loading='lazy';x.style.cssText='max-width:420px;max-height:360px;border-radius:12px';b.append(x)}else if(mime.startsWith('video/')){const x=document.createElement('video');x.src=media.url;x.controls=true;x.style.cssText='max-width:420px;max-height:360px';b.append(x)}else if(mime.startsWith('audio/')){const x=document.createElement('audio');x.src=media.url;x.controls=true;b.append(x)}else{const x=document.createElement('a');x.href=media.url;x.target='_blank';x.rel='noopener';x.textContent=media.name||m.content||'Open attachment';b.append(x)}}else{const x=document.createElement('div');x.className='msg-text';x.innerHTML=highlightMentions(esc(pendingDecrypt?'':m.content||''));if(pendingDecrypt){x.className='msg-text decrypt-pending';x.style.opacity='.6';x.style.fontStyle='italic';x.textContent='🔒 Decrypting…';}b.append(x)}
   const t=document.createElement('div');t.className='time';
   if(m.isEdited){const et=document.createElement('span');et.className='edited-tag';et.textContent='edited';t.append(et)}
-  const more=document.createElement('button');more.type='button';more.className='msg-more';more.textContent='⋮';more.title='More';more.onclick=e=>{e.stopPropagation();toggleMsgMenu(id)};t.append(more);
+  if(!m._optimistic){const more=document.createElement('button');more.type='button';more.className='msg-more';more.textContent='⋮';more.title='More';more.onclick=e=>{e.stopPropagation();toggleMsgMenu(id)};t.append(more);}
   const clock=document.createElement('span');clock.textContent=new Date(m.createdAt||m.sentAt||Date.now()).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});t.append(clock);
+  if(m._optimistic){
+    const st=document.createElement('span');
+    if(m.status==='failed'){
+      st.textContent='⚠ Not sent';st.style.cssText='color:#fecaca;font-weight:700';t.append(st);
+      const rt=document.createElement('button');rt.type='button';rt.textContent='Retry';rt.style.cssText='border:0;background:rgba(255,255,255,.22);color:inherit;border-radius:8px;padding:1px 7px;cursor:pointer;font-size:10px';rt.onclick=e=>{e.stopPropagation();retryOptimistic(m.localId)};t.append(rt);
+      const dc=document.createElement('button');dc.type='button';dc.textContent='Discard';dc.style.cssText='border:0;background:transparent;color:inherit;text-decoration:underline;cursor:pointer;font-size:10px';dc.onclick=e=>{e.stopPropagation();S.messages=S.messages.filter(x=>x.localId!==m.localId);renderMessages(false)};t.append(dc);
+    }else{st.textContent='🕓';st.title='Sending…';t.append(st)}
+  }
   b.append(t);
+  if(m._optimistic){row.append(b);return row}
   const menu=document.createElement('div');menu.className='msg-menu';menu.dataset.for=id;
   const copyBtn=document.createElement('button');copyBtn.type='button';copyBtn.textContent='📋 Copy text';copyBtn.onclick=()=>{closeMsgMenu();navigator.clipboard?.writeText(m.content||'').catch(()=>{})};menu.append(copyBtn);
   const pinBtn=document.createElement('button');pinBtn.type='button';pinBtn.textContent='📌 Pin message';pinBtn.onclick=()=>{closeMsgMenu();pinMessage(id)};menu.append(pinBtn);
@@ -178,7 +232,7 @@ function buildRow(m){const id=String(m.id||m.messageId||'');const pendingDecrypt
 function startEdit(id,currentContent){const next=prompt('Edit message:',currentContent);if(next==null)return;const trimmed=next.trim();if(!trimmed||trimmed===currentContent)return;(async()=>{
   let outgoing;
   try{
-    if(!(await ensureE2EReady())||!window.KynectaGroupE2E)throw new Error('Secure messaging is not ready yet');
+    if(!(await ensureE2EReady())||!window.KynectaGroupE2E)throw new Error(e2eNotReadyMessage());
     outgoing=await window.KynectaGroupE2E.encryptForGroup(S.current?.id,trimmed,groupMemberIds(S.current));
   }catch(e){alert(e.message||'Could not encrypt the edited message');return}
   api(`/messages/${encodeURIComponent(id)}`,{method:'PATCH',body:JSON.stringify({content:outgoing})}).then(()=>{const idx=S.messages.findIndex(m=>String(m.id||m.messageId)===String(id));if(idx!==-1){S.messages[idx]={...S.messages[idx],content:trimmed,isEdited:true};renderMessages(false)}}).catch(e=>alert(e.message||'Could not edit message'))
@@ -234,23 +288,72 @@ function openGroup(id){
 }
 function closeGroup(){S.current=null;window.__GROUP_CHAT_ID=null;window.__GROUP_CHAT_TYPE=null;clearInterval(S.poll);S.poll=null;$('input').value='';$('input').disabled=true;$('send').disabled=true;['searchToggle','pinnedToggle','mediaToggle'].forEach(bid=>{const b=$(bid);if(b)b.disabled=true});closeSubbars();S.messages=[];S.pins=[];renderMessages(false);setMobileChat(false);renderGroups();postParent('GROUP_PANEL_CLOSED',{});postSelf('GROUP_PANEL_CLOSE',{});window.dispatchEvent(new CustomEvent('kyn:group:close'))}
 function makeGroupClientId(){return 'group-'+(crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random().toString(36).slice(2));}
-async function sendMessage(){
-  if(S.sending||!S.current?.id)return;const input=$('input'),plain=input.value.trim();if(!plain)return;S.sending=true;$('send').disabled=true;
+// POST /messages is idempotent on clientMessageId server-side (the same route the 1:1 chat uses), so a
+// transient failure (Render cold start / 502 / dropped connection) can be retried safely.
+const isTransientErr=e=>/Failed to fetch|NetworkError|Load failed|network|timeout|timed out|\b50[234]\b|Bad Gateway|Service Unavailable|Gateway/i.test(String(e?.message||e));
+async function apiRetry(path,opt,attempts=3){
+  let last;
+  for(let i=0;i<attempts;i++){
+    try{return await api(path,opt)}
+    catch(e){last=e;if(!isTransientErr(e))throw e;if(i<attempts-1)await sleep(1500*(i+1))}
+  }
+  throw last;
+}
+function groupObjectFor(groupId){return (S.current&&String(S.current.id)===String(groupId))?S.current:S.groups.find(g=>String(g.id)===String(groupId))||null}
+
+// FIX (MEMBER'S MESSAGE APPEARS LATE / NOT AT ALL): sending used to do everything — E2E unlock, group-key
+// lookup (network), encryption, POST /messages (network) — BEFORE the message showed anywhere, so on a
+// slow backend the sender stared at an empty panel for seconds. Now the message is shown the instant
+// it's sent (grey clock), then confirmed when the server answers, or marked "Not sent — Retry" if it
+// really can't be delivered.
+function makeOptimisticMessage(cid,plain,groupId){
+  const me=Number(uid())||uid();
+  return {id:'local:'+cid,localId:cid,clientMessageId:cid,chatId:groupId,senderId:me,userId:me,content:plain,type:'text',metadata:null,createdAt:new Date().toISOString(),status:'sending',_optimistic:true};
+}
+async function deliverOptimistic(cid,groupId,plain){
   try{
-    if(!(await ensureE2EReady())||!window.KynectaGroupE2E?.encryptForGroup)throw new Error('Secure group messaging is not ready yet');
-    const encrypted=await window.KynectaGroupE2E.encryptForGroup(Number(S.current.id),plain,groupMemberIds(S.current));
-    const r=await api('/messages',{method:'POST',body:JSON.stringify({chatId:Number(S.current.id),content:encrypted,type:'text',clientMessageId:makeGroupClientId(),metadata:{groupId:Number(S.current.id)}})});
-    const serverMessage=r?.data?.message||r?.data;if(!serverMessage?.id)throw new Error('Server did not return the saved group message');
-    mergeGroupMessages([{...serverMessage,content:plain,displayContent:plain}]);input.value='';await loadMessages();
-  }catch(error){alert('Unable to send message: '+(error?.message||error));}finally{S.sending=false;$('send').disabled=!S.current;}
+    if(!(await ensureE2EReady())||!window.KynectaGroupE2E?.encryptForGroup)throw new Error(e2eNotReadyMessage());
+    const encrypted=await window.KynectaGroupE2E.encryptForGroup(groupId,plain,groupMemberIds(groupObjectFor(groupId)));
+    const r=await apiRetry('/messages',{method:'POST',body:JSON.stringify({chatId:groupId,content:encrypted,type:'text',clientMessageId:cid,metadata:{groupId}})});
+    const serverMessage=r?.data?.message||r?.data;
+    if(!serverMessage?.id)throw new Error('Server did not return the saved group message');
+    // We know our own plaintext — remember it so this row never needs a decrypt round trip.
+    groupMessageState.plaintext.set(String(serverMessage.id),plain);groupMessageState.lastCiphertext.set(String(serverMessage.id),encrypted);
+    if(S.current&&String(S.current.id)===String(groupId)){
+      S.messages=S.messages.filter(m=>!(m._optimistic&&m.localId===cid));
+      mergeGroupMessages([{...serverMessage,clientMessageId:cid,content:plain,displayContent:plain}]);
+      renderMessages(true);
+      loadMessages(); // background reconcile, never blocks the UI
+    }
+  }catch(error){
+    console.warn('[GroupMessage] send failed',error?.message||error);
+    const row=S.messages.find(m=>m._optimistic&&m.localId===cid);
+    if(row){row.status='failed';row._error=String(error?.message||error);renderMessages(false)}
+  }
+}
+function queueOptimisticSend(cid,groupId,plain){
+  S._sendQueue=(S._sendQueue||Promise.resolve()).then(()=>deliverOptimistic(cid,groupId,plain)).catch(()=>{});
+}
+function retryOptimistic(cid){
+  const row=S.messages.find(m=>m._optimistic&&m.localId===cid);if(!row||!S.current?.id)return;
+  row.status='sending';renderMessages(false);queueOptimisticSend(cid,Number(S.current.id),row.content);
+}
+async function sendMessage(){
+  if(!S.current?.id)return;const input=$('input'),plain=input.value.trim();if(!plain)return;
+  const groupId=Number(S.current.id),cid=makeGroupClientId();
+  input.value='';$('mentionSuggest')?.classList.remove('open');
+  S.messages.push(makeOptimisticMessage(cid,plain,groupId));renderMessages(true);
+  queueOptimisticSend(cid,groupId,plain);
 }
 async function sendGroupPayload(plain,type='text',metadata=null){
   if(!S.current?.id)throw new Error('No group is open');const text=String(plain||'').trim();if(type==='text'&&!text)throw new Error('Message cannot be empty');
-  if(!(await ensureE2EReady())||!window.KynectaGroupE2E?.encryptForGroup)throw new Error('Secure group messaging is not ready yet');
-  const encrypted=text?await window.KynectaGroupE2E.encryptForGroup(Number(S.current.id),text,groupMemberIds(S.current)):'';
-  const r=await api('/messages',{method:'POST',body:JSON.stringify({chatId:Number(S.current.id),content:encrypted,type,clientMessageId:makeGroupClientId(),metadata:{...(metadata||{}),groupId:Number(S.current.id)}})});
+  if(!(await ensureE2EReady())||!window.KynectaGroupE2E?.encryptForGroup)throw new Error(e2eNotReadyMessage());
+  const gid=Number(S.current.id),cid=makeGroupClientId();
+  const encrypted=text?await window.KynectaGroupE2E.encryptForGroup(gid,text,groupMemberIds(S.current)):'';
+  const r=await apiRetry('/messages',{method:'POST',body:JSON.stringify({chatId:gid,content:encrypted,type,clientMessageId:cid,metadata:{...(metadata||{}),groupId:gid}})});
   const message=r?.data?.message||r?.data;if(!message?.id)throw new Error('Server did not return the saved group message');
-  mergeGroupMessages([{...message,content:text,displayContent:text}]);await loadMessages();return message;
+  if(text){groupMessageState.plaintext.set(String(message.id),text);groupMessageState.lastCiphertext.set(String(message.id),encrypted)}
+  mergeGroupMessages([{...message,clientMessageId:cid,content:text,displayContent:text}]);loadMessages();return message;
 }
 window.__NECPRA_GROUP_SEND=sendGroupPayload;
 
@@ -325,8 +428,9 @@ function handleRealtime(ev){
         const exists=S.messages.some(m=>String(m.id||m.messageId)===String(message.id));
         if(!exists){decryptRow(message).then(dm=>{
             if(!S.current||String(groupId)!==String(S.current.id))return;
-            if(S.messages.some(m=>String(m.id||m.messageId)===String(dm.id||dm.messageId)))return;
-            S.messages.push(dm);S.messages.sort((a,b)=>Number(a.id||0)-Number(b.id||0));renderMessages(true)
+            // mergeGroupMessages de-duplicates by id / clientMessageId, replaces our own local echo and keeps
+            // a consistent order (a bare sort by Number(id) breaks once local rows are present).
+            mergeGroupMessages([dm]);const box=$('messages');if(box)box.scrollTop=box.scrollHeight;
         })}
         markRead(groupId);
         return;

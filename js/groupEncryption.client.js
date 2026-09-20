@@ -106,8 +106,15 @@
   }
 
   async function waitForE2E(timeoutMs) {
-    timeoutMs = timeoutMs || 8000;
+    // FIX ("Secure messaging is not ready yet"): 8s was often too short while the identity key is
+    // still being restored/registered on a cold backend, and nothing here ever tried to unlock it —
+    // it only watched a flag. Ask the page's shared unlock routine (group.html exposes it) first, then
+    // wait longer for `enabled`.
+    timeoutMs = timeoutMs || 20000;
     const start = Date.now();
+    if (!(global.KynectaE2E && global.KynectaE2E.enabled) && typeof global.__NECPRA_ENSURE_E2E === 'function') {
+      try { await global.__NECPRA_ENSURE_E2E(); } catch (_) {}
+    }
     while (!(global.KynectaE2E && global.KynectaE2E.enabled)) {
       if (Date.now() - start > timeoutMs) return false;
       await new Promise(function (r) { setTimeout(r, 150); });

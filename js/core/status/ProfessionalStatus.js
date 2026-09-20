@@ -52,6 +52,10 @@ function avatar(u,cls='ns-avatar'){
 const ago=t=>{const s=Math.max(1,Math.floor((Date.now()-new Date(t).getTime())/1000));if(s<60)return s+'s';if(s<3600)return Math.floor(s/60)+'m';if(s<86400)return Math.floor(s/3600)+'h';return Math.floor(s/86400)+'d'};
 const toast=(m)=>{const el=document.querySelector('.ns-toast');if(!el)return;el.textContent=m;el.classList.add('show');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),2400)};
 const bg=['linear-gradient(135deg,#2563eb,#7c3aed)','linear-gradient(135deg,#ec4899,#f97316)','linear-gradient(135deg,#06b6d4,#2563eb)','linear-gradient(135deg,#22c55e,#14b8a6)','linear-gradient(135deg,#f59e0b,#ef4444)','linear-gradient(135deg,#111827,#475569)','linear-gradient(135deg,#7c3aed,#db2777)','linear-gradient(135deg,#0f172a,#0ea5e9)'];
+// A status background is user-supplied data that gets written into a style="" attribute. Only
+// accept plain colours / gradients so a crafted value can never break out of the attribute, and
+// fall back to the first palette entry otherwise.
+const safeBg=v=>{v=String(v||'').trim();return /^(#[0-9a-f]{3,8}|(?:linear|radial)-gradient\([#a-zA-Z0-9%.,()\s-]*\)|rgba?\([0-9.,\s%]*\)|[a-z]{3,20})$/i.test(v)?v:bg[0]};
 const stickers=['❤️','🔥','😂','😍','🎓','✨','💯','🙌','🎉','📚','🛍️','💡'];
 let state={tab:'friends',statuses:[],mine:[],index:0,viewerGroup:[],replyingStatusId:null,composer:{type:'text',content:'',caption:'',background:bg[0],font:'system-ui',privacy:'all_contacts',topics:[],moodType:'',category:'',intent:'',allowReplies:true,allowReactions:true,allowSharing:true,linkUrl:'',mentions:[],stickers:[],media:null,poll:['',''],selectedSticker:''},seen:new Set(),timer:null,panel:'list',lastScreen:'list'};
 
@@ -203,7 +207,7 @@ function renderFeed(){
 }
 function card(s,i){
  const u=s.owner||{};const media=s.mediaUrl;
- const visual=s.type==='image'&&media?'<img class="ns-card-media" src="'+esc(media)+'" loading="lazy">':s.type==='video'&&media?'<video class="ns-card-media" src="'+esc(media)+'" muted playsinline preload="metadata"></video>':'<div class="ns-card-media" style="background:'+(s.background||bg[0])+';display:grid;place-items:center"><div style="padding:25px;color:#fff;font-weight:850;font-size:25px;text-align:center;font-family:'+esc(s.font||'system-ui')+'">'+esc(s.content||s.caption||'✨')+'</div></div>';
+ const visual=s.type==='image'&&media?'<img class="ns-card-media" src="'+esc(media)+'" loading="lazy">':s.type==='video'&&media?'<video class="ns-card-media" src="'+esc(media)+'" muted playsinline preload="metadata"></video>':'<div class="ns-card-media" style="background:'+safeBg(s.background)+';display:grid;place-items:center"><div style="padding:25px;color:#fff;font-weight:850;font-size:25px;text-align:center;font-family:'+esc(s.font||'system-ui')+'">'+esc(s.content||s.caption||'✨')+'</div></div>';
  return '<article class="ns-card" data-open-status="'+s.id+'">'+visual+'<div class="ns-card-overlay"></div><div class="ns-card-top">'+avatar(u)+'<span class="ns-card-user">'+esc(u.displayName||u.username||'User')+'</span><span class="ns-card-time">'+ago(s.createdAt)+'</span></div><div class="ns-card-bottom"><div class="ns-card-caption">'+esc(s.caption||s.content||'')+'</div><div class="ns-card-meta"><span>👁 '+(s.viewCount||0)+'</span><span>❤️ '+(s.reactionCount||0)+'</span><span>💬 '+(s.replyCount||0)+'</span></div></div></article>';
 }
 async function openUser(userId){
@@ -225,7 +229,7 @@ function showViewer(){
  const isReplay=!!s.viewedByMe && !isOwner;
  s.viewedByMe=true;state.seen.add(s.id);try{localStorage.setItem('necpa_status_seen_'+String(currentUser().id||'guest'),JSON.stringify([...state.seen].slice(-500)))}catch(_){}
  const root=document.querySelector('[data-viewer]');const u=s.owner||{};state.seen.add(s.id);
- root.innerHTML='<div class="ns-viewer-stage">'+viewerVisual(s)+'<div class="ns-viewer-grad"></div><div class="ns-progress">'+state.viewerGroup.map((_,i)=>'<i><b style="width:'+(i<state.index?'100':'0')+'%"></b></i>').join('')+'</div><div class="ns-viewer-head">'+avatar(u)+'<div><div class="ns-viewer-name">'+esc(u.displayName||u.username||'User')+'</div><div class="ns-viewer-time">'+ago(s.createdAt)+' ago · 24h moment</div></div><div class="ns-viewer-actions"><button data-viewers>👁 '+(s.viewCount||0)+'</button><button data-more>•••</button><button data-vclose>×</button></div></div><button class="ns-nav ns-prev" data-prev>‹</button><button class="ns-nav ns-next" data-next>›</button><div class="ns-viewer-bottom"><div class="ns-reactions">'+['❤️','😂','🔥','😍','👏','💯'].map(e=>'<button class="ns-reaction" data-react="'+e+'">'+e+'</button>').join('')+'</div><div class="ns-reply-row">'+(s.allowReplies!==false?'<input class="ns-reply" data-reply placeholder="Reply to '+esc(u.displayName||'this status')+'…"><button class="ns-reaction" data-send>➤</button>':'<span style="opacity:.65">Replies are disabled</span>')+'</div></div><div class="ns-viewer-more" data-moremenu><button data-share>↗ Share</button><button data-save>⇩ Save</button><button data-report>⚑ Report</button>'+(String(s.userId)===String(currentUser().id)?'<button data-edit>✎ Edit</button><button data-delete>🗑 Delete</button><button data-highlight>★ Highlight</button>':'')+'</div></div>';
+ root.innerHTML='<div class="ns-viewer-stage"'+((s.type==='image'||s.type==='video')?'':' style="background:'+safeBg(s.background)+'"')+'>'+viewerVisual(s)+'<div class="ns-viewer-grad"></div><div class="ns-progress">'+state.viewerGroup.map((_,i)=>'<i><b style="width:'+(i<state.index?'100':'0')+'%"></b></i>').join('')+'</div><div class="ns-viewer-head">'+avatar(u)+'<div><div class="ns-viewer-name">'+esc(u.displayName||u.username||'User')+'</div><div class="ns-viewer-time">'+ago(s.createdAt)+' ago · 24h moment</div></div><div class="ns-viewer-actions"><button data-viewers>👁 '+(s.viewCount||0)+'</button><button data-more>•••</button><button data-vclose>×</button></div></div><button class="ns-nav ns-prev" data-prev>‹</button><button class="ns-nav ns-next" data-next>›</button><div class="ns-viewer-bottom"><div class="ns-reactions">'+['❤️','😂','🔥','😍','👏','💯'].map(e=>'<button class="ns-reaction" data-react="'+e+'">'+e+'</button>').join('')+'</div><div class="ns-reply-row">'+(s.allowReplies!==false?'<input class="ns-reply" data-reply placeholder="Reply to '+esc(u.displayName||'this status')+'…"><button class="ns-reaction" data-send>➤</button>':'<span style="opacity:.65">Replies are disabled</span>')+'</div></div><div class="ns-viewer-more" data-moremenu><button data-share>↗ Share</button><button data-save>⇩ Save</button><button data-report>⚑ Report</button>'+(String(s.userId)===String(currentUser().id)?'<button data-edit>✎ Edit</button><button data-delete>🗑 Delete</button><button data-highlight>★ Highlight</button>':'')+'</div></div>';
  root.classList.add('open');syncParent();
  if(isOwner) root.querySelector('.ns-viewer-bottom')?.remove();
  root.querySelector('[data-vclose]').onclick=()=>closeViewer();root.querySelector('[data-prev]').onclick=()=>move(-1);root.querySelector('[data-next]').onclick=()=>move(1);
@@ -268,8 +272,8 @@ function viewerVisual(s){
  if(s.type==='image'&&!s.mediaUrl)return failed;
  if(s.type==='video'&&s.mediaUrl)return '<video class="ns-viewer-media" src="'+esc(s.mediaUrl)+'" controls autoplay playsinline onerror="window.__necpaStatusMediaError(this)"></video>';
  if(s.type==='video'&&!s.mediaUrl)return failed;
- if(s.type==='poll'){const p=Array.isArray(s.pollOptions)?s.pollOptions:[];return '<div class="ns-viewer-text" style="background:'+(s.background||bg[0])+';max-width:none;width:100%;height:100%;display:flex;flex-direction:column;justify-content:center;align-items:center"><div>'+esc(s.content||'Poll')+'</div>'+p.map(x=>'<div style="margin:7px;padding:12px 22px;border-radius:999px;background:rgba(255,255,255,.16);font-size:17px">'+esc(x)+'</div>').join('')+'</div>'}
- return '<div class="ns-viewer-text" style="background:'+(s.background||bg[0])+';width:100%;height:100%;display:grid;place-items:center;font-family:'+esc(s.font||'system-ui')+'">'+esc(s.content||s.caption||'')+'</div>';
+ if(s.type==='poll'){const p=Array.isArray(s.pollOptions)?s.pollOptions:[];return '<div class="ns-viewer-text" style="background:'+safeBg(s.background)+';max-width:none;width:100%;height:100%;display:flex;flex-direction:column;justify-content:center;align-items:center"><div>'+esc(s.content||'Poll')+'</div>'+p.map(x=>'<div style="margin:7px;padding:12px 22px;border-radius:999px;background:rgba(255,255,255,.16);font-size:17px">'+esc(x)+'</div>').join('')+'</div>'}
+ return '<div class="ns-viewer-text" style="background:'+safeBg(s.background)+';max-width:none;width:100%;height:100%;display:grid;place-items:center;font-family:'+esc(s.font||'system-ui')+'">'+esc(s.content||s.caption||'')+'</div>';
 }
 function move(dir){const n=state.index+dir;if(n<0||n>=state.viewerGroup.length){closeViewer();return}state.index=n;showViewer()}
 function closeViewer(silent){clearInterval(state.timer);const el=document.querySelector('[data-viewer]');if(el?.classList.contains('open')){el.classList.remove('open');if(silent!==true)syncParent()}}
@@ -293,14 +297,27 @@ async function editStatus(s){
  const value=prompt('Edit caption/text:',s.caption||s.content||'');if(value===null)return;
  try{const r=await api('/'+s.id,{method:'PUT',body:JSON.stringify({caption:value,content:s.type==='text'?value:s.content})});Object.assign(s,r.status||{});showViewer();renderFeed();toast('Status updated')}catch(e){toast(e.message)}
 }
+// FIX ("Secure messaging is not ready yet"): status.html never loaded the E2E scripts, and even
+// where they load, unlocking the identity takes a moment (key restore / server registration). Wait
+// for it (bounded) instead of failing on the first check.
+async function ensureSecureReady(timeoutMs){
+ const ok=()=>!!(window.KynectaE2E&&typeof window.KynectaE2E.encryptForChat==='function');
+ const deadline=Date.now()+(timeoutMs||15000);
+ while(!ok()&&Date.now()<deadline){
+   if(typeof window.KynectaMessageE2EReady==='function'){
+     try{await Promise.race([window.KynectaMessageE2EReady(),new Promise(r=>setTimeout(r,4000))])}catch(_){}
+   }
+   if(!ok())await new Promise(r=>setTimeout(r,400));
+ }
+ return ok();
+}
 async function sendStatusInteraction(s,payload){
  const ownerId=Number(s?.userId||s?.owner?.id||0), meId=Number(currentUser()?.id||0);
  if(!ownerId||ownerId===meId) return;
  const text=String(payload?.text||'').trim(), kind=payload?.kind==='reaction'?'reaction':'comment';
  const interaction={statusId:s.id,statusType:s.type||'text',kind,emoji:kind==='reaction'?(payload?.emoji||''):null,text:kind==='comment'?text:'',caption:String(s.caption||s.content||'').slice(0,500)};
  const clientMessageId='status-'+s.id+'-'+kind+'-'+Date.now()+'-'+Math.random().toString(36).slice(2,10);
- if(!window.KynectaE2E||typeof window.KynectaE2E.encryptForChat!=='function') await window.KynectaMessageE2EReady?.();
- if(!window.KynectaE2E||typeof window.KynectaE2E.encryptForChat!=='function') throw new Error('Secure messaging is not ready yet');
+ if(!(await ensureSecureReady())) throw new Error('Secure messaging is still unlocking. Please try again in a moment.');
  const start=await fetchRetry(apiOrigin()+'/api/chats/start',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token()},body:JSON.stringify({userId:ownerId})});
  const startData=await start.json().catch(()=>({}));
  if(!start.ok||startData.success===false) throw new Error(startData.message||'Could not open the creator chat');
@@ -312,8 +329,30 @@ async function sendStatusInteraction(s,payload){
  if(!sent.ok||sentData.success===false) throw new Error(sentData.message||'Could not send the interaction');
  return sentData?.data||null;
 }
-async function react(s,emoji){if(s.allowReactions===false)return;try{const r=await api('/'+s.id+'/like',{method:'POST',body:JSON.stringify({emoji})});s.reactionCount=r.count;await sendStatusInteraction(s,{kind:'reaction',emoji});toast('Reaction sent privately to the creator')}catch(e){toast(e.message)}}
-async function reply(s,text){if(!text.trim())return;clearInterval(state.timer);state.replyingStatusId=s.id;const value=text.trim();try{await api('/'+s.id+'/comment',{method:'POST',body:JSON.stringify({text:value})});await sendStatusInteraction(s,{kind:'comment',text:value});s.replyCount=(s.replyCount||0)+1;document.querySelector('[data-reply]').value='';toast('Reply sent privately to the creator')}catch(e){toast(e.message)}}
+// The reaction/comment itself is already saved by the API call before this runs, so failing to
+// deliver the PRIVATE copy to the creator must not be reported as if the reaction/reply failed
+// (that is what made people retry and post duplicates). Retry quietly, then say what really happened.
+async function notifyCreator(s,payload){
+ for(let i=0;i<3;i++){
+   try{await sendStatusInteraction(s,payload);return true}
+   catch(_){if(i<2)await new Promise(r=>setTimeout(r,2500*(i+1)))}
+ }
+ return false;
+}
+async function react(s,emoji){
+ if(s.allowReactions===false)return;
+ try{const r=await api('/'+s.id+'/like',{method:'POST',body:JSON.stringify({emoji})});s.reactionCount=r.count;toast('Reaction sent')}
+ catch(e){toast(e.message);return}
+ const ok=await notifyCreator(s,{kind:'reaction',emoji});
+ toast(ok?'Reaction sent privately to the creator':'Reaction saved. The creator could not be notified privately yet.');
+}
+async function reply(s,text){
+ if(!text.trim())return;clearInterval(state.timer);state.replyingStatusId=s.id;const value=text.trim();
+ try{await api('/'+s.id+'/comment',{method:'POST',body:JSON.stringify({text:value})});s.replyCount=(s.replyCount||0)+1;const box=document.querySelector('[data-reply]');if(box)box.value='';toast('Reply sent')}
+ catch(e){toast(e.message);return}
+ const ok=await notifyCreator(s,{kind:'comment',text:value});
+ toast(ok?'Reply sent privately to the creator':'Reply saved. The creator could not be notified privately yet.');
+}
 async function share(s){try{if(navigator.share)await navigator.share({title:'Necpa Status',text:s.caption||s.content||'Check this status',url:location.href});else await navigator.clipboard.writeText(location.href+'#status-'+s.id);await api('/'+s.id+'/share',{method:'POST',body:'{}'});toast('Status shared')}catch(e){if(e.name!=='AbortError')toast(e.message)}}
 async function save(s){try{const url=s.mediaUrl;if(!url)return toast('Text statuses do not need downloading');const a=document.createElement('a');a.href=url;a.download='necpa-status';a.target='_blank';a.click();toast('Save opened')}catch(e){toast(e.message)}}
 async function report(s){const reason=prompt('Why are you reporting this status?','spam');if(!reason)return;try{await api('/'+s.id+'/report',{method:'POST',body:JSON.stringify({reason})});toast('Report submitted')}catch(e){toast(e.message)}}
@@ -463,7 +502,14 @@ function boot(){if(!document.body)return;const style=document.createElement('sty
 #necpa-status-root.ns-mobile[data-panel="list"] .ns-main-head,#necpa-status-root.ns-mobile[data-panel="list"] .ns-feed{display:none}
 #necpa-status-root.ns-mobile[data-panel="list"] .ns-composer.open,#necpa-status-root.ns-mobile[data-panel="list"] .ns-viewer.open{pointer-events:auto}
 #necpa-status-root.ns-mobile[data-panel="feed"] .ns-side{display:none}
-`;document.head.appendChild(themeStyle);syncTheme();try{const src=(window.parent&&window.parent!==window)?window.parent.document.documentElement:document.documentElement;new MutationObserver(syncTheme).observe(src,{attributes:true,attributeFilter:['style','class','data-theme']})}catch(_){}mount()}
+`;document.head.appendChild(themeStyle);
+// FIX (STATUS BACKGROUND NOT FILLING THE SCREEN): .ns-viewer-text carried max-width:620px (a
+// leftover from the old boxed viewer) while the stage was already forced to 100vw, so a chosen
+// background colour stopped at 620px and the rest of the screen stayed black. Make the coloured
+// layer cover the whole stage edge-to-edge, keep the text centred, and leave room for the header
+// and the reply bar so nothing is hidden underneath them.
+(function(){const f=document.createElement('style');f.id='ns-viewer-fill';f.textContent='#necpa-status-root .ns-viewer-stage{width:100vw!important;max-width:none!important;height:100dvh!important;min-height:100dvh!important;overflow:hidden}#necpa-status-root .ns-viewer-text{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;max-width:none!important;max-height:none!important;min-height:100%!important;margin:0!important;border-radius:0!important;box-sizing:border-box!important;padding:84px 28px 130px!important;display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;text-align:center!important;overflow-y:auto;overflow-wrap:anywhere}';document.head.appendChild(f)})();
+syncTheme();try{const src=(window.parent&&window.parent!==window)?window.parent.document.documentElement:document.documentElement;new MutationObserver(syncTheme).observe(src,{attributes:true,attributeFilter:['style','class','data-theme']})}catch(_){}mount()}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
 window.__NecpaProfessionalStatus={open,close,loadFeed,goBack:goBackOne,resetToList};
 })();

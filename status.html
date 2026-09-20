@@ -7,6 +7,13 @@
   <script src="/js/runtime-config.js"></script>
   <script src="/js/config.js"></script>
   <script src="/js/theme.engine.js"></script>
+  <!-- FIX ("Secure messaging is not ready yet" on status reactions/replies): this page sends the
+       private reaction/reply to the creator through window.KynectaE2E.encryptForChat, but it never
+       loaded the E2E chain (message.html does), so that object never existed here. Same three
+       scripts, same order, as message.html; e2e-session-init.js then loads the canonical core. -->
+  <script src="/js/e2e-encryption.js" defer></script>
+  <script src="/js/e2e-store-v2.js" defer></script>
+  <script src="/js/e2e-session-init.js" defer></script>
   <script>
     // The Status module uses the same authenticated session and API origin
     // as the main Necpa shell. Keep this iframe visually independent from
