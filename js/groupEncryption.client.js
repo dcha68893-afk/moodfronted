@@ -10,7 +10,19 @@ const token=()=>global.__kynToken||global.__accessToken||global.AuthSessionManag
 const me=()=>Number(global._kynCurrentUserId||localStorage.getItem('userId')||localStorage.getItem('currentUserId')||0);
 function e2e(){if(!global.KynectaE2E)throw new Error('Secure messaging core is not loaded');return global.KynectaE2E}
 async function request(path,opts){opts=opts||{};const headers=Object.assign({},opts.headers||{}),t=token();if(t)headers.Authorization='Bearer '+t;if(opts.body&&!headers['Content-Type'])headers['Content-Type']='application/json';let res=await fetch(base()+path,Object.assign({},opts,{headers}));if(res.status===401&&global.NecpaSessionResilience){try{if(await global.NecpaSessionResilience.refreshAccessToken(base())){const fresh=token();if(fresh)headers.Authorization='Bearer '+fresh;res=await fetch(base()+path,Object.assign({},opts,{headers}))}}catch(_){}}const data=await res.json().catch(()=>({}));if(!res.ok){const err=new Error(data.message||data.error||('Request failed ('+res.status+')'));err.status=res.status;err.payload=data;throw err}return data}
-async function waitReady(timeout=20000){if(global.KynectaE2E?.enabled)return true;if(typeof global.__NECPRA_ENSURE_E2E==='function'){try{await global.__NECPRA_ENSURE_E2E()}catch(_){}}const started=Date.now();while(!global.KynectaE2E?.enabled&&Date.now()-started<timeout)await new Promise(r=>setTimeout(r,150));return!!global.KynectaE2E?.enabled}
+// FIX-ROOT-CAUSE (GROUP-SEND-STUCK-"SECURE MESSAGING IS STILL UNLOCKING"):
+// this used to call group.html's ensureE2EReady() (via __NECPRA_ENSURE_E2E)
+// and THEN re-poll `.enabled` itself on a second, separate setTimeout loop —
+// a duplicate of a duplicate. Now that ensureE2EReady() itself just awaits
+// the canonical KynectaE2E.waitForEnabledBounded gate, there is nothing left
+// for a second poll here to add; it only ever waited on the exact same flag
+// group.html was already waiting on, one indirection removed.
+async function waitReady(timeout=20000){
+  if(global.KynectaE2E?.enabled)return true;
+  if(typeof global.__NECPRA_ENSURE_E2E==='function'){try{if(await global.__NECPRA_ENSURE_E2E())return true}catch(_){}}
+  if(typeof global.KynectaE2E?.waitForEnabledBounded==='function')return await global.KynectaE2E.waitForEnabledBounded(timeout);
+  return!!global.KynectaE2E?.enabled;
+}
 function bucket(gid){const id=String(gid);if(!cache.has(id))cache.set(id,new Map());return cache.get(id)}
 function storageKey(gid,v){return'kyn_group_key_v2_'+gid+'_'+v}
 async function saveLocal(gid,v,rawB64,ownerId){try{const wrapped=await e2e().wrapForLocalStorage(rawB64);if(wrapped)localStorage.setItem(storageKey(gid,v),JSON.stringify({ownerId:Number(ownerId)||0,wrapped}))}catch(_){}}

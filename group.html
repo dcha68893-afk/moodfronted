@@ -1,4 +1,4 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Groups</title><script src="/js/runtime-config.js"></script><script src="/js/config.js"></script><script src="/js/theme.engine.js"></script><script src="/js/e2e-encryption.js"></script><script src="/js/settings-broadcast-listener.js"></script><script src="/js/necpa-session-resilience.js"></script><script src="js/core/groups/group-cache-first.js"></script><script src="js/groupEncryption.client.js"></script><script src="js/group-platform.js"></script><style>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Groups</title><script src="/js/runtime-config.js"></script><script src="/js/config.js"></script><script src="/js/theme.engine.js"></script><script src="/js/e2e-encryption.js"></script><script src="/js/e2e-session-init.js" defer></script><script src="/js/settings-broadcast-listener.js"></script><script src="/js/necpa-session-resilience.js"></script><script src="js/core/groups/group-cache-first.js"></script><script src="js/groupEncryption.client.js"></script><script src="js/group-platform.js"></script><style>
 :root{--bg:var(--kyn-bg-root,#f8fafc);--surface:var(--kyn-bg-panel,#fff);--surface2:var(--kyn-bg-input,#f1f5f9);--border:var(--kyn-border,#e2e8f0);--text:var(--kyn-text-primary,#0f172a);--muted:var(--kyn-text-muted,#64748b);--primary:var(--kyn-accent-secondary,#2563eb)}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden}body{background:var(--bg);color:var(--text);font:14px system-ui,-apple-system,"Segoe UI",Roboto,Arial}button,input,textarea{font:inherit}button{cursor:pointer}.layout{height:100%;display:grid;grid-template-columns:minmax(250px,32%) 1fr}.sidebar,.panel{min-width:0;min-height:0}.sidebar{border-right:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column}.side-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--border);font-weight:800}.toolbar{display:flex;gap:7px;padding:10px}.search{flex:1;min-width:0;padding:9px;border:1px solid var(--border);border-radius:11px;background:var(--surface2);color:inherit}.refresh{border:1px solid var(--border);border-radius:10px;background:var(--surface2);color:inherit;padding:8px 11px}.groups{flex:1;overflow:auto;padding:0 10px}.group{width:100%;display:flex;align-items:center;gap:10px;padding:10px;border:1px solid transparent;border-radius:13px;background:transparent;color:inherit;text-align:left;margin-bottom:5px}.group:hover,.group.active{background:var(--surface2);border-color:var(--border)}.avatar{width:43px;height:43px;border-radius:13px;background:linear-gradient(135deg,#dbeafe,#c4b5fd);display:grid;place-items:center;font-weight:800;color:#1e40af;flex:0 0 auto;background-size:cover;background-position:center}.groupmain{min-width:0;flex:1}.name{font-weight:750;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.meta{font-size:11px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.empty{text-align:center;color:var(--muted);padding:40px 18px}
 .unread-badge{flex:0 0 auto;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:#ef4444;color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;line-height:1}
 /* No in-panel header any more: the parent shell's #globalHeader owns the
@@ -75,30 +75,35 @@ function postSelf(type,payload){try{window.postMessage({type,payload:payload||{}
 function currentGroupMeta(g){return{id:g.id,name:g.name||g.groupName||'Group',memberCount:Number(g.participantCount??g.participants?.length??0),stats:{totalMembers:Number(g.participantCount??g.participants?.length??0)}}}
 
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-// FIX ("Secure messaging is not ready yet"): this used to answer "no" the instant init() returned
-// false once — which happens legitimately while a key is still being restored/registered with the
-// server (init() then finishes in the background and flips `enabled` a moment later). Sending in
-// that window failed outright. Now: share ONE in-flight attempt, retry init() a few times
-// (sequentially, never overlapping), and also accept `enabled` turning true on its own.
+// FIX-ROOT-CAUSE (GROUP-SEND-STUCK-"SECURE MESSAGING IS STILL UNLOCKING"):
+// this used to hand-roll its OWN copy of E2E bootstrap — reading the unlock
+// password out of sessionStorage itself, calling KynectaE2E.init() itself,
+// and polling `.enabled` on its own home-grown timer (bailing out after as
+// little as ~3s if it happened to check before the password was written).
+// js/e2e-session-init.js is the canonical bootstrap that message.html and
+// chat.html already load for exactly this — it owns the password lookup,
+// the init() call, and de-duping against a second load — and it explicitly
+// documents group.html as one of the pages meant to load it. This page
+// just never had the <script> tag for it, so every group send was racing
+// this duplicate, weaker copy instead of the real thing, and lost more
+// often than not. Now this only waits on the single shared readiness gate
+// KynectaE2E already exposes for every caller (group, DM, anything else) —
+// no separate init logic lives here anymore.
 let e2eReadyPromise=null;
 function e2eNotReadyMessage(){let pw=null;try{pw=sessionStorage.getItem('kyn_e2e_pw_session')}catch(_){}return pw?'Secure messaging is still unlocking. Please try again in a moment.':'Secure messaging is locked. Please sign in again to unlock it.'}
 async function ensureE2EReady(){
   if(window.KynectaE2E?.enabled)return true;
   if(e2eReadyPromise)return e2eReadyPromise;
   e2eReadyPromise=(async()=>{
-    const started=Date.now();
     try{
-      for(let attempt=0;attempt<4;attempt++){
-        if(window.KynectaE2E?.enabled)return true;
-        let pw=null,legacyPw=null;
-        try{pw=sessionStorage.getItem('kyn_e2e_pw_session');legacyPw=sessionStorage.getItem('kyn_e2e_pw_legacy_session')}catch(_){}
-        if(window.KynectaE2E&&typeof window.KynectaE2E.init==='function'&&pw){
-          try{const ok=await window.KynectaE2E.init(pw,legacyPw||undefined);if(ok&&window.KynectaE2E.enabled)return true}catch(_){}
-        }else if(Date.now()-started>3000){break} // core not loaded / nothing to unlock with: don't make people wait
-        // init() may have kicked off background registration — give `enabled` time to flip.
-        const until=Date.now()+2500;
-        while(Date.now()<until&&!window.KynectaE2E?.enabled)await sleep(200);
-      }
+      if(typeof window.KynectaE2E?.waitForEnabledBounded==='function')return await window.KynectaE2E.waitForEnabledBounded(8000);
+      // js/e2e-session-init.js hasn't finished attaching the core yet (very
+      // first tick of the page) — give it a moment to appear, then use the
+      // same bounded gate everyone else uses. No password handling here:
+      // that's e2e-session-init.js's job, and only its job.
+      const until=Date.now()+3000;
+      while(Date.now()<until&&typeof window.KynectaE2E?.waitForEnabledBounded!=='function')await sleep(150);
+      if(typeof window.KynectaE2E?.waitForEnabledBounded==='function')return await window.KynectaE2E.waitForEnabledBounded(5000);
       return !!window.KynectaE2E?.enabled;
     }finally{e2eReadyPromise=null}
   })();
