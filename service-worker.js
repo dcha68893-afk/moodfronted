@@ -42,7 +42,7 @@ const SW_VERSION = '19.31.0';
 // js/pwa-mobile-install.js + js/install-chooser.js were deleted. Bumping the cache name drops every cached copy
 // of those two scripts (and the old pwa-manager.js) on the next activate, so no device keeps running a stale
 // installer next to the new one.
-const CACHE_NAME = 'necpa-static-v62';
+const CACHE_NAME = 'necpa-static-v61';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [

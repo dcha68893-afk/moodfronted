@@ -237,10 +237,7 @@
       if (b.miui || b.uc || b.opera || b.firefox) return { code: 'unsupported-browser', message: 'This browser does not offer a one-tap install for this site. Open ' + location.host + ' in Chrome.' };
       var manifestProblem = await checkManifest();
       if (manifestProblem) return { code: 'manifest', message: manifestProblem };
-      if ('serviceWorker' in navigator && !navigator.serviceWorker.controller) {
-        return { code: 'sw-not-ready', message: 'Offline support is still starting. Reload this page once, wait a few seconds, then try again.' };
-      }
-      return { code: 'no-prompt', message: 'Chrome has not offered its install prompt yet (it may have been dismissed recently, or Necpa may already be installed). You can still install from the browser menu.' };
+      return { code: 'no-prompt', message: 'Chrome has not offered its native prompt yet. Chrome controls when that event becomes available; use the Install button here or Chrome menu → Add to Home screen → Install app.' };
     } catch (_) {
       return { code: 'unknown', message: 'Could not check installation support.' };
     }
