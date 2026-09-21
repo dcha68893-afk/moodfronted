@@ -57,6 +57,22 @@ function avatar(u,cls='ns-avatar'){
   return '<div class="'+cls+'" style="'+(url?'background-image:url(&quot;'+esc(url)+'&quot;)':'')+'">'+(url?'':esc((name.trim().split(/\s+/).map(x=>x[0]).join('').slice(0,2)||'U').toUpperCase()))+'</div>';
 }
 const ago=t=>{const s=Math.max(1,Math.floor((Date.now()-new Date(t).getTime())/1000));if(s<60)return s+'s';if(s<3600)return Math.floor(s/60)+'m';if(s<86400)return Math.floor(s/3600)+'h';return Math.floor(s/86400)+'d'};
+// VIEW DURATION: text/image/poll/link statuses keep using whatever duration the creator picked
+// (the composer's "duration" select, saved as s.durationSeconds — floor 3s, same as before).
+// Video and audio/music statuses always get a fixed 20 second viewing window regardless of the
+// creator's saved duration or the clip's own length, matching every other short-video app.
+const isTimedMediaStatus=s=>s&&(s.type==='video'||s.type==='audio'||/^audio\//i.test(String(s.mediaMime||'')));
+const VIDEO_STATUS_MS=20000;
+const viewDurationMs=s=>isTimedMediaStatus(s)?VIDEO_STATUS_MS:Math.max(3000,(Number(s?.durationSeconds)||7)*1000);
+// Explicitly stop any playing video/audio in the main viewer — called on every advance/close so
+// playback (and its sound) never continues once the 20s window elapses, even if the tab is
+// backgrounded and setTimeout gets throttled (the visibilitychange listener below covers that).
+function stopViewerMedia(){
+ document.querySelectorAll('[data-viewer] video,[data-viewer] audio').forEach(el=>{try{el.pause();el.muted=true;el.currentTime=0}catch(_){}});
+}
+document.addEventListener('visibilitychange',()=>{
+ if(document.visibilityState==='hidden')stopViewerMedia();
+});
 const toast=(m)=>{const el=document.querySelector('.ns-toast');if(!el)return;el.textContent=m;el.classList.add('show');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),2400)};
 const bg=['linear-gradient(135deg,#2563eb,#7c3aed)','linear-gradient(135deg,#ec4899,#f97316)','linear-gradient(135deg,#06b6d4,#2563eb)','linear-gradient(135deg,#22c55e,#14b8a6)','linear-gradient(135deg,#f59e0b,#ef4444)','linear-gradient(135deg,#111827,#475569)','linear-gradient(135deg,#7c3aed,#db2777)','linear-gradient(135deg,#0f172a,#0ea5e9)'];
 // A status background is user-supplied data that gets written into a style="" attribute. Only
@@ -72,7 +88,7 @@ function mount(){
  const launcher=document.createElement('button');launcher.id='necpa-status-launcher';launcher.innerHTML='<span class="ns-dot"></span> Status';launcher.onclick=open;
  document.body.appendChild(launcher);
  const root=document.createElement('div');root.id='necpa-status-root';
- root.innerHTML='<div class="ns-shell"><aside class="ns-side"><div class="ns-brand"><div><h2>Moments</h2><small>Share what is happening</small></div></div><div class="ns-my-card" data-my-status>'+avatar(currentUser())+'<div style="flex:1;min-width:0"><b>My Status</b><small data-my-status-meta style="display:block;color:#64748b">Add a new moment</small></div><button class="ns-add" data-compose aria-label="Add status">+</button></div><div class="ns-section-title">Status</div><div class="ns-tabs"><button class="ns-tab active" data-tab="friends">Friends</button><button class="ns-tab" data-tab="discover">Discover</button></div><div class="ns-discover-only ns-discover-actions"><button class="ns-btn ghost" data-open-interests>🎯 Interests</button><button class="ns-btn ghost" data-open-reels>▶ Reels</button></div><button class="ns-browse" data-browse><span>Browse all moments</span><span>›</span></button><div class="ns-section-title">People</div><div class="ns-list" data-people></div></aside><main class="ns-main"><div class="ns-main-head"><input class="ns-search" placeholder="Search statuses, topics or people"><select class="ns-filter"><option value="all">All moments</option><option value="image">Photos</option><option value="video">Videos</option><option value="text">Text</option><option value="poll">Polls</option></select><button class="ns-btn ghost ns-feed-back" data-feed-back aria-label="Back to status list">← Back</button><button class="ns-btn primary" data-compose>Create</button></div><section class="ns-feed" data-feed></section><div class="ns-composer" data-composer></div><div class="ns-viewer" data-viewer></div><div class="ns-interests" data-interests></div><div class="ns-reels" data-reels></div></main></div><div class="ns-toast"></div>';
+ root.innerHTML='<div class="ns-shell"><aside class="ns-side"><div class="ns-brand"><div><h2>Moments</h2><small>Share what is happening</small></div></div><div class="ns-my-card" data-my-status>'+avatar(currentUser())+'<div style="flex:1;min-width:0"><b>My Status</b><small data-my-status-meta style="display:block;color:#64748b">Add a new moment</small></div><button class="ns-add" data-compose aria-label="Add status">+</button></div><div class="ns-section-title">Status</div><div class="ns-tabs"><button class="ns-tab active" data-tab="friends">Friends</button><button class="ns-tab" data-tab="discover">Discover</button></div><div class="ns-discover-actions"><button class="ns-btn ghost" data-open-vibes>▶ Vibes</button><button class="ns-btn ghost ns-discover-only" data-open-interests>🎯 Interests</button></div><button class="ns-browse" data-browse><span>Browse all moments</span><span>›</span></button><div class="ns-section-title">People</div><div class="ns-list" data-people></div></aside><main class="ns-main"><div class="ns-main-head"><input class="ns-search" placeholder="Search statuses, topics or people"><select class="ns-filter"><option value="all">All moments</option><option value="image">Photos</option><option value="video">Videos</option><option value="text">Text</option><option value="poll">Polls</option></select><button class="ns-btn ghost ns-feed-back" data-feed-back aria-label="Back to status list">← Back</button><button class="ns-btn primary" data-compose>Create</button></div><section class="ns-feed" data-feed></section><div class="ns-composer" data-composer></div><div class="ns-viewer" data-viewer></div><div class="ns-interests" data-interests></div><div class="ns-vibes" data-vibes></div></main></div><div class="ns-toast"></div>';
  document.body.appendChild(root);
  const applyViewportLayout=()=>{
    const mobile=window.matchMedia('(max-width: 800px)').matches;
@@ -97,11 +113,11 @@ function mount(){
    loadFeed().then(()=>{if(state.tab==='discover'&&state.interests===null)openInterestPicker()});
  });
  root.querySelector('[data-open-interests]')?.addEventListener('click',()=>openInterestPicker());
- root.querySelector('[data-open-reels]')?.addEventListener('click',()=>openReels());
+ root.querySelector('[data-open-vibes]')?.addEventListener('click',()=>openVibes());
  root.querySelector('[data-interests]')?.addEventListener('click',e=>{if(e.target===e.currentTarget)closeInterestPicker()});
  root.querySelector('.ns-filter').onchange=renderFeed;
  root.querySelector('.ns-search').oninput=renderFeed;
- document.addEventListener('keydown',e=>{if(e.key==='Escape')goBackOne();else if(document.querySelector('[data-reels]')?.classList.contains('open')){if(e.key==='ArrowDown')moveReel(1);else if(e.key==='ArrowUp')moveReel(-1)}});
+ document.addEventListener('keydown',e=>{if(e.key==='Escape')goBackOne();else if(document.querySelector('[data-vibes]')?.classList.contains('open')){if(e.key==='ArrowDown')moveVibe(1);else if(e.key==='ArrowUp')moveVibe(-1)}});
  if(state.interests===null)state.interests=loadInterests();
  renderPeople();loadFeed();
 }
@@ -115,7 +131,7 @@ function mount(){
 const isMobile=()=>window.matchMedia('(max-width: 800px)').matches;
 const rootEl=()=>document.getElementById('necpa-status-root');
 function topScreen(){
- if(document.querySelector('[data-reels]')?.classList.contains('open'))return 'reels';
+ if(document.querySelector('[data-vibes]')?.classList.contains('open'))return 'vibes';
  if(document.querySelector('[data-interests]')?.classList.contains('open'))return 'interests';
  if(document.querySelector('[data-viewer]')?.classList.contains('open'))return 'viewer';
  if(document.querySelector('[data-composer]')?.classList.contains('open'))return 'composer';
@@ -138,7 +154,7 @@ function exitModule(){
 }
 function goBackOne(){
  const d=topScreen();
- if(d==='reels')return closeReels();
+ if(d==='vibes')return closeVibes();
  if(d==='interests')return closeInterestPicker();
  if(d==='viewer')return closeViewer();
  if(d==='composer')return closeComposer();
@@ -149,7 +165,7 @@ function resetToList(){
  clearInterval(state.timer);
  document.querySelector('[data-viewer]')?.classList.remove('open');
  document.querySelector('[data-composer]')?.classList.remove('open');
- closeReels();
+ closeVibes();
  closeInterestPicker();
  setPanel('list');
 }
@@ -271,7 +287,7 @@ function showViewer(){
  const isReplay=!!s.viewedByMe && !isOwner;
  s.viewedByMe=true;state.seen.add(s.id);try{localStorage.setItem('necpa_status_seen_'+String(currentUser().id||'guest'),JSON.stringify([...state.seen].slice(-500)))}catch(_){}
  const root=document.querySelector('[data-viewer]');const u=s.owner||{};state.seen.add(s.id);
- root.innerHTML='<div class="ns-viewer-stage"'+((s.type==='image'||s.type==='video')?'':' style="background:'+safeBg(s.background)+'"')+'>'+viewerVisual(s)+'<div class="ns-viewer-grad"></div><div class="ns-progress">'+state.viewerGroup.map((_,i)=>'<i><b style="width:'+(i<state.index?'100':'0')+'%"></b></i>').join('')+'</div><div class="ns-viewer-head">'+avatar(u)+'<div><div class="ns-viewer-name">'+esc(u.displayName||u.username||'User')+'</div><div class="ns-viewer-time">'+ago(s.createdAt)+' ago · 24h moment</div></div><div class="ns-viewer-actions"><button data-viewers>👁 '+(s.viewCount||0)+'</button><button data-more>•••</button><button data-vclose>×</button></div></div><button class="ns-nav ns-prev" data-prev>‹</button><button class="ns-nav ns-next" data-next>›</button><div class="ns-viewer-bottom"><div class="ns-reactions">'+['❤️','😂','🔥','😍','👏','💯'].map(e=>'<button class="ns-reaction" data-react="'+e+'">'+e+'</button>').join('')+'</div><div class="ns-reply-row">'+(s.allowReplies!==false?'<input class="ns-reply" data-reply placeholder="Reply to '+esc(u.displayName||'this status')+'…"><button class="ns-reaction" data-send>➤</button>':'<span style="opacity:.65">Replies are disabled</span>')+'</div></div><div class="ns-viewer-more" data-moremenu><button data-share>↗ Share</button><button data-save>⇩ Save</button><button data-report>⚑ Report</button>'+(String(s.userId)===String(currentUser().id)?'<button data-edit>✎ Edit</button><button data-delete>🗑 Delete</button><button data-highlight>★ Highlight</button>':'')+'</div></div>';
+ root.innerHTML='<div class="ns-viewer-stage"'+((s.type==='image'||s.type==='video')?'':' style="background:'+safeBg(s.background)+'"')+'>'+viewerVisual(s)+'<div class="ns-viewer-grad"></div><div class="ns-progress">'+state.viewerGroup.map((_,i)=>'<i><b style="width:'+(i<state.index?'100':'0')+'%"></b></i>').join('')+'</div><div class="ns-viewer-head">'+avatar(u)+'<div><div class="ns-viewer-name">'+esc(u.displayName||u.username||'User')+'</div><div class="ns-viewer-time">'+ago(s.createdAt)+' ago · 24h moment</div></div><div class="ns-viewer-actions">'+(s.type==='video'?'<button data-vunmute>🔇</button>':'')+'<button data-viewers>👁 '+(s.viewCount||0)+'</button><button data-more>•••</button><button data-vclose>×</button></div></div><button class="ns-nav ns-prev" data-prev>‹</button><button class="ns-nav ns-next" data-next>›</button><div class="ns-viewer-bottom"><div class="ns-reactions">'+['❤️','😂','🔥','😍','👏','💯'].map(e=>'<button class="ns-reaction" data-react="'+e+'">'+e+'</button>').join('')+'</div><div class="ns-reply-row">'+(s.allowReplies!==false?'<input class="ns-reply" data-reply placeholder="Reply to '+esc(u.displayName||'this status')+'…"><button class="ns-reaction" data-send>➤</button>':'<span style="opacity:.65">Replies are disabled</span>')+'</div></div><div class="ns-viewer-more" data-moremenu><button data-share>↗ Share</button><button data-save>⇩ Download</button><button data-report>⚑ Report</button>'+(String(s.userId)===String(currentUser().id)?'<button data-edit>✎ Edit</button><button data-delete>🗑 Delete</button><button data-highlight>★ Highlight</button>':'')+'</div></div>';
  root.classList.add('open');syncParent();
  if(isOwner) root.querySelector('.ns-viewer-bottom')?.remove();
  root.querySelector('[data-vclose]').onclick=()=>closeViewer();root.querySelector('[data-prev]').onclick=()=>move(-1);root.querySelector('[data-next]').onclick=()=>move(1);
@@ -279,6 +295,7 @@ function showViewer(){
  root.querySelector('.ns-viewer-bottom')?.addEventListener('pointerdown',()=>clearInterval(state.timer),{passive:true});
  root.querySelector('[data-reply]')?.addEventListener('focus',()=>clearInterval(state.timer));
  root.querySelector('[data-more]').onclick=()=>root.querySelector('[data-moremenu]').classList.toggle('open');
+ root.querySelector('[data-vunmute]')?.addEventListener('click',()=>{const v=root.querySelector('[data-status-video]');if(!v)return;v.muted=!v.muted;if(!v.muted)v.play().catch(()=>{v.muted=true;root.querySelector('[data-vunmute]').textContent='🔇'});root.querySelector('[data-vunmute]').textContent=v.muted?'🔇':'🔊'});
  root.querySelector('[data-viewers]').onclick=()=>showViewers(s);
  root.querySelector('[data-edit]')?.addEventListener('click',()=>editStatus(s));
  root.querySelectorAll('[data-react]').forEach(b=>b.onclick=()=>react(s,b.dataset.react));
@@ -295,7 +312,7 @@ function showViewer(){
    s.viewedByMe=String(s.userId)!==String(currentUser().id||'') ? true : !!s.viewedByMe;
    renderFeed();renderPeople();renderMyStatus();
  }).catch(()=>{});
- clearInterval(state.timer);if(!isReplay&&!state.replyingStatusId)state.timer=setTimeout(()=>move(1),Math.max(3000,(Number(s.durationSeconds)||7)*1000));
+ clearInterval(state.timer);if(!isReplay&&!state.replyingStatusId)state.timer=setTimeout(()=>move(1),viewDurationMs(s));
 }
 // FIX (STATUS "HOLD NEVER RELEASES" BUG): reply() below pauses auto-advance by setting
 // state.replyingStatusId so showViewer()'s timer-arm check above skips arming a timer while a
@@ -312,7 +329,7 @@ function restartAutoAdvance(s){
  if(!root?.classList.contains('open'))return;
  if(state.viewerGroup[state.index]!==s)return;
  clearInterval(state.timer);
- if(state.autoAdvanceEligible)state.timer=setTimeout(()=>move(1),Math.max(3000,(Number(s.durationSeconds)||7)*1000));
+ if(state.autoAdvanceEligible)state.timer=setTimeout(()=>move(1),viewDurationMs(s));
 }
 // Referenced by viewerVisual()'s onerror handlers below — kept as a real
 // function call (not inlined HTML-in-an-attribute) specifically so nothing
@@ -330,13 +347,22 @@ function viewerVisual(s){
  const failed='<div class="ns-media-error" role="alert">This media could not be loaded</div>';
  if(s.type==='image'&&s.mediaUrl)return '<img class="ns-viewer-media" src="'+esc(s.mediaUrl)+'" alt="" onerror="window.__necpaStatusMediaError(this)">';
  if(s.type==='image'&&!s.mediaUrl)return failed;
- if(s.type==='video'&&s.mediaUrl)return '<video class="ns-viewer-media" src="'+esc(s.mediaUrl)+'" controls autoplay playsinline onerror="window.__necpaStatusMediaError(this)"></video>';
+ // FIX (VIDEO STATUS INVISIBLE TO VIEWERS): this <video> used to autoplay unmuted. Browsers only
+ // allow unmuted autoplay right after a direct user gesture in the SAME call stack — opening a
+ // status from a click still qualifies most of the time, but any async gap (the /view POST above,
+ // a slower device, a notification/deep-link open) makes the browser silently block playback
+ // instead, leaving a blank black rectangle with no error (no onerror fires — the browser refused
+ // to *play*, it didn't fail to *load*). That is what made a friend's video status look like "no
+ // video" while the same status played fine for its own creator opening it right after publishing.
+ // Start muted (autoplay-with-sound is always allowed muted) and preload="auto" so the first frame
+ // paints immediately; data-vunmute below lets the viewer turn sound on with one tap.
+ if(s.type==='video'&&s.mediaUrl)return '<video class="ns-viewer-media" data-status-video src="'+esc(s.mediaUrl)+'" controls autoplay muted playsinline preload="auto" onerror="window.__necpaStatusMediaError(this)"></video>';
  if(s.type==='video'&&!s.mediaUrl)return failed;
  if(s.type==='poll'){const p=Array.isArray(s.pollOptions)?s.pollOptions:[];return '<div class="ns-viewer-text" style="background:'+safeBg(s.background)+';max-width:none;width:100%;height:100%;display:flex;flex-direction:column;justify-content:center;align-items:center"><div>'+esc(s.content||'Poll')+'</div>'+p.map(x=>'<div style="margin:7px;padding:12px 22px;border-radius:999px;background:rgba(255,255,255,.16);font-size:17px">'+esc(x)+'</div>').join('')+'</div>'}
  return '<div class="ns-viewer-text" style="background:'+safeBg(s.background)+';max-width:none;width:100%;height:100%;display:grid;place-items:center;font-family:'+esc(s.font||'system-ui')+'">'+esc(s.content||s.caption||'')+'</div>';
 }
-function move(dir){const n=state.index+dir;if(n<0||n>=state.viewerGroup.length){closeViewer();return}state.index=n;showViewer()}
-function closeViewer(silent){clearInterval(state.timer);const el=document.querySelector('[data-viewer]');if(el?.classList.contains('open')){el.classList.remove('open');if(silent!==true)syncParent()}}
+function move(dir){stopViewerMedia();const n=state.index+dir;if(n<0||n>=state.viewerGroup.length){closeViewer();return}state.index=n;showViewer()}
+function closeViewer(silent){clearInterval(state.timer);stopViewerMedia();const el=document.querySelector('[data-viewer]');if(el?.classList.contains('open')){el.classList.remove('open');if(silent!==true)syncParent()}}
 
 async function showViewers(s){
  try{
@@ -450,51 +476,119 @@ function closeInterestPicker(){
  if(state.interests===null){state.interests={mode:'all'};saveInterests(state.interests)}
 }
 
-// DISCOVER REELS: continuous video-only swipe view over whatever the Discover tab currently has
-// loaded (respecting the interest filter above), reachable from the "▶ Reels" button.
-let reelsState={items:[],index:0,muted:true};
-function reelsSource(){return discoverFilteredStatuses().filter(s=>s.type==='video'&&s.mediaUrl)}
-function openReels(){
- const root=document.querySelector('[data-reels]');if(!root)return;
- const items=reelsSource();
+// VIBES: continuous video-only swipe view (formerly "Reels"). Unlike the old Discover-only
+// version, the source now combines the viewer's OWN video statuses, their FRIENDS' video
+// statuses and (optionally) PUBLIC video statuses from people they don't follow — each one
+// already gated server-side by canView()/that status's own privacy setting, which is how a
+// person controls "who can view my vibes" (set per-clip in the composer's Audience picker,
+// same control used for every other status type). "who can appear in my vibes" (the pool of
+// OTHER people's clips shown to this viewer) is controlled client-side by vibesPrefs.includePublic
+// below, toggled from the "🌐"/"👥" button in the Vibes header, and by the existing Discover
+// interest filter (applyInterestFilter), so the feed only surfaces topics this viewer opted into.
+const vibesPrefsKey=()=>'necpa_status_vibesprefs_'+String(currentUser().id||'guest');
+const loadVibesPrefs=()=>{let v=null;try{v=JSON.parse(localStorage.getItem(vibesPrefsKey())||'null')}catch(_){}return Object.assign({includePublic:true},v||{})};
+const saveVibesPrefs=v=>{try{localStorage.setItem(vibesPrefsKey(),JSON.stringify(v))}catch(_){}};
+// Saved (bookmarked) vibes, kept locally per account — mirrors the "Save"/bookmark feature of
+// other short-video apps. Downloading the clip itself is a separate action (save(s) below,
+// reused from the main viewer's own Save/Download button).
+const savedVibesKey=()=>'necpa_status_savedvibes_'+String(currentUser().id||'guest');
+const loadSavedVibeIds=()=>{try{return new Set(JSON.parse(localStorage.getItem(savedVibesKey())||'[]'))}catch(_){return new Set()}};
+const persistSavedVibeIds=set=>{try{localStorage.setItem(savedVibesKey(),JSON.stringify([...set].slice(-500)))}catch(_){}};
+function applyInterestFilter(list){
+ if(!state.interests||state.interests.mode!=='selected'||!Array.isArray(state.interests.topics)||!state.interests.topics.length)return list;
+ const wanted=state.interests.topics;
+ return list.filter(s=>{
+   const hay=[...(Array.isArray(s.topics)?s.topics:[]),s.category,s.moodType,s.intent].filter(Boolean).map(x=>String(x).toLowerCase());
+   return wanted.some(t=>hay.includes(t));
+ });
+}
+let vibesState={items:[],index:0,muted:true,onlySaved:false};
+async function vibesSource(){
+ const prefs=state.vibesPrefs||(state.vibesPrefs=loadVibesPrefs());
+ const mine=Array.isArray(state.mine)?state.mine:[];
+ let friends=[],pub=[];
+ try{friends=((await api('/friends')).data||[]).map(normalizeStatus)}catch(_){}
+ if(prefs.includePublic){try{pub=((await api('/public')).data||[]).map(normalizeStatus)}catch(_){}}
+ const byId=new Map();
+ [...mine,...friends,...pub].forEach(s=>{if(s&&s.id!=null&&!byId.has(String(s.id)))byId.set(String(s.id),s)});
+ let items=[...byId.values()].filter(s=>s.type==='video'&&s.mediaUrl);
+ items=applyInterestFilter(items);
+ items.sort((a,b)=>Date.parse(b.createdAt||0)-Date.parse(a.createdAt||0));
+ return items;
+}
+async function openVibes(){
+ const root=document.querySelector('[data-vibes]');if(!root)return;
  clearInterval(state.timer);
  root.classList.add('open');
+ root.innerHTML='<div class="ns-vibes-empty"><div>Loading vibes…</div></div>';
+ syncParent();
+ const items=await vibesSource().catch(()=>[]);
+ if(!root.classList.contains('open'))return;
+ vibesState={items,index:0,muted:true,onlySaved:false};
  if(!items.length){
-   root.innerHTML='<button class="ns-icon-btn ns-vback" data-rclose style="position:absolute;top:20px;left:16px;z-index:6">×</button><div class="ns-reels-empty"><div><strong>No videos to reel through yet</strong><br>Check back once Discover has some video moments.</div></div>';
-   root.querySelector('[data-rclose]').onclick=closeReels;
-   syncParent();
+   root.innerHTML='<button class="ns-icon-btn ns-vback" data-rclose style="position:absolute;top:20px;left:16px;z-index:6">×</button><div class="ns-vibes-empty"><div><strong>No vibes to play yet</strong><br>Check back once you, your friends, or public creators post short videos.</div></div>';
+   root.querySelector('[data-rclose]').onclick=closeVibes;
    return;
  }
- reelsState={items,index:0,muted:true};
- renderReel();syncParent();
+ renderVibe();
 }
-function closeReels(){
- const root=document.querySelector('[data-reels]');
+function closeVibes(){
+ const root=document.querySelector('[data-vibes]');
  if(!root?.classList.contains('open'))return;
- root.querySelectorAll('video').forEach(v=>{try{v.pause()}catch(_){}});
+ root.querySelectorAll('video,audio').forEach(v=>{try{v.pause();v.muted=true}catch(_){}});
  root.classList.remove('open');root.innerHTML='';
  syncParent();
 }
-function renderReel(){
- const root=document.querySelector('[data-reels]');if(!root)return;
- const s=reelsState.items[reelsState.index];if(!s){closeReels();return}
+async function toggleVibesAudience(){
+ const prefs=state.vibesPrefs||(state.vibesPrefs=loadVibesPrefs());
+ prefs.includePublic=!prefs.includePublic;
+ saveVibesPrefs(prefs);state.vibesPrefs=prefs;
+ toast(prefs.includePublic?'Vibes: including public clips':'Vibes: friends only');
+ const root=document.querySelector('[data-vibes]');if(!root?.classList.contains('open'))return;
+ const items=await vibesSource().catch(()=>[]);
+ vibesState={items,index:0,muted:vibesState.muted,onlySaved:false};
+ if(items.length)renderVibe();else{root.innerHTML='<button class="ns-icon-btn ns-vback" data-rclose style="position:absolute;top:20px;left:16px;z-index:6">×</button><div class="ns-vibes-empty"><div><strong>No vibes to play yet</strong></div></div>';root.querySelector('[data-rclose]').onclick=closeVibes;}
+}
+function toggleSavedVibesView(){
+ if(!vibesState.onlySaved){
+   const saved=loadSavedVibeIds();
+   vibesState.allItems=vibesState.allItems||vibesState.items;
+   const filtered=vibesState.allItems.filter(s=>saved.has(String(s.id)));
+   if(!filtered.length){toast('No saved vibes yet');return}
+   vibesState={items:filtered,index:0,muted:vibesState.muted,onlySaved:true,allItems:vibesState.allItems};
+ }else{
+   vibesState={items:vibesState.allItems,index:0,muted:vibesState.muted,onlySaved:false,allItems:vibesState.allItems};
+ }
+ renderVibe();
+}
+function renderVibe(){
+ const root=document.querySelector('[data-vibes]');if(!root)return;
+ const s=vibesState.items[vibesState.index];if(!s){closeVibes();return}
  const u=s.owner||{};
- root.innerHTML='<div class="ns-reels-stage" data-rstage><video src="'+esc(s.mediaUrl)+'" playsinline loop autoplay'+(reelsState.muted?' muted':'')+' onerror="window.__necpaStatusMediaError&&window.__necpaStatusMediaError(this)"></video></div><div class="ns-reels-head"><button class="ns-icon-btn ns-vback" data-rclose>×</button><div style="flex:1;min-width:0">'+avatar(u)+'</div><button class="ns-icon-btn" data-rmute>'+(reelsState.muted?'🔇':'🔊')+'</button></div><div class="ns-reels-caption">'+esc(s.caption||s.content||'')+'</div><div class="ns-reels-side"><button data-rlike>❤️ '+(s.reactionCount||0)+'</button><button data-rup aria-label="Previous">▲</button><button data-rdown aria-label="Next">▼</button></div>';
- root.querySelector('[data-rclose]').onclick=closeReels;
- root.querySelector('[data-rmute]').onclick=()=>{reelsState.muted=!reelsState.muted;const v=root.querySelector('video');if(v)v.muted=reelsState.muted;root.querySelector('[data-rmute]').textContent=reelsState.muted?'🔇':'🔊'};
- root.querySelector('[data-rlike]').onclick=()=>react(s,'❤️');
- root.querySelector('[data-rup]').onclick=()=>moveReel(-1);
- root.querySelector('[data-rdown]').onclick=()=>moveReel(1);
- const v=root.querySelector('video');if(v){v.muted=reelsState.muted;v.play().catch(()=>{})}
- wireReelGestures(root);
+ const prefs=state.vibesPrefs||(state.vibesPrefs=loadVibesPrefs());
+ const savedIds=loadSavedVibeIds();const isSaved=savedIds.has(String(s.id));
+ root.innerHTML='<div class="ns-vibes-stage" data-rstage><video src="'+esc(s.mediaUrl)+'" playsinline loop autoplay muted preload="auto" onerror="window.__necpaStatusMediaError&&window.__necpaStatusMediaError(this)"></video></div><div class="ns-vibes-head"><button class="ns-icon-btn ns-vback" data-rclose>×</button><div style="flex:1;min-width:0">'+avatar(u)+'</div><button class="ns-icon-btn" data-raudience title="Who appears in your Vibes">'+(prefs.includePublic?'🌐':'👥')+'</button><button class="ns-icon-btn" data-rsavedview title="Saved vibes">'+(vibesState.onlySaved?'📂':'🔖')+'</button><button class="ns-icon-btn" data-rmute>'+(vibesState.muted?'🔇':'🔊')+'</button></div><div class="ns-vibes-caption">'+esc(s.caption||s.content||'')+'</div><div class="ns-vibes-side"><button data-rlike>❤️ '+(s.reactionCount||0)+'</button><button data-rcomment>💬 '+(s.replyCount||0)+'</button><button data-rsave class="'+(isSaved?'active':'')+'">'+(isSaved?'🔖':'📑')+'</button><button data-rdownload>⬇</button><button data-rshare>↗</button><button data-rup aria-label="Previous">▲</button><button data-rdown aria-label="Next">▼</button></div>';
+ root.querySelector('[data-rclose]').onclick=closeVibes;
+ root.querySelector('[data-raudience]')?.addEventListener('click',toggleVibesAudience);
+ root.querySelector('[data-rsavedview]')?.addEventListener('click',toggleSavedVibesView);
+ root.querySelector('[data-rmute]').onclick=()=>{vibesState.muted=!vibesState.muted;const v=root.querySelector('video');if(v)v.muted=vibesState.muted;root.querySelector('[data-rmute]').textContent=vibesState.muted?'🔇':'🔊'};
+ root.querySelector('[data-rlike]').onclick=()=>{react(s,'❤️');s.reactionCount=(Number(s.reactionCount)||0)+1;const b=root.querySelector('[data-rlike]');if(b)b.textContent='❤️ '+s.reactionCount};
+ root.querySelector('[data-rcomment]').onclick=()=>{const text=prompt('Reply to this vibe:');if(text&&text.trim())reply(s,text.trim())};
+ root.querySelector('[data-rsave]').onclick=()=>{const set=loadSavedVibeIds();const id=String(s.id);if(set.has(id)){set.delete(id);toast('Removed from Saved')}else{set.add(id);toast('Saved to your Vibes')}persistSavedVibeIds(set);renderVibe()};
+ root.querySelector('[data-rdownload]').onclick=()=>save(s);
+ root.querySelector('[data-rshare]').onclick=()=>share(s);
+ root.querySelector('[data-rup]').onclick=()=>moveVibe(-1);
+ root.querySelector('[data-rdown]').onclick=()=>moveVibe(1);
+ const v=root.querySelector('video');if(v){v.muted=vibesState.muted;v.play().catch(()=>{})}
+ wireVibeGestures(root);
 }
-function moveReel(dir){
- if(!document.querySelector('[data-reels]')?.classList.contains('open'))return;
- const n=reelsState.index+dir;
- if(n<0||n>=reelsState.items.length)return;
- reelsState.index=n;renderReel();
+function moveVibe(dir){
+ if(!document.querySelector('[data-vibes]')?.classList.contains('open'))return;
+ const n=vibesState.index+dir;
+ if(n<0||n>=vibesState.items.length)return;
+ vibesState.index=n;renderVibe();
 }
-function wireReelGestures(root){
+function wireVibeGestures(root){
  const stage=root.querySelector('[data-rstage]');if(!stage)return;
  let startY=null;
  stage.addEventListener('touchstart',e=>{startY=e.touches[0].clientY},{passive:true});
@@ -502,7 +596,7 @@ function wireReelGestures(root){
    if(startY==null)return;
    const dy=e.changedTouches[0].clientY-startY;startY=null;
    if(Math.abs(dy)<40)return;
-   moveReel(dy<0?1:-1);
+   moveVibe(dy<0?1:-1);
  },{passive:true});
  stage.addEventListener('click',e=>{if(e.target.closest('button'))return;const v=stage.querySelector('video');if(!v)return;if(v.paused)v.play().catch(()=>{});else v.pause()});
 }
@@ -664,15 +758,16 @@ function boot(){if(!document.body)return;const style=document.createElement('sty
 .ns-interest-chip{border:1px solid var(--status-border,#e2e8f0);background:transparent;color:inherit;padding:8px 14px;border-radius:999px;cursor:pointer;font-weight:700;font-size:13px}
 .ns-interest-chip.selected{background:var(--status-accent,#2563eb);border-color:var(--status-accent,#2563eb);color:#fff}
 .ns-interests-actions{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
-.ns-reels{position:fixed;inset:0;width:100vw;height:100dvh;background:#000;display:none;z-index:45;color:#fff;overflow:hidden}
-.ns-reels.open{display:block}
-.ns-reels-stage{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
-.ns-reels-stage video{max-width:100%;max-height:100%;width:100%;height:100%;object-fit:contain;background:#000}
-.ns-reels-head{position:absolute;top:20px;left:16px;right:16px;z-index:5;display:flex;align-items:center;gap:10px}
-.ns-reels-side{position:absolute;right:14px;bottom:110px;z-index:5;display:flex;flex-direction:column;gap:14px;align-items:center}
-.ns-reels-side button{border:0;background:rgba(255,255,255,.16);color:#fff;width:44px;height:44px;border-radius:50%;cursor:pointer;font-size:19px}
-.ns-reels-caption{position:absolute;left:16px;right:80px;bottom:26px;z-index:5;font-size:13px;line-height:1.4}
-.ns-reels-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:30px;color:rgba(255,255,255,.75)}
+.ns-vibes{position:fixed;inset:0;width:100vw;height:100dvh;background:#000;display:none;z-index:45;color:#fff;overflow:hidden}
+.ns-vibes.open{display:block}
+.ns-vibes-stage{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+.ns-vibes-stage video{max-width:100%;max-height:100%;width:100%;height:100%;object-fit:contain;background:#000}
+.ns-vibes-head{position:absolute;top:20px;left:16px;right:16px;z-index:5;display:flex;align-items:center;gap:10px}
+.ns-vibes-side{position:absolute;right:14px;bottom:110px;z-index:5;display:flex;flex-direction:column;gap:12px;align-items:center;max-height:70vh;overflow:visible}
+.ns-vibes-side button{border:0;background:rgba(255,255,255,.16);color:#fff;width:42px;height:42px;border-radius:50%;cursor:pointer;font-size:17px}
+.ns-vibes-side button.active{background:#f59e0b;color:#111}
+.ns-vibes-caption{position:absolute;left:16px;right:80px;bottom:26px;z-index:5;font-size:13px;line-height:1.4}
+.ns-vibes-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:30px;color:rgba(255,255,255,.75)}
 @media(max-width:800px){.ns-interests-box{border-radius:20px}}
 `;document.head.appendChild(themeStyle);
 // FIX (STATUS BACKGROUND NOT FILLING THE SCREEN): .ns-viewer-text carried max-width:620px (a
