@@ -133,17 +133,21 @@ async function decryptGroupContent(message){
   if(!message||typeof message.content!=='string'||!message.content)return message;
   const id=String(message.id||message.messageId||''); const cipher=message.content;
   const cached=groupMessageState.plaintext.get(id);
-  if(cached!==undefined&&groupMessageState.lastCiphertext.get(id)===cipher)return {...message,content:cached};
-  if(groupMessageState.decryptInFlight.has(id)){const plain=await groupMessageState.decryptInFlight.get(id);return plain==null?{...message,_decryptPending:true}:{...message,content:plain};}
+  if(cached!==undefined&&groupMessageState.lastCiphertext.get(id)===cipher)return {...message,content:cached,_cipher:cipher};
+  if(groupMessageState.decryptInFlight.has(id)){const plain=await groupMessageState.decryptInFlight.get(id);return plain==null?{...message,_decryptPending:true}:{...message,content:plain,_cipher:cipher};}
+  // A message that just failed is not retried on every 5s poll (each attempt can cost a network call); it is retried after
+  // a minute, or immediately when the encryption keys unlock (see the kyn:e2eUnlocked listener below).
+  const failedAt=groupMessageState.failed.get(id);
+  if(failedAt&&failedAt.cipher===cipher&&Date.now()-failedAt.at<60000)return {...message,_decryptPending:true};
   const task=(async()=>{try{
     if(!(await ensureE2EReady())||!window.KynectaGroupE2E?.decryptForGroup)throw new Error('Secure group messaging is not ready yet');
     const plain=await window.KynectaGroupE2E.decryptForGroup(Number(S.current?.id??message.chatId),cipher,groupMemberIds(S.current));
     if(plain==null)throw new Error('Unable to decrypt group message');
-    groupMessageState.plaintext.set(id,plain);groupMessageState.lastCiphertext.set(id,cipher);return plain;
-  }catch(error){console.warn('[GroupMessage] decryption deferred',id,error?.message||error);return null;}})();
-  groupMessageState.decryptInFlight.set(id,task);try{const plain=await task;return plain==null?{...message,_decryptPending:true}:{...message,content:plain};}finally{groupMessageState.decryptInFlight.delete(id);}
+    groupMessageState.plaintext.set(id,plain);groupMessageState.lastCiphertext.set(id,cipher);groupMessageState.failed.delete(id);return plain;
+  }catch(error){groupMessageState.failed.set(id,{cipher,at:Date.now()});console.warn('[GroupMessage] decryption deferred',id,error?.message||error);return null;}})();
+  groupMessageState.decryptInFlight.set(id,task);try{const plain=await task;return plain==null?{...message,_decryptPending:true}:{...message,content:plain,_cipher:cipher};}finally{groupMessageState.decryptInFlight.delete(id);}
 }
-const groupMessageState={decryptInFlight:new Map(),plaintext:new Map(),lastCiphertext:new Map()};
+const groupMessageState={decryptInFlight:new Map(),plaintext:new Map(),lastCiphertext:new Map(),failed:new Map()};
 async function decryptRows(list){return Promise.all(list.map(decryptGroupContent))}
 // FIX (LIVE GROUP MESSAGES NEVER APPEARED UNTIL THE 5s POLL): handleRealtime() below has been calling
 // decryptGroupContent(message), but only decryptRows()/decryptGroupContent() exist — the group rebuild renamed
@@ -166,7 +170,7 @@ function mergeGroupMessages(incoming){
     const ao=a._optimistic?1:0,bo=b._optimistic?1:0;if(ao!==bo)return ao-bo;
     const ai=Number(a.id),bi=Number(b.id);if(!ao&&Number.isFinite(ai)&&Number.isFinite(bi))return ai-bi;
     return new Date(a.createdAt||a.sentAt||0)-new Date(b.createdAt||b.sentAt||0);});
-  const changed=merged.length!==S.messages.length||merged.some((m,i)=>{const old=S.messages[i];return !old||String(m.id||m.messageId||m.localId)!==String(old.id||old.messageId||old.localId)||m.content!==old.content||m.status!==old.status||m.isEdited!==old.isEdited;});
+  const changed=merged.length!==S.messages.length||merged.some((m,i)=>{const old=S.messages[i];return !old||String(m.id||m.messageId||m.localId)!==String(old.id||old.messageId||old.localId)||m.content!==old.content||m.status!==old.status||m.isEdited!==old.isEdited||!!m._decryptPending!==!!old._decryptPending||!!m._decryptFailed!==!!old._decryptFailed;});
   if(changed){S.messages=merged;renderMessages(false);}return merged;
 }
 function renderMessages(scroll=true){
@@ -187,12 +191,51 @@ function schedulePendingRetry(){
   S._pendTries=(S._pendTries||0)+1;
   S._pendTimer=setTimeout(()=>{S._pendTimer=null;loadMessages()},1200*S._pendTries);
 }
+// FIX (GROUP HISTORY EMPTY UNTIL YOU SEND / "Decrypting..." FOR MESSAGES ALREADY READ): this used to await decryption of the
+// WHOLE page (Promise.all) before showing anything. Decryption waits for the E2E identity to unlock (up to 50s on a cold
+// device), so after a reload the list stayed empty until something else — sending a message — forced the unlock. It also
+// re-decrypted messages that had already been read, and a sender-key chain is one-way: once the chain has moved on, an old
+// message cannot be decrypted a second time, so those became "Decrypting..." forever. Now:
+//   1. rows are painted IMMEDIATELY — from the plaintext already known (memory or the on-disk cache) or a placeholder;
+//   2. only the genuinely unknown ones are decrypted, one at a time, oldest first (chain order), and painted in batches;
+//   3. if the keys are not unlocked yet nothing blocks — the placeholders stay and a retry fires when they unlock.
+const byIdAsc=(a,b)=>{const x=Number(a.id||a.messageId),y=Number(b.id||b.messageId);return Number.isFinite(x)&&Number.isFinite(y)?x-y:new Date(a.createdAt||a.sentAt||0)-new Date(b.createdAt||b.sentAt||0)};
+function knownPlain(m){
+  const id=String(m.id||m.messageId||'');if(!id||typeof m.content!=='string')return undefined;
+  const plain=groupMessageState.plaintext.get(id);if(plain===undefined)return undefined;
+  const seen=groupMessageState.lastCiphertext.get(id);
+  if(seen!==undefined)return seen===m.content?plain:undefined;   // known cipher: only valid for exactly that cipher (covers edits)
+  return m.isEdited?undefined:plain;                              // own optimistic send (no cipher recorded): trust unless edited
+}
 async function loadMessages(){
   if(!S.current?.id)return;const gid=String(S.current.id);
-  try{const r=await api('/group-messages/'+encodeURIComponent(gid)+'/messages?limit=100');if(!S.current||String(S.current.id)!==gid)return;
-    const decrypted=await decryptRows(normalizeMessages(r));if(!S.current||String(S.current.id)!==gid)return;mergeGroupMessages(decrypted);
+  try{
+    const r=await api('/group-messages/'+encodeURIComponent(gid)+'/messages?limit=100');if(!S.current||String(S.current.id)!==gid)return;
+    try{await S._hydrating}catch(_){}                       // disk cache seeds the known-plaintext map first
+    if(!S.current||String(S.current.id)!==gid)return;
+    const rows=normalizeMessages(r).slice().sort(byIdAsc);
+    const painted=rows.map(m=>{const plain=knownPlain(m);return plain!==undefined?{...m,content:plain,_cipher:groupMessageState.lastCiphertext.get(String(m.id||m.messageId||''))||m.content,_decryptPending:false}:{...m,_decryptPending:true}});
+    mergeGroupMessages(painted);
+    const todo=rows.filter((m,i)=>painted[i]._decryptPending&&typeof m.content==='string'&&m.content);
+    if(!todo.length)return;
+    // Do not sit on the unlock: if the identity isn't ready within a few seconds, leave the placeholders and retry on unlock.
+    const ready=await Promise.race([ensureE2EReady().catch(()=>false),new Promise(res=>setTimeout(()=>res(false),4000))]);
+    if(!ready){S._retryOnUnlock=true;return}
+    let batch=[];const flush=()=>{if(batch.length&&S.current&&String(S.current.id)===gid)mergeGroupMessages(batch);batch=[]};
+    for(const m of todo){
+      if(!S.current||String(S.current.id)!==gid)return;
+      const d=await decryptGroupContent(m);
+      // Explicit flags: mergeGroupMessages() spreads the OLD row under the new one, so a row that used to be
+      // _decryptPending:true would otherwise stay "pending" forever even after its text arrived.
+      if(!d._decryptPending)batch.push({...d,_decryptPending:false,_decryptFailed:false});
+      else if(groupMessageState.failed.has(String(m.id||m.messageId||'')))batch.push({...d,_decryptPending:true,_decryptFailed:true});
+      if(batch.length>=10)flush()
+    }
+    flush();
   }catch(error){console.warn('[GroupMessage] history sync deferred',error?.message||error);}
 }
+// Keys unlocked (or were re-restored): forget earlier failures and try again right away instead of waiting for the next poll.
+document.addEventListener('kyn:e2eUnlocked',()=>{groupMessageState.failed.clear();if(S.current?.id)loadMessages()});
 
 function renderGroups(){const box=$('groups');if(!box)return;box.replaceChildren();const q=S.q.trim().toLowerCase();const rows=S.groups.filter(g=>!q||String(g.name||g.groupName||'').toLowerCase().includes(q));if(!rows.length){box.innerHTML='<div class="empty">No groups yet.</div>';return}for(const g of rows){const b=document.createElement('button');b.type='button';b.className='group'+(S.current&&String(S.current.id)===String(g.id)?' active':'');const a=document.createElement('div');a.className='avatar';a.textContent=String(g.name||g.groupName||'G').slice(0,1).toUpperCase();const m=document.createElement('div');m.className='groupmain';m.innerHTML=`<div class="name">${esc(g.name||g.groupName||'Unnamed group')}</div><div class="meta">${Number(g.participantCount??g.participants?.length??0)} members</div>`;b.append(a,m);const unread=Number(S.unread?.[String(g.id)]||0);if(unread>0){const badge=document.createElement('span');badge.className='unread-badge';badge.textContent=unread>99?'99+':String(unread);b.append(badge)}b.onclick=()=>openGroup(g.id);box.append(b)}}
 
@@ -245,7 +288,7 @@ function buildRow(m){const id=String(m.id||m.messageId||'');const pendingDecrypt
     else if(mime.startsWith('video/')){const x=document.createElement('video');x.className='bubble-media-thumb';x.src=media.url;x.muted=true;x.playsInline=true;x.preload='metadata';x.onclick=()=>openGroupMedia(media,mime);b.append(x)}
     else if(mime.startsWith('audio/')){const x=document.createElement('audio');x.src=media.url;x.controls=true;b.append(x)}
     else{const x=document.createElement('button');x.type='button';x.className='bubble-media-file';x.innerHTML='📄 <span></span>';x.querySelector('span').textContent=media.name||m.content||'Attachment';x.onclick=()=>openGroupMedia(media,mime);b.append(x)}
-    if(!pendingDecrypt&&m.content&&(mime.startsWith('image/')||mime.startsWith('video/')||mime.startsWith('audio/')||media.name)){const cap=document.createElement('div');cap.className='msg-text';cap.innerHTML=highlightMentions(esc(m.content));b.append(cap)}}else{const x=document.createElement('div');x.className='msg-text';x.innerHTML=highlightMentions(esc(pendingDecrypt?'':m.content||''));if(pendingDecrypt){x.className='msg-text decrypt-pending';x.style.opacity='.6';x.style.fontStyle='italic';x.textContent='🔒 Decrypting…';}b.append(x)}
+    if(!pendingDecrypt&&m.content&&(mime.startsWith('image/')||mime.startsWith('video/')||mime.startsWith('audio/')||media.name)){const cap=document.createElement('div');cap.className='msg-text';cap.innerHTML=highlightMentions(esc(m.content));b.append(cap)}}else{const x=document.createElement('div');x.className='msg-text';x.innerHTML=highlightMentions(esc(pendingDecrypt?'':m.content||''));if(pendingDecrypt){x.className='msg-text decrypt-pending';x.style.opacity='.6';x.style.fontStyle='italic';x.textContent=m._decryptFailed?'🔒 This message can’t be restored on this device':'🔒 Decrypting…';}b.append(x)}
   const t=document.createElement('div');t.className='time';
   if(m.isEdited){const et=document.createElement('span');et.className='edited-tag';et.textContent='edited';t.append(et)}
   if(!m._optimistic){const more=document.createElement('button');more.type='button';more.className='msg-more';more.textContent='⋮';more.title='More';more.onclick=e=>{e.stopPropagation();toggleMsgMenu(id)};t.append(more);}
@@ -346,6 +389,7 @@ function renderMedia(){const box=$('mediaBar');const items=S.messages.filter(m=>
 // cached row only fills in where the live row is still an undecryptable envelope — which is
 // exactly the case the cache exists for (a group sender-key message can't be decrypted twice).
 async function hydrateGroupHistory(id){if(!window.KynectaGroupMessageCache)return;try{const cached=await window.KynectaGroupMessageCache.getMessages(id);if(String(window.__GROUP_CHAT_ID)!==String(id)||!cached.length)return;
+  for(const c of cached){const cid=String(c.id||c.messageId||'');if(!cid||typeof c.content!=='string'||c._decryptPending)continue;groupMessageState.plaintext.set(cid,c.content);if(c._cipher)groupMessageState.lastCiphertext.set(cid,c._cipher);}
   const keyOf=m=>String(m.localId||m.id||m.messageId||'');const byId=new Map();
   for(const c of cached){const k=keyOf(c);if(k)byId.set(k,{...c,_decryptPending:false});}
   for(const m of S.messages){const k=keyOf(m);if(!k)continue;const c=byId.get(k);
@@ -375,7 +419,7 @@ function openGroup(id){
   S.current=g;window.__GROUP_CHAT_ID=String(id);window.__GROUP_CHAT_TYPE='group';
   $('input').disabled=false;$('send').disabled=false;['searchToggle','pinnedToggle','mediaToggle'].forEach(bid=>{const b=$(bid);if(b)b.disabled=false});
   S.messages=[];markRead(id);renderMessages(false);renderGroups();setMobileChat(true);const meta=currentGroupMeta(g);postParent('GROUP_PANEL_OPEN',meta);postSelf('GROUP_PANEL_OPEN',meta);
-  window.dispatchEvent(new CustomEvent('kyn:group:open',{detail:{groupId:String(id)}}));hydrateGroupHistory(id);loadMessages();loadPins();clearInterval(S.poll);S.poll=setInterval(loadMessages,5000);
+  window.dispatchEvent(new CustomEvent('kyn:group:open',{detail:{groupId:String(id)}}));groupMessageState.failed.clear();S._hydrating=hydrateGroupHistory(id);loadMessages();loadPins();clearInterval(S.poll);S.poll=setInterval(loadMessages,5000);
   renderKeyGapNotice(null);checkKeyGap(id);
 }
 function closeGroup(){S.current=null;window.__GROUP_CHAT_ID=null;window.__GROUP_CHAT_TYPE=null;clearInterval(S.poll);S.poll=null;$('input').value='';$('input').disabled=true;$('send').disabled=true;['searchToggle','pinnedToggle','mediaToggle'].forEach(bid=>{const b=$(bid);if(b)b.disabled=true});closeSubbars();S.messages=[];S.pins=[];renderMessages(false);setMobileChat(false);renderGroups();postParent('GROUP_PANEL_CLOSED',{});postSelf('GROUP_PANEL_CLOSE',{});renderKeyGapNotice(null);window.dispatchEvent(new CustomEvent('kyn:group:close'))}

@@ -15,11 +15,50 @@ const currentUser=()=>{
   const id=localStorage.getItem('userId')||localStorage.getItem('currentUserId');
   return id?{id:Number(id)}:{};
 };
-const token=()=>{
-  const keys=['token','authToken','accessToken','jwt','access_token','kyn_access_token'];
-  for(const k of keys){const v=localStorage.getItem(k);if(v)return v}
-  try{const a=JSON.parse(localStorage.getItem('auth')||'null');return a?.token||a?.accessToken||''}catch(_){return ''}
+// FIX (VIBES/STATUS BUTTONS "DO NOTHING" AFTER A WHILE, esp. Google sign-in): this used to return the FIRST non-empty
+// key from a fixed list. Different login/refresh paths write different keys (google-auth.js, api.auth.js and
+// authStorage.js do not update the same set), so 'token' could hold an expired copy while a fresh one sat in
+// 'kynecta_auth' or 'accessToken' — every request then failed with 401 and the UI showed nothing. Collect every
+// copy, and use the non-expired JWT that expires last.
+const jwtExp=t=>{try{const p=String(t).replace(/^Bearer\s+/i,'').split('.')[1];if(!p)return 0;const j=JSON.parse(atob(p.replace(/-/g,'+').replace(/_/g,'/')));return Number(j.exp)||0}catch(_){return 0}};
+const tokenCandidates=()=>{
+  const out=[];const add=v=>{if(typeof v==='string'&&v.length>=10)out.push(v.replace(/^Bearer\s+/i,''))};
+  try{const a=JSON.parse(localStorage.getItem('kynecta_auth')||'null');add(a?.token);add(a?.accessToken)}catch(_){}
+  ['token','authToken','accessToken','necpa_token','USER_TOKEN','kynecta_token','auth_token','kyn_token','jwt','access_token','kyn_access_token'].forEach(k=>{try{add(localStorage.getItem(k))}catch(_){}});
+  try{const a=JSON.parse(localStorage.getItem('auth')||'null');add(a?.token);add(a?.accessToken)}catch(_){}
+  return out;
 };
+const token=()=>{
+  const c=tokenCandidates();if(!c.length)return '';
+  const now=Date.now()/1000;let best='',bestExp=-1;
+  for(const t of c){const e=jwtExp(t);if(e>now&&e>bestExp){best=t;bestExp=e}}
+  return best||c[0];
+};
+let __refreshing=null;
+// Last resort after a 401 with an expired token: pick up a newer token the shell already stored, otherwise use the
+// stored refresh token once. Only ever WRITES on success, so a failure can never log the person out from here.
+function refreshAuth(){
+  if(__refreshing)return __refreshing;
+  __refreshing=(async()=>{
+    const before=token();
+    await new Promise(r=>setTimeout(r,400));
+    const after=token();
+    if(after&&after!==before&&jwtExp(after)>Date.now()/1000)return true;
+    if(before&&jwtExp(before)>Date.now()/1000)return false;
+    let rt='';try{rt=JSON.parse(localStorage.getItem('kynecta_auth')||'null')?.refreshToken||localStorage.getItem('refreshToken')||''}catch(_){}
+    if(!rt)return false;
+    try{
+      const r=await fetch(apiOrigin()+'/api/auth/refresh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({refreshToken:rt})});
+      const d=await r.json().catch(()=>({}));const nt=d.accessToken||d.token;
+      if(!r.ok||!nt)return false;
+      try{const a=JSON.parse(localStorage.getItem('kynecta_auth')||'null')||{};a.token=nt;a.accessToken=nt;if(d.refreshToken)a.refreshToken=d.refreshToken;localStorage.setItem('kynecta_auth',JSON.stringify(a))}catch(_){}
+      ['token','authToken','accessToken','necpa_token'].forEach(k=>{try{localStorage.setItem(k,nt)}catch(_){}});
+      if(d.refreshToken){try{localStorage.setItem('refreshToken',d.refreshToken)}catch(_){}}
+      return true;
+    }catch(_){return false}
+  })().finally(()=>{setTimeout(()=>{__refreshing=null},1500)});
+  return __refreshing;
+}
 // DISCOVER INTERESTS: stored per-account so switching accounts on the same device (see
 // authStorage.js's switchAccount()/saveAuth() restoring per-account localStorage) doesn't leak
 // one person's picks onto another's Discover feed. {mode:'all'} = no filtering (explicit choice
@@ -44,9 +83,13 @@ async function fetchRetry(url,init,attempts){
   throw new Error('The server is starting up. Please try again in a moment.');
 }
 async function api(path,opts={}){
-  const headers=Object.assign({'Content-Type':'application/json'},opts.headers||{});
-  const t=token();if(t)headers.Authorization=/^Bearer /i.test(t)?t:'Bearer '+t;
-  const r=await fetchRetry(apiUrl(path),Object.assign({},opts,{headers}));
+  const send=()=>{
+    const headers=Object.assign({'Content-Type':'application/json'},opts.headers||{});
+    const t=token();if(t)headers.Authorization=/^Bearer /i.test(t)?t:'Bearer '+t;
+    return fetchRetry(apiUrl(path),Object.assign({},opts,{headers}));
+  };
+  let r=await send();
+  if(r.status===401&&await refreshAuth().catch(()=>false))r=await send();
   const data=await r.json().catch(()=>({}));
   if(!r.ok)throw new Error(data.message||data.error||('Request failed '+r.status));
   return data;
@@ -296,7 +339,7 @@ function showViewer(){
  root.querySelector('[data-reply]')?.addEventListener('focus',()=>clearInterval(state.timer));
  root.querySelector('[data-more]').onclick=()=>root.querySelector('[data-moremenu]').classList.toggle('open');
  root.querySelector('[data-vunmute]')?.addEventListener('click',()=>{const v=root.querySelector('[data-status-video]');if(!v)return;v.muted=!v.muted;if(!v.muted)v.play().catch(()=>{v.muted=true;root.querySelector('[data-vunmute]').textContent='🔇'});root.querySelector('[data-vunmute]').textContent=v.muted?'🔇':'🔊'});
- root.querySelector('[data-viewers]').onclick=()=>showViewers(s);
+ root.querySelector('[data-viewers]').onclick=()=>{if(isOwner)showViewers(s);else{const n=Number(s.viewCount)||0;toast(n+' view'+(n===1?'':'s'))}};
  root.querySelector('[data-edit]')?.addEventListener('click',()=>editStatus(s));
  root.querySelectorAll('[data-react]').forEach(b=>b.onclick=()=>react(s,b.dataset.react));
  state.autoAdvanceEligible=!isReplay;
@@ -307,8 +350,9 @@ function showViewer(){
  root.querySelector('[data-delete]')?.addEventListener('click',()=>del(s));
  root.querySelector('[data-highlight]')?.addEventListener('click',()=>highlight(s));
  api('/view',{method:'POST',body:JSON.stringify({statusId:s.id})}).then(r=>{
-   const result=r.data||{};
-   if(result.created) s.viewCount=Number(result.viewCount||s.viewCount||0);
+   const result=(r&&r.data)||r||{};
+   if(result.viewCount!=null) s.viewCount=Number(result.viewCount)||0;
+   try{const vb=state.viewerGroup[state.index]===s?root.querySelector('[data-viewers]'):null;if(vb)vb.textContent='👁 '+(s.viewCount||0)}catch(_){}
    s.viewedByMe=String(s.userId)!==String(currentUser().id||'') ? true : !!s.viewedByMe;
    renderFeed();renderPeople();renderMyStatus();
  }).catch(()=>{});
@@ -367,8 +411,8 @@ function closeViewer(silent){clearInterval(state.timer);stopViewerMedia();const 
 async function showViewers(s){
  try{
    const r=await api('/'+s.id+'/viewers');
-   const payload=r.data||{};
-   const rows=Array.isArray(payload.viewers)?payload.viewers:[];
+   const payload=(r&&!Array.isArray(r.data)&&r.data)?r.data:r||{};
+   const rows=Array.isArray(payload.viewers)?payload.viewers:(Array.isArray(r?.data)?r.data:[]);
    const root=document.querySelector('[data-viewer]');
    root.querySelector('.ns-viewer-list')?.remove();
    const panel=document.createElement('div');
@@ -444,7 +488,7 @@ async function reply(s,text){
  }
 }
 async function share(s){try{if(navigator.share)await navigator.share({title:'Necpa Status',text:s.caption||s.content||'Check this status',url:location.href});else await navigator.clipboard.writeText(location.href+'#status-'+s.id);await api('/'+s.id+'/share',{method:'POST',body:'{}'});toast('Status shared')}catch(e){if(e.name!=='AbortError')toast(e.message)}}
-async function save(s){try{const url=s.mediaUrl;if(!url)return toast('Text statuses do not need downloading');const a=document.createElement('a');a.href=url;a.download='necpa-status';a.target='_blank';a.click();toast('Save opened')}catch(e){toast(e.message)}}
+async function save(s){try{const url=s.mediaUrl;if(!url)return toast('Text statuses do not need downloading');const dl=/res\.cloudinary\.com/.test(url)&&url.includes('/upload/')&&!url.includes('/fl_attachment')?url.replace('/upload/','/upload/fl_attachment/'):url;const a=document.createElement('a');a.href=dl;a.download='necpa-status';a.rel='noopener';a.target='_blank';document.body.appendChild(a);a.click();a.remove();toast('Download started')}catch(e){toast(e.message)}}
 async function report(s){const reason=prompt('Why are you reporting this status?','spam');if(!reason)return;try{await api('/'+s.id+'/report',{method:'POST',body:JSON.stringify({reason})});toast('Report submitted')}catch(e){toast(e.message)}}
 async function del(s){if(!confirm('Delete this status now?'))return;try{await api('/'+s.id,{method:'DELETE'});state.statuses=state.statuses.filter(x=>x.id!==s.id);state.mine=state.mine.filter(x=>x.id!==s.id);closeViewer();renderFeed();toast('Status deleted')}catch(e){toast(e.message)}}
 async function highlight(s){try{await api('/'+s.id,{method:'PUT',body:JSON.stringify({highlight:!s.highlight})});s.highlight=!s.highlight;toast(s.highlight?'Added to Highlights':'Removed from Highlights')}catch(e){toast(e.message)}}
@@ -510,7 +554,7 @@ async function vibesSource(){
  return data.map(normalizeStatus).filter(s=>s.type==='video'&&s.mediaUrl);
 }
 
-function openVibes(){
+async function openVibes(){
  const root=document.querySelector('[data-vibes]');if(!root)return;
  clearInterval(state.timer);
  root.classList.add('open');
@@ -561,12 +605,12 @@ function renderVibe(){
  const u=s.owner||{};const prefs=state.vibesPrefs||(state.vibesPrefs=loadVibesPrefs());
  const savedIds=loadSavedVibeIds();const isSaved=savedIds.has(String(s.id));
  const expiry=s.vibeExpiresAt?('Expires '+new Date(s.vibeExpiresAt).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})):'';
- root.innerHTML='<div class="ns-vibes-stage" data-rstage><video src="'+esc(s.mediaUrl)+'" playsinline loop autoplay muted preload="auto" onerror="window.__necpaStatusMediaError&&window.__necpaStatusMediaError(this)"></video></div><div class="ns-vibes-head"><button class="ns-icon-btn ns-vback" data-rclose aria-label="Close">×</button><div class="ns-vibe-creator">'+avatar(u,'ns-avatar')+'<div><b>'+esc(u.displayName||u.username||'Creator')+'</b><small>'+esc(expiry)+'</small></div></div><button class="ns-icon-btn" data-raudience title="Audience">'+(prefs.includePublic?'🌐':'👥')+'</button><button class="ns-icon-btn" data-rsavedview title="Saved vibes">'+(vibesState.onlySaved?'📂':'🔖')+'</button><button class="ns-icon-btn" data-rmute>'+(vibesState.muted?'🔇':'🔊')+'</button></div><div class="ns-vibes-caption">'+esc(s.caption||s.content||'')+'</div><div class="ns-vibes-side"><button data-rlike aria-label="Love">❤️ <span>'+Number(s.reactionCount||0)+'</span></button><button data-rcomment aria-label="Comments">💬 <span>'+Number(s.replyCount||0)+'</span></button><button data-rsave class="'+(isSaved?'active':'')+'">'+(isSaved?'🔖':'📑')+'</button><button data-rdownload aria-label="Download">⬇</button><button data-rshare aria-label="Share">↗</button><button data-rup aria-label="Previous">▲</button><button data-rdown aria-label="Next">▼</button></div><div class="ns-vibe-comments" data-vibe-comments></div>';
+ root.innerHTML='<div class="ns-vibes-stage" data-rstage><video src="'+esc(s.mediaUrl)+'" playsinline loop autoplay muted preload="auto" onerror="window.__necpaStatusMediaError&&window.__necpaStatusMediaError(this)"></video></div><div class="ns-vibes-head"><button class="ns-icon-btn ns-vback" data-rclose aria-label="Close">×</button><div class="ns-vibe-creator">'+avatar(u,'ns-avatar')+'<div><b>'+esc(u.displayName||u.username||'Creator')+'</b><small data-vmeta>'+esc(vibeMeta(s,expiry))+'</small></div></div><button class="ns-icon-btn" data-raudience title="Audience">'+(prefs.includePublic?'🌐':'👥')+'</button><button class="ns-icon-btn" data-rsavedview title="Saved vibes">'+(vibesState.onlySaved?'📂':'🔖')+'</button><button class="ns-icon-btn" data-rmute>'+(vibesState.muted?'🔇':'🔊')+'</button></div><div class="ns-vibes-caption">'+esc(s.caption||s.content||'')+'</div><div class="ns-vibes-side"><button data-rlike class="'+(s.likedByMe?'liked':'')+'" aria-label="Love" aria-pressed="'+(s.likedByMe?'true':'false')+'"><span data-heart>'+(s.likedByMe?'❤️':'🤍')+'</span> <span data-count>'+Number(s.reactionCount||0)+'</span></button><button data-rcomment aria-label="Comments">💬 <span data-count>'+Number(s.replyCount||0)+'</span></button><button data-rsave class="'+(isSaved?'active':'')+'">'+(isSaved?'🔖':'📑')+'</button><button data-rdownload aria-label="Download">⬇</button><button data-rshare aria-label="Share">↗</button><button data-rup aria-label="Previous">▲</button><button data-rdown aria-label="Next">▼</button></div><div class="ns-vibe-comments" data-vibe-comments></div>';
  root.querySelector('[data-rclose]').onclick=closeVibes;
  root.querySelector('[data-raudience]')?.addEventListener('click',toggleVibesAudience);
  root.querySelector('[data-rsavedview]')?.addEventListener('click',toggleSavedVibesView);
  root.querySelector('[data-rmute]').onclick=()=>{vibesState.muted=!vibesState.muted;const v=root.querySelector('video');if(v)v.muted=vibesState.muted;root.querySelector('[data-rmute]').textContent=vibesState.muted?'🔇':'🔊'};
- root.querySelector('[data-rlike]').onclick=async()=>{try{const r=await api('/vibes/'+s.id+'/love',{method:'POST',body:'{}'});s.reactionCount=Number(r.count||0);root.querySelector('[data-rlike] span').textContent=s.reactionCount}catch(e){toast(e.message)}};
+ root.querySelector('[data-rlike]').onclick=e=>{e.stopPropagation();toggleVibeLove(s)};
  root.querySelector('[data-rcomment]').onclick=()=>openVibeComments(s);
  root.querySelector('[data-rsave]').onclick=()=>{const set=loadSavedVibeIds();const id=String(s.id);if(set.has(id)){set.delete(id);toast('Removed from Saved')}else{set.add(id);toast('Saved to your Vibes')}persistSavedVibeIds(set);renderVibe()};
  root.querySelector('[data-rdownload]').onclick=()=>save(s);
@@ -574,16 +618,65 @@ function renderVibe(){
  root.querySelector('[data-rup]').onclick=()=>moveVibe(-1);root.querySelector('[data-rdown]').onclick=()=>moveVibe(1);
  const v=root.querySelector('video');if(v){v.muted=vibesState.muted;v.play().catch(()=>{})}
  wireVibeGestures(root);
+ recordVibeView(s);
+}
+const vibeMeta=(s,expiry)=>{const n=Number(s.viewCount)||0;return n+' view'+(n===1?'':'s')+(expiry?' · '+expiry:'')};
+function paintVibe(s){
+ // Update only the parts that changed so a tap never rebuilds the video or steals focus.
+ if(vibesState.items[vibesState.index]!==s)return;
+ const root=document.querySelector('[data-vibes]');if(!root)return;
+ const like=root.querySelector('[data-rlike]');
+ if(like){like.classList.toggle('liked',!!s.likedByMe);like.setAttribute('aria-pressed',s.likedByMe?'true':'false');const h=like.querySelector('[data-heart]');if(h)h.textContent=s.likedByMe?'❤️':'🤍';const c=like.querySelector('[data-count]');if(c)c.textContent=Number(s.reactionCount||0)}
+ const cm=root.querySelector('[data-rcomment] [data-count]');if(cm)cm.textContent=Number(s.replyCount||0);
+ const meta=root.querySelector('[data-vmeta]');if(meta){const expiry=s.vibeExpiresAt?('Expires '+new Date(s.vibeExpiresAt).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})):'';meta.textContent=vibeMeta(s,expiry)}
+}
+async function toggleVibeLove(s){
+ if(s.__loving)return;s.__loving=true;
+ const wasLiked=!!s.likedByMe,wasCount=Number(s.reactionCount||0);
+ s.likedByMe=!wasLiked;s.reactionCount=Math.max(0,wasCount+(s.likedByMe?1:-1));paintVibe(s);
+ try{
+  const r=await api('/vibes/'+s.id+'/love',{method:'POST',body:'{}'});
+  if(r&&r.liked!==undefined)s.likedByMe=!!r.liked;
+  if(r&&r.count!=null)s.reactionCount=Number(r.count)||0;
+ }catch(e){s.likedByMe=wasLiked;s.reactionCount=wasCount;toast(e.message||'Could not update your like')}
+ finally{s.__loving=false;paintVibe(s)}
+}
+const __viewedVibes=new Set();
+function recordVibeView(s){
+ const id=String(s.id);if(__viewedVibes.has(id))return;__viewedVibes.add(id);
+ if(String(s.userId)===String(currentUser().id||''))return;
+ api('/view',{method:'POST',body:JSON.stringify({statusId:s.id})}).then(r=>{const d=(r&&r.data)||r||{};if(d.viewCount!=null){s.viewCount=Number(d.viewCount)||0;paintVibe(s)}}).catch(()=>{__viewedVibes.delete(id)});
 }
 async function openVibeComments(s){
  const root=document.querySelector('[data-vibe-comments]');if(!root)return;
- root.classList.add('open');root.innerHTML='<div class="ns-vibe-comments-head"><b>Comments</b><button data-vcclose>×</button></div><div class="ns-vibe-comment-list">Loading…</div><div class="ns-vibe-comment-compose"><input data-vctext placeholder="Write a comment…"><button data-vcsend>Send</button></div>';
+ root.classList.add('open');
+ root.innerHTML='<div class="ns-vibe-comments-head"><b>Comments</b><button type="button" data-vcclose aria-label="Close comments">×</button></div><div class="ns-vibe-comment-list">Loading…</div><div class="ns-vibe-comment-compose"><input data-vctext placeholder="Write a comment…" maxlength="2000" autocomplete="off"><button type="button" data-vcsend>Send</button></div>';
+ const list=root.querySelector('.ns-vibe-comment-list'),input=root.querySelector('[data-vctext]'),sendBtn=root.querySelector('[data-vcsend]');
  root.querySelector('[data-vcclose]').onclick=()=>root.classList.remove('open');
+ const name=x=>{const u=x.user||{};return u.displayName||u.username||(String(x.userId)===String(currentUser().id||'')?'You':'User '+x.userId)};
+ const row=x=>'<div class="ns-vibe-comment"><b>'+esc(name(x))+'</b><span>'+esc(x.text)+'</span></div>';
+ const paint=rows=>{list.innerHTML=rows.length?rows.map(row).join(''):'<div class="ns-vibe-empty-comments">No comments yet. Be the first.</div>';list.scrollTop=list.scrollHeight};
  try{
-  const rows=(await api('/'+s.id+'/comments')).data||[];
-  root.querySelector('.ns-vibe-comment-list').innerHTML=rows.length?rows.map(x=>'<div class="ns-vibe-comment"><b>User '+esc(x.userId)+'</b><span>'+esc(x.text)+'</span></div>').join(''):'<div class="ns-vibe-empty-comments">No comments yet.</div>';
-  root.querySelector('[data-vcsend]').onclick=async()=>{const input=root.querySelector('[data-vctext]');const text=(input.value||'').trim();if(!text)return;try{const r=await api('/'+s.id+'/comment',{method:'POST',body:JSON.stringify({text})});s.replyCount=Number(r.count||0);document.querySelector('[data-rcomment] span').textContent=s.replyCount;input.value='';openVibeComments(s)}catch(e){toast(e.message)}};
- }catch(e){root.querySelector('.ns-vibe-comment-list').textContent=e.message}
+  const r=await api('/'+s.id+'/comments');
+  const rows=Array.isArray(r.data)?r.data:[];
+  paint(rows);
+  if(r.count!=null&&Number(r.count)!==Number(s.replyCount||0)){s.replyCount=Number(r.count)||0;paintVibe(s)}
+ }catch(e){list.textContent=e.message||'Could not load comments'}
+ const send=async()=>{
+  const text=(input.value||'').trim();if(!text||sendBtn.disabled)return;
+  sendBtn.disabled=true;
+  try{
+   const r=await api('/'+s.id+'/comment',{method:'POST',body:JSON.stringify({text})});
+   s.replyCount=r.count!=null?Number(r.count)||0:(Number(s.replyCount)||0)+1;paintVibe(s);
+   input.value='';
+   const fresh=await api('/'+s.id+'/comments').catch(()=>null);
+   if(fresh&&Array.isArray(fresh.data))paint(fresh.data);
+   else{list.querySelector('.ns-vibe-empty-comments')?.remove();list.insertAdjacentHTML('beforeend',row(Object.assign({text,userId:currentUser().id},r.reply||{})));list.scrollTop=list.scrollHeight}
+  }catch(e){toast(e.message||'Could not post your comment')}
+  finally{sendBtn.disabled=false;input.focus()}
+ };
+ sendBtn.onclick=send;
+ input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});
 }
 function moveVibe(dir){
  if(!document.querySelector('[data-vibes]')?.classList.contains('open'))return;
@@ -781,6 +874,25 @@ function boot(){if(!document.body)return;const style=document.createElement('sty
 // layer cover the whole stage edge-to-edge, keep the text centred, and leave room for the header
 // and the reply bar so nothing is hidden underneath them.
 (function(){const f=document.createElement('style');f.id='ns-viewer-fill';f.textContent='#necpa-status-root .ns-viewer-stage{width:100vw!important;max-width:none!important;height:100dvh!important;min-height:100dvh!important;overflow:hidden}#necpa-status-root .ns-viewer-text{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;max-width:none!important;max-height:none!important;min-height:100%!important;margin:0!important;border-radius:0!important;box-sizing:border-box!important;padding:84px 28px 130px!important;display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;text-align:center!important;overflow-y:auto;overflow-wrap:anywhere}';document.head.appendChild(f)})();
+// FIX (VIBES: EVERY ICON DEAD ON PHONES): on mobile the LIST screen sets `.ns-main{pointer-events:none}` so the
+// hidden feed behind the list can't catch taps, and then re-enables only .ns-composer and .ns-viewer. The Vibes
+// overlay (and the interests picker) also live inside .ns-main, so they inherited `none` and swallowed nothing —
+// the close X, audience/saved/mute buttons and the whole heart/comment/save/download/share/up/down column were
+// untappable. pointer-events is inherited, so re-enabling it on the overlay itself is enough.
+(function(){const f=document.createElement('style');f.id='ns-vibes-fix';f.textContent='#necpa-status-root .ns-vibes.open,#necpa-status-root .ns-interests.open{pointer-events:auto}'+
+'#necpa-status-root .ns-vibes-head,#necpa-status-root .ns-vibes-side,#necpa-status-root .ns-vibes-caption,#necpa-status-root .ns-vibe-comments{pointer-events:auto}'+
+'#necpa-status-root .ns-vibes-head button,#necpa-status-root .ns-vibes-side button{touch-action:manipulation;-webkit-tap-highlight-color:transparent}'+
+'#necpa-status-root .ns-vibes-side button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;width:46px;height:46px;font-size:18px;line-height:1;background:rgba(0,0,0,.42)}'+
+'#necpa-status-root .ns-vibes-side button [data-count]{font-size:11px;font-weight:700}'+
+'#necpa-status-root .ns-vibes-side button.liked{background:rgba(239,68,68,.45)}'+
+'#necpa-status-root .ns-vibes-side button:active,#necpa-status-root .ns-vibes-head button:active{transform:scale(.92)}'+
+'#necpa-status-root .ns-vibes-head{padding-top:env(safe-area-inset-top,0px)}'+
+'#necpa-status-root .ns-vibe-comment-compose{display:flex;gap:8px;padding:10px 12px;border-top:1px solid rgba(255,255,255,.12)}'+
+'#necpa-status-root .ns-vibe-comment-compose input{flex:1;min-width:0;border:0;border-radius:999px;padding:10px 14px;background:rgba(255,255,255,.14);color:#fff;font-size:16px}'+
+'#necpa-status-root .ns-vibe-comment-compose button{border:0;border-radius:999px;padding:0 16px;background:#2563eb;color:#fff;font-weight:700;cursor:pointer}'+
+'#necpa-status-root .ns-vibe-comment-compose button:disabled{opacity:.5}'+
+'#necpa-status-root .ns-vibe-comment{display:flex;flex-direction:column;gap:2px;padding:6px 0}#necpa-status-root .ns-vibe-comment b{font-size:12px;opacity:.8}#necpa-status-root .ns-vibe-comment span{font-size:14px;word-break:break-word}'+
+'@media(max-width:800px){#necpa-status-root .ns-vibe-comments{left:0;right:0;bottom:0;max-height:65dvh;border-radius:20px 20px 0 0;padding-bottom:env(safe-area-inset-bottom,0px)}}';document.head.appendChild(f)})();
 syncTheme();try{if(!(window.parent&&window.parent!==window))throw 0;const src=window.parent.document.documentElement;new MutationObserver(syncTheme).observe(src,{attributes:true,attributeFilter:['style','class','data-theme']})}catch(_){}mount()}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
 window.__NecpaProfessionalStatus={open,close,loadFeed,goBack:goBackOne,resetToList};

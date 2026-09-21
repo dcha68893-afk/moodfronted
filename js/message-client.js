@@ -1768,11 +1768,29 @@
     // real conversation history in the database. Uses the existing,
     // pre-built /chats endpoint (already returns other-participant info,
     // unread count, and the last message in one call — not reimplemented).
+    // FIX (DELETED CHAT COMES BACK AFTER RELOAD): deleteChat()/archiveChat() only removed the conversation from the
+    // in-memory Map. The same conversation stayed in the IndexedDB cache (js/message-local-db.js), and
+    // hydrateConversationsFromCache() below re-adds EVERY cached conversation on the next load — so a chat the person had
+    // deleted reappeared in the list (and its old decrypted messages stayed readable on disk). Forget it in both places.
+    // Map keys are the server's numeric ids, but tolerate a string id from a DOM attribute.
+    function _forgetConversation(chatId, { keepMessages = false } = {}) {
+        const key = state.conversations.has(chatId) ? chatId : Array.from(state.conversations.keys()).find(k => String(k) === String(chatId));
+        if (key !== undefined) state.conversations.delete(key);
+        try {
+            const cache = window.KynectaMessageCache;
+            if (!cache) return;
+            cache.deleteConversation(chatId);
+            cache.deleteConversation(Number(chatId));
+            if (!keepMessages) cache.deleteChatMessages(chatId);
+        } catch (_) {}
+        try { state.messagesByConversation && !keepMessages && state.messagesByConversation.delete(chatId); } catch (_) {}
+    }
+
     async function archiveChat(chatId) {
         try {
             const res = await api().put(`/chats/${chatId}/archive`);
             if (res && (res.status === 'success' || res.success)) {
-                state.conversations.delete(chatId);
+                _forgetConversation(chatId, { keepMessages: true });
                 notify('conversation:archived', { chatId });
             }
             return res;
@@ -1800,7 +1818,7 @@
         try {
             const res = await api().delete(`/chats/${chatId}`);
             if (res && (res.status === 'success' || res.success)) {
-                state.conversations.delete(chatId);
+                _forgetConversation(chatId, { keepMessages: false });
                 notify('conversation:deleted', { chatId });
             }
             return res;
@@ -1926,9 +1944,27 @@
     // with backoff instead of giving up after one try.
     async function loadConversations(attempt = 0) {
         try {
+            // Chats that exist right now (from memory / the disk cache). Only THESE may be pruned below — a chat that
+            // appears while the request is in flight (a live message) is newer than the server's answer and must survive.
+            try { await state.hydrating; } catch (_) {}
+            const knownBefore = new Set(Array.from(state.conversations.keys()).map(String));
             const res = await api().get('/chats?summary=1&limit=50');
             if (!res || res.success === false) throw new Error((res && res.message) || 'Failed to load conversation list');
             const chats = (res.data && Array.isArray(res.data.chats)) ? res.data.chats : [];
+            state.convLoadFailed = false;
+            // FIX (DELETED / ARCHIVED CHATS STAYED IN THE LIST): this only ever ADDED conversations, so anything hidden or
+            // archived (here or on another device) lingered from the cache forever. When the server returned the complete
+            // list (the request is capped at 50), drop cached conversations it no longer lists. The open chat is left alone.
+            // (An EMPTY answer is ambiguous — a real empty list or a server hiccup — so it never prunes.)
+            if (chats.length > 0 && chats.length < 50) {
+                const serverIds = new Set(chats.map(c => String(c.id)));
+                const activeId = String(state.activeChatId == null ? '' : state.activeChatId);
+                knownBefore.forEach((id) => {
+                    if (serverIds.has(id) || id === activeId || !/^\d+$/.test(id)) return;   // non-numeric = local "pending:<user>" chat
+                    _forgetConversation(id, { keepMessages: true });
+                    notify('conversation:deleted', { chatId: Number(id) });
+                });
+            }
             _warmupKnownContactKeys(chats);
             chats.filter(c => c.type === 'direct' && c.otherParticipant).forEach(c => {
                 const lastRaw = Array.isArray(c.chatMessages) && c.chatMessages[0] ? c.chatMessages[0] : null;
@@ -1953,10 +1989,12 @@
             });
         } catch (err) {
             console.error(`[MessageModule] Failed to load conversation list (attempt ${attempt + 1}):`, err.message);
-            if (attempt < 2) {
-                setTimeout(() => loadConversations(attempt + 1), Math.min(1000 * (attempt + 1), 5000));
+            state.convLoadFailed = true;
+            if (attempt < 5) {
+                setTimeout(() => loadConversations(attempt + 1), Math.min(1000 * (attempt + 1), 8000));
             } else {
-                console.error('[MessageModule] Giving up on loading conversation list after 3 attempts');
+                // Not a permanent give-up: the cached list stays on screen, and the 'online' / tab-visible handlers below retry.
+                console.error('[MessageModule] Conversation list refresh failed after 6 attempts; will retry when back online');
             }
         }
     }
@@ -2014,12 +2052,16 @@
     // in flight.
     (function hydrateConversationsFromCache() {
         if (!window.KynectaMessageCache) return;
-        window.KynectaMessageCache.getConversations().then((cached) => {
+        state.hydrating = window.KynectaMessageCache.getConversations().then((cached) => {
             (cached || []).forEach((conv) => {
                 if (conv && conv.chatId != null) upsertConversationMeta(conv.chatId, conv);
             });
         }).catch(() => {});
     })();
+    // A failed refresh (offline, cold server) used to be final for the page session. Try again when the connection returns or
+    // the person comes back to the tab — but only if the last attempt actually failed.
+    window.addEventListener('online', () => { if (state.convLoadFailed) loadConversations(); });
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && state.convLoadFailed) loadConversations(); });
 
     // window.api.request may not be ready yet at this exact point —
     // api.request.js runs its own async bootstrap sequence with retries/

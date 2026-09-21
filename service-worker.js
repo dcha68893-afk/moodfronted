@@ -24,7 +24,7 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.31.0';
+const SW_VERSION = '19.32.0';
 // FIX: bumped so activate() drops every existing cache immediately on this
 // deploy — anyone with a stale pre-rebuild group.html (or the old, now-
 // deleted group-core-*/group-os-* files, or the misspelled necpra-* icons
@@ -42,7 +42,12 @@ const SW_VERSION = '19.31.0';
 // js/pwa-mobile-install.js + js/install-chooser.js were deleted. Bumping the cache name drops every cached copy
 // of those two scripts (and the old pwa-manager.js) on the next activate, so no device keeps running a stale
 // installer next to the new one.
-const CACHE_NAME = 'necpa-static-v61';
+// FIX (CACHE NAME WENT BACKWARDS): the previous deploy changed this from v62 back to v61. A phone that had cached the
+// ORIGINAL v61 (before v62 existed) then kept that cache untouched — activate() only deletes caches whose name differs —
+// and so kept running stale scripts (e.g. an old pwa-manager.js that expected the deleted pwa-mobile-install.js, which is
+// exactly "install option missing on phones but present on laptop"). Cache names must only ever move forward.
+// v63 also ships the Vibes/Status, group history and chat-list fixes, so every installed app drops its old copies once.
+const CACHE_NAME = 'necpa-static-v63';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
