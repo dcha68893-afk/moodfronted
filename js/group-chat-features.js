@@ -1,9 +1,29 @@
+/* FIX-ROUND (GROUP-ATTACH-WRONG-PIPELINE): this file used to POST attachments
+   straight to the 1:1 DM endpoint (/messages) with a plaintext caption, and
+   it also carried its own Edit/Delete/message-cache/fetch-monkeypatch logic
+   that duplicated what group.html already does correctly and encrypted.
+   Root cause (confirmed against src/services/groupMessagingService.js on the
+   backend): every row inserted via POST /group-messages/:groupId/messages is
+   auto-tagged by the server with metadata.groupPipeline='KYN-GROUP-V2', and
+   deleteMessage()/updateMessage() on the server both require that tag to find
+   a row. An attachment posted to /messages never gets tagged, so it becomes
+   invisible to group delete/edit ("Group message not found" 404) and its
+   caption was never encrypted for the group at all.
+   Fix: removed the duplicate edit/delete/cache/fetch-patch code entirely
+   (group.html's own ⋮ menu already provides working, encrypted Edit/Delete —
+   see startEdit()/deleteMessage() there) and route the attachment send
+   through window.__NECPRA_GROUP_SEND, the one function group.html itself
+   exposes for exactly this purpose (encrypts the caption, posts to the
+   correct /group-messages/:groupId/messages endpoint, and lets the server
+   apply the pipeline tag). This file no longer touches window.fetch, no
+   longer keeps its own message cache, and no longer offers a second
+   Edit/Delete UI on top of group.html's bubbles. */
 (() => {
   'use strict';
   if (window.__NECPRA_GROUP_CHAT_FEATURES__) return;
   window.__NECPRA_GROUP_CHAT_FEATURES__ = true;
 
-  const state = { chatId: null, editingId: null, uploadBusy: false };
+  const state = { uploadBusy: false };
   const $ = (id) => document.getElementById(id);
 
   function token() {
@@ -48,15 +68,20 @@
     if ($('groupChatFeatureStyles')) return;
     const style = document.createElement('style');
     style.id = 'groupChatFeatureStyles';
-    style.textContent = '.group-feature-tools{display:flex;gap:5px;align-items:center;flex:0 0 auto}.group-feature-btn{width:38px;height:38px;border:1px solid var(--border,#e2e8f0);border-radius:11px;background:var(--surface2,#f1f5f9);color:var(--text,#0f172a);cursor:pointer}.group-feature-btn:hover{filter:brightness(.97)}.group-emoji-picker{position:absolute;bottom:62px;left:8px;width:min(330px,calc(100vw - 20px));max-height:220px;overflow-y:auto;padding:10px;border:1px solid var(--border,#e2e8f0);border-radius:14px;background:var(--surface,#fff);box-shadow:0 16px 40px #0002;display:grid;grid-template-columns:repeat(8,1fr);grid-auto-rows:min-content;gap:3px;z-index:100}.group-emoji-picker[hidden]{display:none}.group-emoji-picker button{border:0;background:transparent;border-radius:8px;padding:7px;font-size:21px;cursor:pointer;line-height:1}.group-emoji-picker button:hover{background:var(--surface2,#f1f5f9)}.group-message-actions{display:flex;gap:4px;margin-top:5px;justify-content:flex-end}.group-message-actions button{border:0;background:transparent;color:inherit;opacity:.75;font-size:10px;cursor:pointer;padding:3px 5px}.group-edit-banner{display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--surface2,#f1f5f9);border-top:1px solid var(--border,#e2e8f0);font-size:11px}.group-edit-banner span{flex:1}.group-attachment-preview{font-size:11px;padding:5px 10px;color:var(--muted,#64748b);display:none}';
+    style.textContent = '.group-feature-tools{display:flex;gap:5px;align-items:center;flex:0 0 auto}.group-feature-btn{width:38px;height:38px;border:1px solid var(--border,#e2e8f0);border-radius:11px;background:var(--surface2,#f1f5f9);color:var(--text,#0f172a);cursor:pointer}.group-feature-btn:hover{filter:brightness(.97)}.group-feature-btn:disabled{opacity:.5;cursor:default}.group-emoji-picker{position:absolute;bottom:62px;left:8px;width:min(330px,calc(100vw - 20px));max-height:220px;overflow-y:auto;padding:10px;border:1px solid var(--border,#e2e8f0);border-radius:14px;background:var(--surface,#fff);box-shadow:0 16px 40px #0002;display:grid;grid-template-columns:repeat(8,1fr);grid-auto-rows:min-content;gap:3px;z-index:100}.group-emoji-picker[hidden]{display:none}.group-emoji-picker button{border:0;background:transparent;border-radius:8px;padding:7px;font-size:21px;cursor:pointer;line-height:1}.group-emoji-picker button:hover{background:var(--surface2,#f1f5f9)}.group-attachment-preview{font-size:11px;padding:5px 10px;color:var(--muted,#64748b);display:none}';
     document.head.appendChild(style);
   }
 
+  // Every entry point this file needs — window.__NECPRA_GROUP_SEND (the
+  // encrypted send pipeline) and window.__GROUP_CHAT_ID (which group.html
+  // itself already sets in openGroup()/closeGroup()) — is provided natively
+  // by group.html. No separate chatId tracking or fetch interception needed.
   function currentChatId() {
-    return state.chatId || window.__GROUP_CHAT_ID || null;
+    return window.__GROUP_CHAT_ID || null;
   }
 
   function buildTools() {
+    if (typeof window.__NECPRA_GROUP_SEND !== 'function') return false; // not on group.html
     const composer = document.querySelector('#chat .composer, .composer');
     const input = $('input');
     if (!composer || !input) return false;
@@ -84,13 +109,6 @@
       picker.appendChild(button);
     });
 
-    const banner = document.createElement('div');
-    banner.id = 'groupEditBanner';
-    banner.className = 'group-edit-banner';
-    banner.hidden = true;
-    banner.innerHTML = '<span id="groupEditText">Editing message</span><button type="button" id="groupEditCancel">Cancel</button>';
-    if (composer.parentElement) composer.parentElement.insertBefore(banner, composer);
-
     const preview = document.createElement('div');
     preview.id = 'groupAttachmentPreview';
     preview.className = 'group-attachment-preview';
@@ -99,7 +117,6 @@
     $('groupEmojiBtn').onclick = (event) => { event.stopPropagation(); picker.hidden = !picker.hidden; };
     $('groupAttachBtn').onclick = () => $('groupAttachInput').click();
     $('groupAttachInput').onchange = handleAttachment;
-    $('groupEditCancel').onclick = cancelEdit;
     document.addEventListener('click', (event) => {
       const emojiButton = $('groupEmojiBtn');
       if (!picker.contains(event.target) && event.target !== emojiButton) picker.hidden = true;
@@ -112,7 +129,10 @@
     event.target.value = '';
     const chatId = currentChatId();
     if (!file || !chatId || state.uploadBusy) return;
+    if (typeof window.__NECPRA_GROUP_SEND !== 'function') return;
     state.uploadBusy = true;
+    const attachBtn = $('groupAttachBtn');
+    if (attachBtn) attachBtn.disabled = true;
     const preview = $('groupAttachmentPreview');
     if (preview) { preview.style.display = 'block'; preview.textContent = `Uploading ${file.name}…`; }
     try {
@@ -121,149 +141,40 @@
       const uploaded = await api('/files/upload', { method: 'POST', body: form });
       const media = uploaded && (uploaded.data || uploaded.file || uploaded);
       if (!media || !media.url) throw new Error('File upload did not return a URL');
-      const type = media.type || (file.type.indexOf('image/') === 0 ? 'image' : file.type.indexOf('video/') === 0 ? 'video' : file.type.indexOf('audio/') === 0 ? 'audio' : 'document');
-      const result = await api('/messages', {
-        method: 'POST',
-        body: JSON.stringify({
-          chatId: Number(chatId),
-          type,
-          content: file.name,
-          clientMessageId: `grp_media_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-          metadata: { media: { url: media.url, publicId: media.publicId || media.public_id || null, name: file.name, mimeType: file.type, size: file.size, type } }
-        })
+      const type = media.type || (file.type.indexOf('image/') === 0 ? 'image' : file.type.indexOf('video/') === 0 ? 'video' : file.type.indexOf('audio/') === 0 ? 'audio' : 'file');
+      const input = $('input');
+      const caption = (input && input.value.trim()) || '';
+      if (input) input.value = '';
+      // FIX (GROUP-ATTACH-WRONG-PIPELINE): previously api('/messages', {...})
+      // straight to the 1:1 endpoint with a plaintext caption. Now goes
+      // through the same encrypted, correctly-tagged pipeline group.html's
+      // own text sends use — see sendGroupPayload()/window.__NECPRA_GROUP_SEND
+      // in group.html.
+      await window.__NECPRA_GROUP_SEND(caption, type, {
+        media: { url: media.url, publicId: media.publicId || media.public_id || null, name: file.name, mimeType: file.type, size: file.size, type }
       });
-      const message = result && result.data && (result.data.message || result.data);
-      if (message) {
-        window.__GROUP_MESSAGES_CACHE = Array.isArray(window.__GROUP_MESSAGES_CACHE) ? window.__GROUP_MESSAGES_CACHE.concat([message]) : [message];
-        if (typeof window.__GROUP_REFRESH_MESSAGES === 'function') await window.__GROUP_REFRESH_MESSAGES();
-      }
       if (preview) { preview.textContent = `${file.name} sent`; setTimeout(() => { preview.style.display = 'none'; }, 1800); }
     } catch (error) {
       if (preview) preview.textContent = `Upload failed: ${error.message}`;
       console.error('[GroupChat] attachment upload failed:', error);
     } finally {
       state.uploadBusy = false;
+      if (attachBtn) attachBtn.disabled = false;
     }
-  }
-
-  function cancelEdit() {
-    state.editingId = null;
-    if ($('groupEditBanner')) $('groupEditBanner').hidden = true;
-    if ($('input')) $('input').value = '';
-  }
-
-  async function editMessage(id, text) {
-    await api(`/messages/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify({ content: text }) });
-    cancelEdit();
-    if (typeof window.__GROUP_REFRESH_MESSAGES === 'function') await window.__GROUP_REFRESH_MESSAGES();
-  }
-
-  async function deleteMessage(id) {
-    if (!window.confirm('Delete this message for everyone?')) return;
-    try {
-      await api(`/messages/${encodeURIComponent(id)}`, { method: 'DELETE', body: JSON.stringify({ deleteForEveryone: true }) });
-      if (typeof window.__GROUP_REFRESH_MESSAGES === 'function') await window.__GROUP_REFRESH_MESSAGES();
-    } catch (error) { window.alert(error.message); }
-  }
-
-  function beginEdit(message) {
-    state.editingId = String(message.id);
-    const input = $('input');
-    if (!input) return;
-    input.value = message.content || '';
-    input.focus();
-    if ($('groupEditBanner')) { $('groupEditBanner').hidden = false; $('groupEditText').textContent = 'Editing message'; }
-  }
-
-  function messageCache() {
-    return Array.isArray(window.__GROUP_MESSAGES_CACHE) ? window.__GROUP_MESSAGES_CACHE : [];
-  }
-
-  function enhanceMessages() {
-    const box = $('messages');
-    if (!box) return;
-    const cache = messageCache();
-    Array.from(box.querySelectorAll('.row')).forEach((row, index) => {
-      if (row.dataset.groupActions === '1') return;
-      const message = cache[index];
-      if (!message || !message.id) return;
-      row.dataset.groupActions = '1';
-      row.dataset.messageId = String(message.id);
-      if (!row.classList.contains('mine')) return;
-      const actions = document.createElement('div');
-      actions.className = 'group-message-actions';
-      const edit = document.createElement('button');
-      edit.type = 'button'; edit.textContent = 'Edit';
-      edit.onclick = (event) => { event.stopPropagation(); beginEdit(message); };
-      const del = document.createElement('button');
-      del.type = 'button'; del.textContent = 'Delete';
-      del.onclick = (event) => { event.stopPropagation(); deleteMessage(message.id); };
-      actions.append(edit, del);
-      const bubble = row.querySelector('.bubble');
-      if (bubble) bubble.appendChild(actions);
-    });
-  }
-
-  function installMessageObserver() {
-    const box = $('messages');
-    if (!box || box.dataset.groupFeaturesObserver === '1') return;
-    box.dataset.groupFeaturesObserver = '1';
-    new MutationObserver(() => setTimeout(enhanceMessages, 0)).observe(box, { childList: true, subtree: true });
-    enhanceMessages();
-  }
-
-  function wireSendOverride() {
-    const send = $('send');
-    const input = $('input');
-    if (!send || !input || send.dataset.groupFeatureSend === '1') return;
-    send.dataset.groupFeatureSend = '1';
-    send.addEventListener('click', async (event) => {
-      if (!state.editingId) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      const text = input.value.trim();
-      if (!text) return;
-      try { await editMessage(state.editingId, text); } catch (error) { window.alert(error.message); }
-    }, true);
-  }
-
-  function setChat(id) {
-    if (id) { state.chatId = String(id); window.__GROUP_CHAT_ID = String(id); }
-    buildTools(); installMessageObserver(); wireSendOverride();
-  }
-
-  function observeGroupOpen() {
-    const nativeFetch = window.fetch && window.fetch.bind(window);
-    if (!nativeFetch || window.__GROUP_FEATURE_FETCH_PATCHED__) return;
-    window.__GROUP_FEATURE_FETCH_PATCHED__ = true;
-    window.fetch = async function groupFeatureFetch(input, init) {
-      const url = typeof input === 'string' ? input : (input && input.url) || '';
-      const response = await nativeFetch(input, init);
-      try {
-        const text = String(url);
-        const chatMatch = text.match(/\/chats\/(\d+)(?:\?|$)/);
-        const messageMatch = text.match(/\/messages\/(\d+)(?:\?|$)/);
-        if ((chatMatch || messageMatch) && response.ok) {
-          const id = (chatMatch || messageMatch)[1];
-          setChat(id);
-          const data = await response.clone().json().catch(() => null);
-          const list = data && (data.data && data.data.messages || data.data || data.messages || data);
-          if (Array.isArray(list)) window.__GROUP_MESSAGES_CACHE = list.filter((item) => item && item.id);
-        }
-      } catch (_) {}
-      return response;
-    };
   }
 
   function init() {
     injectStyles();
-    observeGroupOpen();
-    const run = () => { buildTools(); installMessageObserver(); wireSendOverride(); };
+    const run = () => { buildTools(); };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run, { once: true });
     else run();
-    const observer = new MutationObserver(run);
-    if (document.documentElement) observer.observe(document.documentElement, { childList: true, subtree: true });
-    setInterval(run, 800);
+    // group.html's composer only exists once, but the group panel itself is
+    // enabled/disabled (input.disabled) as groups open/close — a light
+    // interval is enough to attach once and is a no-op afterwards, without
+    // the global MutationObserver + 800ms interval the old version ran on
+    // the whole document (that scope, plus the fetch monkeypatch, is what
+    // made this file risky to load on every page).
+    setInterval(run, 1000);
   }
 
   init();

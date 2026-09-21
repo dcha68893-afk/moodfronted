@@ -375,9 +375,13 @@
   #attachBtn:hover { background: var(--kyn-bg-hover); color: var(--kyn-accent-primary); }
   #attachBtn:active { transform: scale(0.92); }
   #attachBtn:disabled { opacity: 0.5; cursor: default; }
-  .bubble-attachment-image { max-width: 220px; max-height: 220px; border-radius: 10px; display: block; margin-bottom: 4px; cursor: pointer; }
+  .bubble-attachment-image, .bubble-attachment-video { max-width: 220px; max-height: 220px; border-radius: 10px; display: block; margin-bottom: 4px; cursor: pointer; object-fit: cover; }
   #mediaViewer { background: rgba(0,0,0,0.9); flex-direction: column; }
-  #mediaViewer img { max-width: 92vw; max-height: 88vh; object-fit: contain; border-radius: 4px; }
+  #mediaViewer img, #mediaViewer video { max-width: 92vw; max-height: 88vh; object-fit: contain; border-radius: 4px; }
+  #mediaViewer iframe { width: min(92vw, 900px); height: 84vh; border: 0; border-radius: 4px; background: #fff; }
+  #mediaViewerFileName { color: #fff; font-size: 14px; margin-bottom: 8px; text-align: center; padding: 0 20px; }
+  #mediaViewerDownload { color: #fff; text-decoration: underline; font-size: 13px; margin-top: 10px; }
+  #mediaViewerImg.hidden, #mediaViewerVideo.hidden, #mediaViewerFrame.hidden, #mediaViewerFileName.hidden, #mediaViewerDownload.hidden { display: none; }
   #closeMediaViewer {
     position: absolute; top: 16px; right: 20px; background: none; border: none; color: #fff;
     font-size: 32px; cursor: pointer; z-index: 1;
@@ -385,6 +389,8 @@
   .bubble-attachment-file {
     display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px;
     background: rgba(0,0,0,0.06); text-decoration: none; color: inherit; margin-bottom: 4px; font-size: 13px;
+    border: none; cursor: pointer; font-family: inherit; text-align: left; max-width: 220px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .bubble-row.mine .bubble-attachment-file { background: rgba(255,255,255,0.2); }
   #attachUploadProgress { font-size: 12px; color: var(--kyn-text-secondary); padding: 0 14px; }
@@ -439,7 +445,11 @@
 
   <div id="mediaViewer" class="modal-overlay hidden">
     <button id="closeMediaViewer">&times;</button>
-    <img id="mediaViewerImg" src="" alt="">
+    <img id="mediaViewerImg" src="" alt="" class="hidden">
+    <video id="mediaViewerVideo" src="" controls playsinline class="hidden"></video>
+    <iframe id="mediaViewerFrame" src="" class="hidden"></iframe>
+    <div id="mediaViewerFileName" class="hidden"></div>
+    <a id="mediaViewerDownload" href="" target="_blank" rel="noopener" class="hidden">⬇ Download</a>
   </div>
 
   <div id="newChatModal" class="modal-overlay hidden">
@@ -1013,13 +1023,24 @@
       if (typeof meta === 'string') { try { meta = JSON.parse(meta); } catch (_) { meta = null; } }
       const att = meta && meta.attachment;
       if (!att) return '';
-      if ((att.type || m.type) === 'image') {
+      const type = att.type || m.type;
+      // FIX (ATTACHMENTS-OPEN-IN-NEW-TAB): video/audio/document/file all used to
+      // render as <a target="_blank">, leaving the app entirely. Images already
+      // had an in-app viewer (#mediaViewer, data-view-image) — this extends the
+      // same modal to the other types instead of adding a second viewer.
+      if (type === 'image') {
         return `<img class="bubble-attachment-image" data-view-image="${escapeHtml(att.url)}" src="${escapeHtml(att.url)}" alt="${escapeHtml(att.originalName || 'image')}">`;
       }
-      const icon = { video: '🎬', audio: '🎵', document: '📄', file: '📎' }[att.type] || '📎';
-      return `<a class="bubble-attachment-file" href="${escapeHtml(att.url)}" target="_blank" rel="noopener">
+      if (type === 'video') {
+        return `<video class="bubble-attachment-video" data-view-video="${escapeHtml(att.url)}" src="${escapeHtml(att.url)}" muted playsinline preload="metadata"></video>`;
+      }
+      if (type === 'audio') {
+        return `<audio class="bubble-attachment-audio" src="${escapeHtml(att.url)}" controls></audio>`;
+      }
+      const icon = { document: '📄', file: '📎' }[type] || '📎';
+      return `<button type="button" class="bubble-attachment-file" data-view-file="${escapeHtml(att.url)}" data-file-name="${escapeHtml(att.originalName || 'Attachment')}" data-file-mime="${escapeHtml(att.mimeType || '')}">
                 ${icon} ${escapeHtml(att.originalName || 'Attachment')}
-              </a>`;
+              </button>`;
     }
 
     function replyPreviewHtml(m, chatId) {
@@ -2510,17 +2531,52 @@
       if (e.target.id === 'chatInfoModal') document.getElementById('chatInfoModal').classList.add('hidden');
     });
 
-    document.getElementById('closeMediaViewer').addEventListener('click', () => {
-      document.getElementById('mediaViewer').classList.add('hidden');
-    });
+    // FIX (ATTACHMENTS-OPEN-IN-NEW-TAB): #mediaViewer now handles image, video,
+    // PDF (inline iframe) and any other file type (name + download), instead
+    // of only images — see attachmentHtml() above for the matching markup.
+    function closeMediaViewer() {
+      const viewer = document.getElementById('mediaViewer');
+      viewer.classList.add('hidden');
+      const video = document.getElementById('mediaViewerVideo');
+      video.pause(); video.src = '';
+      document.getElementById('mediaViewerFrame').src = '';
+      ['mediaViewerImg', 'mediaViewerVideo', 'mediaViewerFrame', 'mediaViewerFileName', 'mediaViewerDownload']
+        .forEach(id => document.getElementById(id).classList.add('hidden'));
+    }
+    function openMediaViewer({ image, video, pdf, fileUrl, fileName }) {
+      closeMediaViewer();
+      const viewer = document.getElementById('mediaViewer');
+      if (image) {
+        const el = document.getElementById('mediaViewerImg'); el.src = image; el.classList.remove('hidden');
+      } else if (video) {
+        const el = document.getElementById('mediaViewerVideo'); el.src = video; el.classList.remove('hidden'); el.play().catch(() => {});
+      } else if (pdf) {
+        document.getElementById('mediaViewerFrame').src = pdf;
+        document.getElementById('mediaViewerFrame').classList.remove('hidden');
+      } else {
+        const nameEl = document.getElementById('mediaViewerFileName');
+        nameEl.textContent = fileName || 'Attachment'; nameEl.classList.remove('hidden');
+      }
+      if (fileUrl) {
+        const dl = document.getElementById('mediaViewerDownload');
+        dl.href = fileUrl; dl.classList.remove('hidden');
+      }
+      viewer.classList.remove('hidden');
+    }
+    document.getElementById('closeMediaViewer').addEventListener('click', closeMediaViewer);
     document.getElementById('mediaViewer').addEventListener('click', (e) => {
-      if (e.target.id === 'mediaViewer') document.getElementById('mediaViewer').classList.add('hidden');
+      if (e.target.id === 'mediaViewer') closeMediaViewer();
     });
     document.addEventListener('click', (e) => {
       const img = e.target.closest('[data-view-image]');
-      if (!img) return;
-      document.getElementById('mediaViewerImg').src = img.dataset.viewImage;
-      document.getElementById('mediaViewer').classList.remove('hidden');
+      if (img) { openMediaViewer({ image: img.dataset.viewImage, fileUrl: img.dataset.viewImage }); return; }
+      const video = e.target.closest('[data-view-video]');
+      if (video) { openMediaViewer({ video: video.dataset.viewVideo, fileUrl: video.dataset.viewVideo }); return; }
+      const file = e.target.closest('[data-view-file]');
+      if (file) {
+        const url = file.dataset.viewFile, mime = file.dataset.fileMime || '', name = file.dataset.fileName || 'Attachment';
+        openMediaViewer(mime === 'application/pdf' ? { pdf: url, fileUrl: url, fileName: name } : { fileUrl: url, fileName: name });
+      }
     });
 
     document.getElementById('newChatBtn').addEventListener('click', () => {

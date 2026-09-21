@@ -435,9 +435,24 @@ async function renderAdminProducts(container) {
     if (!_isAdmin()) { container.innerHTML = _pageShell('Products', _noAccess()); return; }
     container.innerHTML = _pageShell('Product Management', `<div style="padding:20px;text-align:center">⏳</div>`);
 
-    let filter = 'pending';
+    // FIX (DELETE/APPROVE/SUSPEND/REJECT KNOCK YOU BACK TO THE "PENDING" TAB):
+    // `filter` used to be a variable local to this render call, always
+    // initialized to 'pending', and every action handler below refreshed by
+    // calling window._jmNavMore('admin-products') — which re-invokes this
+    // whole function fresh, resetting filter to 'pending' every time. So
+    // deleting/approving/suspending/rejecting an item while looking at the
+    // Approved (or Rejected/Suspended) tab silently dumped you back onto
+    // Pending — which, combined with the admin/products filtering bug (see
+    // marketplace.controller.js's adminGetProducts), made it look like
+    // nothing had happened when you switched back to the tab you were on.
+    // Persisting the current filter on `window` and having the action
+    // handlers call window._admProductsLoad(currentFilter) directly (no
+    // navigation, no reset) keeps you on the tab you were actually looking
+    // at.
+    let filter = window.__admProductsFilter || 'pending';
     async function load(f) {
         filter = f;
+        window.__admProductsFilter = f;
         const r = await _api('GET', `/marketplace/admin/products?approval_status=${f}&limit=30`);
         const products = r?.data?.products || [];
         const total = r?.data?.total || 0;
@@ -487,20 +502,31 @@ async function renderAdminProducts(container) {
     load('pending');
 }
 
+function _refreshAdminProducts() {
+    // Refresh the list in place, on whatever tab the admin is actually
+    // looking at, instead of window._jmNavMore('admin-products') — which
+    // re-renders the whole page fresh and always lands back on "Pending"
+    // (see the FIX comment on `filter` in renderAdminProducts above).
+    if (typeof window._admProductsLoad === 'function') {
+        window._admProductsLoad(window.__admProductsFilter || 'pending');
+    } else {
+        window._jmNavMore('admin-products'); // page not currently open — fall back
+    }
+}
 window._admApprove = async (id) => {
     const r = await _api('POST', `/marketplace/admin/products/${id}/approve`);
-    if (r&&!r._error) { _toast('Product approved and live!','success','✅'); window._jmNavMore('admin-products'); }
+    if (r&&!r._error) { _toast('Product approved and live!','success','✅'); _refreshAdminProducts(); }
     else _toast(r?._error||'Failed','error','❌');
 };
 window._admSuspendProduct = async (id) => {
     if (!confirm('Suspend this product?')) return;
     await _api('POST', `/marketplace/admin/products/${id}/suspend`);
-    _toast('Product suspended','info','⏸️'); window._jmNavMore('admin-products');
+    _toast('Product suspended','info','⏸️'); _refreshAdminProducts();
 };
 window._admDeleteProduct = async (id) => {
     if (!confirm('Permanently remove this product?')) return;
     await _api('DELETE', `/marketplace/admin/products/${id}`);
-    _toast('Product removed','info','🗑️'); window._jmNavMore('admin-products');
+    _toast('Product removed','info','🗑️'); _refreshAdminProducts();
 };
 window._admRejectModal = function(id, title) {
     document.getElementById('admRejectModal')?.remove();
@@ -520,7 +546,7 @@ window._admReject = async (id) => {
     const reason = document.getElementById('admRejectReason')?.value?.trim() || 'Does not meet marketplace standards';
     document.getElementById('admRejectModal')?.remove();
     const r = await _api('POST', `/marketplace/admin/products/${id}/reject`, { reason });
-    if (r&&!r._error) { _toast('Product rejected. Seller notified.','info','❌'); window._jmNavMore('admin-products'); }
+    if (r&&!r._error) { _toast('Product rejected. Seller notified.','info','❌'); _refreshAdminProducts(); }
     else _toast(r?._error||'Failed','error','❌');
 };
 

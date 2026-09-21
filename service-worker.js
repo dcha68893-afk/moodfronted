@@ -92,7 +92,7 @@ const NETWORK_FIRST_PATTERNS = [
   // below. Swapped the dead legacy entries for the real, still-actively-
   // edited files group.html depends on today.
   /\/group\.html/i,/\/js\/groupMessaging\.client\.js/i,/\/js\/groupEncryption\.client\.js/i,/\/js\/group-platform\.js/i,/\/js\/group-message-local-db\.js/i,/\/js\/core\/groups\/group-cache-first\.js/i,/\/js\/group-chat-features\.js/i,/\/js\/group-message-cache\.js/i,
-  /\/js\/group-media-render\.js/i,/\/friend-core\.ui-bridge\.js/i,
+  /\/friend-core\.ui-bridge\.js/i,
   // ROOT-CAUSE FIX (fixes to the friend module silently not appearing after
   // deploy — "some changes show, others don't"): friend.html and friend.css
   // were already precached fresh on every SW install (CORE_STATIC_ASSETS
