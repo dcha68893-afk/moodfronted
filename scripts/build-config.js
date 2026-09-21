@@ -16,6 +16,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const os = require('os');
 
 const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
@@ -217,7 +218,24 @@ function validateJavaScript(dir) {
             validateJavaScript(file);
         } else if (entry.isFile() && entry.name.endsWith('.js')) {
             try {
-                execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
+                const source = fs.readFileSync(file, 'utf8');
+                // Node's --check treats .js as CommonJS here, but the Tools core is
+                // intentionally an ES-module graph. Validate import/export-bearing
+                // artifacts as temporary .mjs files instead of falsely rejecting
+                // valid module syntax.
+                const moduleSyntax = /^\s*(?:import|export)\b/m.test(source);
+                if (moduleSyntax) {
+                    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'necpa-jscheck-'));
+                    const tempFile = path.join(tempDir, 'check.mjs');
+                    try {
+                        fs.writeFileSync(tempFile, source, 'utf8');
+                        execFileSync(process.execPath, ['--check', tempFile], { stdio: 'pipe' });
+                    } finally {
+                        fs.rmSync(tempDir, { recursive: true, force: true });
+                    }
+                } else {
+                    execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
+                }
             } catch (error) {
                 const detail = error.stderr ? error.stderr.toString() : error.message;
                 throw new Error(`Invalid generated JavaScript: ${path.relative(ROOT, file)}\n${detail}`);

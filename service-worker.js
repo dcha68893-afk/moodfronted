@@ -24,7 +24,7 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.32.0';
+const SW_VERSION = '19.33.0';
 // FIX: bumped so activate() drops every existing cache immediately on this
 // deploy — anyone with a stale pre-rebuild group.html (or the old, now-
 // deleted group-core-*/group-os-* files, or the misspelled necpra-* icons
@@ -47,7 +47,7 @@ const SW_VERSION = '19.32.0';
 // and so kept running stale scripts (e.g. an old pwa-manager.js that expected the deleted pwa-mobile-install.js, which is
 // exactly "install option missing on phones but present on laptop"). Cache names must only ever move forward.
 // v63 also ships the Vibes/Status, group history and chat-list fixes, so every installed app drops its old copies once.
-const CACHE_NAME = 'necpa-static-v63';
+const CACHE_NAME = 'necpa-static-v64';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -58,7 +58,7 @@ const CORE_STATIC_ASSETS = [
   '/js/app.core.bootstrap.js','/js/app.core.session.js','/js/app.core.ui.js','/js/app.ui.auth.js',
   '/js/app.cache.js','/js/app.cache.unified.js','/js/authStorage.js','/js/app.offline.queue.js','/js/auth.session.manager.js',
   '/js/app.runtime.authority.js','/js/auth.account.limit.js','/js/google-auth.js','/js/app.offline.bootstrap.js',
-  '/friend.css','/css/suppress-webgl.css'
+  '/friend.css','/css/suppress-webgl.css','/js/status-runtime-hardening.js','/js/marketplace-category-images.js'
 ];
 
 const NETWORK_FIRST_PATTERNS = [
@@ -80,7 +80,7 @@ const NETWORK_FIRST_PATTERNS = [
   /\/status-core-transport\.js/i,/\/status-core-state\.js/i,/\/status-ui\.js/i,
   // status.html now hosts js/core/status/ProfessionalStatus.js (the whole Status UI); neither was
   // network-first, so a cached copy kept the old mobile layout after deploys.
-  /\/status\.html/i,/\/js\/core\/status\/ProfessionalStatus\.js/i,
+  /\/status\.html/i,/\/js\/core\/status\/ProfessionalStatus\.js/i,/\/js\/status-runtime-hardening\.js/i,/\/js\/marketplace-category-images\.js/i,
   // ROOT-CAUSE FIX (Groups panel showing blank on open / after "back to list",
   // group messages from other members never appearing): group.html was
   // rebuilt from scratch on 2026-09-15 as a single self-contained page —
@@ -148,7 +148,7 @@ const OFFLINE_SHELL='<!doctype html><html><head><meta charset="utf-8"><meta name
 
 async function navigation(request){
   const cache=await caches.open(CACHE_NAME);
-  try{const r=await fetch(request);if(r.ok){cache.put(request.url,r.clone()).catch(()=>{});return r;}}catch(_){}
+  try{let r=await fetch(request);if(r.ok){if(new URL(request.url).pathname==='/Tools.html'){try{let h=await r.text();const tag='<script src="/js/marketplace-category-images.js"></script>';if(h.includes('</body>')&&!h.includes(tag))h=h.replace('</body>',tag+'</body>');const headers=new Headers(r.headers);headers.set('content-type','text/html; charset=utf-8');r=new Response(h,{status:r.status,statusText:r.statusText,headers})}catch(_){}}cache.put(request.url,r.clone()).catch(()=>{});return r;}}catch(_){}
   const exact=await cache.match(request);if(exact)return exact;
   for(const u of ['/index.html','/','/friend.html','/chat.html']){const r=await cache.match(new URL(u,self.location.origin).href);if(r)return r;}
   return new Response(OFFLINE_SHELL,{status:200,headers:{'Content-Type':'text/html;charset=utf-8'}});
@@ -198,11 +198,11 @@ function encryptedBody(s){if(typeof s!=='string')return false;const t=s.trim();i
 self.addEventListener('push',event=>{
   if(!event.data)return;let data={};try{data=event.data.json();}catch(_){try{data={title:'Necpa',body:event.data.text()};}catch(__){return;}}
   const raw=String(data.body||data.message||'');const safe=encryptedBody(raw)?'You have a new message':(raw||'You have a new notification');const title=data.title||'Necpa';
-  const options={body:data.senderName?data.senderName+': '+safe:safe,icon:data.icon||'/icons/necpa-192.png',badge:data.badge||'/icons/necpa-192.png',tag:data.type==='message'||data.type==='new_message'?'msg-'+(data.chatId||'chat'):(data.tag||'necpa-notification'),data:data.data||{url:data.url||'/chat.html'},silent:data.silent===true,requireInteraction:data.requireInteraction||false,vibrate:Array.isArray(data.vibrate)?data.vibrate:(data.vibrate===false?[]:[200,100,200])};
-  event.waitUntil((async()=>{if(data.type==='message'||data.type==='new_message'){try{const chat=String(data.chatId||(data.data&&data.data.chatId)||''),map=self.__kynActiveChatByClient,cs=await self.clients.matchAll({type:'window',includeUncontrolled:true});if(chat&&cs.some(c=>c.focused&&map&&map.get(c.id)===chat))return;}catch(_){} }return self.registration.showNotification(title,options);})());
+  const chatId=String(data.chatId||(data.data&&data.data.chatId)||'');const tag=chatId?'chat-'+chatId:(data.tag||'necpa-notification');
+  const options={body:data.senderName?data.senderName+': '+safe:safe,icon:data.icon||'/icons/necpa-192.png',badge:data.badge||'/icons/necpa-192.png',tag,renotify:true,data:Object.assign({url:data.url||'/chat.html',chatId},data.data||{}),silent:data.silent===true,requireInteraction:data.requireInteraction||false,vibrate:Array.isArray(data.vibrate)?data.vibrate:(data.vibrate===false?[]:[200,100,200]),actions:[{action:'reply',title:'Reply',type:'text',placeholder:'Type a message…'},{action:'mark_read',title:'Mark as read'}]};
+  event.waitUntil((async()=>{if(data.type==='message'||data.type==='new_message'){try{const chat=chatId,map=self.__kynActiveChatByClient,cs=await self.clients.matchAll({type:'window',includeUncontrolled:true});if(chat&&cs.some(c=>c.focused&&map&&map.get(c.id)===chat))return;}catch(_){} }return self.registration.showNotification(title,options);})());
 });
 self.addEventListener('notificationclick',event=>{event.notification.close();const nd=event.notification.data||{};const url=nd.url||'/chat.html';
-  /* FIX (notification opens a NEW window instead of the chat): the old check c.url.includes(url) never matched an already-open
-     window (its URL is /chat.html, the notification's is /chat.html?chatId=..), so a second window was opened every time and the
-     deep link was only read at page load. Focus the existing app window and tell it what to open; only open a window if none exists. */
-  event.waitUntil(self.clients.matchAll({type:'window',includeUncontrolled:true}).then(async cs=>{const origin=self.location.origin;const app=cs.find(c=>c.url.indexOf(origin)===0&&/chat\.html|\/$/.test(c.url.split('?')[0]))||cs.find(c=>c.url.indexOf(origin)===0);if(app){try{if(app.focus)await app.focus();}catch(_){}try{app.postMessage({type:'KYN_NOTIFICATION_CLICK',data:nd,url});}catch(_){}return;}return self.clients.openWindow?self.clients.openWindow(url):null;}));});
+  event.waitUntil((async()=>{if(event.action==='reply'){const text=String(event.reply||'').trim();if(text){const headers={'Content-Type':'application/json'};if(nd.token)headers.Authorization=/^Bearer /i.test(nd.token)?nd.token:'Bearer '+nd.token;const r=await fetch('/api/messages',{method:'POST',headers,body:JSON.stringify({chatId:nd.chatId,content:text,type:'text'})}).catch(()=>null);if(r&&r.ok)return;}}
+    if(event.action==='mark_read'&&nd.chatId){await fetch('/api/messages/read',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chatId:nd.chatId})}).catch(()=>{});return;}
+    const cs=await self.clients.matchAll({type:'window',includeUncontrolled:true});const origin=self.location.origin;const app=cs.find(c=>c.url.indexOf(origin)===0&&/chat\.html|\/$/.test(c.url.split('?')[0]))||cs.find(c=>c.url.indexOf(origin)===0);if(app){try{await app.focus()}catch(_){}try{app.postMessage({type:'KYN_NOTIFICATION_CLICK',data:nd,url})}catch(_){}return;}return self.clients.openWindow?self.clients.openWindow(url):null;})());});
