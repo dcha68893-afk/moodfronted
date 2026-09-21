@@ -24,7 +24,7 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.29.2';
+const SW_VERSION = '19.29.3';
 // FIX: bumped so activate() drops every existing cache immediately on this
 // deploy — anyone with a stale pre-rebuild group.html (or the old, now-
 // deleted group-core-*/group-os-* files, or the misspelled necpra-* icons
@@ -35,7 +35,7 @@ const SW_VERSION = '19.29.2';
 // FIX (this deploy): js/config.js (brand rewriter no longer touches inline <script> text), group/E2E files and
 // Tool-core.part3.js all changed. Bumping the cache name makes every installed PWA/Android app drop the old copies
 // on next launch instead of running them for up to CACHE_MAX_AGE.
-const CACHE_NAME = 'necpa-static-v57';
+const CACHE_NAME = 'necpa-static-v58';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [

@@ -13,7 +13,7 @@ function install(){
   var b=document.getElementById('fabAddFriend');
   if(!b){
     b=document.createElement('button');b.id='fabAddFriend';b.type='button';b.title='Add friend';b.setAttribute('aria-label','Add friend');b.innerHTML='＋';
-    var s=document.createElement('style');s.textContent='#fabAddFriend{position:absolute;right:12px;top:50%;transform:translateY(-50%);width:40px;height:40px;border:1px solid var(--kyn-border,#e2e8f0);border-radius:12px;background:var(--kyn-bg-panel,#fff);color:var(--kyn-text-primary,#0f172a);font-size:24px;line-height:1;display:grid;place-items:center;z-index:100;cursor:pointer;box-shadow:0 5px 18px rgba(0,0,0,.1)}#fabAddFriend:hover{transform:translateY(-50%) scale(1.05)}';document.head.appendChild(s);
+    var s=document.createElement('style');s.textContent='#fabAddFriend{position:absolute;right:12px;top:50%;transform:translateY(-50%);width:40px;height:40px;border:1px solid var(--kyn-border);border-radius:12px;background:var(--kyn-bg-panel);color:var(--kyn-text-primary);font-size:24px;line-height:1;display:grid;place-items:center;z-index:100;cursor:pointer;box-shadow:0 5px 18px rgba(0,0,0,.1)}#fabAddFriend:hover{transform:translateY(-50%) scale(1.05)}';document.head.appendChild(s);
     if(getComputedStyle(header).position==='static')header.style.position='relative';header.appendChild(b);
   }
   if(!b.__friendsBound){b.__friendsBound=true;b.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();openFriends();},true);}

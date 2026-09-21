@@ -104,7 +104,7 @@
         || String(u.lastName || '').toLowerCase().indexOf(q) !== -1;
     });
     if (!filtered.length) {
-      results.innerHTML = '<div style="padding:18px;color:var(--kyn-text-secondary,#999);font-size:13px;">'
+      results.innerHTML = '<div style="padding:18px;color:var(--kyn-text-secondary);font-size:13px;">'
         + (q ? 'No friends match that search.' : 'Loading your friends…') + '</div>';
       return;
     }
@@ -113,7 +113,7 @@
       var avatar = escapeHtml(u.avatar || '/icons/necpa-192.png');
       return '<div class="new-chat-result-item" data-necpra-friend-chat="1" data-user-id="' + u.id
         + '" data-user-name="' + name + '" data-user-avatar="' + avatar + '"><img src="' + avatar
-        + '" alt=""><span>' + name + '</span><span style="margin-left:auto;font-size:11px;color:var(--kyn-text-secondary,#999);">Friend</span></div>';
+        + '" alt=""><span>' + name + '</span><span style="margin-left:auto;font-size:11px;color:var(--kyn-text-secondary);">Friend</span></div>';
     }).join('');
     results.querySelectorAll('[data-necpra-friend-chat]').forEach(function (el) {
       el.addEventListener('click', function (e) {

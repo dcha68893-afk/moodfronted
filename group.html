@@ -1,5 +1,5 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Groups</title><script src="/js/runtime-config.js"></script><script src="/js/config.js"></script><script src="/js/theme.engine.js"></script><script src="/js/e2e-encryption.js"></script><script src="/js/e2e-session-init.js" defer></script><script src="/js/settings-broadcast-listener.js"></script><script src="/js/necpa-session-resilience.js"></script><script src="js/core/groups/group-cache-first.js"></script><script src="js/groupMessaging.client.js"></script><script src="js/group-platform.js"></script><style>
-:root{--bg:var(--kyn-bg-root,#f8fafc);--surface:var(--kyn-bg-panel,#fff);--surface2:var(--kyn-bg-input,#f1f5f9);--border:var(--kyn-border,#e2e8f0);--text:var(--kyn-text-primary,#0f172a);--muted:var(--kyn-text-muted,#64748b);--primary:var(--kyn-accent-secondary,#2563eb)}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden}body{background:var(--bg);color:var(--text);font:14px system-ui,-apple-system,"Segoe UI",Roboto,Arial}button,input,textarea{font:inherit}button{cursor:pointer}.layout{height:100%;display:grid;grid-template-columns:minmax(250px,32%) 1fr}.sidebar,.panel{min-width:0;min-height:0}.sidebar{border-right:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column}.side-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--border);font-weight:800}.toolbar{display:flex;gap:7px;padding:10px}.search{flex:1;min-width:0;padding:9px;border:1px solid var(--border);border-radius:11px;background:var(--surface2);color:inherit}.refresh{border:1px solid var(--border);border-radius:10px;background:var(--surface2);color:inherit;padding:8px 11px}.groups{flex:1;overflow:auto;padding:0 10px}.group{width:100%;display:flex;align-items:center;gap:10px;padding:10px;border:1px solid transparent;border-radius:13px;background:transparent;color:inherit;text-align:left;margin-bottom:5px}.group:hover,.group.active{background:var(--surface2);border-color:var(--border)}.avatar{width:43px;height:43px;border-radius:13px;background:linear-gradient(135deg,#dbeafe,#c4b5fd);display:grid;place-items:center;font-weight:800;color:#1e40af;flex:0 0 auto;background-size:cover;background-position:center}.groupmain{min-width:0;flex:1}.name{font-weight:750;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.meta{font-size:11px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.empty{text-align:center;color:var(--muted);padding:40px 18px}
+:root{--bg:var(--kyn-bg-root);--surface:var(--kyn-bg-panel);--surface2:var(--kyn-bg-input);--border:var(--kyn-border);--text:var(--kyn-text-primary);--muted:var(--kyn-text-muted);--primary:var(--kyn-accent-secondary)}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden}body{background:var(--bg);color:var(--text);font:14px system-ui,-apple-system,"Segoe UI",Roboto,Arial}button,input,textarea{font:inherit}button{cursor:pointer}.layout{height:100%;display:grid;grid-template-columns:minmax(250px,32%) 1fr}.sidebar,.panel{min-width:0;min-height:0}.sidebar{border-right:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column}.side-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--border);font-weight:800}.toolbar{display:flex;gap:7px;padding:10px}.search{flex:1;min-width:0;padding:9px;border:1px solid var(--border);border-radius:11px;background:var(--surface2);color:inherit}.refresh{border:1px solid var(--border);border-radius:10px;background:var(--surface2);color:inherit;padding:8px 11px}.groups{flex:1;overflow:auto;padding:0 10px}.group{width:100%;display:flex;align-items:center;gap:10px;padding:10px;border:1px solid transparent;border-radius:13px;background:transparent;color:inherit;text-align:left;margin-bottom:5px}.group:hover,.group.active{background:var(--surface2);border-color:var(--border)}.avatar{width:43px;height:43px;border-radius:13px;background:linear-gradient(135deg,#dbeafe,#c4b5fd);display:grid;place-items:center;font-weight:800;color:#1e40af;flex:0 0 auto;background-size:cover;background-position:center}.groupmain{min-width:0;flex:1}.name{font-weight:750;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.meta{font-size:11px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.empty{text-align:center;color:var(--muted);padding:40px 18px}
 .unread-badge{flex:0 0 auto;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:#ef4444;color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;line-height:1}
 /* No in-panel header any more: the parent shell's #globalHeader owns the
    group name, back arrow, call/video and the three-dot "more" menu (it
@@ -162,7 +162,7 @@ function mergeGroupMessages(incoming){
   if(changed){S.messages=merged;renderMessages(false);}return merged;
 }
 function renderMessages(scroll=true){
-  const box=$('messages');if(!box)return;box.replaceChildren();
+  const box=$('messages');if(!box)return;box.replaceChildren();S.messages=filterHiddenForMe(S.messages);
   if(!S.messages.length)box.innerHTML='<div class="empty">No messages yet.</div>';else S.messages.forEach(m=>box.append(buildRow(m)));
   if(scroll)box.scrollTop=box.scrollHeight;
   const confirmed=S.messages.filter(m=>!m._optimistic);
@@ -234,8 +234,11 @@ function buildRow(m){const id=String(m.id||m.messageId||'');const pendingDecrypt
   const pinBtn=document.createElement('button');pinBtn.type='button';pinBtn.textContent='📌 Pin message';pinBtn.onclick=()=>{closeMsgMenu();pinMessage(id)};menu.append(pinBtn);
   if(mine&&!media?.url){
     const editBtn=document.createElement('button');editBtn.type='button';editBtn.textContent='✎ Edit';editBtn.onclick=()=>{closeMsgMenu();startEdit(id,m.content||'')};menu.append(editBtn);
-    const delBtn=document.createElement('button');delBtn.type='button';delBtn.textContent='🗑 Delete';delBtn.onclick=()=>{closeMsgMenu();deleteMessage(id)};menu.append(delBtn);
   }
+  /* NEW: every member can remove ANY message (received ones included) from their OWN view. It never touches what other
+     members see. "Delete for everyone" stays available only for the sender's own messages. */
+  const delMeBtn=document.createElement('button');delMeBtn.type='button';delMeBtn.textContent='🗑 Delete for me';delMeBtn.onclick=()=>{closeMsgMenu();deleteMessage(id,false)};menu.append(delMeBtn);
+  if(mine){const delAllBtn=document.createElement('button');delAllBtn.type='button';delAllBtn.textContent='🗑 Delete for everyone';delAllBtn.onclick=()=>{closeMsgMenu();deleteMessage(id,true)};menu.append(delAllBtn);}
   b.append(menu);
   row.append(b);return row}
 
@@ -247,7 +250,18 @@ function startEdit(id,currentContent){const next=prompt('Edit message:',currentC
   }catch(e){alert(e.message||'Could not encrypt the edited message');return}
   api(`/group-messages/message/${encodeURIComponent(id)}`,{method:'PATCH',body:JSON.stringify({content:outgoing})}).then(()=>{const idx=S.messages.findIndex(m=>String(m.id||m.messageId)===String(id));if(idx!==-1){S.messages[idx]={...S.messages[idx],content:trimmed,isEdited:true};renderMessages(false)}}).catch(e=>alert(e.message||'Could not edit message'))
 })()}
-function deleteMessage(id){const forEveryone=confirm('Delete for everyone? Click Cancel to delete just for you.');api(`/group-messages/message/${encodeURIComponent(id)}?deleteForEveryone=${forEveryone}`,{method:'DELETE'}).then(()=>{S.messages=S.messages.filter(m=>String(m.id||m.messageId)!==String(id));renderMessages(false)}).catch(e=>alert(e.message||'Could not delete message'))}
+/* ── Delete for me ─────────────────────────────────────────────────────────
+   Stored per member (userId + group) so it survives reloads/cache-first hydration and works even against a backend that
+   has not been updated yet. The server also records it (metadata.deletedFor) so it follows the member across devices. */
+const hiddenKey=gid=>`kyn_group_hidden_v1_${uid()}_${gid}`;
+function hiddenSet(gid){try{return new Set(JSON.parse(localStorage.getItem(hiddenKey(gid))||'[]').map(String))}catch(_){return new Set()}}
+function hideForMe(gid,id){try{const s=hiddenSet(gid);s.add(String(id));localStorage.setItem(hiddenKey(gid),JSON.stringify([...s].slice(-3000)))}catch(_){}}
+function filterHiddenForMe(list){const gid=S.current?.id;if(!gid)return list;const hs=hiddenSet(gid),meS=String(uid());return list.filter(m=>{if(m._optimistic)return true;const id=m.id??m.messageId;if(id!=null&&hs.has(String(id)))return false;const df=m.metadata?.deletedFor;return !(Array.isArray(df)&&df.map(String).includes(meS))})}
+function deleteMessage(id,forEveryone){const gid=S.current?.id;
+  if(!confirm(forEveryone?'Delete this message for everyone in the group?':'Delete this message just for you? Other members will still see it.'))return;
+  const drop=()=>{S.messages=S.messages.filter(m=>String(m.id||m.messageId)!==String(id));renderMessages(false)};
+  if(!forEveryone){hideForMe(gid,id);drop()}
+  api(`/group-messages/message/${encodeURIComponent(id)}?deleteForEveryone=${forEveryone?'true':'false'}`,{method:'DELETE'}).then(()=>{if(forEveryone)drop()}).catch(e=>{if(forEveryone)alert(e.message||'Could not delete message');else console.warn('[GroupMessage] delete-for-me saved locally; server sync deferred',e?.message||e)})}
 
 // ── Mentions ─────────────────────────────────────────────────────────────
 // Lightweight @name highlighting in rendered messages, plus an autocomplete
@@ -590,6 +604,10 @@ window.addEventListener('kyn:group:message',handleRealtime);
 window.addEventListener('message',e=>{
   const d=e.data;if(!d||typeof d!=='object')return;
   if(d.type==='group:message'||d.type==='GROUP_MESSAGE'){handleRealtime({detail:d});return}
+  if(d.type==='group:message:deleted'){const p=d.payload||d.data||d;if(!p||String(p.groupId)!==String(S.current?.id))return;
+    const mineFromOtherDevice=Number(p.deletedBy)===Number(uid());
+    /* a "delete for me" by someone else must NEVER remove the message here; only delete-for-everyone (or my own action) does */
+    if(p.deleteForEveryone===true||p.deleteForEveryone==='true'||mineFromOtherDevice){if(mineFromOtherDevice&&!(p.deleteForEveryone===true||p.deleteForEveryone==='true'))hideForMe(S.current.id,p.messageId);S.messages=S.messages.filter(m=>String(m.id||m.messageId)!==String(p.messageId));renderMessages(false)}return}
   // Parent's own back arrow (#hdrGroupBack) posts this instead of touching
   // our DOM directly — same contract message.html's compose panel already
   // answers to for 1:1 chats.

@@ -28,15 +28,15 @@
   body {
     margin: 0; height: 100vh; display: flex; overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: var(--kyn-bg-panel, #fff); color: var(--kyn-text-primary, #111b21);
+    background: var(--kyn-bg-panel); color: var(--kyn-text-primary);
   }
   #convListPanel {
-    width: 320px; min-width: 260px; border-right: 1px solid var(--kyn-border, #e2e2e2);
+    width: 320px; min-width: 260px; border-right: 1px solid var(--kyn-border);
     display: flex; flex-direction: column; overflow: hidden;
   }
   #convListHeader {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 12px 14px; font-weight: 600; border-bottom: 1px solid var(--kyn-border, #f0f0f0);
+    padding: 12px 14px; font-weight: 600; border-bottom: 1px solid var(--kyn-border);
   }
   #newChatBtn {
     background: none; border: none; font-size: 18px; cursor: pointer;
@@ -44,7 +44,7 @@
     display: flex; align-items: center; justify-content: center;
     transition: background-color 0.15s ease, transform 0.1s ease;
   }
-  #newChatBtn:hover { background: var(--kyn-bg-hover, #f0f0f0); }
+  #newChatBtn:hover { background: var(--kyn-bg-hover); }
   #newChatBtn:active { transform: scale(0.92); }
   /* FIX (duplicate "New chat" button): chat.html's global header already
      shows a "New chat" pencil icon for the messages page (see
@@ -64,10 +64,10 @@
     display: flex; align-items: center; justify-content: center;
     transition: background-color 0.15s ease, transform 0.1s ease;
   }
-  #archivedLinkBtn:hover { background: var(--kyn-bg-hover, #f0f0f0); }
+  #archivedLinkBtn:hover { background: var(--kyn-bg-hover); }
   #archivedLinkBtn:active { transform: scale(0.92); }
   .unarchive-btn {
-    background: var(--kyn-accent-primary, #22c55e); color: #fff; border: none; border-radius: 14px;
+    background: var(--kyn-accent-primary); color: #fff; border: none; border-radius: 14px;
     padding: 5px 12px; font-size: 12px; cursor: pointer; flex-shrink: 0;
   }
   #convList { flex: 1; overflow-y: auto; }
@@ -77,16 +77,16 @@
   }
   .modal-overlay.hidden { display: none; }
   .modal-box {
-    background: var(--kyn-bg-panel, #fff); border-radius: 12px; width: 90%; max-width: 380px;
+    background: var(--kyn-bg-panel); border-radius: 12px; width: 90%; max-width: 380px;
     max-height: 70vh; display: flex; flex-direction: column; overflow: hidden;
   }
   .modal-header {
     display: flex; align-items: center; justify-content: space-between; padding: 14px;
-    font-weight: 600; border-bottom: 1px solid var(--kyn-border, #eee);
+    font-weight: 600; border-bottom: 1px solid var(--kyn-border);
   }
   #closeNewChatModal { background: none; border: none; font-size: 20px; cursor: pointer; }
   #newChatSearchInput {
-    margin: 10px 14px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--kyn-border, #ddd);
+    margin: 10px 14px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--kyn-border);
     font-size: 14px;
   }
   #newChatSearchInput.hidden { display: none; }
@@ -94,7 +94,7 @@
   .new-chat-result-item {
     display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer;
   }
-  .new-chat-result-item:hover { background: var(--kyn-bg-hover, #f5f5f5); }
+  .new-chat-result-item:hover { background: var(--kyn-bg-hover); }
   .new-chat-result-item img { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; background: #ccc; }
   /* FIX (start-chat should be a full screen like WhatsApp's "Select
      contact", not a small centered popup): #newChatModal reuses the
@@ -104,7 +104,7 @@
      header goes from [title | ✕] to [← | title (flex) | 🔍], matching the
      back-button + collapsed-search-icon pattern in the WhatsApp screenshot,
      instead of an always-visible search box. */
-  #newChatModal.modal-overlay { align-items: stretch; justify-content: stretch; background: var(--kyn-bg-panel, #fff); }
+  #newChatModal.modal-overlay { align-items: stretch; justify-content: stretch; background: var(--kyn-bg-panel); }
   #newChatModal .modal-box { width: 100%; max-width: 100%; height: 100%; max-height: 100%; border-radius: 0; display: flex; flex-direction: column; }
   #newChatModal .modal-header { justify-content: flex-start; gap: 4px; }
   #newChatModal .modal-header span { flex: 1; }
@@ -119,19 +119,19 @@
   .new-chat-result-item.broadcast-mode { cursor: pointer; }
   .new-chat-result-item .broadcast-checkbox { width: 20px; height: 20px; margin-left: auto; flex-shrink: 0; cursor: pointer; }
   #broadcastComposeBar {
-    border-top: 1px solid var(--kyn-border, #e2e2e2); padding: 10px 14px;
-    display: flex; flex-direction: column; gap: 8px; background: var(--kyn-bg-input, #f7f7f8);
+    border-top: 1px solid var(--kyn-border); padding: 10px 14px;
+    display: flex; flex-direction: column; gap: 8px; background: var(--kyn-bg-input);
   }
   #broadcastComposeBar.hidden { display: none; }
-  #broadcastSelectedCount { font-size: 12px; color: var(--kyn-text-secondary, #777); }
+  #broadcastSelectedCount { font-size: 12px; color: var(--kyn-text-secondary); }
   #broadcastComposeRow { display: flex; align-items: center; gap: 8px; }
   #broadcastComposeInput {
-    flex: 1; border: 1px solid var(--kyn-border, #ddd); border-radius: 20px; padding: 9px 14px;
+    flex: 1; border: 1px solid var(--kyn-border); border-radius: 20px; padding: 9px 14px;
     font-size: 14px; font-family: inherit; resize: none; max-height: 90px;
-    background: var(--kyn-bg-panel, #fff); color: var(--kyn-text-primary, #111b21);
+    background: var(--kyn-bg-panel); color: var(--kyn-text-primary);
   }
   #broadcastSendBtn {
-    background: var(--kyn-accent-primary, #22c55e); color: #fff; border: none; border-radius: 50%;
+    background: var(--kyn-accent-primary); color: #fff; border: none; border-radius: 50%;
     width: 40px; height: 40px; flex-shrink: 0; font-size: 16px; cursor: pointer;
     display: flex; align-items: center; justify-content: center;
   }
@@ -141,23 +141,23 @@
     background: none; border: none; font-size: 18px; cursor: pointer;
     width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
   }
-  #closeNewChatModal:hover, #newChatSearchToggleBtn:hover { background: var(--kyn-bg-hover, #f0f0f0); }
+  #closeNewChatModal:hover, #newChatSearchToggleBtn:hover { background: var(--kyn-bg-hover); }
   .conv-item {
     display: flex; align-items: center; gap: 10px; padding: 12px 14px; cursor: pointer;
-    border-bottom: 1px solid var(--kyn-border, #f0f0f0);
+    border-bottom: 1px solid var(--kyn-border);
   }
-  .conv-item:hover, .conv-item.active { background: var(--kyn-bg-hover, #f5f5f5); }
+  .conv-item:hover, .conv-item.active { background: var(--kyn-bg-hover); }
   .conv-avatar { width: 44px; height: 44px; border-radius: 50%; background: #ccc; flex-shrink: 0; object-fit: cover; }
   .conv-meta { flex: 1; min-width: 0; }
   .conv-name { font-weight: 600; font-size: 14px; }
-  .conv-preview { font-size: 13px; color: var(--kyn-text-secondary, #777); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .conv-preview { font-size: 13px; color: var(--kyn-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .unread-badge {
-    background: var(--kyn-accent-primary, #22c55e); color: #fff; border-radius: 999px;
+    background: var(--kyn-accent-primary); color: #fff; border-radius: 999px;
     font-size: 11px; padding: 2px 7px; min-width: 18px; text-align: center;
   }
   #chatPanel { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   #chatHeader {
-    padding: 12px 16px; border-bottom: 1px solid var(--kyn-border, #e2e2e2);
+    padding: 12px 16px; border-bottom: 1px solid var(--kyn-border);
     display: flex; align-items: center; gap: 10px;
   }
   #backBtn {
@@ -166,16 +166,16 @@
     align-items: center; justify-content: center;
     transition: background-color 0.15s ease, transform 0.1s ease;
   }
-  #backBtn:hover { background: var(--kyn-bg-hover, #f0f0f0); }
+  #backBtn:hover { background: var(--kyn-bg-hover); }
   #backBtn:active { transform: scale(0.92); }
-  #messageLog { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 6px; background: var(--kyn-bg-chat, #efeae2); }
+  #messageLog { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 6px; background: var(--kyn-bg-chat); }
   .bubble-row { display: flex; }
   .bubble-row.mine { justify-content: flex-end; }
   .bubble {
     max-width: 70%; padding: 8px 12px; border-radius: 14px; font-size: 14px; line-height: 1.4;
-    background: var(--kyn-bubble-recv, #fff); color: var(--kyn-bubble-recv-text, #111b21); word-wrap: break-word;
+    background: var(--kyn-bubble-recv); color: var(--kyn-bubble-recv-text); word-wrap: break-word;
   }
-  .bubble-row.mine .bubble { background: var(--kyn-bubble-sent, #d9fdd3); color: var(--kyn-bubble-sent-text, #111b21); }
+  .bubble-row.mine .bubble { background: var(--kyn-bubble-sent); color: var(--kyn-bubble-sent-text); }
   .bubble-meta { font-size: 10px; opacity: 0.65; margin-top: 3px; text-align: right; }
   .bubble-row.failed .bubble { outline: 2px solid #e04b4b; }
   .bubble-deleted { font-style: italic; opacity: 0.6; }
@@ -208,7 +208,7 @@
     width: 22px; height: 22px; flex-shrink: 0; align-self: center; margin: 0 6px; cursor: pointer;
   }
   .bubble-row.selecting { align-items: center; cursor: pointer; }
-  .bubble-row.selected .bubble { outline: 2px solid var(--kyn-accent-primary, #22c55e); }
+  .bubble-row.selected .bubble { outline: 2px solid var(--kyn-accent-primary); }
   #selectionActions {
     display: flex; align-items: center; gap: 12px; flex: 1;
   }
@@ -240,8 +240,8 @@
   #chatHeader { display: none; }
   #chatHeader.selection-active { display: flex; }
   .bubble-context-menu {
-    position: fixed; z-index: 1500; background: var(--kyn-bg-panel, #fff);
-    border: 1px solid var(--kyn-border, #ddd); border-radius: 12px; box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+    position: fixed; z-index: 1500; background: var(--kyn-bg-panel);
+    border: 1px solid var(--kyn-border); border-radius: 12px; box-shadow: 0 6px 20px rgba(0,0,0,0.2);
     display: flex; flex-direction: column; min-width: 170px; overflow: hidden; padding: 6px 0;
     animation: kynMenuPop 0.12s ease-out;
   }
@@ -251,27 +251,27 @@
   }
   .bubble-context-menu button {
     background: none; border: none; text-align: left; padding: 9px 16px; font-size: 13.5px; cursor: pointer;
-    color: var(--kyn-text-primary, #111b21); transition: background-color 0.12s ease;
+    color: var(--kyn-text-primary); transition: background-color 0.12s ease;
   }
-  .bubble-context-menu button:hover { background: var(--kyn-bg-hover, #f0f0f0); }
-  .status-reply-card{margin-bottom:6px;padding:9px 11px;border-radius:12px;border:1px solid var(--kyn-border,#dfe3e8);background:rgba(34,197,94,.08);max-width:100%}
+  .bubble-context-menu button:hover { background: var(--kyn-bg-hover); }
+  .status-reply-card{margin-bottom:6px;padding:9px 11px;border-radius:12px;border:1px solid var(--kyn-border);background:rgba(34,197,94,.08);max-width:100%}
   .status-reply-head{display:flex;align-items:center;gap:7px;font-size:12px}
-  .status-reply-icon{width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:var(--kyn-accent-primary,#22c55e);color:#fff;font-size:11px}
-  .status-reply-caption{margin-top:5px;font-size:11px;color:var(--kyn-text-secondary,#667085);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .status-reply-icon{width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:var(--kyn-accent-primary);color:#fff;font-size:11px}
+  .status-reply-caption{margin-top:5px;font-size:11px;color:var(--kyn-text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .status-reply-text{margin-top:7px;font-size:14px;white-space:pre-wrap;word-break:break-word}
   .status-reply-emoji{margin-top:4px;font-size:38px;line-height:1.05}
   .reply-quote {
-    border-left: 3px solid var(--kyn-accent-primary, #22c55e); padding: 4px 8px; margin-bottom: 4px;
+    border-left: 3px solid var(--kyn-accent-primary); padding: 4px 8px; margin-bottom: 4px;
     font-size: 12px; opacity: 0.75; cursor: pointer; background: rgba(0,0,0,0.04); border-radius: 4px;
   }
   #replyBar {
     display: flex; align-items: center; justify-content: space-between; padding: 8px 14px;
-    background: var(--kyn-bg-input, #f0f2f5); border-top: 1px solid var(--kyn-border, #e2e2e2); font-size: 13px;
+    background: var(--kyn-bg-input); border-top: 1px solid var(--kyn-border); font-size: 13px;
   }
   .reply-bar-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #cancelReplyBtn { background: none; border: none; font-size: 18px; cursor: pointer; }
-  .date-separator { text-align: center; font-size: 12px; color: var(--kyn-text-secondary,#999); margin: 10px 0; }
-  .date-separator span { background: var(--kyn-bg-input,#f0f2f5); padding: 3px 10px; border-radius: 10px; }
+  .date-separator { text-align: center; font-size: 12px; color: var(--kyn-text-secondary); margin: 10px 0; }
+  .date-separator span { background: var(--kyn-bg-input); padding: 3px 10px; border-radius: 10px; }
   .bubble-reactions { margin-top: 2px; font-size: 14px; }
   .decrypt-retry { cursor: pointer; text-decoration: underline dotted; opacity: 0.8; }
   .decrypt-pending { opacity: 0.6; font-style: italic; }
@@ -290,22 +290,22 @@
   #chatHeaderName { flex: 1; }
   #chatSearchBar {
     display: flex; align-items: center; gap: 8px; padding: 8px 14px;
-    border-bottom: 1px solid var(--kyn-border, #e2e2e2); background: var(--kyn-bg-input, #f0f2f5);
+    border-bottom: 1px solid var(--kyn-border); background: var(--kyn-bg-input);
   }
   #chatSearchBar.hidden { display: none; }
-  #chatSearchInput { flex: 1; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--kyn-border, #ddd); font-size: 13px; }
-  #chatSearchCount { font-size: 12px; color: var(--kyn-text-secondary, #999); white-space: nowrap; }
+  #chatSearchInput { flex: 1; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--kyn-border); font-size: 13px; }
+  #chatSearchCount { font-size: 12px; color: var(--kyn-text-secondary); white-space: nowrap; }
   #closeChatSearchBtn { background: none; border: none; font-size: 18px; cursor: pointer; }
   .search-hit .bubble { outline: 2px solid #f5a623; }
   .chat-info-header { text-align: center; padding: 24px 14px; }
   .chat-info-avatar { width: 88px; height: 88px; border-radius: 50%; object-fit: cover; margin-bottom: 10px; }
   .chat-info-name { font-size: 16px; font-weight: 600; }
-  .chat-info-section { padding: 12px 14px; border-top: 1px solid var(--kyn-border, #eee); }
-  .chat-info-section-title { font-size: 12px; font-weight: 600; color: var(--kyn-text-secondary, #999); margin-bottom: 8px; text-transform: uppercase; }
+  .chat-info-section { padding: 12px 14px; border-top: 1px solid var(--kyn-border); }
+  .chat-info-section-title { font-size: 12px; font-weight: 600; color: var(--kyn-text-secondary); margin-bottom: 8px; text-transform: uppercase; }
   .chat-info-media-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
   .chat-info-media-grid img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; cursor: pointer; }
   .chat-info-doc { display: block; padding: 6px 0; font-size: 13px; color: inherit; text-decoration: none; }
-  .chat-info-empty { font-size: 13px; color: var(--kyn-text-secondary, #999); }
+  .chat-info-empty { font-size: 13px; color: var(--kyn-text-secondary); }
   #chatHeaderActions { display: flex; gap: 2px; }
   /* VISUAL POLISH (requested behavior): unified sizing/centering/transition
      rules across every icon button in this module (header actions, emoji,
@@ -318,7 +318,7 @@
     display: flex; align-items: center; justify-content: center;
     transition: background-color 0.15s ease, transform 0.1s ease;
   }
-  .header-icon-btn:hover { background: var(--kyn-bg-hover, #f0f0f0); }
+  .header-icon-btn:hover { background: var(--kyn-bg-hover); }
   .header-icon-btn:active { transform: scale(0.92); }
   .header-icon-btn:disabled { opacity: 0.35; cursor: default; }
   .header-icon-btn:disabled:hover { background: none; }
@@ -331,11 +331,11 @@
     display: flex; align-items: center; justify-content: center;
     transition: background-color 0.15s ease, transform 0.1s ease, color 0.15s ease;
   }
-  #emojiBtn:hover { background: var(--kyn-bg-hover, #f0f0f0); color: var(--kyn-accent-primary, #22c55e); }
+  #emojiBtn:hover { background: var(--kyn-bg-hover); color: var(--kyn-accent-primary); }
   #emojiBtn:active { transform: scale(0.92); }
   #emojiPicker {
-    position: absolute; bottom: 60px; right: 10px; background: var(--kyn-bg-panel, #fff);
-    border: 1px solid var(--kyn-border, #ddd); border-radius: 14px; padding: 10px;
+    position: absolute; bottom: 60px; right: 10px; background: var(--kyn-bg-panel);
+    border: 1px solid var(--kyn-border); border-radius: 14px; padding: 10px;
     display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; box-shadow: 0 6px 20px rgba(0,0,0,0.16);
   }
   #emojiPicker.hidden { display: none; }
@@ -343,16 +343,16 @@
     background: none; border: none; font-size: 20px; cursor: pointer; padding: 6px; border-radius: 8px;
     display: flex; align-items: center; justify-content: center; transition: background-color 0.15s ease, transform 0.1s ease;
   }
-  .emoji-option:hover { background: var(--kyn-bg-hover, #f0f0f0); transform: scale(1.12); }
-  #composeBar { display: flex; align-items: flex-end; gap: 6px; padding: 10px; border-top: 1px solid var(--kyn-border, #e2e2e2); position: relative; }
+  .emoji-option:hover { background: var(--kyn-bg-hover); transform: scale(1.12); }
+  #composeBar { display: flex; align-items: flex-end; gap: 6px; padding: 10px; border-top: 1px solid var(--kyn-border); position: relative; }
   #composeInput {
-    flex: 1; border-radius: 22px; border: 1px solid var(--kyn-border, #ddd);
+    flex: 1; border-radius: 22px; border: 1px solid var(--kyn-border);
     padding: 10px 16px; font-size: 14px; resize: none; max-height: 120px;
     transition: border-color 0.15s ease;
   }
-  #composeInput:focus { outline: none; border-color: var(--kyn-accent-primary, #22c55e); }
+  #composeInput:focus { outline: none; border-color: var(--kyn-accent-primary); }
   #sendBtn {
-    background: linear-gradient(135deg, var(--kyn-accent-primary, #22c55e), var(--kyn-accent-secondary, #16a34a));
+    background: linear-gradient(135deg, var(--kyn-accent-primary), var(--kyn-accent-secondary));
     color: #fff; border: none; border-radius: 50%;
     width: 42px; height: 42px; cursor: pointer; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
@@ -363,7 +363,7 @@
   #sendBtn:active:not(:disabled) { transform: scale(0.9); }
   #sendBtn:disabled { opacity: 0.45; cursor: default; box-shadow: none; }
   #attachBtn, #emojiBtn {
-    color: var(--kyn-text-secondary, #667781);
+    color: var(--kyn-text-secondary);
   }
   #attachBtn {
     background: none; border: none; cursor: pointer; flex-shrink: 0;
@@ -372,7 +372,7 @@
     transition: background-color 0.15s ease, transform 0.1s ease, color 0.15s ease;
   }
   #attachBtn svg { transform: rotate(45deg); }
-  #attachBtn:hover { background: var(--kyn-bg-hover, #f0f0f0); color: var(--kyn-accent-primary, #22c55e); }
+  #attachBtn:hover { background: var(--kyn-bg-hover); color: var(--kyn-accent-primary); }
   #attachBtn:active { transform: scale(0.92); }
   #attachBtn:disabled { opacity: 0.5; cursor: default; }
   .bubble-attachment-image { max-width: 220px; max-height: 220px; border-radius: 10px; display: block; margin-bottom: 4px; cursor: pointer; }
@@ -387,17 +387,17 @@
     background: rgba(0,0,0,0.06); text-decoration: none; color: inherit; margin-bottom: 4px; font-size: 13px;
   }
   .bubble-row.mine .bubble-attachment-file { background: rgba(255,255,255,0.2); }
-  #attachUploadProgress { font-size: 12px; color: var(--kyn-text-secondary,#999); padding: 0 14px; }
-  .empty-conv-list { padding: 60px 24px; text-align: center; color: var(--kyn-text-secondary, #999); }
+  #attachUploadProgress { font-size: 12px; color: var(--kyn-text-secondary); padding: 0 14px; }
+  .empty-conv-list { padding: 60px 24px; text-align: center; color: var(--kyn-text-secondary); }
   .empty-conv-icon { font-size: 40px; margin-bottom: 14px; }
-  .empty-conv-title { font-size: 15px; font-weight: 600; color: var(--kyn-text-primary, #333); margin-bottom: 4px; }
+  .empty-conv-title { font-size: 15px; font-weight: 600; color: var(--kyn-text-primary); margin-bottom: 4px; }
   .empty-conv-subtitle { font-size: 13px; margin-bottom: 16px; }
   #emptyStateNewChatBtn {
-    background: var(--kyn-accent-primary, #22c55e); color: #fff; border: none; border-radius: 20px;
+    background: var(--kyn-accent-primary); color: #fff; border: none; border-radius: 20px;
     padding: 9px 20px; font-size: 13px; font-weight: 600; cursor: pointer;
   }
   #emptyStateNewChatBtn:hover { opacity: 0.9; }
-  #loadOlderBtn { text-align: center; padding: 8px; font-size: 12px; color: var(--kyn-accent-primary, #22c55e); cursor: pointer; }
+  #loadOlderBtn { text-align: center; padding: 8px; font-size: 12px; color: var(--kyn-accent-primary); cursor: pointer; }
   /* FIX (two-panel desktop layout lost its sidebar): #convListPanel's
      "hide it while a chat is open" rule used to sit outside this media
      query — display:none at every width, not just mobile — so opening any
@@ -651,16 +651,16 @@
         const overlay = document.createElement('div');
         overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;';
         overlay.innerHTML = `
-          <div style="background:var(--kyn-bg-panel,#fff);border-radius:16px;padding:22px;width:100%;max-width:320px;text-align:center;">
+          <div style="background:var(--kyn-bg-panel);border-radius:16px;padding:22px;width:100%;max-width:320px;text-align:center;">
             <div style="font-size:15px;font-weight:700;margin-bottom:4px;">${escapeHtml(title)}</div>
-            <div style="font-size:12px;color:var(--kyn-text-secondary,#888);margin-bottom:14px;">${escapeHtml(subtitle)}</div>
+            <div style="font-size:12px;color:var(--kyn-text-secondary);margin-bottom:14px;">${escapeHtml(subtitle)}</div>
             <input type="password" inputmode="numeric" maxlength="6" placeholder="••••••"
               style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;font-size:20px;text-align:center;letter-spacing:8px;
-                     border:1px solid var(--kyn-border,#ddd);outline:none;margin-bottom:10px;" id="kynPinModalInput">
+                     border:1px solid var(--kyn-border);outline:none;margin-bottom:10px;" id="kynPinModalInput">
             <div id="kynPinModalErr" style="font-size:12px;color:#ef4444;min-height:16px;margin-bottom:8px;"></div>
             <div style="display:flex;gap:8px;">
-              <button id="kynPinModalCancel" style="flex:1;padding:11px;border-radius:10px;border:none;background:var(--kyn-bg-hover,#eee);cursor:pointer;">Cancel</button>
-              <button id="kynPinModalOk" style="flex:1;padding:11px;border-radius:10px;border:none;background:var(--kyn-accent-primary,#22c55e);color:#fff;font-weight:700;cursor:pointer;">OK</button>
+              <button id="kynPinModalCancel" style="flex:1;padding:11px;border-radius:10px;border:none;background:var(--kyn-bg-hover);cursor:pointer;">Cancel</button>
+              <button id="kynPinModalOk" style="flex:1;padding:11px;border-radius:10px;border:none;background:var(--kyn-accent-primary);color:#fff;font-weight:700;cursor:pointer;">OK</button>
             </div>
           </div>`;
         document.body.appendChild(overlay);
@@ -759,7 +759,7 @@
       }
 
       const lockedSectionHtml = lockedConvs.length ? `
-        <div class="conv-locked-header" id="kynLockedHeader" style="display:flex;align-items:center;gap:8px;padding:10px 14px;font-size:12px;font-weight:700;color:var(--kyn-text-secondary,#888);cursor:pointer;">
+        <div class="conv-locked-header" id="kynLockedHeader" style="display:flex;align-items:center;gap:8px;padding:10px 14px;font-size:12px;font-weight:700;color:var(--kyn-text-secondary);cursor:pointer;">
           <span>🔒 Locked chats (${lockedConvs.length})</span>
           <span style="margin-left:auto;">▸ Unlock</span>
         </div>
@@ -804,9 +804,9 @@
       if (existing) existing.remove();
       const overlay = document.createElement('div');
       overlay.id = 'kynLockedScreen';
-      overlay.style.cssText = 'position:fixed;inset:0;background:var(--kyn-bg-root,#fff);z-index:9500;display:flex;flex-direction:column;';
+      overlay.style.cssText = 'position:fixed;inset:0;background:var(--kyn-bg-root);z-index:9500;display:flex;flex-direction:column;';
       overlay.innerHTML = `
-        <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--kyn-border,#eee);">
+        <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--kyn-border);">
           <button id="kynLockedBack" style="border:none;background:none;font-size:18px;cursor:pointer;color:inherit;">←</button>
           <div style="font-weight:700;font-size:15px;">🔒 Locked Chats</div>
         </div>
@@ -952,10 +952,10 @@
       document.getElementById('archivedLinkBtn').textContent = '←';
       document.getElementById('archivedLinkBtn').title = 'Back to chats';
       document.getElementById('newChatBtn').classList.add('hidden');
-      convListEl.innerHTML = '<div style="padding:20px;color:var(--kyn-text-secondary,#999);font-size:13px;">Loading...</div>';
+      convListEl.innerHTML = '<div style="padding:20px;color:var(--kyn-text-secondary);font-size:13px;">Loading...</div>';
       const archived = await window.MessageModule.loadArchivedConversations();
       if (archived.length === 0) {
-        convListEl.innerHTML = '<div style="padding:20px;color:var(--kyn-text-secondary,#999);font-size:13px;">No archived chats</div>';
+        convListEl.innerHTML = '<div style="padding:20px;color:var(--kyn-text-secondary);font-size:13px;">No archived chats</div>';
         return;
       }
       convListEl.innerHTML = archived.map(c => `
@@ -1149,7 +1149,7 @@
         </div>` : ''}
         <div id="loadOlderBtn"${hasChat ? '' : ' style="display:none;"'}>Load earlier messages</div>
         <div id="messageLog">${pending ? `
-          <div class="chat-loading-state" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--kyn-text-secondary,#888);">
+          <div class="chat-loading-state" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--kyn-text-secondary);">
             <div class="spinner" style="width:22px;height:22px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:kyn-spin .8s linear infinite;"></div>
             <p style="margin-top:10px;">Opening chat with ${escapeHtml(pending.userName || 'user')}…</p>
           </div>
@@ -1635,7 +1635,7 @@
           const target = document.querySelector(`[data-message-id="${el.dataset.jumpTo}"]`);
           if (target) {
             target.scrollIntoView({ block: 'center', behavior: 'smooth' });
-            target.style.outline = '2px solid var(--kyn-accent-primary,#22c55e)';
+            target.style.outline = '2px solid var(--kyn-accent-primary)';
             setTimeout(() => { target.style.outline = ''; }, 1200);
           }
         });
@@ -2150,7 +2150,7 @@
           <span>${escapeHtml(u.username || u.firstName || u.displayName || 'User')}</span>
           ${broadcastMode
             ? `<input type="checkbox" class="broadcast-checkbox" data-broadcast-id="${u.id}"${broadcastSelectedIds.has(Number(u.id)) ? ' checked' : ''}>`
-            : (u.friendshipStatus && u.friendshipStatus !== 'friends' ? '<span style="margin-left:auto;font-size:11px;color:var(--kyn-text-secondary,#999);">Not a friend</span>' : '')}
+            : (u.friendshipStatus && u.friendshipStatus !== 'friends' ? '<span style="margin-left:auto;font-size:11px;color:var(--kyn-text-secondary);">Not a friend</span>' : '')}
         </div>
       `).join('');
       if (broadcastMode) {
@@ -2414,15 +2414,15 @@
       if (filtered.length > 0) {
         renderNewChatResults(filtered);
       } else if (!q && _knownUsers.length === 0) {
-        newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary,#999);font-size:13px;">No friends yet — search above to message anyone on Kynecta.</div>';
+        newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary);font-size:13px;">No friends yet — search above to message anyone on Kynecta.</div>';
       } else if (q) {
         // A query is active — a global search is either in flight or about
         // to be (see runGlobalUserSearch below), so don't claim "no
         // matches" yet; that call replaces this with real results or a
         // real empty state once it resolves.
-        newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary,#999);font-size:13px;">Searching…</div>';
+        newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary);font-size:13px;">Searching…</div>';
       } else {
-        newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary,#999);font-size:13px;">No matches</div>';
+        newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary);font-size:13px;">No matches</div>';
       }
       return filtered;
     }
@@ -2478,13 +2478,13 @@
         if (combined.length > 0) {
           renderNewChatResults(combined);
         } else {
-          newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary,#999);font-size:13px;">No matches</div>';
+          newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary);font-size:13px;">No matches</div>';
         }
       } catch (err) {
         if (myToken !== _globalSearchToken) return;
         console.warn('[Messages] Directory search failed, showing friends-only matches:', err && err.message);
         if (knownFilteredCount === 0) {
-          newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary,#999);font-size:13px;">No matches</div>';
+          newChatResults.innerHTML = '<div style="padding:14px;color:var(--kyn-text-secondary);font-size:13px;">No matches</div>';
         }
       }
     }
@@ -2695,7 +2695,7 @@
         }
         case 'message:scroll-to': {
           const el = document.querySelector(`[data-message-id="${data.messageId}"]`);
-          if (el) { el.scrollIntoView({ block: 'center' }); el.style.outline = '2px solid var(--kyn-accent-primary, #22c55e)'; }
+          if (el) { el.scrollIntoView({ block: 'center' }); el.style.outline = '2px solid var(--kyn-accent-primary)'; }
           break;
         }
       }

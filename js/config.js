@@ -120,16 +120,84 @@
         try { document.querySelectorAll('link[rel="icon"],link[rel="shortcut icon"]').forEach(function (node) { node.href = '/icons/necpa-192.png'; }); } catch (_) {}
     }
 
+    // ROOT-CAUSE FIX (real photos/videos replaced by the app icon):
+    // the first time ANY <img> failed to load -- even a passing failure such as the backend waking from a cold start --
+    // it was permanently swapped for /icons/necpa-192.png. That also hit chat/group/status pictures, so the receiver saw
+    // the app image instead of what the sender sent. User media must never be replaced by the app icon: transient failures
+    // are retried, and a file that is really gone gets a neutral "unavailable - tap to retry" placeholder instead.
+    var APP_ICON = '/icons/necpa-192.png';
+    var MEDIA_UNAVAILABLE = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160" viewBox="0 0 240 160"><rect width="240" height="160" rx="12" fill="#e5e7eb"/>' +
+        '<path d="M84 104l22-28 16 20 12-14 22 22z" fill="#9ca3af"/><circle cx="96" cy="60" r="9" fill="#9ca3af"/>' +
+        '<text x="120" y="132" font-family="Arial,sans-serif" font-size="12" text-anchor="middle" fill="#6b7280">Image unavailable - tap to retry</text></svg>');
+    function isUserMediaSrc(src) {
+        src = String(src || '');
+        if (!src || src.indexOf(APP_ICON) !== -1) return false;
+        return /\/uploads\//i.test(src) || /res\.cloudinary\.com|cloudinary\.com/i.test(src) || /\/api\/(?:files|media)\//i.test(src) || /^blob:/i.test(src) || /^data:image\//i.test(src);
+    }
+    // Uploaded files live on the BACKEND. A relative "/uploads/..." link would otherwise resolve against the frontend site (404).
+    function toBackendUploadUrl(u) {
+        try {
+            if (typeof u === 'string' && /^\/uploads\//i.test(u)) { var o = backendOrigin(); if (o) return o + u; }
+        } catch (_) {}
+        return u;
+    }
+    window.__resolveMediaUrl = toBackendUploadUrl;
+    var UPLOAD_LINK_SELECTOR = 'img[src^="/uploads/"],video[src^="/uploads/"],audio[src^="/uploads/"],source[src^="/uploads/"],a[href^="/uploads/"]';
+    // querySelectorAll() only finds DESCENDANTS. When the node the observer hands us IS the <img>/<a> itself (the normal
+    // case for a chat bubble that appends a bare <img>), it was silently skipped -- so include the node itself.
+    function selfAndDescendants(root, selector) {
+        var base = root && root.querySelectorAll ? root : document, list = [];
+        try { if (base !== document && base.matches && base.matches(selector)) list.push(base); } catch (_) {}
+        return list.concat(Array.prototype.slice.call(base.querySelectorAll(selector)));
+    }
+    function fixUploadLinks(root) {
+        try {
+            selfAndDescendants(root, UPLOAD_LINK_SELECTOR).forEach(function (el) {
+                var attr = el.hasAttribute('src') ? 'src' : 'href';
+                var fixed = toBackendUploadUrl(el.getAttribute(attr));
+                if (fixed !== el.getAttribute(attr)) el.setAttribute(attr, fixed);
+            });
+        } catch (_) {}
+    }
+    function retryUserImage(img, src) {
+        var tries = Number(img.dataset.mediaRetry || 0);
+        if (!img.dataset.mediaOrigSrc) img.dataset.mediaOrigSrc = src;
+        if (tries < 3) {
+            img.dataset.mediaRetry = String(tries + 1);
+            setTimeout(function () {
+                var base = String(img.dataset.mediaOrigSrc).replace(/([?&])_r=\d+/, '$1').replace(/[?&]$/, '');
+                img.src = base + (base.indexOf('?') === -1 ? '?' : '&') + '_r=' + Date.now();
+            }, 1500 * (tries + 1));
+            return;
+        }
+        img.dataset.mediaFailed = '1';
+        img.style.cursor = 'pointer';
+        img.src = MEDIA_UNAVAILABLE;
+        img.addEventListener('click', function reload(ev) {
+            if (img.dataset.mediaFailed !== '1') return;
+            ev.stopPropagation(); ev.preventDefault();
+            img.dataset.mediaFailed = ''; img.dataset.mediaRetry = '0'; img.removeEventListener('click', reload);
+            img.src = String(img.dataset.mediaOrigSrc).replace(/([?&])_r=\d+/, '$1').replace(/[?&]$/, '') + '?_r=' + Date.now();
+        }, true);
+    }
     function fixBrokenImages(root) {
         try {
-            (root || document).querySelectorAll('img').forEach(function (img) {
+            fixUploadLinks(root);
+            selfAndDescendants(root, 'img').forEach(function (img) {
                 if (img.classList.contains('jm-subcat-img')) return;
-                if (!img.getAttribute('src') || /\/undefined(?:$|[?#])/i.test(img.getAttribute('src'))) img.src = '/icons/necpa-192.png';
+                if (!img.getAttribute('src') || /\/undefined(?:$|[?#])/i.test(img.getAttribute('src'))) img.src = APP_ICON;
                 if (!img.dataset.necpraImageGuard) {
                     img.dataset.necpraImageGuard = '1';
-                    img.addEventListener('error', function () {
-                        if (!img.dataset.necpraImageFallback) { img.dataset.necpraImageFallback = '1'; img.src = '/icons/necpa-192.png'; }
-                    });
+                    var onFail = function () {
+                        var current = img.getAttribute('src') || '';
+                        if (img.dataset.mediaFailed === '1' || current.indexOf('data:image/svg+xml') === 0) return;
+                        if (isUserMediaSrc(current)) { retryUserImage(img, current); return; }
+                        if (!img.dataset.necpraImageFallback) { img.dataset.necpraImageFallback = '1'; img.src = APP_ICON; }
+                    };
+                    img.addEventListener('error', onFail);
+                    // it may already have failed before this guard was attached
+                    if (img.complete && img.naturalWidth === 0 && img.getAttribute('src')) setTimeout(onFail, 0);
                 }
             });
         } catch (_) {}
@@ -147,7 +215,7 @@
         if (!origin) return input;
         function normalize(url) {
             if (!url || typeof url !== 'string') return url;
-            if (/^\/api(?:\/|$)/i.test(url) || /^\/socket\.io(?:\/|$)/i.test(url) || /^\/ws(?:\/|$)/i.test(url)) return origin + url;
+            if (/^\/api(?:\/|$)/i.test(url) || /^\/socket\.io(?:\/|$)/i.test(url) || /^\/ws(?:\/|$)/i.test(url) || /^\/uploads\//i.test(url)) return origin + url;
             try {
                 var parsed = new URL(url, window.location.origin);
                 if (/^\/api(?:\/|$)/i.test(parsed.pathname) || /^\/socket\.io(?:\/|$)/i.test(parsed.pathname) || /^\/ws(?:\/|$)/i.test(parsed.pathname)) return origin + parsed.pathname + parsed.search + parsed.hash;

@@ -4174,7 +4174,7 @@ html.dark-mode .viewer-container {
    CSS loads before theme.colors.css has applied the variable. */
 #createStatusModal.active {
     display: flex;
-    background: var(--kyn-bg-modal, #000);
+    background: var(--kyn-bg-modal);
 }
 
 #createStatusModal .create-status-container {
@@ -4184,7 +4184,7 @@ html.dark-mode .viewer-container {
     max-height: 100%;
     border-radius: 0;
     box-shadow: none;
-    background: var(--kyn-bg-modal, #0b0b0f);
+    background: var(--kyn-bg-modal);
     position: relative;
     overflow: hidden;
 }
@@ -4322,7 +4322,7 @@ html.dark-mode .viewer-container {
 /* Media mode: fills the screen; upload dropzone centered until a file
    is chosen, then the preview + caption take over */
 #createStatusModal #mediaTab {
-    background: var(--kyn-bg-modal, #000);
+    background: var(--kyn-bg-modal);
     position: relative;
 }
 #createStatusModal .media-upload-container {

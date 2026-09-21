@@ -144,7 +144,7 @@
                themes on its own, and the separate override below is now
                genuinely redundant rather than the only thing making dark
                mode work. */
-            background: var(--kyn-bg-root, white);
+            background: var(--kyn-bg-root);
             z-index: 9999;
             display: flex;
             align-items: center;
@@ -260,7 +260,7 @@
                that override used — theme.engine.js already writes this
                variable inline for both themes, so this rule is correct on
                its own now, no override needed for the background itself. */
-            background: var(--kyn-header-action-bg, rgba(255,255,255,0.70));
+            background: var(--kyn-header-action-bg);
             color: #0f172a;
             display: inline-flex;
             align-items: center;
@@ -271,7 +271,7 @@
 
         .header-action-btn:hover {
             transform: translateY(-1px);
-            background: var(--kyn-header-action-bg-hover, rgba(255,255,255,0.95));
+            background: var(--kyn-header-action-bg-hover);
         }
 
         .header-action-btn i {
@@ -723,7 +723,7 @@
                theme and created a visible seam against the light page
                background behind it. Now follows the same theme variable
                as the bar itself, so the "cutout" always blends in. */
-            box-shadow: 0 20px 0 0 var(--kyn-navbar-notch-shadow, rgba(13,17,26,0.97));
+            box-shadow: 0 20px 0 0 var(--kyn-navbar-notch-shadow);
             pointer-events: none;
         }
 
@@ -743,7 +743,7 @@
             background: var(--kyn-bg-navbar, linear-gradient(180deg, rgba(10,13,22,0.98) 0%, rgba(13,17,28,0.99) 100%));
             backdrop-filter: blur(24px) saturate(200%);
             -webkit-backdrop-filter: blur(24px) saturate(200%);
-            border-top: 1px solid var(--kyn-navbar-border, rgba(255,255,255,0.06));
+            border-top: 1px solid var(--kyn-navbar-border);
             z-index: 1000;
             justify-content: space-around;
             align-items: center;
@@ -794,7 +794,7 @@
             /* FIX (footer sparkle): was a fixed slate-gray tuned only for
                a dark bar; on a light-theme bar it read as low-contrast and
                inconsistent with the header's themed text colors. */
-            color: var(--kyn-navbar-icon-inactive, rgba(148, 163, 184, 0.55));
+            color: var(--kyn-navbar-icon-inactive);
             cursor: pointer;
             font-size: 21px;
             position: relative;
@@ -920,7 +920,7 @@
             background: linear-gradient(145deg, #f97316 0%, #ea580c 50%, #c2410c 100%);
             border-radius: 50%;
             box-shadow:
-                0 0 0 4px var(--kyn-navbar-ring, rgba(10,13,22,0.98)),
+                0 0 0 4px var(--kyn-navbar-ring),
                 0 0 0 5px rgba(249,115,22,0.25),
                 0 6px 24px rgba(249,115,22,0.65),
                 0 12px 40px rgba(0,0,0,0.5);
@@ -936,14 +936,14 @@
         @keyframes centerBtnIdle {
             0%, 100% {
                 box-shadow:
-                    0 0 0 4px var(--kyn-navbar-ring, rgba(10,13,22,0.98)),
+                    0 0 0 4px var(--kyn-navbar-ring),
                     0 0 0 5px rgba(249,115,22,0.20),
                     0 6px 24px rgba(249,115,22,0.55),
                     0 12px 40px rgba(0,0,0,0.5);
             }
             50% {
                 box-shadow:
-                    0 0 0 4px var(--kyn-navbar-ring, rgba(10,13,22,0.98)),
+                    0 0 0 4px var(--kyn-navbar-ring),
                     0 0 0 8px rgba(249,115,22,0.12),
                     0 6px 32px rgba(249,115,22,0.75),
                     0 12px 40px rgba(0,0,0,0.5);
@@ -969,7 +969,7 @@
             transform: scale(0.91) translateY(-2px);
             animation: none;
             box-shadow:
-                0 0 0 4px var(--kyn-navbar-ring, rgba(10,13,22,0.98)),
+                0 0 0 4px var(--kyn-navbar-ring),
                 0 0 0 8px rgba(249,115,22,0.15),
                 0 8px 36px rgba(249,115,22,0.8),
                 0 16px 48px rgba(0,0,0,0.55);
@@ -983,14 +983,14 @@
         @keyframes centerBtnPulse {
             0%, 100% {
                 box-shadow:
-                    0 0 0 4px var(--kyn-navbar-ring, rgba(10,13,22,0.98)),
+                    0 0 0 4px var(--kyn-navbar-ring),
                     0 0 0 6px rgba(249,115,22,0.22),
                     0 6px 28px rgba(249,115,22,0.75),
                     0 12px 40px rgba(0,0,0,0.5);
             }
             50% {
                 box-shadow:
-                    0 0 0 4px var(--kyn-navbar-ring, rgba(10,13,22,0.98)),
+                    0 0 0 4px var(--kyn-navbar-ring),
                     0 0 0 10px rgba(249,115,22,0.12),
                     0 6px 40px rgba(249,115,22,1.0),
                     0 12px 40px rgba(0,0,0,0.5);
@@ -1013,7 +1013,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            border: 2px solid var(--kyn-navbar-ring, rgba(10,13,22,0.98));
+            border: 2px solid var(--kyn-navbar-ring);
             line-height: 1;
             pointer-events: none;
             box-shadow: 0 2px 8px rgba(239,68,68,0.5);
@@ -1740,14 +1740,14 @@
             background: linear-gradient(135deg, #f97316, #ea580c);
             color: #fff; font-size: 9px; font-weight: 800;
             border-radius: 10px; display: none; align-items: center;
-            justify-content: center; border: 2px solid var(--kyn-navbar-ring, rgba(10,13,22,0.98));
+            justify-content: center; border: 2px solid var(--kyn-navbar-ring);
             line-height: 1; pointer-events: none;
             animation: badgePop 0.3s cubic-bezier(0.34,1.56,0.64,1) forwards;
         }
         .mobile-nav-icon[data-page="tools"] .ecom-notif-dot {
             position: absolute; top: 8px; right: calc(50% - 16px);
             width: 8px; height: 8px; background: #ef4444;
-            border-radius: 50%; border: 2px solid var(--kyn-navbar-ring, rgba(10,13,22,0.98)); display: none;
+            border-radius: 50%; border: 2px solid var(--kyn-navbar-ring); display: none;
         }
         /* ── Add-Friend FAB ─────────────────────────────────────────────── */
         #fabAddFriend {
@@ -4847,23 +4847,22 @@
                 // reapplyThemeToAllIframes() those already use, so the one
                 // documented API actually works everywhere it's called from.
                 if (data.type === 'NECPRA_THEME_REQUEST' && data.theme && window.ThemeManager) {
-                    window.ThemeManager.setTheme(data.theme);
-                    reapplyThemeToAllIframes();
+                    // userChoice: this request only ever comes from the Settings page (theme.engine.js no longer lets other
+                    // modules send it), so it is the user's explicit choice and is protected from stale re-applies.
+                    // No reapplyThemeToAllIframes(): setTheme() now paints the shell AND every module in the same task.
+                    window.ThemeManager.setTheme(data.theme, data.userInitiated ? { userChoice: true } : undefined);
                     return;
                 }
                 if (data.type === 'NECPRA_FONT_REQUEST' && data.value && window.ThemeManager) {
-                    window.ThemeManager.setFontSize(data.value);
-                    reapplyThemeToAllIframes();
+                    window.ThemeManager.setFontSize(data.value, data.userInitiated ? { userChoice: true } : undefined);
                     return;
                 }
                 if (data.type === 'NECPRA_ICON_REQUEST' && data.value && window.ThemeManager) {
-                    window.ThemeManager.setIconScale(data.value);
-                    reapplyThemeToAllIframes();
+                    window.ThemeManager.setIconScale(data.value, data.userInitiated ? { userChoice: true } : undefined);
                     return;
                 }
                 if (data.type === 'NECPRA_ACCENT_REQUEST' && data.value && window.ThemeManager) {
-                    window.ThemeManager.setAccentColor(data.value);
-                    reapplyThemeToAllIframes();
+                    window.ThemeManager.setAccentColor(data.value, data.userInitiated ? { userChoice: true } : undefined);
                     return;
                 }
                 if (data.type) {

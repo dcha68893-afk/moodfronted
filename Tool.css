@@ -2932,11 +2932,14 @@ input:focus + .toggle-slider,
     --jm-orange: #f57224;
     --jm-orange-dark: #e05c0a;
     --jm-orange-light: #fff3ec;
-    --jm-gray-bg: #f5f5f5;
-    --jm-white: #fff;
-    --jm-text: #111;
-    --jm-text2: #6b7280;
-    --jm-border: #e5e7eb;
+    /* FIX (Tools stayed light in dark mode): these neutrals were literal light colours with no dark override, so the whole
+       Tools sidebar/cards ignored the app theme and sat as a full-screen light-grey slab next to a dark header and footer.
+       They now follow the single theme engine (theme.engine.js), so Tools switches in the same frame as everything else. */
+    --jm-gray-bg: var(--kyn-bg-panel);
+    --jm-white: var(--kyn-bg-card);
+    --jm-text: var(--kyn-text-primary);
+    --jm-text2: var(--kyn-text-secondary);
+    --jm-border: var(--kyn-border);
     --jm-green: #22c55e;
     --jm-red: #ef4444;
 }

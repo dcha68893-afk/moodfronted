@@ -59,7 +59,7 @@ const safeBg=v=>{v=String(v||'').trim();return /^(#[0-9a-f]{3,8}|(?:linear|radia
 const stickers=['❤️','🔥','😂','😍','🎓','✨','💯','🙌','🎉','📚','🛍️','💡'];
 let state={tab:'friends',statuses:[],mine:[],index:0,viewerGroup:[],replyingStatusId:null,composer:{type:'text',content:'',caption:'',background:bg[0],font:'system-ui',privacy:'all_contacts',topics:[],moodType:'',category:'',intent:'',allowReplies:true,allowReactions:true,allowSharing:true,linkUrl:'',mentions:[],stickers:[],media:null,poll:['',''],selectedSticker:''},seen:new Set(),timer:null,panel:'list',lastScreen:'list'};
 
-function syncTheme(){try{const source=window.parent&&window.parent!==window?window.parent.document:document;const src=source.documentElement,target=document.documentElement,cs=source.defaultView.getComputedStyle(src);for(let i=0;i<cs.length;i++){const n=cs[i];if(n&&n.indexOf('--')===0){const v=cs.getPropertyValue(n);if(v)target.style.setProperty(n,v)}}const mode=src.getAttribute('data-theme');if(mode)target.setAttribute('data-theme',mode);target.style.colorScheme=src.style.colorScheme||getComputedStyle(src).colorScheme||''}catch(_){}}
+function syncTheme(){try{/* FIX: standalone (no parent shell) the 'parent' is this very document; copying it onto itself is pointless and, with the observer below, re-triggered itself forever and froze the page */if(!(window.parent&&window.parent!==window))return;const source=window.parent.document;const src=source.documentElement,target=document.documentElement,cs=source.defaultView.getComputedStyle(src);for(let i=0;i<cs.length;i++){const n=cs[i];if(n&&n.indexOf('--')===0){const v=cs.getPropertyValue(n);if(v)target.style.setProperty(n,v)}}const mode=src.getAttribute('data-theme');if(mode)target.setAttribute('data-theme',mode);target.style.colorScheme=src.style.colorScheme||getComputedStyle(src).colorScheme||''}catch(_){}}
 function mount(){
  if(document.getElementById('necpa-status-root'))return;
  const launcher=document.createElement('button');launcher.id='necpa-status-launcher';launcher.innerHTML='<span class="ns-dot"></span> Status';launcher.onclick=open;
@@ -443,8 +443,10 @@ async function publish(){
     c.media.sourceDuration=end-start;c.media.trimStart=0;c.media.trimEnd=end-start;
    }
    const fd=new FormData();fd.append('file',c.media.file);fd.append('trimStart','0');fd.append('trimEnd',String(c.media.trimEnd||Math.min(Number(c.media.sourceDuration||20),20)));fd.append('sourceDuration',String(c.media.sourceDuration||0));const t=token();const r=await fetch(uploadUrl(),{method:'POST',headers:t?{Authorization:/^Bearer /i.test(t)?t:'Bearer '+t}:{},body:fd});const d=await r.json();if(!r.ok||!d.success)throw new Error(d.error||'Media upload failed');const uploaded=d?.data?.cloudinary||d?.cloudinary||d; const mediaUrl=uploaded?.url||uploaded?.secure_url||d?.url; const mediaPublicId=uploaded?.public_id||uploaded?.publicId||d?.publicId; if(!mediaUrl)throw new Error('Media upload succeeded but no media URL was returned'); media={mediaUrl,mediaPublicId,mediaMime:c.media.file.type};}
-  const activePane=root.querySelector('.ns-pane.active')?.dataset.pane;
-  const type=activePane==='poll'?'poll':activePane==='link'?'link':activePane==='media'?(c.media?.type||'image'):'text';
+  /* FIX ("Cannot access 'type' before initialization" on Publish): `activePane` and `type` were declared again with const
+     inside this try block, AFTER the check at the top of the block had already read `type`. That inner `type` shadows the
+     outer one and is still in its temporal dead zone at that point, so every Publish click threw immediately (before any
+     network call). They are already computed above the try block and cannot change during the upload, so reuse them. */
   let content=(root.querySelector('[data-content]')?.value||c.content||'').trim();
   c.content=content;
   if(type==='poll')content=root.querySelector('[data-pollq]').value.trim();
@@ -509,7 +511,7 @@ function boot(){if(!document.body)return;const style=document.createElement('sty
 // layer cover the whole stage edge-to-edge, keep the text centred, and leave room for the header
 // and the reply bar so nothing is hidden underneath them.
 (function(){const f=document.createElement('style');f.id='ns-viewer-fill';f.textContent='#necpa-status-root .ns-viewer-stage{width:100vw!important;max-width:none!important;height:100dvh!important;min-height:100dvh!important;overflow:hidden}#necpa-status-root .ns-viewer-text{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;max-width:none!important;max-height:none!important;min-height:100%!important;margin:0!important;border-radius:0!important;box-sizing:border-box!important;padding:84px 28px 130px!important;display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;text-align:center!important;overflow-y:auto;overflow-wrap:anywhere}';document.head.appendChild(f)})();
-syncTheme();try{const src=(window.parent&&window.parent!==window)?window.parent.document.documentElement:document.documentElement;new MutationObserver(syncTheme).observe(src,{attributes:true,attributeFilter:['style','class','data-theme']})}catch(_){}mount()}
+syncTheme();try{if(!(window.parent&&window.parent!==window))throw 0;const src=window.parent.document.documentElement;new MutationObserver(syncTheme).observe(src,{attributes:true,attributeFilter:['style','class','data-theme']})}catch(_){}mount()}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
 window.__NecpaProfessionalStatus={open,close,loadFeed,goBack:goBackOne,resetToList};
 })();

@@ -126,6 +126,16 @@ function _realOpenProduct(productId) {
     });
 }
 
+// FIX ("[Tools] Uncaught SyntaxError: Unexpected end of input" from _renderProductFallback):
+// the inline onclick handlers below were built with JSON.stringify(...) placed inside a double-quoted HTML
+// attribute. JSON strings contain double quotes, so `onclick="window._jmMessageSeller?.("Shop", ...)"` ended the
+// attribute at the first quote and the browser tried to run the truncated `window._jmMessageSeller?.(` -> SyntaxError
+// (every product with a seller, since the seller name is always a string; and every string/UUID product id).
+// _jsArg() produces a value that is safe inside onclick="...". _escHtml() also stops seller-supplied product text
+// (title/description/category/image URL) from being injected into the page as HTML.
+const _escHtml = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const _jsArg = v => _escHtml(JSON.stringify(v === undefined ? null : v));
+
 function _renderProductFallback(product, panel, content, nameEl) {
     // AUDIT FIX: stash the product so _jmAddToCart/_jmBuyNow (defined below)
     // can look it up by id — CartEngine.add() needs the full product object,
@@ -140,28 +150,28 @@ function _renderProductFallback(product, panel, content, nameEl) {
     if (content) content.innerHTML = `
         <div style="background:#fff;min-height:100vh;padding-bottom:80px">
             ${img ? `<div style="width:100%;height:260px;background:#f3f4f6;overflow:hidden">
-                <img src="${img}" alt="${product.title||''}" style="width:100%;height:100%;object-fit:cover">
+                <img src="${_escHtml(img)}" alt="${_escHtml(product.title||'')}" style="width:100%;height:100%;object-fit:cover">
             </div>` : '<div style="width:100%;height:200px;background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:64px">📦</div>'}
             <div style="padding:16px">
-                <div style="font-size:18px;font-weight:700;color:#111827;margin-bottom:4px">${product.title||'Product'}</div>
+                <div style="font-size:18px;font-weight:700;color:#111827;margin-bottom:4px">${_escHtml(product.title||'Product')}</div>
                 <div style="font-size:22px;font-weight:800;color:#f57224;margin-bottom:12px">KES ${parseFloat(price).toLocaleString()}</div>
-                ${product.description ? `<div style="font-size:14px;color:#4b5563;line-height:1.6;margin-bottom:16px">${product.description}</div>` : ''}
+                ${product.description ? `<div style="font-size:14px;color:#4b5563;line-height:1.6;margin-bottom:16px">${_escHtml(product.description)}</div>` : ''}
                 <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
-                    ${product.category ? `<span style="background:#fef3c7;color:#92400e;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:600">${product.category}</span>` : ''}
-                    ${product.condition ? `<span style="background:#dbeafe;color:#1e40af;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:600">${product.condition}</span>` : ''}
+                    ${product.category ? `<span style="background:#fef3c7;color:#92400e;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:600">${_escHtml(product.category)}</span>` : ''}
+                    ${product.condition ? `<span style="background:#dbeafe;color:#1e40af;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:600">${_escHtml(product.condition)}</span>` : ''}
                     ${product.stock != null ? `<span style="background:#d1fae5;color:#065f46;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:600">${product.stock > 0 ? `${product.stock} in stock` : 'Out of stock'}</span>` : ''}
                 </div>
                 ${(product.seller_id || product.seller?.id) ? `
-                <button onclick="window._jmMessageSeller?.(${JSON.stringify(product.seller_id || product.seller?.id)}, ${JSON.stringify(product.seller?.name || 'Seller')}, ${JSON.stringify(product.id || product._id)})"
+                <button onclick="window._jmMessageSeller?.(${_jsArg(product.seller_id || product.seller?.id)}, ${_jsArg(product.seller?.name || 'Seller')}, ${_jsArg(product.id || product._id)})"
                     style="width:100%;background:#fff;color:#374151;border:1.5px solid #e5e7eb;border-radius:12px;padding:12px;font-weight:700;cursor:pointer;font-size:14px;margin-bottom:16px;display:flex;align-items:center;justify-content:center;gap:8px">
                     💬 Message Seller
                 </button>` : ''}
                 <div style="position:fixed;bottom:0;left:0;right:0;background:#fff;padding:12px 16px;border-top:1px solid #e5e7eb;display:flex;gap:8px;z-index:100">
-                    <button onclick="window._jmAddToCart?.(${JSON.stringify(product.id || product._id)})"
+                    <button onclick="window._jmAddToCart?.(${_jsArg(product.id || product._id)})"
                         style="flex:1;background:#fff;color:#f57224;border:2px solid #f57224;border-radius:12px;padding:14px;font-weight:700;cursor:pointer;font-size:15px">
                         🛒 Add to Cart
                     </button>
-                    <button onclick="window._jmBuyNow?.(${JSON.stringify(product.id || product._id)})||window._jmNavMore?.('checkout')"
+                    <button onclick="window._jmBuyNow?.(${_jsArg(product.id || product._id)})||window._jmNavMore?.('checkout')"
                         style="flex:1;background:#f57224;color:#fff;border:none;border-radius:12px;padding:14px;font-weight:700;cursor:pointer;font-size:15px">
                         ⚡ Buy Now
                     </button>

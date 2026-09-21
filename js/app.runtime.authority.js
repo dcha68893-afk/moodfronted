@@ -333,7 +333,10 @@
     function applyThemeSettings(settings) {
         if (!settings) return;
 
-        const theme = settings.appearance?.theme || settings.theme || 'light';
+        // FIX: this used to fall back to a hardcoded 'light' whenever the snapshot had no theme, so any unrelated settings
+        // event repainted the whole app light. No explicit theme -> leave the current theme alone.
+        const theme = settings.appearance?.theme || settings.theme;
+        if (theme !== 'dark' && theme !== 'light') return;
         // Painting now goes through the single canonical engine
         // (js/theme.engine.js / window.ThemeManager) instead of this
         // function keeping its own copy of the same data-theme logic.
