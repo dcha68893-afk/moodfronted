@@ -174,6 +174,23 @@
     setTimeout(initPush, 1500);
   }
 
+  // FIX: the service worker now focuses the ALREADY-OPEN window and posts the click here (a deep link in the URL is only read at
+  // page load, so it could never reach a running app). Relay it to the same events the URL path uses.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', (e) => {
+      const d = e && e.data;
+      if (!d || d.type !== 'KYN_NOTIFICATION_CLICK') return;
+      const n = d.data || {};
+      let q = null;
+      try { q = new URL(d.url || n.url || '', location.origin).searchParams; } catch (_) {}
+      const chatId = n.chatId || (q && q.get('chatId'));
+      const groupId = n.groupId || (q && q.get('groupId'));
+      const msgId = n.messageId || (q && q.get('messageId')) || null;
+      if (groupId) window.dispatchEvent(new CustomEvent('kyn:openGroup', { detail: { groupId, scrollToMessageId: msgId } }));
+      else if (chatId) window.dispatchEvent(new CustomEvent('kyn:openChat', { detail: { chatId, scrollToMessageId: msgId } }));
+    });
+  }
+
   // Handle notification clicks
   _handleNotificationDeepLink();
 

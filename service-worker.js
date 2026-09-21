@@ -38,7 +38,7 @@ const SW_VERSION = '19.30.1';
 // FIX (message restore / account isolation): js/message-client.js, js/message-local-db.js, js/group-message-local-db.js,
 // js/authStorage.js, js/core/groups/group-cache-first.js and group.html changed. group-cache-first.js was on neither the
 // precache nor NETWORK_FIRST_PATTERNS list, so it is now network-first; the bump forces one clean break on next launch.
-const CACHE_NAME = 'necpa-static-v60';
+const CACHE_NAME = 'necpa-static-v61';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -183,11 +183,15 @@ self.addEventListener('sync',event=>{
   if(event.tag==='offline-message-queue')event.waitUntil(self.clients.matchAll({type:'window',includeUncontrolled:true}).then(cs=>{const c=cs.find(x=>x.focused)||cs[0];if(c)c.postMessage({type:'FLUSH_OFFLINE_QUEUE',source:'background-sync'});}));
   if(event.tag==='offline-status-sync')event.waitUntil(self.clients.matchAll({type:'window'}).then(cs=>cs.forEach(c=>c.postMessage({type:'SYNC_STATUS_UPDATES',source:'background-sync'}))));
 });
-function encryptedBody(s){if(typeof s!=='string')return false;const t=s.trim();if(!t||t[0]!=='{')return false;try{const o=JSON.parse(t);return !!o&&typeof o==='object'&&(['v','kid','ct','iv','eph','sid','n'].some(k=>Object.prototype.hasOwnProperty.call(o,k)));}catch(_){return false;}}
+function encryptedBody(s){if(typeof s!=='string')return false;const t=s.trim();if(!t||t[0]!=='{')return false;try{const o=JSON.parse(t);return !!o&&typeof o==='object'&&(['v','kid','ct','iv','eph','sid','n'].some(k=>Object.prototype.hasOwnProperty.call(o,k)));}catch(_){/* FIX: server truncates previews to 100 chars, so an envelope is often cut-off JSON that never parses -- match its shape instead */return /^\{\s*"(v|kid|ct|iv|eph|sid|n)"\s*:/.test(t);}}
 self.addEventListener('push',event=>{
   if(!event.data)return;let data={};try{data=event.data.json();}catch(_){try{data={title:'Necpa',body:event.data.text()};}catch(__){return;}}
   const raw=String(data.body||data.message||'');const safe=encryptedBody(raw)?'You have a new message':(raw||'You have a new notification');const title=data.title||'Necpa';
   const options={body:data.senderName?data.senderName+': '+safe:safe,icon:data.icon||'/icons/necpa-192.png',badge:data.badge||'/icons/necpa-192.png',tag:data.type==='message'||data.type==='new_message'?'msg-'+(data.chatId||'chat'):(data.tag||'necpa-notification'),data:data.data||{url:data.url||'/chat.html'},silent:data.silent===true,requireInteraction:data.requireInteraction||false,vibrate:Array.isArray(data.vibrate)?data.vibrate:(data.vibrate===false?[]:[200,100,200])};
   event.waitUntil((async()=>{if(data.type==='message'||data.type==='new_message'){try{const chat=String(data.chatId||(data.data&&data.data.chatId)||''),map=self.__kynActiveChatByClient,cs=await self.clients.matchAll({type:'window',includeUncontrolled:true});if(chat&&cs.some(c=>c.focused&&map&&map.get(c.id)===chat))return;}catch(_){} }return self.registration.showNotification(title,options);})());
 });
-self.addEventListener('notificationclick',event=>{event.notification.close();const url=(event.notification.data&&event.notification.data.url)||'/chat.html';event.waitUntil(self.clients.matchAll({type:'window',includeUncontrolled:true}).then(cs=>{for(const c of cs){if(c.url.includes(url)&&c.focus)return c.focus();}return self.clients.openWindow?self.clients.openWindow(url):null;}));});
+self.addEventListener('notificationclick',event=>{event.notification.close();const nd=event.notification.data||{};const url=nd.url||'/chat.html';
+  /* FIX (notification opens a NEW window instead of the chat): the old check c.url.includes(url) never matched an already-open
+     window (its URL is /chat.html, the notification's is /chat.html?chatId=..), so a second window was opened every time and the
+     deep link was only read at page load. Focus the existing app window and tell it what to open; only open a window if none exists. */
+  event.waitUntil(self.clients.matchAll({type:'window',includeUncontrolled:true}).then(async cs=>{const origin=self.location.origin;const app=cs.find(c=>c.url.indexOf(origin)===0&&/chat\.html|\/$/.test(c.url.split('?')[0]))||cs.find(c=>c.url.indexOf(origin)===0);if(app){try{if(app.focus)await app.focus();}catch(_){}try{app.postMessage({type:'KYN_NOTIFICATION_CLICK',data:nd,url});}catch(_){}return;}return self.clients.openWindow?self.clients.openWindow(url):null;}));});

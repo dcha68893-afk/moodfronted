@@ -1534,6 +1534,7 @@
     // catch block below has a bound instead of being able to spin forever.
     const _transientFailCounts = new Map();
 
+    function isPlaceholderName(n) { return !n || /^\s*(user|unknown|member)\s*$/i.test(String(n)); }
     async function openChat({ conversationId = null, userId = null, messageId = null, userName = null, avatar = null, force = false } = {}) {
         let resolvedChatId = normalizeChatId(conversationId);
         const normalizedUserId = normalizeChatId(userId);
@@ -1717,7 +1718,9 @@
             upsertConversationMeta(resolvedChatId, {
                 otherUser: Object.assign({}, state.conversations.get(resolvedChatId)?.otherUser, {
                     id: userId || state.conversations.get(resolvedChatId)?.otherUser?.id,
-                    username: userName || state.conversations.get(resolvedChatId)?.otherUser?.username,
+                    // FIX (HEADER-SHOWS-"User"): callers used to invent 'User' when they had no name; a placeholder is a real string,
+                    // so it overwrote the correct name from the chat list (and got cached to disk). Placeholders are treated as missing.
+                    username: isPlaceholderName(userName) ? state.conversations.get(resolvedChatId)?.otherUser?.username : userName,
                     avatar: avatar || state.conversations.get(resolvedChatId)?.otherUser?.avatar,
                 }),
             });

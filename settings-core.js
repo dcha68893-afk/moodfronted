@@ -6302,8 +6302,10 @@ async function saveSettings() {
             window.AppSettings.merge(userSettings);
         }
         
-        if (userSettings.appearance) {
-            applyTheme(userSettings.appearance.theme || 'light');
+        // FIX (Settings changes the theme by itself): this used to be `applyTheme(theme || 'light')`, so any save/sync of a
+        // settings object without an explicit theme repainted the whole app light. A missing theme now means "leave it alone".
+        if (userSettings.appearance && userSettings.appearance.theme) {
+            applyTheme(userSettings.appearance.theme);
         }
         
         // If offline, queue the entire settings object for later sync

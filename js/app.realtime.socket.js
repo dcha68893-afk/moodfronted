@@ -1311,7 +1311,13 @@
                             var _myId = _myAuthRaw ? (JSON.parse(_myAuthRaw).user || {}).id : null;
                             var _senderId = payload && (payload.senderId || payload.userId || payload.fromId);
                             if (_senderId && String(_senderId) !== String(_myId)) {
-                                var _senderName = (payload && (payload.senderName || payload.fromName)) || 'New message';
+                                // FIX (BANNER-TITLE-ALWAYS-"New message"): the server never sends `senderName`, only a `sender` object, so the title
+                                // fell through to the literal fallback every time and the click had no name/avatar to open the chat with.
+                                var _sndObj = (payload && payload.sender) || {};
+                                var _fullName = [_sndObj.firstName, _sndObj.lastName].filter(Boolean).join(' ').trim();
+                                var _realName = (payload && (payload.senderName || payload.fromName)) || _sndObj.displayName || _fullName || _sndObj.username || null;
+                                var _senderName = _realName || 'New message';
+                                var _senderAvatar = _sndObj.avatar || _sndObj.profilePicture || null;
                                 var _preview = (payload && (payload.content || payload.text)) || '';
                                 // FIX (ciphertext STILL leaking into the notification toast):
                                 // the previous version of this check required BOTH `"v"` AND
@@ -1336,7 +1342,10 @@
                                                 ('v' in o || 'kid' in o || 'ct' in o || 'iv' in o || 'eph' in o || 'sid' in o || 'n' in o);
                                         } catch (_e) { return false; }
                                     })();
-                                if (_looksEncrypted) {
+                                var _mt = String((payload && (payload.type || payload.messageType)) || '').toLowerCase();
+                                if (_mt.indexOf('status') !== -1) {
+                                    _preview = (_mt.indexOf('react') !== -1 || _mt.indexOf('like') !== -1) ? 'reacted to your status' : 'replied to your status';
+                                } else if (_looksEncrypted) {
                                     _preview = 'New message received';
                                 } else if (_preview.length > 60) {
                                     _preview = _preview.slice(0, 60) + '…';
@@ -1344,7 +1353,7 @@
                                 window.__NotificationStabilizationLayer && window.__NotificationStabilizationLayer.notifyApp(
                                     _senderName,
                                     _preview || 'Sent you a message',
-                                    { module: 'dm', contextId: payload.chatId || _senderId }
+                                    { module: 'dm', contextId: payload.chatId || _senderId, userId: _senderId, userName: _realName, avatar: _senderAvatar }
                                 );
                             }
                         } catch(_) {}

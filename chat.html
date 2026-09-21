@@ -5552,7 +5552,8 @@
                             // by-userId lookup.
                             const chatPayload = {
                                 userId: payload.userId,
-                                userName: payload.userName || 'User',
+                                userName: payload.userName || null,
+                                avatar: payload.avatar || null,
                                 conversationId: payload.conversationId || null,
                                 messageId: payload.messageId || null,
                                 findExisting: true, // Continue existing chat if available
@@ -5637,7 +5638,7 @@
                 if (data.type === 'DIRECT_CHAT_REQUEST') {
                     const chatPayload = {
                         userId:       data.payload.userId,
-                        userName:     data.payload.userName || data.payload.name || 'User',
+                        userName:     data.payload.userName || data.payload.name || null,
                         findExisting: true,
                         timestamp: Date.now()
                     };
@@ -5711,7 +5712,7 @@
                     if (_ocwuUserId) {
                         const chatPayload = {
                             userId: _ocwuUserId,
-                            userName: _ocwuPayload.userName || _ocwuPayload.recipientName || 'User',
+                            userName: _ocwuPayload.userName || _ocwuPayload.recipientName || null,
                             findExisting: _ocwuPayload.findExisting !== false,
                             timestamp: Date.now()
                         };

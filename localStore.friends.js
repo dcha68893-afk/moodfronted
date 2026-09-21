@@ -121,7 +121,7 @@
         var id = Number(el.dataset.userId);
         if (!Number.isInteger(id) || id <= 0) return;
         modal.classList.add('hidden');
-        openDirectChat({ userId: id, userName: el.dataset.userName || 'User', avatar: el.dataset.userAvatar || null, source: 'messages-module' });
+        openDirectChat({ userId: id, userName: el.dataset.userName || null, avatar: el.dataset.userAvatar || null, source: 'messages-module' });
       }, true);
     });
   }
@@ -147,10 +147,10 @@
           chatId = Number(response.data && response.data.chat && response.data.chat.id);
           if (!Number.isInteger(chatId) || chatId <= 0) throw new Error('Chat ID was not returned');
         } catch (_) {
-          return window.MessageModule.openChat({ userId: id, userName: target.userName || 'User', avatar: target.avatar || null });
+          return window.MessageModule.openChat({ userId: id, userName: target.userName || null, avatar: target.avatar || null });
         }
       }
-      return window.MessageModule.openChat({ conversationId: chatId, userId: id, userName: target.userName || 'User', avatar: target.avatar || null });
+      return window.MessageModule.openChat({ conversationId: chatId, userId: id, userName: target.userName || null, avatar: target.avatar || null });
     })();
     openPromises.set(key, promise);
     try { return await promise; } finally { openPromises.delete(key); }
@@ -180,7 +180,7 @@
     var conversationId = Number(p.conversationId || 0), userId = Number(p.userId || 0);
     if (conversationId > 0 || userId > 0) {
       try { event.stopImmediatePropagation(); } catch (_) {}
-      openDirectChat({ conversationId: conversationId, userId: userId, userName: p.userName || 'User', avatar: p.avatar || null, source: p.source || 'parent-module' });
+      openDirectChat({ conversationId: conversationId, userId: userId, userName: p.userName || null, avatar: p.avatar || null, source: p.source || 'parent-module' });
     }
   }, true);
 

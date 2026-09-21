@@ -125,7 +125,7 @@ async function decryptGroupContent(message){
   if(!message||typeof message.content!=='string'||!message.content)return message;
   const id=String(message.id||message.messageId||''); const cipher=message.content;
   const cached=groupMessageState.plaintext.get(id);
-  if(cached&&groupMessageState.lastCiphertext.get(id)===cipher)return {...message,content:cached};
+  if(cached!==undefined&&groupMessageState.lastCiphertext.get(id)===cipher)return {...message,content:cached};
   if(groupMessageState.decryptInFlight.has(id)){const plain=await groupMessageState.decryptInFlight.get(id);return plain==null?{...message,_decryptPending:true}:{...message,content:plain};}
   const task=(async()=>{try{
     if(!(await ensureE2EReady())||!window.KynectaGroupE2E?.decryptForGroup)throw new Error('Secure group messaging is not ready yet');
@@ -210,7 +210,7 @@ function toggleMsgMenu(id){const willOpen=S.openMenuId!==id;closeMsgMenu();if(!w
 })}
 document.addEventListener('click',e=>{if(!e.target.closest?.('.msg-more, .msg-menu'))closeMsgMenu()});
 
-function buildRow(m){const id=String(m.id||m.messageId||'');const pendingDecrypt=!!m._decryptPending;const row=document.createElement('div');const mine=String(m.senderId||m.userId)===uid();row.className='row'+(mine?' mine':'');row.dataset.messageId=id;const b=document.createElement('div');b.className='bubble';if(!mine){const s=document.createElement('div');s.className='sender';s.textContent=m.sender?.displayName||m.sender?.username||m.senderUsername||'Member';b.append(s)}const media=m.metadata?.media;if(media?.url){const mime=String(media.mimeType||'');if(mime.startsWith('image/')){const x=document.createElement('img');x.src=media.url;x.loading='lazy';x.style.cssText='max-width:420px;max-height:360px;border-radius:12px';b.append(x)}else if(mime.startsWith('video/')){const x=document.createElement('video');x.src=media.url;x.controls=true;x.style.cssText='max-width:420px;max-height:360px';b.append(x)}else if(mime.startsWith('audio/')){const x=document.createElement('audio');x.src=media.url;x.controls=true;b.append(x)}else{const x=document.createElement('a');x.href=media.url;x.target='_blank';x.rel='noopener';x.textContent=media.name||m.content||'Open attachment';b.append(x)}}else{const x=document.createElement('div');x.className='msg-text';x.innerHTML=highlightMentions(esc(pendingDecrypt?'':m.content||''));if(pendingDecrypt){x.className='msg-text decrypt-pending';x.style.opacity='.6';x.style.fontStyle='italic';x.textContent='🔒 Decrypting…';}b.append(x)}
+function buildRow(m){const id=String(m.id||m.messageId||'');const pendingDecrypt=!!m._decryptPending;const row=document.createElement('div');const mine=String(m.senderId||m.userId)===uid();row.className='row'+(mine?' mine':'');row.dataset.messageId=id;const b=document.createElement('div');b.className='bubble';if(!mine){const s=document.createElement('div');s.className='sender';s.textContent=m.sender?.displayName||m.sender?.username||m.senderUsername||'Member';b.append(s)}const media=m.metadata?.media;if(media?.url){const mime=String(media.mimeType||'');if(mime.startsWith('image/')){const x=document.createElement('img');x.src=media.url;x.loading='lazy';x.style.cssText='max-width:420px;max-height:360px;border-radius:12px';b.append(x)}else if(mime.startsWith('video/')){const x=document.createElement('video');x.src=media.url;x.controls=true;x.style.cssText='max-width:420px;max-height:360px';b.append(x)}else if(mime.startsWith('audio/')){const x=document.createElement('audio');x.src=media.url;x.controls=true;b.append(x)}else{const x=document.createElement('a');x.href=media.url;x.target='_blank';x.rel='noopener';x.textContent=media.name||m.content||'Open attachment';b.append(x)}if(!pendingDecrypt&&m.content&&(mime.startsWith('image/')||mime.startsWith('video/')||mime.startsWith('audio/')||media.name)){const cap=document.createElement('div');cap.className='msg-text';cap.innerHTML=highlightMentions(esc(m.content));b.append(cap)}}else{const x=document.createElement('div');x.className='msg-text';x.innerHTML=highlightMentions(esc(pendingDecrypt?'':m.content||''));if(pendingDecrypt){x.className='msg-text decrypt-pending';x.style.opacity='.6';x.style.fontStyle='italic';x.textContent='🔒 Decrypting…';}b.append(x)}
   const t=document.createElement('div');t.className='time';
   if(m.isEdited){const et=document.createElement('span');et.className='edited-tag';et.textContent='edited';t.append(et)}
   if(!m._optimistic){const more=document.createElement('button');more.type='button';more.className='msg-more';more.textContent='⋮';more.title='More';more.onclick=e=>{e.stopPropagation();toggleMsgMenu(id)};t.append(more);}
@@ -506,10 +506,15 @@ async function sendGroupPayload(plain,type='text',metadata=null){
   if(!(await ensureE2EReady())||!window.KynectaGroupE2E?.encryptForGroup)throw new Error(e2eNotReadyMessage());
   const gid=Number(S.current.id),cid=makeGroupClientId();
   await refreshCurrentGroupMembers(gid);
-  const encrypted=text?await window.KynectaGroupE2E.encryptForGroup(gid,text,groupMemberIds(S.current)):'';
+  /* FIX (UPLOAD-FAILED-INVALID-GROUP-CIPHERTEXT-ENVELOPE): this used to be `text ? encrypt(...) : ''`. An attachment sent
+     without a caption has empty text, so content:'' was POSTed and groupMessagingService.insertMessage() rejects anything
+     that is not a KYN-GROUP-V2 envelope ("Invalid group ciphertext envelope"). Direct chat never hit this because its
+     server route accepts empty content when metadata carries the attachment; the group route never did. Always encrypt
+     -- AES-GCM of '' is still a valid envelope (16-byte tag), so sender-key epoch/owner checks keep applying. */
+  const encrypted=await window.KynectaGroupE2E.encryptForGroup(gid,text,groupMemberIds(S.current));
   const r=await apiRetry('/group-messages/'+encodeURIComponent(gid)+'/messages',{method:'POST',body:JSON.stringify({chatId:gid,content:encrypted,type,clientMessageId:cid,metadata:{...(metadata||{}),groupId:gid}})});
   const message=r?.data?.message||r?.data;if(!message?.id)throw new Error('Server did not return the saved group message');
-  if(text){groupMessageState.plaintext.set(String(message.id),text);groupMessageState.lastCiphertext.set(String(message.id),encrypted)}
+  groupMessageState.plaintext.set(String(message.id),text);groupMessageState.lastCiphertext.set(String(message.id),encrypted);
   mergeGroupMessages([{...message,clientMessageId:cid,content:text,displayContent:text}]);loadMessages();return message;
 }
 window.__NECPRA_GROUP_SEND=sendGroupPayload;

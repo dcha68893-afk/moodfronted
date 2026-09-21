@@ -48,11 +48,16 @@
        The header of this file always promised "child module frames never become competing theme authorities": now they really
        cannot. Only the Settings page (where the user actually chooses) may send change requests. */
     var CAN_REQUEST = /(?:^|\/)settings(?:\.html)?$/i.test(global.location.pathname || '');
-    /* Even the Settings page runs code on load that re-applies ITS cached values and sends requests (which used to be treated
-       as the user's choice and reverted a correct theme). Only a request made while the user is really interacting counts as a
-       choice: the browser's transient user-activation flag is true right after a click/tap/keypress in this frame and false
-       for boot-time or timer-driven calls. (Browsers without the API keep the old behaviour.) */
-    function userGesture() { try { return navigator.userActivation ? !!navigator.userActivation.isActive : true; } catch (_) { return true; } }
+    /* ROOT-CAUSE FIX (Settings flips the theme by itself when you navigate back to it):
+       the previous guard treated ANY call made while `navigator.userActivation.isActive` as "the user's choice". Transient user
+       activation is shared with every SAME-ORIGIN frame in the page (HTML spec, "activation notification"), so tapping the Settings
+       icon in chat.html's nav marks the freshly-focused Settings iframe as "active" too. Settings' own boot / refocus / sync code
+       (settings-core.js applySettingsToUI(), the `|| 'light'` re-save, SETTINGS_LOAD replies ...) then re-applied its cached
+       snapshot through this proxy, every such call was stamped userInitiated:true, and the shell obeyed and locked it for 2s.
+       That is also why only Settings misbehaved -- it is the only frame allowed to send requests.
+       A request now only counts when the caller says so explicitly (opts.userChoice === true). settings-ui.js passes that flag
+       from the theme/font/icon <select> change handlers and nowhere else, so boot, sync and refocus code can never change it. */
+    function explicitChoice(opts) { return !!(opts && opts.userChoice === true); }
     /* ROOT-CAUSE FIX (module body painted with a hardcoded fallback first): this frame never painted itself - it waited for
        the shell to inject variables later, on a different timer than the shell's own header/footer. Modules use
        `var(--kyn-bg-panel, #fff)` style fallbacks, so until the injection landed they rendered white while the shell around
@@ -67,6 +72,13 @@
     var proxy = {
       __kynEmbeddedProxy: true,
       __kynEngine: true,
+      /* ROOT-CAUSE FIX (nested frames such as game.html -> game-v3.html never got their --kyn-* tokens on load): a frame whose
+         parent is itself an embedded module (game-v3.html inside game.html) calls shell.ThemeManager.paintDocument(document),
+         but `shell` there is game.html's PROXY, which had no paintDocument, so paintFromShell() silently did nothing and the
+         nested page stayed unpainted until the next theme change. Forward the call up the frame chain to the real engine. */
+      paintDocument: function (doc) {
+        try { if (shell && shell.ThemeManager && typeof shell.ThemeManager.paintDocument === 'function') shell.ThemeManager.paintDocument(doc || document); } catch (_) {}
+      },
       getTheme: function () {
         try {
           if (shell && shell.ThemeManager && typeof shell.ThemeManager.getTheme === 'function') {
@@ -105,37 +117,37 @@
       // call that doesn't actually change anything is a no-op (matching the
       // equivalent guard the real, non-embedded ThemeManager below already
       // has) stops the redundant REQUESTs at the source.
-      setTheme: function (value) {
+      setTheme: function (value, opts) {
         if (value === proxy.getTheme()) return value;
-        if (!CAN_REQUEST) return proxy.getTheme();
+        if (!CAN_REQUEST || !explicitChoice(opts)) return proxy.getTheme();
         try {
           if (shell && shell.postMessage) {
-            shell.postMessage({ type: 'NECPRA_THEME_REQUEST', userInitiated: userGesture(), theme: value, source: 'embedded-module' }, global.location.origin);
+            shell.postMessage({ type: 'NECPRA_THEME_REQUEST', userInitiated: true, theme: value, source: 'embedded-module' }, global.location.origin);
           }
         } catch (_) {}
         return proxy.getTheme();
       },
-      setFontSize: function (value) {
+      setFontSize: function (value, opts) {
         if (value === proxy.getFontSize()) return value;
-        if (!CAN_REQUEST) return proxy.getFontSize();
+        if (!CAN_REQUEST || !explicitChoice(opts)) return proxy.getFontSize();
         try {
-          if (shell && shell.postMessage) shell.postMessage({ type: 'NECPRA_FONT_REQUEST', userInitiated: userGesture(), value: value, source: 'embedded-module' }, global.location.origin);
+          if (shell && shell.postMessage) shell.postMessage({ type: 'NECPRA_FONT_REQUEST', userInitiated: true, value: value, source: 'embedded-module' }, global.location.origin);
         } catch (_) {}
         return proxy.getFontSize();
       },
-      setIconScale: function (value) {
+      setIconScale: function (value, opts) {
         if (value === proxy.getIconScale()) return value;
-        if (!CAN_REQUEST) return proxy.getIconScale();
+        if (!CAN_REQUEST || !explicitChoice(opts)) return proxy.getIconScale();
         try {
-          if (shell && shell.postMessage) shell.postMessage({ type: 'NECPRA_ICON_REQUEST', userInitiated: userGesture(), value: value, source: 'embedded-module' }, global.location.origin);
+          if (shell && shell.postMessage) shell.postMessage({ type: 'NECPRA_ICON_REQUEST', userInitiated: true, value: value, source: 'embedded-module' }, global.location.origin);
         } catch (_) {}
         return proxy.getIconScale();
       },
-      setAccentColor: function (value) {
+      setAccentColor: function (value, opts) {
         if (value === proxy.getAccentColor()) return value;
-        if (!CAN_REQUEST) return proxy.getAccentColor();
+        if (!CAN_REQUEST || !explicitChoice(opts)) return proxy.getAccentColor();
         try {
-          if (shell && shell.postMessage) shell.postMessage({ type: 'NECPRA_ACCENT_REQUEST', userInitiated: userGesture(), value: value, source: 'embedded-module' }, global.location.origin);
+          if (shell && shell.postMessage) shell.postMessage({ type: 'NECPRA_ACCENT_REQUEST', userInitiated: true, value: value, source: 'embedded-module' }, global.location.origin);
         } catch (_) {}
         return proxy.getAccentColor();
       },

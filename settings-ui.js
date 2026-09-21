@@ -1640,7 +1640,7 @@ export function applyTheme(theme) {
     // whose meaning differs between the top-level engine and this proxy.
     const resolved = theme === 'dark' ? 'dark' : 'light';
     if (window.ThemeManager) {
-        window.ThemeManager.setTheme(resolved);
+        window.ThemeManager.setTheme(resolved, { userChoice: true }); // explicit <select> change -- see theme.engine.js explicitChoice()
     } else {
         // Fallback only if theme.engine.js somehow failed to load.
         const root = document.documentElement;
@@ -1686,7 +1686,7 @@ export function applyFontSize(size) {
     // broadcast/save instead of that return value.
     const fontSize = parseInt(size, 10) || 16;
     if (window.ThemeManager) {
-        window.ThemeManager.setFontSize(fontSize);
+        window.ThemeManager.setFontSize(fontSize, { userChoice: true });
     } else {
         // Fallback only if theme.engine.js somehow failed to load.
         document.documentElement.style.fontSize = `${fontSize}px`;
@@ -1722,7 +1722,7 @@ export function applyIconSize(size) {
     // broadcast/save instead of that return value.
     const iconScale = size || 'medium';
     if (window.ThemeManager) {
-        window.ThemeManager.setIconScale(iconScale);
+        window.ThemeManager.setIconScale(iconScale, { userChoice: true });
     } else {
         // Fallback only if theme.engine.js somehow failed to load.
         const ICON_SCALE_MAP = { small: 0.85, medium: 1, large: 1.2, xl: 1.4 };
