@@ -694,9 +694,11 @@
             });
         }
 
-        // Service Worker Registration for PWA functionality
+        // Service Worker: registered once by /pwa-manager.js (window.NecpaPWA). Fallback only if that script isn't on this page.
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/service-worker.js')
+            (window.NecpaPWA
+                ? window.NecpaPWA.registerServiceWorker()
+                : navigator.serviceWorker.register('/service-worker.js', { scope: '/' }))
                 .then(registration => {
                     console.log('ServiceWorker registered: ', registration);
                 })

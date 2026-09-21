@@ -24,7 +24,7 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.30.1';
+const SW_VERSION = '19.31.0';
 // FIX: bumped so activate() drops every existing cache immediately on this
 // deploy — anyone with a stale pre-rebuild group.html (or the old, now-
 // deleted group-core-*/group-os-* files, or the misspelled necpra-* icons
@@ -38,7 +38,11 @@ const SW_VERSION = '19.30.1';
 // FIX (message restore / account isolation): js/message-client.js, js/message-local-db.js, js/group-message-local-db.js,
 // js/authStorage.js, js/core/groups/group-cache-first.js and group.html changed. group-cache-first.js was on neither the
 // precache nor NETWORK_FIRST_PATTERNS list, so it is now network-first; the bump forces one clean break on next launch.
-const CACHE_NAME = 'necpa-static-v61';
+// FIX (PWA install consolidation): pwa-manager.js is now the single install/registration controller and
+// js/pwa-mobile-install.js + js/install-chooser.js were deleted. Bumping the cache name drops every cached copy
+// of those two scripts (and the old pwa-manager.js) on the next activate, so no device keeps running a stale
+// installer next to the new one.
+const CACHE_NAME = 'necpa-static-v62';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -104,7 +108,7 @@ const NETWORK_FIRST_PATTERNS = [
   // regardless of how many times the page was reloaded.
   /\/friend-ui\.js/i,/\/friend-core\.bootstrap\.js/i,/\/friend-core\.operations\.js/i,
   /\/friendSync\.engine\.js/i,/\/friendQueue\.manager\.js/i,/\/localStore\.friends\.js/i,
-  /\/Tool-core\.part3\.js/i,/\/Tool-ui\.js/i,/\/pwa-manager\.js/i,/\/js\/kynecta\.safety\.layer\.js/i,
+  /\/Tool-core\.part3\.js/i,/\/Tool-ui\.js/i,/\/pwa-manager\.js/i,/\/manifest\.json/i,/\/js\/kynecta\.safety\.layer\.js/i,
   /\/settings-ui\.js/i,/\/js\/settings-ui\.local-first\.patch\.js/i,
   /\/chat\.html/i,
   // ROOT-CAUSE FIX (Product Management admin page showing raw JS/template-literal
@@ -171,6 +175,8 @@ self.addEventListener('fetch',event=>{
 self.addEventListener('message',event=>{
   const d=event.data;if(!d||!d.type)return;
   if(d.type==='SKIP_WAITING')self.skipWaiting();
+  // index.html asks for this (MessageChannel) to render the "Offline ready / vX" status line; it was never answered.
+  if(d.type==='GET_CACHE_INFO'&&event.ports&&event.ports[0]){const port=event.ports[0];event.waitUntil(caches.open(CACHE_NAME).then(c=>c.keys()).then(k=>port.postMessage({version:SW_VERSION,cache:CACHE_NAME,count:k.length})).catch(()=>port.postMessage({version:SW_VERSION,cache:CACHE_NAME,count:0})));}
   if(d.type==='CLEAR_CACHE')event.waitUntil(caches.delete(CACHE_NAME));
   if(d.type==='INVALIDATE_URLS'&&Array.isArray(d.urls))event.waitUntil(caches.open(CACHE_NAME).then(c=>Promise.all(d.urls.map(u=>c.delete(u)))));
   if(d.type==='FORCE_REFRESH')event.waitUntil(caches.open(CACHE_NAME).then(c=>Promise.all(['/js/theme.engine.js','/theme.colors.css','/js/e2e-encryption.js','/js/authStorage.js','/js/auth.account.limit.js','/js/google-auth.js','/js/app.cache.unified.js','/js/app.cache.js'].map(async u=>{try{const r=await fetch(u,{cache:'no-store'});if(r.ok)await c.put(u,r);}catch(_){}}))));

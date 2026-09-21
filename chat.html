@@ -64,6 +64,9 @@
     <title>Necpa - Chat, Friends & Marketplace</title>
     <!-- PWA: manifest MUST be linked from the main shell so beforeinstallprompt fires -->
     <link rel="manifest" href="/manifest.json">
+    <!-- PWA controller (single owner of beforeinstallprompt + install UI + service-worker registration).
+         Plain script in <head> so its listener exists before Chrome fires the one-time event. -->
+    <script src="/pwa-manager.js"></script>
     <!-- theme-color is now set dynamically by theme.engine.js to match the saved theme -->
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3622,9 +3625,7 @@
         <!-- ✅ SAFETY LAYER — Must be first (patch v1) -->
     <script src="js/core/identity/IdentityProfileStore.js"></script>
     <script src="js/kynecta.safety.layer.js"></script>
-    <!-- PWA install banner + SW update manager — MUST be in main shell (chat.html) -->
-    <script src="/pwa-manager.js"></script>
-    <script src="/js/pwa-mobile-install.js" defer></script>
+    <!-- PWA install + SW update manager: loaded once, in <head> (see the manifest link above). -->
     <script>
         // Signal to child iframes that AppStorage is ready
         (function() {

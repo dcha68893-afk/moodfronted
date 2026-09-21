@@ -240,47 +240,25 @@
   }
 
   // ─── Service Worker registration ──────────────────────────────────────────
-  // FIX-DUAL-SW-CONFLICT: this used to register '/sw.js', a second,
-  // independently-maintained service worker that competes with
-  // '/service-worker.js' (registered by main.js, pwa-manager.js,
-  // push-manager.js, index.html, upload.html) at the SAME scope ('/').
-  // Only one service worker can control a page at a time, and every page
-  // load of THIS file re-triggered an install/update cycle for '/sw.js',
-  // racing against whichever page most recently registered
-  // '/service-worker.js'. Whichever one won depended purely on load order —
-  // which explains behavior differing by entry point ("source"): different
-  // pages load their scripts, and therefore register their service worker,
-  // at different points in the page lifecycle.
+  // ONE registration path: /pwa-manager.js (window.NecpaPWA.registerServiceWorker) registers '/service-worker.js'
+  // exactly once per page and returns the same promise to every caller. This file only asks for it.
+  // The pages that don't load pwa-manager.js fall back to the identical register() call (same URL + scope, so it is
+  // an idempotent no-op if the shell already registered it).
   //
-  // The two workers are NOT equivalent: '/sw.js' has no guard against
-  // showing raw E2E ciphertext envelopes in push notifications (the
-  // '/service-worker.js' push handler explicitly detects and replaces
-  // encrypted-looking bodies — see its `_looksEncrypted` check), and it
-  // runs its own independent fetch/cache and background-sync logic that
-  // can silently serve stale cached JS instead of what '/service-worker.js'
-  // would serve. Registering only the maintained worker, and actively
-  // unregistering any stray '/sw.js' left over from a previous visit,
-  // eliminates the race entirely.
+  // History: this used to register '/sw.js' (a second worker), and later carried a "self-heal" that unregistered any
+  // registration whose active worker was '/sw.js'. Registrations are keyed by SCOPE, so registering
+  // '/service-worker.js' at '/' already replaces an old '/sw.js' worker at the same scope — and that self-heal could
+  // unregister the very registration that was mid-upgrade. It is removed; '/sw.js' is now only a retirement stub.
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/service-worker.js').then(reg => {
+      const registration = window.NecpaPWA
+        ? window.NecpaPWA.registerServiceWorker()
+        : navigator.serviceWorker.register('/service-worker.js', { scope: '/' });
+      registration.then(reg => {
         console.log('[BGSync] SW registered:', reg.scope);
       }).catch(() => {
-        // SW not found — that's OK, we degrade gracefully
+        // SW not available — that's OK, we degrade gracefully
       });
-
-      // Self-heal: remove any previously-installed '/sw.js' registration
-      // so it stops intercepting fetches/push/sync on this device.
-      navigator.serviceWorker.getRegistrations().then(regs => {
-        regs.forEach(reg => {
-          const scriptUrl = reg.active?.scriptURL || reg.installing?.scriptURL || reg.waiting?.scriptURL || '';
-          if (scriptUrl.endsWith('/sw.js')) {
-            reg.unregister().then(() => {
-              console.log('[BGSync] Unregistered stale duplicate SW: /sw.js');
-            }).catch(() => {});
-          }
-        });
-      }).catch(() => {});
     });
   }
 

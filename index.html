@@ -68,7 +68,7 @@
         })();
     </script>
 
-    <link rel="manifest" href="manifest.json">
+    <link rel="manifest" href="/manifest.json">
     <!-- theme-color is now set dynamically by theme.engine.js to match the saved theme -->
     <link rel="icon" href="favicon.ico" type="image/x-icon">
     <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16x16.png">
@@ -1641,8 +1641,11 @@
             #authPanel.show-auth { transform: none; }
         }
     </style>
-    <!-- Install chooser: Google Play or install now (PWA). Loaded early so it catches the one-time beforeinstallprompt event. -->
-    <script src="/js/install-chooser.js"></script>
+    <!-- PWA controller: the ONE owner of beforeinstallprompt, the install dialog (Android native prompt / manual
+         steps, iOS Share -> Add to Home Screen) and service-worker registration. Must be a plain, early script so its
+         listener exists before Chrome fires the one-time beforeinstallprompt event. It replaces install-chooser.js
+         and pwa-mobile-install.js (both deleted). -->
+    <script src="/pwa-manager.js"></script>
 </head>
 <body>
     <!-- ====================================================================== -->
@@ -5500,18 +5503,10 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
         if (dashboardPanel) autoSkipObserver.observe(dashboardPanel, { attributes: true, attributeFilter: ['class'] });
 
         // ---- Service worker registration -----------------------------------------
-        // index.html never registered the service worker anywhere (only
-        // main.js does that, and main.js isn't loaded on this page) — without
-        // an active SW controlling this page, the browser's install
-        // criteria aren't met and beforeinstallprompt won't fire here at
-        // all, silently defeating the whole point of putting Install here
-        // instead of only inside chat.html. Registering the same SW file
-        // multiple times across pages is safe/idempotent by spec.
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/service-worker.js').catch(function (err) {
-                console.error('[Landing] ServiceWorker registration failed:', err);
-            });
-        }
+        // Removed: /pwa-manager.js (loaded in <head>) is the single owner of
+        // service-worker registration and calls navigator.serviceWorker.register()
+        // exactly once per page. Registering it here as well only added a second,
+        // racing code path.
 
         // ---- PWA install --------------------------------------------------------
         // Two buttons share one captured event: the hero's landingInstallBtn
@@ -5534,7 +5529,7 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
         // back. The buttons are now visible by default in the HTML; this
         // script's only job is to hide them when the app is genuinely
         // installed. Click handling and "why can't I install" messaging both
-        // belong to install-chooser.js, which owns clicks on these buttons.
+        // belong to pwa-manager.js, which owns clicks on these buttons.
 
         // ---- Install-state UI (Phase 17, Step 5) ---------------------------
         // Once installed, the Install button is replaced with a small status
@@ -5714,10 +5709,10 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
             if (!installButtons.length) return;
             // Buttons are visible by default in the HTML. On iOS, swap in the
             // Share-sheet hint (no beforeinstallprompt there ever). Everywhere
-            // else, leave the button showing — install-chooser.js owns clicks
-            // and, for browsers that never offer a native prompt, explains why
-            // and offers the Google Play / manual-install routes instead of
-            // hiding the button.
+            // else, leave the button showing — pwa-manager.js owns clicks
+            // and, for browsers that never offer a native prompt, shows the
+            // manual Chrome menu steps (and the Google Play option on Android)
+            // instead of hiding the button.
             if (isIOS()) renderIOSHint();
             window.addEventListener('appinstalled', function () {
                 try { localStorage.setItem('pwa_installed', '1'); } catch (_) {}
@@ -5726,6 +5721,5 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
         });
     })();
     </script>
-    <script src="/js/pwa-mobile-install.js" defer></script>
 </body>
 </html>

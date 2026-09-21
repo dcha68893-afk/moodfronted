@@ -52,7 +52,8 @@
 </script>
     <!-- CRITICAL: Safety layer must load before module scripts -->
     <script src="/js/kynecta.safety.layer.js"></script>
-    <link rel="manifest" href="../manifest.json">
+    <link rel="manifest" href="/manifest.json">
+    <script src="/pwa-manager.js"></script>
     <!-- theme-color is now set dynamically by theme.engine.js to match the saved theme -->
     <!-- App log image (favicon / home-screen icon): use the "necpa-*" icon set to
          match the app's actual name (Necpa), not the misspelled "necpra-*" set. -->
@@ -3926,8 +3927,6 @@
   LOAD ORDER: must come after all other marketplace scripts.
 ════════════════════════════════════════════════════════════════════════ -->
 <script src="/marketplace-ui-fix.js"></script>
-<!-- PWA shared script — install banner + instant update -->
-<script src="/pwa-manager.js" defer></script>
-<script src="/js/pwa-mobile-install.js" defer></script>
+<!-- PWA controller (/pwa-manager.js) is loaded once in <head>. -->
 </body>
 </html>

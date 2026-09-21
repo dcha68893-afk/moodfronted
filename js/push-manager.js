@@ -258,7 +258,10 @@
 
     try {
       // FIX-SW-SCOPE-CONFLICT: share the single service worker at '/'.
-      _swRegistration = await navigator.serviceWorker.register('/service-worker.js', { scope: '/' });
+      // The single registration path is /pwa-manager.js (window.NecpaPWA); the fallback only runs on pages that don't load it.
+      _swRegistration = await (window.NecpaPWA
+        ? window.NecpaPWA.registerServiceWorker()
+        : navigator.serviceWorker.register('/service-worker.js', { scope: '/' }));
       console.log('[PushManager] ✅ Service Worker registered');
 
       navigator.serviceWorker.addEventListener('controllerchange', () => {

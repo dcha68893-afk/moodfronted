@@ -38,7 +38,8 @@
 </script>
     <!-- CRITICAL: Safety layer must load before module scripts -->
     <script src="/js/kynecta.safety.layer.js"></script>
-    <link rel="manifest" href="../manifest.json">
+    <link rel="manifest" href="/manifest.json">
+    <script src="/pwa-manager.js"></script>
     <!-- theme-color is now set dynamically by theme.engine.js to match the saved theme -->
     <!-- FIX (tab icon didn't match the actual app icon): see chat.html -->
     <link rel="icon" href="../icons/necpa-192.png">
@@ -3488,8 +3489,7 @@
   DO NOT move above existing scripts.
 ════════════════════════════════════════════════════════════════════════ -->
 <script type="module" src="/js/core/phase6.bootstrap.js"></script>
-<script src="/pwa-manager.js" defer></script>
-<script src="/js/pwa-mobile-install.js" defer></script>
+<!-- PWA controller (/pwa-manager.js) is loaded once in <head>. -->
 
 <!-- FIX: Help/Contact Us/Terms relocated here from the login page (index.html) per user request — same content/logic, now reachable after login via the Support menu items below. -->
     <!-- INFO MODALS: Privacy, Terms, Contact, Help                            -->

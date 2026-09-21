@@ -880,32 +880,12 @@ window._advDeliveryEstimate = async function(containerEl, weight) {
 // ══════════════════════════════════════════════════════════════════════════════
 // 11. PWA INSTALL PROMPT
 // ══════════════════════════════════════════════════════════════════════════════
+// FIX (PWA install consolidation): this module used to add its own `beforeinstallprompt` listener and its own
+// "Install Knecta Market" banner. That was a 4th competing owner of a one-time browser event. The install prompt now
+// lives ONLY in /pwa-manager.js (window.NecpaPWA). All that is left here is the marketplace cache warm-up message.
 const PWAManager = {
-    _deferredPrompt: null,
-    _dismissed: _ls.load('adv_pwa_dismissed', false),
-
     init() {
-        window.addEventListener('beforeinstallprompt', (e) => {
-            e.preventDefault();
-            this._deferredPrompt = e;
-            if (!this._dismissed) this._showBanner();
-        });
-        // Update service worker to cache marketplace files
         this._updateServiceWorker();
-    },
-
-    _showBanner() {
-        if (document.getElementById('advPWABanner')) return;
-        const jmApp = document.querySelector('.jm-app') || document.querySelector('.knt-app') || document.getElementById('jmApp');
-        if (!jmApp) return;
-        const banner = document.createElement('div');
-        banner.id = 'advPWABanner';
-        banner.className = 'adv-pwa-banner';
-        banner.innerHTML = `<div class="adv-pwa-icon">⚡</div>
-        <div class="adv-pwa-text"><strong>Install Knecta Market</strong><span>Shop faster with our app — offline ready!</span></div>
-        <button class="adv-pwa-btn" onclick="window._advInstallPWA()">Install</button>
-        <button class="adv-pwa-close" onclick="window._advDismissPWA()">✕</button>`;
-        jmApp.prepend(banner);
     },
 
     _updateServiceWorker() {
@@ -920,21 +900,6 @@ const PWAManager = {
             }
         }).catch(() => {});
     }
-};
-
-window._advInstallPWA = async function() {
-    const prompt = PWAManager._deferredPrompt;
-    if (!prompt) { _toast('Use browser menu to install', 'info', '📱'); return; }
-    prompt.prompt();
-    const { outcome } = await prompt.userChoice;
-    PWAManager._deferredPrompt = null;
-    document.getElementById('advPWABanner')?.remove();
-    if (outcome === 'accepted') _toast('App installed successfully!', 'success', '🎉');
-};
-window._advDismissPWA = function() {
-    document.getElementById('advPWABanner')?.remove();
-    PWAManager._dismissed = true;
-    _ls.save('adv_pwa_dismissed', true);
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
