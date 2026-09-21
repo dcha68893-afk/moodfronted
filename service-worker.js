@@ -24,7 +24,7 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.29.3';
+const SW_VERSION = '19.30.1';
 // FIX: bumped so activate() drops every existing cache immediately on this
 // deploy — anyone with a stale pre-rebuild group.html (or the old, now-
 // deleted group-core-*/group-os-* files, or the misspelled necpra-* icons
@@ -35,7 +35,10 @@ const SW_VERSION = '19.29.3';
 // FIX (this deploy): js/config.js (brand rewriter no longer touches inline <script> text), group/E2E files and
 // Tool-core.part3.js all changed. Bumping the cache name makes every installed PWA/Android app drop the old copies
 // on next launch instead of running them for up to CACHE_MAX_AGE.
-const CACHE_NAME = 'necpa-static-v58';
+// FIX (message restore / account isolation): js/message-client.js, js/message-local-db.js, js/group-message-local-db.js,
+// js/authStorage.js, js/core/groups/group-cache-first.js and group.html changed. group-cache-first.js was on neither the
+// precache nor NETWORK_FIRST_PATTERNS list, so it is now network-first; the bump forces one clean break on next launch.
+const CACHE_NAME = 'necpa-static-v60';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -84,7 +87,7 @@ const NETWORK_FIRST_PATTERNS = [
   // already hit and fixed for the friend module and marketplace files
   // below. Swapped the dead legacy entries for the real, still-actively-
   // edited files group.html depends on today.
-  /\/group\.html/i,/\/js\/groupMessaging\.client\.js/i,/\/js\/groupEncryption\.client\.js/i,/\/js\/group-platform\.js/i,/\/js\/group-message-local-db\.js/i,/\/js\/group-chat-features\.js/i,/\/js\/group-message-cache\.js/i,
+  /\/group\.html/i,/\/js\/groupMessaging\.client\.js/i,/\/js\/groupEncryption\.client\.js/i,/\/js\/group-platform\.js/i,/\/js\/group-message-local-db\.js/i,/\/js\/core\/groups\/group-cache-first\.js/i,/\/js\/group-chat-features\.js/i,/\/js\/group-message-cache\.js/i,
   /\/js\/group-media-render\.js/i,/\/friend-core\.ui-bridge\.js/i,
   // ROOT-CAUSE FIX (fixes to the friend module silently not appearing after
   // deploy — "some changes show, others don't"): friend.html and friend.css

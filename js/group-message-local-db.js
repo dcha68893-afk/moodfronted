@@ -13,32 +13,33 @@
   let dbPromise = null;
   let closed = false;
 
-  // Same account-detection strategy as message-local-db.js, kept in sync
-  // deliberately — both caches must agree on "whose data is this" or a
-  // shared device could leak one account's group history into another's.
+  // Same account-detection rule as message-local-db.js (kept identical on purpose —
+  // both caches must agree on "whose data is this"): persisted auth is the source of
+  // truth, and a window whose in-memory user disagrees with it is stale (e.g. an
+  // account was switched from another tab/iframe), so the cache is not used at all
+  // rather than filing one account's fetched history under another's partition.
+  function idFrom(u) { const id = u && (u.id || u.userId || u.uid || u._id); return id != null ? String(id) : null; }
   function currentUserId() {
+    let stored = null, mem = null;
     try {
-      if (global.currentUser && (global.currentUser.id || global.currentUser.userId || global.currentUser._id)) {
-        const u = global.currentUser;
-        return String(u.id || u.userId || u._id);
+      try { const raw = localStorage.getItem('kynecta_auth'); if (raw) { const p = JSON.parse(raw); stored = idFrom(p && p.user ? p.user : p); } } catch (_) {}
+      if (stored == null) {
+        for (const key of ['currentUser', 'necpa_user', 'user']) {
+          try { const raw = localStorage.getItem(key); if (!raw) continue; const p = JSON.parse(raw); const id = idFrom(p && p.user ? p.user : p); if (id != null) { stored = id; break; } } catch (_) {}
+        }
       }
-      if (global.AuthStorage && typeof global.AuthStorage.getUser === 'function') {
-        const u = global.AuthStorage.getUser();
-        const id = u && (u.id || u.userId || u.uid || u._id);
-        if (id != null) return String(id);
-      }
-      for (const key of ['kynecta_auth', 'currentUser', 'necpa_user', 'user']) {
-        try {
-          const raw = localStorage.getItem(key);
-          if (!raw) continue;
-          const parsed = JSON.parse(raw);
-          const u = parsed && parsed.user ? parsed.user : parsed;
-          const id = u && (u.id || u.userId || u.uid || u._id);
-          if (id != null) return String(id);
-        } catch (_) {}
-      }
+      if (global.currentUser) mem = idFrom(global.currentUser);
+      if (mem == null && global.AuthStorage && typeof global.AuthStorage.getUser === 'function') mem = idFrom(global.AuthStorage.getUser());
     } catch (_) {}
-    return null;
+    if (stored != null && mem != null && stored !== mem) return null;
+    return stored != null ? stored : mem;
+  }
+  // Transient UI flags that must never be persisted.
+  const TRANSIENT_FIELDS = ['_decryptPending', '_error', '_hint', '_autoTries', '_readinessWait', '_optimistic'];
+  function forDisk(message) {
+    const out = Object.assign({}, message);
+    TRANSIENT_FIELDS.forEach((f) => { delete out[f]; });
+    return out;
   }
 
   function openDb() {
@@ -109,16 +110,24 @@
   async function putMessages(groupId, messages) {
     const accountId = currentUserId();
     if (!accountId || groupId == null || !Array.isArray(messages) || !messages.length) return;
+    // NEVER STORE WHAT WE COULD NOT READ: a row whose decryption is still pending
+    // carries only the raw envelope. Group sender-key ratchets are one-way, so a
+    // message that is not decrypted in this session may never be decryptable again;
+    // writing the envelope over a row that already holds plaintext (same key) used to
+    // destroy the only readable copy. Pending rows are skipped entirely — the next
+    // successful decrypt writes the real one.
+    const writable = messages.filter((m) => m && !m._decryptPending && !m._optimistic && (m.id != null || m.messageId != null));
+    if (!writable.length) return;
     const ctx = await withStore('readwrite');
     if (!ctx) return;
-    try {
-      for (const message of messages) {
-        const id = message && (message.id != null ? message.id : message.messageId);
-        if (!message || id == null) continue;
+    for (const message of writable) {
+      // One bad row (e.g. a non-cloneable value) must not abort the rest of the batch.
+      try {
+        const id = message.id != null ? message.id : message.messageId;
         const key = msgKey(accountId, groupId, id);
-        ctx.store.put({ key, accountId, groupId: String(groupId), id, message });
-      }
-    } catch (_) {}
+        ctx.store.put({ key, accountId, groupId: String(groupId), id, message: forDisk(message) });
+      } catch (_) {}
+    }
   }
 
   async function deleteGroupMessages(groupId) {

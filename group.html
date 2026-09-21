@@ -303,7 +303,21 @@ async function runGroupSearch(q){const box=$('searchResults');if(!q.trim()){box.
 function renderMedia(){const box=$('mediaBar');const items=S.messages.filter(m=>m.metadata?.media?.url);if(!items.length){box.innerHTML='<div class="empty" style="padding:6px">No files or media in the loaded history yet.</div>';return}box.innerHTML='';for(const m of items){const media=m.metadata.media;const row=document.createElement('div');row.className='media-item';row.innerHTML=`<a href="${esc(media.url)}" target="_blank" rel="noopener">${esc(media.name||media.mimeType||'Attachment')}</a>`;box.append(row)}}
 
 
-async function hydrateGroupHistory(id){if(!window.KynectaGroupMessageCache)return;try{const cached=await window.KynectaGroupMessageCache.getMessages(id);if(String(window.__GROUP_CHAT_ID)!==String(id)||!cached.length)return;S.messages=cached;renderMessages(false);}catch(_){}}
+// FIX (GROUP HISTORY NOT RESTORING / NEWEST MESSAGES VANISHING ON OPEN): this used to REPLACE
+// S.messages with whatever the disk cache returned. hydrate and loadMessages() run
+// concurrently, so when the network answered first the cache read then wiped the fresh
+// rows (and anything sent/received in the meantime) off the screen until the next 5s poll,
+// and renderMessages() persisted that regressed list. It now MERGES: live rows win, and a
+// cached row only fills in where the live row is still an undecryptable envelope — which is
+// exactly the case the cache exists for (a group sender-key message can't be decrypted twice).
+async function hydrateGroupHistory(id){if(!window.KynectaGroupMessageCache)return;try{const cached=await window.KynectaGroupMessageCache.getMessages(id);if(String(window.__GROUP_CHAT_ID)!==String(id)||!cached.length)return;
+  const keyOf=m=>String(m.localId||m.id||m.messageId||'');const byId=new Map();
+  for(const c of cached){const k=keyOf(c);if(k)byId.set(k,{...c,_decryptPending:false});}
+  for(const m of S.messages){const k=keyOf(m);if(!k)continue;const c=byId.get(k);
+    if(c&&m._decryptPending&&!m._optimistic)byId.set(k,{...m,content:c.content,_decryptPending:false});
+    else byId.set(k,c?{...c,...m}:m);}
+  const merged=[...byId.values()].sort((a,b)=>{const ao=a._optimistic?1:0,bo=b._optimistic?1:0;if(ao!==bo)return ao-bo;const ai=Number(a.id),bi=Number(b.id);if(!ao&&Number.isFinite(ai)&&Number.isFinite(bi))return ai-bi;return new Date(a.createdAt||a.sentAt||0)-new Date(b.createdAt||b.sentAt||0);});
+  S.messages=merged;renderMessages(false);}catch(_){}}
 function openGroup(id){
   const g=S.groups.find(x=>String(x.id)===String(id))||{id};
   // FIX (GROUP SENDER KEY NEVER PREWARMED — the group-specific counterpart to the

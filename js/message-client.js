@@ -270,7 +270,26 @@
         }
 
         if (bucket.has(message.id)) {
-            bucket.set(message.id, Object.assign({}, bucket.get(message.id), message));
+            // ROOT-CAUSE FIX (CACHED PLAINTEXT THROWN AWAY ON RE-DELIVERY): a server
+            // copy of a message we already hold (history re-fetch, delta sync,
+            // reconnect backfill, socket redelivery) carries only the raw envelope.
+            // decryptForDisplay() below used to be handed THAT raw copy, so a message
+            // whose plaintext was already restored from the local cache was pushed
+            // through the ratchet a second time — which fails for an already-consumed
+            // message key — and the good plaintext was then overwritten by a
+            // "Unable to decrypt" placeholder (and, via persistMessage(), on disk).
+            // Now: if the ciphertext is unchanged and we already hold resolved
+            // plaintext, keep it; if the ciphertext CHANGED (edit), drop the stale
+            // plaintext so it is decrypted fresh.
+            const prev = bucket.get(message.id);
+            const merged = Object.assign({}, prev, message);
+            if (message.displayContent === undefined && prev && prev.displayContent !== undefined) {
+                if (prev.content !== undefined && message.content !== undefined && prev.content !== message.content) {
+                    merged.displayContent = undefined;
+                    delete merged.decryptVersion;
+                }
+            }
+            bucket.set(message.id, merged);
         } else {
             bucket.set(message.id, message);
         }
@@ -310,7 +329,9 @@
 
         notify('message:added', { chatId, message });
         persistMessage(chatId, bucket.get(message.id));
-        decryptForDisplay(chatId, message);
+        // Decrypt the MERGED bucket entry (it carries any plaintext already restored
+        // from the cache), not the raw incoming copy — see the comment above.
+        decryptForDisplay(chatId, bucket.get(message.id) || message);
 
         // FIX (HEADER-SAYS-OFFLINE-WHILE-THEY-ARE-MESSAGING): a message that was created
         // moments ago and did not come from us is proof its sender is online right now.
@@ -703,9 +724,9 @@
         const res = await api().get(`/messages/${chatId}?${qs.toString()}`);
         if (res && res.success && Array.isArray(res.data)) {
             _chronological(res.data).forEach(m => applyIncomingMessage(m, { fromSelf: false }));
-            return { messages: res.data, hasMore: !!res.hasMore };
+            return { messages: res.data, hasMore: !!res.hasMore, ok: true };
         }
-        return { messages: [], hasMore: false };
+        return { messages: [], hasMore: false, ok: false };
     }
 
     async function syncMissed(chatId, sinceId) {
@@ -723,28 +744,85 @@
     // decryptForDisplay's very first check (`if (message.displayContent
     // !== undefined) return;`), so replaying history from disk costs no
     // crypto work, only the already-cheap in-memory bucket writes.
+    // ROOT-CAUSE FIX (CHAT HISTORY NOT RESTORING AFTER RELOAD/RELOGIN, list fine):
+    // this used to treat "the cache has at least one message for this chat" as
+    // "the cache holds this chat's history" and, in that case, skip the full
+    // history fetch and only ask the server for messages NEWER than the newest
+    // cached one. But the cache is not only written by opening a chat: the
+    // sidebar's last-message preview is decrypted for EVERY conversation on
+    // startup (loadConversations() -> decryptForDisplay()), and every
+    // successful decrypt is written through to the same messages store. So a
+    // conversation the user had never opened on this device already held
+    // exactly ONE cached row (its last message); opening it took the "cached"
+    // branch, rendered that single message, synced "newer than it" (nothing),
+    // and never loaded the rest — the list looked perfect while the chat body
+    // was missing everything but the newest bubble, on every reload.
+    //
+    // A chat's history is now only trusted from disk once a full history fetch
+    // for it has actually succeeded on this device (a per-account marker, kept
+    // outside the message store so a partial cache can never satisfy it). Until
+    // then the cached rows still paint instantly, and the real history is
+    // fetched in the background exactly as before. Never the other way round:
+    // a missing/cleared marker only ever costs one extra fetch, never lost rows.
+    function _historyMarkerKey() {
+        try {
+            const raw = localStorage.getItem('kynecta_auth');
+            const a = raw ? JSON.parse(raw) : null;
+            const id = a && a.user && (a.user.id ?? a.user.userId ?? a.user.uid ?? a.user._id);
+            return id == null ? null : 'kyn_msg_history_full_v1:' + String(id);
+        } catch (_) { return null; }
+    }
+    function _hasFullHistory(chatId) {
+        const key = _historyMarkerKey();
+        if (!key) return false;
+        try { const map = JSON.parse(localStorage.getItem(key) || '{}') || {}; return !!map[String(chatId)]; } catch (_) { return false; }
+    }
+    function _markFullHistory(chatId) {
+        const key = _historyMarkerKey();
+        if (!key) return;
+        try {
+            const map = JSON.parse(localStorage.getItem(key) || '{}') || {};
+            map[String(chatId)] = Date.now();
+            localStorage.setItem(key, JSON.stringify(map));
+        } catch (_) {}
+    }
+    const _PLACEHOLDER_DISPLAY = new Set(['🔒 Encrypted message', '🔒 Unable to decrypt this message', 'Decrypting…']);
+
     async function hydrateFromCacheThenSync(chatId) {
         const cache = window.KynectaMessageCache;
         let cachedCount = 0;
         if (cache) {
             try {
                 const cached = await cache.getMessages(chatId);
-                _chronological(cached).forEach((m) => applyIncomingMessage(m, { fromSelf: false }));
+                _chronological(cached).forEach((m) => {
+                    // Pin the bucket key to the chat being opened (a cached row's own
+                    // chatId may be a different type, which would file it in a bucket
+                    // getMessages(activeChatId) never reads), and never replay a
+                    // failure placeholder as if it were resolved plaintext: with a
+                    // displayContent present decryptForDisplay() short-circuits and
+                    // the message would never be retried.
+                    const row = Object.assign({}, m, { chatId });
+                    if (typeof row.displayContent === 'string' && _PLACEHOLDER_DISPLAY.has(row.displayContent)) {
+                        delete row.displayContent;
+                        delete row.decryptFailureReason;
+                    }
+                    applyIncomingMessage(row, { fromSelf: false });
+                });
                 cachedCount = cached.length;
             } catch (_) { /* cache is best-effort — falls through to a full network load below */ }
         }
         if (cachedCount > 0) {
-            // Already have this conversation's history rendered with zero
-            // network calls and zero redecrypts. Only ask the server for
-            // what's genuinely new since the newest cached message — a
-            // delta fetch, not loadHistory()'s blind "last 50 again".
+            // Forward delta: everything newer than the newest cached row.
             let lastId = null;
             try { lastId = await cache.getLastMessageId(chatId); } catch (_) {}
-            try { await syncMissed(chatId, lastId); } catch (_) { /* offline/first-open-after-reconnect: cached history still stands */ }
-        } else {
-            // Nothing cached for this chat yet (first time it's ever been
-            // opened on this device) — same full fetch as before.
-            await loadHistory(chatId);
+            try { await syncMissed(chatId, lastId); } catch (_) { /* offline: cached history still stands */ }
+        }
+        if (cachedCount === 0 || !_hasFullHistory(chatId)) {
+            // First time this chat's history is being loaded on this device, or the
+            // cache is only the partial rows described above.
+            let res = null;
+            try { res = await loadHistory(chatId); } catch (_) {}
+            if (res && res.ok) _markFullHistory(chatId);
         }
     }
 
