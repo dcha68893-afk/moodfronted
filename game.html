@@ -1,4 +1,24 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover"><title>Necpra Games</title><script src="/js/runtime-config.js"></script><script src="/js/config.js"></script><script src="/js/theme.engine.js"></script><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--kyn-bg-root);color:var(--kyn-text-primary)}iframe{display:block;width:100%;height:100%;border:0}</style></head><body><iframe id="games" src="game-v3.html" title="Necpra Games"></iframe><script>
+// FIX (NAV BAR STILL VISIBLE INSIDE A GAME, cont'd): relay the arcade's own
+// GAMES_PANEL_OPENED/CLOSED notice (see game-v3.html's notifyGamesPanel()) up
+// to chat.html. This file sits between them (chat.html -> this file's iframe
+// -> game-v3.html's iframe), and postMessage only ever reaches the immediate
+// parent, so without this relay chat.html never saw the message at all.
+window.addEventListener('message',function(ev){
+  var d=ev.data;
+  if(d&&(d.type==='GAMES_PANEL_OPENED'||d.type==='GAMES_PANEL_CLOSED'||d.type==='mood:close-games'||d.action==='close-game')){
+    try{parent.postMessage(d,'*')}catch(e){}
+    return;
+  }
+  // Downward leg of the same relay: chat.html's hardware-back handler sends
+  // GO_BACK_TO_LIST to #gamesIframe (this window); forward it into the actual
+  // arcade iframe, which knows how to return to its home screen.
+  if(d&&d.type==='GO_BACK_TO_LIST'){
+    var f=document.getElementById('games');
+    try{f&&f.contentWindow&&f.contentWindow.postMessage(d,'*')}catch(e){}
+  }
+});
+</script><script>
 // FIX (GAMES-HARDCODED-THEME, cont'd): this used to manually read computed
 // --kyn-* values off the PARENT page on every load and push them into the
 // nested game-v3.html iframe as inline styles — a "foreground/background"

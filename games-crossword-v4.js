@@ -20,18 +20,48 @@ function canPlace(grid,w,r,c,d){const dr=d==='Down'?1:0,dc=d==='Across'?1:0;let 
  const before=[r-dr,c-dc],after=[r+dr*w.length,c+dc*w.length];
  if(inBounds(...before)&&grid[before[0]][before[1]])return null;
  if(inBounds(...after)&&grid[after[0]][after[1]])return null;
+ // FIX (CROSSWORD NEVER PLACES MORE THAN ~1 WORD): the comment above already
+ // says intersections are supposed to be allowed to touch — but this loop
+ // never actually excluded the intersection cell itself, so it checked the
+ // crossing word's own perpendicular neighbors too. At a real intersection
+ // those neighbors are the OTHER letters of the word already occupying that
+ // row/column, which almost never equal w[i], so this rejected essentially
+ // every genuine crossing and left only the seed word most of the time.
  for(let i=0;i<w.length;i++){const rr=r+dr*i,cc=c+dc*i;
+  if(grid[rr][cc]===w[i])continue; // an intersection point: touching here is the whole point of a crossword
   const sides=d==='Across'?[[rr-1,cc],[rr+1,cc]]:[[rr,cc-1],[rr,cc+1]];
   for(const [sr,sc] of sides)if(inBounds(sr,sc)&&grid[sr][sc]&&grid[sr][sc]!==w[i])return null;
  }
  return intersects;
 }
-function generate(level){const r=rng(seedFor(level)),grid=Array.from({length:SIZE},()=>Array(SIZE).fill('')),selected=shuffled(BANK,r);
+function generate(level){const r=rng(seedFor(level)),grid=Array.from({length:SIZE},()=>Array(SIZE).fill(''));
+ // FIX (CROSSWORD SHOWS NOTHING WHEN OPENED, 2nd cause): `selected` was
+ // declared as part of the same `const r=...,grid=...,selected=...` list as
+ // r and grid, making it const too — but the very next line reassigns it
+ // (`selected=selected.slice(...).concat(...)`). That's a TypeError
+ // ("Assignment to constant variable") on every single call, unconditionally,
+ // so generate() never returned anything and build() never got to replace
+ // the placeholder. Needs its own `let`.
+ let selected=shuffled(BANK,r);
  // Rotate the bank deterministically so nearby levels use different category mixes.
  const rotation=(level*17)%selected.length;selected=selected.slice(rotation).concat(selected.slice(0,rotation));
  const placed=[];
- const first=selected.find(x=>x.w.length<=7)||selected[0];let fr=Math.floor(SIZE/2),fc=Math.max(0,Math.floor((SIZE-first.w.length)/2));
- const fd=r()>.5?'Across':'Down';for(let i=0;i<first.w.length;i++)grid[fr+(fd==='Down'?i:0)][fc+(fd==='Across'?i:0)]=first.w[i];
+ // FIX (CROSSWORD SHOWS NOTHING WHEN OPENED): fr used to be hardcoded to the
+ // grid's center row (floor(SIZE/2)=4) regardless of direction or word
+ // length. That's fine for an Across word (only 1 row tall), but for a Down
+ // word it writes grid[4], grid[5], ... grid[4+len-1] — for anything longer
+ // than 5 letters that runs past row 8 (SIZE=9) and writes to a row that
+ // doesn't exist, throwing mid-generate() before build() ever gets to
+ // replace the "Crossword renderer coming next" placeholder, so the screen
+ // just stayed on that placeholder forever. fc already centered correctly
+ // for the Across case (Math.max(0,Math.floor((SIZE-len)/2))) — Down needs
+ // the same centering applied to the row instead.
+ const first=selected.find(x=>x.w.length<=7)||selected[0];
+ const fd=r()>.5?'Across':'Down';
+ let fr,fc;
+ if(fd==='Down'){fr=Math.max(0,Math.floor((SIZE-first.w.length)/2));fc=Math.floor(SIZE/2)}
+ else{fr=Math.floor(SIZE/2);fc=Math.max(0,Math.floor((SIZE-first.w.length)/2))}
+ for(let i=0;i<first.w.length;i++)grid[fr+(fd==='Down'?i:0)][fc+(fd==='Across'?i:0)]=first.w[i];
  placed.push({w:first.w,c:first.c,clue:first.clue,r:fr,c:fc,d:fd});
  for(const item of selected.slice(1)){
    if(placed.length>=8)break;

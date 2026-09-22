@@ -765,7 +765,8 @@
         /* Hide with smooth slide animation on chat/call screens */
         body.chat-panel-active .mobile-nav-bar,
         body.group-panel-active .mobile-nav-bar,
-        body.status-panel-active .mobile-nav-bar {
+        body.status-panel-active .mobile-nav-bar,
+        body.games-panel-active .mobile-nav-bar {
             transform: translateY(100%) !important;
             opacity: 0 !important;
             pointer-events: none !important;
@@ -778,7 +779,8 @@
             }
             body.chat-panel-active .mobile-nav-bar,
             body.group-panel-active .mobile-nav-bar,
-            body.status-panel-active .mobile-nav-bar {
+            body.status-panel-active .mobile-nav-bar,
+            body.games-panel-active .mobile-nav-bar {
                 display: flex !important;
                 transform: translateY(100%) !important;
                 opacity: 0 !important;
@@ -1041,7 +1043,8 @@
             }
             body.chat-panel-active .iframe-container,
             body.group-panel-active .iframe-container,
-            body.status-panel-active .iframe-container {
+            body.status-panel-active .iframe-container,
+            body.games-panel-active .iframe-container {
                 bottom: 0;
             }
 
@@ -1049,7 +1052,8 @@
                 left: 0;
                 padding: 0 14px;
             }
-            body.status-panel-active #globalHeader {
+            body.status-panel-active #globalHeader,
+            body.games-panel-active #globalHeader {
                 opacity: 0 !important;
                 pointer-events: none !important;
                 visibility: hidden !important;
@@ -2648,6 +2652,20 @@
                 return true;
             }
 
+            if (document.body.classList.contains('games-panel-active')) {
+                document.body.classList.remove('games-panel-active');
+                // Tell the games iframe (game.html) to go back to the arcade
+                // home screen; game.html relays it down to game-v3.html, which
+                // already knows how to go home via GO_BACK_TO_LIST (same message
+                // name group/status use for their own "back to list" case).
+                const gamesIframe = document.getElementById('gamesIframe');
+                if (gamesIframe && gamesIframe.contentWindow) {
+                    gamesIframe.contentWindow.postMessage({ type: 'GO_BACK_TO_LIST' }, '*');
+                }
+                logProcessStatus('back-navigation', true, 'returned-games-home');
+                return true;
+            }
+
             // FIX (BACK-STACK-EXACT-RESTORE, Tools module): Tools' sub-tabs
             // (home/categories/cart/wishlist/account) are parent-driven via
             // toolsNavTo()/TOOLS_NAV, not a local panel back-nav.js already
@@ -2824,6 +2842,18 @@
                     } catch (_) {}
                 }
                 document.body.classList.remove('status-panel-active');
+            }
+
+            // FIX (NAV BAR STICKING when leaving Games via a different nav icon):
+            // mirrors the group/status cleanup just above. game-v3.html's own
+            // notifyGamesPanel() (relayed through game.html) handles the normal
+            // in-arcade paths (opening a game, tapping back-to-arcade, the ×
+            // close button), but if the player switches tabs a different way —
+            // tapping Messages/Status/etc. directly while a game is open —
+            // gamesIframe never gets a chance to send GAMES_PANEL_CLOSED, so
+            // without this the nav would stay hidden on every other tab too.
+            if (page !== 'games') {
+                document.body.classList.remove('games-panel-active');
             }
 
             // BUG FIX (no icon nav after a call ends / after leaving a screen):
@@ -3150,7 +3180,7 @@
         // the login page," never an overlap of old and new screens.
         function _teardownAllPanelsForLogout() {
             try {
-                document.body.classList.remove('chat-panel-active', 'group-panel-active', 'status-panel-active');
+                document.body.classList.remove('chat-panel-active', 'group-panel-active', 'status-panel-active', 'games-panel-active');
                 document.querySelectorAll('.iframe-container').forEach(function (el) {
                     el.classList.add('hidden');
                     el.style.setProperty('display', 'none', 'important');
@@ -3425,6 +3455,22 @@
                     // handler): accept the status module's own declared source too.
                     if (window.innerWidth <= 768 && (event.source === document.getElementById('statusIframe')?.contentWindow || data.source === 'professional-status')) {
                         document.body.classList.remove('status-panel-active');
+                    }
+                }
+
+                // ── GAMES PANEL: hide nav when a specific game opens; show again on the arcade home/list ──
+                // Mirrors the GROUP/STATUS panel handling above. game.html's inner iframe
+                // (game-v3.html, the actual arcade) posts these — see its home()/openGame()
+                // wiring below.
+                if (data.type === 'GAMES_PANEL_OPENED') {
+                    if (window.innerWidth <= 768) {
+                        document.body.classList.add('games-panel-active');
+                        syncBrowserHistoryState(window.__currentPage, false);
+                    }
+                }
+                if (data.type === 'GAMES_PANEL_CLOSED') {
+                    if (window.innerWidth <= 768) {
+                        document.body.classList.remove('games-panel-active');
                     }
                 }
 

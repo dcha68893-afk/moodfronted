@@ -445,26 +445,27 @@ function ensureKeyGapNotice(){
   }
   return el;
 }
-// FIX (group messages not going through): small, non-blocking heads-up when
-// the server reports members who don't have the current key yet (see
-// missingMemberIds on GET /state) — previously nothing told anyone this gap
-// existed at all.
+// FIX (KEY-GAP BANNER TOO NOISY): this used to surface a visible "🔒 N member(s)
+// can't read new messages yet..." banner in the panel. Cha asked for the sync to
+// stay silent/background-only — the key top-up below (checkKeyGap ->
+// distributeMissing) still runs exactly as before, so stragglers still get
+// caught up automatically; this just stops rendering anything about it. Kept as
+// a no-op (rather than deleting the calls) so nothing else that references
+// renderKeyGapNotice/ensureKeyGapNotice has to change, and so a banner can be
+// brought back later by just re-adding the body of this function.
 function renderKeyGapNotice(missingIds){
-  const el=ensureKeyGapNotice();
-  if(!missingIds||!missingIds.length){el.style.display='none';el.textContent='';return}
-  el.style.display='block';
-  el.textContent=missingIds.length===1
-    ?'🔒 1 member can\'t read new messages yet — their device key is still syncing.'
-    :`🔒 ${missingIds.length} members can't read new messages yet — their device keys are still syncing.`;
+  const el=document.getElementById('keyGapNotice');
+  if(el){el.style.display='none';el.textContent='';}
 }
 // Best-effort: top up any stragglers' key copies (if we hold the key) and
 // reflect the result. Safe to call often — it's a no-op once everyone has
 // their copy, and distributeMissing() itself no-ops if we don't hold the key.
+// Runs silently in the background; see renderKeyGapNotice above for why it no
+// longer surfaces anything in the UI.
 async function checkKeyGap(gid){
   if(!window.KynectaGroupE2E?.distributeMissing)return;
   try{
-    const{missing}=await window.KynectaGroupE2E.distributeMissing(gid);
-    if(S.current&&String(S.current.id)===String(gid))renderKeyGapNotice(missing);
+    await window.KynectaGroupE2E.distributeMissing(gid);
   }catch(_){}
 }
 function groupObjectFor(groupId){return (S.current&&String(S.current.id)===String(groupId))?S.current:S.groups.find(g=>String(g.id)===String(groupId))||null}
