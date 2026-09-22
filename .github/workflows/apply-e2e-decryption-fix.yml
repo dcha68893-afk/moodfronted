@@ -1,0 +1,211 @@
+name: Apply E2E decryption context fix
+
+on:
+  push:
+    branches:
+      - fix/e2e-decryption-context
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch E2E decrypt peer resolution
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('js/e2e-encryption.js')
+          s = p.read_text(encoding='utf-8')
+
+          if 'FIX-E2E-DECRYPT-CANONICAL-PEER' in s:
+              print('Fix already present; nothing to do.')
+              raise SystemExit(0)
+
+          marker = '  // ── Decrypt a received message ────────────────────────────────────────────\n'
+          helper = r'''  // FIX-E2E-DECRYPT-CANONICAL-PEER: messages opened from Friend/Status/Calls/
+  // notifications can briefly carry a stale/placeholder senderId even though
+  // the encrypted envelope itself was delivered correctly. Decryption must
+  // therefore be able to recover the canonical peer from the receiver's local
+  // conversation/message state before declaring the ciphertext undecryptable.
+  // This never falls back to plaintext: it only supplies additional sender-id
+  // candidates to the existing ECDH/HKDF decrypt path.
+  function _collectDecryptPeerCandidates(encContent, chatId, suppliedSenderId) {
+    const out = [];
+    const seen = new Set();
+    const add = (id) => {
+      if (id === null || id === undefined || id === '') return;
+      const v = String(id);
+      if (!v || seen.has(v)) return;
+      const me = _myUserId();
+      if (me && v === String(me)) return;
+      seen.add(v);
+      out.push(v);
+    };
+
+    add(suppliedSenderId);
+
+    const visit = (value, depth = 0) => {
+      if (depth > 4 || value === null || value === undefined) return;
+      if (Array.isArray(value)) {
+        for (const item of value) visit(item, depth + 1);
+        return;
+      }
+      if (typeof value !== 'object') return;
+
+      const id = value.id ?? value.userId ?? value.senderId ?? value.friendId
+        ?? value.otherUserId ?? value.otherParticipantId;
+      const objectChatId = value.chatId ?? value.conversationId ?? value.chat_id;
+      const matchesChat = chatId && objectChatId && String(objectChatId) === String(chatId);
+      const exactEnvelope = encContent && typeof value.content === 'string'
+        && value.content === encContent;
+
+      // An exact message match is the strongest evidence: use its senderId.
+      if (exactEnvelope && value.senderId != null) add(value.senderId);
+
+      // For a conversation object matching this chat, prefer explicit peer
+      // fields and then participantIds/participants excluding the current user.
+      if (matchesChat || (value.id != null && String(value.id) === String(chatId))) {
+        add(value.friendId);
+        add(value.otherUserId);
+        add(value.otherParticipantId);
+        if (Array.isArray(value.participantIds)) {
+          value.participantIds.forEach(add);
+        }
+        if (Array.isArray(value.participants)) {
+          value.participants.forEach((participant) => {
+            if (participant && typeof participant === 'object') add(participant.id ?? participant.userId);
+          });
+        }
+      }
+
+      // Do not recursively walk CryptoKeys/DOM objects or huge unrelated
+      // objects. Only traverse plain JSON-like values.
+      for (const [k, v] of Object.entries(value)) {
+        if (k === 'content' || k === 'ct' || k === 'iv' || k === 'key' || k === 'publicKey') continue;
+        if (typeof v === 'object' && v !== null) visit(v, depth + 1);
+      }
+    };
+
+    // The messages module already persists conversation/message state here.
+    // Looking up the exact ciphertext in the cached message is particularly
+    // important for first messages opened through a non-history entry point.
+    const storage = [window.localStorage, window.sessionStorage];
+    for (const store of storage) {
+      try {
+        for (let i = 0; i < store.length; i++) {
+          const key = store.key(i) || '';
+          if (!/kynecta_(messages_v8_|chats_cache_v8|chat_state_v8|auth|session)/i.test(key)) continue;
+          const raw = store.getItem(key);
+          if (!raw || raw.length > 2_000_000) continue;
+          try { visit(JSON.parse(raw)); } catch (_) {}
+        }
+      } catch (_) {}
+    }
+
+    // Some entry points expose the active conversation/session on window.
+    try { visit(window.__kynActiveChat); } catch (_) {}
+    try { visit(window.__kynectaActiveChat); } catch (_) {}
+    try { visit(window.__PARENT_SESSION__); } catch (_) {}
+
+    return out;
+  }
+
+'''
+          if marker not in s:
+              raise SystemExit('decrypt marker not found')
+          s = s.replace(marker, helper + marker, 1)
+
+          pattern = re.compile(r"  async function decryptFromChat\(encContent, chatId, senderUserId\) \{.*?\n  \}\n\n  // ── Safety numbers", re.S)
+          replacement = r'''  async function decryptFromChat(encContent, chatId, senderUserId) {
+    if (!encContent || typeof encContent !== 'string') return encContent;
+    let envelope;
+    try {
+      envelope = JSON.parse(encContent);
+    } catch (_) { return encContent; }
+    if (!envelope || envelope.v !== 1) return encContent; // plaintext
+
+    if (!_enabled || !_myPrivKey) return '[Encrypted message — unlock your key to read]';
+
+    // Try the supplied sender first, then the canonical sender/peer recovered
+    // from the locally persisted message/conversation state. This fixes the
+    // non-history entry points without changing the wire format or weakening
+    // E2E security: every candidate still has to pass ECDH + AES-GCM auth.
+    const candidates = _collectDecryptPeerCandidates(encContent, chatId, senderUserId);
+    if (!candidates.length) return '[Encrypted — sender key not found]';
+
+    for (const candidateId of candidates) {
+      let sender = await _getRecipientPublicKey(candidateId);
+      if (!sender) continue;
+
+      const sharedBits = await _computeSharedBits(_myPrivKey, sender.key);
+
+      // Current protocol: stable per-user-pair context. Legacy chatId context
+      // remains as a compatibility path for messages encrypted before the
+      // pair-context migration.
+      try {
+        const aesKey = await _hkdf(sharedBits, _chatContext(chatId, candidateId));
+        return await _aesDecrypt(envelope, aesKey);
+      } catch (_) {
+        try {
+          const legacyKey = await _hkdf(sharedBits, String(chatId));
+          return await _aesDecrypt(envelope, legacyKey);
+        } catch (_) {
+          // If the candidate's cached key is stale, force one fresh fetch for
+          // that exact user before moving to the next candidate.
+          _purgeCachedRecipientKey(candidateId);
+          const fresh = await _getRecipientPublicKey(candidateId, true);
+          if (!fresh) continue;
+          try {
+            const freshBits = await _computeSharedBits(_myPrivKey, fresh.key);
+            const freshAes = await _hkdf(freshBits, _chatContext(chatId, candidateId));
+            return await _aesDecrypt(envelope, freshAes);
+          } catch (_) {
+            try {
+              const freshLegacy = await _hkdf(freshBits, String(chatId));
+              return await _aesDecrypt(envelope, freshLegacy);
+            } catch (_) {}
+          }
+        }
+      }
+    }
+
+    return '[Decryption failed]';
+  }
+
+  // ── Safety numbers'''
+          s2, n = pattern.subn(replacement, s, count=1)
+          if n != 1:
+              raise SystemExit(f'decrypt function replacement count={n}')
+          p.write_text(s2, encoding='utf-8')
+          print('Patched js/e2e-encryption.js')
+          PY
+
+      - name: Verify syntax
+        run: node --check js/e2e-encryption.js
+
+      - name: Commit fix
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add js/e2e-encryption.js
+          git commit -m 'fix: recover canonical E2E sender for non-history messages' || exit 0
+          git push origin HEAD:fix/e2e-decryption-context
+
+      - name: Remove one-time patch workflow
+        if: success()
+        shell: bash
+        run: |
+          git rm .github/workflows/apply-e2e-decryption-fix.yml || true
+          git commit -m 'chore: remove one-time E2E patch workflow' || true
+          git push origin HEAD:fix/e2e-decryption-context || true
