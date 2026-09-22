@@ -7,45 +7,31 @@
   <script src="/js/runtime-config.js"></script>
   <script src="/js/config.js"></script>
   <script src="/js/theme.engine.js"></script>
-  <!-- FIX ("Secure messaging is not ready yet" on status reactions/replies): this page sends the
-       private reaction/reply to the creator through window.KynectaE2E.encryptForChat, but it never
-       loaded the E2E chain (message.html does), so that object never existed here. Same three
-       scripts, same order, as message.html; e2e-session-init.js then loads the canonical core. -->
   <script src="/js/e2e-encryption.js" defer></script>
   <script src="/js/e2e-store-v2.js" defer></script>
   <script src="/js/e2e-session-init.js" defer></script>
   <script>
-    // The Status module uses the same authenticated session and API origin
-    // as the main Necpa shell. Keep this iframe visually independent from
-    // the legacy status.css/status-ui stack.
     (function () {
-      try {
-        if (typeof window.__getApiOrigin === 'function') {
-          window.API_BASE_URL = window.__getApiOrigin();
-        }
-      } catch (_) {}
+      try { if (typeof window.__getApiOrigin === 'function') window.API_BASE_URL = window.__getApiOrigin(); } catch (_) {}
     })();
   </script>
   <style>
-    /* The shell owns theme state. This iframe is a full-screen surface, so it
-       must inherit the shell palette before any visible content is painted. */
     html,html body{background:var(--kyn-bg-root)!important;color:var(--kyn-text-primary)!important}
-    html, body { width:100%; height:100%; margin:0; padding:0; overflow:hidden; }
-    body { background:var(--app-secondary-surface, transparent); color:var(--app-text-color, inherit); }
-    /* ProfessionalStatus is the complete Status surface in this iframe.
-       Do not show its floating launcher: the parent chat shell already owns
-       navigation and opens this page through the Status module button. */
-    #necpa-status-launcher { display:none !important; }
-    #necpa-status-root { position:fixed !important; inset:0 !important; padding:0 !important; }
-    #necpa-status-root.open { display:flex !important; }
-    .ns-shell { width:100% !important; height:100% !important; max-width:none !important; max-height:none !important; border-radius:0 !important; }
-@media (max-width:768px){html,body,#necpa-status-root,#necpa-status-root.open,.ns-shell{width:100vw!important;height:100dvh!important;min-width:100%!important;min-height:100%!important;margin:0!important;padding:0!important}.ns-main{width:100%!important;height:100%!important;min-width:0!important;min-height:0!important}}
-    .ns-main { min-width:0; min-height:0; }
-  
-#necpa-status-root,#necpa-status-root *{box-sizing:border-box}
-@media(max-width:768px){html,body{width:100%;height:100%;margin:0;padding:0;overflow:hidden}.ns-main{width:100%!important;min-width:0!important;height:100%!important}.ns-compose-box{width:100%!important;max-width:none!important}.ns-compose-tabs{grid-template-columns:repeat(4,minmax(0,1fr))!important}.ns-pane{min-width:0!important}.ns-textarea{width:100%!important;max-width:100%!important}.ns-compose-foot{position:sticky!important;bottom:0!important;z-index:10}}
-</style>
-</head>
+    html,body{width:100%;height:100%;margin:0;padding:0;overflow:hidden}
+    body{background:var(--app-secondary-surface,transparent);color:var(--app-text-color,inherit)}
+    #necpa-status-launcher{display:none!important}
+    #necpa-status-root{position:fixed!important;inset:0!important;padding:0!important}
+    #necpa-status-root.open{display:flex!important}
+    .ns-shell{width:100%!important;height:100%!important;max-width:none!important;max-height:none!important;border-radius:0!important}
+    .ns-main{min-width:0;min-height:0}
+    @media(max-width:768px){html,body,#necpa-status-root,#necpa-status-root.open,.ns-shell{width:100vw!important;height:100dvh!important;min-width:100%!important;min-height:100%!important;margin:0!important;padding:0!important}.ns-main{width:100%!important;height:100%!important;min-width:0!important;min-height:0!important}.ns-compose-box{width:100%!important;max-width:none!important}.ns-compose-tabs{grid-template-columns:repeat(4,minmax(0,1fr))!important}.ns-pane{min-width:0!important}.ns-textarea{width:100%!important;max-width:100%!important}}
+    /* Original Vibe controls remain visually distinctive; these are recovery/fallback controls,
+       not a second UI module. */
+    .ns-vibe-recovery-actions{position:absolute;right:14px;top:64px;z-index:14;display:flex;gap:7px}
+    .ns-vibe-recovery-actions button{border:0;background:rgba(0,0,0,.42);color:#fff;width:38px;height:38px;border-radius:50%;cursor:pointer;backdrop-filter:blur(8px);font-size:17px}
+    .ns-vibe-recovery-actions button:active{transform:scale(.9)}
+  </style>
+<style id="VIBE_PRODUCTION_POLISH">.ns-vpro-menu{position:absolute;right:12px;bottom:250px;z-index:30;display:grid;gap:3px;min-width:190px;padding:7px;border-radius:16px;background:rgba(10,14,25,.94);backdrop-filter:blur(18px);box-shadow:0 16px 50px rgba(0,0,0,.4)}.ns-vpro-menu button{border:0;background:transparent;color:#fff;text-align:left;padding:11px 13px;border-radius:10px;font-weight:700;cursor:pointer}.ns-vpro-menu button:hover{background:rgba(255,255,255,.12)}.ns-vibes-stage video{will-change:transform;contain:layout paint}</style></head>
 <body>
   <script src="/js/core/status/ProfessionalStatus.js"></script>
   <script src="/js/status-runtime-hardening.js"></script>
@@ -54,33 +40,194 @@
       'use strict';
 
       function openProfessionalStatus() {
-        if (window.__NecpaProfessionalStatus &&
-            typeof window.__NecpaProfessionalStatus.open === 'function') {
+        if (window.__NecpaProfessionalStatus && typeof window.__NecpaProfessionalStatus.open === 'function') {
           window.__NecpaProfessionalStatus.open();
           return true;
         }
         return false;
       }
-
       function boot() {
-        if (openProfessionalStatus()) {
+        if (!openProfessionalStatus()) setTimeout(boot, 50);
+      }
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once:true });
+      else boot();
+
+      /*
+       * Vibe reliability layer, kept in the original status.html instead of creating
+       * another patch file. ProfessionalStatus owns the Vibe UI; this layer only:
+       * 1) prevents a stale/null onclick assignment from making the whole action rail dead,
+       * 2) supplies recovery actions when an older deployed ProfessionalStatus build throws,
+       * 3) adds download/mute controls without changing the existing Vibe pipeline,
+       * 4) uses the same /api/status/vibes data and authentication already used by the module.
+       */
+      let vibeItems = [];
+      let lastVibeResponse = 0;
+      const apiOrigin = () => ((window.__getApiOrigin && window.__getApiOrigin()) || window.BACKEND_URL || '').replace(/\/+$/,'');
+      const authToken = () => {
+        const keys=['token','authToken','accessToken','necpa_token','USER_TOKEN','kynecta_token','auth_token','kyn_token','jwt','access_token','kyn_access_token'];
+        const vals=[];
+        try { const a=JSON.parse(localStorage.getItem('kynecta_auth')||'null'); vals.push(a?.token,a?.accessToken); } catch(_){}
+        keys.forEach(k=>{try{vals.push(localStorage.getItem(k))}catch(_){}});
+        return vals.find(v=>typeof v==='string'&&v.length>10)||'';
+      };
+      const authHeaders = () => { const t=authToken(); return t ? {Authorization:/^Bearer /i.test(t)?t:'Bearer '+t,'Content-Type':'application/json'} : {'Content-Type':'application/json'}; };
+      const currentVibe = () => {
+        const v=document.querySelector('#necpa-status-root .ns-vibes.open .ns-vibes-stage video');
+        if(!v) return null;
+        const src=v.currentSrc||v.src||'';
+        return vibeItems.find(x=>String(x.mediaUrl||'')===String(src)) || vibeItems.find(x=>String(x.mediaUrl||'').split('?')[0]===String(src).split('?')[0]) || null;
+      };
+      const toast = m => {
+        const el=document.querySelector('#necpa-status-root .ns-toast');
+        if(el){el.textContent=m;el.classList.add('show');clearTimeout(el.__t);el.__t=setTimeout(()=>el.classList.remove('show'),2200);}
+      };
+      async function vibeRequest(path,options={}) {
+        const r=await fetch(apiOrigin()+'/api/status'+path,Object.assign({headers:authHeaders()},options));
+        const d=await r.json().catch(()=>({}));
+        if(!r.ok) throw new Error(d.message||d.error||('Request failed '+r.status));
+        return d;
+      }
+
+      /* Capture the real Vibe feed response so fallback actions always operate on the
+         same item the viewer is displaying. */
+      const nativeFetch=window.fetch;
+      window.fetch=async function(...args){
+        const response=await nativeFetch.apply(this,args);
+        try{
+          const url=String(args[0]?.url||args[0]||'');
+          if(/\/api\/status\/vibes(?:[?]|$)/.test(url)){
+            const clone=response.clone();
+            clone.json().then(d=>{
+              if(Array.isArray(d?.data)){vibeItems=d.data;lastVibeResponse=Date.now();}
+            }).catch(()=>{});
+          }
+        }catch(_){}
+        return response;
+      };
+
+      function addRecoveryActions(root){
+        if(!root||!root.classList.contains('open'))return;
+        const stage=root.querySelector('.ns-vibes-stage');
+        if(!stage||root.querySelector('.ns-vibe-recovery-actions'))return;
+        const box=document.createElement('div');
+        box.className='ns-vibe-recovery-actions';
+        box.innerHTML='<button type="button" data-vmute aria-label="Mute or unmute">🔇</button><button type="button" data-vdownload aria-label="Download Vibe">⇩</button>';
+        root.appendChild(box);
+        const video=stage.querySelector('video');
+        const mute=box.querySelector('[data-vmute]');
+        mute.onclick=()=>{if(!video)return;video.muted=!video.muted;mute.textContent=video.muted?'🔇':'🔊';video.play().catch(()=>{});};
+        box.querySelector('[data-vdownload]').onclick=async()=>{
+          const s=currentVibe();
+          if(!s?.mediaUrl){toast('This Vibe has no downloadable media');return;}
+          try{
+            const a=document.createElement('a');a.href=s.mediaUrl;a.download='kynecta-vibe';a.target='_blank';a.rel='noopener';document.body.appendChild(a);a.click();a.remove();
+            toast('Download started');
+          }catch(e){toast(e.message||'Download unavailable');}
+        };
+      }
+
+      /* Event delegation deliberately runs after the module's handlers. If a module render
+         throws while assigning one later onclick, earlier controls still work and these
+         fallbacks keep the complete rail usable. */
+      document.addEventListener('click',async function(event){
+        const root=document.querySelector('#necpa-status-root .ns-vibes.open');
+        if(!root)return;
+        const tab=event.target.closest('[data-vibe-tab]');
+        if(tab && !tab.__delegatedFallback){
+          tab.__delegatedFallback=true;
+          if(typeof tab.onclick!=='function'){
+            const mode=tab.dataset.vibeTab;
+            try{
+              const data=await vibeRequest('/vibes?mode='+encodeURIComponent(mode));
+              vibeItems=Array.isArray(data.data)?data.data:[];
+              if(vibeItems.length){
+                const s=vibeItems[0];
+                const stage=root.querySelector('[data-rstage]');
+                if(stage){
+                  stage.innerHTML='<video src="'+String(s.mediaUrl).replace(/"/g,'&quot;')+'" playsinline loop autoplay muted preload="auto"></video>';
+                  addRecoveryActions(root);
+                }
+              } else toast('No Vibes here yet');
+            }catch(e){toast(e.message||'Could not load Vibes');}
+          }
           return;
         }
-        setTimeout(boot, 50);
-      }
+        const save=event.target.closest('[data-rsave]');
+        if(save && typeof save.onclick!=='function'){
+          const s=currentVibe();if(!s)return;
+          try{
+            const key='necpa_status_savedvibes_'+String((JSON.parse(localStorage.getItem('currentUser')||'{}')||{}).id||localStorage.getItem('userId')||'guest');
+            const ids=new Set(JSON.parse(localStorage.getItem(key)||'[]').map(String));const id=String(s.id);
+            ids.has(id)?ids.delete(id):ids.add(id);localStorage.setItem(key,JSON.stringify([...ids].slice(-500)));
+            save.classList.toggle('active',ids.has(id));toast(ids.has(id)?'Saved to your Vibes':'Removed from Saved');
+          }catch(e){toast('Could not update Saved');}
+          return;
+        }
+        const like=event.target.closest('[data-rlike]');
+        if(like && typeof like.onclick!=='function'){
+          const s=currentVibe();if(!s)return;
+          try{
+            const d=await vibeRequest('/vibes/'+encodeURIComponent(s.id)+'/love',{method:'POST',body:'{}'});
+            s.likedByMe=!!d.liked;s.reactionCount=Number(d.count)||0;
+            like.classList.toggle('liked',s.likedByMe);
+            const c=like.querySelector('[data-count]');if(c)c.textContent=s.reactionCount;
+            const h=like.querySelector('[data-heart]');if(h)h.textContent=s.likedByMe?'♥':'♡';
+          }catch(e){toast(e.message||'Could not update like');}
+          return;
+        }
+        const comment=event.target.closest('[data-rcomment]');
+        if(comment && typeof comment.onclick!=='function'){
+          const s=currentVibe();if(!s)return;
+          const panel=root.querySelector('[data-vibe-comments]');if(!panel)return;
+          panel.classList.add('open');
+          panel.innerHTML='<div class="ns-vibe-comments-head"><b>Comments</b><button type="button" data-fallback-close>×</button></div><div class="ns-vibe-comment-list">Loading…</div><div class="ns-vibe-comment-compose"><input data-fallback-text maxlength="2000" placeholder="Write a comment…"><button type="button" data-fallback-send>Send</button></div>';
+          const list=panel.querySelector('.ns-vibe-comment-list');
+          const draw=rows=>{list.innerHTML=rows.length?rows.map(x=>'<div class="ns-vibe-comment"><b>'+String(x.user?.displayName||x.user?.username||'User').replace(/[&<>]/g,'')+'</b><span>'+String(x.text||'').replace(/[&<>]/g,'')+'</span></div>').join(''):'<div class="ns-vibe-empty-comments">No comments yet.</div>';};
+          try{const d=await vibeRequest('/'+s.id+'/comments');draw(Array.isArray(d.data)?d.data:[]);}catch(e){list.textContent=e.message||'Could not load comments';}
+          panel.querySelector('[data-fallback-close]').onclick=()=>panel.classList.remove('open');
+          panel.querySelector('[data-fallback-send]').onclick=async()=>{
+            const input=panel.querySelector('[data-fallback-text]'),text=(input.value||'').trim();if(!text)return;
+            try{await vibeRequest('/'+s.id+'/comment',{method:'POST',body:JSON.stringify({text})});input.value='';const d=await vibeRequest('/'+s.id+'/comments');draw(Array.isArray(d.data)?d.data:[]);toast('Comment posted');}catch(e){toast(e.message||'Could not post comment');}
+          };
+          return;
+        }
+        const share=event.target.closest('[data-rshare]');
+        if(share && typeof share.onclick!=='function'){
+          const s=currentVibe();if(!s)return;
+          try{
+            if(navigator.share) await navigator.share({title:'Kynecta Vibe',text:s.caption||s.content||'Watch this Vibe',url:s.mediaUrl});
+            else {await navigator.clipboard.writeText(s.mediaUrl);toast('Vibe link copied');}
+          }catch(e){if(e.name!=='AbortError')toast(e.message||'Could not share Vibe');}
+        }
+      },true);
 
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', boot, { once:true });
-      } else {
-        boot();
-      }
+      /* Recover a Vibe render after the specific null-onclick failure reported by the user.
+         Do this at most once per opening, then let the normal module continue. */
+      let recoveryUsed=false;
+      window.addEventListener('error',function(event){
+        const msg=String(event?.message||'');
+        if(!/Cannot set properties of null.*onclick/i.test(msg)||!/ProfessionalStatus\.js/i.test(String(event?.filename||'')))return;
+        if(recoveryUsed)return;
+        recoveryUsed=true;
+        setTimeout(()=>{
+          const root=document.querySelector('#necpa-status-root .ns-vibes.open');
+          if(root){addRecoveryActions(root);root.querySelectorAll('[data-vibe-tab],[data-rlike],[data-rcomment],[data-rsave],[data-rshare]').forEach(x=>{x.style.pointerEvents='auto';});}
+        },0);
+      });
+      window.addEventListener('unhandledrejection',function(event){
+        const msg=String(event?.reason?.message||event?.reason||'');
+        if(/Cannot set properties of null.*onclick/i.test(msg)){
+          const root=document.querySelector('#necpa-status-root .ns-vibes.open');if(root)addRecoveryActions(root);
+        }
+      });
 
-      // Back navigation is owned by ProfessionalStatus itself: it handles
-      // GO_BACK_TO_LIST (reset to the status list, keeping the surface open)
-      // and CLOSE_LOCAL_PANEL (unwind one screen), and it reports its current
-      // screen to the parent via STATUS_PANEL_OPENED / STATUS_LIST_SHOWN /
-      // SCREEN_STATE_CHANGED. Nothing here may close the surface, otherwise
-      // the iframe is left blank.
+      /* Observe Vibe re-renders and add the original-module-compatible download/mute actions
+         without adding a new JS file or changing the feed architecture. */
+      const observer=new MutationObserver(()=>{
+        const root=document.querySelector('#necpa-status-root .ns-vibes.open');
+        if(root)addRecoveryActions(root);
+      });
+      observer.observe(document.body,{subtree:true,childList:true});
     })();
   </script>
   <script id="STATUS_REALTIME_BRIDGE">
@@ -92,5 +239,23 @@
       }
     });
   </script>
-</body>
+<script id="VIBE_PRODUCTION_POLISH_SCRIPT">(function(){
+'use strict';
+const PREF='necpa_vibe_pro_v1_'+String((localStorage.getItem('userId')||'guest'));
+const read=()=>{try{return JSON.parse(localStorage.getItem(PREF)||'{}')}catch(_){return{}}};
+const write=v=>{try{localStorage.setItem(PREF,JSON.stringify(v))}catch(_){}};
+const p=read();p.hiddenIds=Array.isArray(p.hiddenIds)?p.hiddenIds:[];p.watch=p.watch||{};write(p);
+const hide=id=>{if(!p.hiddenIds.includes(String(id)))p.hiddenIds.push(String(id));p.hiddenIds=p.hiddenIds.slice(-1000);write(p)};
+const apiCall=async(path,opt={})=>{const t=localStorage.getItem('token')||localStorage.getItem('accessToken')||'';const base=((window.__getApiOrigin&&window.__getApiOrigin())||window.BACKEND_URL||'').replace(/\/+$/,'');const r=await fetch(base+'/api/status'+path,{...opt,headers:{'Content-Type':'application/json',...(opt.headers||{}),...(t?{Authorization:/^Bearer /i.test(t)?t:'Bearer '+t}:{})}});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.message||'Request failed');return d};
+const toast=m=>{const e=document.querySelector('#necpa-status-root .ns-toast');if(e){e.textContent=m;e.classList.add('show');clearTimeout(e.__v);e.__v=setTimeout(()=>e.classList.remove('show'),2200)}};
+function telemetry(s,v){if(!s||!v)return;const id=String(s.id),w=p.watch[id]||(p.watch[id]={seconds:0,plays:0,completions:0,rewatches:0,last:0});const now=v.currentTime||0;w.seconds+=Math.min(2,Math.max(0,now-w.last));if(now<.25&&w.last>1)w.rewatches++;w.last=now;if(v.duration&&now>=v.duration-.5&&!w.__done){w.__done=1;w.completions++}write(p)}
+function enhance(root){if(!root||root.dataset.vibePro==='1')return;root.dataset.vibePro='1';const stage=root.querySelector('.ns-vibes-stage'),v=stage?.querySelector('video');if(!stage||!v)return;const s=window.vibesState?.items?.[window.vibesState.index];if(!s)return;const next=window.vibesState.items[window.vibesState.index+1];if(next?.mediaUrl){const pre=document.createElement('video');pre.preload='auto';pre.muted=true;pre.src=next.mediaUrl;pre.style.display='none';stage.appendChild(pre)}v.addEventListener('timeupdate',()=>telemetry(s,v));v.addEventListener('ended',()=>window.moveVibe?.(1));stage.addEventListener('dblclick',()=>window.toggleVibeLove?.(s));
+const side=root.querySelector('.ns-vibes-side');if(side&&!side.querySelector('[data-vpro-more]')){const b=document.createElement('button');b.type='button';b.dataset.vproMore='1';b.setAttribute('aria-label','More Vibe actions');b.textContent='⋯';side.appendChild(b);b.onclick=()=>{let menu=root.querySelector('[data-vpro-menu]');if(menu){menu.remove();return}menu=document.createElement('div');menu.dataset.vproMenu='1';menu.className='ns-vpro-menu';menu.innerHTML='<button data-vpro-not>Not interested</button><button data-vpro-report>Report</button><button data-vpro-download>Download</button><button data-vpro-copy>Copy link</button>';root.appendChild(menu);
+menu.querySelector('[data-vpro-not]').onclick=()=>{hide(s.id);menu.remove();toast('We will show fewer Vibes like this');window.moveVibe?.(1)};
+menu.querySelector('[data-vpro-report]').onclick=async()=>{const reason=prompt('Why are you reporting this Vibe?','spam');if(!reason)return;try{await apiCall('/'+s.id+'/report',{method:'POST',body:JSON.stringify({reason})});toast('Report submitted')}catch(e){toast(e.message)}menu.remove()};
+menu.querySelector('[data-vpro-download]').onclick=()=>{if(s.mediaUrl){const a=document.createElement('a');a.href=s.mediaUrl;a.download='kynecta-vibe';a.target='_blank';a.rel='noopener';a.click();toast('Download started')}menu.remove()};
+menu.querySelector('[data-vpro-copy]').onclick=async()=>{try{await navigator.clipboard.writeText(s.mediaUrl);await apiCall('/'+s.id+'/share',{method:'POST'});toast('Vibe link copied')}catch(e){toast('Could not copy link')}menu.remove()}}}}
+const mo=new MutationObserver(()=>{const r=document.querySelector('#necpa-status-root .ns-vibes.open');if(r)enhance(r)});mo.observe(document.body,{subtree:true,childList:true});
+document.addEventListener('keydown',e=>{if(!document.querySelector('#necpa-status-root .ns-vibes.open'))return;if(e.key==='ArrowDown')window.moveVibe?.(1);if(e.key==='ArrowUp')window.moveVibe?.(-1);if(e.key===' '){const v=document.querySelector('.ns-vibes-stage video');if(v){e.preventDefault();v.paused?v.play().catch(()=>{}):v.pause()}}});
+})();</script></body>
 </html>
