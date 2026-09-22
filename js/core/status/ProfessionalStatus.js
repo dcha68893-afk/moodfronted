@@ -611,7 +611,6 @@ function searchVibes(){
  const needle=q.trim().toLowerCase();const all=vibesState.items.filter(s=>[s.caption,s.content,s.category,s.moodType,s.intent,...(s.topics||[])].filter(Boolean).join(' ').toLowerCase().includes(needle));
  if(!all.length){toast('No matching Vibes');return}
  vibesState={...vibesState,items:all,index:0};renderVibe();
-}lay yet</strong></div></div>';root.querySelector('[data-rclose]').onclick=closeVibes;}
 }
 function toggleSavedVibesView(){
  if(!vibesState.onlySaved){
