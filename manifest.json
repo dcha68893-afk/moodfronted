@@ -1,9 +1,9 @@
 {
-  "id": "/index.html",
+  "id": "/",
   "name": "Necpa",
   "short_name": "Necpa",
   "description": "Secure messaging, social communication and marketplace platform",
-  "start_url": "/index.html",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",
@@ -24,7 +24,15 @@
       "purpose": "any"
     }
   ],
-  "categories": ["social", "communication", "shopping"],
+  "categories": [
+    "social",
+    "communication",
+    "shopping"
+  ],
   "prefer_related_applications": false,
-  "related_applications": []
+  "related_applications": [],
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ]
 }

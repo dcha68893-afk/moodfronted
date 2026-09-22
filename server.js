@@ -176,6 +176,21 @@ app.get("/js/runtime-config.js", (_req, res) => {
   );
 });
 
+// PWA critical resources must never be held in a long-lived HTTP cache.
+// The service worker itself needs prompt revalidation so an installed PWA can
+// discover a new worker; the manifest needs the same treatment so Chrome does
+// not keep an old install identity/start_url. pwa-manager.js is the single
+// install controller and is also kept fresh because it owns beforeinstallprompt.
+app.use((req, res, next) => {
+  if (req.path === "/service-worker.js") {
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.set("Service-Worker-Allowed", "/");
+  } else if (req.path === "/manifest.json" || req.path === "/pwa-manager.js") {
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  }
+  next();
+});
+
 // Serve static files
 app.use(express.static(__dirname));
 
@@ -4375,7 +4390,12 @@ app.use("/api/*", (req, res) =>
 );
 
 app.use((req, res) => {
-  if (req.accepts("html")) res.sendFile(path.join(__dirname, "index.html"));
+  // Only extension-less browser routes are SPA fallbacks. Missing assets
+  // (especially .js/.json/service-worker files) must remain real 404s;
+  // otherwise a missing PWA resource can be returned as index.html and
+  // silently break installability/service-worker registration.
+  if (req.accepts("html") && !path.extname(req.path)) {
+    res.sendFile(path.join(__dirname, "index.html"));
   else sendError(res, "Not found", 404);
 });
 
