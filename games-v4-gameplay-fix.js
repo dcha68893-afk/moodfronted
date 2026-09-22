@@ -60,37 +60,24 @@ function trivia(){
  window.__MOOD_TRIVIA_ACTIVE__={subject:subject(),render};
 }
 
-const SHAPES=[[[0,0]],[[0,0],[0,1]],[[0,0],[1,0]],[[0,0],[0,1],[1,0]],[[0,0],[0,1],[0,2]],[[0,0],[1,0],[2,0]],[[0,1],[1,0],[1,1],[1,2]],[[0,0],[0,1],[1,0],[1,1]],[[0,0],[0,1],[0,2],[1,0]]],COLORS=['#24a8ff','#9b6cff','#20e06b','#ff7a18','#ff3e55','#ffd21f'];
+const SHAPES=[[[0,0]],[[0,0],[0,1]],[[0,0],[1,0]],[[0,0],[0,1],[1,0]],[[0,0],[0,1],[0,2]],[[0,0],[1,0],[2,0]],[[0,1],[1,0],[1,1],[1,2]],[[0,0],[0,1],[1,0],[1,1]],[[0,0],[0,1],[0,2],[1,0]],[[0,0],[1,0],[1,1],[1,2]],[[0,0],[0,1],[0,2],[1,1]],[[0,1],[1,0],[1,1],[2,1]]],COLORS=['#24a8ff','#9b6cff','#20e06b','#ff7a18','#ff3e55','#ffd21f'];
 let B=null,level=1;
 function block(){
  const board=document.getElementById('board'),tray=document.getElementById('tray');if(!board||!tray)return;
- B={grid:Array.from({length:10},()=>Array(10).fill(-1)),score:0,pieces:[]};level=Math.max(1,+(document.getElementById('bl')?.textContent||1));
- board.innerHTML='';
- for(let i=0;i<100;i++){const c=document.createElement('div');c.className='cell';c.dataset.i=i;board.appendChild(c)}
- function draw(){board.querySelectorAll('.cell').forEach((c,i)=>{const v=B.grid[Math.floor(i/10)][i%10];c.classList.toggle('filled',v>=0);c.style.background=v>=0?'linear-gradient(145deg,'+COLORS[v] + ',#0008)':''})}
+ B={grid:Array.from({length:10},()=>Array(10).fill(-1)),score:0,pieces:[],combo:0};level=Math.max(1,+(document.getElementById('bl')?.textContent||1));
+ board.innerHTML='';for(let i=0;i<100;i++){const c=document.createElement('div');c.className='cell';c.dataset.i=i;board.appendChild(c)}
+ function draw(){board.querySelectorAll('.cell').forEach((c,i)=>{const v=B.grid[Math.floor(i/10)][i%10];c.classList.toggle('filled',v>=0);c.style.background=v>=0?'linear-gradient(145deg,'+COLORS[v]+',#0008)':''})}
  function fit(s,r,c){return s.every(([dr,dc])=>r+dr>=0&&r+dr<10&&c+dc>=0&&c+dc<10&&B.grid[r+dr][c+dc]<0)}
+ function anyFit(){return B.pieces.some(el=>{for(let r=0;r<10;r++)for(let c=0;c<10;c++)if(fit(el._shape,r,c))return true;return false})}
  function make(s,col){const el=document.createElement('div');el.className='piece';const mr=Math.max(...s.map(x=>x[0])),mc=Math.max(...s.map(x=>x[1]));el.style.gridTemplateColumns='repeat('+(mc+1)+',22px)';el.style.gridTemplateRows='repeat('+(mr+1)+',22px)';s.forEach(([r,c])=>{const x=document.createElement('i');x.style.gridRow=r+1;x.style.gridColumn=c+1;x.style.background='linear-gradient(145deg,'+COLORS[col]+',#0008)';el.appendChild(x)});el.dataset.color=col;el._shape=s;return el}
- function refill(){tray.innerHTML='';B.pieces=[];for(let i=0;i<3;i++){const s=SHAPES[Math.floor(Math.random()*SHAPES.length)],col=Math.floor(Math.random()*COLORS.length),el=make(s,col);tray.appendChild(el);B.pieces.push(el)}}
- function lines(){const rows=[],cols=[];for(let r=0;r<10;r++)if(B.grid[r].every(v=>v>=0))rows.push(r);for(let c=0;c<10;c++)if(B.grid.every(row=>row[c]>=0))cols.push(c);if(rows.length||cols.length){const n=rows.length+cols.length;rows.forEach(r=>B.grid[r].fill(-1));cols.forEach(c=>B.grid.forEach(row=>row[c]=-1));B.score+=n*n*100;const s=document.getElementById('bs');if(s)s.textContent=B.score;draw()}}
- function noMove(){return B.pieces.every(el=>{for(let r=0;r<10;r++)for(let c=0;c<10;c++)if(fit(el._shape,r,c))return false;return true})}
+ function refill(){tray.innerHTML='';B.pieces=[];for(let i=0;i<3;i++){let s,col,el,tries=0;do{s=SHAPES[Math.floor(Math.random()*SHAPES.length)];col=Math.floor(Math.random()*COLORS.length);el=make(s,col);tries++}while(tries<30&&B.pieces.length===0&&!Array.from({length:10},(_,r)=>Array.from({length:10},(_,c)=>fit(s,r,c))).flat().some(Boolean));tray.appendChild(el);B.pieces.push(el)}}
+ function anchor(e,s,br,cs){const h=Math.max(...s.map(x=>x[0]))+1,w=Math.max(...s.map(x=>x[1]))+1,rawC=Math.round((e.clientX-br.left)/cs-w/2),rawR=Math.round((e.clientY-br.top)/cs-h/2);let best=null;for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){const r=rawR+dr,c=rawC+dc;if(!fit(s,r,c))continue;const px=br.left+(c+w/2)*cs,py=br.top+(r+h/2)*cs,d=(e.clientX-px)**2+(e.clientY-py)**2;if(!best||d<best.d)best={r,c,d}}return best}
  let drag=null;
- function start(e){const el=e.target.closest('#tray .piece');if(!el)return;e.preventDefault();const br=board.getBoundingClientRect(),cs=br.width/10;const ghost=el.cloneNode(true);ghost.id='ghost';ghost.classList.add('ghost');document.body.appendChild(ghost);el.style.opacity='.25';drag={el,shape:el._shape,color:+el.dataset.color,r:0,c:0,valid:false,br,cs,ghost};move(e)}
- function move(e){if(!drag)return;const d=drag;d.ghost.style.left=e.clientX+'px';d.ghost.style.top=e.clientY+'px';d.c=Math.round((e.clientX-d.br.left-d.cs*.5)/d.cs);d.r=Math.round((e.clientY-d.br.top-d.cs*1.1)/d.cs);d.valid=fit(d.shape,d.r,d.c);board.querySelectorAll('.preview').forEach(x=>x.classList.remove('preview'));if(d.valid)d.shape.forEach(([r,c])=>board.children[(d.r+r)*10+d.c+c]?.classList.add('preview'))}
- function end(){if(!drag)return;const d=drag;drag=null;d.ghost.remove();d.el.style.opacity='1';board.querySelectorAll('.preview').forEach(x=>x.classList.remove('preview'));if(!d.valid)return;d.shape.forEach(([r,c])=>B.grid[d.r+r][d.c+c]=d.color);B.score+=d.shape.length*5;document.getElementById('bs').textContent=B.score;d.el.remove();B.pieces=B.pieces.filter(x=>x!==d.el);draw();lines();if(!B.pieces.length)refill();if(noMove())document.getElementById('bo')?.classList.add('show')}
- // FIX (BLOCK-PUZZLE-DUPLICATE-DRAG): block() runs every time the player opens Block Puzzle from
- // the arcade home screen, not just the first time. These three document-level pointer listeners
- // used to be attached unconditionally on every call and were never removed, so replaying the
- // game a few times stacked up N duplicate drag handlers that all fired on the same touch —
- // inflating the score for a single placement and drawing several overlapping "ghost" pieces at
- // once. start/move/end still close over the correct #board/#tray elements (fixed IDs, never
- // recreated) and the shared B state (module-level, always current), so binding them only once
- // is safe and keeps every replay working exactly the same from the player's point of view.
- if(!window.__MOOD_BLOCK_DRAG_BOUND__){
-   window.__MOOD_BLOCK_DRAG_BOUND__=true;
-   document.addEventListener('pointerdown',start,{capture:true,passive:false});
-   document.addEventListener('pointermove',e=>{if(drag){e.preventDefault();move(e)}},{passive:false});
-   document.addEventListener('pointerup',end,{capture:true});
- }
+ function start(e){const el=e.target.closest('#tray .piece');if(!el||drag)return;e.preventDefault();try{el.setPointerCapture?.(e.pointerId)}catch(_){}const br=board.getBoundingClientRect(),cs=br.width/10,s=el._shape,h=Math.max(...s.map(x=>x[0]))+1,w=Math.max(...s.map(x=>x[1]))+1,col=+el.dataset.color,ghost=el.cloneNode(true);ghost.id='ghost';ghost.classList.add('ghost');ghost.style.transform='translate(0,0) scale('+(cs/22)+')';document.body.appendChild(ghost);el.style.opacity='.25';drag={el,shape:s,color:col,rct:br,cs,ghost,r:NaN,c:NaN,w,h}}
+ function move(e){if(!drag)return;const d=drag,a=anchor(e,d.shape,d.rct,d.cs);d.ghost.style.left=(a?d.rct.left+a.c*d.cs:e.clientX-d.w*d.cs/2)+'px';d.ghost.style.top=(a?d.rct.top+a.r*d.cs:e.clientY-d.h*d.cs/2)+'px';board.querySelectorAll('.preview').forEach(x=>x.classList.remove('preview'));if(a){d.r=a.r;d.c=a.c;d.ghost.classList.add('drop-valid');d.shape.forEach(([r,c])=>board.children[(d.r+r)*10+d.c+c]?.classList.add('preview'))}else{d.r=NaN;d.c=NaN;d.ghost.classList.remove('drop-valid')}}
+ function end(){if(!drag)return;const d=drag;drag=null;d.ghost.remove();d.el.style.opacity='1';board.querySelectorAll('.preview').forEach(x=>x.classList.remove('preview'));if(!Number.isInteger(d.r)||!Number.isInteger(d.c)||!fit(d.shape,d.r,d.c)){try{beep(150,.08,'square')}catch(_){}return}d.shape.forEach(([r,c])=>B.grid[d.r+r][d.c+c]=d.color);B.score+=d.shape.length*5;document.getElementById('bs').textContent=Math.round(B.score);d.el.remove();B.pieces=B.pieces.filter(x=>x!==d.el);draw();lines();if(!B.pieces.length)refill();if(!anyFit())document.getElementById('bo')?.classList.add('show')}
+ function lines(){const rows=[],cols=[];for(let r=0;r<10;r++)if(B.grid[r].every(v=>v>=0))rows.push(r);for(let c=0;c<10;c++)if(B.grid.every(row=>row[c]>=0))cols.push(c);if(!rows.length&&!cols.length){B.combo=0;return}const n=rows.length+cols.length;B.combo++;rows.forEach(r=>B.grid[r].fill(-1));cols.forEach(c=>B.grid.forEach(row=>row[c]=-1));B.score+=n*n*100*(1+Math.max(0,B.combo-1)*.25);document.getElementById('bs').textContent=Math.round(B.score);draw();try{burst(innerWidth/2,innerHeight*.45,'#45d9ff',28+n*6)}catch(_){}}
+ if(!window.__MOOD_BLOCK_DRAG_BOUND__){window.__MOOD_BLOCK_DRAG_BOUND__=true;document.addEventListener('pointerdown',start,{capture:true,passive:false});document.addEventListener('pointermove',e=>{if(drag){e.preventDefault();move(e)}},{passive:false});document.addEventListener('pointerup',end,{capture:true})}
  refill();draw();window.__MOOD_BLOCK_ACTIVE__=B;
 }
 function hook(){
