@@ -644,7 +644,7 @@ function renderVibe(){
  root.querySelector('[data-rlike]').onclick=e=>{e.stopPropagation();toggleVibeLove(s)};
  root.querySelector('[data-rcomment]').onclick=()=>openVibeComments(s);
  root.querySelector('[data-rsave]').onclick=()=>{const set=loadSavedVibeIds();const id=String(s.id);if(set.has(id)){set.delete(id);toast('Removed from Saved')}else{set.add(id);toast('Saved to your Vibes')}persistSavedVibeIds(set);renderVibe()};
- root.querySelector('[data-rdownload]').onclick=()=>save(s);
+ // Download was intentionally removed from the current Vibes action rail; do not bind a control that is no longer rendered.
  root.querySelector('[data-rshare]').onclick=()=>share(s);
  const v=root.querySelector('video');if(v){v.muted=vibesState.muted;v.play().catch(()=>{})}
  wireVibeGestures(root);
