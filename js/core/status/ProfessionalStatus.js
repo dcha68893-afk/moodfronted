@@ -555,11 +555,9 @@ function applyInterestFilter(list){
    return wanted.some(t=>hay.includes(t));
  });
 }
-let vibesState={items:[],index:0,muted:true,onlySaved:false};
-async function vibesSource(){
- const prefs=state.vibesPrefs||(state.vibesPrefs=loadVibesPrefs());
- const includePublic=prefs.includePublic!==false;
- const data=(await api('/vibes?includePublic='+String(includePublic))).data||[];
+let vibesState={items:[],index:0,muted:true,onlySaved:false,mode:'forYou'};
+async function vibesSource(mode=vibesState.mode||'forYou'){
+ const data=(await api('/vibes?mode='+encodeURIComponent(mode))).data||[];
  return data.map(normalizeStatus).filter(s=>s.type==='video'&&s.mediaUrl);
 }
 
@@ -571,7 +569,7 @@ async function openVibes(){
  syncParent();
  const items=await vibesSource().catch(()=>[]);
  if(!root.classList.contains('open'))return;
- vibesState={items,index:0,muted:true,onlySaved:false};
+ vibesState={items,index:0,muted:true,onlySaved:false,mode:'forYou'};
  if(!items.length){
    root.innerHTML='<button class="ns-icon-btn ns-vback" data-rclose style="position:absolute;top:20px;left:16px;z-index:6">×</button><div class="ns-vibes-empty"><div><strong>No vibes to play yet</strong><br>Check back once you, your friends, or public creators post short videos.</div></div>';
    root.querySelector('[data-rclose]').onclick=closeVibes;
@@ -590,14 +588,29 @@ function closeVibes(){
  syncParent();
 }
 async function toggleVibesAudience(){
- const prefs=state.vibesPrefs||(state.vibesPrefs=loadVibesPrefs());
- prefs.includePublic=!prefs.includePublic;
- saveVibesPrefs(prefs);state.vibesPrefs=prefs;
- toast(prefs.includePublic?'Vibes: including public clips':'Vibes: friends only');
+ const next=vibesState.mode==='public'?'forYou':'public';
+ await switchVibeTab(next);
+}
+async function switchVibeTab(mode){
  const root=document.querySelector('[data-vibes]');if(!root?.classList.contains('open'))return;
- const items=await vibesSource().catch(()=>[]);
- vibesState={items,index:0,muted:vibesState.muted,onlySaved:false};
- if(items.length)renderVibe();else{root.innerHTML='<button class="ns-icon-btn ns-vback" data-rclose style="position:absolute;top:20px;left:16px;z-index:6">×</button><div class="ns-vibes-empty"><div><strong>No vibes to play yet</strong></div></div>';root.querySelector('[data-rclose]').onclick=closeVibes;}
+ if(!['forYou','friends','public','following'].includes(mode))mode='forYou';
+ root.querySelectorAll('[data-vibe-tab]').forEach(b=>b.classList.toggle('active',b.dataset.vibeTab===mode));
+ root.querySelector('[data-vibe-tab-scroll]')?.classList.remove('hidden');
+ root.querySelector('[data-rstage]')?.classList.add('ns-vibe-loading');
+ const items=await vibesSource(mode).catch(()=>[]);
+ if(!root.classList.contains('open'))return;
+ vibesState={items,index:0,muted:vibesState.muted,onlySaved:false,mode};
+ if(items.length)renderVibe();
+ else{
+   root.innerHTML='<div class="ns-vibes-top"><button class="ns-vibe-close" data-rclose aria-label="Close">×</button><nav class="ns-vibe-tabs" data-vibe-tab-scroll>'+['forYou','friends','public','following'].map(x=>'<button data-vibe-tab="'+x+'" class="'+(x===mode?'active':'')+'">'+({forYou:'For You',friends:'Friends',public:'Public',following:'Following'}[x])+'</button>').join('')+'</nav><button class="ns-vibe-search" data-vsearch aria-label="Search">⌕</button></div><div class="ns-vibes-empty"><div><strong>No vibes here yet</strong><br>Try another feed.</div></div>';
+   root.querySelector('[data-rclose]').onclick=closeVibes;root.querySelectorAll('[data-vibe-tab]').forEach(b=>b.onclick=()=>switchVibeTab(b.dataset.vibeTab));root.querySelector('[data-vsearch]').onclick=searchVibes;
+ }
+}
+function searchVibes(){
+ const q=window.prompt('Search Vibes');if(!q?.trim())return;
+ const needle=q.trim().toLowerCase();const all=vibesState.items.filter(s=>[s.caption,s.content,s.category,s.moodType,s.intent,...(s.topics||[])].filter(Boolean).join(' ').toLowerCase().includes(needle));
+ if(!all.length){toast('No matching Vibes');return}
+ vibesState={...vibesState,items:all,index:0};renderVibe();
 }
 function toggleSavedVibesView(){
  if(!vibesState.onlySaved){
@@ -622,20 +635,24 @@ function renderVibe(){
  const u=s.owner||{};const prefs=state.vibesPrefs||(state.vibesPrefs=loadVibesPrefs());
  const savedIds=loadSavedVibeIds();const isSaved=savedIds.has(String(s.id));
  const expiry=s.vibeExpiresAt?('Expires '+new Date(s.vibeExpiresAt).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})):'';
- root.innerHTML='<div class="ns-vibes-stage" data-rstage><video src="'+esc(s.mediaUrl)+'" playsinline loop autoplay muted preload="auto" onerror="window.__necpaStatusMediaError&&window.__necpaStatusMediaError(this)"></video></div><div class="ns-vibes-head"><button class="ns-icon-btn ns-vback" data-rclose aria-label="Close">×</button><div class="ns-vibe-creator">'+avatar(u,'ns-avatar')+'<div><b>'+esc(u.displayName||u.username||'Creator')+'</b><small data-vmeta>'+esc(vibeMeta(s,expiry))+'</small></div></div><button class="ns-icon-btn" data-raudience title="Audience">'+(prefs.includePublic?'🌐':'👥')+'</button><button class="ns-icon-btn" data-rsavedview title="Saved vibes">'+(vibesState.onlySaved?'📂':'🔖')+'</button><button class="ns-icon-btn" data-rmute>'+(vibesState.muted?'🔇':'🔊')+'</button></div><div class="ns-vibes-caption">'+esc(s.caption||s.content||'')+'</div><div class="ns-vibes-side"><button data-rlike class="'+(s.likedByMe?'liked':'')+'" aria-label="Love" aria-pressed="'+(s.likedByMe?'true':'false')+'"><span data-heart>'+(s.likedByMe?'❤️':'🤍')+'</span> <span data-count>'+Number(s.reactionCount||0)+'</span></button><button data-rcomment aria-label="Comments">💬 <span data-count>'+Number(s.replyCount||0)+'</span></button><button data-rsave class="'+(isSaved?'active':'')+'">'+(isSaved?'🔖':'📑')+'</button><button data-rdownload aria-label="Download">⬇</button><button data-rshare aria-label="Share">↗</button><button data-rup aria-label="Previous">▲</button><button data-rdown aria-label="Next">▼</button></div><div class="ns-vibe-comments" data-vibe-comments></div>';
+ root.innerHTML='<div class="ns-vibes-stage" data-rstage><video src="'+esc(s.mediaUrl)+'" playsinline loop autoplay muted preload="auto" onerror="window.__necpaStatusMediaError&&window.__necpaStatusMediaError(this)"></video></div><div class="ns-vibes-top"><button class="ns-vibe-close" data-rclose aria-label="Close">×</button><nav class="ns-vibe-tabs" data-vibe-tab-scroll>'+['forYou','friends','public','following'].map(x=>'<button data-vibe-tab="'+x+'" class="'+(x===vibesState.mode?'active':'')+'">'+({forYou:'For You',friends:'Friends',public:'Public',following:'Following'}[x])+'</button>').join('')+'</nav><button class="ns-vibe-search" data-vsearch aria-label="Search Vibes">⌕</button></div><div class="ns-vibe-creator">'+avatar(u,'ns-vibe-profile-avatar')+'<button class="ns-vibe-follow" data-rfollow aria-label="Add creator">+</button><div class="ns-vibe-creator-text"><b>'+esc(u.displayName||u.username||'Creator')+'</b><small data-vmeta>'+esc(vibeMeta(s,expiry))+'</small></div></div><div class="ns-vibes-caption">'+esc(s.caption||s.content||'')+'</div><div class="ns-vibes-side"><button class="ns-vibe-profile" data-rprofile aria-label="Creator profile">'+avatar(u,'ns-vibe-side-avatar')+'<i>+</i></button><button data-rlike class="'+(s.likedByMe?'liked':'')+'" aria-label="Love" aria-pressed="'+(s.likedByMe?'true':'false')+'"><span data-heart>'+(s.likedByMe?'♥':'♡')+'</span><span data-count>'+Number(s.reactionCount||0)+'</span></button><button data-rcomment aria-label="Comments"><span>💬</span><span data-count>'+Number(s.replyCount||0)+'</span></button><button data-rsave aria-label="Save" class="'+(isSaved?'active':'')+'"><span>'+(isSaved?'🔖':'🔖')+'</span></button><button data-rshare aria-label="Share"><span>↗</span><span>Share</span></button></div><div class="ns-vibe-comments" data-vibe-comments></div>';
  root.querySelector('[data-rclose]').onclick=closeVibes;
- root.querySelector('[data-raudience]')?.addEventListener('click',toggleVibesAudience);
- root.querySelector('[data-rsavedview]')?.addEventListener('click',toggleSavedVibesView);
- root.querySelector('[data-rmute]').onclick=()=>{vibesState.muted=!vibesState.muted;const v=root.querySelector('video');if(v)v.muted=vibesState.muted;root.querySelector('[data-rmute]').textContent=vibesState.muted?'🔇':'🔊'};
+ root.querySelectorAll('[data-vibe-tab]').forEach(b=>b.onclick=()=>switchVibeTab(b.dataset.vibeTab));
+ root.querySelector('[data-vsearch]').onclick=searchVibes;
+ root.querySelector('[data-rprofile]')?.addEventListener('click',()=>{try{window.parent?.postMessage({type:'OPEN_USER_PROFILE',userId:Number(u.id)},'*')}catch(_){};window.dispatchEvent(new CustomEvent('necpa:open-profile',{detail:{userId:Number(u.id)}}))});
+ root.querySelector('[data-rfollow]')?.addEventListener('click',()=>sendVibeFriendRequest(u));
  root.querySelector('[data-rlike]').onclick=e=>{e.stopPropagation();toggleVibeLove(s)};
  root.querySelector('[data-rcomment]').onclick=()=>openVibeComments(s);
  root.querySelector('[data-rsave]').onclick=()=>{const set=loadSavedVibeIds();const id=String(s.id);if(set.has(id)){set.delete(id);toast('Removed from Saved')}else{set.add(id);toast('Saved to your Vibes')}persistSavedVibeIds(set);renderVibe()};
  root.querySelector('[data-rdownload]').onclick=()=>save(s);
  root.querySelector('[data-rshare]').onclick=()=>share(s);
- root.querySelector('[data-rup]').onclick=()=>moveVibe(-1);root.querySelector('[data-rdown]').onclick=()=>moveVibe(1);
  const v=root.querySelector('video');if(v){v.muted=vibesState.muted;v.play().catch(()=>{})}
  wireVibeGestures(root);
  recordVibeView(s);
+}
+async function sendVibeFriendRequest(u){
+ const id=Number(u?.id||0);if(!id||id===Number(currentUser().id||0))return;
+ try{const r=await fetch(apiOrigin()+'/api/friends/requests',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token()},body:JSON.stringify({userId:id})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.message||'Unable to send request');toast('Friend request sent')}catch(e){toast(e.message||'Unable to send request')}
 }
 const vibeMeta=(s,expiry)=>{const n=Number(s.viewCount)||0;return n+' view'+(n===1?'':'s')+(expiry?' · '+expiry:'')};
 function paintVibe(s){
@@ -873,7 +890,7 @@ function boot(){if(!document.body)return;const style=document.createElement('sty
 .ns-interest-chip{border:1px solid var(--status-border,#e2e8f0);background:transparent;color:inherit;padding:8px 14px;border-radius:999px;cursor:pointer;font-weight:700;font-size:13px}
 .ns-interest-chip.selected{background:var(--status-accent,#2563eb);border-color:var(--status-accent,#2563eb);color:#fff}
 .ns-interests-actions{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
-.ns-vibes{position:fixed;inset:0;width:100vw;height:100dvh;background:#000;display:none;z-index:45;color:#fff;overflow:hidden}
+.ns-vibes-top{position:absolute;top:12px;left:14px;right:14px;z-index:12;height:48px;display:flex;align-items:center;justify-content:center}.ns-vibe-close,.ns-vibe-search{position:absolute;top:5px;width:38px;height:38px;border:0;border-radius:50%;background:rgba(0,0,0,.42);color:#fff;font-size:25px;backdrop-filter:blur(10px);cursor:pointer}.ns-vibe-close{left:0}.ns-vibe-search{right:0;font-size:27px}.ns-vibe-tabs{display:flex;align-items:center;justify-content:center;gap:18px;height:100%;padding:0 48px;max-width:82vw;overflow-x:auto;scrollbar-width:none}.ns-vibe-tabs::-webkit-scrollbar{display:none}.ns-vibe-tabs button{border:0;background:none;color:rgba(255,255,255,.68);font-weight:800;font-size:13px;white-space:nowrap;padding:10px 2px;cursor:pointer;position:relative}.ns-vibe-tabs button.active{color:#fff}.ns-vibe-tabs button.active:after{content:"";position:absolute;left:12%;right:12%;bottom:1px;height:3px;border-radius:5px;background:#fff}.ns-vibe-creator{position:absolute;left:16px;bottom:94px;z-index:6;display:flex;align-items:center;gap:7px;max-width:70vw}.ns-vibe-profile-avatar,.ns-vibe-side-avatar{width:42px!important;height:42px!important;border-radius:50%;background-size:cover;background-position:center;flex:0 0 42px}.ns-vibe-creator-text{min-width:0}.ns-vibe-creator-text b{display:block;font-size:14px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ns-vibe-creator-text small{display:block;font-size:10px;color:rgba(255,255,255,.72);margin-top:2px}.ns-vibe-follow{width:22px;height:22px;border:0;border-radius:50%;background:#ff2d55;color:#fff;font-weight:1000;line-height:22px;padding:0;cursor:pointer;margin-left:-16px;z-index:2}.ns-vibe-profile{position:relative!important;background:transparent!important;width:46px!important;height:58px!important;box-shadow:none!important;backdrop-filter:none!important}.ns-vibe-profile i{position:absolute;right:0;bottom:4px;width:17px;height:17px;border-radius:50%;background:#ff2d55;color:#fff;font-style:normal;font-size:13px;display:grid;place-items:center;border:2px solid #000}.ns-vibe-side-avatar{width:44px!important;height:44px!important;flex-basis:44px!important;border:2px solid #fff}.ns-vibes-side button{font-size:12px}.ns-vibes-side button span:first-child{font-size:23px;line-height:23px}.ns-vibes-side button[data-rshare]{font-size:10px}.ns-vibes-side button[data-rshare] span:first-child{font-size:25px}.ns-vibes-side button.active{background:rgba(255,255,255,.22);color:#fff}.ns-vibes-caption{bottom:45px;left:16px;right:90px}.ns-vibes-side{bottom:108px;gap:10px}.ns-vibes-side button[data-rsave]{font-size:22px}.ns-vibes-side button[data-rsave] span{font-size:22px}@media(max-width:600px){.ns-vibe-tabs{gap:13px;max-width:78vw}.ns-vibe-tabs button{font-size:12px}.ns-vibe-creator{bottom:92px}.ns-vibes-caption{bottom:45px}}.ns-vibes{position:fixed;inset:0;width:100vw;height:100dvh;background:#000;display:none;z-index:45;color:#fff;overflow:hidden}
 .ns-vibes.open{display:block}
 .ns-vibes-stage{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
 .ns-vibes-stage video{max-width:100%;max-height:100%;width:100%;height:100%;object-fit:contain;background:#000}
