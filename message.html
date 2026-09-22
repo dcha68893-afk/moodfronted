@@ -168,13 +168,27 @@
   }
   #backBtn:hover { background: var(--kyn-bg-hover); }
   #backBtn:active { transform: scale(0.92); }
-  #messageLog { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 6px; background: var(--kyn-bg-chat); }
+  /* FIX (Chat Wallpaper setting has no visible effect): Settings -> Chat -> Change Wallpaper
+     saves chat.wallpaper/chat.wallpaperImage and settings-broadcast-listener.js correctly turns
+     that into --chat-background/--chat-background-size/--chat-background-repeat CSS variables on
+     <html>, but nothing in this file's stylesheet ever read those variables — this was the only
+     place the chosen wallpaper could actually be shown, so the setting silently did nothing.
+     Falls back to the existing solid theme colour when no wallpaper is set (var default). */
+  #messageLog { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 6px; background-color: var(--kyn-bg-chat); background-image: var(--chat-background, none); background-size: var(--chat-background-size, cover); background-repeat: var(--chat-background-repeat, no-repeat); background-position: center; background-attachment: local; }
   .bubble-row { display: flex; }
   .bubble-row.mine { justify-content: flex-end; }
+  /* FIX (Message Font Size setting has no visible effect): Settings -> Chat -> Message Font Size
+     saves chat.fontSize and settings-broadcast-listener.js correctly turns it into a
+     --message-font-size CSS variable on <html>, but the bubble text itself was hard-coded to
+     14px and never read that variable, so Small/Medium/Large all looked identical. */
   .bubble {
-    max-width: 70%; padding: 8px 12px; border-radius: 14px; font-size: 14px; line-height: 1.4;
+    max-width: 70%; padding: 8px 12px; border-radius: 14px; font-size: var(--message-font-size, 14px); line-height: 1.4;
     background: var(--kyn-bubble-recv); color: var(--kyn-bubble-recv-text); word-wrap: break-word;
   }
+  /* FIX (Show Timestamps setting has no visible effect): the per-message time used to always
+     render; hide just the time span (not the read-receipt tick/star, which are separate
+     settings) when Settings -> Chat -> Show Timestamps is turned off. */
+  html[data-show-timestamps="false"] .bubble-time { display: none; }
   .bubble-row.mine .bubble { background: var(--kyn-bubble-sent); color: var(--kyn-bubble-sent-text); }
   .bubble-meta { font-size: 10px; opacity: 0.65; margin-top: 3px; text-align: right; }
   .bubble-row.failed .bubble { outline: 2px solid #e04b4b; }
@@ -1104,7 +1118,7 @@
             ${statusCard}
             ${statusCard ? '' : '<span'+contentAttrs+'>'+ (content ? escapeHtml(content) : '') +'</span>'}${!isDeletedForEveryone ? editedTag : ''}
             ${reactionsHtml}
-            <div class="bubble-meta">${time} ${statusTick}${m.starred ? ' ⭐' : ''}${decryptVersionBadge}</div>
+            <div class="bubble-meta"><span class="bubble-time">${time}</span> ${statusTick}${m.starred ? ' ⭐' : ''}${decryptVersionBadge}</div>
 
           </div>
         </div>`;
@@ -1427,6 +1441,16 @@
 
       const input = document.getElementById('composeInput');
       const sendBtn = document.getElementById('sendBtn');
+      // FIX (Autocorrect setting has no effect): Settings -> Chat -> Autocorrect saved
+      // chat.autoCorrect but nothing ever read it — the compose box always used the browser's
+      // default spellcheck behavior regardless of the toggle. Apply it on load and keep it live.
+      function applyAutoCorrectSetting() {
+        const on = window.MessageModule.getSetting('chat', 'autoCorrect') !== false;
+        input.spellcheck = on;
+        input.setAttribute('autocorrect', on ? 'on' : 'off');
+        input.setAttribute('autocapitalize', on ? 'sentences' : 'off');
+      }
+      applyAutoCorrectSetting();
       const attachBtn = document.getElementById('attachBtn');
       const attachInput = document.getElementById('attachInput');
 
@@ -1450,6 +1474,12 @@
         if (!hasChat) return;
         const content = input.value.trim();
         if (!content) return;
+        // FIX (Confirm Before Sending setting has no effect): Settings -> Chat -> Confirm Send
+        // saved chat.confirmSend but nothing ever read it — messages always sent immediately on
+        // Enter/tap regardless of the toggle.
+        if (window.MessageModule.getSetting('chat', 'confirmSend') === true) {
+          if (!window.confirm('Send this message?')) return;
+        }
         input.value = '';
         window.MessageModule.sendTypingStop(chatId);
         clearTimeout(typingStopTimer);
@@ -2636,6 +2666,9 @@
 
     window.MessageModule.subscribe((event, data) => {
       switch (event) {
+        case 'settings:changed':
+          if (data && data.section === 'chat' && data.key === 'autoCorrect') applyAutoCorrectSetting();
+          break;
         case 'conversation:updated':
           renderConversationList();
           // FIX (HEADER-SAYS-OFFLINE): presence changes arrive as conversation updates but

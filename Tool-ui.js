@@ -6146,9 +6146,98 @@ const _CDN = {
     'Gas Regulators':         'https://placehold.co/400x300/f97316/ffffff?text=Gas+Regulator',
     'Gas Hoses & Accessories':'https://placehold.co/400x300/f97316/ffffff?text=Gas+Hose',
 };
-// Fallback for any entry not in the map — use a real product-style image
+
+// ── SELF-GENERATED CATEGORY ARTWORK (fix: wrong / duplicated / missing category images) ─────────────
+// ROOT CAUSE: every tile above pointed at a hand-typed Unsplash photo id. Several ids resolve to the
+// wrong picture (Storage Cabinets/Closet Storage = a man with a microphone, Mirrors = a wristwatch),
+// many are shared by unrelated categories, and the Gas & LPG tiles were flat placehold.co rectangles.
+// Guessing more photo ids cannot be verified, so for the categories that were broken we now build an
+// inline SVG illustration per category. It is a data: URI, so it can never 404, be rate-limited, be
+// blocked, or show a different product. Real seller-uploaded listing photos are still preferred
+// everywhere (see _getListingImage) — this only replaces the stock category/fallback tile.
+const _JM_ART = {
+    'Fans':                    ['🌀', '#38bdf8', '#2563eb'],
+    'Cookers':                 ['🍳', '#fb923c', '#dc2626'],
+    'Blenders':                ['🥤', '#a78bfa', '#7c3aed'],
+    'Rice Cookers':            ['🍚', '#fbbf24', '#f97316'],
+    'Irons':                   ['👔', '#60a5fa', '#4f46e5'],
+    'Conditioner':             ['🧴', '#f472b6', '#db2777'],
+    'Hair Oils':               ['💆', '#fb7185', '#be123c'],
+    'Sunscreen':               ['☀️', '#fde047', '#f59e0b'],
+    'Bed Pillows':             ['🛏️', '#93c5fd', '#6366f1'],
+    'Storage Cabinets':        ['🗄️', '#a8a29e', '#57534e'],
+    'Closet Storage':          ['🧥', '#f0abfc', '#a21caf'],
+    'Mirrors':                 ['🪞', '#67e8f9', '#0891b2'],
+    'Gas Cylinders':           ['🛢️', '#fb923c', '#ea580c'],
+    'LPG Refills':             ['⛽', '#f97316', '#c2410c'],
+    'Gas Cookers':             ['🔥', '#fbbf24', '#dc2626'],
+    'Gas Regulators':          ['🎛️', '#fdba74', '#ea580c'],
+    'Gas Hoses & Accessories': ['🔧', '#fdba74', '#c2410c'],
+    'Shorts':                  ['🩳', '#34d399', '#059669'],
+    'Shirts':                  ['👕', '#60a5fa', '#1d4ed8'],
+    'T-Shirts & Tanks':        ['👕', '#38bdf8', '#0369a1'],
+    'Boots':                   ['🥾', '#d6a56b', '#78350f'],
+    '2 in 1 Laptops':          ['💻', '#818cf8', '#4338ca'],
+    'Desktops':                ['🖥️', '#94a3b8', '#334155'],
+    'Monitors':                ['🖥️', '#22d3ee', '#0e7490'],
+    'Laptop Accessories':      ['🖱️', '#a3e635', '#4d7c0f'],
+    'Scanners':                ['📠', '#cbd5e1', '#64748b'],
+    'Printers':                ['🖨️', '#a5b4fc', '#4f46e5'],
+    'PlayStation 3':           ['🎮', '#6366f1', '#312e81'],
+    'PlayStation 4':           ['🎮', '#3b82f6', '#1e3a8a'],
+    'PlayStation 5':           ['🎮', '#0ea5e9', '#0c4a6e'],
+    'Nintendo Switch':         ['🕹️', '#f87171', '#b91c1c'],
+    'Changing Tables':         ['👶', '#fda4af', '#e11d48'],
+    'Bottle Feeding':          ['🍼', '#fbcfe8', '#ec4899'],
+    'Bottle-Feeding':          ['🍼', '#fbcfe8', '#ec4899'],
+    'Bibs & Burp Cloths':      ['🎀', '#fde68a', '#f59e0b'],
+    'Pacifiers':               ['🧸', '#fdba74', '#f43f5e'],
+    'Pacifiers & Accessories': ['🧸', '#fdba74', '#f43f5e'],
+    'Bath Toys':               ['🦆', '#67e8f9', '#0284c7'],
+    'Soaps & Cleansers':       ['🧼', '#a5f3fc', '#06b6d4'],
+    'Bathing Tubs':            ['🛁', '#7dd3fc', '#0369a1'],
+    'Bathing Tubs & Seats':    ['🛁', '#7dd3fc', '#0369a1'],
+    'Sugar & Flour':           ['🌾', '#fde68a', '#d97706'],
+    'Floor Cleaners':          ['🧹', '#86efac', '#15803d'],
+    'Bathroom Cleaners':       ['🚿', '#5eead4', '#0f766e'],
+    'Hand Tools':              ['🔨', '#fbbf24', '#b45309'],
+    'Watering Equipment':      ['🌱', '#86efac', '#16a34a'],
+    'Grills':                  ['🍖', '#f87171', '#7f1d1d'],
+    'Outdoor Cooking Tools':   ['🥩', '#fb923c', '#9a3412'],
+    'Outdoor Cooking Tools & ...': ['🥩', '#fb923c', '#9a3412'],
+    'Patio Seating':           ['🪑', '#a3e635', '#4d7c0f'],
+    'Hammocks':                ['🌴', '#2dd4bf', '#0f766e'],
+    'Hammocks, Stands & Accessories': ['🌴', '#2dd4bf', '#0f766e'],
+};
+function _jmArtUri(label, emoji, c1, c2) {
+    let h = 7; const t = String(label || '');
+    for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0;
+    const id = 'a' + Math.abs(h);
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+        + '<defs><linearGradient id="' + id + '" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="' + c1 + '"/><stop offset="1" stop-color="' + c2 + '"/></linearGradient>'
+        + '<radialGradient id="' + id + 'r" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#fff" stop-opacity=".55"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient></defs>'
+        + '<rect width="400" height="300" fill="url(#' + id + ')"/>'
+        + '<circle cx="335" cy="38" r="92" fill="#fff" fill-opacity=".10"/><circle cx="46" cy="272" r="112" fill="#fff" fill-opacity=".08"/>'
+        + '<circle cx="200" cy="140" r="104" fill="url(#' + id + 'r)"/>'
+        + '<text x="200" y="188" font-size="128" text-anchor="middle" font-family="Apple Color Emoji,Segoe UI Emoji,Noto Color Emoji,sans-serif">' + emoji + '</text></svg>';
+    return 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg);
+}
+// Art for ANY label: a curated entry when we have one, otherwise a neutral tile whose colour is
+// derived from the label so different categories still look different (never a random product photo).
+function _jmArtFor(label) {
+    const key = String(label || '').trim();
+    const hit = _JM_ART[key] || _JM_ART[Object.keys(_JM_ART).find(k => k.toLowerCase() === key.toLowerCase())];
+    if (hit) return _jmArtUri(key, hit[0], hit[1], hit[2]);
+    let h = 0; for (let i = 0; i < key.length; i++) h = (h * 33 + key.charCodeAt(i)) >>> 0;
+    const hue = h % 360;
+    return _jmArtUri(key || 'item', '🛍️', 'hsl(' + hue + ',70%,60%)', 'hsl(' + ((hue + 40) % 360) + ',70%,40%)');
+}
+Object.keys(_JM_ART).forEach(k => { _CDN[k] = _jmArtUri(k, _JM_ART[k][0], _JM_ART[k][1], _JM_ART[k][2]); });
+window._jmArtFor = _jmArtFor;
+
+// Fallback for any entry not in the map — a label-specific illustration, never an unrelated photo
 function _catImg(name) {
-    return _CDN[name] || `https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=300&h=300&fit=crop&q=80`;
+    return _CDN[name] || _jmArtFor(name);
 }
 // FIX (dynamic-category-image-selection): maps the *value* of the Create
 // Listing "Service" tab's <select id="serviceCategory"> to the image that
@@ -6742,10 +6831,10 @@ function _renderCatContent(cat, container) {
                 <div class="jm-subcat-item" onclick="window._jmNav('products','${catId}:${_esc(sub.name)}')">
                     <div class="jm-subcat-img-wrap">
                         <img class="jm-subcat-img"
-                             src="${sub.img || ((section.subs.find(x => x !== sub && x.img)?.img) || (cat.sections.flatMap(x => x.subs || []).find(x => x !== sub && x.img)?.img) || '')}"
+                             src="${sub.img || _jmArtFor(sub.name)}"
                              alt="${_esc(sub.name)}"
                              loading="lazy"
-                             onerror="this.onerror=null;this.src='${(section.subs.find(x => x !== sub && x.img)?.img) || (cat.sections.flatMap(x => x.subs || []).find(x => x !== sub && x.img)?.img) || ''}'">
+                             onerror="this.onerror=null;this.src=window._jmArtFor(this.alt)">
                     </div>
                     <div class="jm-subcat-name">${_esc(sub.name)}</div>
                 </div>`).join('')}

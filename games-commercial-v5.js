@@ -9,7 +9,13 @@ function setLevel(g,n){data.levels[g]=Math.max(1,n);save();applyTheme(g);window.
 function complete(g,score=0){data.games++;data.best[g]=Math.max(data.best[g]||0,Number(score)||0);data.streak++;setLevel(g,level(g)+1);save();window.dispatchEvent(new CustomEvent('mood:game-complete',{detail:{game:g,score,level:level(g)}}))}
 function challenge(){const g=game(),s=data.best[g]||0,dataText=`Mood ${g} challenge — beat ${s} points on level ${level(g)}!`;data.challenges++;save();if(navigator.share)navigator.share({title:'Mood Challenge',text:dataText}).catch(()=>{});else if(navigator.clipboard)navigator.clipboard.writeText(dataText).then(()=>alert('Challenge copied!')).catch(()=>{});else alert(dataText)}
 function decorate(){applyTheme();let old=window.openGame;if(typeof old==='function'&&!window.__arcadeOpen){window.__arcadeOpen=1;window.openGame=function(g){document.body.dataset.game=g;const r=old.apply(this,arguments);setTimeout(()=>{applyTheme(g);data.games++;save()},50);return r}}
- if(!$('[data-arcade-challenge]')){const b=document.createElement('button');b.dataset.arcadeChallenge='1';b.textContent='⚔️ Challenge';Object.assign(b.style,{position:'fixed',right:'12px',bottom:'70px',zIndex:9997,padding:'10px 14px',borderRadius:'18px',border:'1px solid var(--g-accent)',background:'var(--kyn-bg-card)',color:'var(--kyn-text-primary)',boxShadow:'var(--kyn-shadow-md)',fontWeight:900});b.onclick=challenge;document.body.appendChild(b)}
+ // FIX (CHALLENGE-BUTTON-DEDUP-BROKEN): this checked `$('[data-arcade-challenge]')`, but `$` in
+ // this arcade is `id=>document.getElementById(id)` (defined in game-v3.html), not a CSS-selector
+ // lookup — so it was always searching for a literal element with id="[data-arcade-challenge]",
+ // which never exists, and the "already added" check could never actually match. Harmless today
+ // only because decorate() happens to run once per page load; switched to a real selector query
+ // so the guard actually works if this is ever called again.
+ if(!document.querySelector('[data-arcade-challenge]')){const b=document.createElement('button');b.dataset.arcadeChallenge='1';b.textContent='⚔️ Challenge';Object.assign(b.style,{position:'fixed',right:'12px',bottom:'70px',zIndex:9997,padding:'10px 14px',borderRadius:'18px',border:'1px solid var(--g-accent)',background:'var(--kyn-bg-card)',color:'var(--kyn-text-primary)',boxShadow:'var(--kyn-shadow-md)',fontWeight:900});b.onclick=challenge;document.body.appendChild(b)}
 }
 window.MoodArcade={version:'5.0.0',state:data,level,setLevel,complete,applyTheme,challenge};
 window.addEventListener('mood:level-changed',e=>applyTheme(e.detail&&e.detail.game));

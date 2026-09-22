@@ -20,6 +20,19 @@ BANK.random=Object.values(BANK).flat();
 const subject=()=>localStorage.getItem('mood_trivia_subject')||'random';
 
 function trivia(){
+ // FIX (TRIVIA-STALE-TIMER-DISABLES-ANSWERS): opening Trivia always starts the base game's own
+ // 15s countdown for its first (generic) question before this subject-picker overlay even
+ // appears. Once the player picks a subject and this function takes over the same #q/#answers
+ // elements, that original countdown kept running unseen in game-v3.html's own script scope
+ // (its `timer`/`qi` variables aren't reachable from here) and would still fire `answerQ(-1,null)`
+ // on OUR new buttons a few seconds later — disabling the player's current answers and showing a
+ // "correct" highlight for a question that was no longer on screen. game-v3.html's `answerQ` is a
+ // function DECLARATION, so unlike its `let`/`const` variables it IS reachable on window; a single
+ // harmless no-op override neutralizes that stale callback without touching anything else.
+ if(typeof window.answerQ==='function'&&!window.__v4AnswerQNeutralized){
+   window.__v4AnswerQNeutralized=true;
+   window.answerQ=function(){};
+ }
  const qEl=document.getElementById('q'),aEl=document.getElementById('answers');if(!qEl||!aEl)return;
  const bank=(BANK[subject()]||BANK.random).slice();let index=0,score=0,streak=0,timer=null,answered=false;
  const progress=document.getElementById('prog'),st=document.getElementById('ts'),pr=document.getElementById('pr');
@@ -51,7 +64,20 @@ function block(){
  function start(e){const el=e.target.closest('#tray .piece');if(!el)return;e.preventDefault();const br=board.getBoundingClientRect(),cs=br.width/10;const ghost=el.cloneNode(true);ghost.id='ghost';ghost.classList.add('ghost');document.body.appendChild(ghost);el.style.opacity='.25';drag={el,shape:el._shape,color:+el.dataset.color,r:0,c:0,valid:false,br,cs,ghost};move(e)}
  function move(e){if(!drag)return;const d=drag;d.ghost.style.left=e.clientX+'px';d.ghost.style.top=e.clientY+'px';d.c=Math.round((e.clientX-d.br.left-d.cs*.5)/d.cs);d.r=Math.round((e.clientY-d.br.top-d.cs*1.1)/d.cs);d.valid=fit(d.shape,d.r,d.c);board.querySelectorAll('.preview').forEach(x=>x.classList.remove('preview'));if(d.valid)d.shape.forEach(([r,c])=>board.children[(d.r+r)*10+d.c+c]?.classList.add('preview'))}
  function end(){if(!drag)return;const d=drag;drag=null;d.ghost.remove();d.el.style.opacity='1';board.querySelectorAll('.preview').forEach(x=>x.classList.remove('preview'));if(!d.valid)return;d.shape.forEach(([r,c])=>B.grid[d.r+r][d.c+c]=d.color);B.score+=d.shape.length*5;document.getElementById('bs').textContent=B.score;d.el.remove();B.pieces=B.pieces.filter(x=>x!==d.el);draw();lines();if(!B.pieces.length)refill();if(noMove())document.getElementById('bo')?.classList.add('show')}
- document.addEventListener('pointerdown',start,{capture:true,passive:false});document.addEventListener('pointermove',e=>{if(drag){e.preventDefault();move(e)}},{passive:false});document.addEventListener('pointerup',end,{capture:true});
+ // FIX (BLOCK-PUZZLE-DUPLICATE-DRAG): block() runs every time the player opens Block Puzzle from
+ // the arcade home screen, not just the first time. These three document-level pointer listeners
+ // used to be attached unconditionally on every call and were never removed, so replaying the
+ // game a few times stacked up N duplicate drag handlers that all fired on the same touch —
+ // inflating the score for a single placement and drawing several overlapping "ghost" pieces at
+ // once. start/move/end still close over the correct #board/#tray elements (fixed IDs, never
+ // recreated) and the shared B state (module-level, always current), so binding them only once
+ // is safe and keeps every replay working exactly the same from the player's point of view.
+ if(!window.__MOOD_BLOCK_DRAG_BOUND__){
+   window.__MOOD_BLOCK_DRAG_BOUND__=true;
+   document.addEventListener('pointerdown',start,{capture:true,passive:false});
+   document.addEventListener('pointermove',e=>{if(drag){e.preventDefault();move(e)}},{passive:false});
+   document.addEventListener('pointerup',end,{capture:true});
+ }
  refill();draw();window.__MOOD_BLOCK_ACTIVE__=B;
 }
 function hook(){

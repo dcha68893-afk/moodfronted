@@ -20,16 +20,23 @@ const FALLBACKS={
   'Medical Devices':'https://images.unsplash.com/photo-1580281658628-1f3b3b8f0d7a?w=400&h=300&fit=crop'
 };
 const generic='https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400&h=300&fit=crop&q=80';
+// FIX (unrelated / missing category-image fallback): this used to fall back to ONE generic stock
+// photo (a smartwatch) for every category not in the small FALLBACKS list above, so subcategories
+// like Gas & LPG, Storage, Baby items, etc. all showed the same wrong picture on error. Prefer the
+// shared, label-specific illustration generator from Tool-ui.js (window._jmArtFor) — it can never
+// 404/rate-limit and always matches the category — and only fall back to the old static list/photo
+// if that generator isn't loaded for some reason.
 function fix(img){
   if(!img||!img.classList.contains('jm-subcat-img'))return;
   const label=(img.alt||img.closest('.jm-subcat-item')?.querySelector('.jm-subcat-name')?.textContent||'').trim();
   const current=img.getAttribute('src')||'';
   if(!label)return;
-  if(current.includes('/icons/necpa-192.png')) img.src=FALLBACKS[label]||generic;
+  const fallbackFor=()=>(typeof window._jmArtFor==='function'?window._jmArtFor(label):(FALLBACKS[label]||generic));
+  if(current.includes('/icons/necpa-192.png')) img.src=fallbackFor();
   img.addEventListener('error',()=>{
     if(img.dataset.necpraMarketplaceFallback==='1')return;
     img.dataset.necpraMarketplaceFallback='1';
-    img.src=FALLBACKS[label]||generic;
+    img.src=fallbackFor();
   },{once:true});
 }
 function scan(root=document){root.querySelectorAll?.('.jm-subcat-img').forEach(fix)}

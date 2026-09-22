@@ -111,7 +111,16 @@ const viewDurationMs=s=>isTimedMediaStatus(s)?VIDEO_STATUS_MS:Math.max(3000,(Num
 // playback (and its sound) never continues once the 20s window elapses, even if the tab is
 // backgrounded and setTimeout gets throttled (the visibilitychange listener below covers that).
 function stopViewerMedia(){
- document.querySelectorAll('[data-viewer] video,[data-viewer] audio').forEach(el=>{try{el.pause();el.muted=true;el.currentTime=0}catch(_){}});
+ // FIX (video/audio status keeps playing after moving to the next one / closing the viewer):
+ // pause()+muted here only silenced playback visually — the element kept its buffered source, so
+ // audio could keep running underneath on some browsers. Fully detach the source via the shared
+ // hardening helper (status-runtime-hardening.js) when available; otherwise fall back to pause.
+ document.querySelectorAll('[data-viewer] video,[data-viewer] audio').forEach(el=>{
+  try{
+   if(window.__NecpaStatusHardening?.hardStop)window.__NecpaStatusHardening.hardStop(el);
+   else{el.pause();el.muted=true;el.currentTime=0}
+  }catch(_){}
+ });
 }
 document.addEventListener('visibilitychange',()=>{
  if(document.visibilityState==='hidden')stopViewerMedia();
@@ -573,7 +582,10 @@ async function openVibes(){
 function closeVibes(){
  const root=document.querySelector('[data-vibes]');
  if(!root?.classList.contains('open'))return;
- root.querySelectorAll('video,audio').forEach(v=>{try{v.pause();v.muted=true}catch(_){}});
+ // FIX (Vibe clip keeps playing after closing Vibes): pause+mute left the <video> element's source
+ // attached, which on some devices let audio keep decoding after the panel was hidden. Fully
+ // detach the source (same helper used by the main viewer) before wiping the panel.
+ root.querySelectorAll('video,audio').forEach(v=>{try{(window.__NecpaStatusHardening?.hardStop||(el=>{el.pause();el.muted=true}))(v)}catch(_){}});
  root.classList.remove('open');root.innerHTML='';
  syncParent();
 }
@@ -601,6 +613,11 @@ function toggleSavedVibesView(){
 }
 function renderVibe(){
  const root=document.querySelector('[data-vibes]');if(!root)return;
+ // FIX (swiping to the next Vibe leaves the previous clip's audio/video running — "conflicts"):
+ // this used to overwrite root.innerHTML directly, which detaches the old <video> node from the
+ // document but does not guarantee an in-flight <video> stops decoding immediately on every
+ // browser/WebView. Explicitly hard-stop whatever is currently playing in this panel first.
+ root.querySelectorAll('video,audio').forEach(v=>{try{(window.__NecpaStatusHardening?.hardStop||(el=>{el.pause();el.muted=true}))(v)}catch(_){}});
  const s=vibesState.items[vibesState.index];if(!s){closeVibes();return}
  const u=s.owner||{};const prefs=state.vibesPrefs||(state.vibesPrefs=loadVibesPrefs());
  const savedIds=loadSavedVibeIds();const isSaved=savedIds.has(String(s.id));
@@ -882,10 +899,19 @@ function boot(){if(!document.body)return;const style=document.createElement('sty
 (function(){const f=document.createElement('style');f.id='ns-vibes-fix';f.textContent='#necpa-status-root .ns-vibes.open,#necpa-status-root .ns-interests.open{pointer-events:auto}'+
 '#necpa-status-root .ns-vibes-head,#necpa-status-root .ns-vibes-side,#necpa-status-root .ns-vibes-caption,#necpa-status-root .ns-vibe-comments{pointer-events:auto}'+
 '#necpa-status-root .ns-vibes-head button,#necpa-status-root .ns-vibes-side button{touch-action:manipulation;-webkit-tap-highlight-color:transparent}'+
-'#necpa-status-root .ns-vibes-side button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;width:46px;height:46px;font-size:18px;line-height:1;background:rgba(0,0,0,.42)}'+
+'#necpa-status-root .ns-vibes-side button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;width:46px;height:46px;font-size:18px;line-height:1;background:rgba(0,0,0,.42);backdrop-filter:blur(6px);box-shadow:0 4px 14px rgba(0,0,0,.28);transition:background-color .22s ease,box-shadow .22s ease,transform .12s cubic-bezier(.34,1.56,.64,1)}'+
 '#necpa-status-root .ns-vibes-side button [data-count]{font-size:11px;font-weight:700}'+
-'#necpa-status-root .ns-vibes-side button.liked{background:rgba(239,68,68,.45)}'+
-'#necpa-status-root .ns-vibes-side button:active,#necpa-status-root .ns-vibes-head button:active{transform:scale(.92)}'+
+// FIX (Vibe action icons feel flat / no feedback): the heart, comment, save, download, share and
+// up/down buttons had no hover/press polish and the "liked" state only changed colour with no
+// motion, so likes felt unresponsive. Added a spring-style press animation and a heartbeat pulse
+// on the like icon itself (data-heart), respecting prefers-reduced-motion for accessibility.
+'#necpa-status-root .ns-vibes-side button.liked{background:rgba(239,68,68,.55);box-shadow:0 4px 18px rgba(239,68,68,.45)}'+
+'#necpa-status-root .ns-vibes-side button:active{transform:scale(.86)}'+
+'#necpa-status-root .ns-vibes-head button:active{transform:scale(.88)}'+
+'#necpa-status-root .ns-vibes-side button:hover{background:rgba(0,0,0,.58)}'+
+'@keyframes nsHeartPulse{0%{transform:scale(1)}30%{transform:scale(1.35)}55%{transform:scale(.92)}100%{transform:scale(1)}}'+
+'#necpa-status-root .ns-vibes-side button.liked [data-heart]{display:inline-block;animation:nsHeartPulse .5s cubic-bezier(.34,1.56,.64,1)}'+
+'@media(prefers-reduced-motion:reduce){#necpa-status-root .ns-vibes-side button.liked [data-heart]{animation:none}#necpa-status-root .ns-vibes-side button,#necpa-status-root .ns-vibes-head button{transition:none}}'+
 '#necpa-status-root .ns-vibes-head{padding-top:env(safe-area-inset-top,0px)}'+
 '#necpa-status-root .ns-vibe-comment-compose{display:flex;gap:8px;padding:10px 12px;border-top:1px solid rgba(255,255,255,.12)}'+
 '#necpa-status-root .ns-vibe-comment-compose input{flex:1;min-width:0;border:0;border-radius:999px;padding:10px 14px;background:rgba(255,255,255,.14);color:#fff;font-size:16px}'+

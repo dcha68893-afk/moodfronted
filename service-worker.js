@@ -47,7 +47,16 @@ const SW_VERSION = '19.33.0';
 // and so kept running stale scripts (e.g. an old pwa-manager.js that expected the deleted pwa-mobile-install.js, which is
 // exactly "install option missing on phones but present on laptop"). Cache names must only ever move forward.
 // v63 also ships the Vibes/Status, group history and chat-list fixes, so every installed app drops its old copies once.
-const CACHE_NAME = 'necpa-static-v64';
+// FIX (category-image / status-vibe media fixes not showing up on installed PWAs): Tool-ui.js,
+// marketplace-image-hardening.js, js/core/status/ProfessionalStatus.js and
+// js/status-runtime-hardening.js all changed (category artwork, background-media cleanup, Vibe
+// icon animation). Bump forces a clean cache break on next launch instead of waiting up to
+// CACHE_MAX_AGE (7 days).
+// v67: games-v4-gameplay-fix.js (Block Puzzle no longer stacks duplicate drag handlers on
+// replay; Trivia no longer gets its answers disabled mid-quiz by a stale base-game timer),
+// games-commercial-v5.js (Challenge-button dedup check fixed), games-v4-enhancements.js
+// (LEVEL/DIFFICULTY badge now actually appears; duplicate Challenge button removed).
+const CACHE_NAME = 'necpa-static-v67';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -80,7 +89,7 @@ const NETWORK_FIRST_PATTERNS = [
   /\/status-core-transport\.js/i,/\/status-core-state\.js/i,/\/status-ui\.js/i,
   // status.html now hosts js/core/status/ProfessionalStatus.js (the whole Status UI); neither was
   // network-first, so a cached copy kept the old mobile layout after deploys.
-  /\/status\.html/i,/\/js\/core\/status\/ProfessionalStatus\.js/i,/\/js\/status-runtime-hardening\.js/i,/\/js\/marketplace-category-images\.js/i,
+  /\/status\.html/i,/\/js\/core\/status\/ProfessionalStatus\.js/i,/\/js\/status-runtime-hardening\.js/i,/\/js\/marketplace-category-images\.js/i,/\/js\/marketplace-image-hardening\.js/i,
   // ROOT-CAUSE FIX (Groups panel showing blank on open / after "back to list",
   // group messages from other members never appearing): group.html was
   // rebuilt from scratch on 2026-09-15 as a single self-contained page —

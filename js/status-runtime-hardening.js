@@ -1,7 +1,17 @@
 (function(){
 'use strict';if(window.__NecpaStatusHardeningV2)return;window.__NecpaStatusHardeningV2=true;
 const all=()=>[...document.querySelectorAll('video,audio')];
-function stop(except){all().forEach(x=>{if(x===except)return;try{x.pause();x.muted=true;x.currentTime=0}catch(_){} })}
+// FIX (media keeps playing in the background after leaving Status/Vibes): pause()+muted alone
+// leaves the element's buffered media source attached, so on some Android WebViews/Chrome builds
+// audio can keep decoding in the background (esp. after the parent shell just hides this iframe
+// rather than unloading it — see MODULE_BLURRED handling below). Fully detach the source so
+// playback cannot resume on its own: pause, blank the src, and load() to release the decoder.
+function hardStop(x){
+ try{x.pause()}catch(_){}
+ try{x.muted=true;x.currentTime=0}catch(_){}
+ try{x.removeAttribute('src');x.querySelectorAll?.('source').forEach(s=>s.remove());x.load?.()}catch(_){}
+}
+function stop(except){all().forEach(x=>{if(x===except)return;hardStop(x)})}
 function active(){const o=[document.querySelector('.ns-vibes.open'),document.querySelector('.ns-viewer.open')].filter(Boolean);return o.flatMap(x=>[...x.querySelectorAll('video,audio')]).at(-1)||null}
 function enforce(){const a=active();stop(a);if(a&&!a.dataset.necpaGuard){a.dataset.necpaGuard='1';a.addEventListener('play',()=>stop(a));a.addEventListener('ended',()=>{try{a.pause();a.currentTime=0}catch(_){}},{once:true})}}
 function composer(){
@@ -19,7 +29,22 @@ document.addEventListener('pointerdown',e=>{if(e.target.closest('.ns-nav,[data-r
 document.addEventListener('click',()=>setTimeout(enforce,0),true);
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')stop()});
 document.addEventListener('pagehide',()=>stop());
+// FIX (video/audio keeps playing after the user leaves the Status/Vibes screen entirely): the
+// parent shell (chat.html) hides this iframe instead of unloading it when the person switches to
+// another module (Chat, Friends, Tools, ...), and posts MODULE_BLURRED when it does. Until now
+// nothing here listened for that, so a Status video or Vibe clip that was mid-playback kept
+// decoding audio/video in the hidden iframe. Fully stop everything and close the viewer/vibes
+// panels (so re-opening Status starts clean) whenever the module loses focus.
+window.addEventListener('message',e=>{
+ if(e.origin&&e.origin!=='null'&&e.origin!==location.origin)return;
+ const t=e.data&&e.data.type;
+ if(t==='MODULE_BLURRED'){
+  stop();
+  try{window.__NecpaProfessionalStatus?.close?.()}catch(_){}
+  try{window.__NecpaProfessionalStatus?.resetToList?.()}catch(_){}
+ }
+});
 new MutationObserver(()=>{enforce();composer()}).observe(document.documentElement,{childList:true,subtree:true});
 setInterval(enforce,1000);setTimeout(composer,300);
-window.__NecpaStatusHardening={stopMedia:stop};
+window.__NecpaStatusHardening={stopMedia:stop,hardStop};
 })();

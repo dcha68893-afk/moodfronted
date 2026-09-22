@@ -85,6 +85,11 @@ function install(){
       const r=oldOpen.apply(this,arguments);
       setTimeout(()=>{
         levelFX();
+        // FIX (LEVEL/DIFFICULTY-BADGE-NEVER-SHOWS): this custom event has a listener registered
+        // below (`mood:game-opened`) but nothing anywhere in the app ever dispatched it, so the
+        // "LEVEL X • GAME • DIFFICULTY" badge could never appear no matter what the player did.
+        // Fire it here, right after each game actually opens.
+        window.dispatchEvent(new CustomEvent('mood:game-opened'));
         if(type==='block'){
           document.querySelectorAll('.piece').forEach(p=>{
             if(p.dataset.v4Bound)return;p.dataset.v4Bound='1';
@@ -108,7 +113,12 @@ function install(){
   window.addEventListener('mood:game-opened',()=>{
     levelFX();
     const g=body.dataset.game;
-    if(g){b.classList.add('show');mode.style.display='block';mode.textContent=`LEVEL ${level()} • ${g.toUpperCase()} • ${level()<3?'EASY':level()<6?'MEDIUM':level()<9?'HARD':'MASTER'}`;}
+    // FIX: only surface the informational LEVEL/DIFFICULTY badge here. `b` (#v4Challenge) used to
+    // also get shown on this same event, which — now that the event actually fires (see above) —
+    // would have put a SECOND "⚔️ Challenge" button on screen at the same time as the one
+    // games-commercial-v5.js already shows permanently. Keep b's element around (harmless, stays
+    // hidden) but stop toggling it visible so there's exactly one working Challenge button.
+    if(g){mode.style.display='block';mode.textContent=`LEVEL ${level()} • ${g.toUpperCase()} • ${level()<3?'EASY':level()<6?'MEDIUM':level()<9?'HARD':'MASTER'}`;}
   });
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
