@@ -154,7 +154,9 @@
     if (!evt) return { outcome: 'unavailable' };
     deferredPrompt = null;            // a prompt event can be used exactly once
     try {
-      evt.prompt();                   // must run inside a user gesture
+      // IMPORTANT: prompt() is invoked synchronously before the first await so
+      // Chromium still sees the original user gesture that clicked Install.
+      evt.prompt();
       var choice = await evt.userChoice;
       if (choice && choice.outcome === 'accepted') {
         ls('set', INSTALLED_KEY, '1');
@@ -167,6 +169,42 @@
     } finally {
       emit();                         // listeners/dialog now see "no saved prompt"
     }
+  }
+
+  function waitForNativePrompt(timeoutMs) {
+    if (deferredPrompt) return Promise.resolve(true);
+    if (isStandalone()) return Promise.resolve(false);
+    var deadline = Date.now() + (timeoutMs || 5000);
+    return new Promise(function (resolve) {
+      var done = false;
+      var timer = null;
+      var onState = function (state) {
+        if (state && state.nativePromptAvailable) finish(true);
+      };
+      function finish(value) {
+        if (done) return;
+        done = true;
+        if (timer) clearInterval(timer);
+        window.removeEventListener('necpa:pwa-state', onEvent);
+        subscribers = subscribers.filter(function (fn) { return fn !== onState; });
+        resolve(value);
+      }
+      function onEvent(e) {
+        if (e && e.detail && e.detail.nativePromptAvailable) finish(true);
+      }
+      subscribers.push(onState);
+      window.addEventListener('necpa:pwa-state', onEvent);
+      timer = setInterval(function () {
+        if (deferredPrompt) return finish(true);
+        if (Date.now() >= deadline) finish(false);
+      }, 100);
+      // Register/update immediately when the user explicitly asks to install.
+      // This avoids waiting for the normal page-load SW registration path.
+      registerServiceWorker().then(function (reg) {
+        try { if (reg && reg.update) reg.update().catch(function () {}); } catch (_) {}
+      }).catch(function () {});
+      if (deferredPrompt) finish(true);
+    });
   }
 
   function getManualInstructions() {
@@ -245,15 +283,34 @@
 
   // Called from a click handler. Native prompt when we have one, dialog otherwise.
   function requestInstall() {
-    if (isStandalone()) { openInstallDialog(); return; }
+    if (isStandalone()) return;
     if (deferredPrompt) {
       install().then(function (r) {
-        if (r.outcome === 'accepted') closeInstallDialog(false);
+        if (r.outcome === 'accepted' || r.outcome === 'installed') closeInstallDialog(false);
         else if (r.outcome === 'error') openInstallDialog();
       });
       return;
     }
+
+    // The in-app Install button is now the primary installation path. Give
+    // Chromium a short window to publish beforeinstallprompt after SW/manifest
+    // readiness instead of immediately telling the user to hunt for a browser
+    // menu icon.
     openInstallDialog();
+    var startedAt = Date.now();
+    waitForNativePrompt(5000).then(function (ready) {
+      if (!sheet || isStandalone()) return;
+      if (ready && deferredPrompt) {
+        sheetHint = 'Installation is ready. Tap Install below.';
+        renderSheet();
+        var installButton = sheet.querySelector('.np-btn:not(.np-quiet)');
+        if (installButton) installButton.focus();
+      } else {
+        sheetHint = 'Your browser has not granted the in-app install prompt yet. Necpa cannot bypass that browser security decision.';
+        renderSheet();
+      }
+      try { console.debug('[NecpaPWA] in-app install readiness', { ready: ready, waitedMs: Date.now() - startedAt }); } catch (_) {}
+    });
   }
 
   /* ======================================================================
@@ -578,7 +635,10 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
   else boot();
 
-  // Register the one service worker once the page has loaded (does not compete with first paint).
+  // Start registration immediately. The install controller is loaded in <head>,
+  // so this gives Chromium the earliest possible chance to establish PWA
+  // installability before the user presses the in-app Install button.
+  registerServiceWorker().catch(function () {});
   if (document.readyState === 'complete') wireServiceWorkerUpdates();
   else window.addEventListener('load', wireServiceWorkerUpdates, { once: true });
 })();
