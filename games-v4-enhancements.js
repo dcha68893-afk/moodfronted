@@ -9,6 +9,9 @@
 if(window.__MOOD_GAMES_V4__) return;
 window.__MOOD_GAMES_V4__=true;
 const root=document.documentElement, body=document.body;
+const difficulty=()=>localStorage.getItem('mood.game.difficulty.'+(body.dataset.game||'block'))||'moderate';
+function showDifficulty(g=body.dataset.game||'block'){let o=document.getElementById('v4Difficulty');if(!o){o=document.createElement('div');o.id='v4Difficulty';o.innerHTML='<div class="v4-sub-box"><h2>Choose difficulty</h2><p>Difficulty changes the actual gameplay, not just the label.</p><div class="v4-sub-grid">'+[['easy','🟢 Easy'],['moderate','🟡 Moderate'],['hard','🔴 Hard']].map(x=>'<button class="v4-sub" data-diff="'+x[0]+'">'+x[1]+'<small style="display:block;margin-top:5px;opacity:.7" data-check></small></button>').join('')+'</div></div>';document.body.appendChild(o)}o.querySelectorAll('[data-diff]').forEach(b=>{b.querySelector('[data-check]').textContent=b.dataset.diff===difficulty()?'✓ Selected':'';b.onclick=()=>{localStorage.setItem('mood.game.difficulty.'+g,b.dataset.diff);o.classList.remove('show');updateDifficultyButton();window.dispatchEvent(new CustomEvent('mood:difficulty-changed',{detail:{game:g,difficulty:b.dataset.diff}}));}});o.classList.add('show')}
+function updateDifficultyButton(){const b=document.getElementById('v4DifficultyButton');if(b)b.textContent='Difficulty: '+difficulty().toUpperCase();}
 /* Accent hues only (decorative level progression). The page/background colours come from the app theme tokens --
    levels no longer paint their own hard-coded dark backgrounds over the user's chosen theme. */
 const themes=['#8b5cf6','#38bdf8','#22c55e','#f59e0b','#ec4899','#14b8a6','#a78bfa','#f97316'];
@@ -40,7 +43,7 @@ s.textContent=`
 .v4-sub{min-height:78px;border-radius:18px;background:var(--g-surface);border:1px solid var(--g-line);color:var(--kyn-text-primary);font-weight:900;cursor:pointer}.v4-sub:active{transform:scale(.97);background:var(--g-surface-hi)}
 #v4Timer{position:fixed;left:12px;right:12px;bottom:74px;height:6px;border-radius:10px;background:var(--g-surface-hi);z-index:10001;display:none;overflow:hidden}.v4-timer-fill{height:100%;width:100%;background:var(--v4c);transition:width .1s linear}
 #v4Challenge{position:fixed;right:12px;bottom:12px;z-index:9998;padding:10px 14px;border-radius:18px;background:var(--kyn-bg-card);border:1px solid var(--v4c);color:var(--kyn-text-primary);font-weight:900;box-shadow:var(--kyn-shadow-md);display:none}
-#v4Challenge.show{display:block}#v4Mode{position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:9998;padding:7px 12px;border-radius:15px;background:color-mix(in srgb,var(--kyn-bg-panel) 85%,transparent);border:1px solid var(--g-line);color:var(--kyn-text-secondary);font-size:11px;font-weight:900;display:none}
+#v4Challenge.show{display:block}.v4-modal{position:fixed;inset:0;z-index:10002;display:grid;place-items:center;background:var(--kyn-bg-overlay);backdrop-filter:blur(10px);padding:18px}#v4Difficulty{position:fixed;inset:0;z-index:10003;display:none;place-items:center;background:var(--kyn-bg-overlay);backdrop-filter:blur(10px);padding:18px}#v4Difficulty.show{display:grid}#v4DifficultyButton{position:fixed;top:70px;right:12px;z-index:9998;padding:8px 12px;border-radius:16px;background:var(--kyn-bg-card);border:1px solid var(--g-line);color:var(--kyn-text-primary);font-weight:900;font-size:10px}#v4Mode{position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:9998;padding:7px 12px;border-radius:15px;background:color-mix(in srgb,var(--kyn-bg-panel) 85%,transparent);border:1px solid var(--g-line);color:var(--kyn-text-secondary);font-size:11px;font-weight:900;display:none}
 `;
 document.head.appendChild(s);
 function particles(x,y,n=12){
@@ -105,7 +108,8 @@ function install(){
       return r;
     };
   }
-  const b=document.createElement('button');b.id='v4Challenge';b.textContent='⚔️ Challenge';b.onclick=challenge;document.body.appendChild(b);
+  const b=document.createElement('button');b.id='v4Challenge';b.textContent='⚔️ Invite';b.onclick=()=>{const g=body.dataset.game||'game',lv=level(g),url=location.origin+location.pathname+'?challenge='+encodeURIComponent(g)+'&level='+lv+'&difficulty='+difficulty();const msg='🎮 Join my '+g+' challenge — Level '+lv+' ('+difficulty().toUpperCase()+'). '+url;const o=document.createElement('div');o.className='v4-modal';o.innerHTML='<div class="v4-sub-box"><h2>Invite a player</h2><p>Send this challenge to another user. The invite contains the game, level and difficulty.</p><textarea readonly style="width:100%;min-height:90px;border-radius:14px;padding:10px;box-sizing:border-box;background:var(--g-surface);color:var(--kyn-text-primary);border:1px solid var(--g-line)">'+msg.replace(/</g,'&lt;')+'</textarea><div class="row" style="margin-top:12px"><button class="primary" data-share>Share</button><button data-copy>Copy</button><button data-close>Close</button></div></div>';document.body.appendChild(o);o.querySelector('[data-close]').onclick=()=>o.remove();o.querySelector('[data-copy]').onclick=()=>navigator.clipboard?.writeText(msg).then(()=>{o.querySelector('[data-copy]').textContent='Copied ✓'});o.querySelector('[data-share]').onclick=()=>{if(navigator.share)navigator.share({title:'Game Challenge',text:msg}).catch(()=>{});else navigator.clipboard?.writeText(msg).then(()=>{o.querySelector('[data-share]').textContent='Copied ✓'})};try{parent.postMessage({type:'GAME_CHALLENGE_INVITE',game:g,level:lv,difficulty:difficulty(),message:msg},'*')}catch(e){}};document.body.appendChild(b);
+ const db=document.createElement('button');db.id='v4DifficultyButton';db.textContent='Difficulty: '+difficulty().toUpperCase();db.onclick=()=>showDifficulty();document.body.appendChild(db);
   const mode=document.createElement('div');mode.id='v4Mode';document.body.appendChild(mode);
   // Do NOT use a MutationObserver here. Game screens constantly mutate the DOM;
   // observing them would create a self-triggering render loop and make buttons unresponsive.
@@ -118,7 +122,7 @@ function install(){
     // would have put a SECOND "⚔️ Challenge" button on screen at the same time as the one
     // games-commercial-v5.js already shows permanently. Keep b's element around (harmless, stays
     // hidden) but stop toggling it visible so there's exactly one working Challenge button.
-    if(g){mode.style.display='block';mode.textContent=`LEVEL ${level()} • ${g.toUpperCase()} • ${level()<3?'EASY':level()<6?'MEDIUM':level()<9?'HARD':'MASTER'}`;}
+    if(g){mode.style.display='block';mode.textContent=`LEVEL ${level()} • ${g.toUpperCase()} • ${difficulty().toUpperCase()}`;updateDifficultyButton();}
   });
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();

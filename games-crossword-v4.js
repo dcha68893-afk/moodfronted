@@ -406,6 +406,7 @@ function setAspect(){
 
 function init(){
  const sec=document.getElementById('crossword');
+ window.__MOOD_CROSSWORD_OPEN__=()=>{setTimeout(()=>{try{render();setAspect()}catch(e){console.error('Crossword render failed',e);}},20)};
  if(!sec)return;
  const old=window.openGame;
  if(typeof old==='function'&&!window.__wcOpenWrapped){
