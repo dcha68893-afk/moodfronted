@@ -24,7 +24,7 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.35.0';
+const SW_VERSION = '19.36.0';
 // FIX: bumped so activate() drops every existing cache immediately on this
 // deploy — anyone with a stale pre-rebuild group.html (or the old, now-
 // deleted group-core-*/group-os-* files, or the misspelled necpra-* icons
@@ -69,7 +69,16 @@ const SW_VERSION = '19.35.0';
 // game screen was reopened. Adding these below and bumping CACHE_NAME forces the one clean
 // break every other module fix here already gets.
 // (LEVEL/DIFFICULTY badge now actually appears; duplicate Challenge button removed).
-const CACHE_NAME = 'necpa-static-v69';
+// v70: FIX (Vibes Friends/Following/For You/Public tabs stopped filtering after the first
+// switch): js/core/status/ProfessionalStatus.js's renderVibe()/openVibes()/switchVibeTab()
+// used bare `.onclick=` chains where one missing element could throw and skip binding the tab
+// buttons entirely, leaving them visually "active" but dead to further clicks. Already
+// network-first (see NETWORK_FIRST_PATTERNS below) so this alone doesn't strictly need a cache
+// bump, but bumping anyway per this project's standing rule of always bumping on any JS/HTML
+// change, so any device that grabbed a copy of games-v4-gameplay-fix.js from before it was
+// folded into game-v3.html/games-v4-enhancements.js (the exact stale file this project's own
+// v67/v69 fixes above were meant to retire) also gets one more forced clean break.
+const CACHE_NAME = 'necpa-static-v70';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [

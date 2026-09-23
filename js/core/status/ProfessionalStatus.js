@@ -573,7 +573,7 @@ async function openVibes(){
  vibesState={items,index:0,muted:localStorage.getItem('necpa.vibe.sound')!=='on',onlySaved:false,mode:'forYou'};
  if(!items.length){
    root.innerHTML='<button class="ns-icon-btn ns-vback" data-rclose style="position:absolute;top:20px;left:16px;z-index:6">×</button><div class="ns-vibes-empty"><div><strong>No vibes to play yet</strong><br>Check back once you, your friends, or public creators post short videos.</div></div>';
-   root.querySelector('[data-rclose]').onclick=closeVibes;
+   root.querySelector('[data-rclose]')?.addEventListener('click',closeVibes);
    return;
  }
  renderVibe();
@@ -604,7 +604,13 @@ async function switchVibeTab(mode){
  if(items.length)renderVibe();
  else{
    root.innerHTML='<div class="ns-vibes-top"><button class="ns-vibe-close" data-rclose aria-label="Close">×</button><nav class="ns-vibe-tabs" data-vibe-tab-scroll>'+['forYou','friends','public','following'].map(x=>'<button data-vibe-tab="'+x+'" class="'+(x===mode?'active':'')+'">'+({forYou:'For You',friends:'Friends',public:'Public',following:'Following'}[x])+'</button>').join('')+'</nav><button class="ns-vibe-search" data-vsearch aria-label="Search">⌕</button></div><div class="ns-vibes-empty"><div><strong>No vibes here yet</strong><br>Try another feed.</div></div>';
-   root.querySelector('[data-rclose]').onclick=closeVibes;root.querySelectorAll('[data-vibe-tab]').forEach(b=>b.onclick=()=>switchVibeTab(b.dataset.vibeTab));root.querySelector('[data-vsearch]').onclick=searchVibes;
+   // FIX: bind the tabs first and optional-chain every lookup here too — see the matching fix
+   // and explanation in renderVibe() above. This empty-state markup is what's on screen right
+   // after switching to a tab with nothing in it yet, so it has to stay just as clickable as
+   // the populated view for the person to be able to try a different tab next.
+   root.querySelectorAll('[data-vibe-tab]').forEach(b=>{b.onclick=()=>switchVibeTab(b.dataset.vibeTab)});
+   root.querySelector('[data-rclose]')?.addEventListener('click',closeVibes);
+   root.querySelector('[data-vsearch]')?.addEventListener('click',searchVibes);
  const sound=root.querySelector('[data-vsound]');sound?.addEventListener('click',e=>{e.stopPropagation();vibesState.muted=!vibesState.muted;localStorage.setItem('necpa.vibe.sound',vibesState.muted?'off':'on');const v=root.querySelector('video');if(v){v.muted=vibesState.muted;if(!v.muted)v.play().catch(()=>{})}sound.textContent=vibesState.muted?'🔇':'🔊';sound.setAttribute('aria-label',vibesState.muted?'Turn sound on':'Mute sound')});
  }
 }
@@ -646,18 +652,28 @@ function renderVibe(){
  const savedIds=loadSavedVibeIds();const isSaved=savedIds.has(String(s.id));
  const expiry=s.vibeExpiresAt?('Expires '+new Date(s.vibeExpiresAt).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})):'';
  root.classList.remove('ns-vibe-next','ns-vibe-prev');void root.offsetWidth;root.classList.add(dirVibeTransition>0?'ns-vibe-next':'ns-vibe-prev');root.innerHTML='<div class="ns-vibes-stage" data-rstage><video src="'+esc(s.mediaUrl)+'" playsinline loop autoplay '+(vibesState.muted?'muted':'')+' preload="auto" onerror="window.__necpaStatusMediaError&&window.__necpaStatusMediaError(this)"></video></div><div class="ns-vibes-top"><button class="ns-vibe-close" data-rclose aria-label="Close">×</button><nav class="ns-vibe-tabs" data-vibe-tab-scroll>'+['forYou','friends','public','following'].map(x=>'<button data-vibe-tab="'+x+'" class="'+(x===vibesState.mode?'active':'')+'">'+({forYou:'For You',friends:'Friends',public:'Public',following:'Following'}[x])+'</button>').join('')+'</nav><button class="ns-vibe-search" data-vsearch aria-label="Search Vibes">⌕</button></div><div class="ns-vibe-creator">'+avatar(u,'ns-vibe-profile-avatar')+(String(u.id)===String(currentUser().id||'')?'':'<button class="ns-vibe-follow'+(s.isFollowedByMe?' following':'')+'" data-rfollow aria-label="'+(s.isFollowedByMe?'Following':'Follow creator')+'">'+(s.isFollowedByMe?'\u2713':'+')+'</button>')+'<div class="ns-vibe-creator-text"><b>'+esc(u.displayName||u.username||'Creator')+'</b><small data-vmeta>'+esc(vibeMeta(s,expiry))+'</small></div></div><div class="ns-vibes-caption">'+esc(s.caption||s.content||'')+'</div><div class="ns-vibes-side"><button class="ns-vibe-profile" data-rprofile aria-label="Creator profile">'+avatar(u,'ns-vibe-side-avatar')+'<i>+</i></button><button data-rlike class="'+(s.likedByMe?'liked':'')+'" aria-label="Love" aria-pressed="'+(s.likedByMe?'true':'false')+'"><span data-heart>'+(s.likedByMe?'♥':'♡')+'</span><span data-count>'+Number(s.reactionCount||0)+'</span></button><button data-rcomment aria-label="Comments"><span>💬</span><span data-count>'+Number(s.replyCount||0)+'</span></button><button data-rsave aria-label="Save" class="'+(isSaved?'active':'')+'"><span>'+(isSaved?'🔖':'🔖')+'</span></button><button data-rshare aria-label="Share"><span>↗</span><span>Share</span></button></div><div class="ns-vibe-comments" data-vibe-comments></div>';
- root.querySelector('[data-rclose]').onclick=closeVibes;
- root.querySelectorAll('[data-vibe-tab]').forEach(b=>b.onclick=()=>switchVibeTab(b.dataset.vibeTab));
- root.querySelector('[data-vsearch]').onclick=searchVibes;
+ // FIX (VIBE TABS STOPPED FILTERING AFTER THE FIRST SWITCH): every binding below used a bare
+ // `.onclick=` (no `?.`), so if ANY single one of them ever failed to find its element (a slow
+ // paint, a stale node from the previous render, or any other transient DOM timing hiccup) it
+ // threw right there and skipped every binding still queued after it — including the tab
+ // buttons themselves, since they were bound only AFTER data-rclose. The tab's "active" class
+ // still updated (that happens in the HTML string above, before any binding runs), so the tab
+ // visually looked selected while being completely dead to future clicks — exactly "looks like
+ // it switched, but content never changes". Binding the tabs and the close button FIRST, and
+ // making every single one of these optional-chained, means one bad/missing element can never
+ // again take the working ones down with it.
+ root.querySelectorAll('[data-vibe-tab]').forEach(b=>{b.onclick=()=>switchVibeTab(b.dataset.vibeTab)});
+ root.querySelector('[data-rclose]')?.addEventListener('click',closeVibes);
+ root.querySelector('[data-vsearch]')?.addEventListener('click',searchVibes);
  root.querySelector('[data-rprofile]')?.addEventListener('click',()=>{try{window.parent?.postMessage({type:'OPEN_USER_PROFILE',userId:Number(u.id)},'*')}catch(_){};window.dispatchEvent(new CustomEvent('necpa:open-profile',{detail:{userId:Number(u.id)}}))});
  root.querySelector('[data-rfollow]')?.addEventListener('click',()=>toggleVibeFollow(s));
- root.querySelector('[data-rlike]').onclick=e=>{e.stopPropagation();toggleVibeLove(s)};
- root.querySelector('[data-rcomment]').onclick=()=>openVibeComments(s);
- root.querySelector('[data-rsave]').onclick=()=>{const set=loadSavedVibeIds();const id=String(s.id);if(set.has(id)){set.delete(id);toast('Removed from Saved')}else{set.add(id);toast('Saved to your Vibes')}persistSavedVibeIds(set);renderVibe()};
+ root.querySelector('[data-rlike]')?.addEventListener('click',e=>{e.stopPropagation();toggleVibeLove(s)});
+ root.querySelector('[data-rcomment]')?.addEventListener('click',()=>openVibeComments(s));
+ root.querySelector('[data-rsave]')?.addEventListener('click',()=>{const set=loadSavedVibeIds();const id=String(s.id);if(set.has(id)){set.delete(id);toast('Removed from Saved')}else{set.add(id);toast('Saved to your Vibes')}persistSavedVibeIds(set);renderVibe()});
  // Download was intentionally removed from the current Vibes action rail; do not bind a control that is no longer rendered.
- root.querySelector('[data-rshare]').onclick=()=>share(s);
+ root.querySelector('[data-rshare]')?.addEventListener('click',()=>share(s));
  const v=root.querySelector('video');if(v){v.muted=vibesState.muted;v.play().catch(()=>{})}
- wireVibeGestures(root);
+ try{wireVibeGestures(root)}catch(_){}
  recordVibeView(s);
  preloadAdjacentVibes();
 }

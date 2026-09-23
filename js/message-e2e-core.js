@@ -17,6 +17,13 @@
   // stays in sync with decryptCache/failed/etc, including the account-
   // switch wipe below.
   let decryptVersionByMsgId = new Map();
+  // ROOT-CAUSE FIX (OFFLINE-1:1-MESSAGE-STUCK-ON-"🔒 Encrypted message"):
+  // see _scheduleDecryptRetry()/decryptMessageForDisplay() below for the
+  // full explanation. retryTimers must be reset on account switch just
+  // like every other per-account map here, or a timer scheduled for
+  // account A's message id could fire after switching to account B (ids
+  // are not namespaced by account) and touch B's state.
+  let retryTimers = new Map();
 
   // ROOT-CAUSE FIX (ACCOUNT-SWITCH-STALE-STATE — "switch account A to B,
   // chat, switch back to A, sending/decrypting for A misbehaves"): every
@@ -47,6 +54,8 @@
     identityReady = null;
     decryptVersionByMsgId = new Map();
     ratchetLocks.clear();
+    for (const t of retryTimers.values()) { try { clearTimeout(t); } catch (_) {} }
+    retryTimers = new Map();
   }
   function _syncAccountState() {
     const current = me();
@@ -739,8 +748,65 @@
     const isOwnMessage = !!(sender && meId && sender === meId);
     return decryptFromChat(message.content, chatId, peer, isOwnMessage, messageId(message));
   }
-  function notifyResolved(id, plaintext, entry) { decryptCache.set(id, plaintext); pending.delete(id); failed.delete(id); entry?.subscribers?.forEach(fn => { try { fn(plaintext); } catch (_) {} }); try { document.dispatchEvent(new CustomEvent('kyn:messageDecrypted', { detail: { messageId: id, chatId: entry?.chatId, plaintext, version: getDecryptVersion(id) } })); } catch (_) {} }
-  function notifyFailed(id, error, entry) { pending.delete(id); failed.add(id); entry?.subscribers?.forEach(fn => { try { fn(null, error); } catch (_) {} }); try { document.dispatchEvent(new CustomEvent('kyn:messageDecryptFailed', { detail: { messageId: id, error: error?.message || String(error || 'Decryption failed') } })); } catch (_) {} }
+  function notifyResolved(id, plaintext, entry) { decryptCache.set(id, plaintext); pending.delete(id); failed.delete(id); const t = retryTimers.get(id); if (t) { try { clearTimeout(t); } catch (_) {} retryTimers.delete(id); } entry?.subscribers?.forEach(fn => { try { fn(plaintext); } catch (_) {} }); try { document.dispatchEvent(new CustomEvent('kyn:messageDecrypted', { detail: { messageId: id, chatId: entry?.chatId, plaintext, version: getDecryptVersion(id) } })); } catch (_) {} }
+  function notifyFailed(id, error, entry) { pending.delete(id); failed.add(id); const t = retryTimers.get(id); if (t) { try { clearTimeout(t); } catch (_) {} retryTimers.delete(id); } entry?.subscribers?.forEach(fn => { try { fn(null, error); } catch (_) {} }); try { document.dispatchEvent(new CustomEvent('kyn:messageDecryptFailed', { detail: { messageId: id, error: error?.message || String(error || 'Decryption failed') } })); } catch (_) {} }
+
+  // ROOT-CAUSE FIX (OFFLINE 1:1 MESSAGE STUCK ON "🔒 Encrypted message",
+  // never recovers even after the peer replies): decryptMessageForDisplay()
+  // used to make exactly ONE decrypt attempt and call notifyFailed()
+  // (PERMANENT — adds to `failed`, fires kyn:messageDecryptFailed) the
+  // instant that single attempt threw, for ANY reason at all. That's fine
+  // for a message decrypted while the chat is actively open (identity
+  // already unlocked, peer already known, keys already cached), but an
+  // offline-queued message delivered on reconnect (flushOfflineMessages /
+  // sync:missed_messages — see webSocketService.js) typically lands at the
+  // exact moment several async things are still settling: ensureIdentity()
+  // may still be unlocking, peerFor() can come back empty because the
+  // conversation list hasn't finished loading yet, or the peer's public
+  // key hasn't been fetched/cached yet. None of that is a cryptographic
+  // failure — it's pure timing — but the old code could not tell the
+  // difference and treated it exactly like a genuine, unrecoverable
+  // decrypt failure. Once marked `failed`, nothing ever retried it
+  // automatically (only the manual "Retry" button calls retryDecrypt()),
+  // so the placeholder stuck forever — even after the identity/session
+  // fully settled a moment later and the peer sent a brand-new message
+  // that decrypted just fine.
+  //
+  // Group chat never hits this: group.html re-fetches full history over
+  // REST on open/reconnect rather than depending on a single push-based
+  // decrypt attempt, so a bad-timing race there just means the next
+  // refetch (or the 2.5s poll) tries again with fresh state. This gives
+  // 1:1 messages the same resilience by retrying a failed attempt with
+  // bounded backoff — mirroring the retry/backoff design js/e2e-
+  // encryption.js's older engine already used for exactly this reason —
+  // before ever calling notifyFailed(). isMessageQueued() (pending still
+  // holds the id) stays true for the whole retry window, so the UI keeps
+  // showing "Decrypting…" instead of a premature permanent fallback.
+  const DECRYPT_RETRY_DELAYS_MS = [800, 1500, 3000, 6000, 10000, 15000];
+  const MAX_DECRYPT_RETRY_ATTEMPTS = DECRYPT_RETRY_DELAYS_MS.length;
+  function _scheduleDecryptRetry(id, message, chatId, currentUserId, opts, entry) {
+    if (retryTimers.has(id)) return; // a retry is already scheduled for this message
+    if (!pending.has(id)) return; // resolved/failed/forgotten already — nothing to retry
+    entry.retryCount = entry.retryCount || 0;
+    if (entry.retryCount >= MAX_DECRYPT_RETRY_ATTEMPTS) {
+      notifyFailed(id, entry.lastError || new Error('Decryption failed'), entry);
+      return;
+    }
+    const delay = DECRYPT_RETRY_DELAYS_MS[Math.min(entry.retryCount, DECRYPT_RETRY_DELAYS_MS.length - 1)];
+    entry.retryCount += 1;
+    const timer = setTimeout(async () => {
+      retryTimers.delete(id);
+      if (decryptCache.has(id) || !pending.has(id)) return; // already resolved/forgotten while waiting
+      try {
+        const plaintext = await attempt(message, chatId, currentUserId, opts);
+        notifyResolved(id, plaintext, entry);
+      } catch (error) {
+        entry.lastError = error;
+        _scheduleDecryptRetry(id, message, chatId, currentUserId, opts, entry);
+      }
+    }, delay);
+    retryTimers.set(id, timer);
+  }
   async function decryptMessageForDisplay(message, chatId, currentUserId, opts = {}) {
     _syncAccountState(); // must run before any cache lookup below — see _resetPerAccountState's comment
     const id = messageId(message) || `${chatId}:${message?.content || ''}`;
@@ -754,10 +820,31 @@
     if (decryptCache.has(id)) return decryptCache.get(id); if (inflight.has(id)) return inflight.get(id);
     const entry = pending.get(id) || { chatId, subscribers: new Set() }; pending.set(id, entry);
     if (typeof opts.onResolved === 'function') entry.subscribers.add(opts.onResolved);
-    const promise = (async () => { try { const plaintext = await attempt(message, chatId, currentUserId, opts); notifyResolved(id, plaintext, entry); return plaintext; } catch (error) { notifyFailed(id, error, entry); throw error; } finally { inflight.delete(id); } })();
+    const promise = (async () => {
+      try {
+        const plaintext = await attempt(message, chatId, currentUserId, opts);
+        notifyResolved(id, plaintext, entry);
+        return plaintext;
+      } catch (error) {
+        // Not necessarily permanent — see _scheduleDecryptRetry's rationale
+        // above. Schedule a bounded, backed-off retry and hand this caller
+        // the fallback text now; a later automatic retry (or the existing
+        // onResolved subscriber/'kyn:messageDecrypted' event) delivers the
+        // real plaintext if/when it succeeds, exactly like a message that
+        // was still mid-handshake already works elsewhere in this file.
+        entry.lastError = error;
+        _scheduleDecryptRetry(id, message, chatId, currentUserId, opts, entry);
+        return opts.fallbackText === undefined ? '' : opts.fallbackText;
+      } finally { inflight.delete(id); }
+    })();
     inflight.set(id, promise); try { return await promise; } catch (_) { return opts.fallbackText === undefined ? '' : opts.fallbackText; }
   }
-  async function retryDecrypt(chatId, message) { const id = messageId(message); decryptCache.delete(id); failed.delete(id); pending.delete(id); return decryptMessageForDisplay(message, chatId, me(), {}); }
+  async function retryDecrypt(chatId, message) {
+    const id = messageId(message);
+    decryptCache.delete(id); failed.delete(id); pending.delete(id);
+    const t = retryTimers.get(id); if (t) { try { clearTimeout(t); } catch (_) {} retryTimers.delete(id); }
+    return decryptMessageForDisplay(message, chatId, me(), {});
+  }
   async function prefetchRecipientKey(userId) { try { await ensureIdentity(); return await I().publicKeyFor(userId); } catch (_) { return null; } }
   // Login-time batch warmup — see e2e-identity-core.js's publicKeysForBatch
   // for the full rationale. Called once with every known contact id right
@@ -798,6 +885,8 @@
     decryptCache.delete(id);
     inflight.delete(id);
     decryptVersionByMsgId.delete(id);
+    const t = retryTimers.get(id);
+    if (t) { try { clearTimeout(t); } catch (_) {} retryTimers.delete(id); }
   }
   async function registerPendingDecrypt(messageIdValue, attemptFn, onResolved) { const id = String(messageIdValue || ''); if (!id || typeof attemptFn !== 'function') return { ok: false }; if (decryptCache.has(id)) return { ok: true, plaintext: decryptCache.get(id) }; if (pending.has(id)) { if (onResolved) pending.get(id).subscribers.add(onResolved); return { ok: false, queued: true }; } const entry = { subscribers: new Set(onResolved ? [onResolved] : []) }; pending.set(id, entry); try { const text = await attemptFn(); notifyResolved(id, text, entry); return { ok: true, plaintext: text }; } catch (e) { notifyFailed(id, e, entry); return { ok: false, queued: false }; } }
   async function encryptAttachment(arrayBuffer, chatId, recipientUserId) {
