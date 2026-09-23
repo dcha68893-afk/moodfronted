@@ -395,22 +395,34 @@ window._physPublish=async()=>{
 // handler and call it later" fallback for the other tabs — their own
 // .onclick (whichever script last set it) still runs normally since we only
 // preventDefault/stopImmediatePropagation for the physical case.
+// FIX (Publish sometimes does nothing on Service/Digital tabs too — same
+// root cause as the physical case above, just not covered by it): the
+// physical-only intercept only ever calls preventDefault/stopImmediatePropagation
+// when tab==='physical', so on every OTHER tab it deliberately falls through
+// to "whichever .onclick happened to win the race" — which is exactly the
+// fragile behavior described above, just left in place for service/digital.
+// Tool-ui.js's publishListingFromModal() already implements service/digital
+// publish correctly and is exposed as window._publishListingFromModal(), so
+// route every tab through one explicit, race-proof dispatch instead of
+// leaving two tabs still dependent on reassignment timing.
 (() => {
-    function bindPhysPublishIntercept() {
+    function bindPublishIntercept() {
         const b = document.getElementById('publishListingBtn');
-        if (!b) { setTimeout(bindPhysPublishIntercept, 800); return; }
+        if (!b) { setTimeout(bindPublishIntercept, 800); return; }
         if (b.__physInterceptBound) return;
         b.__physInterceptBound = true;
         b.addEventListener('click', e => {
             const tab = document.querySelector('.create-listing-tab.active')?.dataset?.tab;
+            e.preventDefault();
+            e.stopImmediatePropagation();
             if (tab === 'physical') {
-                e.preventDefault();
-                e.stopImmediatePropagation();
                 window._physPublish();
+            } else if (typeof window._publishListingFromModal === 'function') {
+                window._publishListingFromModal();
             }
         }, true);
     }
-    setTimeout(bindPhysPublishIntercept, 600);
+    setTimeout(bindPublishIntercept, 600);
 })();
 
 // ─── Service tab: subcategory + photo (see Tools.html for the fields) ───────
