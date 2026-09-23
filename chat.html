@@ -547,7 +547,9 @@
             text-transform: uppercase;
             opacity: 0.8;
         }
-        .center-menu-group i { color: #60a5fa; }
+        /* FIX (NAV-PLUS-SWAP): renamed from .center-menu-group — Status now
+           occupies this popup slot, keeping the same blue accent. */
+        .center-menu-status i { color: #60a5fa; }
         .center-menu-games i { color: #f59e0b; }
         /* FIX (FRIENDS-ICON-INVISIBLE-IN-LIGHT-THEME): unlike calls/group/games,
            this icon had no explicit color, so it fell back to the .center-menu-item
@@ -880,24 +882,28 @@
             filter: drop-shadow(0 0 10px rgba(96,165,250,0.85));
         }
 
-        /* Green tint for messaging/communication tabs */
+        /* Green tint for messaging/communication tabs.
+           FIX (NAV-PLUS-SWAP): these were keyed to [data-page="status"], which
+           used to be this bottom-bar slot. Group now occupies that slot (status
+           moved into the "+" popup instead), so the selector follows it here to
+           keep the same active-state styling on whichever icon sits in this spot. */
         .mobile-nav-icon[data-page="messages"].active,
-        .mobile-nav-icon[data-page="status"].active {
+        .mobile-nav-icon[data-page="group"].active {
             color: #34d399;
         }
 
         .mobile-nav-icon[data-page="messages"].active i,
-        .mobile-nav-icon[data-page="status"].active i {
+        .mobile-nav-icon[data-page="group"].active i {
             filter: drop-shadow(0 0 10px rgba(52,211,153,0.9));
         }
 
         .mobile-nav-icon[data-page="messages"].active::before,
-        .mobile-nav-icon[data-page="status"].active::before {
+        .mobile-nav-icon[data-page="group"].active::before {
             background: #34d399;
         }
 
         .mobile-nav-icon[data-page="messages"].active::after,
-        .mobile-nav-icon[data-page="status"].active::after {
+        .mobile-nav-icon[data-page="group"].active::after {
             background: #34d399;
         }
 
@@ -1635,10 +1641,14 @@
             <i class="fas fa-plus"></i>
         </button>
 
-        <!-- 4. Updates / Status -->
-        <button class="mobile-nav-icon" data-page="status" aria-label="Updates">
-            <i class="fas fa-bell"></i>
-            <span class="nav-label">Updates</span>
+        <!-- 4. Groups -->
+        <!-- FIX (NAV-PLUS-SWAP): this slot used to be Status/Updates (data-page="status").
+             Status now lives inside the "+" popup menu instead, and Group has moved out
+             of that popup into this bottom-bar slot — see the matching swap below in
+             #centerActionMenu. -->
+        <button class="mobile-nav-icon" data-page="group" aria-label="Groups">
+            <i class="fas fa-users"></i>
+            <span class="nav-label">Groups</span>
         </button>
 
         <!-- 5. Marketplace / Tools -->
@@ -1651,9 +1661,12 @@
     <!-- Center Action Popup Menu -->
     <div id="centerMenuOverlay" onclick="closeCenterMenu()"></div>
     <div id="centerActionMenu">
-        <div class="center-menu-item center-menu-group" onclick="closeCenterMenu(); navigateToPage('group');">
-            <i class="fas fa-users"></i>
-            <span>Groups</span>
+        <!-- FIX (NAV-PLUS-SWAP): was center-menu-group / navigateToPage('group') here;
+             Group now sits in the bottom bar's Updates slot instead (see above), and
+             Status has taken this spot in the "+" popup so it sits next to Friends. -->
+        <div class="center-menu-item center-menu-status" onclick="closeCenterMenu(); navigateToPage('status');">
+            <i class="fas fa-circle"></i>
+            <span>Status</span>
         </div>
         <div class="center-menu-item center-menu-friends" onclick="closeCenterMenu(); navigateToPage('friends');">
             <i class="fas fa-user-friends"></i>

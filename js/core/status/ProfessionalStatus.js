@@ -659,6 +659,39 @@ function renderVibe(){
  const v=root.querySelector('video');if(v){v.muted=vibesState.muted;v.play().catch(()=>{})}
  wireVibeGestures(root);
  recordVibeView(s);
+ preloadAdjacentVibes();
+}
+// FIX (VIBE-NO-PRELOAD — the single biggest reason this didn't feel like
+// TikTok): every clip only started fetching the instant it became the
+// visible stage element, so every single swipe hit a cold start and a
+// visible buffering moment. TikTok's signature feel comes from the next
+// clip already being ready before you finish the swipe gesture. This warms
+// the browser's HTTP cache for the next (and previous, for swiping back up)
+// clip a moment ahead of time via a hidden, muted, off-screen <video> — it
+// never gets shown itself, it just means the real <video> created in
+// renderVibe() for that item is very likely already cached when its turn
+// comes, so playback starts immediately instead of buffering.
+const __vibePreloadCache=new Map();
+function preloadVibeAt(i){
+ const item=vibesState.items&&vibesState.items[i];
+ if(!item||!item.mediaUrl||__vibePreloadCache.has(item.mediaUrl))return;
+ const v=document.createElement('video');
+ v.src=item.mediaUrl;v.muted=true;v.preload='auto';v.playsInline=true;
+ v.style.cssText='position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;left:-9999px;top:-9999px';
+ document.body.appendChild(v);
+ __vibePreloadCache.set(item.mediaUrl,v);
+ const cleanup=()=>{try{v.remove()}catch(_){}};
+ v.addEventListener('canplaythrough',cleanup,{once:true});
+ setTimeout(cleanup,15000); // safety net if canplaythrough never fires (slow/broken connection)
+ // Keep the warm-cache map from growing unbounded across a long scroll session.
+ if(__vibePreloadCache.size>12){const oldestKey=__vibePreloadCache.keys().next().value;__vibePreloadCache.delete(oldestKey)}
+}
+function preloadAdjacentVibes(){
+ const len=vibesState.items?vibesState.items.length:0;if(!len)return;
+ // Match moveVibe()'s own wraparound (swiping past the last clip goes back
+ // to the first, and vice versa) so the edges of the feed preload correctly too.
+ preloadVibeAt((vibesState.index+1)%len);
+ preloadVibeAt((vibesState.index-1+len)%len);
 }
 async function sendVibeFriendRequest(u){
  const id=Number(u?.id||0);if(!id||id===Number(currentUser().id||0))return;

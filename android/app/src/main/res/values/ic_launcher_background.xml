@@ -1,4 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#FFFFFF</color>
+    <!-- FIX (install icon showing the default Android Studio template icon,
+         not the real Necpra logo): the mipmap-*/ic_launcher*.png files and
+         this foreground layer used to be the generic teal-grid template
+         every new Android project starts with, and this background color
+         was left at the template's plain white. Now that the foreground is
+         the real logo (padded to the adaptive-icon safe zone so nothing
+         gets clipped by circle/squircle masking), the background needs to
+         match the logo's own navy so the padding blends in rather than
+         showing a white ring around it. Sampled directly from
+         icons/necpa-512.png's border color. -->
+    <color name="ic_launcher_background">#000933</color>
 </resources>

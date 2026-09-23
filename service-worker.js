@@ -24,7 +24,7 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.34.0';
+const SW_VERSION = '19.35.0';
 // FIX: bumped so activate() drops every existing cache immediately on this
 // deploy — anyone with a stale pre-rebuild group.html (or the old, now-
 // deleted group-core-*/group-os-* files, or the misspelled necpra-* icons
@@ -55,8 +55,21 @@ const SW_VERSION = '19.34.0';
 // v67: games-v4-gameplay-fix.js (Block Puzzle no longer stacks duplicate drag handlers on
 // replay; Trivia no longer gets its answers disabled mid-quiz by a stale base-game timer),
 // games-commercial-v5.js (Challenge-button dedup check fixed), games-v4-enhancements.js
+//
+// v69: ROOT-CAUSE FIX (real crossword game shipped in games-crossword-v4.js never reached
+// installed devices — "click Word Connect, still see the old placeholder"): NOT ONE game
+// file (game.html, game-v3.html, games-crossword-v4.js, games-v4-enhancements.js,
+// games-commercial-v5.js) was ever in NETWORK_FIRST_PATTERNS below, despite this file
+// documenting this exact failure mode — "a real fix sits on the server for up to a week
+// before an installed app runs it" — and already fixing it for friend/group/status/
+// marketplace/tools. The .js files fell through to staticAsset()'s cache-first strategy
+// (only re-checks network every CACHE_MAX_AGE = 7 days or on a CACHE_NAME bump), so a
+// device that had already cached an old games-crossword-v4.js kept running it — including
+// versions from before the real crossword engine existed — no matter how many times the
+// game screen was reopened. Adding these below and bumping CACHE_NAME forces the one clean
+// break every other module fix here already gets.
 // (LEVEL/DIFFICULTY badge now actually appears; duplicate Challenge button removed).
-const CACHE_NAME = 'necpa-static-v68';
+const CACHE_NAME = 'necpa-static-v69';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -139,7 +152,13 @@ const NETWORK_FIRST_PATTERNS = [
   // same failure mode already fixed for the friend module and group-os files above.
   /\/Tools\.html/i,/\/Tool\.css/i,/\/marketplace-ui-fix\.js/i,/\/marketplace-ecommerce\.js/i,
   /\/marketplace-admin\.js/i,/\/marketplace-seller\.js/i,/\/marketplace-checkout\.js/i,
-  /\/marketplace-advanced\.js/i
+  /\/marketplace-advanced\.js/i,
+  // v69 — see the dated comment near the top of this file. game.html itself is a
+  // navigation request (goes through navigation()'s already-network-first path
+  // regardless), but the actual gameplay scripts are plain .js requests and were
+  // falling through to the 7-day cache-first default without these.
+  /\/game\.html/i,/\/game-v3\.html/i,/\/games-crossword-v4\.js/i,
+  /\/games-v4-enhancements\.js/i,/\/games-commercial-v5\.js/i
 ];
 
 const BYPASS_PATTERNS = [

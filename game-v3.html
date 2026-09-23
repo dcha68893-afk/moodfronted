@@ -15,7 +15,18 @@
 </style></head><body><div id="app"><section id="home" class="screen active"><div class="top"><button class="icon" onclick="closeGames()">×</button><div class="title">NECPA ARCADE</div><div class="coins">🪙 <span id="coins">1,200</span></div></div><div class="home"><div class="hero"><div class="eyebrow">PREMIUM GAME ROOM</div><h1>Play. Flow. Win.</h1><p>Touch-first games with fluid animation, sound and satisfying feedback.</p></div><div class="grid"><div class="card" style="--a:#22c55e" onclick="openGame('water')"><div class="art">🧪</div><h3>Water Sort</h3><small>Pour, match & solve</small><div class="play">▶</div></div><div class="card" style="--a:#38bdf8" onclick="openGame('block')"><div class="art">🧊</div><h3>Block Puzzle</h3><small>Drag, clear & combo</small><div class="play">▶</div></div><div class="card" style="--a:#a855f7" onclick="openGame('trivia')"><div class="art">🏆</div><h3>Trivia Master</h3><small>Answer & climb</small><div class="play">▶</div></div><div class="card" style="--a:#f59e0b" onclick="openGame('crossword')"><div class="art">🔤</div><h3>Word Connect</h3><small>Swipe letters, fill the board</small><div class="play">▶</div></div><div class="card wide" style="--a:#ff4d8d" onclick="openGame('daily')"><div class="art">🔥</div><div><h3>Daily Challenge</h3><small>Bonus level and rewards.</small></div><div class="play">›</div></div></div><div class="stats"><div class="stat"><b id="games">0</b><span>Games</span></div><div class="stat"><b id="best">0</b><span>Best Score</span></div><div class="stat"><b id="streak">0</b><span>Streak</span></div></div></div></section>
 <section id="water" class="screen"><div class="top"><button class="icon" onclick="home()">‹</button><div class="title">Water Sort</div><div class="coins">LV <span id="wl">1</span></div></div><div class="body"><canvas id="wc" class="canvas"></canvas><div class="hud"><div class="pill">SCORE <b id="ws">0</b></div><div class="pill">MOVES <b id="wm">0</b></div></div><div id="wh" class="hint">TAP A BOTTLE<span>Then tap another bottle to pour</span></div><div class="actions"><button class="action" onclick="undo()">↶ UNDO</button><button class="action" onclick="waterHint()">💡 HINT</button><button class="action" onclick="addWaterTube()">＋ TUBE</button><button class="action primary" onclick="restartWater()">↻ RESTART</button></div></div><div id="wo" class="overlay"><div class="modal"><div class="big">🎉</div><h2>Level Complete!</h2><p>Clean pour. Perfect sort.</p><div class="row"><button onclick="restartWater()">Replay</button><button class="primary" onclick="nextWater()">Next Level</button></div></div></div><div id="wn" class="overlay"><div class="modal"><div class="big">🧩</div><h2>NO MOVES LEFT</h2><p>The puzzle is not solved and no legal pour remains.</p><div class="row"><button onclick="undo()">Undo</button><button class="primary" onclick="restartWater()">Restart</button></div></div></div></section>
 <section id="daily" class="screen"><div class="top"><button class="icon" onclick="home()">‹</button><div class="title">Daily Challenge</div><div class="coins">⏱ <span id="dt">03:00</span></div></div><div class="body"><canvas id="dc" class="canvas"></canvas><div class="hud"><div class="pill">DAILY <b id="ds">0</b></div><div class="pill">MOVES <b id="dm">0</b></div></div><div id="dh" class="hint">DAILY PUZZLE<span>Same puzzle for everyone today</span></div><div class="actions"><button class="action" onclick="dailyUndo()">↶ UNDO</button><button class="action primary" onclick="dailyRestart()">↻ RESTART</button><button class="action" onclick="home()">EXIT</button></div></div><div id="do" class="overlay"><div class="modal"><div class="big">🔥</div><h2>Daily Complete!</h2><p id="dot">You solved today's puzzle.</p><div class="row"><button class="primary" onclick="home()">Back to Arcade</button></div></div></div></section><section id="block" class="screen"><div class="top"><button class="icon" onclick="home()">‹</button><div class="title">Block Puzzle</div><div class="coins">LEVEL <span id="bl">1</span></div></div><div class="blockbody"><div><div class="score" id="bs">0</div><div class="target">Clear lines to increase your score</div></div><div id="board" class="board"></div><div id="tray" class="tray"></div></div><div id="bo" class="overlay"><div class="modal"><div class="big">🏆</div><h2>NO MOVES</h2><p id="bot">Score: 0</p><div class="row"><button class="primary" onclick="restartBlock()">Play Again</button><button onclick="home()">Exit</button></div></div></div></section>
-<section id="trivia" class="screen trivia"><div class="top"><button class="icon" onclick="home()">‹</button><div class="title">Trivia Master</div><div class="coins">🪙 <span id="tc">1,200</span></div></div><div class="tvbody"><canvas id="tp" class="tvparticles"></canvas><div class="tvcontent"><div class="tvtop"><div class="streak" id="ts">STREAK ×0</div><div class="prize" id="pr">1,000</div></div><div class="progress"><i id="prog"></i></div><div class="question" id="q">Loading…</div><div id="answers" class="answers"></div><div class="lifelines"><button id="l50" class="life" onclick="fifty()">50:50<small>HELP</small></button><button id="ls" class="life" onclick="skip()">↻<small>SKIP</small></button><button id="lh" class="life" onclick="hint()">💡<small>HINT</small></button></div></div></div><div id="to" class="overlay"><div class="modal"><div class="big">🎉</div><h2>Quiz Complete!</h2><p id="tot"></p><button class="action primary" onclick="startTrivia()">Play Again</button></div></div></section><section id="crossword" class="screen"><div class="top"><button class="icon" onclick="home()">‹</button><div class="title">Crossword</div></div><div class="blockbody"><div style="font-size:70px">🔤</div><h2>Word Challenge</h2><p class="target">Crossword renderer coming next.</p><button class="action primary" style="max-width:260px" onclick="home()">BACK TO ARCADE</button></div></section></div><div id="toast" class="toast"></div>
+<section id="trivia" class="screen trivia"><div class="top"><button class="icon" onclick="home()">‹</button><div class="title">Trivia Master</div><div class="coins">🪙 <span id="tc">1,200</span></div></div><div class="tvbody"><canvas id="tp" class="tvparticles"></canvas><div class="tvcontent"><div class="tvtop"><div class="streak" id="ts">STREAK ×0</div><div class="prize" id="pr">1,000</div></div><div class="progress"><i id="prog"></i></div><div class="question" id="q">Loading…</div><div id="answers" class="answers"></div><div class="lifelines"><button id="l50" class="life" onclick="fifty()">50:50<small>HELP</small></button><button id="ls" class="life" onclick="skip()">↻<small>SKIP</small></button><button id="lh" class="life" onclick="hint()">💡<small>HINT</small></button></div></div></div><div id="to" class="overlay"><div class="modal"><div class="big">🎉</div><h2>Quiz Complete!</h2><p id="tot"></p><button class="action primary" onclick="startTrivia()">Play Again</button></div></div></section><section id="crossword" class="screen"><div class="top"><button class="icon" onclick="home()">‹</button><div class="title">Crossword</div></div><div class="blockbody" id="crosswordFallback"><div class="cw-spinner" aria-hidden="true"></div><h2>Loading puzzle…</h2><p class="target">Hang tight, the board is on its way.</p><button class="action primary" style="max-width:260px" onclick="home()">BACK TO ARCADE</button></div></section></div>
+<style>
+/* FIX (CROSSWORD-PLACEHOLDER-STUCK): the block above used to be a permanent
+   "coming next" dead-end. games-crossword-v4.js now overwrites #crossword's
+   innerHTML with the real board as soon as it has loaded (see the retry
+   logic in openGame() below), so this is only ever seen for the brief
+   window before that script finishes downloading. */
+.cw-spinner{width:40px;height:40px;margin:0 auto 14px;border-radius:50%;
+  border:3px solid rgba(255,255,255,.18);border-top-color:#f59e0b;
+  animation:cwspin .8s linear infinite}
+@keyframes cwspin{to{transform:rotate(360deg)}}
+</style><div id="toast" class="toast"></div>
 <script>
 'use strict';const $=id=>document.getElementById(id),S=['home','water','daily','block','trivia','crossword'];let data=JSON.parse(localStorage.getItem('moodArcadeV3')||'{}');data.coins??=1200;data.games??=0;data.best??=0;data.streak??=0;function save(){localStorage.setItem('moodArcadeV3',JSON.stringify(data));updateHome()}function updateHome(){$('coins').textContent=data.coins.toLocaleString();$('tc').textContent=data.coins.toLocaleString();$('games').textContent=data.games;$('best').textContent=data.best;$('streak').textContent=data.streak}function show(x){S.forEach(s=>$(s).classList.toggle('active',s===x))}
 // FIX (NAV BAR STILL VISIBLE INSIDE A GAME): home() and openGame() only ever
@@ -28,7 +39,37 @@
 // there.
 function notifyGamesPanel(open){try{parent.postMessage({type:open?'GAMES_PANEL_OPENED':'GAMES_PANEL_CLOSED'},'*')}catch(e){}}
 function home(){show('home');try{clearInterval(window.__dailyTimer)}catch(e){};window.__dailyTimer=null;updateHome();notifyGamesPanel(false)}
-function openGame(x){data.games++;save();show(x);notifyGamesPanel(true);x==='water'?initWater():x==='daily'?initDaily():x==='block'?initBlock():x==='trivia'?startTrivia():x==='crossword'&&window.__MOOD_CROSSWORD_OPEN__?.()}
+function openGame(x){data.games++;save();show(x);notifyGamesPanel(true);x==='water'?initWater():x==='daily'?initDaily():x==='block'?initBlock():x==='trivia'?startTrivia():x==='crossword'&&openCrossword()}
+
+// FIX (CROSSWORD-PLACEHOLDER-STUCK): games-crossword-v4.js is injected into
+// this document asynchronously by game.html (added to the DOM only once the
+// outer iframe's own "load" event fires, then fetched over the network from
+// there). If the player taps "Word Connect" before that fetch finishes,
+// window.__MOOD_CROSSWORD_OPEN__ does not exist yet, the old code did
+// nothing, and the static "coming next" placeholder markup was left on
+// screen permanently -- looking exactly like a broken/unfinished game even
+// though the real crossword engine was only a moment away from being ready.
+// This now polls briefly for the real game to become available and opens it
+// the instant it does, instead of giving up silently.
+let __cwWaitAttempts=0;
+function openCrossword(){
+  if(typeof window.__MOOD_CROSSWORD_OPEN__==='function'){
+    __cwWaitAttempts=0;
+    window.__MOOD_CROSSWORD_OPEN__();
+    return;
+  }
+  __cwWaitAttempts++;
+  if(__cwWaitAttempts>100){ // ~15s worst case (network truly failed/blocked)
+    const fb=document.getElementById('crosswordFallback');
+    if(fb){
+      fb.querySelector('h2').textContent='Could not load puzzle';
+      fb.querySelector('.target').textContent='Check your connection and try again.';
+      const spinner=fb.querySelector('.cw-spinner'); if(spinner)spinner.remove();
+    }
+    return;
+  }
+  setTimeout(openCrossword,150);
+}
 function closeGames(){notifyGamesPanel(false);try{parent.postMessage({type:'mood:close-games'},'*')}catch(e){}try{parent.postMessage({action:'close-game'},'*')}catch(e){}}
 // Hardware/device back button (relayed via game.html — see chat.html's
 // handleAppBackNavigation games-panel-active branch): just go home, same as
@@ -70,7 +111,95 @@ if(!window.__MOOD_BLOCK_POINTERS_BOUND__){window.__MOOD_BLOCK_POINTERS_BOUND__=t
 function clearLines(){let rows=[],cols=[];for(let r=0;r<10;r++)if(board[r].every(x=>x>=0))rows.push(r);for(let c=0;c<10;c++)if(board.every(row=>row[c]>=0))cols.push(c);if(!rows.length&&!cols.length){bcombo=0;updateBlockTarget();if(!hasMove()){$('bot').textContent='Score: '+bscore;$('bo').classList.add('show')}return}let cells=[...new Set(rows.flatMap(r=>Array.from({length:10},(_,c)=>r*10+c)).concat(cols.flatMap(c=>Array.from({length:10},(_,r)=>r*10+c))))];cells.forEach(i=>$('board').children[i]?.animate([{transform:'scale(1)'},{transform:'scale(1.2)',filter:'brightness(2)'},{transform:'scale(.1)',opacity:0}],{duration:280}));let n=rows.length+cols.length;bcombo++;bscore+=n*n*100*(1+Math.max(0,bcombo-1)*.25);$('bs').textContent=Math.round(bscore);data.best=Math.max(data.best,bscore);burst(innerWidth/2,innerHeight*.45,'#45d9ff',28+n*6);beep(720+n*90,.16);updateBlockTarget();setTimeout(()=>{rows.forEach(r=>board[r].fill(-1));cols.forEach(c=>board.forEach(row=>row[c]=-1));renderBlock();if(!hasMove()){$('bot').textContent='Score: '+Math.round(bscore);$('bo').classList.add('show')}},290)}
 function hasMove(){return hasAnyBlockMove()}
 function restartBlock(){initBlock()}
-const qs=[['What is a football commonly known to be made of?',['Cow skin','Goat skin','Elephant skin','Pig skin'],0],['Which planet is known as the Red Planet?',['Earth','Mars','Venus','Jupiter'],1],['What is the largest ocean on Earth?',['Atlantic','Indian','Arctic','Pacific'],3],['How many sides does a hexagon have?',['5','6','7','8'],1],['Which language runs in a web browser?',['JavaScript','Python','C++','SQL'],0],['What gas do plants absorb?',['Oxygen','Nitrogen','Carbon dioxide','Helium'],2],['Which country is home to Mount Fuji?',['China','Japan','Nepal','Thailand'],1],['What is 12 × 8?',['86','96','108','112'],1]];let qi=0,tscore=0,tstreak=0,used={a:false,b:false,c:false},timer=null;function triviaDifficultyTime(){const d=gameDifficulty('trivia');return d==='easy'?25:d==='hard'?10:18}function startTrivia(){qi=0;tscore=0;tstreak=0;used={a:false,b:false,c:false};$('to').classList.remove('show');$('l50').disabled=$('ls').disabled=$('lh').disabled=false;renderQ();particles()}function renderQ(){if(qi>=qs.length){finishQ();return}let q=qs[qi];$('q').textContent=q[0];$('pr').textContent=(1000+tscore).toLocaleString();$('ts').textContent='STREAK ×'+tstreak;$('prog').style.width=(qi/qs.length*100)+'%';let a=$('answers');a.innerHTML='';q[1].forEach((txt,i)=>{let b=document.createElement('button');b.className='answer';b.innerHTML=`<span class="letter">${String.fromCharCode(65+i)}</span><span>${txt}</span>`;b.onclick=()=>answerQ(i,b);a.appendChild(b)});$('q').animate([{opacity:0,transform:'translateY(10px)'},{opacity:1,transform:'none'}],{duration:350});clearInterval(timer);let left=triviaDifficultyTime();timer=setInterval(()=>{if(--left<=0){clearInterval(timer);answerQ(-1,null)}},1000)}function answerQ(i,el){clearInterval(timer);let q=qs[qi],ans=[...$('answers').children];ans.forEach((x,j)=>{x.disabled=true;if(j===q[2])x.classList.add('correct')});if(i===q[2]){el?.classList.add('correct');tstreak++;tscore+=100+tstreak*25;data.coins+=10+tstreak;beep(780,.12);burst(innerWidth/2,innerHeight*.45,'#38e38a',25)}else{el?.classList.add('wrong');tstreak=0;beep(180,.12,'sawtooth')}setTimeout(()=>{qi++;renderQ()},650)}function fifty(){if(used.a)return;used.a=true;$('l50').disabled=true;let q=qs[qi],bad=q[2]===0?[2,3]:q[2]===3?[0,1]:[0,3];bad.forEach(i=>$('answers').children[i].style.visibility='hidden')}function skip(){if(used.b)return;used.b=true;$('ls').disabled=true;clearInterval(timer);qi++;renderQ()}function hint(){if(used.c)return;used.c=true;$('lh').disabled=true;$('q').textContent=qs[qi][0]+'  •  Hint: think of the most common answer.';beep(520)}function finishQ(){clearInterval(timer);const lv=Math.max(1,Number(localStorage.getItem('mood.trivia.level')||1))+1;localStorage.setItem('mood.trivia.level',String(lv));data.best=Math.max(data.best,tscore);data.coins+=tscore;data.streak++;save();$('tot').textContent='Level '+(lv-1)+' complete • '+tscore+' points earned. Next level: '+lv+'.';$('to').classList.add('show');burst(innerWidth/2,innerHeight*.45,'#ffd34e',40);beep(1000,.16)}let pf=0;function particles(){let c=$('tp'),x=c.getContext('2d'),r=c.getBoundingClientRect(),d=devicePixelRatio||1;c.width=r.width*d;c.height=r.height*d;x.setTransform(d,0,0,d,0,0);cancelAnimationFrame(pf);let p=Array.from({length:45},()=>({x:Math.random()*r.width,y:Math.random()*r.height,v:.15+Math.random()*.5,s:1+Math.random()*2}));function loop(){x.clearRect(0,0,r.width,r.height);p.forEach(a=>{a.y-=a.v;if(a.y<0)a.y=r.height;x.fillStyle=ink(.33);x.beginPath();x.arc(a.x,a.y,a.s,0,Math.PI*2);x.fill()});pf=requestAnimationFrame(loop)}loop()}updateHome();
+// FIX (TRIVIA-NOT-ENDLESS): this used to be a fixed 8-question array — every
+// single playthrough, at every level, was the exact same 8 questions in the
+// exact same order, with zero difficulty change (the per-question timer only
+// depended on the global easy/normal/hard setting, never on level). That's
+// what "few levels, doesn't get harder" was describing. This is now a 48
+// question pool across 3 difficulty tiers; each level draws a fresh set from
+// a tier mix that shifts toward harder questions as level rises, the pool
+// reshuffles once exhausted (so a level never repeats a question already
+// seen this cycle), and the per-question timer shortens with level on top of
+// the existing easy/normal/hard baseline. Progress (mood.trivia.level) was
+// already being saved/read from localStorage correctly, so resuming after a
+// reload/relogin already worked — this only fixes the "not actually endless,
+// not actually harder" part.
+const QUESTION_BANK=[
+['What is the capital of France?',['Paris','Rome','Madrid','Berlin'],0,1],
+['How many continents are there on Earth?',['5','6','7','8'],2,1],
+['What is the boiling point of water in Celsius?',['90','100','110','120'],1,1],
+['Which planet is known as the Red Planet?',['Earth','Mars','Venus','Jupiter'],1,1],
+['How many days are there in a leap year?',['364','365','366','367'],2,1],
+['What is the largest ocean on Earth?',['Atlantic','Indian','Arctic','Pacific'],3,1],
+['How many sides does a hexagon have?',['5','6','7','8'],1,1],
+['Which gas do plants absorb from the air?',['Oxygen','Nitrogen','Carbon dioxide','Helium'],2,1],
+['What is 12 × 8?',['86','96','108','112'],1,1],
+['Which country is home to Mount Fuji?',['China','Japan','Nepal','Thailand'],1,1],
+['What is the freezing point of water in Celsius?',['-10','0','10','32'],1,1],
+['How many legs does a spider have?',['6','8','10','12'],1,1],
+['What is the largest planet in our solar system?',['Saturn','Neptune','Jupiter','Uranus'],2,1],
+['Which ocean is the smallest?',['Atlantic','Indian','Arctic','Pacific'],2,1],
+['How many colors are in a rainbow?',['5','6','7','8'],2,1],
+['What is the currency of Japan?',['Won','Yuan','Yen','Ringgit'],2,1],
+['Who wrote the play "Romeo and Juliet"?',['Charles Dickens','William Shakespeare','Mark Twain','Jane Austen'],1,2],
+['What is the chemical symbol for gold?',['Ag','Gd','Au','Go'],2,2],
+['What is the tallest mountain in the world?',['K2','Mount Everest','Kilimanjaro','Denali'],1,2],
+['How many bones are in the adult human body?',['186','206','226','246'],1,2],
+['What is the smallest prime number?',['0','1','2','3'],2,2],
+['Which planet is closest to the Sun?',['Venus','Earth','Mercury','Mars'],2,2],
+['What is the square root of 144?',['10','11','12','13'],2,2],
+['In which continent is the Sahara Desert located?',['Asia','Africa','Australia','South America'],1,2],
+['What is the main ingredient in guacamole?',['Tomato','Avocado','Lime','Onion'],1,2],
+['How many strings does a standard guitar have?',['4','5','6','7'],2,2],
+['Which element has the chemical symbol "O"?',['Osmium','Oxygen','Gold','Iron'],1,2],
+['What is the hardest natural substance on Earth?',['Quartz','Steel','Diamond','Granite'],2,2],
+['How many minutes are in a full day?',['1220','1320','1440','1500'],2,2],
+['Which shape has three sides?',['Square','Triangle','Pentagon','Hexagon'],1,2],
+['What is the powerhouse of the cell called?',['Nucleus','Ribosome','Mitochondria','Cytoplasm'],2,2],
+['Which language runs natively in a web browser?',['Python','JavaScript','C++','SQL'],1,2],
+['What is the speed of light in a vacuum (approx.)?',['150,000 km/s','300,000 km/s','450,000 km/s','600,000 km/s'],1,3],
+['Who developed the theory of general relativity?',['Isaac Newton','Niels Bohr','Albert Einstein','Galileo Galilei'],2,3],
+['What is the capital of Australia?',['Sydney','Melbourne','Canberra','Perth'],2,3],
+['Which vitamin is produced when skin is exposed to sunlight?',['Vitamin A','Vitamin C','Vitamin D','Vitamin K'],2,3],
+['What is the atomic number of hydrogen?',['0','1','2','3'],1,3],
+["Which gas makes up most of Earth's atmosphere?",['Oxygen','Carbon dioxide','Nitrogen','Argon'],2,3],
+['Who painted the Mona Lisa?',['Michelangelo','Leonardo da Vinci','Raphael','Donatello'],1,3],
+['What is the smallest bone in the human body?',['Femur','Stapes','Radius','Tibia'],1,3],
+['What is the study of earthquakes called?',['Volcanology','Meteorology','Seismology','Geology'],2,3],
+['In chemistry, what does "pH" measure?',['Temperature','Density','Acidity/alkalinity','Pressure'],2,3],
+['What is the largest species of shark?',['Great white shark','Hammerhead shark','Whale shark','Tiger shark'],2,3],
+['Which country invented paper?',['Egypt','China','Greece','India'],1,3],
+['What is a word called that reads the same forwards and backwards?',['Anagram','Acronym','Palindrome','Synonym'],2,3],
+['Which organ in the human body produces insulin?',['Liver','Kidney','Pancreas','Spleen'],2,3],
+['What is the capital of Canada?',['Toronto','Vancouver','Ottawa','Montreal'],2,3],
+['What is the chemical formula for table salt?',['NaCl','H2O','CO2','KCl'],0,3],
+];
+const QUESTIONS_PER_LEVEL=8;
+let triviaCyclePool=[],qs=[],qi=0,tscore=0,tstreak=0,used={a:false,b:false,c:false},timer=null;
+function triviaLevel(){return Math.max(1,Number(localStorage.getItem('mood.trivia.level')||1))}
+// Tier mix shifts from mostly-easy toward a harder blend as level rises, but
+// always leaves a floor of tier-1 questions so a level is never impossible.
+function tierWeights(level){
+  const hardness=Math.min(1,(level-1)/14); // ramps up over the first ~15 levels, then holds
+  return {1:Math.max(.18,.7-hardness*.52),2:.3+hardness*.05,3:Math.min(.55,hardness*.62)};
+}
+function refillCyclePool(){triviaCyclePool=QUESTION_BANK.slice();for(let i=triviaCyclePool.length-1;i>0;i--){const j=Math.random()*(i+1)|0;[triviaCyclePool[i],triviaCyclePool[j]]=[triviaCyclePool[j],triviaCyclePool[i]]}}
+function drawTieredSet(level,n){
+  const w=tierWeights(level),picked=[];
+  for(let i=0;i<n;i++){
+    if(!triviaCyclePool.length)refillCyclePool();
+    const r=Math.random(),tier=r<w[1]?1:(r<w[1]+w[2]?2:3);
+    let idx=triviaCyclePool.findIndex(q=>q[3]===tier);
+    if(idx<0)idx=0; // tier exhausted this cycle — take whatever's left rather than stall
+    picked.push(triviaCyclePool.splice(idx,1)[0]);
+  }
+  return picked;
+}
+function triviaDifficultyTime(){
+  const d=gameDifficulty('trivia'),base=d==='easy'?25:d==='hard'?10:18;
+  const level=triviaLevel(),shrink=Math.min(base-6,Math.floor((level-1)/2)); // -1s every 2 levels, floor of 6s
+  return Math.max(6,base-shrink);
+}function renderQ(){if(qi>=qs.length){finishQ();return}let q=qs[qi];$('q').textContent=q[0];$('pr').textContent=(1000+tscore).toLocaleString();$('ts').textContent='STREAK ×'+tstreak;$('prog').style.width=(qi/qs.length*100)+'%';let a=$('answers');a.innerHTML='';q[1].forEach((txt,i)=>{let b=document.createElement('button');b.className='answer';b.innerHTML=`<span class="letter">${String.fromCharCode(65+i)}</span><span>${txt}</span>`;b.onclick=()=>answerQ(i,b);a.appendChild(b)});$('q').animate([{opacity:0,transform:'translateY(10px)'},{opacity:1,transform:'none'}],{duration:350});clearInterval(timer);let left=triviaDifficultyTime();timer=setInterval(()=>{if(--left<=0){clearInterval(timer);answerQ(-1,null)}},1000)}function answerQ(i,el){clearInterval(timer);let q=qs[qi],ans=[...$('answers').children];ans.forEach((x,j)=>{x.disabled=true;if(j===q[2])x.classList.add('correct')});if(i===q[2]){el?.classList.add('correct');tstreak++;tscore+=100+tstreak*25;data.coins+=10+tstreak;beep(780,.12);burst(innerWidth/2,innerHeight*.45,'#38e38a',25)}else{el?.classList.add('wrong');tstreak=0;beep(180,.12,'sawtooth')}setTimeout(()=>{qi++;renderQ()},650)}function fifty(){if(used.a)return;used.a=true;$('l50').disabled=true;let q=qs[qi],bad=q[2]===0?[2,3]:q[2]===3?[0,1]:[0,3];bad.forEach(i=>$('answers').children[i].style.visibility='hidden')}function skip(){if(used.b)return;used.b=true;$('ls').disabled=true;clearInterval(timer);qi++;renderQ()}function hint(){if(used.c)return;used.c=true;$('lh').disabled=true;$('q').textContent=qs[qi][0]+'  •  Hint: think of the most common answer.';beep(520)}function finishQ(){clearInterval(timer);const lv=Math.max(1,Number(localStorage.getItem('mood.trivia.level')||1))+1;localStorage.setItem('mood.trivia.level',String(lv));data.best=Math.max(data.best,tscore);data.coins+=tscore;data.streak++;save();$('tot').textContent='Level '+(lv-1)+' complete • '+tscore+' points earned. Next level: '+lv+'.';$('to').classList.add('show');burst(innerWidth/2,innerHeight*.45,'#ffd34e',40);beep(1000,.16)}let pf=0;function particles(){let c=$('tp'),x=c.getContext('2d'),r=c.getBoundingClientRect(),d=devicePixelRatio||1;c.width=r.width*d;c.height=r.height*d;x.setTransform(d,0,0,d,0,0);cancelAnimationFrame(pf);let p=Array.from({length:45},()=>({x:Math.random()*r.width,y:Math.random()*r.height,v:.15+Math.random()*.5,s:1+Math.random()*2}));function loop(){x.clearRect(0,0,r.width,r.height);p.forEach(a=>{a.y-=a.v;if(a.y<0)a.y=r.height;x.fillStyle=ink(.33);x.beginPath();x.arc(a.x,a.y,a.s,0,Math.PI*2);x.fill()});pf=requestAnimationFrame(loop)}loop()}updateHome();
 
 /* DAILY CHALLENGE — isolated deterministic Water Sort state/canvas. The UTC date is the seed,
    so every player receives the same puzzle on the same calendar day. Completion is rewarded once
