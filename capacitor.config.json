@@ -1,5 +1,5 @@
-{
+﻿{
   "appId": "com.necpa",
   "appName": "Necpa",
-  "webDir": "www"
+  "webDir": "dist"
 }

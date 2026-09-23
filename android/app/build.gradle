@@ -3,6 +3,7 @@ apply plugin: 'com.android.application'
 android {
     namespace = "com.necpa"
     compileSdk = rootProject.ext.compileSdkVersion
+
     defaultConfig {
         applicationId "com.necpa"
         minSdkVersion rootProject.ext.minSdkVersion
@@ -10,22 +11,45 @@ android {
         versionCode 1
         versionName "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+
         aaptOptions {
-             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
-             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+
+    signingConfigs {
+        release {
+            def keystoreFile = project.findProperty("NECPA_STORE_FILE")
+            def keyAliasValue = project.findProperty("NECPA_KEY_ALIAS")
+            def storePasswordValue = project.findProperty("NECPA_STORE_PASSWORD")
+            def keyPasswordValue = project.findProperty("NECPA_KEY_PASSWORD")
+
+            if (!keystoreFile || !keyAliasValue || !storePasswordValue || !keyPasswordValue) {
+                throw new GradleException(
+                    "Missing Necpa release signing properties. Configure " +
+                    "NECPA_STORE_FILE, NECPA_KEY_ALIAS, NECPA_STORE_PASSWORD and " +
+                    "NECPA_KEY_PASSWORD in your user Gradle properties."
+                )
+            }
+
+            storeFile file(keystoreFile)
+            storePassword storePasswordValue
+            keyAlias keyAliasValue
+            keyPassword keyPasswordValue
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
+            signingConfig signingConfigs.release
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
 }
 
 repositories {
-    flatDir{
+    flatDir {
         dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
     }
 }
