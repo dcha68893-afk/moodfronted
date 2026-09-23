@@ -70,7 +70,7 @@ const excludedDirectories = new Set([
 ]);
 const excludedFiles = new Set([
     '.env', '.env.example', '.gitignore', 'package.json',
-    'package-lock.json', 'yarn.lock'
+    'package-lock.json', 'yarn.lock', 'server.js'
 ]);
 
 function shouldCopy(relativePath, entry) {

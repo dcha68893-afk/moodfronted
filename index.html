@@ -1654,267 +1654,6 @@
     <!-- Dismissed by user action (Login/Register/Google) via landing.js logic  -->
     <!-- near the end of <body>, which just calls the existing switchForm().    -->
     <!-- ====================================================================== -->
-    <div class="landing-screen" id="landingScreen" role="dialog" aria-label="Welcome to Necpa">
-        <button type="button" class="landing-skip" id="landingSkip" aria-label="Skip to login">Skip</button>
-        <div class="landing-scroll">
-            <header class="landing-hero">
-                <div class="landing-hero-bg" aria-hidden="true"></div>
-                <div class="landing-hero-inner">
-                    <div class="landing-logo"><i class="fas fa-comments"></i><span>Necpa</span></div>
-
-                    <div class="landing-mockup" aria-hidden="true">
-                        <div class="landing-phone landing-phone-lg">
-                            <div class="landing-phone-notch"></div>
-                            <div class="landing-phone-tabs">
-                                <span class="landing-phone-tab active" data-screen="chat" title="Chat"><i class="fas fa-comment-dots"></i></span>
-                                <span class="landing-phone-tab" data-screen="friends" title="Friends"><i class="fas fa-user-plus"></i></span>
-                                <span class="landing-phone-tab" data-screen="accommodation" title="Accommodation"><i class="fas fa-bed"></i></span>
-                                <span class="landing-phone-tab" data-screen="market" title="Marketplace"><i class="fas fa-store"></i></span>
-                                <span class="landing-phone-tab" data-screen="community" title="Communities"><i class="fas fa-users"></i></span>
-                                <span class="landing-phone-tab" data-screen="status" title="Status"><i class="fas fa-circle-play"></i></span>
-                            </div>
-                            <div class="landing-phone-screens">
-                                <div class="landing-phone-screen active" data-screen="chat">
-                                    <div class="lp-row"><div class="lp-avatar"></div><div class="lp-lines"><span class="lp-line w70"></span><span class="lp-line w40 dim"></span></div></div>
-                                    <div class="lp-bubble other lp-slide-in" style="animation-delay:.15s">Hey, join the group! <i class="fas fa-check-double lp-tick"></i></div>
-                                    <div class="lp-bubble mine lp-slide-in" style="animation-delay:.55s">On my way 🎉</div>
-                                    <div class="lp-bubble other lp-typing lp-slide-in" style="animation-delay:.95s"><span></span><span></span><span></span></div>
-                                </div>
-                                <div class="landing-phone-screen" data-screen="friends">
-                                    <div class="lp-fr-head"><i class="fas fa-user-plus"></i><span>Friend requests</span><span class="lp-fr-badge">2</span></div>
-                                    <div class="lp-fr-row"><span class="lp-avatar-chip a"></span><span class="lp-line w60"></span><span class="lp-fr-btn">Accept</span></div>
-                                    <div class="lp-fr-label">Suggested for you</div>
-                                    <div class="lp-fr-row"><span class="lp-avatar-chip b"></span><span class="lp-line w40"></span><span class="lp-fr-btn add">Add</span></div>
-                                    <div class="lp-community-tag"><i class="fas fa-location-dot"></i> 5 people nearby</div>
-                                </div>
-                                <div class="landing-phone-screen" data-screen="accommodation">
-                                    <div class="lp-ac-search"><i class="fas fa-magnifying-glass"></i><span>Rooms near campus</span></div>
-                                    <div class="lp-ac-card">
-                                        <div class="lp-ac-photo"><i class="fas fa-bed"></i></div>
-                                        <div class="lp-ac-title">Furnished student room, Kilimani</div>
-                                        <div class="lp-ac-price">KSh 8,500 / month</div>
-                                        <div class="lp-ac-btn">Check availability &amp; book</div>
-                                    </div>
-                                </div>
-                                <div class="landing-phone-screen" data-screen="market">
-                                    <div class="lp-market-grid">
-                                        <div class="lp-market-card"><div class="lp-market-thumb a"></div><span class="lp-line w60"></span></div>
-                                        <div class="lp-market-card"><div class="lp-market-thumb b"></div><span class="lp-line w60"></span></div>
-                                        <div class="lp-market-card"><div class="lp-market-thumb c"></div><span class="lp-line w60"></span></div>
-                                        <div class="lp-market-card"><div class="lp-market-thumb d"></div><span class="lp-line w60"></span></div>
-                                    </div>
-                                </div>
-                                <div class="landing-phone-screen" data-screen="community">
-                                    <div class="lp-community-header"><i class="fas fa-users"></i><span class="lp-line w60"></span></div>
-                                    <div class="lp-avatar-cluster"><span class="lp-avatar-chip a"></span><span class="lp-avatar-chip b"></span><span class="lp-avatar-chip c"></span><span class="lp-avatar-chip more">+128</span></div>
-                                    <div class="lp-bubble other lp-slide-in">Welcome to Devs United 👋</div>
-                                    <div class="lp-community-tag"><i class="fas fa-bolt"></i> 12 online now</div>
-                                </div>
-                                <div class="landing-phone-screen" data-screen="status">
-                                    <div class="lp-status-row">
-                                        <span class="lp-status-ring a"><span class="lp-status-avatar"></span></span>
-                                        <span class="lp-status-ring b"><span class="lp-status-avatar"></span></span>
-                                        <span class="lp-status-ring c seen"><span class="lp-status-avatar"></span></span>
-                                    </div>
-                                    <div class="lp-line w70" style="margin:10px auto 4px"></div>
-                                    <div class="lp-status-caption"><i class="fas fa-circle-play"></i> Tap to view status</div>
-                                </div>
-                            </div>
-                        </div>
-                        <p class="landing-mockup-caption" id="landingMockupCaption" aria-live="polite">Chat</p>
-                    </div>
-
-                    <h1 class="landing-headline">One app for Messaging, Friends, Accommodation and Marketplace.</h1>
-                    <p class="landing-subtitle">Necpa brings your chats, friends, places to stay and shopping into one fast, secure app — on any device.</p>
-
-                    <div class="landing-stat-row" aria-label="Necpa by the numbers">
-                        <div class="landing-stat"><span class="landing-stat-num"><i class="fas fa-star"></i> 4.8</span><span class="landing-stat-label">User rating</span></div>
-                        <div class="landing-stat"><span class="landing-stat-num">1+</span><span class="landing-stat-label">Countries</span></div>
-                        <div class="landing-stat"><span class="landing-stat-num">99.9%</span><span class="landing-stat-label">Uptime</span></div>
-                        <div class="landing-stat"><span class="landing-stat-num"><i class="fas fa-lock"></i></span><span class="landing-stat-label">End-to-end encrypted</span></div>
-                    </div>
-
-                    <div class="landing-trust-strip" aria-label="Why people trust Necpa">
-                        <span class="landing-trust-pill"><i class="fas fa-lock"></i> End-to-End Encrypted</span>
-                        <span class="landing-trust-pill"><i class="fas fa-globe"></i> Trusted Worldwide</span>
-                        <span class="landing-trust-pill"><i class="fas fa-paper-plane"></i> Millions of Messages Delivered</span>
-                        <span class="landing-trust-pill"><i class="fas fa-shield-alt"></i> Fast &amp; Secure</span>
-                    </div>
-
-                    <div class="landing-badge-row" aria-label="Necpa highlights">
-                        <span class="landing-badge"><i class="fas fa-bolt"></i> Real-time</span>
-                        <span class="landing-badge"><i class="fas fa-users"></i> Communities</span>
-                        <span class="landing-badge"><i class="fas fa-wifi"></i> Offline-Ready</span>
-                        <span class="landing-badge"><i class="fas fa-sync-alt"></i> Cross-Device</span>
-                    </div>
-
-                    <div class="landing-cta-row">
-                        <button type="button" class="btn btn-primary landing-cta" id="landingRegisterBtn">Create Account</button>
-                        <button type="button" class="btn btn-secondary landing-cta" id="landingLoginBtn">Login</button>
-                    </div>
-                    <div class="landing-cta-row landing-cta-row-secondary">
-                        <button type="button" class="landing-ghost-btn" id="landingGoogleBtn"><i class="fab fa-google"></i> Continue with Google</button>
-                        <button type="button" class="landing-ghost-btn" id="landingInstallBtn"><i class="fas fa-arrow-down"></i> Install App</button>
-                        <div class="pwa-status" id="landingPwaStatus" hidden>
-                            <span class="pwa-status-badge"><i class="fas fa-check-circle"></i> Installed</span>
-                            <button type="button" class="pwa-status-btn" id="landingOpenAppBtn"><i class="fas fa-external-link-alt"></i> Open App</button>
-                            <button type="button" class="pwa-status-btn" id="landingCheckUpdateBtn"><i class="fas fa-sync-alt"></i> Check for Updates</button>
-                            <span class="pwa-status-meta" id="landingPwaVersion"></span>
-                            <span class="pwa-status-meta" id="landingPwaOffline"></span>
-                        </div>
-                        <p class="pwa-install-hint" id="landingPwaHint" hidden></p>
-                    </div>
-                </div>
-            </header>
-
-            <section class="landing-showcase" aria-label="What you can do on Necpa">
-
-                <div class="showcase-item reveal">
-                    <div class="showcase-art" aria-hidden="true">
-                        <svg viewBox="0 0 200 160" class="il-messaging">
-                            <rect x="14" y="18" width="120" height="72" rx="18" class="il-bubble il-bubble-a"/>
-                            <circle cx="38" cy="54" r="5" class="il-dot"/><circle cx="58" cy="54" r="5" class="il-dot"/><circle cx="78" cy="54" r="5" class="il-dot"/>
-                            <rect x="66" y="70" width="120" height="60" rx="16" class="il-bubble il-bubble-b"/>
-                            <rect x="82" y="88" width="70" height="8" rx="4" class="il-line"/>
-                            <rect x="82" y="102" width="46" height="8" rx="4" class="il-line"/>
-                            <circle cx="150" cy="34" r="14" class="il-accent-circle"/>
-                            <path d="M145 34l4 4 8-9" class="il-check"/>
-                        </svg>
-                    </div>
-                    <div class="showcase-copy">
-                        <h3>Instant Messaging</h3>
-                        <p>Real-time text, media and reactions that sync the moment you send them — read receipts and typing indicators included.</p>
-                    </div>
-                </div>
-
-                <div class="showcase-item reveal reverse">
-                    <div class="showcase-art" aria-hidden="true">
-                        <svg viewBox="0 0 200 160" class="il-friends">
-                            <circle cx="100" cy="80" r="46" class="il-ring il-ring-pulse"/>
-                            <circle cx="100" cy="80" r="46" class="il-ring"/>
-                            <circle cx="100" cy="68" r="14" class="il-avatar il-avatar-1"/>
-                            <path d="M74 104q26-26 52 0" class="il-arc"/>
-                            <circle cx="42" cy="124" r="12" class="il-avatar il-avatar-2"/>
-                            <circle cx="158" cy="124" r="12" class="il-avatar il-avatar-3"/>
-                        </svg>
-                    </div>
-                    <div class="showcase-copy">
-                        <h3>Friends</h3>
-                        <p>Send and accept friend requests, find people you may know from suggestions, and see who is nearby — all in one place.</p>
-                    </div>
-                </div>
-
-                <div class="showcase-item reveal">
-                    <div class="showcase-art" aria-hidden="true">
-                        <svg viewBox="0 0 200 160" class="il-accommodation">
-                            <path d="M40 84L100 36l60 48" class="il-bag-handle"/>
-                            <rect x="56" y="82" width="88" height="54" rx="6" class="il-tile"/>
-                            <rect x="88" y="104" width="24" height="32" rx="4" class="il-badge"/>
-                            <rect x="126" y="30" width="40" height="24" rx="6" class="il-tag"/>
-                            <circle cx="136" cy="42" r="3" class="il-tag-hole"/>
-                        </svg>
-                    </div>
-                    <div class="showcase-copy">
-                        <h3>Accommodation &amp; Rentals</h3>
-                        <p>Search rooms and rentals by area, check availability and book — or list your own place — without leaving the app.</p>
-                    </div>
-                </div>
-
-                <div class="showcase-item reveal reverse">
-                    <div class="showcase-art" aria-hidden="true">
-                        <svg viewBox="0 0 200 160" class="il-groups">
-                            <circle cx="76" cy="60" r="26" class="il-avatar il-avatar-1"/>
-                            <circle cx="124" cy="60" r="26" class="il-avatar il-avatar-2"/>
-                            <circle cx="100" cy="100" r="26" class="il-avatar il-avatar-3"/>
-                            <path d="M60 130q40-26 80 0" class="il-arc"/>
-                        </svg>
-                    </div>
-                    <div class="showcase-copy">
-                        <h3>Groups &amp; Communities</h3>
-                        <p>Organize the people who matter into groups, or grow a whole community with roles, invites and shared spaces.</p>
-                    </div>
-                </div>
-
-                <div class="showcase-item reveal">
-                    <div class="showcase-art" aria-hidden="true">
-                        <svg viewBox="0 0 200 160" class="il-marketplace">
-                            <path d="M52 56h96l-8 68a10 10 0 01-10 9H70a10 10 0 01-10-9z" class="il-bag"/>
-                            <path d="M76 56v-8a24 24 0 0148 0v8" class="il-bag-handle"/>
-                            <circle cx="100" cy="90" r="4" class="il-dot"/>
-                            <rect x="126" y="30" width="40" height="24" rx="6" class="il-tag"/>
-                            <circle cx="136" cy="42" r="3" class="il-tag-hole"/>
-                        </svg>
-                    </div>
-                    <div class="showcase-copy">
-                        <h3>Marketplace</h3>
-                        <p>Buy, sell and browse listings from people you already trust — without leaving the app you chat in.</p>
-                    </div>
-                </div>
-
-                <div class="showcase-item reveal reverse">
-                    <div class="showcase-art" aria-hidden="true">
-                        <svg viewBox="0 0 200 160" class="il-status">
-                            <circle cx="70" cy="80" r="30" class="il-story-ring"/>
-                            <circle cx="70" cy="80" r="23" class="il-avatar il-avatar-1"/>
-                            <circle cx="130" cy="80" r="30" class="il-story-ring il-story-ring-b"/>
-                            <circle cx="130" cy="80" r="23" class="il-avatar il-avatar-2"/>
-                        </svg>
-                    </div>
-                    <div class="showcase-copy">
-                        <h3>Status &amp; Stories</h3>
-                        <p>Share what's happening in a 24-hour story that friends can react to — no separate app required.</p>
-                    </div>
-                </div>
-
-                <div class="showcase-item reveal">
-                    <div class="showcase-art" aria-hidden="true">
-                        <svg viewBox="0 0 200 160" class="il-security">
-                            <path d="M100 24l52 18v34c0 38-22 62-52 74-30-12-52-36-52-74V42z" class="il-shield"/>
-                            <path d="M78 84l16 16 28-32" class="il-check-big"/>
-                        </svg>
-                    </div>
-                    <div class="showcase-copy">
-                        <h3>Private by Design</h3>
-                        <p>End-to-end encrypted direct messages with forward secrecy, so conversations stay between you and the people in them.</p>
-                    </div>
-                </div>
-
-            </section>
-
-            <section class="landing-more-features" aria-label="More Necpa features">
-                <div class="landing-feature-chip reveal"><i class="fas fa-gamepad"></i><span>Games</span></div>
-                <div class="landing-feature-chip reveal"><i class="fas fa-wifi"></i><span>Offline Support</span></div>
-                <div class="landing-feature-chip reveal"><i class="fas fa-sync-alt"></i><span>Cross-Device Sync</span></div>
-                <div class="landing-feature-chip reveal"><i class="fas fa-bolt"></i><span>Fast Performance</span></div>
-            </section>
-
-            <section class="landing-trust" aria-label="Why people trust Necpa">
-                <div class="landing-trust-item reveal"><i class="fas fa-lock"></i><span>Secure authentication</span></div>
-                <div class="landing-trust-item reveal"><i class="fas fa-cloud"></i><span>Reliable cloud sync</span></div>
-                <div class="landing-trust-item reveal"><i class="fas fa-bolt"></i><span>Fast delivery</span></div>
-                <div class="landing-trust-item reveal"><i class="fas fa-layer-group"></i><span>Cross-platform</span></div>
-                <div class="landing-trust-item reveal"><i class="fas fa-mobile-alt"></i><span>Progressive Web App</span></div>
-                <div class="landing-trust-item reveal"><i class="fas fa-user-shield"></i><span>Private communication</span></div>
-            </section>
-
-            <footer class="landing-footer">
-                <div class="landing-footer-links">
-                    <!-- No Privacy/Terms/Contact/Help/About pages exist yet in
-                         this app, so these are placeholders (as the footer
-                         spec requires the links to be present). They route to
-                         the login screen for now rather than doing nothing;
-                         swap in real hrefs once those pages exist. -->
-                    <a href="#" class="landing-footer-link">Privacy</a>
-                    <a href="#" class="landing-footer-link">Terms</a>
-                    <a href="#" class="landing-footer-link">Contact</a>
-                    <a href="#" class="landing-footer-link">Help</a>
-                    <a href="#" class="landing-footer-link">About</a>
-                </div>
-                <div class="landing-footer-meta">&copy; <span id="landingYear"></span> Necpa</div>
-            </footer>
-        </div>
-    </div>
-
     <style>
         /* ================================================================ */
         /* LANDING SCREEN — self-contained, theme-aware via existing        */
@@ -2569,6 +2308,268 @@
             box-shadow: 0 4px 10px var(--shadow-color);
         }
     </style>
+
+    <div class="landing-screen" id="landingScreen" role="dialog" aria-label="Welcome to Necpa">
+        <button type="button" class="landing-skip" id="landingSkip" aria-label="Skip to login">Skip</button>
+        <div class="landing-scroll">
+            <header class="landing-hero">
+                <div class="landing-hero-bg" aria-hidden="true"></div>
+                <div class="landing-hero-inner">
+                    <div class="landing-logo"><i class="fas fa-comments"></i><span>Necpa</span></div>
+
+                    <div class="landing-mockup" aria-hidden="true">
+                        <div class="landing-phone landing-phone-lg">
+                            <div class="landing-phone-notch"></div>
+                            <div class="landing-phone-tabs">
+                                <span class="landing-phone-tab active" data-screen="chat" title="Chat"><i class="fas fa-comment-dots"></i></span>
+                                <span class="landing-phone-tab" data-screen="friends" title="Friends"><i class="fas fa-user-plus"></i></span>
+                                <span class="landing-phone-tab" data-screen="accommodation" title="Accommodation"><i class="fas fa-bed"></i></span>
+                                <span class="landing-phone-tab" data-screen="market" title="Marketplace"><i class="fas fa-store"></i></span>
+                                <span class="landing-phone-tab" data-screen="community" title="Communities"><i class="fas fa-users"></i></span>
+                                <span class="landing-phone-tab" data-screen="status" title="Status"><i class="fas fa-circle-play"></i></span>
+                            </div>
+                            <div class="landing-phone-screens">
+                                <div class="landing-phone-screen active" data-screen="chat">
+                                    <div class="lp-row"><div class="lp-avatar"></div><div class="lp-lines"><span class="lp-line w70"></span><span class="lp-line w40 dim"></span></div></div>
+                                    <div class="lp-bubble other lp-slide-in" style="animation-delay:.15s">Hey, join the group! <i class="fas fa-check-double lp-tick"></i></div>
+                                    <div class="lp-bubble mine lp-slide-in" style="animation-delay:.55s">On my way 🎉</div>
+                                    <div class="lp-bubble other lp-typing lp-slide-in" style="animation-delay:.95s"><span></span><span></span><span></span></div>
+                                </div>
+                                <div class="landing-phone-screen" data-screen="friends">
+                                    <div class="lp-fr-head"><i class="fas fa-user-plus"></i><span>Friend requests</span><span class="lp-fr-badge">2</span></div>
+                                    <div class="lp-fr-row"><span class="lp-avatar-chip a"></span><span class="lp-line w60"></span><span class="lp-fr-btn">Accept</span></div>
+                                    <div class="lp-fr-label">Suggested for you</div>
+                                    <div class="lp-fr-row"><span class="lp-avatar-chip b"></span><span class="lp-line w40"></span><span class="lp-fr-btn add">Add</span></div>
+                                    <div class="lp-community-tag"><i class="fas fa-location-dot"></i> 5 people nearby</div>
+                                </div>
+                                <div class="landing-phone-screen" data-screen="accommodation">
+                                    <div class="lp-ac-search"><i class="fas fa-magnifying-glass"></i><span>Rooms near campus</span></div>
+                                    <div class="lp-ac-card">
+                                        <div class="lp-ac-photo"><i class="fas fa-bed"></i></div>
+                                        <div class="lp-ac-title">Furnished student room, Kilimani</div>
+                                        <div class="lp-ac-price">KSh 8,500 / month</div>
+                                        <div class="lp-ac-btn">Check availability &amp; book</div>
+                                    </div>
+                                </div>
+                                <div class="landing-phone-screen" data-screen="market">
+                                    <div class="lp-market-grid">
+                                        <div class="lp-market-card"><div class="lp-market-thumb a"></div><span class="lp-line w60"></span></div>
+                                        <div class="lp-market-card"><div class="lp-market-thumb b"></div><span class="lp-line w60"></span></div>
+                                        <div class="lp-market-card"><div class="lp-market-thumb c"></div><span class="lp-line w60"></span></div>
+                                        <div class="lp-market-card"><div class="lp-market-thumb d"></div><span class="lp-line w60"></span></div>
+                                    </div>
+                                </div>
+                                <div class="landing-phone-screen" data-screen="community">
+                                    <div class="lp-community-header"><i class="fas fa-users"></i><span class="lp-line w60"></span></div>
+                                    <div class="lp-avatar-cluster"><span class="lp-avatar-chip a"></span><span class="lp-avatar-chip b"></span><span class="lp-avatar-chip c"></span><span class="lp-avatar-chip more">+128</span></div>
+                                    <div class="lp-bubble other lp-slide-in">Welcome to Devs United 👋</div>
+                                    <div class="lp-community-tag"><i class="fas fa-bolt"></i> 12 online now</div>
+                                </div>
+                                <div class="landing-phone-screen" data-screen="status">
+                                    <div class="lp-status-row">
+                                        <span class="lp-status-ring a"><span class="lp-status-avatar"></span></span>
+                                        <span class="lp-status-ring b"><span class="lp-status-avatar"></span></span>
+                                        <span class="lp-status-ring c seen"><span class="lp-status-avatar"></span></span>
+                                    </div>
+                                    <div class="lp-line w70" style="margin:10px auto 4px"></div>
+                                    <div class="lp-status-caption"><i class="fas fa-circle-play"></i> Tap to view status</div>
+                                </div>
+                            </div>
+                        </div>
+                        <p class="landing-mockup-caption" id="landingMockupCaption" aria-live="polite">Chat</p>
+                    </div>
+
+                    <h1 class="landing-headline">One app for Messaging, Friends, Accommodation and Marketplace.</h1>
+                    <p class="landing-subtitle">Necpa brings your chats, friends, places to stay and shopping into one fast, secure app — on any device.</p>
+
+                    <div class="landing-stat-row" aria-label="Necpa by the numbers">
+                        <div class="landing-stat"><span class="landing-stat-num"><i class="fas fa-star"></i> 4.8</span><span class="landing-stat-label">User rating</span></div>
+                        <div class="landing-stat"><span class="landing-stat-num">1+</span><span class="landing-stat-label">Countries</span></div>
+                        <div class="landing-stat"><span class="landing-stat-num">99.9%</span><span class="landing-stat-label">Uptime</span></div>
+                        <div class="landing-stat"><span class="landing-stat-num"><i class="fas fa-lock"></i></span><span class="landing-stat-label">End-to-end encrypted</span></div>
+                    </div>
+
+                    <div class="landing-trust-strip" aria-label="Why people trust Necpa">
+                        <span class="landing-trust-pill"><i class="fas fa-lock"></i> End-to-End Encrypted</span>
+                        <span class="landing-trust-pill"><i class="fas fa-globe"></i> Trusted Worldwide</span>
+                        <span class="landing-trust-pill"><i class="fas fa-paper-plane"></i> Millions of Messages Delivered</span>
+                        <span class="landing-trust-pill"><i class="fas fa-shield-alt"></i> Fast &amp; Secure</span>
+                    </div>
+
+                    <div class="landing-badge-row" aria-label="Necpa highlights">
+                        <span class="landing-badge"><i class="fas fa-bolt"></i> Real-time</span>
+                        <span class="landing-badge"><i class="fas fa-users"></i> Communities</span>
+                        <span class="landing-badge"><i class="fas fa-wifi"></i> Offline-Ready</span>
+                        <span class="landing-badge"><i class="fas fa-sync-alt"></i> Cross-Device</span>
+                    </div>
+
+                    <div class="landing-cta-row">
+                        <button type="button" class="btn btn-primary landing-cta" id="landingRegisterBtn">Create Account</button>
+                        <button type="button" class="btn btn-secondary landing-cta" id="landingLoginBtn">Login</button>
+                    </div>
+                    <div class="landing-cta-row landing-cta-row-secondary">
+                        <button type="button" class="landing-ghost-btn" id="landingGoogleBtn"><i class="fab fa-google"></i> Continue with Google</button>
+                        <button type="button" class="landing-ghost-btn" id="landingInstallBtn"><i class="fas fa-arrow-down"></i> Install App</button>
+                        <div class="pwa-status" id="landingPwaStatus" hidden>
+                            <span class="pwa-status-badge"><i class="fas fa-check-circle"></i> Installed</span>
+                            <button type="button" class="pwa-status-btn" id="landingOpenAppBtn"><i class="fas fa-external-link-alt"></i> Open App</button>
+                            <button type="button" class="pwa-status-btn" id="landingCheckUpdateBtn"><i class="fas fa-sync-alt"></i> Check for Updates</button>
+                            <span class="pwa-status-meta" id="landingPwaVersion"></span>
+                            <span class="pwa-status-meta" id="landingPwaOffline"></span>
+                        </div>
+                        <p class="pwa-install-hint" id="landingPwaHint" hidden></p>
+                    </div>
+                </div>
+            </header>
+
+            <section class="landing-showcase" aria-label="What you can do on Necpa">
+
+                <div class="showcase-item reveal">
+                    <div class="showcase-art" aria-hidden="true">
+                        <svg viewBox="0 0 200 160" class="il-messaging">
+                            <rect x="14" y="18" width="120" height="72" rx="18" class="il-bubble il-bubble-a"/>
+                            <circle cx="38" cy="54" r="5" class="il-dot"/><circle cx="58" cy="54" r="5" class="il-dot"/><circle cx="78" cy="54" r="5" class="il-dot"/>
+                            <rect x="66" y="70" width="120" height="60" rx="16" class="il-bubble il-bubble-b"/>
+                            <rect x="82" y="88" width="70" height="8" rx="4" class="il-line"/>
+                            <rect x="82" y="102" width="46" height="8" rx="4" class="il-line"/>
+                            <circle cx="150" cy="34" r="14" class="il-accent-circle"/>
+                            <path d="M145 34l4 4 8-9" class="il-check"/>
+                        </svg>
+                    </div>
+                    <div class="showcase-copy">
+                        <h3>Instant Messaging</h3>
+                        <p>Real-time text, media and reactions that sync the moment you send them — read receipts and typing indicators included.</p>
+                    </div>
+                </div>
+
+                <div class="showcase-item reveal reverse">
+                    <div class="showcase-art" aria-hidden="true">
+                        <svg viewBox="0 0 200 160" class="il-friends">
+                            <circle cx="100" cy="80" r="46" class="il-ring il-ring-pulse"/>
+                            <circle cx="100" cy="80" r="46" class="il-ring"/>
+                            <circle cx="100" cy="68" r="14" class="il-avatar il-avatar-1"/>
+                            <path d="M74 104q26-26 52 0" class="il-arc"/>
+                            <circle cx="42" cy="124" r="12" class="il-avatar il-avatar-2"/>
+                            <circle cx="158" cy="124" r="12" class="il-avatar il-avatar-3"/>
+                        </svg>
+                    </div>
+                    <div class="showcase-copy">
+                        <h3>Friends</h3>
+                        <p>Send and accept friend requests, find people you may know from suggestions, and see who is nearby — all in one place.</p>
+                    </div>
+                </div>
+
+                <div class="showcase-item reveal">
+                    <div class="showcase-art" aria-hidden="true">
+                        <svg viewBox="0 0 200 160" class="il-accommodation">
+                            <path d="M40 84L100 36l60 48" class="il-bag-handle"/>
+                            <rect x="56" y="82" width="88" height="54" rx="6" class="il-tile"/>
+                            <rect x="88" y="104" width="24" height="32" rx="4" class="il-badge"/>
+                            <rect x="126" y="30" width="40" height="24" rx="6" class="il-tag"/>
+                            <circle cx="136" cy="42" r="3" class="il-tag-hole"/>
+                        </svg>
+                    </div>
+                    <div class="showcase-copy">
+                        <h3>Accommodation &amp; Rentals</h3>
+                        <p>Search rooms and rentals by area, check availability and book — or list your own place — without leaving the app.</p>
+                    </div>
+                </div>
+
+                <div class="showcase-item reveal reverse">
+                    <div class="showcase-art" aria-hidden="true">
+                        <svg viewBox="0 0 200 160" class="il-groups">
+                            <circle cx="76" cy="60" r="26" class="il-avatar il-avatar-1"/>
+                            <circle cx="124" cy="60" r="26" class="il-avatar il-avatar-2"/>
+                            <circle cx="100" cy="100" r="26" class="il-avatar il-avatar-3"/>
+                            <path d="M60 130q40-26 80 0" class="il-arc"/>
+                        </svg>
+                    </div>
+                    <div class="showcase-copy">
+                        <h3>Groups &amp; Communities</h3>
+                        <p>Organize the people who matter into groups, or grow a whole community with roles, invites and shared spaces.</p>
+                    </div>
+                </div>
+
+                <div class="showcase-item reveal">
+                    <div class="showcase-art" aria-hidden="true">
+                        <svg viewBox="0 0 200 160" class="il-marketplace">
+                            <path d="M52 56h96l-8 68a10 10 0 01-10 9H70a10 10 0 01-10-9z" class="il-bag"/>
+                            <path d="M76 56v-8a24 24 0 0148 0v8" class="il-bag-handle"/>
+                            <circle cx="100" cy="90" r="4" class="il-dot"/>
+                            <rect x="126" y="30" width="40" height="24" rx="6" class="il-tag"/>
+                            <circle cx="136" cy="42" r="3" class="il-tag-hole"/>
+                        </svg>
+                    </div>
+                    <div class="showcase-copy">
+                        <h3>Marketplace</h3>
+                        <p>Buy, sell and browse listings from people you already trust — without leaving the app you chat in.</p>
+                    </div>
+                </div>
+
+                <div class="showcase-item reveal reverse">
+                    <div class="showcase-art" aria-hidden="true">
+                        <svg viewBox="0 0 200 160" class="il-status">
+                            <circle cx="70" cy="80" r="30" class="il-story-ring"/>
+                            <circle cx="70" cy="80" r="23" class="il-avatar il-avatar-1"/>
+                            <circle cx="130" cy="80" r="30" class="il-story-ring il-story-ring-b"/>
+                            <circle cx="130" cy="80" r="23" class="il-avatar il-avatar-2"/>
+                        </svg>
+                    </div>
+                    <div class="showcase-copy">
+                        <h3>Status &amp; Stories</h3>
+                        <p>Share what's happening in a 24-hour story that friends can react to — no separate app required.</p>
+                    </div>
+                </div>
+
+                <div class="showcase-item reveal">
+                    <div class="showcase-art" aria-hidden="true">
+                        <svg viewBox="0 0 200 160" class="il-security">
+                            <path d="M100 24l52 18v34c0 38-22 62-52 74-30-12-52-36-52-74V42z" class="il-shield"/>
+                            <path d="M78 84l16 16 28-32" class="il-check-big"/>
+                        </svg>
+                    </div>
+                    <div class="showcase-copy">
+                        <h3>Private by Design</h3>
+                        <p>End-to-end encrypted direct messages with forward secrecy, so conversations stay between you and the people in them.</p>
+                    </div>
+                </div>
+
+            </section>
+
+            <section class="landing-more-features" aria-label="More Necpa features">
+                <div class="landing-feature-chip reveal"><i class="fas fa-gamepad"></i><span>Games</span></div>
+                <div class="landing-feature-chip reveal"><i class="fas fa-wifi"></i><span>Offline Support</span></div>
+                <div class="landing-feature-chip reveal"><i class="fas fa-sync-alt"></i><span>Cross-Device Sync</span></div>
+                <div class="landing-feature-chip reveal"><i class="fas fa-bolt"></i><span>Fast Performance</span></div>
+            </section>
+
+            <section class="landing-trust" aria-label="Why people trust Necpa">
+                <div class="landing-trust-item reveal"><i class="fas fa-lock"></i><span>Secure authentication</span></div>
+                <div class="landing-trust-item reveal"><i class="fas fa-cloud"></i><span>Reliable cloud sync</span></div>
+                <div class="landing-trust-item reveal"><i class="fas fa-bolt"></i><span>Fast delivery</span></div>
+                <div class="landing-trust-item reveal"><i class="fas fa-layer-group"></i><span>Cross-platform</span></div>
+                <div class="landing-trust-item reveal"><i class="fas fa-mobile-alt"></i><span>Progressive Web App</span></div>
+                <div class="landing-trust-item reveal"><i class="fas fa-user-shield"></i><span>Private communication</span></div>
+            </section>
+
+            <footer class="landing-footer">
+                <div class="landing-footer-links">
+                    <!-- No Privacy/Terms/Contact/Help/About pages exist yet in
+                         this app, so these are placeholders (as the footer
+                         spec requires the links to be present). They route to
+                         the login screen for now rather than doing nothing;
+                         swap in real hrefs once those pages exist. -->
+                    <a href="#" class="landing-footer-link">Privacy</a>
+                    <a href="#" class="landing-footer-link">Terms</a>
+                    <a href="#" class="landing-footer-link">Contact</a>
+                    <a href="#" class="landing-footer-link">Help</a>
+                    <a href="#" class="landing-footer-link">About</a>
+                </div>
+                <div class="landing-footer-meta">&copy; <span id="landingYear"></span> Necpa</div>
+            </footer>
+        </div>
+    </div>
+
 
     <div id="app-container"></div>
     <div id="iframe-container"></div>
