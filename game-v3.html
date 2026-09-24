@@ -167,7 +167,8 @@ refreshTokens();try{new MutationObserver(onThemeChange).observe(document.documen
 document.addEventListener('kyn:themechange',onThemeChange);addEventListener('message',e=>{if(e.data&&e.data.type==='NECPRA_THEME_APPLIED')onThemeChange()});
 const colors=['#20e06b','#24a8ff','#ff7a18','#ff3e55','#ffd21f','#9b6cff','#28d7c2'];let level=1,bottles=[],selected=-1,hist=[],score=0,moves=0,anim=null;const wc=$('wc'),cx=wc.getContext('2d');function resizeW(){let r=wc.getBoundingClientRect(),d=devicePixelRatio||1;wc.width=r.width*d;wc.height=r.height*d;cx.setTransform(d,0,0,d,0,0);drawW()}addEventListener('resize',resizeW);function geom(i){
  let r=wc.getBoundingClientRect(),n=bottles.length,cols=Math.min(5,n),gap=Math.min(18,Math.max(9,r.width*.035));
- let w=Math.min(66,(r.width-gap*(cols+1))/cols),rows=Math.ceil(n/cols);
+ let available=Math.max(40,r.width-gap*(cols+1));
+ let w=Math.max(36,Math.min(66,available/Math.max(1,cols))),rows=Math.ceil(n/cols);
  let h=Math.min(215,Math.max(150,(r.height-165)/rows)),row=Math.floor(i/cols),col=i%cols;
  let count=Math.min(cols,n-row*cols),total=count*w+(count-1)*gap;
  return {x:(r.width-total)/2+col*(w+gap),y:Math.max(66,row*(h+34)+66),w,h};
@@ -194,7 +195,7 @@ function drawW(){
    cx.save();path(cx,q);cx.clip();
    let bottom=q.y+q.h-5,unit=(q.h-q.h*.18*.72)/4;
    b.forEach((col,j)=>{let y=bottom-unit*(j+1),g=cx.createLinearGradient(q.x,y,q.x+q.w,y+unit);g.addColorStop(0,colors[col]);g.addColorStop(.42,colors[col]);g.addColorStop(.86,'rgba(0,0,0,.12)');g.addColorStop(1,'rgba(0,0,0,.38)');cx.fillStyle=g;cx.fillRect(q.x+q.w*.13,y,q.w*.74,unit+1);cx.fillStyle='rgba(255,255,255,.18)';cx.fillRect(q.x+q.w*.18,y+3,q.w*.22,2)});
-   if(b.length){let y=bottom-unit*b.length;cx.fillStyle='rgba(255,255,255,.3)';cx.beginPath();cx.ellipse(q.x+q.w/2,y,q.w*.30,3,0,0,Math.PI*2);cx.fill()}
+   if(b.length){let y=bottom-unit*b.length;cx.fillStyle='rgba(255,255,255,.3)';cx.beginPath();cx.ellipse(q.x+q.w/2,y,Math.max(1,q.w*.30),3,0,0,Math.PI*2);cx.fill()}
    cx.restore();
    cx.strokeStyle='rgba(245,248,250,.72)';cx.lineWidth=2.2;path(cx,q);cx.stroke();
    cx.strokeStyle='rgba(255,255,255,.32)';cx.lineWidth=3;cx.beginPath();cx.moveTo(q.x+q.w*.27,q.y+q.h*.20);cx.lineTo(q.x+q.w*.27,q.y+q.h*.78);cx.stroke();

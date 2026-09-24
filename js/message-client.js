@@ -580,7 +580,37 @@
         // /chats is the Message Module's critical-path read. Use the shared
         // runtime-config fetch transport directly so iframe bootstrap timing
         // cannot strand the conversation list behind a postMessage relay.
-        if (method === 'GET' && /^\/chats(?:\?|$)/.test(path) && typeof window.__getApiBase === 'function') {
+        if ((method === 'GET' && /^\/chats(?:\?|$)/.test(path) || method === 'POST' && path === '/messages') &&
+            typeof window.__getApiBase === 'function') {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 50000);
+            try {
+                const headers = { 'Accept': 'application/json' };
+                if (method !== 'GET') headers['Content-Type'] = 'application/json';
+                const token = window.__kynToken || window.__accessToken || window.AuthSessionManager?.getToken?.() ||
+                    window.authToken || localStorage.getItem('authToken') || localStorage.getItem('accessToken') || localStorage.getItem('token') || '';
+                if (token) headers.Authorization = 'Bearer ' + token;
+                const response = await fetch(window.__getApiBase() + path, {
+                    method, headers, credentials: 'include', cache: 'no-store',
+                    body: method === 'GET' ? undefined : JSON.stringify(body || {}),
+                    signal: controller.signal
+                });
+                const payload = await response.json().catch(() => ({}));
+                return {
+                    ok: response.ok && payload?.success !== false,
+                    success: response.ok && payload?.success !== false,
+                    status: response.status,
+                    data: payload?.data ?? {},
+                    message: payload?.message || payload?.error || null
+                };
+            } catch (error) {
+                if (error?.name === 'AbortError') throw new Error(method === 'POST' ? 'Message send request timed out' : 'Conversation list request timed out');
+                throw error;
+            } finally {
+                clearTimeout(timeoutId);
+            }
+        }
+
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 45000);
             try {

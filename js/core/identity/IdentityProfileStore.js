@@ -107,8 +107,15 @@
   function resolveAvatar(userLike) {
     if (!userLike) return null;
     const id = userLike.id || userLike.userId || userLike.uid;
+    const direct = _firstTruthy(userLike, AVATAR_KEYS);
     const cached = id != null ? cache.get(String(id)) : null;
-    return (cached && cached.avatar) || _firstTruthy(userLike, AVATAR_KEYS) || null;
+    const cachedAvatar = cached && cached.avatar;
+    const isGeneric = (url) => /ui-avatars\.com\/api\/\?name=(?:User|user)(?:&|$)/i.test(String(url || ''));
+    // A fresh API/user object wins over an old cached fallback. This keeps
+    // avatar rendering identical for manual and Google-authenticated sessions.
+    if (direct && !isGeneric(direct)) return direct;
+    if (cachedAvatar && !isGeneric(cachedAvatar)) return cachedAvatar;
+    return direct || cachedAvatar || null;
   }
 
   function resolveCover(userLike) {

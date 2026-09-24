@@ -72,7 +72,15 @@
     // Receipt means the message reached the authenticated client and has been
     // accepted into the message pipeline. It does not mean "read".
     const socket = currentSocket();
-    if (socket?.connected && message.senderId != null && String(message.senderId) !== String(global._kynCurrentUserId)) {
+    let currentUserId = global._kynCurrentUserId;
+    if (currentUserId == null) {
+      try {
+        const raw = localStorage.getItem('kynecta_auth') || localStorage.getItem('currentUser');
+        const parsed = raw ? JSON.parse(raw) : null;
+        currentUserId = parsed?.user?.id ?? parsed?.id ?? parsed?.userId ?? null;
+      } catch (_) {}
+    }
+    if (socket?.connected && message.senderId != null && currentUserId != null && String(message.senderId) !== String(currentUserId)) {
       try {
         socket.emit('message:delivery_ack', {
           messageId: message.serverId ?? message.id,
@@ -127,7 +135,9 @@
   // realtime implementation.
   bind();
   global.addEventListener?.('load', bind);
-  setInterval(bind, 1000);
+  // bind() retries briefly until the socket exists and re-binds on Socket.IO
+  // connect events; a permanent polling loop is unnecessary and creates
+  // avoidable 1s/1.2s safety-layer polling warnings in every iframe.
 
   global.KynectaMessageRealtimeBridge = Object.freeze({
     bind,
