@@ -94,7 +94,7 @@
       return Promise.reject(new Error('Service workers are not supported in this browser'));
     }
     if (!swPromise) {
-      swPromise = navigator.serviceWorker.register(SW_URL, { scope: '/' });
+      swPromise = navigator.serviceWorker.register(SW_URL, { scope: '/', updateViaCache: 'none' });
       swPromise.then(function (reg) {
         if (reg && reg.scope !== location.origin + '/') {
           console.warn('[NecpaPWA] service worker scope is ' + reg.scope + ' — it must be ' + location.origin + '/ to control the whole app.');
@@ -106,6 +106,17 @@
     }
     return swPromise;
   }
+
+  // Check for a newer worker whenever an installed app returns to the foreground.
+  function scheduleUpdateCheck() {
+    if (!('serviceWorker' in navigator)) return;
+    var run = function () { try { registerServiceWorker().then(function (reg) { if (reg && reg.update) reg.update().catch(function () {}); }).catch(function () {}); } catch (_) {} };
+    window.addEventListener('pageshow', run, { passive: true });
+    window.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') run(); });
+    window.addEventListener('focus', run, { passive: true });
+    setTimeout(run, 1500);
+  }
+  scheduleUpdateCheck();
 
   /* ======================================================================
    * 2. Install state

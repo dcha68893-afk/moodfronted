@@ -151,6 +151,7 @@ function openCrossword(){
   }
   setTimeout(openCrossword,150);
 }
+function toast(message){let el=document.getElementById('gameToast');if(!el){el=document.createElement('div');el.id='gameToast';el.className='toast';document.body.appendChild(el)}el.textContent=String(message||'');el.classList.add('show');clearTimeout(window.__gameToastTimer);window.__gameToastTimer=setTimeout(()=>el.classList.remove('show'),1800)}
 function closeGames(){notifyGamesPanel(false);try{parent.postMessage({type:'mood:close-games'},'*')}catch(e){}try{parent.postMessage({action:'close-game'},'*')}catch(e){}}
 // Hardware/device back button (relayed via game.html — see chat.html's
 // handleAppBackNavigation games-panel-active branch): just go home, same as

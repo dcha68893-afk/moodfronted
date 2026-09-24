@@ -926,10 +926,17 @@
     userLoggedIn: function() {
       try {
         const sessionCheck = this.validateSession();
-        return sessionCheck.valid;
-      } catch (e) {
+        if (sessionCheck.valid) return true;
+        try {
+          const raw = localStorage.getItem('kynecta_auth'), a = raw ? JSON.parse(raw) : null, token = a?.token;
+          if (token && token.split('.').length === 3) {
+            const p = token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/');
+            const payload = JSON.parse(atob(p + '='.repeat((4-p.length%4)%4)));
+            if (!payload.exp || payload.exp * 1000 > Date.now()) return true;
+          }
+        } catch (_) {}
         return false;
-      }
+      } catch (e) { return false; }
     },
     
     // Check if resource exists - MODIFIED: Non-fatal for optional resources
@@ -2731,7 +2738,7 @@
           // Priority 2: Session storage
           () => {
             try {
-              const savedPage = sessionStorage.getItem('necpa_last_page');
+              const savedPage = sessionStorage.getItem('necpa_last_page') || localStorage.getItem('necpa_current_page');
               if (savedPage) {
                 const validation = this.validatePageExists(savedPage);
                 if (validation.valid) {
