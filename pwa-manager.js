@@ -88,6 +88,17 @@
    * 1. Service worker registration — ONE register() call per page
    * ====================================================================== */
   var swPromise = null;
+  // SW_UPDATED can arrive during early boot, before the load-time update UX
+  // is wired. Keep it in memory so the first real DOM pass can still show
+  // the user's "Refresh to update" action.
+  var earlySwUpdateVersion = '';
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', function (event) {
+      if (event && event.data && event.data.type === 'SW_UPDATED') {
+        earlySwUpdateVersion = String(event.data.version || '');
+      }
+    });
+  }
 
   function registerServiceWorker() {
     if (!('serviceWorker' in navigator)) {
@@ -534,11 +545,12 @@
    * 6. Service worker update UX (top-level window only)
    * ====================================================================== */
   function inject(id, html) {
-    if (document.getElementById(id) || !document.body) return;
+    if (document.getElementById(id) || !document.body) return false;
     var d = document.createElement('div');
     d.id = id;
     d.innerHTML = html;
     document.body.appendChild(d);
+    return true;
   }
 
   function wireServiceWorkerUpdates() {
@@ -593,21 +605,48 @@
 
     navigator.serviceWorker.addEventListener('message', function (event) {
       if (!event.data || event.data.type !== 'SW_UPDATED') return;
-      var version = event.data.version || '';
+      var version = String(event.data.version || '');
       var last = ls('get', '_sw_last_version') || '';
-      ls('set', '_sw_last_version', version);
-      if (hadControllerOnLoad && version && version !== last) showUpdateBanner();
+      if (hadControllerOnLoad && version && version !== last) {
+        ls('set', '_sw_last_version', version);
+        showUpdateBanner();
+      }
     });
 
+    // The worker may have activated before the load handler was installed.
+    // Surface that pending update now instead of silently losing the event.
+    if (hadControllerOnLoad && earlySwUpdateVersion) {
+      var earlyLast = ls('get', '_sw_last_version') || '';
+      if (earlySwUpdateVersion !== earlyLast) {
+        ls('set', '_sw_last_version', earlySwUpdateVersion);
+        showUpdateBanner();
+      }
+    }
+
     registerServiceWorker().then(function (registration) {
-      if (registration.waiting && navigator.serviceWorker.controller) registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+      function activateReadyWorker(worker) {
+        if (!worker) return;
+        // Tell the worker to activate immediately. The actual page refresh is
+        // still user-controlled so a long-lived chat is not interrupted.
+        try { worker.postMessage({ type: 'SKIP_WAITING' }); } catch (_) {}
+      }
+
+      if (registration.waiting && navigator.serviceWorker.controller) {
+        activateReadyWorker(registration.waiting);
+      }
+
       registration.addEventListener('updatefound', function () {
         var worker = registration.installing;
         if (!worker) return;
         worker.addEventListener('statechange', function () {
-          if (worker.state === 'installed' && navigator.serviceWorker.controller) worker.postMessage({ type: 'SKIP_WAITING' });
+          if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+            // The new worker is fully installed. It activates immediately,
+            // then SW_UPDATED drives the visible Refresh action.
+            activateReadyWorker(worker);
+          }
         });
       });
+
       setInterval(function () { registration.update().catch(function () {}); }, 30 * 60 * 1000);
       if (isStandalone()) setInterval(function () { registration.update().catch(function () {}); }, 5 * 60 * 1000);
     }).catch(function () { /* already logged by registerServiceWorker */ });
