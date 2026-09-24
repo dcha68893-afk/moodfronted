@@ -24,6 +24,9 @@
     <script src="/js/runtime-config.js"></script>
     <script src="/js/config.js"></script>
     <script>
+    (function(){try{var raw=localStorage.getItem("kynecta_auth"),a=raw?JSON.parse(raw):null,t=a&&a.token,v=false;if(t&&t.split(".").length===3){var p=t.split(".")[1].replace(/-/g,"+").replace(/_/g,"/"),x=JSON.parse(atob(p+"=".repeat((4-p.length%4)%4)));v=!x.exp||x.exp*1000>Date.now()}if(v&&a.user)document.documentElement.setAttribute("data-necpa-session","active")}catch(_){}})();
+    </script>
+    <script>
     // FIX (HARDCODED-BACKEND-URL-BYPASSES-DOTENV): this used to hardcode
     // https://noxopa.onrender.com directly, so BACKEND_URL in .env /
     // runtime-config.js (read by js/config.js, loaded just above) was never
@@ -220,6 +223,9 @@
         }
 
         #app-container, #iframe-container, #bottom-nav { display: none; }
+        html[data-necpa-session="active"] .landing-screen { display:none !important; }
+        html[data-necpa-session="active"] #app-container { display:flex !important; }
+        html[data-necpa-session="active"] #iframe-container { display:block !important; }
         /* FIX (LOGIN-PAGE-DEAD-APP-NAV): #bottom-nav (Home/Explore/Notifications/
            Profile/Settings/Close — the authenticated app's nav, all dead href="#"
            links) was already hidden above, but its round toggle button was not,
