@@ -24,7 +24,7 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.38.0';
+const SW_VERSION = '19.39.0';
 // FIX: bumped so activate() drops every existing cache immediately on this
 // deploy — anyone with a stale pre-rebuild group.html (or the old, now-
 // deleted group-core-*/group-os-* files, or the misspelled necpra-* icons
@@ -80,7 +80,7 @@ const SW_VERSION = '19.38.0';
 // v67/v69 fixes above were meant to retire) also gets one more forced clean break.
 // v71: script/style requests that come back as HTML (free-tier host still waking, SPA/404 fallback)
 // are no longer cached or executed as code; navigations fall back to the cached shell after 6s.
-const CACHE_NAME = 'necpa-static-v72';
+const CACHE_NAME = 'necpa-static-v73';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -181,6 +181,18 @@ const STATIC_PATTERNS = [/\.(css|js|json|png|jpg|jpeg|svg|ico|woff2|woff|ttf|web
 function isApi(url){return BYPASS_PATTERNS.some(p=>p.test(url));}
 function isNetworkFirst(url){return NETWORK_FIRST_PATTERNS.some(p=>p.test(url));}
 function isStatic(url){return STATIC_PATTERNS.some(p=>p.test(url));}
+// LIVE-UPDATE POLICY: executable/document assets must never sit in the
+// 7-day cache-first path. An installed PWA can remain open for days, so a
+// freshly deployed JS/CSS/HTML file must win immediately when the device is
+// online, while the cached copy remains the offline fallback.
+function isLiveCodeAsset(url){
+  try{
+    const u=new URL(url);
+    if(u.origin!==self.location.origin)return false;
+    return /\.(?:html?|css|js|json|mjs)$/i.test(u.pathname) ||
+           u.pathname==='/' || u.pathname==='/manifest.json';
+  }catch(_){return false;}
+}
 function local(url){try{return new URL(url,self.location.origin).origin===self.location.origin;}catch(_){return false;}}
 function stale(res){try{const d=res.headers.get('date');return d&&(Date.now()-new Date(d).getTime()>CACHE_MAX_AGE);}catch(_){return false;}}
 const OFFLINE_SHELL='<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Necpa - Offline</title></head><body><main style="font-family:system-ui;text-align:center;padding:4rem"><h1>Necpa</h1><p>You are offline.</p><button onclick="location.reload()">Try again</button></main></body></html>';
@@ -219,12 +231,19 @@ self.addEventListener('fetch',event=>{
   if(r.mode==='navigate'||r.destination==='document'){event.respondWith(navigation(r));return;}
   if(isApi(url)){event.respondWith(api(r));return;}
   if(local(url)&&isNetworkFirst(url)){event.respondWith(networkFirst(r));return;}
+  if(local(url)&&isLiveCodeAsset(url)){event.respondWith(networkFirst(r));return;}
   if(local(url)&&isStatic(url)){event.respondWith(staticAsset(r));return;}
   event.respondWith(fetch(r).catch(()=>new Response('Offline',{status:503})));
 });
 self.addEventListener('message',event=>{
   const d=event.data;if(!d||!d.type)return;
   if(d.type==='SKIP_WAITING')self.skipWaiting();
+  // A foreground client can ask the active worker which version is actually
+  // controlling it. This lets the UI recover an update notification even when
+  // activation happened before the page's normal load handler was attached.
+  if(d.type==='GET_SW_VERSION'&&event.ports&&event.ports[0]){
+    event.ports[0].postMessage({type:'SW_VERSION',version:SW_VERSION});
+  }
   // index.html asks for this (MessageChannel) to render the "Offline ready / vX" status line; it was never answered.
   if(d.type==='GET_CACHE_INFO'&&event.ports&&event.ports[0]){const port=event.ports[0];event.waitUntil(caches.open(CACHE_NAME).then(c=>c.keys()).then(k=>port.postMessage({version:SW_VERSION,cache:CACHE_NAME,count:k.length})).catch(()=>port.postMessage({version:SW_VERSION,cache:CACHE_NAME,count:0})));}
   if(d.type==='CLEAR_CACHE')event.waitUntil(caches.delete(CACHE_NAME));
