@@ -1046,7 +1046,7 @@
         return `<img class="bubble-attachment-image" data-view-image="${escapeHtml(att.url)}" src="${escapeHtml(att.url)}" alt="${escapeHtml(att.originalName || 'image')}">`;
       }
       if (type === 'video') {
-        return `<video class="bubble-attachment-video" data-view-video="${escapeHtml(att.url)}" src="${escapeHtml(att.url)}" muted playsinline preload="metadata"></video>`;
+        return `<video class="bubble-attachment-video" data-view-video="${escapeHtml(att.url)}" src="${escapeHtml(att.url)}" muted playsinline preload="${(window.__necpaLiteMedia && window.__necpaLiteMedia('chat')) ? 'none' : 'metadata'}"></video>`;
       }
       if (type === 'audio') {
         return `<audio class="bubble-attachment-audio" src="${escapeHtml(att.url)}" controls></audio>`;

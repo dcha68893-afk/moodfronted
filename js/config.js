@@ -3,6 +3,65 @@
 (function () {
     'use strict';
 
+    // NATIVE SHELL: the Play Store app (Capacitor) bundles every asset locally, so a
+    // service worker adds nothing there and its cache can serve files from an older
+    // app version next to newer ones. Retire any existing worker/caches once and make
+    // every later register() call a harmless no-op. Web PWA behaviour is unchanged.
+    var IS_NATIVE_SHELL = false;
+    try {
+        IS_NATIVE_SHELL = !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform());
+    } catch (_) {}
+    window.__NECPA_NATIVE__ = IS_NATIVE_SHELL;
+    if (IS_NATIVE_SHELL && 'serviceWorker' in navigator) {
+        try {
+            navigator.serviceWorker.register = function () {
+                return Promise.reject(new Error('Service worker disabled in native shell'));
+            };
+            if (!localStorage.getItem('necpa_native_sw_retired')) {
+                navigator.serviceWorker.getRegistrations().then(function (regs) {
+                    return Promise.all(regs.map(function (r) { return r.unregister(); }));
+                }).then(function () {
+                    return window.caches ? caches.keys().then(function (k) { return Promise.all(k.map(function (n) { return caches.delete(n); })); }) : null;
+                }).then(function () {
+                    try { localStorage.setItem('necpa_native_sw_retired', '1'); } catch (_) {}
+                }).catch(function () {});
+            }
+        } catch (_) {}
+    }
+
+    // BOOT GUARD: top-level pages stay invisible (background already painted by the
+    // theme boot below) until scripts, styles and icon fonts have settled, so a slow
+    // cold start never shows half-styled markup. Always released by a hard timeout.
+    (function bootGuard() {
+        try {
+            if (window.top !== window.self) return;
+            var root = document.documentElement;
+            root.classList.add('kyn-booting');
+            var st = document.createElement('style');
+            st.id = 'kyn-boot-guard';
+            st.textContent = 'html.kyn-booting body{visibility:hidden!important}';
+            (document.head || root).appendChild(st);
+            var done = false;
+            function release() {
+                if (done) return;
+                done = true;
+                root.classList.remove('kyn-booting');
+                if (st.parentNode) st.parentNode.removeChild(st);
+            }
+            function afterFonts() {
+                var t = setTimeout(release, 800);
+                try {
+                    if (document.fonts && document.fonts.ready) {
+                        document.fonts.ready.then(function () { clearTimeout(t); requestAnimationFrame(release); });
+                    } else { clearTimeout(t); release(); }
+                } catch (_) { release(); }
+            }
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', afterFonts, { once: true });
+            else afterFonts();
+            setTimeout(release, 3000);
+        } catch (_) {}
+    })();
+
     var runtime = window.__NEXIPA_RUNTIME_CONFIG__ || window.__NECPRA_RUNTIME_CONFIG__ || {};
     var configuredOrigin = String(runtime.BACKEND_URL || window.BACKEND_URL || '').trim().replace(/\/+$/, '');
     var warned = false;
@@ -130,9 +189,20 @@
         '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160" viewBox="0 0 240 160"><rect width="240" height="160" rx="12" fill="#e5e7eb"/>' +
         '<path d="M84 104l22-28 16 20 12-14 22 22z" fill="#9ca3af"/><circle cx="96" cy="60" r="9" fill="#9ca3af"/>' +
         '<text x="120" y="132" font-family="Arial,sans-serif" font-size="12" text-anchor="middle" fill="#6b7280">Image unavailable - tap to retry</text></svg>');
+    // Neutral silhouette for a profile picture that cannot be loaded (never the app logo).
+    var AVATAR_UNAVAILABLE = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#d1d5db"/>' +
+        '<circle cx="50" cy="38" r="18" fill="#f3f4f6"/><path d="M14 92c4-22 20-32 36-32s32 10 36 32z" fill="#f3f4f6"/></svg>');
+    function isAvatarImg(img) {
+        try { return /(?:^|[\s_-])(avatar|profile-?pic|profile-?photo|user-?photo)(?:$|[\s_-])/i.test(String(img.className || '')) || img.hasAttribute('data-avatar'); }
+        catch (_) { return false; }
+    }
     function isUserMediaSrc(src) {
         src = String(src || '');
         if (!src || src.indexOf(APP_ICON) !== -1) return false;
+        // Google account photos (lh3.googleusercontent.com) are profile pictures too: retry them
+        // instead of swapping in the app logo the first time the CDN hiccups.
+        if (/googleusercontent\.com|ui-avatars\.com|gravatar\.com/i.test(src)) return true;
         return /\/uploads\//i.test(src) || /res\.cloudinary\.com|cloudinary\.com/i.test(src) || /\/api\/(?:files|media)\//i.test(src) || /^blob:/i.test(src) || /^data:image\//i.test(src);
     }
     // Uploaded files live on the BACKEND. A relative "/uploads/..." link would otherwise resolve against the frontend site (404).
@@ -173,7 +243,7 @@
         }
         img.dataset.mediaFailed = '1';
         img.style.cursor = 'pointer';
-        img.src = MEDIA_UNAVAILABLE;
+        img.src = isAvatarImg(img) ? AVATAR_UNAVAILABLE : MEDIA_UNAVAILABLE;
         img.addEventListener('click', function reload(ev) {
             if (img.dataset.mediaFailed !== '1') return;
             ev.stopPropagation(); ev.preventDefault();
@@ -186,9 +256,11 @@
             fixUploadLinks(root);
             selfAndDescendants(root, 'img').forEach(function (img) {
                 if (img.classList.contains('jm-subcat-img')) return;
-                if (!img.getAttribute('src') || /\/undefined(?:$|[?#])/i.test(img.getAttribute('src'))) img.src = APP_ICON;
+                if (!img.getAttribute('src') || /\/undefined(?:$|[?#])/i.test(img.getAttribute('src'))) img.src = isAvatarImg(img) ? AVATAR_UNAVAILABLE : APP_ICON;
                 if (!img.dataset.necpraImageGuard) {
                     img.dataset.necpraImageGuard = '1';
+                    // Google/CDN avatar hosts reject requests carrying our page as Referer.
+                    if (isAvatarImg(img) || /googleusercontent\.com/i.test(img.getAttribute('src') || '')) img.referrerPolicy = 'no-referrer';
                     var onFail = function () {
                         var current = img.getAttribute('src') || '';
                         if (img.dataset.mediaFailed === '1' || current.indexOf('data:image/svg+xml') === 0) return;

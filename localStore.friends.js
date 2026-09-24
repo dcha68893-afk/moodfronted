@@ -110,10 +110,11 @@
     }
     results.innerHTML = filtered.map(function (u) {
       var name = escapeHtml(u.displayName || u.username || 'User');
-      var avatar = escapeHtml(u.avatar || '/icons/necpa-192.png');
+      // A friend without a photo gets the neutral silhouette, never the app logo.
+      var avatar = escapeHtml((window.__resolveMediaUrl ? window.__resolveMediaUrl(u.avatar) : u.avatar) || 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#d1d5db"/><circle cx="50" cy="38" r="18" fill="#f3f4f6"/><path d="M14 92c4-22 20-32 36-32s32 10 36 32z" fill="#f3f4f6"/></svg>'));
       return '<div class="new-chat-result-item" data-necpra-friend-chat="1" data-user-id="' + u.id
         + '" data-user-name="' + name + '" data-user-avatar="' + avatar + '"><img src="' + avatar
-        + '" alt=""><span>' + name + '</span><span style="margin-left:auto;font-size:11px;color:var(--kyn-text-secondary);">Friend</span></div>';
+        + '" alt="" data-avatar="1" referrerpolicy="no-referrer"><span>' + name + '</span><span style="margin-left:auto;font-size:11px;color:var(--kyn-text-secondary);">Friend</span></div>';
     }).join('');
     results.querySelectorAll('[data-necpra-friend-chat]').forEach(function (el) {
       el.addEventListener('click', function (e) {

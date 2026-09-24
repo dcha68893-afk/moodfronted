@@ -903,6 +903,9 @@ class MarketplaceCoreImpl {
     validateImage(url) {
         if (!url || typeof url !== 'string') return false;
         if (url.startsWith('data:')) return true;
+        // Relative upload paths (/uploads/...) are legitimate stored values; the UI resolves them
+        // against the API origin. Dropping them here made listings lose their photo entirely.
+        if (url.startsWith('/') && !url.startsWith('//')) return true;
         try {
             const parsed = new URL(url);
             return parsed.protocol === 'https:' || parsed.protocol === 'http:';
@@ -915,6 +918,7 @@ class MarketplaceCoreImpl {
         if (!url || typeof url !== 'string') return '';
         if (url.startsWith('data:')) return url;
         if (url.startsWith('https:') || url.startsWith('http:')) return url;
+        if (url.startsWith('/') && !url.startsWith('//')) return url;
         return '';
     }
 

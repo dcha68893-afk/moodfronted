@@ -2137,11 +2137,18 @@ const renderers = {
             <div class="jm-card-img-wrap">
                 <div class="jm-card-img-skeleton" style="background:#f3f4f6;height:160px;border-radius:6px;animation:jmPulse 1.2s infinite;">
                 </div>
-                ${imgSrc
-                    ? `<img class="jm-card-img" src="${escapeHtml(imgSrc)}" alt="${escapeHtml(listing.title||'')}" loading="lazy"
+                ${(() => {
+                    const _own = _listingImageCandidates(listing).filter(u => !_isAppIconImage(u));
+                    const _first = _own[0] ? _jmThumb(_own[0]) : '';
+                    const _alts = [];
+                    if (_own[0] && _first !== _own[0]) _alts.push(_own[0]);
+                    _own.slice(1).forEach(u => _alts.push(u));
+                    const _src = _first || fallbackImg;
+                    return _src ? `<img class="jm-card-img" src="${escapeHtml(_src)}" alt="${escapeHtml(listing.title||'')}" loading="lazy" decoding="async"
+                        data-alts="${escapeHtml(JSON.stringify(_first ? _alts : []))}" data-fb="${escapeHtml(_first ? fallbackImg : '')}"
                         onload="this.classList.add('loaded'); this.previousElementSibling && (this.previousElementSibling.style.display='none')"
-                        onerror="this.onerror=null; this.src='${escapeHtml(fallbackImg)}'; this.previousElementSibling && (this.previousElementSibling.style.display='none')">`
-                    : `<img class="jm-card-img" src="${escapeHtml(fallbackImg)}" alt="${escapeHtml(listing.title||'')}" loading="lazy" onerror="this.style.display='none'">`}
+                        onerror="window._jmImgFail(this)">` : '';
+                })()}
                 ${discount>0 ? `<span class="jm-card-discount-badge">-${discount}%</span>` : ''}
                 ${condition ? `<span class="jm-card-condition-badge">${escapeHtml(condition.toUpperCase())}</span>` : ''}
                 <button class="jm-card-wish${inWish?' wishlisted':''}" data-id="${listing.id}" onclick="event.stopPropagation()">
@@ -5842,10 +5849,13 @@ function _renderHScroll(containerId, listings, sectionId) {
         // uploaded image URL fails to load (onerror), instead of just
         // hiding the image or showing a generic icon.
         const fallbackImg = (typeof _resolveListingImg === 'function') ? _resolveListingImg(p) : null;
-        const displaySrc = img || fallbackImg;
+        const _own = _listingImageCandidates(p).filter(u => !_isAppIconImage(u));
+        const _first = _own[0] ? _jmThumb(_own[0], 320) : '';
+        const _alts = []; if (_own[0] && _first !== _own[0]) _alts.push(_own[0]); _own.slice(1).forEach(u => _alts.push(u));
+        const displaySrc = _first || fallbackImg;
         return `<div class="jm-hcard" data-id="${p.id}">
             ${displaySrc
-                ? `<img class="jm-hcard-img" src="${_esc(displaySrc)}" loading="lazy" onerror="${fallbackImg ? `this.onerror=null;this.src='${_esc(fallbackImg)}';` : `this.style.display='none';`}">`
+                ? `<img class="jm-hcard-img" src="${_esc(displaySrc)}" loading="lazy" decoding="async" data-alts="${_esc(JSON.stringify(_first ? _alts : []))}" data-fb="${_esc(_first ? (fallbackImg || '') : '')}" onerror="window._jmImgFail(this)">`
                 : `<div class="jm-hcard-img-placeholder">${p.type==='digital'?'💾':'🛒'}</div>`}
             <div class="jm-hcard-body">
                 <div class="jm-hcard-title">${_esc(p.title||'')}</div>
@@ -6603,17 +6613,59 @@ window._JM_BRANDS = _JM_BRANDS;
 // (subcategory photo → service-category photo → case-insensitive
 // subcategory match → first image in the listing's own top-level category →
 // generic default) the same way, everywhere a listing can appear.
+// Seller uploads reach the client in several shapes: absolute URLs, relative "/uploads/..."
+// paths (which resolve against https://localhost inside the Play Store app and 404), JSON-encoded
+// arrays, or objects. Digital listings also store the DELIVERABLE FILE (pdf/zip/mp3...) in
+// `images`, which can never render. Every card/detail/seller list resolves images through this
+// one function so the seller's real photo is used and only then does the category art appear.
+const _JM_NON_IMAGE_EXT = /\.(pdf|zip|rar|7z|docx?|xlsx?|pptx?|txt|csv|json|epub|mobi|apk|exe|mp3|wav|m4a|mp4|mov|webm|avi)(?:$|[?#])/i;
+function _jmAbsImageUrl(u) {
+    if (!u || typeof u !== 'string') return '';
+    u = u.trim();
+    if (/^(?:https?:|data:image\/|blob:)/i.test(u)) return u;
+    if (u.startsWith('//')) return 'https:' + u;
+    let origin = '';
+    try { origin = (typeof window.__getApiOrigin === 'function' && window.__getApiOrigin()) || ''; } catch (_) {}
+    if (!origin) return u;
+    return origin.replace(/\/+$/, '') + (u.startsWith('/') ? '' : '/') + u;
+}
+// Small, optimised version of a Cloudinary image for list cards (full image stays for detail view).
+function _jmThumb(u, w) {
+    return (typeof u === 'string' && /res\.cloudinary\.com/.test(u) && u.includes('/image/upload/') && !/\/upload\/[^/]*w_\d+/.test(u))
+        ? u.replace('/upload/', '/upload/w_' + (w || 480) + ',c_limit,q_auto,f_auto/') : u;
+}
 function _listingImageCandidates(l) {
     const raw = [];
     const add = v => {
         if (!v) return;
         if (Array.isArray(v)) v.forEach(add);
-        else if (typeof v === 'object') add(v.url || v.src || v.href || v.path);
-        else if (typeof v === 'string') raw.push(v.trim());
+        else if (typeof v === 'object') add(v.url || v.src || v.href || v.path || v.secure_url);
+        else if (typeof v === 'string') {
+            const t = v.trim();
+            if (t.startsWith('[') || t.startsWith('{')) { try { add(JSON.parse(t)); return; } catch (_) {} }
+            raw.push(t);
+        }
     };
     add(l?.images); add(l?.imageUrl); add(l?.image_url); add(l?.mediaUrl); add(l?.media_url); add(l?.image);
-    return [...new Set(raw)].filter(Boolean);
+    add(l?.photos); add(l?.gallery); add(l?.metadata?.images);
+    return [...new Set(raw.map(_jmAbsImageUrl))].filter(u => u && !_JM_NON_IMAGE_EXT.test(u) && !/\/raw\/upload\//.test(u));
 }
+// <img onerror>: walk the listing's own remaining images first (data-alts), and only then the
+// category illustration (data-fb), so a transient failure never swaps a real photo for stock art.
+window._jmImgFail = function (el) {
+    try {
+        let alts = [];
+        try { alts = JSON.parse(el.dataset.alts || '[]'); } catch (_) {}
+        const next = alts.shift();
+        el.dataset.alts = JSON.stringify(alts);
+        const sk = el.previousElementSibling;
+        if (next) { el.src = next; return; }
+        const fb = el.dataset.fb;
+        if (fb && el.dataset.fbDone !== '1') { el.dataset.fbDone = '1'; el.src = fb; return; }
+        el.style.display = 'none';
+        if (sk && sk.classList && sk.classList.contains('jm-card-img-skeleton')) sk.style.display = 'none';
+    } catch (_) { el.style.display = 'none'; }
+};
 function _isAppIconImage(url) {
     if (!url || typeof url !== 'string') return false;
     const u = url.toLowerCase();
@@ -6651,6 +6703,10 @@ window._catImg = _catImg;
 // _catImg above). The IIFE's own callers keep using their local copies.
 window._getListingImage = _getListingImage;
 window._resolveListingImg = _resolveListingImg;
+window._listingImageCandidates = _listingImageCandidates;
+window._isAppIconImage = _isAppIconImage;
+window._jmAbsImageUrl = _jmAbsImageUrl;
+window._jmThumb = _jmThumb;
 
 // ── CSS injected once for the new category UI ──────────────────────────────
 (function _injectCatStyles() {

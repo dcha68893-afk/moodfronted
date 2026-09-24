@@ -383,12 +383,25 @@
     return withRatchetLock(recipientUserId, async () => {
       const R = global.KynectaRatchet;
       let session = loadRatchetSession(recipientUserId);
+      // Always resolve the recipient's CURRENT key (cached for a few minutes, see e2e-identity-core.js).
+      // If they re-installed / moved device / rotated while this device was away, the old sending
+      // session is encrypted to a key they no longer hold: every message until it is rebuilt would
+      // arrive but never decrypt. Detect the key change and start a fresh session for the new key.
+      let currentPeer;
+      try { currentPeer = await identity.publicKeyFor(recipientUserId); }
+      catch (freshErr) { currentPeer = await identity.publicKeyFor(recipientUserId, false, true); } // offline: use what we have
+      if (session && session.peerKeyId && currentPeer.keyId && String(session.peerKeyId) !== String(currentPeer.keyId)) {
+        _diagLog('V3_PEER_KEY_CHANGED_RESET', { recipientUserId, old: session.peerKeyId, current: currentPeer.keyId });
+        clearRatchetSession(recipientUserId);
+        session = null;
+      }
       if (!session) {
-        const peer = await identity.publicKeyFor(recipientUserId);
+        const peer = currentPeer;
         const sharedBitsRaw = await crypto.subtle.deriveBits({ name: 'ECDH', public: peer.key }, identity.privateKey, 256);
         const peerRawPub = await crypto.subtle.exportKey('raw', peer.key);
         const peerRawPubB64 = btoa(String.fromCharCode(...new Uint8Array(peerRawPub)));
         session = await R.initSessionAsSender(sharedBitsRaw, peerRawPubB64);
+        session.peerKeyId = peer.keyId || null;
       }
       const { session: nextSession, envelope } = await R.ratchetEncrypt(session, String(plaintext));
       saveRatchetSession(recipientUserId, nextSession);
@@ -415,7 +428,7 @@
   // also needlessly burn a bogus DH computation against the local
   // session).
   async function _initReceiverSessionFromHeader(identity, peerUserId, envelope, forceRefresh = false) {
-    const peer = await identity.publicKeyFor(peerUserId, forceRefresh);
+    const peer = await identity.publicKeyFor(peerUserId, forceRefresh, /* allowStale */ true);
     const sharedBitsRaw = await crypto.subtle.deriveBits({ name: 'ECDH', public: peer.key }, identity.privateKey, 256);
     const myPrivJwk = await crypto.subtle.exportKey('jwk', identity.privateKey);
     return global.KynectaRatchet.initSessionAsReceiver(sharedBitsRaw, myPrivJwk, envelope.hdr.dh);
@@ -616,7 +629,7 @@
       if (!historical) throw new Error('Historical key unavailable');
       return historical.key;
     }]);
-    candidates.push(['currently_cached_key', async () => (await identity.publicKeyFor(peerUserId)).key]);
+    candidates.push(['currently_cached_key', async () => (await identity.publicKeyFor(peerUserId, false, true)).key]);
     candidates.push(['fresh_key_after_purge', async () => { identity.purgePublicKey?.(peerUserId); return (await identity.publicKeyFor(peerUserId, true)).key; }]);
 
     let lastErr = null;
@@ -904,7 +917,7 @@
     if (env && env.spk) {
       peerKey = await crypto.subtle.importKey('spki', Uint8Array.from(atob(env.spk), c => c.charCodeAt(0)), { name: 'ECDH', namedCurve: 'P-256' }, true, []);
     } else {
-      peerKey = (await identity.publicKeyFor(senderUserId)).key;
+      peerKey = (await identity.publicKeyFor(senderUserId, false, true)).key;
     }
     const shared = await identity.deriveShared(peerKey);
     const key = await identity.hkdf(shared, pairContext(senderUserId) + ':attachment');

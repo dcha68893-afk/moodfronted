@@ -163,13 +163,22 @@
     return enabled;
   }
 
-  async function publicKeyFor(userId, forceRefresh = false) {
+  // A cached copy of someone's identity key never used to expire. If they re-installed or moved to
+  // a new device while this device was offline (the live 'key_rotated' push is missed), messages
+  // were encrypted to their OLD key and could never be decrypted when they came back online.
+  // Entries older than this (or written before timestamps existed) are re-checked on the server;
+  // it is one small GET per contact per interval, and only when a message is actually sent.
+  const PUB_TTL_MS = 10 * 60 * 1000;
+  const pubStamp = new Map();
+  const fresh = (id) => (Date.now() - (pubStamp.get(id) || 0)) < PUB_TTL_MS;
+
+  async function publicKeyFor(userId, forceRefresh = false, allowStale = false) {
     userId = String(userId);
-    if (!forceRefresh && pubCache.has(userId)) return pubCache.get(userId);
-    if (!forceRefresh) {
+    if (!forceRefresh && pubCache.has(userId) && (allowStale || fresh(userId))) return pubCache.get(userId);
+    if (!forceRefresh && (allowStale || fresh(userId))) {
       try {
         const s = JSON.parse(localStorage.getItem(PUB_STORE) || '{}');
-        if (s[userId]?.pub) {
+        if (s[userId]?.pub && (allowStale || (s[userId].ts && Date.now() - s[userId].ts < PUB_TTL_MS))) {
           // FIX (HISTORICAL-KEY-SELF-CONTAINED-ENVELOPE): entries now retain
           // the raw base64 public key (`pub`), not just the imported
           // CryptoKey. Callers that need to embed/compare the exact bytes
@@ -181,7 +190,7 @@
           // key bytes used at encryption time, so decrypting it later
           // never has to depend on whatever this cache happens to hold.
           const entry = { key: await importPub(s[userId].pub), keyId: s[userId].keyId, pub: s[userId].pub };
-          pubCache.set(userId, entry); return entry;
+          pubCache.set(userId, entry); pubStamp.set(userId, s[userId].ts || 0); return entry;
         }
       } catch (_) {}
     }
@@ -193,8 +202,8 @@
       const raw = j?.data?.publicKey;
       if (!raw) throw new Error('Recipient has no public key');
       const entry = { key: await importPub(raw), keyId: j.data.keyId, pub: raw };
-      pubCache.set(userId, entry);
-      try { const s = JSON.parse(localStorage.getItem(PUB_STORE) || '{}'); s[userId] = { pub: raw, keyId: entry.keyId }; localStorage.setItem(PUB_STORE, JSON.stringify(s)); } catch (_) {}
+      pubCache.set(userId, entry); pubStamp.set(userId, Date.now());
+      try { const s = JSON.parse(localStorage.getItem(PUB_STORE) || '{}'); s[userId] = { pub: raw, keyId: entry.keyId, ts: Date.now() }; localStorage.setItem(PUB_STORE, JSON.stringify(s)); } catch (_) {}
       try { document.dispatchEvent(new CustomEvent('kyn:e2eKeyAvailable', { detail: { userId } })); } catch (_) {}
       return entry;
     })().finally(() => inflightFetch.delete(userId));
@@ -259,7 +268,7 @@
     for (const id of wanted) {
       if (pubCache.has(id)) continue;
       if (store[id]?.pub) {
-        try { pubCache.set(id, { key: await importPub(store[id].pub), keyId: store[id].keyId, pub: store[id].pub }); continue; }
+        try { pubCache.set(id, { key: await importPub(store[id].pub), keyId: store[id].keyId, pub: store[id].pub }); if (store[id].ts) pubStamp.set(id, store[id].ts); continue; }
         catch (_) { /* corrupted entry — fall through to re-fetch */ }
       }
       missing.push(id);
@@ -275,8 +284,8 @@
         const raw = data[id]?.publicKey;
         if (!raw) continue;
         try {
-          pubCache.set(id, { key: await importPub(raw), keyId: data[id].keyId, pub: raw });
-          store[id] = { pub: raw, keyId: data[id].keyId };
+          pubCache.set(id, { key: await importPub(raw), keyId: data[id].keyId, pub: raw }); pubStamp.set(id, Date.now());
+          store[id] = { pub: raw, keyId: data[id].keyId, ts: Date.now() };
           dirty = true;
         } catch (_) { /* skip a corrupt individual entry, keep the rest */ }
       }
@@ -288,7 +297,7 @@
   }
 
   function purgePublicKey(userId) {
-    userId = String(userId); pubCache.delete(userId);
+    userId = String(userId); pubCache.delete(userId); pubStamp.delete(userId);
     try { const s = JSON.parse(localStorage.getItem(PUB_STORE) || '{}'); delete s[userId]; localStorage.setItem(PUB_STORE, JSON.stringify(s)); } catch (_) {}
   }
 
@@ -304,9 +313,9 @@
     userId = String(userId);
     if (!userId || !rawPubB64) return false;
     try {
-      pubCache.set(userId, { key: await importPub(rawPubB64), keyId: keyIdValue, pub: rawPubB64 });
+      pubCache.set(userId, { key: await importPub(rawPubB64), keyId: keyIdValue, pub: rawPubB64 }); pubStamp.set(userId, Date.now());
       const s = JSON.parse(localStorage.getItem(PUB_STORE) || '{}');
-      s[userId] = { pub: rawPubB64, keyId: keyIdValue };
+      s[userId] = { pub: rawPubB64, keyId: keyIdValue, ts: Date.now() };
       localStorage.setItem(PUB_STORE, JSON.stringify(s));
       try { document.dispatchEvent(new CustomEvent('kyn:e2eKeyAvailable', { detail: { userId } })); } catch (_) {}
       return true;

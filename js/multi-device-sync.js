@@ -251,6 +251,8 @@
 
     // Periodic sync
     _syncTimer = setInterval(() => {
+      // Hidden: skip; the visibilitychange handler above catches up when the app returns.
+      if (document.hidden) return;
       _heartbeat();
       sync(false);
     }, SYNC_INTERVAL);

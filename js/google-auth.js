@@ -92,6 +92,67 @@
         }
     }
 
+
+    // ── Native (Play Store / Capacitor) sign-in ─────────────────────────────
+    // Google refuses its web sign-in inside an Android WebView, and the bundled
+    // app's origin (https://localhost) is not an authorised web origin. In the
+    // native shell we use Android Credential Manager through
+    // @capgo/capacitor-social-login instead. It yields the same Google ID token
+    // GIS returns, so it goes through the SAME handleCredentialResponse() and
+    // /api/auth/google endpoint — there is no second auth path on the server.
+    function isNativeShell() {
+        try {
+            return window.__NECPA_NATIVE__ === true ||
+                !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform());
+        } catch (_) { return false; }
+    }
+
+    let nativeInitPromise = null;
+    let nativeBusy = false;
+
+    function getNativePlugin() {
+        return window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.SocialLogin;
+    }
+
+    async function nativeSignIn() {
+        if (nativeBusy) return;
+        const plugin = getNativePlugin();
+        if (!plugin) return showError('Google sign-in is not available in this build. Please update the app or use email/password.');
+        if (!GOOGLE_CLIENT_ID) return showError('Google sign-in is not configured.');
+        nativeBusy = true;
+        try {
+            if (!nativeInitPromise) {
+                nativeInitPromise = plugin.initialize({ google: { webClientId: GOOGLE_CLIENT_ID } });
+            }
+            await nativeInitPromise;
+            const res = await plugin.login({ provider: 'google', options: { scopes: ['email', 'profile'] } });
+            const idToken = res && res.result && res.result.idToken;
+            if (!idToken) return showError('Google sign-in did not return a credential. Please try again.');
+            await handleCredentialResponse({ credential: idToken });
+        } catch (err) {
+            nativeInitPromise = null;
+            if (err && (err.code === 'USER_CANCELLED' || /cancel/i.test(String(err.message || '')))) return;
+            console.error('[GoogleAuth] Native sign-in failed:', err);
+            showError('Google sign-in failed. Check your connection and try again, or use email/password.');
+        } finally {
+            nativeBusy = false;
+        }
+    }
+
+    function renderNativeButtons() {
+        getContainers().forEach(function (container) {
+            if (container.dataset.nativeGoogle === 'true') return;
+            container.dataset.nativeGoogle = 'true';
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.textContent = 'Continue with Google';
+            btn.setAttribute('aria-label', 'Continue with Google');
+            btn.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:10px;width:100%;max-width:320px;min-height:44px;margin:0 auto;padding:10px 16px;border:1px solid #dadce0;border-radius:999px;background:#fff;color:#3c4043;font:500 14px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;cursor:pointer;';
+            btn.addEventListener('click', nativeSignIn);
+            container.replaceChildren(btn);
+        });
+    }
+
     let initialized = false;
     const rendered = new WeakSet();
 
@@ -179,6 +240,11 @@
     }
 
     function init() {
+        if (isNativeShell()) {
+            renderNativeButtons();
+            window.addEventListener('auth-form-switched', () => setTimeout(renderNativeButtons, 0));
+            return;
+        }
         const tryRender = () => {
             if (!window.google?.accounts?.id) return false;
             renderVisibleContainersOnce();

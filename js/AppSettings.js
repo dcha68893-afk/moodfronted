@@ -155,6 +155,8 @@
     let _broadcast = null;
     let _activeUserId = 'guest';
     let _serverSyncPromise = null;
+    let _lastServerSyncAt = 0;
+    let _lastServerSyncUser = null;
     let _readyResolve;
     const _ready = new Promise((resolve) => { _readyResolve = resolve; });
     let _notificationProxyInstalled = false;
@@ -1298,11 +1300,20 @@
 
         async refreshFromServer(options) {
             const opts = options || {};
-            if (_serverSyncPromise && !opts.force) return _serverSyncPromise;
+            // Login fires several events at once (session:ready, user-login, user-logged-in,
+            // token:stored, storage-sync). "force" used to start a NEW GET /settings for each,
+            // i.e. 4-6 identical DB-backed requests per login. Share the in-flight request, and
+            // reuse a result fetched within the last 5s for the same user.
+            if (_serverSyncPromise) return _serverSyncPromise;
+            if (opts.force && _lastServerSyncUser === _activeUserId && Date.now() - _lastServerSyncAt < 5000) {
+                return Promise.resolve(clone(_data));
+            }
 
             _serverSyncPromise = fetchServerSettings()
                 .then((serverSettings) => {
                     if (!serverSettings || typeof serverSettings !== 'object') return null;
+                    _lastServerSyncAt = Date.now();
+                    _lastServerSyncUser = _activeUserId;
                     debugLog('[AppSettings] Loaded settings from backend');
                     AppSettings.merge(serverSettings, {
                         silent: false,

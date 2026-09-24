@@ -125,10 +125,13 @@ app.use(cors());
 app.use(compression());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
-app.use("/api", (req, _res, next) => {
-  console.log("[API] Request:", req.url);
-  next();
-});
+// Per-request logging is noise (and log volume) on a free tier; enable with DEBUG_API=1.
+if (process.env.DEBUG_API === "1") {
+  app.use("/api", (req, _res, next) => {
+    console.log("[API] Request:", req.url);
+    next();
+  });
+}
 
 // FIX (BACKEND_URL-MISSING / GOOGLE-BUTTON-NOT-DISPLAYING): this server used
 // to serve the raw source tree with no runtime-config.js at all. The only
@@ -192,7 +195,32 @@ app.use((req, res, next) => {
 });
 
 // Serve static files
-app.use(express.static(__dirname));
+// SECURITY: this server serves the repo root, so without a deny-list the Android
+// signing keystore, server source, package files and git data were downloadable.
+app.use((req, res, next) => {
+  const p = decodeURIComponent(req.path || "").toLowerCase();
+  if (
+    /^\/(android|scripts|node_modules|\.git|\.github|\.vscode)(\/|$)/.test(p) ||
+    /\.(jks|keystore|env|pem|key)$/.test(p) ||
+    /^\/(server\.js|package(-lock)?\.json|\.env(\..*)?|capacitor\.config\.json|deploy\.js)$/.test(p)
+  ) {
+    return res.status(404).end();
+  }
+  next();
+});
+
+// Fonts/icons/images never change under the same URL in practice: let browsers keep
+// them for a week. Code and HTML stay revalidated (ETag) so deploys still show at once.
+app.use(
+  express.static(__dirname, {
+    dotfiles: "deny",
+    setHeaders(res, filePath) {
+      if (/\.(woff2?|ttf|png|jpe?g|webp|svg|ico)$/i.test(filePath)) {
+        res.setHeader("Cache-Control", "public, max-age=604800");
+      }
+    },
+  })
+);
 
 // --- CLOUDINARY SIGNATURE ---
 function generateSignature(params) {
@@ -4396,7 +4424,9 @@ app.use((req, res) => {
   // silently break installability/service-worker registration.
   if (req.accepts("html") && !path.extname(req.path)) {
     res.sendFile(path.join(__dirname, "index.html"));
-  else sendError(res, "Not found", 404);
+  } else {
+    sendError(res, "Not found", 404);
+  }
 });
 
 // START SERVER

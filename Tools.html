@@ -3928,5 +3928,21 @@
 ════════════════════════════════════════════════════════════════════════ -->
 <script src="/marketplace-ui-fix.js"></script>
 <!-- PWA controller (/pwa-manager.js) is loaded once in <head>. -->
+<script>
+/* Keep a single back arrow: while the listing detail panel is open the header's arrow is hidden
+   (CSS: body.jm-detail-open #jmBackBtn). Observing the panel catches every code path that opens
+   or closes it, so the arrow can no longer be re-shown underneath it by a later navigation. */
+(function () {
+    function wire() {
+        var p = document.getElementById('marketplaceDetailPanel');
+        if (!p) return false;
+        var sync = function () { document.body.classList.toggle('jm-detail-open', p.classList.contains('active')); };
+        new MutationObserver(sync).observe(p, { attributes: true, attributeFilter: ['class'] });
+        sync();
+        return true;
+    }
+    if (!wire()) document.addEventListener('DOMContentLoaded', wire, { once: true });
+})();
+</script>
 </body>
 </html>

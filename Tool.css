@@ -4592,3 +4592,35 @@ input:focus + .toggle-slider,
    block and are not needed elsewhere since price/rating colors are meant to
    stay constant across themes; if a specific brand-color accent is still
    wanted somewhere, reintroduce it as a variable, not a theme override. */
+
+
+/* ── Marketplace polish (compact cards, small-screen header, single back arrow) ───────────────
+   Card image area was a full 1:1 square (padding-top:100%) which made every listing very tall on
+   Home and left room for only a few per screen. 3:4-of-square (~72%) keeps the whole photo visible
+   (object-fit:contain) and lets the next row start higher. Tune with --jm-card-img-ratio. */
+:root { --jm-card-img-ratio: 72%; }
+.jm-card-img-wrap { padding-top: var(--jm-card-img-ratio) !important; }
+.jm-card-img-skeleton { position: absolute !important; inset: 0 !important; height: auto !important; border-radius: 0 !important; }
+.jm-card-body { padding: 6px 8px 8px !important; gap: 2px !important; }
+.jm-card-title { line-height: 1.3 !important; }
+
+/* Header: never let the right-hand controls (cart, bell, Menu) run past the screen edge. */
+html, body { max-width: 100%; overflow-x: hidden; }
+.jm-header {
+    box-sizing: border-box !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    padding-left: max(8px, env(safe-area-inset-left)) !important;
+    padding-right: max(10px, env(safe-area-inset-right)) !important;
+    flex-wrap: nowrap !important;
+}
+.jm-header .jm-search-wrap { flex: 1 1 0 !important; min-width: 0 !important; }
+.jm-header .jm-icon-btn, .jm-header #jmMoreBtn, .jm-header .jm-back-btn { flex: 0 0 auto !important; }
+@media (max-width: 420px) {
+    .jm-header { gap: 4px !important; }
+    .jm-header .jm-icon-btn { width: 34px !important; min-width: 34px !important; }
+    .jm-header #jmMoreBtn { width: 36px !important; min-width: 36px !important; margin-right: 2px; }
+}
+
+/* The listing detail panel has its own back arrow: hide the shell's while it is open. */
+body.jm-detail-open #jmBackBtn { display: none !important; }

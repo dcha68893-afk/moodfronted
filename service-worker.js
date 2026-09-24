@@ -24,7 +24,7 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.36.0';
+const SW_VERSION = '19.37.0';
 // FIX: bumped so activate() drops every existing cache immediately on this
 // deploy — anyone with a stale pre-rebuild group.html (or the old, now-
 // deleted group-core-*/group-os-* files, or the misspelled necpra-* icons
@@ -78,7 +78,9 @@ const SW_VERSION = '19.36.0';
 // change, so any device that grabbed a copy of games-v4-gameplay-fix.js from before it was
 // folded into game-v3.html/games-v4-enhancements.js (the exact stale file this project's own
 // v67/v69 fixes above were meant to retire) also gets one more forced clean break.
-const CACHE_NAME = 'necpa-static-v70';
+// v71: script/style requests that come back as HTML (free-tier host still waking, SPA/404 fallback)
+// are no longer cached or executed as code; navigations fall back to the cached shell after 6s.
+const CACHE_NAME = 'necpa-static-v71';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -183,20 +185,25 @@ function local(url){try{return new URL(url,self.location.origin).origin===self.l
 function stale(res){try{const d=res.headers.get('date');return d&&(Date.now()-new Date(d).getTime()>CACHE_MAX_AGE);}catch(_){return false;}}
 const OFFLINE_SHELL='<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Necpa - Offline</title></head><body><main style="font-family:system-ui;text-align:center;padding:4rem"><h1>Necpa</h1><p>You are offline.</p><button onclick="location.reload()">Try again</button></main></body></html>';
 
+function badAssetResponse(request,res){
+  // A script/stylesheet answered with an HTML page is never valid code: it is a wake-up/404/fallback page.
+  try{const d=request.destination;if(d!=='script'&&d!=='style'&&d!=='worker')return false;const ct=(res.headers.get('content-type')||'').toLowerCase();return ct.indexOf('text/html')!==-1;}catch(_){return false;}
+}
 async function navigation(request){
   const cache=await caches.open(CACHE_NAME);
-  try{let r=await fetch(request);if(r.ok){if(new URL(request.url).pathname==='/Tools.html'){try{let h=await r.text();const tag='<script src="/js/marketplace-category-images.js"></script>';if(h.includes('</body>')&&!h.includes(tag))h=h.replace('</body>',tag+'</body>');const headers=new Headers(r.headers);headers.set('content-type','text/html; charset=utf-8');r=new Response(h,{status:r.status,statusText:r.statusText,headers})}catch(_){}}cache.put(request.url,r.clone()).catch(()=>{});return r;}}catch(_){}
+  const cachedNav=await cache.match(request);
+  try{let r=await (cachedNav?Promise.race([fetch(request),new Promise((_,rej)=>setTimeout(()=>rej(new Error('nav-timeout')),6000))]):fetch(request));if(r.ok){if(new URL(request.url).pathname==='/Tools.html'){try{let h=await r.text();const tag='<script src="/js/marketplace-category-images.js"></script>';if(h.includes('</body>')&&!h.includes(tag))h=h.replace('</body>',tag+'</body>');const headers=new Headers(r.headers);headers.set('content-type','text/html; charset=utf-8');r=new Response(h,{status:r.status,statusText:r.statusText,headers})}catch(_){}}cache.put(request.url,r.clone()).catch(()=>{});return r;}}catch(_){}
   const exact=await cache.match(request);if(exact)return exact;
   for(const u of ['/index.html','/','/friend.html','/chat.html']){const r=await cache.match(new URL(u,self.location.origin).href);if(r)return r;}
   return new Response(OFFLINE_SHELL,{status:200,headers:{'Content-Type':'text/html;charset=utf-8'}});
 }
 async function networkFirst(request){
   const cache=await caches.open(CACHE_NAME);
-  try{const r=await fetch(request,{cache:'no-store'});if(r.ok){await cache.put(request,r.clone()).catch(()=>{});return r;}const old=await cache.match(request);return old||r;}catch(_){const old=await cache.match(request);return old||new Response('Resource unavailable offline',{status:503});}
+  try{const r=await fetch(request,{cache:'no-store'});if(r.ok&&!badAssetResponse(request,r)){await cache.put(request,r.clone()).catch(()=>{});return r;}const old=await cache.match(request);return old||r;}catch(_){const old=await cache.match(request);return old||new Response('Resource unavailable offline',{status:503});}
 }
 async function staticAsset(request){
   const cache=await caches.open(CACHE_NAME);const old=await cache.match(request);if(old&&!stale(old))return old;
-  try{const r=await fetch(request);if(r.ok)await cache.put(request,r.clone()).catch(()=>{});return r.ok?r:(old||r);}catch(_){return old||new Response('Resource unavailable offline',{status:503});}
+  try{const r=await fetch(request);const good=r.ok&&!badAssetResponse(request,r);if(good)await cache.put(request,r.clone()).catch(()=>{});return good?r:(old||r);}catch(_){return old||new Response('Resource unavailable offline',{status:503});}
 }
 async function api(request){try{return await fetch(request);}catch(_){return new Response(JSON.stringify({error:'Network request failed',offline:true}),{status:503,headers:{'Content-Type':'application/json'}});}}
 

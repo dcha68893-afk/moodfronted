@@ -565,7 +565,7 @@ async function renderMyListings(container) {
         const renderGroup=(label,items,sk)=>!items.length?'':_card(`${label} <span style="background:${statusBg[sk]};color:${statusColor[sk]};border-radius:20px;padding:2px 9px;font-size:10px;font-weight:700;margin-left:6px">${items.length}</span>`,
             items.map(p=>{
                 const sk2=p.approval_status==='rejected'?'rejected':p.status==='pending_review'?'pending_review':p.status;
-                const img=p.image||(Array.isArray(p.images)?p.images[0]:'')||'';
+                const img=(window._getListingImage?window._getListingImage(p):'')||p.image||(Array.isArray(p.images)?p.images[0]:'')||'';
                 return `<div style="display:flex;align-items:flex-start;gap:10px;padding:11px 0;border-bottom:1px solid #f9fafb">
                     ${img?`<img src="${_esc(img)}" style="width:52px;height:52px;border-radius:8px;object-fit:cover;background:#f3f4f6;flex-shrink:0" loading="lazy">`:`<div style="width:52px;height:52px;border-radius:8px;background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">📦</div>`}
                     <div style="flex:1;min-width:0">
@@ -625,7 +625,7 @@ async function renderInventory(container) {
                 <tbody>${items.map(p=>{
                     const qty=p.stockQuantity??p.stock??0;
                     const [bg,col,lbl]=qty===0?['#fee2e2','#991b1b','Out of Stock']:qty<=5?['#fef3c7','#92400e','Low Stock']:['#d1fae5','#065f46','In Stock'];
-                    const img=p.image||(Array.isArray(p.images)?p.images[0]:'')||'';
+                    const img=(window._getListingImage?window._getListingImage(p):'')||p.image||(Array.isArray(p.images)?p.images[0]:'')||'';
                     return `<tr><td style="padding:10px 8px;border-bottom:1px solid #f9fafb"><div style="display:flex;align-items:center;gap:8px">${img?`<img src="${_esc(img)}" style="width:32px;height:32px;border-radius:5px;object-fit:cover;flex-shrink:0">`:`<div style="width:32px;height:32px;border-radius:5px;background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">📦</div>`}<div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100px">${_esc(p.title||'')}</div></div></td><td style="padding:10px 8px;border-bottom:1px solid #f9fafb"><span style="background:${bg};color:${col};border-radius:20px;padding:2px 8px;font-size:10px;font-weight:700">${lbl}</span></td><td style="padding:10px 8px;border-bottom:1px solid #f9fafb"><input type="number" min="0" value="${qty}" data-id="${p.id}" id="inv_${p.id}" style="width:58px;border:1.5px solid #e5e7eb;border-radius:6px;padding:5px 6px;font-size:13px;text-align:center;outline:none"></td></tr>`;
                 }).join('')}</tbody>
             </table></div>`:`<div style="padding:0 0 8px">${_empty('📦','No products yet','Add products to start managing inventory.','Create Product',"window._jmHideMore?.();setTimeout(()=>document.getElementById('createListingBtn')?.click(),100)")}</div>`}
@@ -896,7 +896,7 @@ async function renderAdminApproval(container) {
         ${r?._error?_err(r._error):''}
         <div style="padding:12px 16px">
         ${products.length?products.map(p=>{
-            const img=p.image||(Array.isArray(p.images)?p.images[0]:'')||'';
+            const img=(window._getListingImage?window._getListingImage(p):'')||p.image||(Array.isArray(p.images)?p.images[0]:'')||'';
             return `<div style="background:#fff;border-radius:14px;margin-bottom:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.06)">
                 ${img?`<img src="${_esc(img)}" style="width:100%;height:160px;object-fit:cover;background:#f3f4f6">`:'<div style="width:100%;height:120px;background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:48px">📦</div>'}
                 <div style="padding:14px">

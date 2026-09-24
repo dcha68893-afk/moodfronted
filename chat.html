@@ -1728,8 +1728,32 @@
         <iframe id="settingsIframe" class="content-iframe" src="settings.html" data-module="settings"></iframe>
     </div>
     <div id="toolsContent" class="iframe-container hidden">
-        <iframe id="toolsIframe" class="content-iframe" src="Tools.html" data-module="tools"></iframe>
+        <iframe id="toolsIframe" class="content-iframe" data-src="Tools.html" data-module="tools"></iframe>
     </div>
+    <script>
+    // Tools/Marketplace pulls ~2.5 MB of scripts (video.js, chart.js, jQuery, the marketplace
+    // bundles). It used to start loading in parallel with everything else on launch. It now
+    // loads once the app is idle (or immediately when the user opens it), so chat/status/group
+    // become usable first. It is still loaded shortly after launch because the cart badge and
+    // order-notification dot on the nav are produced by this module.
+    (function () {
+        var f = document.getElementById('toolsIframe');
+        if (!f) return;
+        function load() {
+            if (f.getAttribute('src')) return;
+            var s = f.getAttribute('data-src');
+            if (s) f.setAttribute('src', s);
+        }
+        window.__loadToolsIframe = load;
+        window.__toolsIframeLoaded = function () { return !!f.getAttribute('src'); };
+        function scheduleIdle() {
+            if (window.requestIdleCallback) window.requestIdleCallback(load, { timeout: 6000 });
+            else setTimeout(load, 1500);
+        }
+        if (document.readyState === 'complete') setTimeout(scheduleIdle, 3000);
+        else window.addEventListener('load', function () { setTimeout(scheduleIdle, 3000); }, { once: true });
+    })();
+    </script>
 
     <!-- ── Add Friend FAB (fixed, bottom-right, above the bottom nav) ── -->
     <!-- Shown only on the messages module via JS below.
@@ -2741,6 +2765,7 @@
 
         function navigateToPage(page, options = {}) {
             _chatLog('[Navigation] navigateToPage called with:', page, options);
+            if ((page === 'tools' || page === 'tool' || page === 'marketplace') && window.__loadToolsIframe) window.__loadToolsIframe();
             if (!page) {
                 console.warn('[Navigation] No page provided to navigateToPage');
                 return;
@@ -2992,7 +3017,11 @@
 
         function toolsNavTo(page) {
             const iframe = document.getElementById('toolsIframe');
-            if (iframe && iframe.contentWindow) {
+            if (iframe && window.__toolsIframeLoaded && !window.__toolsIframeLoaded()) {
+                // Deferred module not loaded yet: load it and deliver this navigation once it is up.
+                window.__loadToolsIframe();
+                iframe.addEventListener('load', function () { setTimeout(function () { toolsNavTo(page); }, 300); }, { once: true });
+            } else if (iframe && iframe.contentWindow) {
                 iframe.contentWindow.postMessage(
                     { type: 'TOOLS_NAV', payload: { page: page }, source: 'parent-shell' }, '*'
                 );
@@ -7454,7 +7483,14 @@ window.__groupHdrHide = hideGroupHeader;
   // ticks in a row are needed before the dyno could ever go idle — and a
   // background-tab/throttled-timer slip (common on mobile) won't single-
   // handedly cause it anymore.
+  var _lastKeepAlivePing = 0;
   function keepBackendAwake() {
+    // Hidden tabs/backgrounded app: nobody is waiting on the backend, and focus +
+    // visibilitychange both fire on return, so also skip pings closer than 60s.
+    if (document.hidden) return;
+    var _now = Date.now();
+    if (_now - _lastKeepAlivePing < 60000) return;
+    _lastKeepAlivePing = _now;
     // FIX-KEEPALIVE-STALE-HOST: this was hardcoded to noxopa.onrender.com,
     // an old renamed backend host — it kept pinging a backend that isn't
     // the one actually serving this session (see window.__getApiBase /

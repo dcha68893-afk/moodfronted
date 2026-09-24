@@ -315,9 +315,16 @@ function renderFeed(){
  el.innerHTML=section('New from friends',fresh,'is-new')+section('Viewed',viewed,'is-viewed-feed');
  el.querySelectorAll('[data-open-status]').forEach(x=>x.onclick=()=>openViewer(Number(x.dataset.openStatus)));
 }
+// Feed thumbnails. The status grid used to download every full-resolution image and the first
+// bytes of every video just to draw a small card. Cloudinary derives a small optimised image
+// (or a poster frame for video) from the same asset via the URL, so nothing extra is stored and
+// the original stays untouched for the viewer/Vibe player. Non-Cloudinary URLs are left as-is.
+const isCld=u=>typeof u==='string'&&/res\.cloudinary\.com/.test(u)&&u.includes('/upload/');
+function cldImageThumb(u,w=480){return isCld(u)?u.replace('/upload/','/upload/w_'+w+',c_limit,q_auto,f_auto/'):u}
+function cldVideoPoster(u,w=480){return isCld(u)?u.replace('/upload/','/upload/so_0,w_'+w+',c_limit,q_auto,f_jpg/').replace(/\.[a-z0-9]+(\?.*)?$/i,'.jpg'):null}
 function card(s,i){
  const u=s.owner||{};const media=s.mediaUrl;
- const visual=s.type==='image'&&media?'<img class="ns-card-media" src="'+esc(media)+'" loading="lazy">':s.type==='video'&&media?'<video class="ns-card-media" src="'+esc(media)+'" muted playsinline preload="metadata"></video>':'<div class="ns-card-media" style="background:'+safeBg(s.background)+';display:grid;place-items:center"><div style="padding:25px;color:#fff;font-weight:850;font-size:25px;text-align:center;font-family:'+esc(s.font||'system-ui')+'">'+esc(s.content||s.caption||'✨')+'</div></div>';
+ const visual=s.type==='image'&&media?'<img class="ns-card-media" src="'+esc(cldImageThumb(media))+'" loading="lazy" decoding="async">':s.type==='video'&&media?(cldVideoPoster(media)?'<img class="ns-card-media" src="'+esc(cldVideoPoster(media))+'" loading="lazy" decoding="async" alt="">':'<video class="ns-card-media" src="'+esc(media)+'" muted playsinline preload="none"></video>'):'<div class="ns-card-media" style="background:'+safeBg(s.background)+';display:grid;place-items:center"><div style="padding:25px;color:#fff;font-weight:850;font-size:25px;text-align:center;font-family:'+esc(s.font||'system-ui')+'">'+esc(s.content||s.caption||'✨')+'</div></div>';
  return '<article class="ns-card" data-open-status="'+s.id+'">'+visual+'<div class="ns-card-overlay"></div><div class="ns-card-top">'+avatar(u)+'<span class="ns-card-user">'+esc(u.displayName||u.username||'User')+'</span><span class="ns-card-time">'+ago(s.createdAt)+'</span></div><div class="ns-card-bottom"><div class="ns-card-caption">'+esc(s.caption||s.content||'')+'</div><div class="ns-card-meta"><span>👁 '+(s.viewCount||0)+'</span><span>❤️ '+(s.reactionCount||0)+'</span><span>💬 '+(s.replyCount||0)+'</span></div></div></article>';
 }
 async function openUser(userId){
@@ -556,10 +563,34 @@ function applyInterestFilter(list){
  });
 }
 let vibesState={items:[],index:0,muted:true,onlySaved:false,mode:'forYou'};
-async function vibesSource(mode=vibesState.mode||'forYou',q=''){
- const qs='mode='+encodeURIComponent(mode)+(q?'&q='+encodeURIComponent(q):'');
- const data=(await api('/vibes?'+qs)).data||[];
- return data.map(normalizeStatus).filter(s=>s.type==='video'&&s.mediaUrl);
+// The vibes endpoint used to return the whole ranked list (up to hundreds of rows with owner
+// objects) on every open. It is now fetched a page at a time and the next page is pulled in as
+// the viewer nears the end. An older backend ignores limit/offset and returns everything with
+// no hasMore flag, which simply means "no further pages".
+const VIBES_PAGE_SIZE=25;
+let vibesPage={hasMore:false,nextOffset:0,mode:'forYou',q:'',loading:false};
+async function vibesSource(mode=vibesState.mode||'forYou',q='',offset=0){
+ const qs='mode='+encodeURIComponent(mode)+(q?'&q='+encodeURIComponent(q):'')+'&limit='+VIBES_PAGE_SIZE+(offset?'&offset='+offset:'');
+ const res=await api('/vibes?'+qs);
+ const data=res.data||[];
+ const items=data.map(normalizeStatus).filter(s=>s.type==='video'&&s.mediaUrl);
+ // Paging info rides on the returned array so a slow "load more" can never overwrite the
+ // state of a newer first-page load (tab switch / search) that finished in between.
+ items.page={hasMore:!!res.hasMore,nextOffset:Number(res.nextOffset)||offset+VIBES_PAGE_SIZE};
+ if(!offset)vibesPage={...items.page,mode,q,loading:false};
+ return items;
+}
+async function loadMoreVibes(){
+ if(!vibesPage.hasMore||vibesPage.loading||vibesState.onlySaved)return;
+ const {mode,q,nextOffset}=vibesPage;
+ vibesPage.loading=true;
+ try{
+  const more=await vibesSource(mode,q,nextOffset);
+  if(vibesState.mode!==mode||vibesPage.q!==q)return; // tab/search changed while this was in flight
+  vibesPage.hasMore=more.page.hasMore;vibesPage.nextOffset=more.page.nextOffset;
+  const seen=new Set(vibesState.items.map(i=>String(i.id)));
+  more.forEach(i=>{if(!seen.has(String(i.id)))vibesState.items.push(i)});
+ }catch(_){}finally{vibesPage.loading=false}
 }
 
 async function openVibes(){
@@ -628,8 +659,11 @@ async function searchVibes(){
   vibesState={...vibesState,items,index:0,searchQuery:q.trim()};renderVibe();
  }catch(e){toast(e.message||'Search failed')}
 }
-function toggleSavedVibesView(){
+async function toggleSavedVibesView(){
  if(!vibesState.onlySaved){
+   // Saved vibes are matched against loaded clips, so pull the remaining pages first
+   // (bounded to the ~200 the endpoint used to return in one go).
+   for(let n=0;n<8&&vibesPage.hasMore;n++)await loadMoreVibes();
    const saved=loadSavedVibeIds();
    vibesState.allItems=vibesState.allItems||vibesState.items;
    const filtered=vibesState.allItems.filter(s=>saved.has(String(s.id)));
@@ -651,7 +685,7 @@ function renderVibe(){
  const u=s.owner||{};const prefs=state.vibesPrefs||(state.vibesPrefs=loadVibesPrefs());
  const savedIds=loadSavedVibeIds();const isSaved=savedIds.has(String(s.id));
  const expiry=s.vibeExpiresAt?('Expires '+new Date(s.vibeExpiresAt).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})):'';
- root.classList.remove('ns-vibe-next','ns-vibe-prev');void root.offsetWidth;root.classList.add(dirVibeTransition>0?'ns-vibe-next':'ns-vibe-prev');root.innerHTML='<div class="ns-vibes-stage" data-rstage><video src="'+esc(s.mediaUrl)+'" playsinline loop autoplay '+(vibesState.muted?'muted':'')+' preload="auto" onerror="window.__necpaStatusMediaError&&window.__necpaStatusMediaError(this)"></video></div><div class="ns-vibes-top"><button class="ns-vibe-close" data-rclose aria-label="Close">×</button><nav class="ns-vibe-tabs" data-vibe-tab-scroll>'+['forYou','friends','public','following'].map(x=>'<button data-vibe-tab="'+x+'" class="'+(x===vibesState.mode?'active':'')+'">'+({forYou:'For You',friends:'Friends',public:'Public',following:'Following'}[x])+'</button>').join('')+'</nav><button class="ns-vibe-search" data-vsearch aria-label="Search Vibes">⌕</button></div><div class="ns-vibe-creator">'+avatar(u,'ns-vibe-profile-avatar')+(String(u.id)===String(currentUser().id||'')?'':'<button class="ns-vibe-follow'+(s.isFollowedByMe?' following':'')+'" data-rfollow aria-label="'+(s.isFollowedByMe?'Following':'Follow creator')+'">'+(s.isFollowedByMe?'\u2713':'+')+'</button>')+'<div class="ns-vibe-creator-text"><b>'+esc(u.displayName||u.username||'Creator')+'</b><small data-vmeta>'+esc(vibeMeta(s,expiry))+'</small></div></div><div class="ns-vibes-caption">'+esc(s.caption||s.content||'')+'</div><div class="ns-vibes-side"><button class="ns-vibe-profile" data-rprofile aria-label="Creator profile">'+avatar(u,'ns-vibe-side-avatar')+'<i>+</i></button><button data-rlike class="'+(s.likedByMe?'liked':'')+'" aria-label="Love" aria-pressed="'+(s.likedByMe?'true':'false')+'"><span data-heart>'+(s.likedByMe?'♥':'♡')+'</span><span data-count>'+Number(s.reactionCount||0)+'</span></button><button data-rcomment aria-label="Comments"><span>💬</span><span data-count>'+Number(s.replyCount||0)+'</span></button><button data-rsave aria-label="Save" class="'+(isSaved?'active':'')+'"><span>'+(isSaved?'🔖':'🔖')+'</span></button><button data-rshare aria-label="Share"><span>↗</span><span>Share</span></button></div><div class="ns-vibe-comments" data-vibe-comments></div>';
+ root.classList.remove('ns-vibe-next','ns-vibe-prev');void root.offsetWidth;root.classList.add(dirVibeTransition>0?'ns-vibe-next':'ns-vibe-prev');root.innerHTML='<div class="ns-vibes-stage" data-rstage><video src="'+esc(s.mediaUrl)+'"'+(cldVideoPoster(s.mediaUrl)?' poster="'+esc(cldVideoPoster(s.mediaUrl,720))+'"':'')+' playsinline loop autoplay '+(vibesState.muted?'muted':'')+' preload="'+((window.__necpaLiteMedia&&window.__necpaLiteMedia('status'))?'metadata':'auto')+'" onerror="window.__necpaStatusMediaError&&window.__necpaStatusMediaError(this)"></video></div><div class="ns-vibes-top"><button class="ns-vibe-close" data-rclose aria-label="Close">×</button><nav class="ns-vibe-tabs" data-vibe-tab-scroll>'+['forYou','friends','public','following'].map(x=>'<button data-vibe-tab="'+x+'" class="'+(x===vibesState.mode?'active':'')+'">'+({forYou:'For You',friends:'Friends',public:'Public',following:'Following'}[x])+'</button>').join('')+'</nav><button class="ns-vibe-search" data-vsearch aria-label="Search Vibes">⌕</button></div><div class="ns-vibe-creator">'+avatar(u,'ns-vibe-profile-avatar')+(String(u.id)===String(currentUser().id||'')?'':'<button class="ns-vibe-follow'+(s.isFollowedByMe?' following':'')+'" data-rfollow aria-label="'+(s.isFollowedByMe?'Following':'Follow creator')+'">'+(s.isFollowedByMe?'\u2713':'+')+'</button>')+'<div class="ns-vibe-creator-text"><b>'+esc(u.displayName||u.username||'Creator')+'</b><small data-vmeta>'+esc(vibeMeta(s,expiry))+'</small></div></div><div class="ns-vibes-caption">'+esc(s.caption||s.content||'')+'</div><div class="ns-vibes-side"><button class="ns-vibe-profile" data-rprofile aria-label="Creator profile">'+avatar(u,'ns-vibe-side-avatar')+'<i>+</i></button><button data-rlike class="'+(s.likedByMe?'liked':'')+'" aria-label="Love" aria-pressed="'+(s.likedByMe?'true':'false')+'"><span data-heart>'+(s.likedByMe?'♥':'♡')+'</span><span data-count>'+Number(s.reactionCount||0)+'</span></button><button data-rcomment aria-label="Comments"><span>💬</span><span data-count>'+Number(s.replyCount||0)+'</span></button><button data-rsave aria-label="Save" class="'+(isSaved?'active':'')+'"><span>'+(isSaved?'🔖':'🔖')+'</span></button><button data-rshare aria-label="Share"><span>↗</span><span>Share</span></button></div><div class="ns-vibe-comments" data-vibe-comments></div>';
  // FIX (VIBE TABS STOPPED FILTERING AFTER THE FIRST SWITCH): every binding below used a bare
  // `.onclick=` (no `?.`), so if ANY single one of them ever failed to find its element (a slow
  // paint, a stale node from the previous render, or any other transient DOM timing hiccup) it
@@ -688,11 +722,13 @@ function renderVibe(){
 // renderVibe() for that item is very likely already cached when its turn
 // comes, so playback starts immediately instead of buffering.
 const __vibePreloadCache=new Map();
-function preloadVibeAt(i){
+function preloadVibeAt(i,depth='auto'){
  const item=vibesState.items&&vibesState.items[i];
  if(!item||!item.mediaUrl||__vibePreloadCache.has(item.mediaUrl))return;
+ // Save-Data / slow links only fetch headers; the previous clip never needs a full download.
+ const lite=!!(window.__necpaLiteMedia&&window.__necpaLiteMedia('status'));
  const v=document.createElement('video');
- v.src=item.mediaUrl;v.muted=true;v.preload='auto';v.playsInline=true;
+ v.src=item.mediaUrl;v.muted=true;v.preload=lite?'metadata':depth;v.playsInline=true;
  v.style.cssText='position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;left:-9999px;top:-9999px';
  document.body.appendChild(v);
  __vibePreloadCache.set(item.mediaUrl,v);
@@ -706,8 +742,8 @@ function preloadAdjacentVibes(){
  const len=vibesState.items?vibesState.items.length:0;if(!len)return;
  // Match moveVibe()'s own wraparound (swiping past the last clip goes back
  // to the first, and vice versa) so the edges of the feed preload correctly too.
- preloadVibeAt((vibesState.index+1)%len);
- preloadVibeAt((vibesState.index-1+len)%len);
+ preloadVibeAt((vibesState.index+1)%len,'auto');
+ preloadVibeAt((vibesState.index-1+len)%len,'metadata');
 }
 async function sendVibeFriendRequest(u){
  const id=Number(u?.id||0);if(!id||id===Number(currentUser().id||0))return;
@@ -796,6 +832,7 @@ async function openVibeComments(s){
 let dirVibeTransition=1;
 function moveVibe(dir){
  if(!document.querySelector('[data-vibes]')?.classList.contains('open'))return;
+ if(dir>0&&vibesState.items.length-vibesState.index<=5)loadMoreVibes();
  const n=vibesState.index+dir;
  if(n<0){vibesState.index=vibesState.items.length-1;dir=1}else if(n>=vibesState.items.length){vibesState.index=0;dir=1}else vibesState.index=n;
  dirVibeTransition=dir;renderVibe();
@@ -841,9 +878,11 @@ async function handleMedia(e){
   try{const compressed=await compressImage(file);state.composer.media={file:compressed,type:'image'};previewMedia()}catch(_){state.composer.media={file,type:'image'};previewMedia()}
  }
 }
-async function trimVideoToRange(file,start,end){
+async function trimVideoToRange(file,start,end,sourceDuration){
  const duration=Math.max(0.1,end-start);
- if(start<=0.001&&duration<=20.001&&Number(file.size)>0&&end>=Math.min(20,end)) return file;
+ // Only a clip that is genuinely <= 20s and untouched can be uploaded as-is. Comparing the range to
+ // itself (the old check) treated "first 20s of a 60s video" as "nothing to trim" and sent the whole file.
+ if(start<=0.001&&Number(file.size)>0&&Number(sourceDuration||0)>0&&Number(sourceDuration)<=20.05&&end>=Number(sourceDuration)-0.05) return file;
  if(!window.MediaRecorder) throw new Error('This browser cannot trim video here. Please choose a video shorter than 20 seconds.');
  const url=URL.createObjectURL(file);
  const v=document.createElement('video');v.src=url;v.muted=false;v.playsInline=true;v.preload='auto';
@@ -891,12 +930,26 @@ async function publish(){
   let media={};
   if(c.media){
    if(c.media.type==='video'){
-    const start=Number(c.media.trimStart||0),end=Math.min(Number(c.media.trimEnd||20),start+20,Number(c.media.sourceDuration||20));
-    if(end-start>20.001) throw new Error('Status video cannot exceed 20 seconds.');
-    c.media.file=await trimVideoToRange(c.media.file,start,end);
-    c.media.sourceDuration=end-start;c.media.trimStart=0;c.media.trimEnd=end-start;
+    // The person's own cut wins. If they did not cut a longer clip, the first 20 seconds are kept.
+    const srcDur=Number(c.media.sourceDuration||0);
+    const start=Math.max(0,Number(c.media.trimStart||0));
+    const end=Math.min(Number(c.media.trimEnd||start+20),start+20,srcDur>0?srcDur:start+20);
+    const needsCut=start>0.05||srcDur>20.05;
+    // The server cuts the range from the original (exact, full quality, works on every device).
+    // Only if it reports it cannot shorten videos does the phone re-record the range itself.
+    c.media.serverTrim=needsCut;
+    if(needsCut){c.media.trimStart=start;c.media.trimEnd=end;}
+    c.media.needsCut=needsCut;c.media.cutRange=[start,end,srcDur];
    }
-   const fd=new FormData();fd.append('file',c.media.file);fd.append('trimStart','0');fd.append('trimEnd',String(c.media.trimEnd||Math.min(Number(c.media.sourceDuration||20),20)));fd.append('sourceDuration',String(c.media.sourceDuration||0));const t=token();const r=await fetch(uploadUrl(),{method:'POST',headers:t?{Authorization:/^Bearer /i.test(t)?t:'Bearer '+t}:{},body:fd});const d=await r.json();if(!r.ok||!d.success)throw new Error(d.error||'Media upload failed');const uploaded=d?.data?.cloudinary||d?.cloudinary||d; const mediaUrl=uploaded?.url||uploaded?.secure_url||d?.url; const mediaPublicId=uploaded?.public_id||uploaded?.publicId||d?.publicId; if(!mediaUrl)throw new Error('Media upload succeeded but no media URL was returned'); media={mediaUrl,mediaPublicId,mediaMime:c.media.file.type};}
+   const sendMedia=async()=>{const fd=new FormData();fd.append('file',c.media.file);fd.append('trimStart',String(c.media.serverTrim?c.media.trimStart:0));fd.append('trimEnd',String(c.media.trimEnd||Math.min(Number(c.media.sourceDuration||20),20)));fd.append('sourceDuration',String(c.media.sourceDuration||0));const t=token();const r=await fetch(uploadUrl(),{method:'POST',headers:t?{Authorization:/^Bearer /i.test(t)?t:'Bearer '+t}:{},body:fd});const d=await r.json().catch(()=>({}));return {r,d};};
+   let {r,d}=await sendMedia();
+   if(!r.ok&&c.media.needsCut&&/cannot shorten/i.test(String(d&&d.error||''))){
+    const [cs,ce,sd]=c.media.cutRange;
+    c.media.file=await trimVideoToRange(c.media.file,cs,ce,sd);
+    c.media.serverTrim=false;c.media.sourceDuration=ce-cs;c.media.trimStart=0;c.media.trimEnd=ce-cs;
+    ({r,d}=await sendMedia());
+   }
+   if(!r.ok||!d.success)throw new Error(d.error||'Media upload failed');const uploaded=d?.data?.cloudinary||d?.cloudinary||d; const mediaUrl=uploaded?.url||uploaded?.secure_url||d?.url; const mediaPublicId=uploaded?.public_id||uploaded?.publicId||d?.publicId; if(!mediaUrl)throw new Error('Media upload succeeded but no media URL was returned'); media={mediaUrl,mediaPublicId,mediaMime:c.media.file.type};}
   /* FIX ("Cannot access 'type' before initialization" on Publish): `activePane` and `type` were declared again with const
      inside this try block, AFTER the check at the top of the block had already read `type`. That inner `type` shadows the
      outer one and is still in its temporal dead zone at that point, so every Publish click threw immediately (before any

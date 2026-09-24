@@ -1250,11 +1250,39 @@
     // (settings-core.js: privacy.readReceipts, chat.enterToSend/messagePreviews).
     const settingsState = { privacy: { readReceipts: true }, chat: { enterToSend: true, messagePreviews: true } };
 
+    // AppSettings (the source of truth) names some keys differently from this module.
+    const SETTING_KEY_ALIASES = { chat: { enterKeySends: 'enterToSend' } };
+
     function applySettingToMessageModule(section, key, value) {
         if (!settingsState[section]) settingsState[section] = {};
-        settingsState[section][key] = value;
-        notify('settings:changed', { section, key, value });
+        const alias = SETTING_KEY_ALIASES[section] && SETTING_KEY_ALIASES[section][key];
+        const target = alias || key;
+        // Unchanged values are ignored so repeated storage/broadcast echoes cannot
+        // trigger a re-render storm.
+        if (settingsState[section][target] === value) return;
+        settingsState[section][target] = value;
+        notify('settings:changed', { section, key: target, value });
     }
+
+    function applySettingsSnapshot(settings) {
+        if (!settings || typeof settings !== 'object') return;
+        ['privacy', 'chat'].forEach((sec) => {
+            const vals = settings[sec];
+            if (vals && typeof vals === 'object') {
+                Object.entries(vals).forEach(([k, v]) => {
+                    if (v === null || typeof v !== 'object') applySettingToMessageModule(sec, k, v);
+                });
+            }
+        });
+    }
+
+    // Seed once from the cached snapshot (settings only reached this module when
+    // changed, so a fresh open used the hard-coded defaults), then follow updates
+    // published by settings-broadcast-listener.js.
+    try {
+        applySettingsSnapshot(window.__cachedSettings || JSON.parse(localStorage.getItem('kyn_app_settings') || 'null'));
+    } catch (_) {}
+    document.addEventListener('settingsUpdated', (e) => applySettingsSnapshot(e && e.detail));
 
     // Typing indicators. Outbound goes through chat.html's existing
     // START_TYPING/STOP_TYPING postMessage bridge (confirmed working —
@@ -1267,7 +1295,7 @@
     const typingState = new Map(); // chatId -> timeout handle
 
     function sendTypingStart(chatId) {
-        if (!chatId) return;
+        if (!chatId || settingsState.privacy.typingIndicators === false) return;
         try { window.parent.postMessage({ type: 'START_TYPING', payload: { conversationId: chatId } }, '*'); } catch (_) {}
     }
     function sendTypingStop(chatId) {

@@ -25,8 +25,44 @@
     }
 
     // ── Apply a full settings object to this iframe's DOM ────────────────────
+    // One settings change reaches a frame through several channels (BroadcastChannel,
+    // postMessage relay and up to three localStorage keys), so identical payloads used
+    // to be re-applied and re-broadcast several times. Consecutive duplicates are skipped.
+    // Single shared answer to "should media be fetched eagerly?" so each module does not
+    // re-derive it: off when Data Saver is on, the browser says Save-Data / a 2G-3G link, or
+    // the relevant auto-download setting is off. kind: 'chat' | 'group' | 'status'.
+    window.__necpaLiteMedia = function (kind) {
+        try {
+            if (window.__dataSaver === true) return true;
+            var c = navigator.connection;
+            if (c && (c.saveData || /(^|-)(2g|3g)$/.test(c.effectiveType || ''))) return true;
+            if (kind === 'chat'   && window.__mediaAutoDownload === false)      return true;
+            if (kind === 'group'  && window.__groupMediaAutoDownload === false) return true;
+            if (kind === 'status' && window.__statusAutoDownload === false)     return true;
+        } catch (_) {}
+        return false;
+    };
+    var _lastSig = '';
+    function _merge(base, patch) {
+        var out = {};
+        var k;
+        for (k in base) if (Object.prototype.hasOwnProperty.call(base, k)) out[k] = base[k];
+        for (k in patch) {
+            if (!Object.prototype.hasOwnProperty.call(patch, k)) continue;
+            var v = patch[k];
+            out[k] = (v && typeof v === 'object' && !Array.isArray(v) && out[k] && typeof out[k] === 'object' && !Array.isArray(out[k]))
+                ? _merge(out[k], v) : v;
+        }
+        return out;
+    }
+
     function applyFull(settings) {
         if (!settings || typeof settings !== 'object') return;
+        try {
+            var sig = JSON.stringify(settings);
+            if (sig === _lastSig) return;
+            _lastSig = sig;
+        } catch (_) {}
         var root = document.documentElement;
         var body = document.body;
 
@@ -222,11 +258,18 @@
         if (st.autoExpireStatus !== undefined)   window.__autoExpireStatus   = st.autoExpireStatus;
         if (st.allowStatusReplies !== undefined) window.__allowStatusReplies = st.allowStatusReplies;
         if (st.showStatusTo !== undefined)       window.__showStatusTo       = st.showStatusTo;
+        // AppSettings' real status keys (the four above are legacy names it never sends).
+        if (st.visibility !== undefined)         window.__whoCanViewMyStatus = st.visibility;
+        if (st.autoDownloadMedia !== undefined)  window.__statusAutoDownload = st.autoDownloadMedia;
+        if (st.moodAutoShare !== undefined)      window.__shareMoodStatus    = st.moodAutoShare;
 
         // Store and notify
-        window.__cachedSettings = settings;
-        try { document.dispatchEvent(new CustomEvent('settingsUpdated', { detail: settings })); } catch (_) {}
-        if (typeof window.onSettingsChange === 'function') { try { window.onSettingsChange(settings); } catch (_) {} }
+        // Keep the cache a FULL snapshot: a single-key change used to overwrite it with a
+        // partial object, so modules reading window.__cachedSettings lost every other value.
+        var merged = _merge(window.__cachedSettings || {}, settings);
+        window.__cachedSettings = merged;
+        try { document.dispatchEvent(new CustomEvent('settingsUpdated', { detail: merged })); } catch (_) {}
+        if (typeof window.onSettingsChange === 'function') { try { window.onSettingsChange(merged); } catch (_) {} }
     }
 
     // ── Apply a single key change ────────────────────────────────────────────
