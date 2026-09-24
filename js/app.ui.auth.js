@@ -1796,7 +1796,8 @@ class AuthGateway {
     
     async _init() {
         try {
-            console.log('🚀 Auth Gateway initializing with waitForReady() integration...');
+            console.log('🚀 Auth Gateway initializing with local-first session restoration...');
+            this._loadAuthState();
             
             // Step 1: Wait for API Auth to be ready - USE waitForReady() if available
             await this._waitForApiAuth();
@@ -4215,7 +4216,14 @@ if (window.SessionManager) {
     
     _loadAuthState() {
         try {
-            const stored = localStorage.getItem(AUTH_GATEWAY_CONFIG.AUTH_STATE_KEY);
+            let stored = localStorage.getItem(AUTH_GATEWAY_CONFIG.AUTH_STATE_KEY);
+            if (!stored) {
+                const canonical = localStorage.getItem('kynecta_auth');
+                if (canonical) {
+                    const auth = JSON.parse(canonical);
+                    if (auth && auth.token && auth.user) stored = JSON.stringify({status:'authenticated',user:auth.user,token:auth.token,timestamp:Number(auth.issuedAt)||Date.now()});
+                }
+            }
             if (stored) {
                 const authState = JSON.parse(stored);
                 
