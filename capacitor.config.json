@@ -12,7 +12,9 @@
       "*.googleusercontent.com",
       "accounts.google.com",
       "res.cloudinary.com"
-    ]
+    ],
+    "url": "https://necpra.co.ke/",
+    "errorPath": "index.html"
   },
   "plugins": {
     "SplashScreen": {
