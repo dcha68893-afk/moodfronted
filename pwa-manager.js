@@ -624,15 +624,11 @@
     }
 
     registerServiceWorker().then(function (registration) {
-      function activateReadyWorker(worker) {
-        if (!worker) return;
-        // Tell the worker to activate immediately. The actual page refresh is
-        // still user-controlled so a long-lived chat is not interrupted.
-        try { worker.postMessage({ type: 'SKIP_WAITING' }); } catch (_) {}
-      }
-
+      // A waiting worker is a real, fully downloaded update. Keep it waiting
+      // until the user explicitly taps Refresh so an active chat/session is
+      // never interrupted by a background deployment.
       if (registration.waiting && navigator.serviceWorker.controller) {
-        activateReadyWorker(registration.waiting);
+        showUpdateBanner();
       }
 
       registration.addEventListener('updatefound', function () {
@@ -640,9 +636,7 @@
         if (!worker) return;
         worker.addEventListener('statechange', function () {
           if (worker.state === 'installed' && navigator.serviceWorker.controller) {
-            // The new worker is fully installed. It activates immediately,
-            // then SW_UPDATED drives the visible Refresh action.
-            activateReadyWorker(worker);
+            showUpdateBanner();
           }
         });
       });

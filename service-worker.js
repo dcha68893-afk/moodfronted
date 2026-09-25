@@ -24,7 +24,7 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.40.0';
+const SW_VERSION = '19.41.0';
 // FIX: bumped so activate() drops every existing cache immediately on this
 // deploy — anyone with a stale pre-rebuild group.html (or the old, now-
 // deleted group-core-*/group-os-* files, or the misspelled necpra-* icons
@@ -82,7 +82,7 @@ const SW_VERSION = '19.40.0';
 // are no longer cached or executed as code; navigations fall back to the cached shell after 6s.
 // v74: profile-photo fix (js/avatar-fix.js added, message.html + js/config.js changed). Bump forces every installed
 // PWA/Android app to drop old copies and show the 'Update ready - Refresh' banner.
-const CACHE_NAME = 'necpa-static-v74';
+const CACHE_NAME = 'necpa-static-v75';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -222,7 +222,6 @@ async function staticAsset(request){
 async function api(request){try{return await fetch(request);}catch(_){return new Response(JSON.stringify({error:'Network request failed',offline:true}),{status:503,headers:{'Content-Type':'application/json'}});}}
 
 self.addEventListener('install',event=>{
-  self.skipWaiting();
   event.waitUntil(caches.open(CACHE_NAME).then(cache=>Promise.all(CORE_STATIC_ASSETS.map(a=>fetch(a,{cache:'no-store',credentials:'same-origin'}).then(r=>r.ok?cache.put(a,r):null).catch(()=>null)))).then(()=>console.log('[SW] Installed '+SW_VERSION)));
 });
 self.addEventListener('activate',event=>{

@@ -5614,9 +5614,14 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
                 g.updateBtn.disabled = true;
                 g.updateBtn.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Checking…';
                 navigator.serviceWorker.getRegistration().then(function (reg) {
-                    return reg ? reg.update() : null;
-                }).then(function () {
-                    g.updateBtn.innerHTML = '<i class="fas fa-check"></i> Up to date';
+                    if (!reg) return null;
+                    return reg.update().then(function () { return reg; });
+                }).then(function (reg) {
+                    if (reg && reg.waiting && navigator.serviceWorker.controller) {
+                        g.updateBtn.innerHTML = '<i class="fas fa-arrow-circle-up"></i> Update ready — use Refresh above';
+                    } else {
+                        g.updateBtn.innerHTML = '<i class="fas fa-check"></i> Up to date';
+                    }
                 }).catch(function () {
                     g.updateBtn.innerHTML = label;
                 }).finally(function () {
@@ -5640,43 +5645,9 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
             if (b) b.remove();
         });
 
-        // ---- "Update available" detection ---------------------------------------
-        // A service worker registration exposes an update the moment it's
-        // downloaded and waiting to activate (registration.waiting / the
-        // 'updatefound' -> installstate 'installed' transition while a
-        // controller already exists). Surface that as a distinct, higher-
-        // urgency state instead of folding it into the same "Check for
-        // Updates" button that silently says "Up to date" either way.
-        function markUpdateAvailable(reg) {
-            statusGroups.forEach(function (g) {
-                if (!g.updateBtn) return;
-                g.updateBtn.classList.add('pwa-update-available');
-                g.updateBtn.innerHTML = '<i class="fas fa-arrow-circle-up"></i> Update Available';
-                g.updateBtn.onclick = function () {
-                    g.updateBtn.disabled = true;
-                    g.updateBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Updating…';
-                    if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-                    navigator.serviceWorker.addEventListener('controllerchange', function () {
-                        window.location.reload();
-                    }, { once: true });
-                };
-            });
-        }
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.getRegistration().then(function (reg) {
-                if (!reg) return;
-                if (reg.waiting && navigator.serviceWorker.controller) markUpdateAvailable(reg);
-                reg.addEventListener('updatefound', function () {
-                    var installing = reg.installing;
-                    if (!installing) return;
-                    installing.addEventListener('statechange', function () {
-                        if (installing.state === 'installed' && navigator.serviceWorker.controller) {
-                            markUpdateAvailable(reg);
-                        }
-                    });
-                });
-            }).catch(function () {});
-        }
+        // Service-worker registration and update UX are owned exclusively by
+        // /pwa-manager.js. This page keeps only its explicit "Check for updates"
+        // action above; it no longer creates a second waiting/activation flow.
 
         // FIX (fake "Installed" state): pwa_installed used to be treated as
         // permanent proof of installation the moment it was set (on
