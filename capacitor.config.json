@@ -1,5 +1,17 @@
-﻿{
+{
   "appId": "com.necpa",
   "appName": "Necpa",
-  "webDir": "dist"
+  "webDir": "dist",
+  "server": {
+    "url": "https://necpra.co.ke",
+    "cleartext": false,
+    "allowNavigation": [
+      "necpra.co.ke",
+      "*.necpra.co.ke",
+      "*.onrender.com",
+      "*.googleusercontent.com",
+      "accounts.google.com",
+      "res.cloudinary.com"
+    ]
+  }
 }

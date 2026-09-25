@@ -474,5 +474,7 @@
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true }); else init();
     if (window.MutationObserver) new MutationObserver(function (mutations) { mutations.forEach(function (mutation) { mutation.addedNodes && mutation.addedNodes.forEach(function (node) { if (node.nodeType === 1) { applyBrand(node); fixBrokenImages(node); } }); }); }).observe(document.documentElement, { childList: true, subtree: true });
+    // Shared profile-photo resolver (Google / manual / relative paths / initials fallback) for EVERY page.
+    loadOnce('/js/avatar-fix.js?v=20260924-1', 'avatar_fix');
     console.log('[Config] Necpa runtime configuration loaded. Backend:', configuredOrigin || '(missing)');
 })();

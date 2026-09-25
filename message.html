@@ -9,6 +9,7 @@
      explanation of why a literal in this spot breaks under the build. -->
 <script src="/js/runtime-config.js"></script>
 <script src="/js/config.js"></script>
+<script src="/js/avatar-fix.js?v=20260924-1"></script>
 <script src="/js/theme.engine.js"></script>
 <!-- FIX (SETTINGS-NOT-APPLIED-EVERYWHERE): this listener's own header comment
      already claims it's "Embedded in EVERY module iframe (messages, calls,
@@ -545,6 +546,15 @@
     const convListEl = document.getElementById('convList');
     const chatPanelEl = document.getElementById('chatPanel');
 
+    // FIX (profile photos): one resolver for every user (Google / manual / relative /uploads path / placeholder).
+    // Falls back to an initials avatar - never the Necpa logo.
+    function userAvatarSrc(u) {
+      try { if (window.NecpaAvatar) return window.NecpaAvatar.src(u); } catch (_) {}
+      return (u && (u.avatar || u.photoURL || u.picture)) || '/icons/necpa-192.png';
+    }
+    function userAvatarName(u) {
+      try { return window.NecpaAvatar ? window.NecpaAvatar.nameOf(u) : ''; } catch (_) { return ''; }
+    }
     function escapeHtml(s) {
       return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     }
@@ -761,7 +771,7 @@
 
       const rowHtml = (c) => `
         <div class="conv-item${c.chatId === window.MessageModule.getActiveChatId() ? ' active' : ''}" data-chat-id="${c.chatId}">
-          <img class="conv-avatar" src="${escapeHtml(c.otherUser?.avatar || '/icons/necpa-192.png')}" alt="">
+          <img class="conv-avatar" src="${escapeHtml(userAvatarSrc(c.otherUser))}" alt="" referrerpolicy="no-referrer" data-avatar="1" data-avatar-name="${escapeHtml(userAvatarName(c.otherUser))}">
           <div class="conv-meta">
             <div class="conv-name">${favIds.has(String(c.chatId)) ? '\u2b50 ' : ''}${escapeHtml(c.otherUser?.username || 'Conversation')}</div>
             <div class="conv-preview">${escapeHtml(safeConvPreview(c.lastMessage, c.chatId))}</div>
@@ -848,7 +858,7 @@
         }
         listEl.innerHTML = convs.map(c => `
           <div class="conv-item" data-chat-id="${c.chatId}" style="display:flex;align-items:center;">
-            <img class="conv-avatar" src="${escapeHtml(c.otherUser?.avatar || '/icons/necpa-192.png')}" alt="">
+            <img class="conv-avatar" src="${escapeHtml(userAvatarSrc(c.otherUser))}" alt="" referrerpolicy="no-referrer" data-avatar="1" data-avatar-name="${escapeHtml(userAvatarName(c.otherUser))}">
             <div class="conv-meta">
               <div class="conv-name">${escapeHtml(c.otherUser?.username || 'Conversation')}</div>
               <div class="conv-preview">${escapeHtml(safeConvPreview(c.lastMessage, c.chatId))}</div>
@@ -984,7 +994,7 @@
       }
       convListEl.innerHTML = archived.map(c => `
         <div class="conv-item">
-          <img class="conv-avatar" src="${escapeHtml(c.otherUser?.avatar || '/icons/necpa-192.png')}" alt="">
+          <img class="conv-avatar" src="${escapeHtml(userAvatarSrc(c.otherUser))}" alt="" referrerpolicy="no-referrer" data-avatar="1" data-avatar-name="${escapeHtml(userAvatarName(c.otherUser))}">
           <div class="conv-meta">
             <div class="conv-name">${escapeHtml(c.otherUser?.username || 'Conversation')}</div>
           </div>
@@ -1160,7 +1170,7 @@
       chatPanelEl.innerHTML = `
         <div id="chatHeader">
           <button id="backBtn"${(hasChat || pending) ? '' : ' disabled style="visibility:hidden;"'}>&larr;</button>
-          ${pending && pending.avatar ? `<img class="conv-avatar" src="${escapeHtml(pending.avatar)}" alt="" style="width:28px;height:28px;border-radius:50%;margin-right:8px;">` : ''}
+          ${pending && pending.avatar ? `<img class="conv-avatar" src="${escapeHtml(userAvatarSrc(pending))}" alt="" referrerpolicy="no-referrer" data-avatar="1" data-avatar-name="${escapeHtml(userAvatarName(pending))}" style="width:28px;height:28px;border-radius:50%;margin-right:8px;">` : ''}
           <strong id="chatHeaderName" style="cursor:${hasChat ? 'pointer' : 'default'};">${escapeHtml(headerName)}</strong>
           <div id="chatHeaderActions">
             <button class="header-icon-btn" id="searchInChatBtn" title="Search"${hasChat ? '' : ' disabled style="visibility:hidden;"'}>🔍</button>
@@ -1928,7 +1938,7 @@
 
       body.innerHTML = `
         <div class="chat-info-header">
-          <img src="${escapeHtml(conv?.otherUser?.avatar || '/icons/necpa-192.png')}" class="chat-info-avatar">
+          <img src="${escapeHtml(userAvatarSrc(conv?.otherUser))}" class="chat-info-avatar" referrerpolicy="no-referrer" data-avatar="1" data-avatar-name="${escapeHtml(userAvatarName(conv?.otherUser))}">
           <div class="chat-info-name">${escapeHtml(conv?.otherUser?.username || 'Conversation')}</div>
         </div>
         <div class="chat-info-section">
@@ -2197,7 +2207,7 @@
     function renderNewChatResults(users) {
       newChatResults.innerHTML = users.map(u => `
         <div class="new-chat-result-item${broadcastMode ? ' broadcast-mode' : ''}" data-user-id="${u.id}" data-user-name="${escapeHtml(u.username || '')}" data-user-avatar="${escapeHtml(u.avatar || u.photoURL || '')}">
-          <img src="${escapeHtml(u.avatar || u.photoURL || '/icons/necpa-192.png')}" alt="">
+          <img src="${escapeHtml(userAvatarSrc(u))}" alt="" referrerpolicy="no-referrer" data-avatar="1" data-avatar-name="${escapeHtml(userAvatarName(u))}">
           <span>${escapeHtml(u.username || u.firstName || u.displayName || 'User')}</span>
           ${broadcastMode
             ? `<input type="checkbox" class="broadcast-checkbox" data-broadcast-id="${u.id}"${broadcastSelectedIds.has(Number(u.id)) ? ' checked' : ''}>`

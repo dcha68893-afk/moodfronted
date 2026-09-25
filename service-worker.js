@@ -24,7 +24,7 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.39.0';
+const SW_VERSION = '19.40.0';
 // FIX: bumped so activate() drops every existing cache immediately on this
 // deploy — anyone with a stale pre-rebuild group.html (or the old, now-
 // deleted group-core-*/group-os-* files, or the misspelled necpra-* icons
@@ -80,7 +80,9 @@ const SW_VERSION = '19.39.0';
 // v67/v69 fixes above were meant to retire) also gets one more forced clean break.
 // v71: script/style requests that come back as HTML (free-tier host still waking, SPA/404 fallback)
 // are no longer cached or executed as code; navigations fall back to the cached shell after 6s.
-const CACHE_NAME = 'necpa-static-v73';
+// v74: profile-photo fix (js/avatar-fix.js added, message.html + js/config.js changed). Bump forces every installed
+// PWA/Android app to drop old copies and show the 'Update ready - Refresh' banner.
+const CACHE_NAME = 'necpa-static-v74';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -97,7 +99,7 @@ const CORE_STATIC_ASSETS = [
 const NETWORK_FIRST_PATTERNS = [
   // FIX: config.js (global brand/config layer every page runs) and the group send path were served stale-while-
   // revalidate, so a fix could sit on the server for a full session before an installed app ran it.
-  /\/js\/config\.js/i,/\/js\/groupMessaging\.client\.js/i,/\/group\.html/i,
+  /\/js\/config\.js/i,/\/js\/avatar-fix\.js/i,/\/js\/groupMessaging\.client\.js/i,/\/group\.html/i,
   /\/js\/theme\.engine\.js/i,/\/theme\.colors\.css/i,/\/js\/e2e-encryption\.js/i,
   /\/js\/e2e-session-init\.js/i,/\/js\/api\.request\.js/i,/\/js\/message-e2e-core\.js/i,
   /\/js\/message-e2e-compat\.js/i,/\/message\.html/i,
@@ -233,7 +235,10 @@ self.addEventListener('fetch',event=>{
   if(local(url)&&isNetworkFirst(url)){event.respondWith(networkFirst(r));return;}
   if(local(url)&&isLiveCodeAsset(url)){event.respondWith(networkFirst(r));return;}
   if(local(url)&&isStatic(url)){event.respondWith(staticAsset(r));return;}
-  event.respondWith(fetch(r).catch(()=>new Response('Offline',{status:503})));
+  // FIX: cross-origin requests (Google/Cloudinary/ui-avatars profile photos) go straight to the network.
+  // Re-fetching them from inside the worker made them subject to the worker's CSP connect-src and to its
+  // 503 fallback, so profile photos could fail in the installed app/PWA while working in a normal tab.
+  return;
 });
 self.addEventListener('message',event=>{
   const d=event.data;if(!d||!d.type)return;
