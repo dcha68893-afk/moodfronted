@@ -3,7 +3,7 @@
   "appName": "Necpa",
   "webDir": "dist",
   "server": {
-    "url": "https://necpra.co.ke",
+    "androidScheme": "https",
     "cleartext": false,
     "allowNavigation": [
       "necpra.co.ke",
@@ -13,5 +13,15 @@
       "accounts.google.com",
       "res.cloudinary.com"
     ]
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 0,
+      "launchAutoHide": false,
+      "backgroundColor": "#2563eb",
+      "androidSplashResourceName": "splash",
+      "androidScaleType": "CENTER_CROP",
+      "showSpinner": false
+    }
   }
 }

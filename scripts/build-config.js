@@ -178,18 +178,70 @@ function transformBackendUrlLiterals(text, fileName) {
 }
 
 function processArtifacts(dir) {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        const file = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-            processArtifacts(file);
-            continue;
+    const skippedTransform = [];
+    (function walk(d) {
+        for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
+            const file = path.join(d, entry.name);
+            if (entry.isDirectory()) {
+                walk(file);
+                continue;
+            }
+            if (!entry.isFile() || !/\.(js|html)$/i.test(entry.name)) continue;
+            const original = fs.readFileSync(file, 'utf8');
+            const transformed = transformBackendUrlLiterals(original, entry.name);
+            if (transformed === original) continue;
+            // ROOT-CAUSE FIX (build fails on a valid source file after
+            // transformBackendUrlLiterals corrupts it): the rewrite above is a
+            // plain text regex replace with no awareness of the surrounding
+            // JS context (e.g. an already-escaped quote inside a bigger
+            // string, or a literal used somewhere the resulting bare
+            // expression isn't valid). It can silently produce invalid JS,
+            // which then only surfaced later as a hard, whole-build failure
+            // in validateJavaScript() pointing at the (already-corrupted)
+            // dist file rather than the real source. For .js files, verify
+            // the rewritten text is still syntactically valid *before*
+            // writing it; if not, keep the original (safe) literal for this
+            // one file instead of failing the entire build over an edge
+            // case in one fallback URL string.
+            if (/\.js$/i.test(entry.name)) {
+                const moduleSyntax = /^\s*(?:import|export)\b/m.test(transformed);
+                try {
+                    if (moduleSyntax) {
+                        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'necpa-jscheck-'));
+                        const tempFile = path.join(tempDir, 'check.mjs');
+                        try {
+                            fs.writeFileSync(tempFile, transformed, 'utf8');
+                            execFileSync(process.execPath, ['--check', tempFile], { stdio: 'pipe' });
+                        } finally {
+                            fs.rmSync(tempDir, { recursive: true, force: true });
+                        }
+                    } else {
+                        const tempFile = file + '.checktmp';
+                        fs.writeFileSync(tempFile, transformed, 'utf8');
+                        try {
+                            execFileSync(process.execPath, ['--check', tempFile], { stdio: 'pipe' });
+                        } finally {
+                            fs.rmSync(tempFile, { force: true });
+                        }
+                    }
+                } catch (_error) {
+                    skippedTransform.push(path.relative(ROOT, file));
+                    continue; // keep `original` on disk, unmodified
+                }
+            }
+            fs.writeFileSync(file, transformed, 'utf8');
         }
-        if (!entry.isFile() || !/\.(js|html)$/i.test(entry.name)) continue;
-        const original = fs.readFileSync(file, 'utf8');
-        const transformed = transformBackendUrlLiterals(original, entry.name);
-        if (transformed !== original) fs.writeFileSync(file, transformed, 'utf8');
+    })(dir);
+    if (skippedTransform.length) {
+        console.warn(
+            `[Necpa build] Kept original literal backend URL in ${skippedTransform.length} file(s) ` +
+            `because rewriting it produced invalid JavaScript: ${skippedTransform.join(', ')}. ` +
+            `These files still work (they use the literal fallback URL); investigate transformBackendUrlLiterals ` +
+            `in scripts/build-config.js if a dynamic origin is required there.`
+        );
     }
 }
+
 processArtifacts(DIST);
 
 function rewriteSplitScriptReferences(dir) {
