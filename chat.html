@@ -3789,6 +3789,18 @@
          this page's init() has almost always already finished, so theirs
          resolves instantly instead of doing real work. -->
     <script src="js/e2e-encryption.js"></script>
+    <!-- FIX-DEAD-SAFETY-NUMBERS: this key-verification screen (60-digit
+         fingerprint, QR mode, "mark as verified", MITM-changed-key warning
+         banner, verified shield badge) was fully built -- 571 lines,
+         complete UI/styles, and its own /api/encryption/safety/:userId
+         backend call already exists -- but this <script> tag never existed
+         on any page, so window.kynSafetyNumbers was never defined and the
+         chat header's lock icon had nothing to call. Loaded here, right
+         after e2e-encryption.js since it reads the same identity keys.
+         Wiring the actual lock-icon button in the chat header is a
+         separate, smaller follow-up (see next fix) -- this line alone only
+         makes the feature callable, not yet reachable by tapping anything. -->
+    <script src="js/safety-numbers.js"></script>
     <!-- Phase 1 redesign: durable IndexedDB-backed session/identity store with
          encrypted backup/restore. Must load before e2e-session-init.js. -->
     <script src="js/e2e-store-v2.js"></script>

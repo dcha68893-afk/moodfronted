@@ -9,22 +9,36 @@
      More than 20 files still write data-theme / theme-dark / theme-light on their own (Tool-core, settings-global-propagation,
      module caches, older bridges...). They run on different timers with their own snapshots, so the page briefly showed a mix.
      A MutationObserver callback runs as a microtask BEFORE the browser paints, so a foreign write that disagrees with the
-     authoritative theme is put back inside the same task -- it is never presented, hence no blink. */
-  function installThemeGuard(getTheme) {
+     authoritative theme is put back inside the same task -- it is never presented, hence no blink.
+
+     ROOT-CAUSE FIX (blink survives even with this guard installed): the guard only ever watched the 'data-theme' and
+     'class' attributes. At least 9 files (AppSettings.js, settingsManager.js, settings-core.js, settings-ui.js,
+     Tool-ui.js, Tool-core.part3.js, unified-screen-controller.js, app.runtime.authority.js, games-commercial-v5.js)
+     don't touch those -- they write the palette straight onto documentElement.style via style.setProperty('--kyn-bg-root', ...)
+     etc. That's a write to the 'style' attribute, which the old attributeFilter never included, so those writes painted
+     the wrong colors and were never caught or corrected. 'style' is now watched too, and a correction repaints the full
+     palette (not just data-theme/class) so a foreign color write is put back before it's ever presented. */
+  function installThemeGuard(repaint) {
     try {
-      var root = document.documentElement, busy = false;
+      var root = document.documentElement, busy = false, observers = [];
       var fix = function () {
         if (busy) return; busy = true;
-        try {
-          var t = getTheme(); if (t !== 'dark' && t !== 'light') return;
-          if (root.getAttribute('data-theme') !== t) root.setAttribute('data-theme', t);
-          root.classList.toggle('theme-dark', t === 'dark'); root.classList.toggle('theme-light', t === 'light'); root.classList.toggle('dark-theme', t === 'dark');
-          var b = document.body;
-          if (b) { if (b.getAttribute('data-theme') !== t) b.setAttribute('data-theme', t); b.classList.toggle('dark-theme', t === 'dark'); }
-        } catch (_) {} finally { busy = false; }
+        try { repaint(); } catch (_) {}
+        /* repaint() itself writes 'style' (palette vars) and would otherwise re-trigger this same
+           observer, correction after correction, forever. Draining each observer's own queued
+           records here removes the mutations repaint() just caused before they can fire fix()
+           again, so the loop terminates after exactly one correction. */
+        try { for (var i = 0; i < observers.length; i++) observers[i].takeRecords(); } catch (_) {}
+        busy = false;
       };
-      new MutationObserver(fix).observe(root, { attributes: true, attributeFilter: ['data-theme', 'class'] });
-      var bindBody = function () { if (document.body) { new MutationObserver(fix).observe(document.body, { attributes: true, attributeFilter: ['data-theme', 'class'] }); fix(); } };
+      var opts = { attributes: true, attributeFilter: ['data-theme', 'class', 'style'] };
+      var rootObs = new MutationObserver(fix); rootObs.observe(root, opts); observers.push(rootObs);
+      var bindBody = function () {
+        if (document.body) {
+          var bodyObs = new MutationObserver(fix); bodyObs.observe(document.body, opts); observers.push(bodyObs);
+          fix();
+        }
+      };
       if (document.body) bindBody(); else document.addEventListener('DOMContentLoaded', bindBody, { once: true });
     } catch (_) {}
   }
@@ -225,6 +239,6 @@ function atomicPaint(reason){var docs=frameDocs(document,[]);beginBoot(document)
   global.addEventListener('DOMContentLoaded',function(){try{if(document.body){document.body.setAttribute('data-theme',state.theme);document.body.classList.toggle('dark-theme',state.theme==='dark');}endBoot(document);}catch(_){}},{once:true});
   global.addEventListener('load',function(){try{endBoot(document);}catch(_){}},{once:true});
   document.addEventListener('load',function(e){var t=e&&e.target;if(t&&t.tagName==='IFRAME'){try{injectFrame(t,t.dataset&&t.dataset.module);}catch(_){}}},true);
-  installThemeGuard(function(){return state.theme;});
+  installThemeGuard(function(){paintNow(state.theme,state.fontSize,state.accentColor,state.iconScale,document);});
   global.ThemeManager=ThemeManager;global.ThemeEngine=ThemeManager;
 })(window);

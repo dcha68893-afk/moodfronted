@@ -4770,6 +4770,31 @@ fetchOptions.signal = controller.signal;
                     _apiCache.delete('get_/api/groups');
                 }
                 
+                // FIX-DEAD-SEALED-GROUPS: sealed-groups.js (membership-privacy
+                // feature: server stores a commitment hash, not the member list)
+                // listens for 'kyn:groupMemberAdded' on window, but nothing in
+                // this app ever dispatched it -- its own comment names a
+                // 'group-core.js' as the source, which doesn't exist. Traced the
+                // backend (server.js POST /api/groups vs PUT /api/groups/:id):
+                // membership is only ever set once, at creation -- there is no
+                // add/remove-member-after-creation route at all. So this is the
+                // one correct, safe place to fire it; a 'removed' counterpart
+                // isn't added because no real removal feature exists yet to
+                // trigger it from (inventing one would mean dispatching a fake
+                // event with made-up data).
+                try {
+                    if (result?.success && result?.data?.id) {
+                        const memberIds = Array.isArray(result.data.memberIds) ? result.data.memberIds
+                            : Array.isArray(result.data.members) ? result.data.members.map(m => m?.id ?? m?.userId ?? m)
+                            : [];
+                        if (memberIds.length) {
+                            window.dispatchEvent(new CustomEvent('kyn:groupMemberAdded', {
+                                detail: { groupId: result.data.id, memberIds }
+                            }));
+                        }
+                    }
+                } catch (_) {}
+                
                 trackRequestEnd(normalizedEndpoint, functionName, true);
                 return result;
                 

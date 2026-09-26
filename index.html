@@ -3347,6 +3347,16 @@
     <!-- ====================================================================== -->
     <script type="module" src="/js/api.core.js"></script>
     <script type="module" src="/js/api.request.js"></script>
+    <!-- FIX-DEAD-SEALED-GROUPS: fully built (395 lines: membership commitment,
+         delivery-token rotation, encrypted invite links, roster-size padding)
+         but had no <script> tag on any page, so window.KynSealedGroups never
+         existed and its 'kyn:groupMemberAdded' listener could never fire even
+         once. Loaded here -- the top-level shell -- because this is the same
+         execution context where api.request.js's createGroup() now actually
+         dispatches that event (see the FIX-DEAD-SEALED-GROUPS comment there),
+         group creation being a top-level shell action, not something done
+         from inside an already-open conversation iframe. -->
+    <script src="/js/sealed-groups.js"></script>
     <script type="module" src="/js/api.auth.js"></script>
     <script type="module" src="/js/api.messages.js"></script>
 

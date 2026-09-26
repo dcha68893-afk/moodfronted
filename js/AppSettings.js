@@ -154,6 +154,38 @@
     let _subscribers = [];
     let _broadcast = null;
     let _activeUserId = 'guest';
+
+    /* PRE-BOOT BROADCAST BUFFER
+       ──────────────────────────────────────────────────────────────────────
+       ROOT CAUSE: setupBroadcast() -- the thing that subscribes this frame
+       to live settings changes from other frames -- was only ever called
+       from inside boot(), which itself waits for this document's own
+       DOMContentLoaded. Every module here (chat, friend, group, status,
+       settings) lives in its own iframe with its own independent parse/load
+       time. BroadcastChannel messages sent before a listener subscribes are
+       not queued by the browser -- they're simply lost to that receiver.
+       So a setting changed while a heavier iframe was still mid-load never
+       arrived there; that frame kept showing the old value until the user
+       left and re-entered it, forcing a fresh boot() that happened to pick
+       up the by-then-updated localStorage cache. Theme never had this gap
+       because theme.engine.js runs synchronously in <head>, not behind
+       DOMContentLoaded -- which is why theme "worked" and little else did.
+       Fix: subscribe to the real channel immediately, at script parse time,
+       independent of boot(). Anything received before boot() has resolved
+       this frame's identity and loaded its base _data is buffered rather
+       than dropped, and is replayed (through the normal set()/merge() path)
+       the moment boot() is ready for it, below. */
+    let _preBootQueue = [];
+    let _preBootChannel = null;
+    try {
+        if (typeof BroadcastChannel !== 'undefined') {
+            _preBootChannel = new BroadcastChannel(BROADCAST_CHANNEL);
+            _preBootChannel.onmessage = function (event) {
+                const message = event.data || {};
+                if (message.source === 'AppSettings') _preBootQueue.push(message);
+            };
+        }
+    } catch (_) {}
     let _serverSyncPromise = null;
     let _lastServerSyncAt = 0;
     let _lastServerSyncUser = null;
@@ -1178,6 +1210,24 @@
         installCallAudioProxy();
         installSettingsServiceBridge();
         setupBroadcast();
+
+        // Hand off from the pre-boot buffer to the permanent listener now that
+        // _activeUserId and _data are resolved. Anything queued while this frame
+        // was still loading gets applied for real instead of being lost.
+        try { if (_preBootChannel) _preBootChannel.close(); } catch (_) {}
+        if (_preBootQueue.length) {
+            _preBootQueue.forEach(function (message) {
+                if (message.userId !== _activeUserId) return;
+                if (message.type === 'set' && message.path) {
+                    AppSettings.set(message.path, message.value, { silent: false, skipBroadcast: true, source: 'broadcast' });
+                }
+                if (message.type === 'merge' && message.settings) {
+                    AppSettings.merge(message.settings, { silent: false, skipBroadcast: true, source: 'broadcast' });
+                }
+            });
+            _preBootQueue = [];
+        }
+
         applyToDOM(_data);
         persist();
         setupAuthListeners();

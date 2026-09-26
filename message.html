@@ -502,6 +502,14 @@
   <script src="/js/app.realtime.socket.js"></script>
   <script src="/js/core/identity/IdentityProfileStore.js"></script>
   <script src="/js/e2e-encryption.js" defer></script>
+  <!-- FIX-DEAD-SAFETY-NUMBERS: fully built (571 lines) but had no <script>
+       tag on ANY page, so window.kynSafetyNumbers was never defined. This
+       is a separate iframe from chat.html/index.html -- loading it there
+       would not reach here, same reason AppSettings.js needed its own
+       per-iframe fix earlier. This is the actual chat surface with the
+       contact-info panel, so it's wired to a real click handler below,
+       not just loaded inert a second time. -->
+  <script src="/js/safety-numbers.js" defer></script>
   <!-- js/double-ratchet.js was deleted (obsolete private-message Double
        Ratchet generation, commit a080662) but this <script> tag referencing
        it was left behind, causing a 404 on every load of this page. Removed;
@@ -1942,6 +1950,11 @@
           <div class="chat-info-name">${escapeHtml(conv?.otherUser?.username || 'Conversation')}</div>
         </div>
         <div class="chat-info-section">
+          <div class="chat-info-doc" id="chatInfoSafetyRow" style="cursor:pointer;display:flex;align-items:center;gap:8px;">
+            🔒 <span>Encryption / Safety Number</span>
+          </div>
+        </div>
+        <div class="chat-info-section">
           <div class="chat-info-section-title">Shared media (${mediaMessages.length})</div>
           <div class="chat-info-media-grid">
             ${mediaMessages.slice(-12).reverse().map(m => `<img src="${escapeHtml(m.metadata.attachment.url)}" data-view-image="${escapeHtml(m.metadata.attachment.url)}">`).join('') || '<div class="chat-info-empty">No media shared yet</div>'}
@@ -1955,6 +1968,14 @@
             </a>`).join('') || '<div class="chat-info-empty">No documents shared yet</div>'}
         </div>
       `;
+      const safetyRow = document.getElementById('chatInfoSafetyRow');
+      if (safetyRow) {
+        safetyRow.addEventListener('click', () => {
+          if (window.kynSafetyNumbers && conv?.otherUser?.id) {
+            window.kynSafetyNumbers.openSafetyNumbers(conv.otherUser.id, conv.otherUser.username || 'this contact');
+          }
+        });
+      }
       document.getElementById('chatInfoModal').classList.remove('hidden');
     }
 

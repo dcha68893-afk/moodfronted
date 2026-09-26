@@ -1451,12 +1451,30 @@
         // connection state is always reported as authenticated (actual auth
         // is held by the parent), so the reliable resync trigger here is the
         // page becoming visible/focused again, not a socket state change.
+        //
+        // ROOT-CAUSE FIX (slow UI on app resume): this used to fire one
+        // syncMissed() network request per cached conversation, all in the
+        // same tick, the instant the app became visible -- competing with
+        // api.auth.js's token-refresh check and app.realtime.socket.js's
+        // reconnect/ping, which fire on the exact same event. With several
+        // conversations open that's a burst of simultaneous requests
+        // blocking first paint. Now capped to a small number in flight at
+        // once and given one tick to let the socket/auth resume work (which
+        // these requests likely depend on) go first, instead of racing it.
+        const RESYNC_MAX_CONCURRENT = 3;
         const resyncActiveConversations = () => {
-            state.conversations.forEach((conv, chatId) => {
+            const entries = Array.from(state.conversations.entries());
+            let cursor = 0;
+            const runNext = () => {
+                if (cursor >= entries.length) return;
+                const [chatId, conv] = entries[cursor++];
                 const msgs = getMessages(chatId);
                 const lastId = msgs.length ? msgs[msgs.length - 1].id : null;
-                syncMissed(chatId, lastId).catch(() => {});
-            });
+                syncMissed(chatId, lastId).catch(() => {}).then(runNext);
+            };
+            setTimeout(() => {
+                for (let i = 0; i < RESYNC_MAX_CONCURRENT; i++) runNext();
+            }, 0);
         };
         window.addEventListener('focus', resyncActiveConversations);
         document.addEventListener('visibilitychange', () => {
