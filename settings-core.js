@@ -493,11 +493,26 @@ const SettingsState = {
     // updatePhoto() can reuse it with the FINAL short Cloudinary URL without
     // triggering a second backend round-trip (see updatePhoto() below).
     _applyLocalOnly(section, key, value) {
-        // STEP 1: Update AppSettings FIRST (single source of truth)
-        // This triggers all module subscriptions instantly
+        // STEP 1: Update the canonical AppSettings path FIRST. The Settings UI
+        // historically used a "profile" section while the rest of the app reads
+        // identity from "account"; privacy fields likewise belong under privacy.
+        // Normalize that boundary here so Google and password-login sessions use
+        // exactly the same runtime state.
+        const canonicalPathMap = {
+            'profile.displayName': 'account.displayName',
+            'profile.username': 'account.username',
+            'profile.email': 'account.email',
+            'profile.bio': 'account.bio',
+            'profile.photoUrl': 'account.avatar',
+            'profile.coverPhotoUrl': 'account.coverPhoto',
+            'profile.profileVisibility': 'privacy.profileVisibility',
+            'profile.photoVisibility': 'privacy.photoVisibility',
+            'profile.lastSeen': 'privacy.lastSeen',
+            'profile.onlineStatus': 'privacy.onlineStatus'
+        };
+        const canonicalPath = canonicalPathMap[section + '.' + key] || (section + '.' + key);
         if (window.AppSettings) {
-            // Mark as user-triggered so propagation layer logs and broadcasts to iframes
-            window.AppSettings.set(section + '.' + key, value, { source: 'user-action', userTriggered: true });
+            window.AppSettings.set(canonicalPath, value, { source: 'user-action', userTriggered: true });
         }
 
         // FIX (IDENTITY-CENTRALIZATION): Settings is the master controller for

@@ -1439,10 +1439,15 @@
         }
     });
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', boot, { once: true });
-    } else {
+    // Hydrate the cached settings immediately. AppSettings only needs the
+    // documentElement for its synchronous visual application, so waiting for
+    // DOMContentLoaded unnecessarily held every settings-dependent module behind
+    // the full page parse on a warm resume.
+    try {
         boot();
+    } catch (error) {
+        console.warn('[AppSettings] Immediate boot failed; retrying after DOM ready:', error.message);
+        document.addEventListener('DOMContentLoaded', boot, { once: true });
     }
 
     debugLog('[AppSettings] Module registered');

@@ -84,9 +84,11 @@ if (window.__SETTINGS_LOCAL_FIRST_PATCH__) {
 
                 case 'privacy':
                     if (key === 'readReceipts')       return 'privacy.readReceipts';
-                    if (key === 'typingIndicators')   return 'privacy.readReceipts';
-                    if (key === 'profileVisibility')  return 'privacy.statusVisibility';
+                    if (key === 'typingIndicators')   return 'privacy.typingIndicators';
+                    if (key === 'profileVisibility')  return 'privacy.profileVisibility';
+                    if (key === 'photoVisibility')    return 'privacy.photoVisibility';
                     if (key === 'lastSeen')           return 'privacy.lastSeen';
+                    if (key === 'onlineStatus')       return 'privacy.onlineStatus';
                     return `privacy.${key}`;
 
                 case 'chat':

@@ -305,13 +305,10 @@ function downscaleImageToDataUrl(file, maxDimension, quality) {
 
 window.__updateSetting = async (section, key, value) => {
     try {
-        // Update AppSettings FIRST (single source of truth)
-        // This automatically propagates to all subscribed modules
-        if (window.AppSettings) {
-            window.AppSettings.set(section + '.' + key, value);
-        }
-        
-        // Update SettingsState for backwards compatibility
+        // SettingsState.update() is the single write entry point. It updates
+        // AppSettings synchronously, persists locally, broadcasts the complete
+        // snapshot, and queues/sends the backend write. Calling AppSettings.set()
+        // here as well caused every UI change to be applied and broadcast twice.
         await SettingsState.update(section, key, value);
         
         unsavedChanges = true;
