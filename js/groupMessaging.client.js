@@ -117,8 +117,23 @@ async function unwrapLocal(wrappedJson){
   try{const r=await global.KynectaE2EIdentity?.unwrapAtRest?.(wrappedJson);if(r)return r}catch(_){}
   return global.KynectaE2E.unwrapFromLocalStorage(wrappedJson);
 }
-async function saveState(st){try{const p=JSON.stringify({chain:b64(st.chain),privateJwk:st.privateJwk||null,publicJwk:st.publicJwk||null,iteration:st.iteration}),w=await wrapLocal(b64(te.encode(p)));if(w)localStorage.setItem(st.slot||idkey(st.groupId,st.epoch,st.ownerId),w)}catch(_){}}
-async function loadState(g,e,o,rx,fp){try{const slot=idkey(g,e,o,rx,fp),w=localStorage.getItem(slot);if(!w)return null;const raw=await unwrapLocal(w),x=JSON.parse(td.decode(unb64(raw))),priv=x.privateJwk?await subtle.importKey('jwk',x.privateJwk,{name:'ECDSA',namedCurve:'P-256'},true,['sign']):null;return{slot,rx:!!rx,groupId:Number(g),epoch:Number(e),ownerId:Number(o),chain:unb64(x.chain),privateKey:priv,privateJwk:x.privateJwk||null,publicJwk:x.publicJwk||null,iteration:Number(x.iteration)||0,skipped:new Map()}}catch(_){return null}}
+async function saveState(st){
+  try{
+    const skipped=[...((st.skipped instanceof Map)?st.skipped:new Map())].slice(-200).map(([i,v])=>[Number(i),b64(v)]);
+    const p=JSON.stringify({chain:b64(st.chain),privateJwk:st.privateJwk||null,publicJwk:st.publicJwk||null,iteration:st.iteration,skipped});
+    const w=await wrapLocal(b64(te.encode(p)));
+    if(w)localStorage.setItem(st.slot||idkey(st.groupId,st.epoch,st.ownerId),w)
+  }catch(_){}
+}
+async function loadState(g,e,o,rx,fp){
+  try{
+    const slot=idkey(g,e,o,rx,fp),w=localStorage.getItem(slot);if(!w)return null;
+    const raw=await unwrapLocal(w),x=JSON.parse(td.decode(unb64(raw)));
+    const priv=x.privateJwk?await subtle.importKey('jwk',x.privateJwk,{name:'ECDSA',namedCurve:'P-256'},true,['sign']):null;
+    const skipped=new Map(Array.isArray(x.skipped)?x.skipped.map(([i,v])=>[Number(i),unb64(v)]).filter(([i,v])=>Number.isFinite(i)&&v instanceof Uint8Array):[]);
+    return{slot,rx:!!rx,groupId:Number(g),epoch:Number(e),ownerId:Number(o),chain:unb64(x.chain),privateKey:priv,privateJwk:x.privateJwk||null,publicJwk:x.publicJwk||null,iteration:Number(x.iteration)||0,skipped}
+  }catch(_){return null}
+}
 async function createSenderState(g,e){const kp=await subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']),priv=await subtle.exportKey('jwk',kp.privateKey),pub=await subtle.exportKey('jwk',kp.publicKey);return{slot:idkey(g,e,me()),groupId:Number(g),epoch:Number(e),ownerId:me(),chain:crypto.getRandomValues(new Uint8Array(32)),privateKey:kp.privateKey,privateJwk:priv,publicJwk:pub,iteration:0,skipped:new Map()}}
 async function state(g,force=false){const k=String(g);if(!force&&stateFetch.has(k))return stateFetch.get(k);const p=req('/group-messages/'+encodeURIComponent(g)+'/crypto/state').then(x=>x.data||{});stateFetch.set(k,p);try{return await p}finally{if(stateFetch.get(k)===p)stateFetch.delete(k)}}
 function keyEntry(s,e,o){const cur=(s?.senderKeys||[]).find(x=>Number(x.epoch)===Number(e)&&Number(x.ownerId)===Number(o));if(cur)return cur;for(const h of(s?.history||[])){const x=(h.senderKeys||[]).find(y=>Number(y.epoch)===Number(e)&&Number(y.ownerId)===Number(o));if(x)return x}return null}
@@ -135,6 +150,10 @@ st={slot:k,rx,groupId:Number(g),epoch:Number(e),ownerId:Number(o),chain:unb64(b.
 const signInput=(g,e,o,i,iv,ct)=>te.encode([PIPELINE,g,e,o,i,iv,ct].join('|'));
 async function encryptForGroup(g,plaintext,members){const st=await ensureSenderKey(g,members),i=st.iteration,mk=await hmac(st.chain,'message:'+i),next=await hmac(st.chain,'chain:'+i),key=await aesKey(mk),iv=crypto.getRandomValues(new Uint8Array(12)),ct=await subtle.encrypt({name:'AES-GCM',iv},key,te.encode(String(plaintext))),ivb=b64(iv),ctb=b64(ct),sig=await subtle.sign({name:'ECDSA',hash:{name:'SHA-256'}},st.privateKey,signInput(g,st.epoch,st.ownerId,i,ivb,ctb));st.chain=next;st.iteration++;await saveState(st);return JSON.stringify({v:2,pipeline:PIPELINE,algorithm:ALGORITHM,group:String(g),epoch:st.epoch,owner:st.ownerId,iteration:i,iv:ivb,ct:ctb,sig:b64(sig),publicKey:st.publicJwk})}
 async function decryptForGroupUnsafe(g,ciphertext){let e;try{e=JSON.parse(ciphertext)}catch(_){return ciphertext}if(!e||e.v!==2||e.pipeline!==PIPELINE)return ciphertext;const st=await getReceiverState(g,Number(e.epoch),Number(e.owner),fpOf(e.publicKey)),pub=await subtle.importKey('jwk',e.publicKey,{name:'ECDSA',namedCurve:'P-256'},false,['verify']),ok=await subtle.verify({name:'ECDSA',hash:{name:'SHA-256'}},pub,unb64(e.sig),signInput(g,e.epoch,e.owner,e.iteration,e.iv,e.ct));if(!ok)throw new Error('Group message signature verification failed');let mk;if(Number(e.iteration)<st.iteration){mk=st.skipped.get(Number(e.iteration));if(!mk)throw new Error('Group message is too old for this sender-key state')}else{while(st.iteration<Number(e.iteration)){const x=await hmac(st.chain,'message:'+st.iteration);st.chain=await hmac(st.chain,'chain:'+st.iteration);st.skipped.set(st.iteration,x);if(st.skipped.size>200)st.skipped.delete(st.skipped.keys().next().value);st.iteration++}mk=await hmac(st.chain,'message:'+st.iteration);st.chain=await hmac(st.chain,'chain:'+st.iteration);st.iteration++}const pt=await subtle.decrypt({name:'AES-GCM',iv:unb64(e.iv)},await aesKey(mk),unb64(e.ct));await saveState(st);return td.decode(pt)}
+/* FIX (OUTSIDE-GROUP-PANEL DECRYPTION): realtime delivery can decrypt a group message while the group panel is closed.
+   The sender-key chain then advances and saveState() persists its current iteration. Previously the in-memory skipped-key map
+   was NOT persisted, so after a reload/open the receiver could be past an older message but had no key for that skipped
+   iteration. Persisting the bounded skipped window makes background delivery and later history opening use the same ratchet state. */
 /* FIX (RACE THAT CORRUPTED THE RATCHET / MESSAGES STUCK ON "Decrypting..."): a sender-key chain is one-way and its state object
    (`st.chain`, `st.iteration`) is shared by every message from that sender. group.html decrypted a whole history page with
    Promise.all, so many decryptForGroup() calls interleaved at their `await hmac(...)` points, each reading and advancing the same
