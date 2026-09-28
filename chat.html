@@ -5177,7 +5177,12 @@
                             document.documentElement.classList.toggle('dark-theme', theme === 'dark');
                             try { (window.ThemeManager ? window.ThemeManager.setTheme(theme) : localStorage.setItem('app_theme', theme)); } catch(e) {}
                         }
-                        reapplyThemeToAllIframes();
+                        // FLICKER FIX: no reapplyThemeToAllIframes() here. This handler runs for EVERY
+                        // settings change (the payload is the full settings object, so appearance.theme is
+                        // always present), and broadcastToAllIframes() freezes transitions and repaints ~100
+                        // CSS variables in every module even when nothing about the theme changed.
+                        // ThemeManager.setTheme() above already repaints shell + modules in one task, and
+                        // only when the theme actually differs.
                     }
                     emitGlobalAppEvent('SETTINGS_UPDATED', {
                         settings,
@@ -5222,7 +5227,9 @@
                                 document.documentElement.classList.toggle('dark-theme', _resolved === 'dark');
                                 try { (window.ThemeManager ? window.ThemeManager.setTheme(_resolved) : localStorage.setItem('app_theme', _resolved)); } catch(_) {}
                             }
-                            reapplyThemeToAllIframes();
+                            // FLICKER FIX: see SETTINGS_UPDATED handler above - setTheme() already repaints
+                            // every module atomically when the theme changes; repainting on every setting
+                            // change is what made all screens flash.
                         }
                         if (s && s.appearance && s.appearance.accentColor) {
                             if (window.ThemeManager) window.ThemeManager.setAccentColor(s.appearance.accentColor);

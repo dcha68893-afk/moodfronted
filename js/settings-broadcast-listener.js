@@ -42,6 +42,31 @@
         } catch (_) {}
         return false;
     };
+    // ── Shared style rules for settings that had NO reader in any module ──────
+    // applyFull() below already sets data-animations / data-compact / data-performance-mode on
+    // <html> and toggles no-animations / compact-mode on <body> in EVERY module iframe, but only
+    // Tools.html had CSS that reacted to them - so in Messages, Groups, Friends, Status and Games
+    // the setting arrived and did nothing visible. One small stylesheet here fixes all of them
+    // without touching each module. Keyed on the <html> attributes (always set before <body>
+    // exists) and only ever injected once per document.
+    (function _installSharedSettingsStyles() {
+        try {
+            if (document.getElementById('__necpaSharedSettingsStyles')) return;
+            var st = document.createElement('style');
+            st.id = '__necpaSharedSettingsStyles';
+            st.textContent =
+                'html[data-animations="false"] *, html[data-animations="false"] *::before, html[data-animations="false"] *::after,' +
+                'html[data-reduce-motion="true"] *, html[data-reduce-motion="true"] *::before, html[data-reduce-motion="true"] *::after' +
+                '{animation-duration:0.01ms!important;animation-iteration-count:1!important;transition-duration:0.01ms!important;scroll-behavior:auto!important}' +
+                'html[data-performance-mode="true"] *, html[data-performance-mode="true"] *::before, html[data-performance-mode="true"] *::after' +
+                '{backdrop-filter:none!important;-webkit-backdrop-filter:none!important;box-shadow:none!important;text-shadow:none!important}' +
+                'html[data-compact="true"] #messageLog{padding:8px!important;gap:3px!important}' +
+                'html[data-compact="true"] .messages{padding:8px!important}' +
+                'html[data-compact="true"] .bubble{padding:5px 9px!important}' +
+                'html[data-compact="true"] .row{margin:3px 0!important}';
+            (document.head || document.documentElement).appendChild(st);
+        } catch (_) {}
+    })();
     var _lastSig = '';
     function _merge(base, patch) {
         var out = {};
