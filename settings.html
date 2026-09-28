@@ -3314,7 +3314,7 @@
             <p style="font-size:12px;font-weight:600;color:#f59e0b;margin:0 0 8px">⚠️ Save these backup codes — shown once only:</p>
             <div id="__p12faCodesGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-family:monospace;font-size:12px"></div>
           </div>
-          <input id="__p12faTok" type="text" inputmode="numeric" maxlength="6" placeholder="6-digit code"
+          <input id="__p12faTok" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="12" placeholder="6-digit code"
                  style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #444;background:var(--kyn-bg-input);color:var(--text-primary);font-size:20px;letter-spacing:8px;text-align:center;margin-bottom:12px">
           <button id="__p12faVerify" style="padding:10px 20px;border-radius:10px;border:none;background:#22c55e;color:#fff;cursor:pointer;font-size:14px;font-weight:600;width:100%">Activate 2FA</button>
         </div>
@@ -3322,7 +3322,7 @@
         <div id="__p12faDisable" style="display:none;margin-top:18px">
           <input id="__p12faDisPass" type="password" placeholder="Your password"
                  style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #444;background:var(--kyn-bg-input);color:var(--text-primary);font-size:14px;margin-bottom:10px">
-          <input id="__p12faDisTok" type="text" inputmode="numeric" maxlength="6" placeholder="TOTP code"
+          <input id="__p12faDisTok" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="12" placeholder="TOTP code"
                  style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #444;background:var(--kyn-bg-input);color:var(--text-primary);font-size:20px;letter-spacing:8px;text-align:center;margin-bottom:12px">
           <button id="__p12faDisBtn" style="padding:10px 20px;border-radius:10px;border:none;background:#ef4444;color:#fff;cursor:pointer;font-size:14px;font-weight:600;width:100%">Disable 2FA</button>
         </div>
@@ -3377,6 +3377,19 @@
   }
 
   function wire2FA() {
+    // Normalize authenticator pastes such as "123 456" before validation.
+    ['__p12faTok', '__p12faDisTok'].forEach(function (id) {
+      var input = el(id);
+      if (!input || input.__otpNormalized) return;
+      input.__otpNormalized = true;
+      input.addEventListener('input', function () {
+        this.value = String(this.value || '').replace(/\\D/g, '').slice(0, 6);
+      });
+      input.addEventListener('paste', function () {
+        var self = this;
+        setTimeout(function () { self.value = String(self.value || '').replace(/\\D/g, '').slice(0, 6); }, 0);
+      });
+    });
     el('__p12faBtn')?.addEventListener('click', async function () {
       const on = el('__p12faStatus')?.textContent?.includes('Enabled');
       if (on) { el('__p12faDisable').style.display = 'block'; el('__p12faSetup').style.display = 'none'; return; }

@@ -620,9 +620,9 @@ const SettingsState = {
                 this._notify('update-success', { section, key, value, oldValue });
                 return { success: true };
             } else {
-                OfflineQueue.enqueue(section, key, value);
-                this._notify('update-queued', { section, key, value, reason: 'server-error' });
-                return { success: true, queued: true };
+                const message = response?.raw?.message || response?.raw?.error || 'Server rejected this setting';
+                this._notify('update-failed', { section, key, value, reason: message });
+                return { success: false, error: message };
             }
         } catch (error) {
             // FIX (silent-save-failure): authorizedRequest() only rejects for a
@@ -665,10 +665,13 @@ const SettingsState = {
                         method   = 'PUT';
                         body     = { language: value };
                     } else {
-                        // accentColor, fontSize, etc. — use profile endpoint
-                        endpoint = '/api/settings/profile';
+                        // Appearance preferences belong to the canonical settings
+                        // snapshot. Sending accentColor/fontSize to /profile used
+                        // to return 200 while updateProfileHandler ignored those
+                        // fields, so the picker looked successful but reverted.
+                        endpoint = '/api/settings';
                         method   = 'PUT';
-                        body     = { [key]: value, section };
+                        body     = { appearance: { [key]: value } };
                     }
                     break;
 

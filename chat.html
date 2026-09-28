@@ -6637,12 +6637,10 @@
                         if (evt.data.type === 'NAVIGATE_BACK') _goBackOnePage();
                     });
 
-                    // Also handle device back on parent
-                    window.addEventListener('popstate', function() {
-                        _goBackOnePage();
-                    });
-                    try { history.pushState({ kyn: true }, '', window.location.href); } catch(_) {}
-
+                    // The parent has one authoritative popstate handler below.
+                    // Do not install another history entry/listener here: two
+                    // handlers caused one hardware-back press to consume two
+                    // navigation levels in some iframe states.
                     _chatLog('[BackNav] ✅ Parent back navigation installed (using window.__navHistory)');
                 })();
 

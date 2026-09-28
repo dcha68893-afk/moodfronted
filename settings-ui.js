@@ -309,8 +309,11 @@ window.__updateSetting = async (section, key, value) => {
         // AppSettings synchronously, persists locally, broadcasts the complete
         // snapshot, and queues/sends the backend write. Calling AppSettings.set()
         // here as well caused every UI change to be applied and broadcast twice.
-        await SettingsState.update(section, key, value);
-        
+        const result = await SettingsState.update(section, key, value);
+        if (!result || result.success === false) {
+            showNotification(result?.error || `Could not save ${key}`, 'error');
+            return false;
+        }
         unsavedChanges = true;
         window.updateSaveButton();
         showNotification(`${key} updated`, 'success');
@@ -2083,12 +2086,10 @@ export function choosePhoto() {
     input.onchange = (e) => {
         const file = e.target.files[0];
         if (file) {
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                pendingPhotoData = event.target.result;
-                updatePhotoPreview(pendingPhotoData);
-            };
-            reader.readAsDataURL(file);
+            downscaleImageToDataUrl(file, 1280, 0.78).then((dataUrl) => {
+                pendingPhotoData = dataUrl;
+                updatePhotoPreview(dataUrl);
+            }).catch(() => showNotification('Could not read that image. Please choose another photo.', 'error'));
         }
     };
     
@@ -2153,12 +2154,10 @@ export function chooseCoverPhoto() {
     input.onchange = (e) => {
         const file = e.target.files[0];
         if (file) {
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                pendingCoverPhotoData = event.target.result;
-                updateCoverPhotoPreview(pendingCoverPhotoData);
-            };
-            reader.readAsDataURL(file);
+            downscaleImageToDataUrl(file, 1600, 0.78).then((dataUrl) => {
+                pendingCoverPhotoData = dataUrl;
+                updateCoverPhotoPreview(dataUrl);
+            }).catch(() => showNotification('Could not read that cover image. Please choose another photo.', 'error'));
         }
     };
 
@@ -4567,8 +4566,11 @@ export function loadDangerSection(container) {
                 return;
             }
 
-            const password = prompt('Enter your password to finish deleting your account:');
-            if (!password) {
+            const hasLocalPassword = currentUser?.hasLocalPassword === true;
+            const password = hasLocalPassword
+                ? prompt('Enter your password to finish deleting your account:')
+                : null;
+            if (hasLocalPassword && !password) {
                 showNotification('Password is required to delete your account', 'warning');
                 return;
             }

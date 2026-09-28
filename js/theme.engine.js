@@ -215,7 +215,30 @@
 /* ONE SCREEN: shell (header/footer) and every embedded module are painted in the SAME task, with transitions frozen, so the browser
    presents them in one frame. Previously only the shell was painted here and each module was updated later by separate listeners
    on separate timers -- which is why header, body and footer visibly changed at different moments. */
-function atomicPaint(reason){var docs=frameDocs(document,[]);beginBoot(document);docs.forEach(beginBoot);paintNow(state.theme,state.fontSize,state.accentColor,state.iconScale,document);docs.forEach(function(d){paintNow(state.theme,state.fontSize,state.accentColor,state.iconScale,d);});endBoot(document);docs.forEach(endBoot);if(reason)notify(reason);}
+function shade(hex, amount){
+    try {
+      var h=String(hex).replace('#','');
+      if(h.length===3) h=h.split('').map(function(c){return c+c;}).join('');
+      if(!/^[0-9a-f]{6}$/i.test(h)) return hex;
+      var n=parseInt(h,16), r=(n>>16)&255, g=(n>>8)&255, b=n&255, p=Math.abs(amount)/100;
+      var adjust=function(c){ return amount < 0 ? Math.round(c*(1-p)) : Math.round(c+(255-c)*p); };
+      r=Math.max(0,Math.min(255,adjust(r))); g=Math.max(0,Math.min(255,adjust(g))); b=Math.max(0,Math.min(255,adjust(b)));
+      return '#'+[r,g,b].map(function(v){return v.toString(16).padStart(2,'0');}).join('');
+    } catch (_) { return hex; }
+  }
+  function paintAccentOnly(doc, accent){
+    try {
+      var root = doc && doc.documentElement;
+      if (!root || !accent) return;
+      root.style.setProperty('--kyn-accent-primary', accent);
+      root.style.setProperty('--primary-color', accent);
+      root.style.setProperty('--accent-color', accent);
+      root.style.setProperty('--primary-dark', shade(accent, -20));
+      root.style.setProperty('--primary-light', shade(accent, 35));
+      root.style.setProperty('--accent-soft', shade(accent, 88));
+    } catch (_) {}
+  }
+  function atomicPaint(reason){var docs=frameDocs(document,[]);beginBoot(document);docs.forEach(beginBoot);paintNow(state.theme,state.fontSize,state.accentColor,state.iconScale,document);docs.forEach(function(d){paintNow(state.theme,state.fontSize,state.accentColor,state.iconScale,d);});endBoot(document);docs.forEach(endBoot);if(reason)notify(reason);}
   function injectFrame(frame,page){try{if(!frame||!frame.contentWindow)return;var doc=frame.contentDocument||frame.contentWindow.document;if(!doc||!doc.documentElement)return;beginBoot(doc);paintNow(state.theme,state.fontSize,state.accentColor,state.iconScale,doc);if(doc.body){doc.body.setAttribute('data-parent-shell','true');doc.body.setAttribute('data-parent-module',page||'');}doc.documentElement.setAttribute('data-parent-shell','true');doc.documentElement.setAttribute('data-parent-module',page||'');endBoot(doc);}catch(_) {}}
   var ThemeManager={__kynEngine:true,paintDocument:function(doc){try{paintNow(state.theme,state.fontSize,state.accentColor,state.iconScale,doc||document);}catch(_){}},getTheme:function(){return state.theme;},getFontSize:function(){return state.fontSize;},getAccentColor:function(){return state.accentColor;},getIconScale:function(){return state.iconScale;},setTheme:function(v,opts){if(!VALID[v])return state.theme;var n=v;if(n===state.theme&&!(opts&&opts.force))return n;
     /* ROOT-CAUSE FIX (dark applied, then snaps back to light ~0.5s later): many modules re-apply the theme from THEIR OWN
@@ -233,7 +256,7 @@ function atomicPaint(reason){var docs=frameDocs(document,[]);beginBoot(document)
        snapshot/sync code can no longer override it. */
     if(!byUser&&state.savedTheme&&n!==state.theme)return state.theme;
     if(byUser){state.lockUntil=opts.userChoice?now+2000:0;state.savedTheme=true;}
-    state.theme=n;set(THEME_KEY,n);atomicPaint('theme');return n;},setFontSize:function(v,opts){var n=validateFont(v);if(n===state.fontSize)return n;if(!(opts&&(opts.userChoice||opts.force))&&state.savedFont)return state.fontSize;if(opts&&opts.userChoice)state.savedFont=true;state.fontSize=n;set(FONT_KEY,String(n));atomicPaint('fontSize');return n;},setIconScale:function(v,opts){var n=validateIcon(v);if(n===state.iconScale)return n;if(!(opts&&(opts.userChoice||opts.force))&&state.savedIcon)return state.iconScale;if(opts&&opts.userChoice)state.savedIcon=true;state.iconScale=n;set(ICON_KEY,n);atomicPaint('iconScale');return n;},setAccentColor:function(v,opts){if(!v||v===state.accentColor)return state.accentColor;if(!(opts&&(opts.userChoice||opts.force))&&state.savedAccent)return state.accentColor;if(opts&&opts.userChoice)state.savedAccent=true;state.accentColor=v;atomicPaint('accentColor');return v;},onChange:function(fn){if(typeof fn!=='function')return function(){};listeners.push(fn);return function(){var i=listeners.indexOf(fn);if(i>=0)listeners.splice(i,1);};},broadcastToIframe:function(frame,page){injectFrame(frame,page||frame.dataset&&frame.dataset.module);},broadcastToAllIframes:function(selector){try{document.querySelectorAll(selector||'iframe.content-iframe,iframe').forEach(function(f){injectFrame(f,f.dataset&&f.dataset.module);});}catch(_) {}}};
+    state.theme=n;set(THEME_KEY,n);atomicPaint('theme');return n;},setFontSize:function(v,opts){var n=validateFont(v);if(n===state.fontSize)return n;if(!(opts&&(opts.userChoice||opts.force))&&state.savedFont)return state.fontSize;if(opts&&opts.userChoice)state.savedFont=true;state.fontSize=n;set(FONT_KEY,String(n));atomicPaint('fontSize');return n;},setIconScale:function(v,opts){var n=validateIcon(v);if(n===state.iconScale)return n;if(!(opts&&(opts.userChoice||opts.force))&&state.savedIcon)return state.iconScale;if(opts&&opts.userChoice)state.savedIcon=true;state.iconScale=n;set(ICON_KEY,n);atomicPaint('iconScale');return n;},setAccentColor:function(v,opts){if(!v||v===state.accentColor)return state.accentColor;if(!(opts&&(opts.userChoice||opts.force))&&state.savedAccent)return state.accentColor;if(opts&&opts.userChoice)state.savedAccent=true;state.accentColor=v;set('necpa_accent_color',v);var docs=frameDocs(document,[]);paintAccentOnly(document,v);docs.forEach(function(d){paintAccentOnly(d,v);});notify('accentColor');return v;},onChange:function(fn){if(typeof fn!=='function')return function(){};listeners.push(fn);return function(){var i=listeners.indexOf(fn);if(i>=0)listeners.splice(i,1);};},broadcastToIframe:function(frame,page){injectFrame(frame,page||frame.dataset&&frame.dataset.module);},broadcastToAllIframes:function(selector){try{document.querySelectorAll(selector||'iframe.content-iframe,iframe').forEach(function(f){injectFrame(f,f.dataset&&f.dataset.module);});}catch(_) {}}};
   global.addEventListener('storage',function(e){if(!e||!e.key)return;if(e.key===THEME_KEY){var t=validateTheme(e.newValue);if(t!==state.theme){state.theme=t;atomicPaint('theme-cross-tab');}}else if(e.key===FONT_KEY){var f=validateFont(e.newValue);if(f!==state.fontSize){state.fontSize=f;atomicPaint('fontSize-cross-tab');}}else if(e.key===ICON_KEY){var i=validateIcon(e.newValue);if(i!==state.iconScale){state.iconScale=i;atomicPaint('iconScale-cross-tab');}}});
   global.addEventListener('message',function(e){var d=e&&e.data;if(!d||typeof d!=='object')return;if(d.type==='THEME_CHANGED'){if(d.source==='necpra-shell'||d.source==='AppSettings')return;return;}if(d.type==='FONT_SIZE_CHANGED'){if(d.source==='necpra-shell'||d.source==='AppSettings')return;return;}if(d.type==='ICON_SCALE_CHANGED'){if(d.source==='necpra-shell'||d.source==='AppSettings')return;return;}});
   global.addEventListener('DOMContentLoaded',function(){try{if(document.body){document.body.setAttribute('data-theme',state.theme);document.body.classList.toggle('dark-theme',state.theme==='dark');}endBoot(document);}catch(_){}},{once:true});
