@@ -66,29 +66,13 @@
 
     // Use the exact postMessage contract already consumed by message-client.js.
     try {
-      global.postMessage({ type: 'message:new', payload: message, source: 'message-realtime-bridge' }, '*');
+      global.postMessage({ type: 'message:new', payload: { ...message, _deliveryCandidate: true }, source: 'message-realtime-bridge' }, '*');
     } catch (_) {}
 
-    // Receipt means the message reached the authenticated client and has been
-    // accepted into the message pipeline. It does not mean "read".
-    const socket = currentSocket();
-    let currentUserId = global._kynCurrentUserId;
-    if (currentUserId == null) {
-      try {
-        const raw = localStorage.getItem('kynecta_auth') || localStorage.getItem('currentUser');
-        const parsed = raw ? JSON.parse(raw) : null;
-        currentUserId = parsed?.user?.id ?? parsed?.id ?? parsed?.userId ?? null;
-      } catch (_) {}
-    }
-    if (socket?.connected && message.senderId != null && currentUserId != null && String(message.senderId) !== String(currentUserId)) {
-      try {
-        socket.emit('message:delivery_ack', {
-          messageId: message.serverId ?? message.id,
-          chatId: message.chatId,
-          senderId: message.senderId,
-        });
-      } catch (_) {}
-    }
+    // The message-client acknowledges only after its encrypted local cache
+    // confirms the message has been accepted. Keeping this out of the transport
+    // bridge prevents a fast socket event from deleting the server mailbox copy
+    // before IndexedDB persistence has completed.
     return true;
   }
 

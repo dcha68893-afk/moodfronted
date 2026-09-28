@@ -328,7 +328,29 @@
         });
 
         notify('message:added', { chatId, message });
-        persistMessage(chatId, bucket.get(message.id));
+        const storedMessage = bucket.get(message.id) || message;
+        persistMessage(chatId, storedMessage);
+        // Delivery is acknowledged only after the message has entered the local
+        // encrypted cache. Realtime transport and UI rendering are deliberately
+        // not the durability boundary.
+        if (message._deliveryCandidate && !fromSelf && message.senderId != null &&
+            String(message.senderId) !== String(window._kynCurrentUserId)) {
+            try {
+                const cache = window.KynectaMessageCache;
+                if (cache && typeof cache.putMessage === 'function') {
+                    Promise.resolve(cache.putMessage(chatId, storedMessage)).then(() => {
+                        const socket = window.KynectaRealtime?._socket || null;
+                        if (socket?.connected) {
+                            socket.emit('message:delivery_ack', {
+                                messageId: storedMessage.serverId ?? storedMessage.id,
+                                chatId: storedMessage.chatId,
+                                senderId: storedMessage.senderId,
+                            });
+                        }
+                    }).catch(() => {});
+                }
+            } catch (_) {}
+        }
         // Decrypt the MERGED bucket entry (it carries any plaintext already restored
         // from the cache), not the raw incoming copy — see the comment above.
         decryptForDisplay(chatId, bucket.get(message.id) || message);

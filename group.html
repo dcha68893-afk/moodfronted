@@ -669,12 +669,25 @@ function handleRealtime(ev){
     const groupId=d.groupId??d.message?.groupId??d.payload?.groupId??d.payload?.message?.groupId;
     const message=d.message??d.payload?.message??d.payload;
     if(groupId==null||!message?.id)return;
+
+    // Persist the ciphertext locally even when this group is not open. Only
+    // after the local cache write completes do we tell the server it may delete
+    // its temporary delivery copy.
+    const cachePromise=(window.KynectaGroupMessageCache&&typeof window.KynectaGroupMessageCache.putMessages==='function')
+      ? Promise.resolve(window.KynectaGroupMessageCache.putMessages(groupId,[message]))
+      : Promise.reject(new Error('group local cache unavailable'));
+    cachePromise.then(()=>{
+      if(String(message.senderId||message.userId||'')===uid())return;
+      fetch(base()+'/group-messages/'+encodeURIComponent(groupId)+'/messages/'+encodeURIComponent(message.id)+'/delivered',{
+        method:'POST',credentials:'include',
+        headers:{Authorization:'Bearer '+token(),'Content-Type':'application/json'}
+      }).catch(()=>{});
+    }).catch(()=>{});
+
     if(S.current&&String(groupId)===String(S.current.id)){
         const exists=S.messages.some(m=>String(m.id||m.messageId)===String(message.id));
         if(!exists){decryptGroupContent(message).then(dm=>{
             if(!S.current||String(groupId)!==String(S.current.id))return;
-            // mergeGroupMessages de-duplicates by id / clientMessageId, replaces our own local echo and keeps
-            // a consistent order (a bare sort by Number(id) breaks once local rows are present).
             mergeGroupMessages([dm]);const box=$('messages');if(box)box.scrollTop=box.scrollHeight;
         })}
         markRead(groupId);
