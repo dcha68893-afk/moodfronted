@@ -130,7 +130,7 @@ async function loadGroups(){if(S.loading)return;S.loading=true;const GCF=window.
 function broadenKeyGapCheck(){if(!Array.isArray(S.groups))return;for(const g of S.groups){if(g&&g.id!=null)checkKeyGap(g.id)}}
 function normalizeMessages(r){const rows=r?.data?.messages||r?.data||r?.messages||[];return Array.isArray(rows)?rows:[]}
 
-async function decryptGroupContent(message){
+async function decryptGroupContent(message, groupMeta=null){
   if(!message||typeof message.content!=='string'||!message.content)return message;
   const id=String(message.id||message.messageId||''); const cipher=message.content;
   const cached=groupMessageState.plaintext.get(id);
@@ -142,13 +142,15 @@ async function decryptGroupContent(message){
   if(failedAt&&failedAt.cipher===cipher&&Date.now()-failedAt.at<60000)return {...message,_decryptPending:true};
   const task=(async()=>{try{
     if(!(await ensureE2EReady())||!window.KynectaGroupE2E?.decryptForGroup)throw new Error('Secure group messaging is not ready yet');
-    const plain=await window.KynectaGroupE2E.decryptForGroup(Number(S.current?.id??message.chatId),cipher,groupMemberIds(S.current));
+    const targetGroup=groupMeta||S.current||S.groups.find(x=>String(x?.id)===String(message.groupId||message.chatId));
+    const plain=await window.KynectaGroupE2E.decryptForGroup(Number(targetGroup?.id??message.chatId),cipher,groupMemberIds(targetGroup));
     if(plain==null)throw new Error('Unable to decrypt group message');
     groupMessageState.plaintext.set(id,plain);groupMessageState.lastCiphertext.set(id,cipher);groupMessageState.failed.delete(id);return plain;
   }catch(error){groupMessageState.failed.set(id,{cipher,at:Date.now()});console.warn('[GroupMessage] decryption deferred',id,error?.message||error);return null;}})();
   groupMessageState.decryptInFlight.set(id,task);try{const plain=await task;return plain==null?{...message,_decryptPending:true}:{...message,content:plain,_cipher:cipher};}finally{groupMessageState.decryptInFlight.delete(id);}
 }
 const groupMessageState={decryptInFlight:new Map(),plaintext:new Map(),lastCiphertext:new Map(),failed:new Map()};
+const groupBackgroundDecryptQueues=new Map();
 async function decryptRows(list){return Promise.all(list.map(decryptGroupContent))}
 // FIX (LIVE GROUP MESSAGES NEVER APPEARED UNTIL THE 5s POLL): handleRealtime() below has been calling
 // decryptGroupContent(message), but only decryptRows()/decryptGroupContent() exist — the group rebuild renamed
@@ -670,19 +672,36 @@ function handleRealtime(ev){
     const message=d.message??d.payload?.message??d.payload;
     if(groupId==null||!message?.id)return;
 
-    // Persist the ciphertext locally even when this group is not open. Only
-    // after the local cache write completes do we tell the server it may delete
-    // its temporary delivery copy.
-    const cachePromise=(window.KynectaGroupMessageCache&&typeof window.KynectaGroupMessageCache.putMessages==='function')
-      ? Promise.resolve(window.KynectaGroupMessageCache.putMessages(groupId,[message]))
-      : Promise.reject(new Error('group local cache unavailable'));
-    cachePromise.then(()=>{
-      if(String(message.senderId||message.userId||'')===uid())return;
-      fetch(base()+'/group-messages/'+encodeURIComponent(groupId)+'/messages/'+encodeURIComponent(message.id)+'/delivered',{
-        method:'POST',credentials:'include',
-        headers:{Authorization:'Bearer '+token(),'Content-Type':'application/json'}
+    // Never acknowledge a group message merely because its ciphertext reached
+    // IndexedDB. Sender Keys are one-way, so that envelope is not a readable
+    // local history copy. Decrypt first, persist plaintext, then ACK; otherwise
+    // server retention can remove the only ciphertext before the receiver reads it.
+    const decryptWhenReady=async()=>{
+      let groupMeta=S.groups.find(x=>String(x?.id)===String(groupId))||null;
+      for(let attempt=0;!groupMeta&&attempt<4;attempt++){
+        if(typeof loadGroups==='function'){try{await loadGroups();}catch(_){}}
+        groupMeta=S.groups.find(x=>String(x?.id)===String(groupId))||null;
+        if(!groupMeta)await sleep(350*(attempt+1));
+      }
+      if(!groupMeta)return null;
+      return decryptGroupContent(message,groupMeta);
+    };
+    if(String(message.senderId||message.userId||'')!==uid()){
+      const queueKey=String(groupId);
+      const previous=groupBackgroundDecryptQueues.get(queueKey)||Promise.resolve();
+      const current=previous.catch(()=>{}).then(()=>decryptWhenReady());
+      groupBackgroundDecryptQueues.set(queueKey,current.finally(()=>{if(groupBackgroundDecryptQueues.get(queueKey)===current)groupBackgroundDecryptQueues.delete(queueKey)}));
+      current.then(async dm=>{
+        if(dm?._decryptPending)return; // keep server copy until a real decrypt succeeds
+        if(window.KynectaGroupMessageCache&&typeof window.KynectaGroupMessageCache.putMessages==='function'){
+          await window.KynectaGroupMessageCache.putMessages(groupId,[dm]);
+        }
+        fetch(base()+'/group-messages/'+encodeURIComponent(groupId)+'/messages/'+encodeURIComponent(message.id)+'/delivered',{
+          method:'POST',credentials:'include',
+          headers:{Authorization:'Bearer '+token(),'Content-Type':'application/json'}
+        }).catch(()=>{});
       }).catch(()=>{});
-    }).catch(()=>{});
+    }
 
     if(S.current&&String(groupId)===String(S.current.id)){
         const exists=S.messages.some(m=>String(m.id||m.messageId)===String(message.id));
