@@ -1845,6 +1845,12 @@
         { action: 'select', label: '☑ Select' },
       ];
       if (isMine) items.push({ action: 'edit', label: '✎ Edit' });
+      // FIX (Play Store compliance audit #6): no Report option existed
+      // anywhere in this menu despite the backend having a MessageReport
+      // model built for exactly this (see the new POST /:messageId/report
+      // route). Only offered on messages you didn't send — matches the
+      // route's own "can't report your own message" check.
+      if (!isMine) items.push({ action: 'report', label: '🚩 Report' });
       // FIX (NO-DELETE-ON-RECEIVED-MESSAGES): this used to only add Delete
       // when isMine — a message someone else sent you had no delete
       // option at all, not even "delete for me". Any participant can
@@ -1911,6 +1917,20 @@
             return;
           }
           await window.MessageModule.deleteMessage(chatId, messageId, { forEveryone });
+          break;
+        }
+        case 'report': {
+          // FIX (Play Store compliance audit #6): completes the Report menu
+          // item — matches the reason set the backend route (and the
+          // existing MessageReport model) actually accepts.
+          const reasons = ['spam', 'harassment', 'hate_speech', 'violence', 'sexual_content', 'misinformation', 'other'];
+          const reason = prompt(`Report this message. Reason (${reasons.join(', ')}):`, 'spam');
+          if (!reason || !reasons.includes(reason.trim())) {
+            if (reason !== null) alert('Please enter one of: ' + reasons.join(', '));
+            return;
+          }
+          const res = await window.MessageModule.reportMessage(chatId, messageId, reason.trim());
+          alert(res && res.success ? 'Message reported. Thank you for helping keep Necpa safe.' : (res?.message || 'Could not submit report.'));
           break;
         }
       }

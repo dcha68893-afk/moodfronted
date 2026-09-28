@@ -238,6 +238,11 @@
 
         const body = _safeNotificationText(text);
         if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+        // FIX (Notifications gate audit): this had no settings check
+        // at all before — any granted permission was enough to show it,
+        // ignoring "Enable Notifications", "Message Notifications", and
+        // "Do Not Disturb". Routed through the shared gate.
+        if (window.__shouldNotify && !window.__shouldNotify('message')) return;
         // The browser notification is only a convenience while the app page is
         // hidden; it never sends plaintext to the backend or service worker.
         new Notification(message.senderName || message.sender || 'New message', {

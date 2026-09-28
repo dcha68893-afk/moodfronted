@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Privacy Policy — Necpa</title>
-<meta name="description" content="Necpa Privacy Policy — how we collect, use, and protect your data.">
+<title>Delete Your Account — Necpa</title>
+<meta name="description" content="How to delete your Necpa account and data, in the app or by email.">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 <style>
   :root { --bg:#0f1115; --card:#171a21; --text:#e8eaed; --text-light:#9aa0a6; --accent:#6c8cff; --border:#262a33; }
@@ -18,26 +18,26 @@
   .updated { color: var(--text-light); font-size: 14px; margin-bottom: 32px; }
   h4 { margin-top: 28px; margin-bottom: 8px; font-size: 16px; }
   p, li { color: var(--text); }
-  ul { padding-left: 20px; }
+  ul, ol { padding-left: 20px; }
   .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 28px 32px; }
 </style>
 </head>
 <body>
   <div class="wrap">
     <a class="top-link" href="../index.html"><i class="fas fa-arrow-left"></i> Back to Necpa</a>
-    <h1><i class="fas fa-shield-alt"></i> Privacy Policy</h1>
+    <h1><i class="fas fa-user-slash"></i> Delete Your Account</h1>
     <div class="updated">Last updated: September 2026</div>
     <div class="card" id="legalBody">Loading…</div>
+    <p style="margin-top:24px;font-size:13px;color:var(--text-light);">
+      This page exists so you can request deletion of your Necpa account and data even if you no longer
+      have the app installed, as required by Google Play's account-deletion policy. See also our
+      <a href="privacy.html">Privacy Policy</a>.
+    </p>
   </div>
 
   <script src="../js/legal-content.js"></script>
   <script>
-    document.getElementById('legalBody').innerHTML = window.LegalContent.privacy.html();
-    document.getElementById('legalBody').addEventListener('change', function (e) {
-      if (e.target && e.target.type === 'checkbox' && e.target.id) {
-        try { localStorage.setItem(e.target.id, e.target.checked); } catch (err) {}
-      }
-    });
+    document.getElementById('legalBody').innerHTML = window.LegalContent.accountDeletion.html();
   </script>
 </body>
 </html>

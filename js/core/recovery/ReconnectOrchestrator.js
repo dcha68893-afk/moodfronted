@@ -204,12 +204,24 @@
       window.addEventListener('online',  () => this._onBrowserOnline());
       window.addEventListener('offline', () => this._onBrowserOffline());
 
-      // Visibility recovery
-      document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') {
-          this._onTabVisible();
-        }
-      });
+      // Visibility recovery.
+      // FIX (resume thundering-herd): reconnect used to fire at the exact
+      // same instant as message resync, settings sync, and auth refresh —
+      // all separate visibilitychange handlers hitting the network in the
+      // same tick right when the backend may still be waking from sleep.
+      // Route through AppResumeController's staggered 'app:resume:realtime'
+      // signal (last in the sequence, after auth/backend/settings/messages)
+      // when it's present; fall back to the original immediate behavior
+      // otherwise so this still works standalone.
+      if (window.__AppResumeController) {
+        window.addEventListener('app:resume:realtime', () => this._onTabVisible());
+      } else {
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') {
+            this._onTabVisible();
+          }
+        });
+      }
 
       console.log('[Reconnect] ✅ Started');
     }

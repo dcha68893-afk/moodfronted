@@ -2316,6 +2316,15 @@ export function savePhoto() {
                 userAvatarPreview.style.backgroundPosition = 'center';
                 userAvatarPreview.innerHTML = '';
             }
+            // FIX (paired with loadProfileSection's new #profilePhotoAvatar):
+            // the modal's own preview (#userAvatarPreview, above) updates
+            // instantly, but the main Profile section's avatar — visible
+            // after the modal closes — never did. Same gap saveCoverPhoto()
+            // had for #profileCoverBanner.
+            const profilePhotoAvatar = document.getElementById('profilePhotoAvatar');
+            if (profilePhotoAvatar) {
+                profilePhotoAvatar.style.backgroundImage = `url(${(result && result.url) || pendingPhotoData})`;
+            }
             
             unsavedChanges = true;
             updateSaveButton();
@@ -2340,12 +2349,19 @@ export async function changePassword() {
     const confirmPassword = document.getElementById('confirmPassword');
     const passwordError = document.getElementById('passwordError');
     
-    if (!currentPassword || !newPassword || !confirmPassword || !passwordError) return;
+    if (!newPassword || !confirmPassword || !passwordError) return;
     
     passwordError.style.display = 'none';
     passwordError.textContent = '';
-    
-    if (!currentPassword.value || !newPassword.value || !confirmPassword.value) {
+
+    // FIX (Google-only accounts): the Current Password field is hidden
+    // (see changePasswordBtn's click handler above) when this account has
+    // no real password yet — don't require or send a value for it in that
+    // case, since none could ever be typed correctly.
+    const currentPasswordGroup = document.getElementById('currentPasswordGroup');
+    const currentPasswordRequired = !currentPasswordGroup || currentPasswordGroup.style.display !== 'none';
+
+    if ((currentPasswordRequired && (!currentPassword || !currentPassword.value)) || !newPassword.value || !confirmPassword.value) {
         passwordError.textContent = 'All fields required';
         passwordError.style.display = 'block';
         return;
@@ -2375,7 +2391,7 @@ export async function changePassword() {
         // actually changed. That's why the old password kept working after
         // "changing" it. Now the result is checked explicitly.
         const response = await makeSafeRequest('/api/settings/change-password', 'POST', {
-            currentPassword: currentPassword.value,
+            currentPassword: currentPasswordRequired ? currentPassword.value : undefined,
             newPassword: newPassword.value,
             confirmPassword: confirmPassword.value
         });
@@ -2385,7 +2401,11 @@ export async function changePassword() {
         }
         
         closeModal('changePasswordModal');
-        showNotification('Password changed successfully', 'success');
+        // FIX: surface the backend's actual message — it now distinguishes
+        // "Password set successfully" (first password, Google-only account)
+        // from "Password changed successfully" (everyone else).
+        showNotification(response.message || 'Password changed successfully', 'success');
+        if (currentUser) currentUser.hasLocalPassword = true;
         
         currentPassword.value = '';
         newPassword.value = '';
@@ -2486,13 +2506,33 @@ export function loadProfileSection(container) {
     debugLog('Loading profile section');
     // Get REAL settings from SettingsState (works even without active auth - uses cache)
     const settings = SettingsState.getSection('profile') || DEFAULT_SETTINGS.profile;
-    
+
+    // FIX (Settings shows "empty bio / missing image" after Google login):
+    // this section used to read ONLY from SettingsState (empty until the
+    // person has explicitly saved Profile Settings at least once) with no
+    // fallback to currentUser for the photo/cover/bio fields, and never
+    // rendered the current photo/cover at all — only "Change" buttons, so
+    // there was nothing to visually confirm what was already saved. Prefer
+    // window.Identity's resolvers (js/core/identity/IdentityProfileStore.js)
+    // when present, since that's the same priority order the rest of the
+    // app (chat header, friends, calls) already uses for a given user, so
+    // Settings shows the identical photo everyone else already sees.
+    const _identity = window.Identity;
+    const _coverUrl = settings.coverPhotoUrl
+        || (_identity && _identity.resolveCover(currentUser))
+        || currentUser?.coverPhoto || currentUser?.coverPhotoURL || '';
+    const _avatarUrl = settings.photoUrl
+        || (_identity && _identity.resolveAvatar(currentUser))
+        || currentUser?.avatar || currentUser?.photoURL || '';
+
     container.innerHTML = `
         <div class="settings-section">
             <div class="section-header">
                 <h3><i class="fas fa-user section-icon"></i> Profile Information</h3>
             </div>
             <div class="section-body">
+                <div id="profileCoverBanner" style="height:120px;border-radius:8px;margin-bottom:12px;background-size:cover;background-position:center;background-color:var(--surface-alt,#e5e7eb);${_coverUrl ? `background-image:url('${escapeHtml(_coverUrl)}');` : ''}"></div>
+                <div id="profilePhotoAvatar" style="width:72px;height:72px;border-radius:50%;margin:-48px 0 12px 16px;border:3px solid var(--surface,#fff);background-size:cover;background-position:center;background-color:var(--primary-color,#6366f1);${_avatarUrl ? `background-image:url('${escapeHtml(_avatarUrl)}');` : ''}"></div>
                 <div class="setting-item">
                     <div class="setting-info">
                         <div class="setting-label">Profile Photo</div>
@@ -2544,8 +2584,8 @@ export function loadProfileSection(container) {
                     </div>
                     <div class="setting-control">
                         <textarea class="setting-textarea" id="bioInput" 
-                                  placeholder="About you...">${escapeHtml(settings.bio || '')}</textarea>
-                        <div class="input-hint"><span id="bioCounter">${(settings.bio || '').length}</span>/150</div>
+                                  placeholder="About you...">${escapeHtml(settings.bio || currentUser?.bio || '')}</textarea>
+                        <div class="input-hint"><span id="bioCounter">${(settings.bio || currentUser?.bio || '').length}</span>/150</div>
                     </div>
                 </div>
                 
@@ -2833,6 +2873,23 @@ function setupSecurityEventListeners() {
     const changePasswordBtn = document.getElementById('changePasswordBtn');
     if (changePasswordBtn) {
         changePasswordBtn.addEventListener('click', () => {
+            // FIX (Google-only accounts): adapt the modal at open time —
+            // hide the Current Password field and swap in the "set a
+            // password" notice/title when this account has never had a
+            // real, user-chosen password (see the matching backend fix in
+            // moodchat's routes/settings.js POST /change-password, which
+            // now only requires currentPassword when hasLocalPassword is
+            // true). Defensively defaults to the normal "Change Password"
+            // behavior if hasLocalPassword isn't present on currentUser yet.
+            const needsFirstPassword = currentUser && currentUser.hasLocalPassword === false;
+            const group = document.getElementById('currentPasswordGroup');
+            const notice = document.getElementById('setAppPasswordNotice');
+            const title = document.getElementById('changePasswordModalTitle');
+            const currentPasswordInput = document.getElementById('currentPassword');
+            if (group) group.style.display = needsFirstPassword ? 'none' : '';
+            if (notice) notice.style.display = needsFirstPassword ? 'block' : 'none';
+            if (title) title.textContent = needsFirstPassword ? 'Set Password' : 'Change Password';
+            if (currentPasswordInput) currentPasswordInput.value = '';
             openModal('changePasswordModal');
         });
     }
@@ -3459,6 +3516,7 @@ export function loadGroupsSection(container) {
 // =============================================
 export function loadStatusSection(container) {
     debugLog('Loading status section');
+    const statusSettings = SettingsState.getSection('status') || DEFAULT_SETTINGS.status || {};
 
     // FIX (PER USER REQUEST — REMOVE SELF-DECLARED PRESENCE): this section
     // used to let the user manually pick "Current Status" (online/away/busy/
@@ -3499,7 +3557,59 @@ export function loadStatusSection(container) {
                 </div>
             </div>
         </div>
+
+        <!-- FIX (Status architecture audit, item #7): "Status" here means
+             presence (above); your posted photo/text Stories are a separate,
+             already fully-built feature (js/core/status/ProfessionalStatus.js
+             + the backend's /api/status routes — posting, viewing, likes,
+             comments, blocking-aware privacy per post). What that feature
+             never had was any account-wide default for privacy/replies, or
+             any Settings UI to set one — every story silently used this
+             route's own hardcoded fallback (visible to all contacts, replies
+             always on) no matter what someone might have wanted. This section
+             is genuinely new; nothing like it existed before. New stories now
+             use these as their default the moment you post (see the matching
+             fix in moodchat/src/routes/status.js's normalizeBody), unless a
+             specific post explicitly overrides it. -->
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-book-open section-icon"></i> Story Privacy</h3>
+            </div>
+            <div class="section-body">
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Who Can See My Stories</div>
+                        <div class="setting-description">Default for new stories you post</div>
+                    </div>
+                    <div class="setting-control">
+                        <select class="setting-dropdown" id="whoCanViewMyStatus">
+                            <option value="everyone" ${statusSettings.whoCanViewMyStatus === 'everyone' ? 'selected' : ''}>Everyone</option>
+                            <option value="friendsOnly" ${statusSettings.whoCanViewMyStatus !== 'everyone' && statusSettings.whoCanViewMyStatus !== 'nobody' ? 'selected' : ''}>My Contacts</option>
+                            <option value="nobody" ${statusSettings.whoCanViewMyStatus === 'nobody' ? 'selected' : ''}>Only Me</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Allow Replies</div>
+                        <div class="setting-description">Let people reply to your stories</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="allowStatusReplies" ${statusSettings.allowStatusReplies !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
     `;
+
+    const whoCanViewMyStatus = document.getElementById('whoCanViewMyStatus');
+    if (whoCanViewMyStatus) whoCanViewMyStatus.addEventListener('change', () => window.__updateSetting('status', 'whoCanViewMyStatus', whoCanViewMyStatus.value));
+
+    const allowStatusReplies = document.getElementById('allowStatusReplies');
+    if (allowStatusReplies) allowStatusReplies.addEventListener('change', () => window.__updateSetting('status', 'allowStatusReplies', allowStatusReplies.checked));
 
     (async () => {
         const badge = document.getElementById('livePresenceBadge');
@@ -3616,6 +3726,25 @@ export function loadNotificationsSection(container) {
                     </div>
                 </div>
                 
+                <!-- FIX (Notifications gate audit): doNotDisturb was already
+                     read by settings-global-propagation.js and is now also
+                     checked by the shared notification gate
+                     (js/core/notifications/NotificationGate.js), but had no
+                     toggle anywhere in Settings UI — there was no way to
+                     actually turn it on. -->
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Do Not Disturb</div>
+                        <div class="setting-description">Mute all notifications</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="doNotDisturb" ${settings.doNotDisturb === true ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
             </div>
         </div>
     `;
@@ -3634,6 +3763,9 @@ export function loadNotificationsSection(container) {
     
     const groupNotifications = document.getElementById('groupNotifications');
     if (groupNotifications) groupNotifications.addEventListener('change', () => window.__updateSetting('notifications', 'groupNotifications', groupNotifications.checked));
+    
+    const doNotDisturb = document.getElementById('doNotDisturb');
+    if (doNotDisturb) doNotDisturb.addEventListener('change', () => window.__updateSetting('notifications', 'doNotDisturb', doNotDisturb.checked));
     
 }
 
@@ -4172,7 +4304,44 @@ export function loadBackupSection(container) {
                 </div>
             </div>
         </div>
+
+        <!-- FIX (Backup & Restore, item #13): the section above is
+             Settings-only backup/restore (exports/imports your Settings as
+             a JSON file) — a separate, already-working system from actual
+             MESSAGE history backup. js/backup-manager.js (now loaded on
+             this page — see settings.html) already has a complete
+             encrypted local + cloud message backup/restore flow and
+             working backend endpoints; it just had no button anywhere to
+             open it, and (see the matching backend fix) the database table
+             its cloud backup writes to didn't exist yet. -->
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-comments section-icon"></i> Message Backup</h3>
+            </div>
+            <div class="section-body">
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Backup &amp; Restore Messages</div>
+                        <div class="setting-description">Encrypted backup of your message history — locally or to the cloud</div>
+                    </div>
+                    <div class="setting-control">
+                        <button class="setting-button" id="messageBackupBtn">
+                            <i class="fas fa-shield-alt"></i> Open
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
     `;
+    
+    const messageBackupBtn = document.getElementById('messageBackupBtn');
+    if (messageBackupBtn) messageBackupBtn.addEventListener('click', () => {
+        if (window.KynectaBackupManager?.showBackupDialog) {
+            window.KynectaBackupManager.showBackupDialog();
+        } else {
+            showNotification('Message backup is unavailable on this page — try again from the Chats screen.', 'error');
+        }
+    });
     
     const autoBackup = document.getElementById('autoBackup');
     if (autoBackup) autoBackup.addEventListener('change', () => window.__updateSetting('backup', 'autoBackup', autoBackup.checked));
@@ -4408,7 +4577,13 @@ export function loadDangerSection(container) {
                 deleteAccountBtn.disabled = true;
                 showNotification('Deleting your account…', 'info');
                 try {
-                    const response = await secureFetchWrapper('/api/settings/account', 'DELETE', {
+                    // FIX (Play Store compliance audit #1/#20): switched from
+                    // /api/settings/account to the canonical /api/account —
+                    // both work now (the old one used to throw a
+                    // ReferenceError on every call; see the backend fix),
+                    // but /api/account is the one endpoint everything should
+                    // converge on going forward.
+                    const response = await secureFetchWrapper('/api/account', 'DELETE', {
                         confirmation,
                         password
                     });

@@ -1984,19 +1984,30 @@
     <div class="modal-overlay" id="changePasswordModal">
         <div class="modal-container">
             <div class="modal-header">
-                <h3>Change Password</h3>
+                <h3 id="changePasswordModalTitle">Change Password</h3>
                 <button class="modal-close" id="closePasswordModal">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
             <div class="modal-body">
                 <div style="margin-bottom: 20px;">
-                    <div style="margin-bottom: 15px;">
+                    <div id="currentPasswordGroup" style="margin-bottom: 15px;">
                         <label style="display: block; margin-bottom: 8px; font-size: 14px; font-weight: 500;">
                             Current Password
                         </label>
                         <input type="password" class="setting-input" id="currentPassword" autocomplete="current-password" style="width: 100%;" 
                                placeholder="Enter current password">
+                    </div>
+                    <!-- FIX (Google-only accounts): shown instead of the Current
+                         Password field for an account that has never set a real
+                         local password (see settings-ui.js's toggling of
+                         #currentPasswordGroup / #setAppPasswordNotice based on
+                         currentUser.hasLocalPassword). There is no "current
+                         password" a Google-only account could ever type — the
+                         one on file is a random value generated at sign-in and
+                         never shown to anyone. -->
+                    <div id="setAppPasswordNotice" style="display:none; margin-bottom: 15px; background-color: rgba(0, 132, 255, 0.08); padding: 12px; border-radius: 6px; font-size: 13px; color: var(--text-secondary);">
+                        <i class="fas fa-info-circle"></i> You signed up with Google and don't have a password yet. Set one below to also be able to log in with your email.
                     </div>
                     <div style="margin-bottom: 15px;">
                         <label style="display: block; margin-bottom: 8px; font-size: 14px; font-weight: 500;">
@@ -3295,7 +3306,10 @@
           <div style="text-align:center;margin-bottom:14px">
             <img id="__p12faQR" src="" alt="QR" style="max-width:180px;border-radius:8px;background:#fff;padding:6px">
           </div>
-          <p style="font-size:11px;color:var(--text-secondary);margin:0 0 10px;word-break:break-all">Manual secret: <code id="__p12faSecret"></code></p>
+          <p style="font-size:11px;color:var(--text-secondary);margin:0 0 6px;word-break:break-all">Manual secret: <code id="__p12faSecret"></code></p>
+          <button id="__p12faCopySecret" type="button" style="padding:6px 14px;border-radius:8px;border:1px solid #444;background:transparent;color:var(--text-primary);cursor:pointer;font-size:12px;margin-bottom:14px">
+            <i class="fas fa-copy"></i> Copy key
+          </button>
           <div id="__p12faCodes" style="display:none;padding:12px;background:var(--kyn-bg-input);border-radius:8px;margin-bottom:14px">
             <p style="font-size:12px;font-weight:600;color:#f59e0b;margin:0 0 8px">⚠️ Save these backup codes — shown once only:</p>
             <div id="__p12faCodesGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-family:monospace;font-size:12px"></div>
@@ -3380,6 +3394,41 @@
         }
       } catch (e) { show2FAErr('Setup failed'); }
       finally { this.disabled = false; this.textContent = 'Set Up 2FA'; }
+    });
+
+    // FIX (2FA mobile enrollment gap): the QR code is useless if you're
+    // setting 2FA up on the same phone that will run the authenticator app —
+    // you can't point that phone's camera at its own screen. The manual
+    // secret text was already selectable, but nothing made it easy to get
+    // it into the authenticator app without typing 32 characters by hand.
+    // One tap copies it so it can be pasted into the app's "enter key
+    // manually" field instead.
+    el('__p12faCopySecret')?.addEventListener('click', async function () {
+      const secret = el('__p12faSecret')?.textContent || '';
+      if (!secret) return;
+      const original = this.innerHTML;
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(secret);
+        } else {
+          // Fallback for non-secure contexts / older WebViews where the
+          // Clipboard API is unavailable.
+          const ta = document.createElement('textarea');
+          ta.value = secret;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        }
+        this.innerHTML = '<i class="fas fa-check"></i> Copied';
+        toast('Secret key copied', 'success');
+      } catch (e) {
+        show2FAErr('Could not copy — select and copy the key manually');
+      } finally {
+        setTimeout(() => { this.innerHTML = original; }, 1800);
+      }
     });
 
     el('__p12faVerify')?.addEventListener('click', async function () {
@@ -3483,6 +3532,13 @@
 <script src="js/core/identity/IdentityProfileStore.js"></script>
 <script src="js/last-seen-privacy.js" defer></script>
 <script src="js/linked-sessions-and-pin.js" defer></script>
+<!-- FIX (Backup & Restore, item #13): js/backup-manager.js has a complete,
+     working local/cloud message-backup + restore flow (AES-256-GCM
+     client-side encryption, calls the already-implemented
+     /api/devices/backup endpoints) but was never actually loaded on this
+     page, so Settings > Backup had no way to reach it. See loadBackupSection
+     in settings-ui.js for the button that opens its dialog. -->
+<script src="js/backup-manager.js" defer></script>
 <!-- ═══ Phase 2 Hybrid Transport Foundation ══════════════════════════════════════════
   Auto-loads Phase 1 + Phase 2 modules. Non-destructive.
   DO NOT move above existing scripts.

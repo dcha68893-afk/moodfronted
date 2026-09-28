@@ -73,3 +73,9 @@ origin chat.html
 
 node_modules/
 dist/
+
+# Signing keys must never be committed (Play Store audit #9)
+*.jks
+*.keystore
+keystore.properties
+key.properties

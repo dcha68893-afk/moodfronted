@@ -360,13 +360,16 @@
     }
 
     _showNotification(title, body, groupId) {
-      // FIX (NOTIFICATION-SETTINGS-INCONSISTENT): this only respected
-      // per-group mute (via the dedup layer / caller-side checks), never
-      // the app-wide Settings > Notifications toggle that every other
-      // module was also missing — so disabling notifications globally
-      // silenced everything except groups. window.__messageNotificationsEnabled
-      // is kept current by settings-broadcast-listener.js on this iframe.
-      if (window.__messageNotificationsEnabled === false) return;
+      // FIX (Notifications gate audit): this checked
+      // window.__messageNotificationsEnabled for GROUP events — the wrong
+      // flag (that's the Message Notifications toggle, not Group
+      // Notifications), so muting messages also silently muted groups, and
+      // muting only groups did nothing. Routed through the shared gate
+      // (js/core/notifications/NotificationGate.js) with kind='group',
+      // which also picks up "Enable Notifications" and "Do Not Disturb".
+      // Falls back to the old (still-wrong-but-functional) check if that
+      // script hasn't loaded on this page.
+      if (window.__shouldNotify ? !window.__shouldNotify('group') : window.__messageNotificationsEnabled === false) return;
       // Use Phase 1 NotifStab for dedup + storm prevention
       const notifStab = window.__NotificationStabilizationLayer;
       const key       = `${title}:${body}`;

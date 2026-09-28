@@ -3575,6 +3575,15 @@
         // actually checked it before firing a native Notification — the
         // toggle had no effect. Reads the same settings cache as above.
         function _kynDesktopNotificationsAllowed() {
+            // FIX (Notifications gate audit): this used to check
+            // notifications.desktopEnabled, a field with no toggle anywhere
+            // in Settings UI, so it always fell back to `true` no matter
+            // what the person actually turned off. Routed through the
+            // shared gate (js/core/notifications/NotificationGate.js) so
+            // "Enable Notifications", "Message Notifications", and "Do Not
+            // Disturb" all actually apply here. Falls back to permissive
+            // (prior behavior) if that script hasn't loaded on this page.
+            if (window.__shouldNotify) return window.__shouldNotify('message');
             try {
                 const raw = localStorage.getItem('knecta_settings_cache');
                 if (!raw) return true;

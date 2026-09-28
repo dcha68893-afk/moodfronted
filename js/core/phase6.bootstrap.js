@@ -37,6 +37,24 @@
     'presence/PresenceEngineFoundation.js',
     'notification/NotificationStabilizationLayer.js',
     'monitoring/MonitoringFoundation.js',
+    // FIX (resume thundering-herd): single coordinator for "tab came back
+    // after being away" — see js/core/resume/AppResumeController.js. Loaded
+    // in Phase 1 so it's available before any resume actually happens
+    // (real resumes only occur well after page load, once the user has
+    // backgrounded and returned to the tab, so exact load order here isn't
+    // load-bearing — this just keeps it grouped with the other foundation
+    // layers it coordinates).
+    'resume/AppResumeController.js',
+    // FIX (storage.autoClearCache had no runtime consumer): see
+    // js/core/storage/StorageAutoCleanup.js — the toggle saved correctly
+    // but nothing ever read it.
+    'storage/StorageAutoCleanup.js',
+    // FIX (Notifications gate audit): see
+    // js/core/notifications/NotificationGate.js — the shared
+    // window.__shouldNotify()/__notify() used by chat.html, push-manager.js
+    // and SocialNotificationEngine.js instead of each re-deriving (and
+    // getting wrong) its own answer.
+    'notifications/NotificationGate.js',
     // ── Phase 2: Hybrid Transport ────────────────────────────────────────
     'network/HybridTransportEngine.js',
     'network/LANCommunicationEngine.js',

@@ -1184,6 +1184,20 @@
         } catch (err) { return { success: false, error: err.message }; }
     }
 
+    // FIX (Play Store compliance audit #6): finishes the fix started in
+    // message.html's context menu (which now has a "Report" item but had
+    // nothing to call) — hits the new POST /:messageId/report backend route.
+    // No local state to update here (unlike star/unstar): a report doesn't
+    // change how the message looks to the reporter, only that it's now on
+    // record for moderation.
+    async function reportMessage(chatId, messageId, reason, details) {
+        try {
+            const res = await api().post(`/messages/${messageId}/report`, { reason, details });
+            if (res && res.success) notify('message:reported', { chatId, messageId, reason });
+            return res;
+        } catch (err) { return { success: false, error: err.message }; }
+    }
+
     async function muteChat(chatId, duration) {
         try {
             const res = await api().put(`/messages/${chatId}/mute`, { muted: true, duration });
@@ -1477,9 +1491,22 @@
             }, 0);
         };
         window.addEventListener('focus', resyncActiveConversations);
-        document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible') resyncActiveConversations();
-        });
+        // FIX (resume thundering-herd): previously fired on every raw
+        // visibilitychange, at the same instant as ~18 other modules'
+        // own visibilitychange handlers (auth refresh, settings sync,
+        // realtime reconnect, etc.), all racing the same possibly-sleeping
+        // backend. When AppResumeController.js is present, wait for its
+        // staggered 'app:resume:messages' signal instead so this resync
+        // lands after auth/backend-wake/settings, not on top of them.
+        // Falls back to the old immediate behavior if that controller
+        // isn't loaded on a given page.
+        if (window.__AppResumeController) {
+            window.addEventListener('app:resume:messages', resyncActiveConversations);
+        } else {
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') resyncActiveConversations();
+            });
+        }
         window.addEventListener('online', () => { state.connectionState = 'online'; notify('connection:changed', 'online'); resyncActiveConversations(); });
         window.addEventListener('offline', () => { state.connectionState = 'offline'; notify('connection:changed', 'offline'); });
         state.connectionState = navigator.onLine ? 'online' : 'offline';
@@ -2063,6 +2090,7 @@
         editMessage,
         starMessage,
         unstarMessage,
+        reportMessage,
         muteChat,
         unmuteChat,
         reactToMessage,
@@ -2112,7 +2140,14 @@
     // A failed refresh (offline, cold server) used to be final for the page session. Try again when the connection returns or
     // the person comes back to the tab — but only if the last attempt actually failed.
     window.addEventListener('online', () => { if (state.convLoadFailed) loadConversations(); });
-    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && state.convLoadFailed) loadConversations(); });
+    // FIX (resume thundering-herd): staggered via AppResumeController when
+    // present (see the 'app:resume:messages' listener above for details);
+    // same immediate fallback otherwise.
+    if (window.__AppResumeController) {
+        window.addEventListener('app:resume:messages', () => { if (state.convLoadFailed) loadConversations(); });
+    } else {
+        document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && state.convLoadFailed) loadConversations(); });
+    }
 
     // window.api.request may not be ready yet at this exact point —
     // api.request.js runs its own async bootstrap sequence with retries/

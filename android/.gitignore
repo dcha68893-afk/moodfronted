@@ -53,9 +53,13 @@ captures/
 .idea/navEditor.xml
 
 # Keystore files
-# Uncomment the following lines if you do not want to check your keystore files in.
-#*.jks
-#*.keystore
+# FIX (Play Store audit #9): these were commented out, and android/app/necpa-release.jks
+# was committed to the repository. Signing keys must never be tracked. See
+# KEYSTORE_REMEDIATION.md for removing the already-committed file from history.
+*.jks
+*.keystore
+keystore.properties
+key.properties
 
 # External native build folder generated in Android Studio 2.2 and later
 .externalNativeBuild
