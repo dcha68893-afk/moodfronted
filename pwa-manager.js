@@ -88,15 +88,45 @@
    * 1. Service worker registration — ONE register() call per page
    * ====================================================================== */
   var swPromise = null;
+  var initialController = false;
   // SW_UPDATED can arrive during early boot, before the load-time update UX
-  // is wired. Keep it in memory so the first real DOM pass can still show
-  // the user's "Refresh to update" action.
+  // is wired. Keep it in memory so no update signal is lost.
   var earlySwUpdateVersion = '';
+  var nativeUpdateReloading = false;
+
   if ('serviceWorker' in navigator) {
+    initialController = !!navigator.serviceWorker.controller;
+
     navigator.serviceWorker.addEventListener('message', function (event) {
       if (event && event.data && event.data.type === 'SW_UPDATED') {
         earlySwUpdateVersion = String(event.data.version || '');
       }
+    });
+  }
+
+  function reloadForNativeUpdate() {
+    if (nativeUpdateReloading) return;
+    nativeUpdateReloading = true;
+    try { sessionStorage.setItem('necpa_sw_auto_reload', '1'); } catch (_) {}
+    window.location.reload();
+  }
+
+  // The Capacitor Android shell is a remote web app: the APK itself does not
+  // contain the current HTML/JS. Once a newer worker is ready, an installed
+  // shell must activate it and reload exactly once.
+  function activateWaitingWorker(registration, automatic) {
+    if (!registration || !registration.waiting) return false;
+    if (automatic && !isStandalone()) return false;
+    try {
+      registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+      return true;
+    } catch (_) { return false; }
+  }
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('controllerchange', function () {
+      if (!initialController || !isStandalone()) return;
+      reloadForNativeUpdate();
     });
   }
 
@@ -111,21 +141,37 @@
           console.warn('[NecpaPWA] service worker scope is ' + reg.scope + ' — it must be ' + location.origin + '/ to control the whole app.');
         }
       }, function (err) {
-        swPromise = null; // allow a later retry
+        swPromise = null;
         console.warn('[NecpaPWA] service worker registration failed:', err);
       });
     }
     return swPromise;
   }
 
-  // Check for a newer worker whenever an installed app returns to the foreground.
+  function checkForUpdateNow() {
+    if (!('serviceWorker' in navigator)) return Promise.resolve(null);
+    return registerServiceWorker().then(function (reg) {
+      if (reg && reg.waiting && isStandalone()) {
+        activateWaitingWorker(reg, true);
+        return reg;
+      }
+      if (reg && reg.update) return reg.update().then(function () {
+        if (reg.waiting && isStandalone()) activateWaitingWorker(reg, true);
+        return reg;
+      }).catch(function () { return reg; });
+      return reg;
+    }).catch(function () { return null; });
+  }
+
+  // Check immediately on launch and whenever the installed app returns to the
+  // foreground. Reopening the APK should be enough to pick up a deployment.
   function scheduleUpdateCheck() {
     if (!('serviceWorker' in navigator)) return;
-    var run = function () { try { registerServiceWorker().then(function (reg) { if (reg && reg.update) reg.update().catch(function () {}); }).catch(function () {}); } catch (_) {} };
+    var run = function () { checkForUpdateNow(); };
     window.addEventListener('pageshow', run, { passive: true });
     window.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') run(); });
     window.addEventListener('focus', run, { passive: true });
-    setTimeout(run, 1500);
+    setTimeout(run, 500);
   }
   scheduleUpdateCheck();
 
@@ -624,11 +670,11 @@
     }
 
     registerServiceWorker().then(function (registration) {
-      // A waiting worker is a real, fully downloaded update. Keep it waiting
-      // until the user explicitly taps Refresh so an active chat/session is
-      // never interrupted by a background deployment.
+      // Browser tabs keep the existing "Update ready" banner so a deployment
+      // cannot interrupt an active session. The installed Android shell is
+      // different: it must activate the waiting worker automatically.
       if (registration.waiting && navigator.serviceWorker.controller) {
-        showUpdateBanner();
+        if (!activateWaitingWorker(registration, true)) showUpdateBanner();
       }
 
       registration.addEventListener('updatefound', function () {
@@ -636,13 +682,14 @@
         if (!worker) return;
         worker.addEventListener('statechange', function () {
           if (worker.state === 'installed' && navigator.serviceWorker.controller) {
-            showUpdateBanner();
+            if (!activateWaitingWorker(registration, true)) showUpdateBanner();
           }
         });
       });
 
-      setInterval(function () { registration.update().catch(function () {}); }, 30 * 60 * 1000);
-      if (isStandalone()) setInterval(function () { registration.update().catch(function () {}); }, 5 * 60 * 1000);
+      // Resume/launch checks above are authoritative. Keep a low-frequency
+      // fallback for a browser tab that stays open while a deployment lands.
+      setInterval(function () { checkForUpdateNow(); }, isStandalone() ? 10 * 60 * 1000 : 30 * 60 * 1000);
     }).catch(function () { /* already logged by registerServiceWorker */ });
   }
 
