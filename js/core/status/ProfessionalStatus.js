@@ -140,7 +140,213 @@ function mount(){
  const launcher=document.createElement('button');launcher.id='necpa-status-launcher';launcher.innerHTML='<span class="ns-dot"></span> Status';launcher.onclick=open;
  document.body.appendChild(launcher);
  const root=document.createElement('div');root.id='necpa-status-root';
- root.innerHTML='<div class="ns-shell"><aside class="ns-side"><div class="ns-brand"><div><h2>Moments</h2><small>Share what is happening</small></div></div><div class="ns-my-card" data-my-status>'+avatar(currentUser())+'<div style="flex:1;min-width:0"><b>My Status</b><small data-my-status-meta style="display:block;color:#64748b">Add a new moment</small></div><button class="ns-add" data-compose aria-label="Add status">+</button></div><div class="ns-section-title">Status</div><div class="ns-tabs"><button class="ns-tab active" data-tab="friends">Friends</button><button class="ns-tab" data-tab="discover">Discover</button></div><div class="ns-discover-actions"><button class="ns-btn ghost" data-open-vibes>▶ Vibes</button><button class="ns-btn ghost ns-discover-only" data-open-interests>🎯 Interests</button></div><button class="ns-browse" data-browse><span>Browse all moments</span><span>›</span></button><div class="ns-section-title">People</div><div class="ns-list" data-people></div></aside><main class="ns-main"><div class="ns-main-head"><input class="ns-search" placeholder="Search statuses, topics or people"><select class="ns-filter"><option value="all">All moments</option><option value="image">Photos</option><option value="video">Videos</option><option value="text">Text</option><option value="poll">Polls</option></select><button class="ns-btn ghost ns-feed-back" data-feed-back aria-label="Back to status list">← Back</button><button class="ns-btn primary" data-compose>Create</button></div><section class="ns-feed" data-feed></section><div class="ns-composer" data-composer></div><div class="ns-viewer" data-viewer></div><div class="ns-interests" data-interests></div><div class="ns-vibes" data-vibes></div></main></div><div class="ns-toast"></div>';\n document.body.appendChild(root);\n const applyViewportLayout=()=>{\n   const mobile=window.matchMedia('(max-width: 800px)').matches;\n   root.classList.toggle('ns-mobile',mobile);\n   const side=root.querySelector('.ns-side');\n   if(!mobile&&state.panel!=='list')state.panel='list';\n   root.dataset.panel=state.panel;\n   syncParent();\n };\n applyViewportLayout();\n window.addEventListener('resize',applyViewportLayout,{passive:true});\n root.querySelectorAll('[data-exit]').forEach(b=>b.onclick=exitModule);\n root.querySelectorAll('[data-back]').forEach(b=>b.onclick=goBackOne);\n root.querySelectorAll('[data-browse]').forEach(b=>b.onclick=()=>setPanel('feed')); root.querySelector('[data-feed-back]')?.addEventListener('click',()=>setPanel('list'));\n root.querySelectorAll('[data-compose]').forEach(b=>b.onclick=(e)=>{e.stopPropagation();openComposer()});\n root.querySelectorAll('[data-my-status]').forEach(b=>b.onclick=()=>openMyStatus());\n root.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{\n   state.tab=b.dataset.tab;\n   root.querySelectorAll('.ns-tab').forEach(x=>x.classList.toggle('active',x===b));\n   root.querySelectorAll('.ns-discover-only').forEach(x=>x.style.display=state.tab==='discover'?'':'none');\n   if(state.tab==='discover')setPanel('feed');\n   loadFeed().then(()=>{if(state.tab==='discover'&&state.interests===null)openInterestPicker()});\n });\n root.querySelector('[data-open-interests]')?.addEventListener('click',()=>openInterestPicker());\n root.querySelector('[data-open-vibes]')?.addEventListener('click',()=>openVibes());\n root.querySelector('[data-interests]')?.addEventListener('click',e=>{if(e.target===e.currentTarget)closeInterestPicker()});\n root.querySelector('.ns-filter').onchange=renderFeed;\n root.querySelector('.ns-search').oninput=renderFeed;\n document.addEventListener('keydown',e=>{if(e.key==='Escape')goBackOne();else if(document.querySelector('[data-vibes]')?.classList.contains('open')){if(e.key==='ArrowDown')moveVibe(1);else if(e.key==='ArrowUp')moveVibe(-1)}});\n if(state.interests===null)state.interests=loadInterests();\n renderPeople();loadFeed();\n}\n\n/* ── MOBILE ONE-PANEL NAVIGATION ─────────────────────────────────────────\n   Screens, deepest first: viewer > composer > feed (mobile) > list.\n   The LIST (Moments / My Status / Friends|Discover / People) is the landing\n   screen on mobile. Every deeper screen has a Back arrow that returns exactly\n   one level, and the same one-level unwind is exposed to the parent shell so\n   the hardware/gesture back button behaves identically. */\nconst isMobile=()=>window.matchMedia('(max-width: 800px)').matches;\nconst rootEl=()=>document.getElementById('necpa-status-root');\nfunction topScreen(){\n if(document.querySelector('[data-vibes]')?.classList.contains('open'))return 'vibes';\n if(document.querySelector('[data-interests]')?.classList.contains('open'))return 'interests';\n if(document.querySelector('[data-viewer]')?.classList.contains('open'))return 'viewer';\n if(document.querySelector('[data-composer]')?.classList.contains('open'))return 'composer';\n if(isMobile()&&state.panel==='feed')return 'feed';\n return null;\n}\nfunction syncParent(){\n const d=topScreen(),key=d||'list';\n if(key===state.lastScreen)return;\n state.lastScreen=key;\n try{\n  window.parent.postMessage({type:d?'STATUS_PANEL_OPENED':'STATUS_LIST_SHOWN',source:'professional-status'},'*');\n  window.parent.postMessage({type:'SCREEN_STATE_CHANGED',module:'status',restore:d?('status-'+d):null,timestamp:Date.now()},'*');\n }catch(_){}\n}\nfunction setPanel(p){state.panel=p;const r=rootEl();if(r)r.dataset.panel=p;syncParent()}\nfunction exitModule(){\n try{if(window.parent&&window.parent!==window){window.parent.postMessage({type:'NAVIGATE_BACK',source:'status'},'*');return}}catch(_){}\n try{history.back()}catch(_){}\n}\nfunction goBackOne(){\n const d=topScreen();\n if(d==='vibes')return closeVibes();\n if(d==='interests')return closeInterestPicker();\n if(d==='viewer')return closeViewer();\n if(d==='composer')return closeComposer();\n if(d==='feed')return setPanel('list');\n exitModule();\n}\nfunction resetToList(){\n clearInterval(state.timer);\n document.querySelector('[data-viewer]')?.classList.remove('open');\n document.querySelector('[data-composer]')?.classList.remove('open');\n closeVibes();\n closeInterestPicker();\n setPanel('list');\n}\nwindow.addEventListener('message',e=>{\n // Same-origin only. Do not compare e.source: the shell's config.js wraps postMessage so the source is the receiver itself.\n if(e.origin&&e.origin!=='null'&&e.origin!==location.origin)return;\n const t=e.data&&e.data.type;\n if(t==='CLOSE_LOCAL_PANEL'){if(topScreen())goBackOne()}\n else if(t==='GO_BACK_TO_LIST')resetToList();\n});\nfunction open(){mount();document.getElementById('necpa-status-root').classList.add('open');loadFeed()}\nfunction close(){document.getElementById('necpa-status-root')?.classList.remove('open');closeViewer();closeComposer()}\nfunction normalizeStatus(s){\n const x={...(s||{})};\n x.mediaUrl=x.mediaUrl||x.media_url||x.media?.url||x.cloudinary?.url||null;\n x.mediaPublicId=x.mediaPublicId||x.media_public_id||x.media?.publicId||x.media?.public_id||null;\n x.mediaMime=x.mediaMime||x.media_mime||x.media?.mimeType||x.media?.mime||null;\n if(!x.type&&x.mediaMime)x.type=String(x.mediaMime).startsWith('video/')?'video':String(x.mediaMime).startsWith('image/')?'image':'text';\n return x;\n}\nasync function loadFeed(){\n try{\n  const me=currentUser();\n  const mine=(await api('/my')).data||[];\n  state.mine=mine.map(normalizeStatus);\n  let data=state.tab==='discover'?(await api('/public')).data||[]:(await api('/friends')).data||[];\n  state.mine=mine.sort((a,b)=>Date.parse(b.createdAt||0)-Date.parse(a.createdAt||0));\n  state.statuses=data.map(normalizeStatus)\n    .filter(s=>String(s.userId||s.owner?.id||'')!==String(me.id||''))\n    .sort((a,b)=>Date.parse(b.createdAt||0)-Date.parse(a.createdAt||0));\n  renderMyStatus();\n  renderFeed();renderPeople();\n }catch(e){renderFeed();toast(e.message)}\n}\nfunction renderMyStatus(){\n const card=document.querySelector('[data-my-status]');\n const meta=document.querySelector('[data-my-status-meta]');\n if(!card||!meta)return;\n const mine=Array.isArray(state.mine)?state.mine:[];\n const latest=mine[0];\n const avatarEl=card.querySelector('.ns-avatar');\n if(latest?.owner&&avatarEl) avatarEl.outerHTML=avatar(latest.owner,'ns-avatar');\n if(!latest){meta.textContent='Add a new moment';return}\n const totalViews=mine.reduce((sum,status)=>sum+Number(status.viewCount||0),0);\n meta.textContent=mine.length===1\n   ? ('1 active status · '+totalViews+' view'+(totalViews===1?'':'s'))\n   : (mine.length+' active statuses · '+totalViews+' views');\n}\nfunction openMyStatus(){\n const mine=Array.isArray(state.mine)?state.mine:[];\n if(!mine.length){openComposer();return}\n state.viewerGroup=mine;\n state.index=0;\n showViewer();\n}\n\nfunction renderPeople(){\n const el=document.querySelector('[data-people]');if(!el)return;\n const groups={};\n for(const s of state.statuses){const u=s.owner||{},id=String(u.id||s.userId);if(!groups[id]||(!groups[id].viewedByMe&&s.viewedByMe))groups[id]=s}\n const arr=Object.values(groups).sort((a,b)=>Number(!!a.viewedByMe)-Number(!!b.viewedByMe)||new Date(b.createdAt)-new Date(a.createdAt));\n const fresh=arr.filter(s=>!s.viewedByMe),viewed=arr.filter(s=>s.viewedByMe);\n const person=s=>{const u=s.owner||{};return '<div class="ns-person '+(s.viewedByMe?'is-viewed':'is-unviewed')+'" data-user="'+esc(s.userId)+'">'+avatar(u)+'<div class="ns-person-info"><div class="ns-person-name">'+esc(u.displayName||u.username||'User')+'</div><div class="ns-person-time">'+(s.viewedByMe?'Viewed':'New')+' · '+ago(s.createdAt)+' ago</div></div><i class="ns-story-ring '+(s.viewedByMe?'viewed':'unviewed')+'"></i></div>'};\n el.innerHTML=(fresh.length?'<div class="ns-status-label">NEW</div>'+fresh.map(person).join(''):'')+(viewed.length?'<div class="ns-status-label viewed-label">VIEWED</div>'+viewed.map(person).join(''):'')||'<div class="ns-empty-mini">No active friend statuses yet.</div>';\n el.querySelectorAll('[data-user]').forEach(x=>x.onclick=()=>openUser(x.dataset.user));\n}\n// Discover interest filtering: only narrows the Discover tab, and only once the person has\n// actually picked topics (mode 'selected'); Friends and an explicit "show me everything" choice\n// both pass every status through unchanged.\nfunction discoverFilteredStatuses(){\n if(state.tab!=='discover'||!state.interests||state.interests.mode!=='selected'||!Array.isArray(state.interests.topics)||!state.interests.topics.length)return state.statuses;\n const wanted=state.interests.topics;\n return state.statuses.filter(s=>{\n   const hay=[...(Array.isArray(s.topics)?s.topics:[]),s.category,s.moodType,s.intent].filter(Boolean).map(x=>String(x).toLowerCase());\n   return wanted.some(t=>hay.includes(t));\n });\n}\nfunction availableInterestTopics(){\n const set=new Set(['campus','study','events','sports','music','tech','art','food','travel','fitness','funny','news']);\n for(const s of state.statuses){\n   (Array.isArray(s.topics)?s.topics:[]).forEach(t=>{if(t)set.add(String(t).trim().toLowerCase())});\n   [s.category,s.moodType,s.intent].forEach(t=>{if(t)set.add(String(t).trim().toLowerCase())});\n }\n return [...set].filter(Boolean).sort();\n}\nfunction renderFeed(){\n const el=document.querySelector('[data-feed]');if(!el)return;\n const q=(document.querySelector('.ns-search')?.value||'').toLowerCase().trim();\n const filter=document.querySelector('.ns-filter')?.value||'all';\n let data=discoverFilteredStatuses().filter(s=>filter==='all'||s.type===filter);\n if(q)data=data.filter(s=>JSON.stringify(s).toLowerCase().includes(q));\n if(!data.length){el.innerHTML='<div class="ns-empty"><strong>Your status space is ready</strong>Post a photo, thought, poll or short video and let your campus see what matters.</div>';return}\n const fresh=data.filter(s=>!s.viewedByMe),viewed=data.filter(s=>s.viewedByMe);\n const section=(title,items,cls)=>items.length?'<div class="ns-feed-section '+cls+'"><div class="ns-feed-title"><span>'+title+'</span><small>'+items.length+' moment'+(items.length===1?'':'s')+'</small></div><div class="ns-feed-grid">'+items.map((s,i)=>card(s,i)).join('')+'</div></div>':'';\n el.innerHTML=section('New from friends',fresh,'is-new')+section('Viewed',viewed,'is-viewed-feed');\n el.querySelectorAll('[data-open-status]').forEach(x=>x.onclick=()=>openViewer(Number(x.dataset.openStatus)));\n}\n// Feed thumbnails. The status grid used to download every full-resolution image and the first\n// bytes of every video just to draw a small card. Cloudinary derives a small optimised image\n// (or a poster frame for video) from the same asset via the URL, so nothing extra is stored and\n// the original stays untouched for the viewer/Vibe player. Non-Cloudinary URLs are left as-is.\nconst isCld=u=>typeof u==='string'&&/res\.cloudinary\.com/.test(u)&&u.includes('/upload/');\nfunction cldImageThumb(u,w=480){return isCld(u)?u.replace('/upload/','/upload/w_'+w+',c_limit,q_auto,f_auto/'):u}\nfunction cldVideoPoster(u,w=480){return isCld(u)?u.replace('/upload/','/upload/so_0,w_'+w+',c_limit,q_auto,f_jpg/').replace(/\.[a-z0-9]+(\?.*)?$/i,'.jpg'):null}\nfunction card(s,i){\n const u=s.owner||{};const media=s.mediaUrl;\n const visual=s.type==='image'&&media?'<img class="ns-card-media" src="'+esc(cldImageThumb(media))+'" loading="lazy" decoding="async">':s.type==='video'&&media?(cldVideoPoster(media)?'<img class="ns-card-media" src="'+esc(cldVideoPoster(media))+'" loading="lazy" decoding="async" alt="">':'<video class="ns-card-media" src="'+esc(media)+'" muted playsinline preload="none"></video>'):'<div class="ns-card-media" style="background:'+safeBg(s.background)+';display:grid;place-items:center"><div style="padding:25px;color:#fff;font-weight:850;font-size:25px;text-align:center;font-family:'+esc(s.font||'system-ui')+'">'+esc(s.content||s.caption||'✨')+'</div></div>';\n return '<article class="ns-card" data-open-status="'+s.id+'">'+visual+'<div class="ns-card-overlay"></div><div class="ns-card-top">'+avatar(u)+'<span class="ns-card-user">'+esc(u.displayName||u.username||'User')+'</span><span class="ns-card-time">'+ago(s.createdAt)+'</span></div><div class="ns-card-bottom"><div class="ns-card-caption">'+esc(s.caption||s.content||'')+'</div><div class="ns-card-meta"><span>👁 '+(s.viewCount||0)+'</span><span>❤️ '+(s.reactionCount||0)+'</span><span>💬 '+(s.replyCount||0)+'</span></div></div></article>';\n}\nasync function openUser(userId){\n try{const data=(await api('/user/'+encodeURIComponent(userId))).data||[];if(data.length){state.viewerGroup=data;state.index=0;showViewer()}}catch(e){toast(e.message)}\n}\nasync function openViewer(id){\n const idx=state.statuses.findIndex(s=>String(s.id)===String(id));\n if(idx<0)return;\n // One continuous viewer sequence, like the normal status experience:\n // tapping the current story advances to the next story, including the next\n // person, instead of ending after the current person's last story.\n state.viewerGroup=state.statuses.slice();\n state.index=idx;\n showViewer();\n}\nfunction showViewer(){\n const s=state.viewerGroup[state.index];if(!s)return;\n const isOwner=String(s.userId)===String(currentUser().id||'');\n const isReplay=!!s.viewedByMe && !isOwner;\n s.viewedByMe=true;state.seen.add(s.id);try{localStorage.setItem('necpa_status_seen_'+String(currentUser().id||'guest'),JSON.stringify([...state.seen].slice(-500)))}catch(_){}\n const root=document.querySelector('[data-viewer]');const u=s.owner||{};state.seen.add(s.id);\n root.innerHTML='<div class="ns-viewer-stage"'+((s.type==='image'||s.type==='video')?'':' style="background:'+safeBg(s.background)+'"')+'>'+viewerVisual(s)+'<div class="ns-viewer-grad"></div><div class="ns-progress">'+state.viewerGroup.map((_,i)=>'<i><b style="width:'+(i<state.index?'100':'0')+'%"></b></i>').join('')+'</div><div class="ns-viewer-head">'+avatar(u)+'<div><div class="ns-viewer-name">'+esc(u.displayName||u.username||'User')+'</div><div class="ns-viewer-time">'+ago(s.createdAt)+' ago · 24h moment</div></div><div class="ns-viewer-actions">'+(s.type==='video'?'<button data-vunmute>🔇</button>':'')+'<button data-viewers>👁 '+(s.viewCount||0)+'</button><button data-more>•••</button><button data-vclose>×</button></div></div><button class="ns-nav ns-prev" data-prev>‹</button><button class="ns-nav ns-next" data-next>›</button><div class="ns-viewer-bottom"><div class="ns-reactions">'+['❤️','😂','🔥','😍','👏','💯'].map(e=>'<button class="ns-reaction" data-react="'+e+'">'+e+'</button>').join('')+'</div><div class="ns-reply-row">'+(s.allowReplies!==false?'<input class="ns-reply" data-reply placeholder="Reply to '+esc(u.displayName||'this status')+'…"><button class="ns-reaction" data-send>➤</button>':'<span style="opacity:.65">Replies are disabled</span>')+'</div></div><div class="ns-viewer-more" data-moremenu><button data-share>↗ Share</button><button data-save>⇩ Download</button><button data-report>⚑ Report</button>'+(String(s.userId)===String(currentUser().id)?'<button data-edit>✎ Edit</button><button data-delete>🗑 Delete</button><button data-highlight>★ Highlight</button>':'')+'</div></div>';
+ root.innerHTML='<div class="ns-shell"><aside class="ns-side"><div class="ns-brand"><div><h2>Moments</h2><small>Share what is happening</small></div></div><div class="ns-my-card" data-my-status>'+avatar(currentUser())+'<div style="flex:1;min-width:0"><b>My Status</b><small data-my-status-meta style="display:block;color:#64748b">Add a new moment</small></div><button class="ns-add" data-compose aria-label="Add status">+</button></div><div class="ns-section-title">Status</div><div class="ns-tabs"><button class="ns-tab active" data-tab="friends">Friends</button><button class="ns-tab" data-tab="discover">Discover</button></div><div class="ns-discover-actions"><button class="ns-btn ghost" data-open-vibes>▶ Vibes</button><button class="ns-btn ghost ns-discover-only" data-open-interests>🎯 Interests</button></div><button class="ns-browse" data-browse><span>Browse all moments</span><span>›</span></button><div class="ns-section-title">People</div><div class="ns-list" data-people></div></aside><main class="ns-main"><div class="ns-main-head"><input class="ns-search" placeholder="Search statuses, topics or people"><select class="ns-filter"><option value="all">All moments</option><option value="image">Photos</option><option value="video">Videos</option><option value="text">Text</option><option value="poll">Polls</option></select><button class="ns-btn ghost ns-feed-back" data-feed-back aria-label="Back to status list">← Back</button><button class="ns-btn primary" data-compose>Create</button></div><section class="ns-feed" data-feed></section><div class="ns-composer" data-composer></div><div class="ns-viewer" data-viewer></div><div class="ns-interests" data-interests></div><div class="ns-vibes" data-vibes></div></main></div><div class="ns-toast"></div>';
+ document.body.appendChild(root);
+ const applyViewportLayout=()=>{
+   const mobile=window.matchMedia('(max-width: 800px)').matches;
+   root.classList.toggle('ns-mobile',mobile);
+   const side=root.querySelector('.ns-side');
+   if(!mobile&&state.panel!=='list')state.panel='list';
+   root.dataset.panel=state.panel;
+   syncParent();
+ };
+ applyViewportLayout();
+ window.addEventListener('resize',applyViewportLayout,{passive:true});
+ root.querySelectorAll('[data-exit]').forEach(b=>b.onclick=exitModule);
+ root.querySelectorAll('[data-back]').forEach(b=>b.onclick=goBackOne);
+ root.querySelectorAll('[data-browse]').forEach(b=>b.onclick=()=>setPanel('feed')); root.querySelector('[data-feed-back]')?.addEventListener('click',()=>setPanel('list'));
+ root.querySelectorAll('[data-compose]').forEach(b=>b.onclick=(e)=>{e.stopPropagation();openComposer()});
+ root.querySelectorAll('[data-my-status]').forEach(b=>b.onclick=()=>openMyStatus());
+ root.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{
+   state.tab=b.dataset.tab;
+   root.querySelectorAll('.ns-tab').forEach(x=>x.classList.toggle('active',x===b));
+   root.querySelectorAll('.ns-discover-only').forEach(x=>x.style.display=state.tab==='discover'?'':'none');
+   if(state.tab==='discover')setPanel('feed');
+   loadFeed().then(()=>{if(state.tab==='discover'&&state.interests===null)openInterestPicker()});
+ });
+ root.querySelector('[data-open-interests]')?.addEventListener('click',()=>openInterestPicker());
+ root.querySelector('[data-open-vibes]')?.addEventListener('click',()=>openVibes());
+ root.querySelector('[data-interests]')?.addEventListener('click',e=>{if(e.target===e.currentTarget)closeInterestPicker()});
+ root.querySelector('.ns-filter').onchange=renderFeed;
+ root.querySelector('.ns-search').oninput=renderFeed;
+ document.addEventListener('keydown',e=>{if(e.key==='Escape')goBackOne();else if(document.querySelector('[data-vibes]')?.classList.contains('open')){if(e.key==='ArrowDown')moveVibe(1);else if(e.key==='ArrowUp')moveVibe(-1)}});
+ if(state.interests===null)state.interests=loadInterests();
+ renderPeople();loadFeed();
+}
+
+/* ── MOBILE ONE-PANEL NAVIGATION ─────────────────────────────────────────
+   Screens, deepest first: viewer > composer > feed (mobile) > list.
+   The LIST (Moments / My Status / Friends|Discover / People) is the landing
+   screen on mobile. Every deeper screen has a Back arrow that returns exactly
+   one level, and the same one-level unwind is exposed to the parent shell so
+   the hardware/gesture back button behaves identically. */
+const isMobile=()=>window.matchMedia('(max-width: 800px)').matches;
+const rootEl=()=>document.getElementById('necpa-status-root');
+function topScreen(){
+ if(document.querySelector('[data-vibes]')?.classList.contains('open'))return 'vibes';
+ if(document.querySelector('[data-interests]')?.classList.contains('open'))return 'interests';
+ if(document.querySelector('[data-viewer]')?.classList.contains('open'))return 'viewer';
+ if(document.querySelector('[data-composer]')?.classList.contains('open'))return 'composer';
+ if(isMobile()&&state.panel==='feed')return 'feed';
+ return null;
+}
+function syncParent(){
+ const d=topScreen(),key=d||'list';
+ if(key===state.lastScreen)return;
+ state.lastScreen=key;
+ try{
+  window.parent.postMessage({type:d?'STATUS_PANEL_OPENED':'STATUS_LIST_SHOWN',source:'professional-status'},'*');
+  window.parent.postMessage({type:'SCREEN_STATE_CHANGED',module:'status',restore:d?('status-'+d):null,timestamp:Date.now()},'*');
+ }catch(_){}
+}
+function setPanel(p){state.panel=p;const r=rootEl();if(r)r.dataset.panel=p;syncParent()}
+function exitModule(){
+ try{if(window.parent&&window.parent!==window){window.parent.postMessage({type:'NAVIGATE_BACK',source:'status'},'*');return}}catch(_){}
+ try{history.back()}catch(_){}
+}
+function goBackOne(){
+ const d=topScreen();
+ if(d==='vibes')return closeVibes();
+ if(d==='interests')return closeInterestPicker();
+ if(d==='viewer')return closeViewer();
+ if(d==='composer')return closeComposer();
+ if(d==='feed')return setPanel('list');
+ exitModule();
+}
+function resetToList(){
+ clearInterval(state.timer);
+ document.querySelector('[data-viewer]')?.classList.remove('open');
+ document.querySelector('[data-composer]')?.classList.remove('open');
+ closeVibes();
+ closeInterestPicker();
+ setPanel('list');
+}
+window.addEventListener('message',e=>{
+ // Same-origin only. Do not compare e.source: the shell's config.js wraps postMessage so the source is the receiver itself.
+ if(e.origin&&e.origin!=='null'&&e.origin!==location.origin)return;
+ const t=e.data&&e.data.type;
+ if(t==='CLOSE_LOCAL_PANEL'){if(topScreen())goBackOne()}
+ else if(t==='GO_BACK_TO_LIST')resetToList();
+});
+function open(){mount();document.getElementById('necpa-status-root').classList.add('open');loadFeed()}
+function close(){document.getElementById('necpa-status-root')?.classList.remove('open');closeViewer();closeComposer()}
+function normalizeStatus(s){
+ const x={...(s||{})};
+ x.mediaUrl=x.mediaUrl||x.media_url||x.media?.url||x.cloudinary?.url||null;
+ x.mediaPublicId=x.mediaPublicId||x.media_public_id||x.media?.publicId||x.media?.public_id||null;
+ x.mediaMime=x.mediaMime||x.media_mime||x.media?.mimeType||x.media?.mime||null;
+ if(!x.type&&x.mediaMime)x.type=String(x.mediaMime).startsWith('video/')?'video':String(x.mediaMime).startsWith('image/')?'image':'text';
+ return x;
+}
+async function loadFeed(){
+ try{
+  const me=currentUser();
+  const mine=(await api('/my')).data||[];
+  state.mine=mine.map(normalizeStatus);
+  let data=state.tab==='discover'?(await api('/public')).data||[]:(await api('/friends')).data||[];
+  state.mine=mine.sort((a,b)=>Date.parse(b.createdAt||0)-Date.parse(a.createdAt||0));
+  state.statuses=data.map(normalizeStatus)
+    .filter(s=>String(s.userId||s.owner?.id||'')!==String(me.id||''))
+    .sort((a,b)=>Date.parse(b.createdAt||0)-Date.parse(a.createdAt||0));
+  renderMyStatus();
+  renderFeed();renderPeople();
+ }catch(e){renderFeed();toast(e.message)}
+}
+function renderMyStatus(){
+ const card=document.querySelector('[data-my-status]');
+ const meta=document.querySelector('[data-my-status-meta]');
+ if(!card||!meta)return;
+ const mine=Array.isArray(state.mine)?state.mine:[];
+ const latest=mine[0];
+ const avatarEl=card.querySelector('.ns-avatar');
+ if(latest?.owner&&avatarEl) avatarEl.outerHTML=avatar(latest.owner,'ns-avatar');
+ if(!latest){meta.textContent='Add a new moment';return}
+ const totalViews=mine.reduce((sum,status)=>sum+Number(status.viewCount||0),0);
+ meta.textContent=mine.length===1
+   ? ('1 active status · '+totalViews+' view'+(totalViews===1?'':'s'))
+   : (mine.length+' active statuses · '+totalViews+' views');
+}
+function openMyStatus(){
+ const mine=Array.isArray(state.mine)?state.mine:[];
+ if(!mine.length){openComposer();return}
+ state.viewerGroup=mine;
+ state.index=0;
+ showViewer();
+}
+
+function renderPeople(){
+ const el=document.querySelector('[data-people]');if(!el)return;
+ const groups={};
+ for(const s of state.statuses){const u=s.owner||{},id=String(u.id||s.userId);if(!groups[id]||(!groups[id].viewedByMe&&s.viewedByMe))groups[id]=s}
+ const arr=Object.values(groups).sort((a,b)=>Number(!!a.viewedByMe)-Number(!!b.viewedByMe)||new Date(b.createdAt)-new Date(a.createdAt));
+ const fresh=arr.filter(s=>!s.viewedByMe),viewed=arr.filter(s=>s.viewedByMe);
+ const person=s=>{const u=s.owner||{};return '<div class="ns-person '+(s.viewedByMe?'is-viewed':'is-unviewed')+'" data-user="'+esc(s.userId)+'">'+avatar(u)+'<div class="ns-person-info"><div class="ns-person-name">'+esc(u.displayName||u.username||'User')+'</div><div class="ns-person-time">'+(s.viewedByMe?'Viewed':'New')+' · '+ago(s.createdAt)+' ago</div></div><i class="ns-story-ring '+(s.viewedByMe?'viewed':'unviewed')+'"></i></div>'};
+ el.innerHTML=(fresh.length?'<div class="ns-status-label">NEW</div>'+fresh.map(person).join(''):'')+(viewed.length?'<div class="ns-status-label viewed-label">VIEWED</div>'+viewed.map(person).join(''):'')||'<div class="ns-empty-mini">No active friend statuses yet.</div>';
+ el.querySelectorAll('[data-user]').forEach(x=>x.onclick=()=>openUser(x.dataset.user));
+}
+// Discover interest filtering: only narrows the Discover tab, and only once the person has
+// actually picked topics (mode 'selected'); Friends and an explicit "show me everything" choice
+// both pass every status through unchanged.
+function discoverFilteredStatuses(){
+ if(state.tab!=='discover'||!state.interests||state.interests.mode!=='selected'||!Array.isArray(state.interests.topics)||!state.interests.topics.length)return state.statuses;
+ const wanted=state.interests.topics;
+ return state.statuses.filter(s=>{
+   const hay=[...(Array.isArray(s.topics)?s.topics:[]),s.category,s.moodType,s.intent].filter(Boolean).map(x=>String(x).toLowerCase());
+   return wanted.some(t=>hay.includes(t));
+ });
+}
+function availableInterestTopics(){
+ const set=new Set(['campus','study','events','sports','music','tech','art','food','travel','fitness','funny','news']);
+ for(const s of state.statuses){
+   (Array.isArray(s.topics)?s.topics:[]).forEach(t=>{if(t)set.add(String(t).trim().toLowerCase())});
+   [s.category,s.moodType,s.intent].forEach(t=>{if(t)set.add(String(t).trim().toLowerCase())});
+ }
+ return [...set].filter(Boolean).sort();
+}
+function renderFeed(){
+ const el=document.querySelector('[data-feed]');if(!el)return;
+ const q=(document.querySelector('.ns-search')?.value||'').toLowerCase().trim();
+ const filter=document.querySelector('.ns-filter')?.value||'all';
+ let data=discoverFilteredStatuses().filter(s=>filter==='all'||s.type===filter);
+ if(q)data=data.filter(s=>JSON.stringify(s).toLowerCase().includes(q));
+ if(!data.length){el.innerHTML='<div class="ns-empty"><strong>Your status space is ready</strong>Post a photo, thought, poll or short video and let your campus see what matters.</div>';return}
+ const fresh=data.filter(s=>!s.viewedByMe),viewed=data.filter(s=>s.viewedByMe);
+ const section=(title,items,cls)=>items.length?'<div class="ns-feed-section '+cls+'"><div class="ns-feed-title"><span>'+title+'</span><small>'+items.length+' moment'+(items.length===1?'':'s')+'</small></div><div class="ns-feed-grid">'+items.map((s,i)=>card(s,i)).join('')+'</div></div>':'';
+ el.innerHTML=section('New from friends',fresh,'is-new')+section('Viewed',viewed,'is-viewed-feed');
+ el.querySelectorAll('[data-open-status]').forEach(x=>x.onclick=()=>openViewer(Number(x.dataset.openStatus)));
+}
+// Feed thumbnails. The status grid used to download every full-resolution image and the first
+// bytes of every video just to draw a small card. Cloudinary derives a small optimised image
+// (or a poster frame for video) from the same asset via the URL, so nothing extra is stored and
+// the original stays untouched for the viewer/Vibe player. Non-Cloudinary URLs are left as-is.
+const isCld=u=>typeof u==='string'&&/res\.cloudinary\.com/.test(u)&&u.includes('/upload/');
+function cldImageThumb(u,w=480){return isCld(u)?u.replace('/upload/','/upload/w_'+w+',c_limit,q_auto,f_auto/'):u}
+function cldVideoPoster(u,w=480){return isCld(u)?u.replace('/upload/','/upload/so_0,w_'+w+',c_limit,q_auto,f_jpg/').replace(/\.[a-z0-9]+(\?.*)?$/i,'.jpg'):null}
+function card(s,i){
+ const u=s.owner||{};const media=s.mediaUrl;
+ const visual=s.type==='image'&&media?'<img class="ns-card-media" src="'+esc(cldImageThumb(media))+'" loading="lazy" decoding="async">':s.type==='video'&&media?(cldVideoPoster(media)?'<img class="ns-card-media" src="'+esc(cldVideoPoster(media))+'" loading="lazy" decoding="async" alt="">':'<video class="ns-card-media" src="'+esc(media)+'" muted playsinline preload="none"></video>'):'<div class="ns-card-media" style="background:'+safeBg(s.background)+';display:grid;place-items:center"><div style="padding:25px;color:#fff;font-weight:850;font-size:25px;text-align:center;font-family:'+esc(s.font||'system-ui')+'">'+esc(s.content||s.caption||'✨')+'</div></div>';
+ return '<article class="ns-card" data-open-status="'+s.id+'">'+visual+'<div class="ns-card-overlay"></div><div class="ns-card-top">'+avatar(u)+'<span class="ns-card-user">'+esc(u.displayName||u.username||'User')+'</span><span class="ns-card-time">'+ago(s.createdAt)+'</span></div><div class="ns-card-bottom"><div class="ns-card-caption">'+esc(s.caption||s.content||'')+'</div><div class="ns-card-meta"><span>👁 '+(s.viewCount||0)+'</span><span>❤️ '+(s.reactionCount||0)+'</span><span>💬 '+(s.replyCount||0)+'</span></div></div></article>';
+}
+async function openUser(userId){
+ try{const data=(await api('/user/'+encodeURIComponent(userId))).data||[];if(data.length){state.viewerGroup=data;state.index=0;showViewer()}}catch(e){toast(e.message)}
+}
+async function openViewer(id){
+ const idx=state.statuses.findIndex(s=>String(s.id)===String(id));
+ if(idx<0)return;
+ // One continuous viewer sequence, like the normal status experience:
+ // tapping the current story advances to the next story, including the next
+ // person, instead of ending after the current person's last story.
+ state.viewerGroup=state.statuses.slice();
+ state.index=idx;
+ showViewer();
+}
+function showViewer(){
+ const s=state.viewerGroup[state.index];if(!s)return;
+ const isOwner=String(s.userId)===String(currentUser().id||'');
+ const isReplay=!!s.viewedByMe && !isOwner;
+ s.viewedByMe=true;state.seen.add(s.id);try{localStorage.setItem('necpa_status_seen_'+String(currentUser().id||'guest'),JSON.stringify([...state.seen].slice(-500)))}catch(_){}
+ const root=document.querySelector('[data-viewer]');const u=s.owner||{};state.seen.add(s.id);
+ root.innerHTML='<div class="ns-viewer-stage"'+((s.type==='image'||s.type==='video')?'':' style="background:'+safeBg(s.background)+'"')+'>'+viewerVisual(s)+'<div class="ns-viewer-grad"></div><div class="ns-progress">'+state.viewerGroup.map((_,i)=>'<i><b style="width:'+(i<state.index?'100':'0')+'%"></b></i>').join('')+'</div><div class="ns-viewer-head">'+avatar(u)+'<div><div class="ns-viewer-name">'+esc(u.displayName||u.username||'User')+'</div><div class="ns-viewer-time">'+ago(s.createdAt)+' ago · 24h moment</div></div><div class="ns-viewer-actions">'+(s.type==='video'?'<button data-vunmute>🔇</button>':'')+'<button data-viewers>👁 '+(s.viewCount||0)+'</button><button data-more>•••</button><button data-vclose>×</button></div></div><button class="ns-nav ns-prev" data-prev>‹</button><button class="ns-nav ns-next" data-next>›</button><div class="ns-viewer-bottom"><div class="ns-reactions">'+['❤️','😂','🔥','😍','👏','💯'].map(e=>'<button class="ns-reaction" data-react="'+e+'">'+e+'</button>').join('')+'</div><div class="ns-reply-row">'+(s.allowReplies!==false?'<input class="ns-reply" data-reply placeholder="Reply to '+esc(u.displayName||'this status')+'…"><button class="ns-reaction" data-send>➤</button>':'<span style="opacity:.65">Replies are disabled</span>')+'</div></div><div class="ns-viewer-more" data-moremenu><button data-share>↗ Share</button><button data-save>⇩ Download</button><button data-report>⚑ Report</button>'+(String(s.userId)===String(currentUser().id)?'<button data-edit>✎ Edit</button><button data-delete>🗑 Delete</button><button data-highlight>★ Highlight</button>':'')+'</div></div>';
  root.classList.add('open');syncParent();
  if(isOwner) root.querySelector('.ns-viewer-bottom')?.remove();
  root.querySelector('[data-vclose]').onclick=()=>closeViewer();root.querySelector('[data-prev]').onclick=()=>move(-1);root.querySelector('[data-next]').onclick=()=>move(1);
