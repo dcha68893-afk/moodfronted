@@ -238,14 +238,15 @@ function shuffleWheel(){
 }
 
 function useHint(){
- if(st.hints<=0){toast('No hints left \u2014 earn more by completing levels');return;}
+ if(st.hints<=0){toast('No hints left — earn more by completing levels');return;}
  const remaining=st.lv.words.filter(w=>!st.found.has(w));
  if(!remaining.length){toast('All words already found!');return;}
  remaining.sort((a,b)=>a.length-b.length);
  const w=remaining[0];
  st.hints--; saveProgress();
- markFound(w,true);
- toast('Hint used: revealed "'+w+'"');
+ const cur=document.getElementById('wcCurrent');
+ if(cur){cur.innerHTML='<span class="wc-hint-prefix">FORM&nbsp;</span><b>'+w+'</b>';clearTimeout(cur._hintTimer);cur._hintTimer=setTimeout(()=>{if(!st.path.length)cur.innerHTML='&nbsp;'},3000)}
+ toast('HINT: form "'+w+'"');beep(680,.08);
 }
 
 function markFound(word,silent){
@@ -415,7 +416,7 @@ style.textContent=`
 .wc-cell.wc-open{background:color-mix(in srgb,var(--kyn-text-primary) 10%,transparent);border:1.5px solid var(--kyn-border)}
 .wc-cell.wc-filled{background:var(--kyn-bg-card);border:1.5px solid var(--kyn-accent-purple);box-shadow:inset 0 2px color-mix(in srgb,#fff 25%,transparent)}
 .wc-cell span{position:absolute;inset:0;display:grid;place-items:center;font-weight:1000;font-size:clamp(11px,3.4vw,18px);color:var(--kyn-text-primary)}
-.wc-current{flex:0 0 auto;text-align:center;min-height:40px;line-height:40px;font-size:22px;font-weight:1000;letter-spacing:3px;color:var(--kyn-accent-warning);text-shadow:0 2px 10px color-mix(in srgb,var(--kyn-bg-root) 60%,transparent)}
+.wc-current{flex:0 0 auto;text-align:center;min-height:40px;line-height:40px;font-size:22px;font-weight:1000;letter-spacing:3px;color:var(--kyn-accent-warning);text-shadow:0 2px 10px color-mix(in srgb,var(--kyn-bg-root) 60%,transparent)}.wc-current .wc-hint-prefix{font-size:11px;letter-spacing:1px;opacity:.72;margin-right:5px}.wc-current b{letter-spacing:4px}
 .wc-toolbar{flex:0 0 auto;display:flex;justify-content:center;gap:20px;padding:2px 12px 6px}
 .wc-tool{width:56px;height:56px;border-radius:18px;background:var(--g-surface);border:1px solid var(--g-line);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:20px}
 .wc-tool small{font-size:8px;color:var(--kyn-text-secondary);font-weight:900;text-transform:uppercase}
