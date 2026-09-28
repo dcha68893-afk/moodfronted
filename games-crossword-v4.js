@@ -287,6 +287,7 @@ function levelComplete(){
  coins(bonus);
  saveProgress();
  document.getElementById('wcCompleteText').textContent='You found every word in this puzzle. +'+bonus+' bonus coins, +1 hint.';
+ if(window.__gameRoomComplete)window.__gameRoomComplete(st.found.size*10+bonus);
  document.getElementById('wcCompleteOverlay').classList.add('show');
  try{
   if(window.data){ window.data.best=Math.max(window.data.best||0, st.found.size); window.data.streak=(window.data.streak||0)+1; if(typeof window.save==='function')window.save(); }
