@@ -350,8 +350,21 @@
 
     // ─── PostMessage listener — receive from parent/sibling iframes ───────────
     global.addEventListener('message', (evt) => {
-        const d = evt.data || {};
+        let d = evt.data || {};
         if (evt.source === global) return;
+
+        // FIX (settings changed in Settings not applied on other screens): the
+        // shell (chat.html dispatchEventToModules) relays SETTING_CHANGED /
+        // SETTINGS_GLOBAL_UPDATE to every module NESTED as { type, payload:
+        // { section, key, value } }, but this listener only ever read
+        // section/key/value from the TOP level of the message — so every relay
+        // from the shell was silently ignored by the module iframes over
+        // postMessage. Flatten the nested shape before handling.
+        if ((d.type === 'SETTING_CHANGED' || d.type === 'SETTINGS_GLOBAL_UPDATE') &&
+            d.section === undefined && d.payload && typeof d.payload === 'object' &&
+            d.payload.section !== undefined) {
+            d = Object.assign({}, d, d.payload, { type: d.type });
+        }
 
         // FIX: Ignore messages that were already broadcast from parent
         if (d._noRebroadcast) return;
@@ -442,8 +455,18 @@
                 _broadcastToFrames('SETTING_CHANGED', { section, key, value, timestamp: Date.now() });
             }
 
-            // For single-key updates, also fire SettingsState._applySettingGlobally if available
-            if (path && path !== '*') {
+            // For single-key updates, also fire SettingsState._applySettingGlobally if available.
+            // FIX (feedback loop): only for genuine user changes. Background loads and
+            // relayed changes (server-sync, broadcast, parent-socket-relay, merge, boot)
+            // must NOT re-enter _applySettingGlobally, otherwise every frame that receives
+            // SETTINGS_GLOBAL_UPDATE re-posts it and the frames ping-pong forever.
+            // Also skip if we are already inside _applySettingGlobally for this path.
+            const __gp = path && path !== '*' ? path : null;
+            const __busy = __gp && global.__SETTINGS_APPLYING_GLOBALLY__ &&
+                           global.__SETTINGS_APPLYING_GLOBALLY__.has(
+                               (function (pp) { const a = pp.split('.'); return a[0] + '.' + (a.slice(1).join('.') || a[0]); })(__gp)
+                           );
+            if (isUserChange && __gp && !__busy) {
                 try {
                     const stateObj = global.__SETTINGS_STATE_OBJ__;
                     if (stateObj && typeof stateObj._applySettingGlobally === 'function') {

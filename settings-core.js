@@ -759,6 +759,24 @@ const SettingsState = {
     },
     
     _applySettingGlobally(section, key, value) {
+        // FIX (settings feedback loop / "Maximum call stack size exceeded" /
+        // "postMessage storm SETTING_CHANGED"): AppSettings.set() below notifies
+        // its subscribers synchronously, and settings-global-propagation.js's
+        // subscriber calls _applySettingGlobally() again for the same path, which
+        // calls AppSettings.set() again ... forever. This re-entrancy guard makes
+        // the nested call a no-op; the outer call already does every step below.
+        const __guardKey = section + '.' + key;
+        window.__SETTINGS_APPLYING_GLOBALLY__ = window.__SETTINGS_APPLYING_GLOBALLY__ || new Set();
+        if (window.__SETTINGS_APPLYING_GLOBALLY__.has(__guardKey)) return;
+        window.__SETTINGS_APPLYING_GLOBALLY__.add(__guardKey);
+        try {
+            this.__applySettingGloballyInner(section, key, value);
+        } finally {
+            window.__SETTINGS_APPLYING_GLOBALLY__.delete(__guardKey);
+        }
+    },
+
+    __applySettingGloballyInner(section, key, value) {
         // 1. Push into AppSettings (single source of truth)
         if (window.AppSettings) {
             window.AppSettings.set(section + '.' + key, value, { source: 'user-action', userTriggered: true });

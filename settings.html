@@ -3432,8 +3432,8 @@
     });
 
     el('__p12faVerify')?.addEventListener('click', async function () {
-      const token = el('__p12faTok').value.trim();
-      if (!token) { show2FAErr('Enter the 6-digit code'); return; }
+      const token = String(el('__p12faTok').value || '').replace(/\D/g, '');
+      if (token.length !== 6) { show2FAErr('Enter the 6-digit code (digits only)'); return; }
       this.disabled = true; this.textContent = 'Verifying…';
       const r = await api('POST', '/api/settings/2fa/verify', { token });
       if (r.status === 'success') {
@@ -3445,7 +3445,7 @@
     });
 
     el('__p12faDisBtn')?.addEventListener('click', async function () {
-      const pass = el('__p12faDisPass').value, token = el('__p12faDisTok').value.trim();
+      const pass = el('__p12faDisPass').value, token = String(el('__p12faDisTok').value || '').replace(/\D/g, '');
       if (!pass || !token) { show2FAErr('Password and code required'); return; }
       this.disabled = true; this.textContent = 'Disabling…';
       const r = await api('POST', '/api/settings/2fa/disable', { password: pass, token });
