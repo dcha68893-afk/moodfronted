@@ -129,6 +129,28 @@ async function loadGroups(){if(S.loading)return;S.loading=true;const GCF=window.
 // costs nothing extra beyond a few no-op network calls.
 function broadenKeyGapCheck(){if(!Array.isArray(S.groups))return;for(const g of S.groups){if(g&&g.id!=null)checkKeyGap(g.id)}}
 function normalizeMessages(r){const rows=r?.data?.messages||r?.data||r?.messages||[];return Array.isArray(rows)?rows:[]}
+// History opened after the group was closed must use a fresh participant snapshot.
+// The group list endpoint can be intentionally lightweight and may not contain
+// participants; decrypting against that lightweight object can leave ciphertext
+// on screen even though the receiver's sender-key state is available. Fetch the
+// canonical group record once when a history page needs it, then reuse it.
+async function ensureGroupCryptoMeta(gid){
+  const id=String(gid);
+  let g=S.groups.find(x=>String(x?.id)===id)||null;
+  if(g?.participants?.length)return g;
+  try{
+    const r=await api('/chats/'+encodeURIComponent(id));
+    const fresh=unwrap(r?.data?.chat||r?.data?.group||r?.data);
+    if(fresh?.id!=null){
+      const idx=S.groups.findIndex(x=>String(x?.id)===id);
+      if(idx>=0)S.groups[idx]={...S.groups[idx],...fresh};
+      else S.groups.push(fresh);
+      if(S.current&&String(S.current.id)===id)S.current={...S.current,...fresh};
+      return S.groups.find(x=>String(x?.id)===id)||fresh;
+    }
+  }catch(e){console.warn('[GroupMessage] group metadata refresh deferred',e?.message||e)}
+  return g||S.current||null;
+}
 
 async function decryptGroupContent(message, groupMeta=null){
   if(!message||typeof message.content!=='string'||!message.content)return message;
@@ -224,10 +246,11 @@ async function loadMessages(){
     // Do not sit on the unlock: if the identity isn't ready within a few seconds, leave the placeholders and retry on unlock.
     const ready=await Promise.race([ensureE2EReady().catch(()=>false),new Promise(res=>setTimeout(()=>res(false),4000))]);
     if(!ready){S._retryOnUnlock=true;return}
+    const cryptoMeta=await ensureGroupCryptoMeta(gid);
     let batch=[];const flush=()=>{if(batch.length&&S.current&&String(S.current.id)===gid)mergeGroupMessages(batch);batch=[]};
     for(const m of todo){
       if(!S.current||String(S.current.id)!==gid)return;
-      const d=await decryptGroupContent(m);
+      const d=await decryptGroupContent(m,cryptoMeta);
       // Explicit flags: mergeGroupMessages() spreads the OLD row under the new one, so a row that used to be
       // _decryptPending:true would otherwise stay "pending" forever even after its text arrived.
       if(!d._decryptPending)batch.push({...d,_decryptPending:false,_decryptFailed:false});
