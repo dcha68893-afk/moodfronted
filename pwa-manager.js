@@ -1,5 +1,5 @@
 /**
- * Necpa PWA controller  (/pwa-manager.js)
+ * Necpra PWA controller  (/pwa-manager.js)
  * ---------------------------------------------------------------------------
  * This file is the ONLY owner of:
  *   1. `beforeinstallprompt` / `appinstalled`     (captured once, kept in one place)
@@ -138,11 +138,11 @@
       swPromise = navigator.serviceWorker.register(SW_URL, { scope: '/', updateViaCache: 'none' });
       swPromise.then(function (reg) {
         if (reg && reg.scope !== location.origin + '/') {
-          console.warn('[NecpraPWA] service worker scope is ' + reg.scope + ' — it must be ' + location.origin + '/ to control the whole app.');
+          console.warn('[NecpaPWA] service worker scope is ' + reg.scope + ' — it must be ' + location.origin + '/ to control the whole app.');
         }
       }, function (err) {
         swPromise = null;
-        console.warn('[NecpraPWA] service worker registration failed:', err);
+        console.warn('[NecpaPWA] service worker registration failed:', err);
       });
     }
     return swPromise;
@@ -232,7 +232,7 @@
       }
       return { outcome: 'dismissed' };
     } catch (err) {
-      console.warn('[NecpraPWA] install prompt failed:', err);
+      console.warn('[NecpaPWA] install prompt failed:', err);
       return { outcome: 'error', error: err };
     } finally {
       emit();                         // listeners/dialog now see "no saved prompt"
@@ -335,7 +335,7 @@
 
   async function diagnose() {
     try {
-      if (isStandalone()) return { code: 'installed', message: 'Necpa is already running as an installed app on this device.' };
+      if (isStandalone()) return { code: 'installed', message: 'Necpra is already running as an installed app on this device.' };
       if (!window.isSecureContext) return { code: 'insecure', message: 'Installing an app needs a secure (https) connection.' };
       if (isIOS) return { code: 'ios', message: 'iPhone and iPad have no install prompt — use Share → Add to Home Screen in Safari.' };
       var b = browserInfo();
@@ -374,10 +374,10 @@
         var installButton = sheet.querySelector('.np-btn:not(.np-quiet)');
         if (installButton) installButton.focus();
       } else {
-        sheetHint = 'Your browser has not granted the in-app install prompt yet. Necpa cannot bypass that browser security decision.';
+        sheetHint = 'Your browser has not granted the in-app install prompt yet. Necpra cannot bypass that browser security decision.';
         renderSheet();
       }
-      try { console.debug('[NecpraPWA] in-app install readiness', { ready: ready, waitedMs: Date.now() - startedAt }); } catch (_) {}
+      try { console.debug('[NecpaPWA] in-app install readiness', { ready: ready, waitedMs: Date.now() - startedAt }); } catch (_) {}
     });
   }
 
@@ -472,7 +472,7 @@
     card.appendChild(x);
 
     var icon = mk('img', 'np-icon');
-    icon.src = '/icons/necpa-192.png'; icon.alt = 'Necpa';
+    icon.src = '/icons/necpra-192.png'; icon.alt = 'Necpra';
     icon.addEventListener('error', function () { icon.style.display = 'none'; });
     card.appendChild(icon);
 
@@ -481,7 +481,7 @@
     card.appendChild(title);
 
     if (isStandalone()) {
-      card.appendChild(mk('p', 'np-text', 'Necpa is already installed on this device.'));
+      card.appendChild(mk('p', 'np-text', 'Necpra is already installed on this device.'));
       card.appendChild(button('Close', '', function () { closeInstallDialog(false); }));
       return;
     }
@@ -615,7 +615,7 @@
       if (document.getElementById('pwaUpdateBanner')) return;
       inject('pwaUpdateBanner',
         '<div style="position:fixed;top:0;left:0;right:0;z-index:2147483647;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;box-shadow:0 4px 20px rgba(0,0,0,.2)">' +
-        '<div style="flex:1"><strong style="display:block;font-size:13px">Update ready</strong><span style="font-size:11px;opacity:.9">Refresh to get the latest Necpa version.</span></div>' +
+        '<div style="flex:1"><strong style="display:block;font-size:13px">Update ready</strong><span style="font-size:11px;opacity:.9">Refresh to get the latest Necpra version.</span></div>' +
         '<button type="button" id="pwaUpdateButton" style="background:#fff;color:#2563eb;border:0;border-radius:8px;padding:8px 15px;font-weight:800;cursor:pointer">Refresh</button>' +
         '<button type="button" id="pwaUpdateClose" aria-label="Dismiss" style="background:none;color:#fff;border:0;font-size:22px;cursor:pointer">&times;</button></div>');
       var u = document.getElementById('pwaUpdateButton');

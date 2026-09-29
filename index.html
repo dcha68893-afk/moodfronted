@@ -24,7 +24,7 @@
     <script src="/js/runtime-config.js"></script>
     <script src="/js/config.js"></script>
     <script>
-    (function(){try{var raw=localStorage.getItem("kynecta_auth"),a=raw?JSON.parse(raw):null,t=a&&a.token,v=false;if(t&&t.split(".").length===3){var p=t.split(".")[1].replace(/-/g,"+").replace(/_/g,"/"),x=JSON.parse(atob(p+"=".repeat((4-p.length%4)%4)));v=!x.exp||x.exp*1000>Date.now()}if(v&&a.user)document.documentElement.setAttribute("data-necpra-session","active")}catch(_){}})();
+    (function(){try{var raw=localStorage.getItem("kynecta_auth"),a=raw?JSON.parse(raw):null,t=a&&a.token,v=false;if(t&&t.split(".").length===3){var p=t.split(".")[1].replace(/-/g,"+").replace(/_/g,"/"),x=JSON.parse(atob(p+"=".repeat((4-p.length%4)%4)));v=!x.exp||x.exp*1000>Date.now()}if(v&&a.user)document.documentElement.setAttribute("data-necpa-session","active")}catch(_){}})();
     </script>
     <script>
     // FIX (HARDCODED-BACKEND-URL-BYPASSES-DOTENV): this used to hardcode
@@ -76,7 +76,8 @@
     <link rel="icon" href="favicon.ico" type="image/x-icon">
     <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16x16.png">
     <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32x32.png">
-    <!-- App icon set uses the Necpra brand assets. -->
+    <!-- App log image (favicon / home-screen icon): must use the "necpa-*" icon set to
+         match the app's actual name (Necpra), not the misspelled "necpra-*" set. -->
     <link rel="icon" type="image/png" sizes="192x192" href="icons/necpra-192.png">
     <link rel="icon" type="image/png" sizes="512x512" href="icons/necpra-512.png">
     <link rel="apple-touch-icon" href="icons/necpra-192.png">
@@ -114,10 +115,7 @@
       "name": "Necpra",
       "url": "https://necpra.co.ke/",
       "description": "Necpra is a messaging and social app for chats, friends, accommodation and marketplace services.",
-      "brand": {
-        "@type": "Brand",
-        "name": "Necpra"
-      },
+      "brand": {"@type": "Brand", "name": "Necpra"},
       "applicationCategory": "SocialNetworkingApplication",
       "operatingSystem": "Web, Android",
       "image": "https://necpra.co.ke/icons/necpra-512.png",
@@ -126,6 +124,15 @@
         "price": "0",
         "priceCurrency": "USD"
       }
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "Necpra",
+      "alternateName": ["Necpra", "necpra.co.ke"],
+      "url": "https://necpra.co.ke/"
     }
     </script>
 
@@ -229,9 +236,9 @@
         }
 
         #app-container, #iframe-container, #bottom-nav { display: none; }
-        html[data-necpra-session="active"] .landing-screen { display:none !important; }
-        html[data-necpra-session="active"] #app-container { display:flex !important; }
-        html[data-necpra-session="active"] #iframe-container { display:block !important; }
+        html[data-necpa-session="active"] .landing-screen { display:none !important; }
+        html[data-necpa-session="active"] #app-container { display:flex !important; }
+        html[data-necpa-session="active"] #iframe-container { display:block !important; }
         /* FIX (LOGIN-PAGE-DEAD-APP-NAV): #bottom-nav (Home/Explore/Notifications/
            Profile/Settings/Close — the authenticated app's nav, all dead href="#"
            links) was already hidden above, but its round toggle button was not,
@@ -3471,7 +3478,7 @@
             getToken: function() {
                 if (window.AuthStorage?.getToken) return window.AuthStorage.getToken();
                 if (window.api?.auth?.getToken) return window.api.auth.getToken();
-                const token = localStorage.getItem('authToken') || localStorage.getItem('necpra_token') || localStorage.getItem('token') || localStorage.getItem('accessToken');
+                const token = localStorage.getItem('authToken') || localStorage.getItem('necpa_token') || localStorage.getItem('token') || localStorage.getItem('accessToken');
                 console.log('[AUTH TOKEN]', token);
                 return token;
             },
@@ -3482,7 +3489,7 @@
                     localStorage.setItem('token', token);
                     localStorage.setItem('accessToken', token);
                     localStorage.setItem('USER_TOKEN', token);
-                    localStorage.setItem('necpra_token', token);
+                    localStorage.setItem('necpa_token', token);
                     localStorage.setItem('isLoggedIn', 'true');
                     console.log('[AUTH TOKEN]', token);
                 }
@@ -3493,7 +3500,7 @@
                 localStorage.removeItem('token');
                 localStorage.removeItem('accessToken');
                 localStorage.removeItem('USER_TOKEN');
-                localStorage.removeItem('necpra_token');
+                localStorage.removeItem('necpa_token');
                 localStorage.removeItem('kynecta_auth');
                 localStorage.removeItem('isLoggedIn');
             },
@@ -3771,7 +3778,7 @@
                     token, refreshToken: response.refreshToken || response.data?.refreshToken || null,
                     user: user || null, expiresAt: response.expiresAt || response.data?.expiresAt || null
                 });
-                ['authToken','necpra_token','token','accessToken','USER_TOKEN'].forEach(k => {
+                ['authToken','necpa_token','token','accessToken','USER_TOKEN'].forEach(k => {
                     try { localStorage.setItem(k, token); } catch(_) {}
                 });
                 if (user) {
@@ -4088,7 +4095,7 @@
                                     expiresAt: response.expiresAt || response.data?.expiresAt || null
                                 });
                                 // Store token in ALL known localStorage keys for module compatibility
-                                ['authToken','necpra_token','token','accessToken','USER_TOKEN'].forEach(k => {
+                                ['authToken','necpa_token','token','accessToken','USER_TOKEN'].forEach(k => {
                                     try { localStorage.setItem(k, token); } catch(_) {}
                                 });
                                 if (user) {
@@ -4884,7 +4891,7 @@
                         '<div class="contact-field"><label for="ct_message">Message</label>' +
                         '<textarea id="ct_message" placeholder="Describe your issue or question…"></textarea></div>' +
                         '<button class="contact-submit" id="contactSendBtn"><i class="fas fa-paper-plane"></i> Send Message</button>' +
-                        '<p style="font-size:12px;color:var(--text-light);margin-top:10px;text-align:center">Or email us directly: <a href="mailto:support@necpra.co.ke">support@necpa.app</a></p>';
+                        '<p style="font-size:12px;color:var(--text-light);margin-top:10px;text-align:center">Or email us directly: <a href="mailto:support@necpa.app">support@necpa.app</a></p>';
                 }
             },
 

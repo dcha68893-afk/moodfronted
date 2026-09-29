@@ -28,7 +28,7 @@ const SW_VERSION = '19.43.0';
 // FIX: bumped so activate() drops every existing cache immediately on this
 // deploy — anyone with a stale pre-rebuild group.html (or the old, now-
 // deleted group-core-*/group-os-* files, or the misspelled necpra-* icons
-// that a previous "fix" had wrongly swapped in place of the real Necpra icon set
+// that a previous "fix" had wrongly swapped in place of the real necpa-*
 // app log image set) cached under the old name gets a clean break on next
 // load, instead of waiting on the 7-day CACHE_MAX_AGE staleness check or a
 // lucky reinstall.
@@ -82,11 +82,11 @@ const SW_VERSION = '19.43.0';
 // are no longer cached or executed as code; navigations fall back to the cached shell after 6s.
 // v74: profile-photo fix (js/avatar-fix.js added, message.html + js/config.js changed). Bump forces every installed
 // PWA/Android app to drop old copies and show the 'Update ready - Refresh' banner.
-const CACHE_NAME = 'necpa-static-v77';
+const CACHE_NAME = 'necpra-static-v78';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
-  '/index.html','/manifest.json','/icons/necpra-192.png','/icons/necpra-512.png',
+  '/index.html','/manifest.json','/icons/necpa-192.png','/icons/necpa-512.png',
   '/Tool.css','/Tool-ui.js','/Tool-core.part1.js','/Tool-core.part2.js','/Tool-core.part3.js',
   '/friend.html','/chat.html',
   '/js/api.core.js','/js/api.request.js','/js/api.auth.js','/js/api.messages.js',
@@ -267,7 +267,7 @@ self.addEventListener('push',event=>{
   if(!event.data)return;let data={};try{data=event.data.json();}catch(_){try{data={title:'Necpra',body:event.data.text()};}catch(__){return;}}
   const raw=String(data.body||data.message||'');const safe=encryptedBody(raw)?'You have a new message':(raw||'You have a new notification');const title=data.title||'Necpra';
   const chatId=String(data.chatId||(data.data&&data.data.chatId)||'');const tag=chatId?'chat-'+chatId:(data.tag||'necpa-notification');
-  const options={body:data.senderName?data.senderName+': '+safe:safe,icon:data.icon||'/icons/necpra-192.png',badge:data.badge||'/icons/necpra-192.png',tag,renotify:true,data:Object.assign({url:data.url||'/chat.html',chatId},data.data||{}),silent:data.silent===true,requireInteraction:data.requireInteraction||false,vibrate:Array.isArray(data.vibrate)?data.vibrate:(data.vibrate===false?[]:[200,100,200]),actions:[{action:'reply',title:'Reply',type:'text',placeholder:'Type a message…'},{action:'mark_read',title:'Mark as read'}]};
+  const options={body:data.senderName?data.senderName+': '+safe:safe,icon:data.icon||'/icons/necpa-192.png',badge:data.badge||'/icons/necpa-192.png',tag,renotify:true,data:Object.assign({url:data.url||'/chat.html',chatId},data.data||{}),silent:data.silent===true,requireInteraction:data.requireInteraction||false,vibrate:Array.isArray(data.vibrate)?data.vibrate:(data.vibrate===false?[]:[200,100,200]),actions:[{action:'reply',title:'Reply',type:'text',placeholder:'Type a message…'},{action:'mark_read',title:'Mark as read'}]};
   event.waitUntil((async()=>{if(data.type==='message'||data.type==='new_message'){try{const chat=chatId,map=self.__kynActiveChatByClient,cs=await self.clients.matchAll({type:'window',includeUncontrolled:true});if(chat&&cs.some(c=>c.focused&&map&&map.get(c.id)===chat))return;}catch(_){} }return self.registration.showNotification(title,options);})());
 });
 self.addEventListener('notificationclick',event=>{event.notification.close();const nd=event.notification.data||{};const url=nd.url||'/chat.html';

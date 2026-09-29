@@ -61,7 +61,7 @@
     </style>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Necpa - Chat, Friends & Marketplace</title>
+    <title>Necpra - Chat, Friends & Marketplace</title>
     <!-- PWA: manifest MUST be linked from the main shell so beforeinstallprompt fires -->
     <link rel="manifest" href="/manifest.json">
     <!-- PWA controller (single owner of beforeinstallprompt + install UI + service-worker registration).
@@ -71,12 +71,12 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <meta name="apple-mobile-web-app-title" content="Necpa">
+    <meta name="apple-mobile-web-app-title" content="Necpra">
     <!-- App log image (favicon / home-screen icon): must use the "necpa-*" icon set to
-         match the app's actual name (Necpa), not the misspelled "necpra-*" set. -->
-    <link rel="apple-touch-icon" href="/icons/necpa-192.png">
-    <link rel="icon" type="image/png" sizes="192x192" href="/icons/necpa-192.png">
-    <link rel="icon" type="image/png" sizes="512x512" href="/icons/necpa-512.png">
+         match the app's actual name (Necpra), not the misspelled "necpra-*" set. -->
+    <link rel="apple-touch-icon" href="/icons/necpra-192.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/necpra-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="/icons/necpra-512.png">
     <style>
         :root {
             --app-primary-gradient: linear-gradient(135deg, #2563eb 0%, #1d4ed8 62%, #06b6d4 100%);
@@ -1451,17 +1451,17 @@
     <!-- FIX (WRONG-ICON-ON-LAUNCH-SCREEN): this was a hardcoded 🧠 emoji on a
          purple/green gradient tile captioned "Kynecta" — leftover pre-rebrand
          placeholder art. It is the first thing shown on every cold start, so it
-         was the "brain icon instead of the Necpa icon" seen at launch. It now
-         renders the real app icon (/icons/necpa-192.png — the same asset
+         was the "brain icon instead of the Necpra icon" seen at launch. It now
+         renders the real app icon (/icons/necpra-192.png — the same asset
          manifest.json ships for the installed PWA) under the real product name,
          with a plain tile kept only as an onerror fallback so the screen never
          goes blank if the image 404s. -->
     <div id="loadingScreen">
         <div style="text-align: center;">
-            <img src="/icons/necpa-192.png" alt="Necpa"
+            <img src="/icons/necpra-192.png" alt="Necpra"
                  style="width: 64px; height: 64px; border-radius: 16px; display: block; object-fit: cover; margin: 0 auto 16px; animation: pulse 1.5s infinite;"
                  onerror="this.onerror=null;this.replaceWith(Object.assign(document.createElement('div'),{style:'width:64px;height:64px;border-radius:16px;margin:0 auto 16px;background:#1a73e8'}));">
-            <h2 style="color: #374151;">Necpa</h2>
+            <h2 style="color: #374151;">Necpra</h2>
             <p style="color: #6b7280;">Loading...</p>
         </div>
     </div>

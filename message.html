@@ -555,10 +555,10 @@
     const chatPanelEl = document.getElementById('chatPanel');
 
     // FIX (profile photos): one resolver for every user (Google / manual / relative /uploads path / placeholder).
-    // Falls back to an initials avatar - never the Necpa logo.
+    // Falls back to an initials avatar - never the Necpra logo.
     function userAvatarSrc(u) {
       try { if (window.NecpaAvatar) return window.NecpaAvatar.src(u); } catch (_) {}
-      return (u && (u.avatar || u.photoURL || u.picture)) || '/icons/necpa-192.png';
+      return (u && (u.avatar || u.photoURL || u.picture)) || '/icons/necpra-192.png';
     }
     function userAvatarName(u) {
       try { return window.NecpaAvatar ? window.NecpaAvatar.nameOf(u) : ''; } catch (_) { return ''; }
@@ -1930,7 +1930,7 @@
             return;
           }
           const res = await window.MessageModule.reportMessage(chatId, messageId, reason.trim());
-          alert(res && res.success ? 'Message reported. Thank you for helping keep Necpa safe.' : (res?.message || 'Could not submit report.'));
+          alert(res && res.success ? 'Message reported. Thank you for helping keep Necpra safe.' : (res?.message || 'Could not submit report.'));
           break;
         }
       }
