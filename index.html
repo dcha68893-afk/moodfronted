@@ -93,50 +93,67 @@
     <!-- Open Graph (Facebook, WhatsApp link previews, etc.) -->
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="Necpra">
-    <meta property="og:title" content="Necpra - Global Chat Platform">
+    <meta property="og:title" content="Necpra - Messaging, Friends, Accommodation & Marketplace">
     <meta property="og:description" content="One app for messaging, friends, accommodation and marketplace. Fast, private, and free.">
     <meta property="og:url" content="https://necpra.co.ke/">
     <meta property="og:image" content="https://necpra.co.ke/icons/necpra-512.png">
 
     <!-- Twitter / X card -->
     <meta name="twitter:card" content="summary">
-    <meta name="twitter:title" content="Necpra - Global Chat Platform">
+    <meta name="twitter:title" content="Necpra - Messaging, Friends, Accommodation & Marketplace">
     <meta name="twitter:description" content="One app for messaging, friends, accommodation and marketplace.">
     <meta name="twitter:image" content="https://necpra.co.ke/icons/necpra-512.png">
 
-    <!-- Structured data so Google can build a rich result (icon, app info, download links) -->
+    <!-- Search identity: keep Necpra as one consistent, machine-readable brand. -->
     <meta name="application-name" content="Necpra">
     <meta name="author" content="Necpra">
 
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
-      "@type": "WebApplication",
-      "name": "Necpra",
-      "url": "https://necpra.co.ke/",
-      "description": "Necpra is a messaging and social app for chats, friends, accommodation and marketplace services.",
-      "brand": {"@type": "Brand", "name": "Necpra"},
-      "applicationCategory": "SocialNetworkingApplication",
-      "operatingSystem": "Web, Android",
-      "image": "https://necpra.co.ke/icons/necpra-512.png",
-      "offers": {
-        "@type": "Offer",
-        "price": "0",
-        "priceCurrency": "USD"
-      }
-    }
-    </script>
-    <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "WebSite",
-      "name": "Necpra",
-      "alternateName": ["Necpra", "necpra.co.ke"],
-      "url": "https://necpra.co.ke/"
+      "@graph": [
+        {
+          "@type": ["Organization", "Brand"],
+          "@id": "https://necpra.co.ke/#organization",
+          "name": "Necpra",
+          "url": "https://necpra.co.ke/",
+          "logo": "https://necpra.co.ke/icons/necpra-512.png",
+          "description": "Necpra is a social and messaging platform for communication, friends, accommodation and marketplace services.",
+          "email": "support@necpra.co.ke"
+        },
+        {
+          "@type": ["WebSite"],
+          "@id": "https://necpra.co.ke/#website",
+          "name": "Necpra",
+          "url": "https://necpra.co.ke/",
+          "publisher": {
+            "@id": "https://necpra.co.ke/#organization"
+          },
+          "inLanguage": "en"
+        },
+        {
+          "@type": ["WebApplication", "SoftwareApplication"],
+          "@id": "https://necpra.co.ke/#app",
+          "name": "Necpra",
+          "url": "https://necpra.co.ke/",
+          "description": "Necpra is a messaging and social app for chats, friends, accommodation and marketplace services.",
+          "applicationCategory": "SocialNetworkingApplication",
+          "operatingSystem": ["Web", "Android"],
+          "image": "https://necpra.co.ke/icons/necpra-512.png",
+          "brand": {
+            "@id": "https://necpra.co.ke/#organization"
+          },
+          "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "USD"
+          }
+        }
+      ]
     }
     </script>
 
-    <script type="application/ld+json">\n    {\n      "@context": "https://schema.org",\n      "@type": "Organization",\n      "name": "Necpra",\n      "url": "https://necpra.co.ke/",\n      "logo": "https://necpra.co.ke/icons/necpra-512.png",\n      "description": "Necpra is a social and messaging platform for communication, friends, accommodation and marketplace services.",\n      "contactPoint": {\n        "@type": "ContactPoint",\n        "email": "support@necpra.co.ke",\n        "contactType": "customer support"\n      }\n    }\n    </script>\n    <link rel="stylesheet" href="/css/vendor/font-awesome.min.css">
+    <link rel="stylesheet" href="/css/vendor/font-awesome.min.css">
     
     <!-- CSS Frameworks and Styles -->
     <style>
