@@ -1,4 +1,4 @@
-// app.core.bootstrap.js - Necpa Bootstrap & Core Initialization Layer
+// app.core.bootstrap.js - Necpra Bootstrap & Core Initialization Layer
 // COMPLETE REWRITE WITH DETERMINISTIC BOOT SEQUENCE
 // ALL ORIGINAL FUNCTIONALITY PRESERVED
 // Session-first initialization, parent authority handshake, no race conditions

@@ -138,11 +138,11 @@
       swPromise = navigator.serviceWorker.register(SW_URL, { scope: '/', updateViaCache: 'none' });
       swPromise.then(function (reg) {
         if (reg && reg.scope !== location.origin + '/') {
-          console.warn('[NecpaPWA] service worker scope is ' + reg.scope + ' — it must be ' + location.origin + '/ to control the whole app.');
+          console.warn('[NecpraPWA] service worker scope is ' + reg.scope + ' — it must be ' + location.origin + '/ to control the whole app.');
         }
       }, function (err) {
         swPromise = null;
-        console.warn('[NecpaPWA] service worker registration failed:', err);
+        console.warn('[NecpraPWA] service worker registration failed:', err);
       });
     }
     return swPromise;
@@ -232,7 +232,7 @@
       }
       return { outcome: 'dismissed' };
     } catch (err) {
-      console.warn('[NecpaPWA] install prompt failed:', err);
+      console.warn('[NecpraPWA] install prompt failed:', err);
       return { outcome: 'error', error: err };
     } finally {
       emit();                         // listeners/dialog now see "no saved prompt"
@@ -279,36 +279,36 @@
     var b = browserInfo();
     if (isIOS) {
       if (b.inApp) {
-        return { kind: 'ios-inapp', title: 'Install Necpa',
+        return { kind: 'ios-inapp', title: 'Install Necpra',
           text: 'This in-app browser cannot install apps. Open ' + location.host + ' in Safari, then follow the steps below.',
           steps: ['Tap Share', 'Choose Add to Home Screen', 'Tap Add'] };
       }
-      return { kind: 'ios', title: 'Install Necpa',
+      return { kind: 'ios', title: 'Install Necpra',
         text: 'On iPhone and iPad, installing is done from the Safari Share menu.',
         steps: ['Tap the Share button', 'Scroll down and choose Add to Home Screen', 'Tap Add'] };
     }
     if (isAndroid) {
       if (b.inApp) {
-        return { kind: 'android-inapp', title: 'Install Necpa',
+        return { kind: 'android-inapp', title: 'Install Necpra',
           text: 'This in-app browser cannot install apps. Open ' + location.host + ' in Chrome first.',
           steps: ['Open this page in Chrome', 'Tap ⋮ (menu)', 'Choose Install app or Add to Home screen'] };
       }
       if (b.firefox) {
-        return { kind: 'android-firefox', title: 'Install Necpa',
+        return { kind: 'android-firefox', title: 'Install Necpra',
           text: 'In Firefox, tap ⋮ and choose Install.', steps: ['Tap ⋮ (menu)', 'Choose Install'] };
       }
       if (b.samsung) {
-        return { kind: 'android-samsung', title: 'Install Necpa',
+        return { kind: 'android-samsung', title: 'Install Necpra',
           text: 'In Samsung Internet, open the menu and choose Add page to → Home screen.',
           steps: ['Tap the menu', 'Choose Add page to', 'Choose Home screen'] };
       }
-      return { kind: 'android-chrome', title: 'Install Necpa',
+      return { kind: 'android-chrome', title: 'Install Necpra',
         text: 'In Chrome, tap ⋮ and choose Install app or Add to Home screen.',
         steps: ['Tap ⋮ (top-right menu)', 'Choose Install app (or Add to Home screen)', 'Tap Install'] };
     }
-    return { kind: 'desktop', title: 'Install Necpa',
-      text: 'Click the install icon at the right of the address bar, or open the browser menu and choose Install Necpa.',
-      steps: ['Look for the install icon in the address bar', 'Or open the browser menu → Install Necpa'] };
+    return { kind: 'desktop', title: 'Install Necpra',
+      text: 'Click the install icon at the right of the address bar, or open the browser menu and choose Install Necpra.',
+      steps: ['Look for the install icon in the address bar', 'Or open the browser menu → Install Necpra'] };
   }
 
   async function checkManifest() {
@@ -377,7 +377,7 @@
         sheetHint = 'Your browser has not granted the in-app install prompt yet. Necpa cannot bypass that browser security decision.';
         renderSheet();
       }
-      try { console.debug('[NecpaPWA] in-app install readiness', { ready: ready, waitedMs: Date.now() - startedAt }); } catch (_) {}
+      try { console.debug('[NecpraPWA] in-app install readiness', { ready: ready, waitedMs: Date.now() - startedAt }); } catch (_) {}
     });
   }
 
@@ -476,7 +476,7 @@
     icon.addEventListener('error', function () { icon.style.display = 'none'; });
     card.appendChild(icon);
 
-    var title = mk('h2', 'np-title', 'Install Necpa');
+    var title = mk('h2', 'np-title', 'Install Necpra');
     title.id = 'np-title';
     card.appendChild(title);
 
@@ -487,7 +487,7 @@
     }
 
     if (deferredPrompt) {
-      card.appendChild(mk('p', 'np-text', 'Install Necpa on your device for faster access and offline support.'));
+      card.appendChild(mk('p', 'np-text', 'Install Necpra on your device for faster access and offline support.'));
       if (sheetHint) card.appendChild(mk('p', 'np-hint', sheetHint));
       card.appendChild(button('Install', '', function () {
         sheetHint = '';

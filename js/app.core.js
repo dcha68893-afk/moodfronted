@@ -1,4 +1,4 @@
-// app.core.js - Necpa Core Services & Bootstrapping - ENHANCED VERSION
+// app.core.js - Necpra Core Services & Bootstrapping - ENHANCED VERSION
 // UPDATED: Enhanced application bootstrap with proper coordination
 // UPDATED: Improved session state coordination with event-driven architecture
 // UPDATED: Robust UI orchestration with failure recovery

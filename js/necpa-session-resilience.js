@@ -18,7 +18,7 @@
  */
 (function (global) {
     'use strict';
-    if (global.NecpaSessionResilience) return;
+    if (global.NecpraSessionResilience) return;
 
     function readRefreshToken() {
         try {
@@ -75,5 +75,5 @@
         return inFlight;
     }
 
-    global.NecpaSessionResilience = { refreshAccessToken: refreshAccessToken };
+    global.NecpraSessionResilience = { refreshAccessToken: refreshAccessToken };
 })(window);

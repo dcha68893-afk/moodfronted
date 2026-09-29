@@ -1,4 +1,4 @@
-// Necpa runtime configuration gateway
+// Necpra runtime configuration gateway
 // Keep this file dependency-free and syntax-safe: it is loaded before the API layer.
 (function () {
     'use strict';
@@ -111,8 +111,8 @@
     window.BACKEND_URL = configuredOrigin;
     window.FRONTEND_URL = String(runtime.FRONTEND_URL || '').trim().replace(/\/+$/, '');
     window.GOOGLE_CLIENT_ID = String(runtime.GOOGLE_CLIENT_ID || '').trim();
-    window.NECPRA_APP_NAME = 'Necpa';
-    window.NECPRA_APP_SHORT_NAME = 'Necpa';
+    window.NECPRA_APP_NAME = 'Necpra';
+    window.NECPRA_APP_SHORT_NAME = 'Necpra';
     window.__NECPRA_ALLOWED_ORIGINS__ = ['https://necpra.co.ke', 'https://www.necpra.co.ke', window.location.origin].filter(Boolean);
     window.__API_ALLOWED_ORIGINS__ = window.__NECPRA_ALLOWED_ORIGINS__.slice();
     window.__getApiOrigin = function () { return backendOrigin(); };
@@ -124,14 +124,14 @@
     function normalizeBrandText(value) {
         if (typeof value !== 'string' || !value) return value;
         return value
-            .replace(/Kynecta/gi, 'Necpa')
-            .replace(/Knecta/gi, 'Necpa')
-            .replace(/MoodChat/gi, 'Necpa')
-            .replace(/Mood Chat/gi, 'Necpa')
-            .replace(/Necpra/gi, 'Necpa')
+            .replace(/Kynecta/gi, 'Necpra')
+            .replace(/Knecta/gi, 'Necpra')
+            .replace(/MoodChat/gi, 'Necpra')
+            .replace(/Mood Chat/gi, 'Necpra')
+            .replace(/Necpra/gi, 'Necpra')
             .replace(/Advanced Mood-Based Chat/gi, 'Advanced Chat')
             .replace(/Mood-Based/gi, '')
-            .replace(/Mood Arcade/gi, 'Necpa Arcade');
+            .replace(/Mood Arcade/gi, 'Necpra Arcade');
     }
 
     // ROOT-CAUSE FIX (GROUP "Secure messaging is still unlocking" FOREVER):
@@ -139,9 +139,9 @@
     // the text of inline <script> and <style> elements. Because the
     // MutationObserver below runs as soon as the parser inserts an inline
     // <script> (before the browser executes it), executable source was being
-    // rewritten first: `window.KynectaGroupE2E` became `window.NecpaGroupE2E`,
-    // `window.KynectaE2EIdentity` became `window.NecpaE2EIdentity`, and
-    // `__NECPRA_ENSURE_E2E` became `__Necpa_ENSURE_E2E`. None of those globals
+    // rewritten first: `window.KynectaGroupE2E` became `legacy group E2E global`,
+    // `window.KynectaE2EIdentity` became `legacy E2E identity global`, and
+    // `__NECPRA_ENSURE_E2E` became `legacy E2E ensure global`. None of those globals
     // exist, so group.html could never see the group crypto module or the
     // unlocked identity and always reported the E2E layer as "still
     // unlocking" -- even though the keys were ready. External .js files are
@@ -176,15 +176,15 @@
     }
 
     function normalizeIcons() {
-        try { document.querySelectorAll('link[rel="icon"],link[rel="shortcut icon"]').forEach(function (node) { node.href = '/icons/necpa-192.png'; }); } catch (_) {}
+        try { document.querySelectorAll('link[rel="icon"],link[rel="shortcut icon"]').forEach(function (node) { node.href = '/icons/necpra-192.png'; }); } catch (_) {}
     }
 
     // ROOT-CAUSE FIX (real photos/videos replaced by the app icon):
     // the first time ANY <img> failed to load -- even a passing failure such as the backend waking from a cold start --
-    // it was permanently swapped for /icons/necpa-192.png. That also hit chat/group/status pictures, so the receiver saw
+    // it was permanently swapped for /icons/necpra-192.png. That also hit chat/group/status pictures, so the receiver saw
     // the app image instead of what the sender sent. User media must never be replaced by the app icon: transient failures
     // are retried, and a file that is really gone gets a neutral "unavailable - tap to retry" placeholder instead.
-    var APP_ICON = '/icons/necpa-192.png';
+    var APP_ICON = '/icons/necpra-192.png';
     var MEDIA_UNAVAILABLE = 'data:image/svg+xml;utf8,' + encodeURIComponent(
         '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160" viewBox="0 0 240 160"><rect width="240" height="160" rx="12" fill="#e5e7eb"/>' +
         '<path d="M84 104l22-28 16 20 12-14 22 22z" fill="#9ca3af"/><circle cx="96" cy="60" r="9" fill="#9ca3af"/>' +
@@ -476,5 +476,5 @@
     if (window.MutationObserver) new MutationObserver(function (mutations) { mutations.forEach(function (mutation) { mutation.addedNodes && mutation.addedNodes.forEach(function (node) { if (node.nodeType === 1) { applyBrand(node); fixBrokenImages(node); } }); }); }).observe(document.documentElement, { childList: true, subtree: true });
     // Shared profile-photo resolver (Google / manual / relative paths / initials fallback) for EVERY page.
     loadOnce('/js/avatar-fix.js?v=20260924-1', 'avatar_fix');
-    console.log('[Config] Necpa runtime configuration loaded. Backend:', configuredOrigin || '(missing)');
+    console.log('[Config] Necpra runtime configuration loaded. Backend:', configuredOrigin || '(missing)');
 })();

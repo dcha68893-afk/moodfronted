@@ -135,7 +135,7 @@
         account: {
             displayName: 'User',
             username: 'user',
-            bio: "Hello! I'm using Necpa",
+            bio: "Hello! I'm using Necpra",
             profileVisibility: 'everyone',
             photoVisibility: 'everyone',
             lastSeen: 'everyone',

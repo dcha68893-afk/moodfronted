@@ -24,7 +24,7 @@
     <script src="/js/runtime-config.js"></script>
     <script src="/js/config.js"></script>
     <script>
-    (function(){try{var raw=localStorage.getItem("kynecta_auth"),a=raw?JSON.parse(raw):null,t=a&&a.token,v=false;if(t&&t.split(".").length===3){var p=t.split(".")[1].replace(/-/g,"+").replace(/_/g,"/"),x=JSON.parse(atob(p+"=".repeat((4-p.length%4)%4)));v=!x.exp||x.exp*1000>Date.now()}if(v&&a.user)document.documentElement.setAttribute("data-necpa-session","active")}catch(_){}})();
+    (function(){try{var raw=localStorage.getItem("kynecta_auth"),a=raw?JSON.parse(raw):null,t=a&&a.token,v=false;if(t&&t.split(".").length===3){var p=t.split(".")[1].replace(/-/g,"+").replace(/_/g,"/"),x=JSON.parse(atob(p+"=".repeat((4-p.length%4)%4)));v=!x.exp||x.exp*1000>Date.now()}if(v&&a.user)document.documentElement.setAttribute("data-necpra-session","active")}catch(_){}})();
     </script>
     <script>
     // FIX (HARDCODED-BACKEND-URL-BYPASSES-DOTENV): this used to hardcode
@@ -76,45 +76,51 @@
     <link rel="icon" href="favicon.ico" type="image/x-icon">
     <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16x16.png">
     <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32x32.png">
-    <!-- App log image (favicon / home-screen icon): must use the "necpa-*" icon set to
-         match the app's actual name (Necpa), not the misspelled "necpra-*" set. -->
-    <link rel="icon" type="image/png" sizes="192x192" href="icons/necpa-192.png">
-    <link rel="icon" type="image/png" sizes="512x512" href="icons/necpa-512.png">
-    <link rel="apple-touch-icon" href="icons/necpa-192.png">
+    <!-- App icon set uses the Necpra brand assets. -->
+    <link rel="icon" type="image/png" sizes="192x192" href="icons/necpra-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="icons/necpra-512.png">
+    <link rel="apple-touch-icon" href="icons/necpra-192.png">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Necpa - Messaging, Friends, Accommodation & Marketplace</title>
+    <title>Necpra - Messaging, Friends, Accommodation & Marketplace</title>
 
     <!-- SEO: description + canonical -->
-    <meta name="description" content="Necpa brings your chats, friends, accommodation search and marketplace into one fast, private app. Download Necpa free for web, Android and desktop.">
+    <meta name="description" content="Necpra is a messaging and social app for chats, friends, accommodation and marketplace services. Use Necpra on the web, Android and desktop.">
     <link rel="canonical" href="https://necpra.co.ke/">
     <meta name="robots" content="index, follow">
 
     <!-- Open Graph (Facebook, WhatsApp link previews, etc.) -->
     <meta property="og:type" content="website">
-    <meta property="og:site_name" content="Necpa">
-    <meta property="og:title" content="Necpa - Global Chat Platform">
+    <meta property="og:site_name" content="Necpra">
+    <meta property="og:title" content="Necpra - Global Chat Platform">
     <meta property="og:description" content="One app for messaging, friends, accommodation and marketplace. Fast, private, and free.">
     <meta property="og:url" content="https://necpra.co.ke/">
-    <meta property="og:image" content="https://necpra.co.ke/icons/necpa-512.png">
+    <meta property="og:image" content="https://necpra.co.ke/icons/necpra-512.png">
 
     <!-- Twitter / X card -->
     <meta name="twitter:card" content="summary">
-    <meta name="twitter:title" content="Necpa - Global Chat Platform">
+    <meta name="twitter:title" content="Necpra - Global Chat Platform">
     <meta name="twitter:description" content="One app for messaging, friends, accommodation and marketplace.">
-    <meta name="twitter:image" content="https://necpra.co.ke/icons/necpa-512.png">
+    <meta name="twitter:image" content="https://necpra.co.ke/icons/necpra-512.png">
 
     <!-- Structured data so Google can build a rich result (icon, app info, download links) -->
+    <meta name="application-name" content="Necpra">
+    <meta name="author" content="Necpra">
+
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
       "@type": "WebApplication",
-      "name": "Necpa",
+      "name": "Necpra",
       "url": "https://necpra.co.ke/",
-      "description": "Real-time chat and marketplace platform: messaging, friends, accommodation and shopping in one app.",
+      "description": "Necpra is a messaging and social app for chats, friends, accommodation and marketplace services.",
+      "brand": {
+        "@type": "Brand",
+        "name": "Necpra"
+      },
       "applicationCategory": "SocialNetworkingApplication",
       "operatingSystem": "Web, Android",
-      "image": "https://necpra.co.ke/icons/necpa-512.png",
+      "image": "https://necpra.co.ke/icons/necpra-512.png",
       "offers": {
         "@type": "Offer",
         "price": "0",
@@ -223,9 +229,9 @@
         }
 
         #app-container, #iframe-container, #bottom-nav { display: none; }
-        html[data-necpa-session="active"] .landing-screen { display:none !important; }
-        html[data-necpa-session="active"] #app-container { display:flex !important; }
-        html[data-necpa-session="active"] #iframe-container { display:block !important; }
+        html[data-necpra-session="active"] .landing-screen { display:none !important; }
+        html[data-necpra-session="active"] #app-container { display:flex !important; }
+        html[data-necpra-session="active"] #iframe-container { display:block !important; }
         /* FIX (LOGIN-PAGE-DEAD-APP-NAV): #bottom-nav (Home/Explore/Notifications/
            Profile/Settings/Close — the authenticated app's nav, all dead href="#"
            links) was already hidden above, but its round toggle button was not,
@@ -2315,13 +2321,13 @@
         }
     </style>
 
-    <div class="landing-screen" id="landingScreen" role="dialog" aria-label="Welcome to Necpa">
+    <div class="landing-screen" id="landingScreen" role="dialog" aria-label="Welcome to Necpra">
         <button type="button" class="landing-skip" id="landingSkip" aria-label="Skip to login">Skip</button>
         <div class="landing-scroll">
             <header class="landing-hero">
                 <div class="landing-hero-bg" aria-hidden="true"></div>
                 <div class="landing-hero-inner">
-                    <div class="landing-logo"><i class="fas fa-comments"></i><span>Necpa</span></div>
+                    <div class="landing-logo"><i class="fas fa-comments"></i><span>Necpra</span></div>
 
                     <div class="landing-mockup" aria-hidden="true">
                         <div class="landing-phone landing-phone-lg">
@@ -2386,23 +2392,23 @@
                     </div>
 
                     <h1 class="landing-headline">One app for Messaging, Friends, Accommodation and Marketplace.</h1>
-                    <p class="landing-subtitle">Necpa brings your chats, friends, places to stay and shopping into one fast, secure app — on any device.</p>
+                    <p class="landing-subtitle">Necpra brings your chats, friends, places to stay and shopping into one fast, secure app — on any device.</p>
 
-                    <div class="landing-stat-row" aria-label="Necpa by the numbers">
+                    <div class="landing-stat-row" aria-label="Necpra by the numbers">
                         <div class="landing-stat"><span class="landing-stat-num"><i class="fas fa-star"></i> 4.8</span><span class="landing-stat-label">User rating</span></div>
                         <div class="landing-stat"><span class="landing-stat-num">1+</span><span class="landing-stat-label">Countries</span></div>
                         <div class="landing-stat"><span class="landing-stat-num">99.9%</span><span class="landing-stat-label">Uptime</span></div>
                         <div class="landing-stat"><span class="landing-stat-num"><i class="fas fa-lock"></i></span><span class="landing-stat-label">End-to-end encrypted</span></div>
                     </div>
 
-                    <div class="landing-trust-strip" aria-label="Why people trust Necpa">
+                    <div class="landing-trust-strip" aria-label="Why people trust Necpra">
                         <span class="landing-trust-pill"><i class="fas fa-lock"></i> End-to-End Encrypted</span>
                         <span class="landing-trust-pill"><i class="fas fa-globe"></i> Trusted Worldwide</span>
                         <span class="landing-trust-pill"><i class="fas fa-paper-plane"></i> Millions of Messages Delivered</span>
                         <span class="landing-trust-pill"><i class="fas fa-shield-alt"></i> Fast &amp; Secure</span>
                     </div>
 
-                    <div class="landing-badge-row" aria-label="Necpa highlights">
+                    <div class="landing-badge-row" aria-label="Necpra highlights">
                         <span class="landing-badge"><i class="fas fa-bolt"></i> Real-time</span>
                         <span class="landing-badge"><i class="fas fa-users"></i> Communities</span>
                         <span class="landing-badge"><i class="fas fa-wifi"></i> Offline-Ready</span>
@@ -2428,7 +2434,7 @@
                 </div>
             </header>
 
-            <section class="landing-showcase" aria-label="What you can do on Necpa">
+            <section class="landing-showcase" aria-label="What you can do on Necpra">
 
                 <div class="showcase-item reveal">
                     <div class="showcase-art" aria-hidden="true">
@@ -2542,14 +2548,14 @@
 
             </section>
 
-            <section class="landing-more-features" aria-label="More Necpa features">
+            <section class="landing-more-features" aria-label="More Necpra features">
                 <div class="landing-feature-chip reveal"><i class="fas fa-gamepad"></i><span>Games</span></div>
                 <div class="landing-feature-chip reveal"><i class="fas fa-wifi"></i><span>Offline Support</span></div>
                 <div class="landing-feature-chip reveal"><i class="fas fa-sync-alt"></i><span>Cross-Device Sync</span></div>
                 <div class="landing-feature-chip reveal"><i class="fas fa-bolt"></i><span>Fast Performance</span></div>
             </section>
 
-            <section class="landing-trust" aria-label="Why people trust Necpa">
+            <section class="landing-trust" aria-label="Why people trust Necpra">
                 <div class="landing-trust-item reveal"><i class="fas fa-lock"></i><span>Secure authentication</span></div>
                 <div class="landing-trust-item reveal"><i class="fas fa-cloud"></i><span>Reliable cloud sync</span></div>
                 <div class="landing-trust-item reveal"><i class="fas fa-bolt"></i><span>Fast delivery</span></div>
@@ -2571,7 +2577,7 @@
                     <a href="#" class="landing-footer-link">Help</a>
                     <a href="#" class="landing-footer-link">About</a>
                 </div>
-                <div class="landing-footer-meta">&copy; <span id="landingYear"></span> Necpa</div>
+                <div class="landing-footer-meta">&copy; <span id="landingYear"></span> Necpra</div>
             </footer>
         </div>
     </div>
@@ -2610,7 +2616,7 @@
     <div class="mobile-header">
         <div class="logo">
             <i class="fas fa-comments logo-icon"></i>
-            <span class="logo-text">Necpa</span>
+            <span class="logo-text">Necpra</span>
         </div>
         <button class="mobile-menu-toggle" id="mobileMenuToggle">
             <i class="fas fa-bars"></i>
@@ -2623,7 +2629,7 @@
         <div class="sidebar-content">
             <div class="branding">
                 <div class="logo-large"><i class="fas fa-comments"></i></div>
-                <h1>Necpa</h1>
+                <h1>Necpra</h1>
                 <p class="tagline">Connect with the world</p>
             </div>
             
@@ -2675,7 +2681,7 @@
         <div class="sidebar-content">
             <div class="branding">
                 <div class="logo-large"><i class="fas fa-comments"></i></div>
-                <h1>Necpa</h1>
+                <h1>Necpra</h1>
                 <p class="tagline">Connect with the world, one chat at a time</p>
             </div>
             
@@ -2708,7 +2714,7 @@
             <div class="social-proof">
                 <h2>🌟 Success Stories</h2>
                 <div class="testimonial">
-                    <div class="testimonial-content">"Necpa helped me find amazing friends across continents!"</div>
+                    <div class="testimonial-content">"Necpra helped me find amazing friends across continents!"</div>
                     <div class="testimonial-author"><div class="testimonial-avatar">SR</div><div class="testimonial-info"><h4>jackson elvis</h4><p>Spain • Regular User</p></div></div>
                 </div>
             </div>
@@ -2773,7 +2779,7 @@
             
             <div class="auth-container" id="auth-container">
                 <div class="auth-header">
-                    <button type="button" class="auth-install-btn" id="authInstallBtn" title="Install Necpa"><i class="fas fa-arrow-down"></i> Install App</button>
+                    <button type="button" class="auth-install-btn" id="authInstallBtn" title="Install Necpra"><i class="fas fa-arrow-down"></i> Install App</button>
                     <div class="pwa-status" id="authPwaStatus" hidden>
                         <span class="pwa-status-badge"><i class="fas fa-check-circle"></i> Installed</span>
                         <button type="button" class="pwa-status-btn" id="authOpenAppBtn"><i class="fas fa-external-link-alt"></i> Open</button>
@@ -2829,7 +2835,7 @@
                             
                             <div class="form-group mb-30">
                                 <button type="submit" class="btn btn-primary btn-with-state" id="login-button" data-form-toggle="login">
-                                    <span id="loginButtonText">Login to Necpa</span>
+                                    <span id="loginButtonText">Login to Necpra</span>
                                     <div class="spinner" id="loginSpinner"></div>
                                 </button>
                                 <p class="login-security-note"><i class="fas fa-shield-alt"></i> Protected by secure, encrypted authentication</p>
@@ -3019,7 +3025,7 @@
                 </div>
                 
                 <div class="auth-footer">
-                    <p>© 2024 Necpa. All rights reserved.</p>
+                    <p>© 2024 Necpra. All rights reserved.</p>
                     <div class="auth-footer-links">
                         <a href="legal/privacy.html" class="footer-link" data-modal="privacy">Privacy</a>
                         <a href="legal/terms.html" class="footer-link" data-modal="terms">Terms</a>
@@ -3046,8 +3052,8 @@
                  widths (see @media (min-width: 1200px) below), so it fills
                  that empty space with content instead of requiring a scroll
                  discovery inside the narrow sidebar. -->
-            <aside class="auth-side-highlights" id="authSideHighlights" aria-label="Necpa features">
-                <h2>Why people choose Necpa</h2>
+            <aside class="auth-side-highlights" id="authSideHighlights" aria-label="Necpra features">
+                <h2>Why people choose Necpra</h2>
                 <div class="feature-grid">
                     <div class="feature-card"><div class="feature-icon"><i class="fas fa-lock"></i></div><div class="feature-content"><h3>End-to-End Encrypted</h3><p>Your messages stay private, always</p></div></div>
                     <div class="feature-card"><div class="feature-icon"><i class="fas fa-user-plus"></i></div><div class="feature-content"><h3>Friends</h3><p>Requests, suggestions &amp; people nearby</p></div></div>
@@ -3064,7 +3070,7 @@
         </div>
 
             <!-- BUG FIX (EMPTY-MOBILE-LANDING-SPACE): #desktopSidebar already
-                 contains a full "why join Necpa" pitch — feature cards,
+                 contains a full "why join Necpra" pitch — feature cards,
                  a testimonial, and app-store badges — but it's display:none
                  below 768px (see the max-width:768px media query), so mobile
                  visitors, who are most of the audience on a phone, saw
@@ -3078,7 +3084,7 @@
                  content) via .mobile-marketing-panel's own CSS. -->
             <div class="mobile-marketing-panel">
                 <div class="mobile-marketing-heading">
-                    <h2>Why people love Necpa</h2>
+                    <h2>Why people love Necpra</h2>
                     <p>Real conversations, real-time — wherever you are.</p>
                 </div>
                 <div class="feature-grid">
@@ -3100,7 +3106,7 @@
                 <div class="social-proof">
                     <h2>🌟 Reviews &amp; Success Stories</h2>
                     <div class="testimonial">
-                        <div class="testimonial-content">"Necpa helped me find amazing friends across continents!"</div>
+                        <div class="testimonial-content">"Necpra helped me find amazing friends across continents!"</div>
                         <div class="testimonial-author"><div class="testimonial-avatar">SR</div><div class="testimonial-info"><h4>jackson elvis</h4><p>Spain • Regular User</p></div></div>
                     </div>
                     <div class="testimonial">
@@ -3116,7 +3122,7 @@
                      accurate look at each module. Swap in real PNG
                      screenshots here once they're exported from the app. -->
                 <div class="mmp-screens-section">
-                    <h2><i class="fas fa-mobile-screen-button"></i> See Necpa In Action</h2>
+                    <h2><i class="fas fa-mobile-screen-button"></i> See Necpra In Action</h2>
                     <div class="mmp-screens-strip">
                         <div class="mmp-screen-card"><div class="mmp-screen-icon chat"><i class="fas fa-comment-dots"></i></div><span>Chat</span></div>
                         <div class="mmp-screen-card"><div class="mmp-screen-icon friends"><i class="fas fa-user-plus"></i></div><span>Friends</span></div>
@@ -3131,7 +3137,7 @@
                 <div class="mmp-faq">
                     <h2><i class="fas fa-circle-question"></i> Frequently Asked Questions</h2>
                     <details class="mmp-faq-item">
-                        <summary>Is Necpa free to use?</summary>
+                        <summary>Is Necpra free to use?</summary>
                         <p>Yes — messaging, friends, groups and communities are free. Some marketplace and premium tools may have their own pricing.</p>
                     </details>
                     <details class="mmp-faq-item">
@@ -3139,12 +3145,12 @@
                         <p>Direct messages are end-to-end encrypted, so only you and the people in the conversation can read them.</p>
                     </details>
                     <details class="mmp-faq-item">
-                        <summary>Can I use Necpa on multiple devices?</summary>
+                        <summary>Can I use Necpra on multiple devices?</summary>
                         <p>Yes — sign in on any device and your chats, friends and groups stay in sync.</p>
                     </details>
                     <details class="mmp-faq-item">
-                        <summary>Does Necpa work offline?</summary>
-                        <p>Necpa is a Progressive Web App with offline support — recent chats stay available and messages send once you're back online.</p>
+                        <summary>Does Necpra work offline?</summary>
+                        <p>Necpra is a Progressive Web App with offline support — recent chats stay available and messages send once you're back online.</p>
                     </details>
                 </div>
 
@@ -3465,7 +3471,7 @@
             getToken: function() {
                 if (window.AuthStorage?.getToken) return window.AuthStorage.getToken();
                 if (window.api?.auth?.getToken) return window.api.auth.getToken();
-                const token = localStorage.getItem('authToken') || localStorage.getItem('necpa_token') || localStorage.getItem('token') || localStorage.getItem('accessToken');
+                const token = localStorage.getItem('authToken') || localStorage.getItem('necpra_token') || localStorage.getItem('token') || localStorage.getItem('accessToken');
                 console.log('[AUTH TOKEN]', token);
                 return token;
             },
@@ -3476,7 +3482,7 @@
                     localStorage.setItem('token', token);
                     localStorage.setItem('accessToken', token);
                     localStorage.setItem('USER_TOKEN', token);
-                    localStorage.setItem('necpa_token', token);
+                    localStorage.setItem('necpra_token', token);
                     localStorage.setItem('isLoggedIn', 'true');
                     console.log('[AUTH TOKEN]', token);
                 }
@@ -3487,7 +3493,7 @@
                 localStorage.removeItem('token');
                 localStorage.removeItem('accessToken');
                 localStorage.removeItem('USER_TOKEN');
-                localStorage.removeItem('necpa_token');
+                localStorage.removeItem('necpra_token');
                 localStorage.removeItem('kynecta_auth');
                 localStorage.removeItem('isLoggedIn');
             },
@@ -3756,7 +3762,7 @@
                 const limitResult = window.AccountLimit.registerDeviceAccount(userId, user.email, user.username || user.displayName);
                 if (!limitResult.success) {
                     window.CoreUtils.showNotification('Error', limitResult.error || `Maximum ${window.AccountLimit.MAX_ACCOUNTS} accounts per device. Please use another device or remove an existing account.`, 'error');
-                    setButtonLoadingState('login-button', 'loginButtonText', 'loginSpinner', 'Login to Necpa', false);
+                    setButtonLoadingState('login-button', 'loginButtonText', 'loginSpinner', 'Login to Necpra', false);
                     return;
                 }
             }
@@ -3765,7 +3771,7 @@
                     token, refreshToken: response.refreshToken || response.data?.refreshToken || null,
                     user: user || null, expiresAt: response.expiresAt || response.data?.expiresAt || null
                 });
-                ['authToken','necpa_token','token','accessToken','USER_TOKEN'].forEach(k => {
+                ['authToken','necpra_token','token','accessToken','USER_TOKEN'].forEach(k => {
                     try { localStorage.setItem(k, token); } catch(_) {}
                 });
                 if (user) {
@@ -3869,7 +3875,7 @@
             newSubmit.addEventListener('click', doVerify);
             newCancel.addEventListener('click', () => {
                 hideMfaModal();
-                setButtonLoadingState('login-button', 'loginButtonText', 'loginSpinner', 'Login to Necpa', false);
+                setButtonLoadingState('login-button', 'loginButtonText', 'loginSpinner', 'Login to Necpra', false);
             });
             document.getElementById('mfaCodeInput')?.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') { e.preventDefault(); doVerify(); }
@@ -3965,7 +3971,7 @@
                         // must be checked BEFORE the generic success/failure branch,
                         // or it falls through to the "invalid credentials" error.
                         if (response?.requiresMfa && response?.tempToken) {
-                            setButtonLoadingState('login-button', 'loginButtonText', 'loginSpinner', 'Login to Necpa', false);
+                            setButtonLoadingState('login-button', 'loginButtonText', 'loginSpinner', 'Login to Necpra', false);
                             showMfaModal(response.tempToken, password);
                         } else if (response?.success || response?.token || response?.data?.token) {
                             // FIX-E2E-WIRING: js/e2e-encryption.js (KynectaE2E) needs the
@@ -4000,7 +4006,7 @@
                         showError('loginIdentifier', msg);
                     } finally {
                         clearTimeout(wakeTimer);
-                        setButtonLoadingState('login-button', 'loginButtonText', 'loginSpinner', 'Login to Necpa', false);
+                        setButtonLoadingState('login-button', 'loginButtonText', 'loginSpinner', 'Login to Necpra', false);
                     }
                 });
             }
@@ -4082,7 +4088,7 @@
                                     expiresAt: response.expiresAt || response.data?.expiresAt || null
                                 });
                                 // Store token in ALL known localStorage keys for module compatibility
-                                ['authToken','necpa_token','token','accessToken','USER_TOKEN'].forEach(k => {
+                                ['authToken','necpra_token','token','accessToken','USER_TOKEN'].forEach(k => {
                                     try { localStorage.setItem(k, token); } catch(_) {}
                                 });
                                 if (user) {
@@ -4878,7 +4884,7 @@
                         '<div class="contact-field"><label for="ct_message">Message</label>' +
                         '<textarea id="ct_message" placeholder="Describe your issue or question…"></textarea></div>' +
                         '<button class="contact-submit" id="contactSendBtn"><i class="fas fa-paper-plane"></i> Send Message</button>' +
-                        '<p style="font-size:12px;color:var(--text-light);margin-top:10px;text-align:center">Or email us directly: <a href="mailto:support@necpa.app">support@necpa.app</a></p>';
+                        '<p style="font-size:12px;color:var(--text-light);margin-top:10px;text-align:center">Or email us directly: <a href="mailto:support@necpra.co.ke">support@necpa.app</a></p>';
                 }
             },
 
@@ -4890,11 +4896,11 @@
                         { q: 'How do I reset my password?', a: 'On the login screen click "Forgot password?", enter your email, and follow the link we send you.' },
                         { q: 'Why can\'t I log in?', a: 'Ensure your email and password are correct. If the server is starting from sleep mode (free tier), wait 30 seconds and try again. Check CAPS LOCK.' },
                         { q: 'How do I find and add friends?', a: 'Open Friends, then use Discover or search by username. You can also add people suggested for you or people from a group you share. Accept requests from the bell icon.' },
-                        { q: 'Can I use Necpa on multiple devices?', a: 'Yes. You can be signed in on up to 2 devices per account simultaneously.' },
+                        { q: 'Can I use Necpra on multiple devices?', a: 'Yes. You can be signed in on up to 2 devices per account simultaneously.' },
                         { q: 'How do I delete my account?', a: 'Go to Settings → Account → Delete Account. This is permanent after 30 days.' },
                         { q: 'Why are my messages disappearing?', a: 'This can happen if you have Auto-Delete enabled, or if the app was refreshed during a sync. Check Settings → Privacy → Auto-Delete Messages.' },
                         { q: 'How do I report someone?', a: 'Open the conversation, tap the ⋮ menu, then choose "Report User". Our moderation team reviews reports within 48 hours.' },
-                        { q: 'Why does the app show a loading spinner for a long time?', a: 'Necpa is hosted on a free cloud tier that sleeps after inactivity. The first request after sleep takes ~30 seconds to wake the server. This is normal.' }
+                        { q: 'Why does the app show a loading spinner for a long time?', a: 'Necpra is hosted on a free cloud tier that sleeps after inactivity. The first request after sleep takes ~30 seconds to wake the server. This is normal.' }
                     ];
                     var html = '<p>Find answers to common questions below.</p>';
                     faqs.forEach(function(f, i) {
@@ -5053,7 +5059,7 @@
 
 <script>
 /* ============================================================
-   NECPA RUNTIME STABILIZATION — All 17 issues fixed inline
+   NECPRA RUNTIME STABILIZATION — All 17 issues fixed inline
    ============================================================ */
 (function(){
 'use strict';
