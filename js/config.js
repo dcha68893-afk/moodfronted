@@ -176,15 +176,15 @@
     }
 
     function normalizeIcons() {
-        try { document.querySelectorAll('link[rel="icon"],link[rel="shortcut icon"]').forEach(function (node) { node.href = '/icons/necpa-192.png'; }); } catch (_) {}
+        try { document.querySelectorAll('link[rel="icon"],link[rel="shortcut icon"]').forEach(function (node) { node.href = '/icons/necpra-192.png'; }); } catch (_) {}
     }
 
     // ROOT-CAUSE FIX (real photos/videos replaced by the app icon):
     // the first time ANY <img> failed to load -- even a passing failure such as the backend waking from a cold start --
-    // it was permanently swapped for /icons/necpa-192.png. That also hit chat/group/status pictures, so the receiver saw
+    // it was permanently swapped for /icons/necpra-192.png. That also hit chat/group/status pictures, so the receiver saw
     // the app image instead of what the sender sent. User media must never be replaced by the app icon: transient failures
     // are retried, and a file that is really gone gets a neutral "unavailable - tap to retry" placeholder instead.
-    var APP_ICON = '/icons/necpa-192.png';
+    var APP_ICON = '/icons/necpra-192.png';
     var MEDIA_UNAVAILABLE = 'data:image/svg+xml;utf8,' + encodeURIComponent(
         '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160" viewBox="0 0 240 160"><rect width="240" height="160" rx="12" fill="#e5e7eb"/>' +
         '<path d="M84 104l22-28 16 20 12-14 22 22z" fill="#9ca3af"/><circle cx="96" cy="60" r="9" fill="#9ca3af"/>' +

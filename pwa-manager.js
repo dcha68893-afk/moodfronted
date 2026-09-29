@@ -24,7 +24,7 @@
  * Load it as a plain (non-deferred, non-async) <script src="/pwa-manager.js">
  * in <head> so the listener exists before Chrome fires the one-time event.
  *
- * Public API (window.NecpaPWA)
+ * Public API (window.NecpraPWA)
  *   .requestInstall()            call from a click handler (native prompt or dialog)
  *   .openInstallDialog()         open the dialog explicitly
  *   .closeInstallDialog()
@@ -39,7 +39,7 @@
  */
 (function () {
   'use strict';
-  if (window.NecpaPWA) return;
+  if (window.NecpraPWA) return;
 
   var SW_URL = '/service-worker.js';
   var DISMISS_KEY = 'necpa_pwa_dismissed_ts';
@@ -138,11 +138,11 @@
       swPromise = navigator.serviceWorker.register(SW_URL, { scope: '/', updateViaCache: 'none' });
       swPromise.then(function (reg) {
         if (reg && reg.scope !== location.origin + '/') {
-          console.warn('[NecpaPWA] service worker scope is ' + reg.scope + ' — it must be ' + location.origin + '/ to control the whole app.');
+          console.warn('[NecpraPWA] service worker scope is ' + reg.scope + ' — it must be ' + location.origin + '/ to control the whole app.');
         }
       }, function (err) {
         swPromise = null;
-        console.warn('[NecpaPWA] service worker registration failed:', err);
+        console.warn('[NecpraPWA] service worker registration failed:', err);
       });
     }
     return swPromise;
@@ -232,7 +232,7 @@
       }
       return { outcome: 'dismissed' };
     } catch (err) {
-      console.warn('[NecpaPWA] install prompt failed:', err);
+      console.warn('[NecpraPWA] install prompt failed:', err);
       return { outcome: 'error', error: err };
     } finally {
       emit();                         // listeners/dialog now see "no saved prompt"
@@ -377,7 +377,7 @@
         sheetHint = 'Your browser has not granted the in-app install prompt yet. Necpra cannot bypass that browser security decision.';
         renderSheet();
       }
-      try { console.debug('[NecpaPWA] in-app install readiness', { ready: ready, waitedMs: Date.now() - startedAt }); } catch (_) {}
+      try { console.debug('[NecpraPWA] in-app install readiness', { ready: ready, waitedMs: Date.now() - startedAt }); } catch (_) {}
     });
   }
 
@@ -696,7 +696,7 @@
   /* ======================================================================
    * 7. Public API + boot
    * ====================================================================== */
-  window.NecpaPWA = {
+  window.NecpraPWA = {
     requestInstall: requestInstall,
     openInstallDialog: openInstallDialog,
     closeInstallDialog: function () { closeInstallDialog(false); },
