@@ -24,7 +24,7 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.43.0';
+const SW_VERSION = '19.45.0';
 // FIX: bumped so activate() drops every existing cache immediately on this
 // deploy — anyone with a stale pre-rebuild group.html (or the old, now-
 // deleted group-core-*/group-os-* files, or the misspelled necpra-* icons
@@ -82,7 +82,7 @@ const SW_VERSION = '19.43.0';
 // are no longer cached or executed as code; navigations fall back to the cached shell after 6s.
 // v74: profile-photo fix (js/avatar-fix.js added, message.html + js/config.js changed). Bump forces every installed
 // PWA/Android app to drop old copies and show the 'Update ready - Refresh' banner.
-const CACHE_NAME = 'necpra-static-v78';
+const CACHE_NAME = 'necpra-static-v80';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -171,7 +171,7 @@ const NETWORK_FIRST_PATTERNS = [
   // regardless), but the actual gameplay scripts are plain .js requests and were
   // falling through to the 7-day cache-first default without these.
   /\/game\.html/i,/\/game-v3\.html/i,/\/games-crossword-v4\.js/i,
-  /\/games-v4-enhancements\.js/i,/\/games-commercial-v5\.js/i
+  /\/games-v4-enhancements\.js/i,/\/games-commercial-v5\.js/i,/\/games-chess-v1\.js/i
 ];
 
 const BYPASS_PATTERNS = [

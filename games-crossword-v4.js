@@ -460,13 +460,14 @@ style.textContent=`
 .wc-found{flex:1;text-align:center;font-weight:900;font-size:12px;color:var(--kyn-accent-info)}
 .wc-progress{height:5px;margin:2px 12px 6px;border-radius:8px;background:var(--g-surface-hi);overflow:hidden;flex:0 0 auto}
 .wc-progress i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--kyn-accent-purple),var(--kyn-accent-info));transition:.3s}
-.wc-boardwrap{flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:6px 10px;overflow:hidden}
-.wc-board{display:grid;gap:3px;width:min(94vw,420px);aspect-ratio:var(--ar,1);margin:auto}
+.wc-boardwrap{flex:1 1 auto;min-height:0;container-type:size;display:flex;align-items:center;justify-content:center;padding:6px 10px;overflow:hidden}
+.wc-board{display:grid;gap:3px;width:min(94vw,420px,calc(100cqh*var(--ar,1)));aspect-ratio:var(--ar,1);margin:auto}
 .wc-cell{position:relative;border-radius:5px}
 .wc-cell.wc-blank{background:transparent}
 .wc-cell.wc-open{background:color-mix(in srgb,var(--kyn-text-primary) 10%,transparent);border:1.5px solid var(--kyn-border)}
-.wc-cell.wc-filled{background:var(--kyn-bg-card);border:1.5px solid var(--kyn-accent-purple);box-shadow:inset 0 2px color-mix(in srgb,#fff 25%,transparent)}
+.wc-cell.wc-filled{background:linear-gradient(145deg,#7c6cff,#4d7cf2);border:1.5px solid #b9c4ffaa;box-shadow:inset 0 2px color-mix(in srgb,#fff 25%,transparent)}
 .wc-cell span{position:absolute;inset:0;display:grid;place-items:center;font-weight:1000;font-size:clamp(11px,3.4vw,18px);color:var(--kyn-text-primary)}
+.wc-cell.wc-filled span{color:#fff}
 .wc-current{flex:0 0 auto;text-align:center;min-height:40px;line-height:40px;font-size:22px;font-weight:1000;letter-spacing:3px;color:var(--kyn-accent-warning);text-shadow:0 2px 10px color-mix(in srgb,var(--kyn-bg-root) 60%,transparent)}.wc-current .wc-hint-prefix{font-size:11px;letter-spacing:1px;opacity:.72;margin-right:5px}.wc-current b{letter-spacing:4px}
 .wc-toolbar{flex:0 0 auto;display:flex;justify-content:center;gap:20px;padding:2px 12px 6px}
 .wc-tool{width:56px;height:56px;border-radius:18px;background:var(--g-surface);border:1px solid var(--g-line);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:20px}
