@@ -12,7 +12,7 @@ let room=null,roomPoll=null;
 async function roomApi(path,options){const opts=Object.assign({credentials:'include',headers:{'Content-Type':'application/json'}},options||{});const token=localStorage.getItem('accessToken')||localStorage.getItem('token')||sessionStorage.getItem('accessToken')||sessionStorage.getItem('token');if(token&&!opts.headers.Authorization)opts.headers.Authorization='Bearer '+token;const r=await fetch('/api/games/rooms'+path,opts);let j={};try{j=await r.json()}catch(_){}if(!r.ok){const detail=j.error||j.message||('HTTP '+r.status);throw new Error('Game room: '+detail)}return j}
 function roomGame(){return game()||document.querySelector('.screen.active')?.id||'water'}
 function roomLink(code){return location.origin+location.pathname+'?gameRoom='+encodeURIComponent(code)}
-function roomText(r){if(!r)return 'No game room yet';if(r.status==='waiting')return 'Waiting for the other player…';if(r.status==='ready'||r.status==='playing')return 'Both players are connected. Finish the level to record the result.';if(r.status==='finished')return r.winnerId?'Game complete — winner recorded.':'Game complete — draw.';return 'Room closed.'}
+function roomText(r){if(!r)return 'No game room yet';if(r.status==='waiting')return 'Waiting for the other player…';if(r.status==='ready')return 'Opponent joined. Both players are ready — the same match is about to start.';if(r.status==='playing')return 'MATCH LIVE • You each get one attempt. Finish the same level and your scores are compared.';if(r.status==='finished')return r.winnerId?'Match complete — winner awarded coins.':'Match complete — draw.';return 'Room closed.'}
 function roomModal(){
  let m=document.getElementById('gameRoomModal');if(m)return m;
  m=document.createElement('div');m.id='gameRoomModal';m.className='game-room-modal';
@@ -26,7 +26,7 @@ function roomModal(){
  return m;
 }
 function renderRoom(){
- const m=roomModal(),r=room;
+ const m=roomModal(),r=room;window.__gameRoomMatch=r||null;
  m.querySelector('#gameRoomStatus').textContent=roomText(r);
  const box=m.querySelector('#gameRoomCodeBox');box.hidden=!r;
  if(r){m.querySelector('#gameRoomCode').textContent=r.code;m.querySelector('#gameRoomPlayers').textContent='Host: '+(r.hostId?'Player 1':'—')+'   •   Guest: '+(r.guestId?'Player 2':'Waiting…');m.querySelector('#gameRoomCreate').disabled=true}
@@ -38,13 +38,14 @@ async function createRoom(){
 }
 async function joinRoom(code){
  code=String(code||'').trim().toUpperCase().replace(/\s/g,'');if(code.length<6)return toast('Enter the game code');
- try{const j=await roomApi('/'+encodeURIComponent(code)+'/join',{method:'POST',body:'{}'});room=j.room;renderRoom();startRoomPoll();if(room.gameType!==roomGame()){document.body.dataset.game=room.gameType;try{window.openGame(room.gameType)}catch(_){} }toast('Joined '+room.gameType+' game');}
+ try{const j=await roomApi('/'+encodeURIComponent(code)+'/join',{method:'POST',body:'{}'});room=j.room;window.__gameRoomMatch=room;renderRoom();startRoomPoll();launchMatchIfReady();if(room.gameType!==roomGame()){document.body.dataset.game=room.gameType;try{window.openGame(room.gameType)}catch(_){} }toast('Joined '+room.gameType+' game');}
  catch(e){toast(e.message)}
 }
 async function openRoom(){
  const m=roomModal();m.classList.add('show');if(!room){const code=new URLSearchParams(location.search).get('gameRoom');if(code)await joinRoom(code)}renderRoom();startRoomPoll();
 }
-function startRoomPoll(){stopRoomPoll();roomPoll=setInterval(async()=>{if(!room)return;try{const j=await roomApi('/'+encodeURIComponent(room.code));room=j.room;renderRoom()}catch(_){}},2500)}
+function launchMatchIfReady(){if(!room||!['ready','playing'].includes(room.status))return;window.__gameRoomMatch=room;const m=document.getElementById('gameRoomModal');if(m)m.classList.remove('show');try{window.dispatchEvent(new CustomEvent('game:match-ready',{detail:room}))}catch(_){} }
+function startRoomPoll(){stopRoomPoll();roomPoll=setInterval(async()=>{if(!room)return;try{const j=await roomApi('/'+encodeURIComponent(room.code));room=j.room;renderRoom();launchMatchIfReady()}catch(_){}},1500)}
 function stopRoomPoll(){if(roomPoll){clearInterval(roomPoll);roomPoll=null}}
 async function roomComplete(score){
  if(!room||!room.code)return;

@@ -228,9 +228,7 @@ function drawW(){
    if(p.pour>0){
      const sx=src.x+src.w/2+p.x+Math.sin(p.tilt)*src.h*.16,sy=src.y+p.y+src.h*.13;
      const tx=dst.x+dst.w/2,ty=dst.y+dst.h*.15,flow=p.pour,ex=sx+(tx-sx)*flow,ey=sy+(ty-sy)*flow;
-     cx.save();cx.lineCap='round';cx.strokeStyle=colors[anim.c];cx.shadowColor=colors[anim.c];cx.shadowBlur=22;cx.lineWidth=8;
-     cx.beginPath();cx.moveTo(sx,sy);cx.quadraticCurveTo((sx+tx)/2,Math.min(sy,ty)-8,ex,ey);cx.stroke();
-     cx.strokeStyle='rgba(255,255,255,.38)';cx.lineWidth=2;cx.beginPath();cx.moveTo(sx,sy+1);cx.quadraticCurveTo((sx+tx)/2,Math.min(sy,ty)-5,ex,ey);cx.stroke();
+     cx.save();const mx=(sx+tx)/2,my=Math.min(sy,ty)-12,width=7+5*flow;cx.shadowColor=colors[anim.c];cx.shadowBlur=18;cx.fillStyle=colors[anim.c];cx.beginPath();cx.moveTo(sx-width*.45,sy);cx.quadraticCurveTo(mx-width*.55,my,ex-width*.18,ey);cx.lineTo(ex+width*.18,ey);cx.quadraticCurveTo(mx+width*.55,my,sx+width*.45,sy);cx.closePath();cx.fill();cx.strokeStyle='rgba(255,255,255,.42)';cx.lineWidth=2;cx.beginPath();cx.moveTo(sx,sy);cx.quadraticCurveTo(mx,my,ex,ey);cx.stroke();
      for(let k=0;k<6;k++){let d=(k*.19+performance.now()*.0018)%1,dx=sx+(tx-sx)*Math.min(1,d*flow),dy=sy+(ty-sy)*Math.min(1,d*flow)+Math.sin(d*10)*4;cx.fillStyle='rgba(255,255,255,.75)';cx.beginPath();cx.arc(dx,dy,1.7+(k%2),0,Math.PI*2);cx.fill()}
      cx.fillStyle=colors[anim.c];cx.globalAlpha=.7;for(let k=0;k<5;k++){cx.beginPath();cx.arc(tx+(Math.random()-.5)*18,ty+Math.random()*13,2+Math.random()*2,0,Math.PI*2);cx.fill()}cx.restore();
    }
@@ -245,7 +243,7 @@ function waterHint(){if(anim||waterStateSolved())return;let best=null;for(let i=
 function addWaterTube(){if(window.__waterExtraTubeUsed||waterStateSolved())return toast('Extra tube already used on this level');bottles.push([]);window.__waterExtraTubeUsed=true;drawW();syncWaterHitTargets();toast('Extra tube added');beep(660,.08)}
 function waterStars(){const par=Math.max(8,8+level*2);return moves<=par?3:moves<=Math.ceil(par*1.5)?2:1}
 function gameDifficulty(g){return localStorage.getItem('mood.game.difficulty.'+g)||'moderate'}
-function initWater(){score=0;moves=0;selected=-1;hist=[];anim=null;window.__waterExtraTubeUsed=false;level=Math.max(1,Number(localStorage.getItem('mood.water.level')||1));const diff=gameDifficulty('water'),base=diff==='easy'?3:diff==='hard'?5:4;let n=Math.min(base+Math.floor((level-1)/3),diff==='hard'?10:9);bottles=scrambleWater(n,0x9e3779b9^level);$('wl').textContent=level;$('ws').textContent=0;$('wm').textContent=0;$('wo').classList.remove('show');$('wn').classList.remove('show');$('wh').innerHTML='TAP A TUBE<span>Tap a tube to lift it, then tap a matching tube to pour the liquid</span>';$('wh').style.display='block';resizeW()}
+function initWater(){score=0;moves=0;selected=-1;hist=[];anim=null;window.__waterExtraTubeUsed=false;level=Math.max(1,Number(localStorage.getItem('mood.water.level')||1));const diff=gameDifficulty('water'),base=diff==='easy'?3:diff==='hard'?5:4;let n=Math.min(base+Math.floor((level-1)/3),diff==='hard'?10:9);const roomSeed=window.__gameRoomMatch?.seed;const seed=roomSeed?((parseInt(String(roomSeed).slice(0,8),16)||0)^level):0x9e3779b9^level;bottles=scrambleWater(n,seed);$('wl').textContent=level;$('ws').textContent=0;$('wm').textContent=0;$('wo').classList.remove('show');$('wn').classList.remove('show');$('wh').innerHTML='TAP A TUBE<span>Tap a tube to lift it, then tap a matching tube to pour the liquid</span>';$('wh').style.display='block';resizeW()}
 function tapW(i){
  if(anim)return;
  if(selected<0){if(!bottles[i].length)return;selected=i;$('wh').style.display='none';beep(520);drawW();return}
@@ -259,7 +257,7 @@ function tapW(i){
  anim={t:performance.now(),d:1500,x1:a.x+a.w/2,y1:a.y+a.h*.18,x2:z.x+z.w/2,y2:z.y+z.h*.18,c:top,from:selected,to:i,sourceFill,targetFill,amount,sourceX:a.x,targetX:z.x,dir};
  from.splice(from.length-amount,amount);for(let k=0;k<amount;k++)to.push(top);
  moves++;score+=amount*25;selected=-1;$('wm').textContent=moves;$('ws').textContent=score;beep(620,.1);drawW();
- setTimeout(()=>{if(win()){const stars=waterStars();data.best=Math.max(data.best,score);data.coins+=100+stars*25;localStorage.setItem('mood.water.level',String(level+1));data.streak++;save();$('wo').querySelector('h2').textContent='Level Complete!';$('wo').querySelector('p').textContent='★'.repeat(stars)+'☆'.repeat(3-stars)+' · '+moves+' moves';$('wo').classList.add('show');window.__gameRoomComplete?.(score);burst(z.x+z.w/2,z.y+30,colors[top],30);beep(950,.14)}else if(!hasWaterMove())$('wn').classList.add('show')},1520);
+ setTimeout(()=>{if(waterStateSolved()){const stars=waterStars();data.best=Math.max(data.best,score);data.coins+=100+stars*25;localStorage.setItem('mood.water.level',String(level+1));data.streak++;save();$('wo').querySelector('h2').textContent='Level Complete!';$('wo').querySelector('p').textContent='★'.repeat(stars)+'☆'.repeat(3-stars)+' · '+moves+' moves';$('wo').classList.add('show');window.__gameRoomComplete?.(score);burst(z.x+z.w/2,z.y+30,colors[top],30);beep(950,.14)}else if(!hasWaterMove())$('wn').classList.add('show')},1520);
 }
 
 wc.style.touchAction='none';wc.addEventListener('pointerdown',e=>{e.preventDefault();let r=wc.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;for(let i=0;i<bottles.length;i++){let q=geom(i);if(x>=q.x&&x<=q.x+q.w&&y>=q.y&&y<=q.y+q.h){tapW(i);break}}},{passive:false});function undo(){if(anim||!hist.length)return;bottles=JSON.parse(hist.pop());moves=Math.max(0,moves-1);selected=-1;$('wn').classList.remove('show');$('wo').classList.remove('show');$('wm').textContent=moves;drawW();beep(350)}function restartWater(){initWater()}function nextWater(){level++;initWater()}

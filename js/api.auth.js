@@ -2926,6 +2926,7 @@
 
         _safeStorageSet('USER_DATA', JSON.stringify(user));
         window.currentUser = user;
+        try { if (user.e2eWrapSecret) { sessionStorage.setItem('kyn_e2e_pw_session', String(user.e2eWrapSecret)); sessionStorage.removeItem('kyn_e2e_secret_unavailable'); } } catch (_) {}
 
         _initCrossTabSync();
         _initIframeSync();
