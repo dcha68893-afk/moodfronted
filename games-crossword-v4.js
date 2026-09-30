@@ -253,6 +253,7 @@ function updateHud(){
 let wheelOrder=[];
 function renderWheel(){
  const lv=st.lv, wheel=document.getElementById('wcWheel');
+ if(!wheel||!lv||!lv.letters)return; // not built yet (e.g. resize fired before render())
  wheel.innerHTML='';
  if(!wheelOrder.length || wheelOrder.length!==lv.letters.length || st._wheelForIdx!==st.idx){
   wheelOrder=lv.letters.map((ch,i)=>({ch,i})); st._wheelForIdx=st.idx;
@@ -448,7 +449,7 @@ function bindWheelEvents(){
  });
 }
 
-window.addEventListener('resize',()=>{ if(document.getElementById('crossword')&&document.getElementById('crossword').classList.contains('active')) renderWheel(); });
+window.addEventListener('resize',()=>{ const c=document.getElementById('crossword'); if(c&&c.classList.contains('active')&&document.getElementById('wcWheel')) renderWheel(); });
 
 const style=document.createElement('style');
 style.textContent=`

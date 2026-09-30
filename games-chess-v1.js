@@ -294,6 +294,7 @@ function showMenu(){
  const rs=o.querySelector('#chResume');if(rs)rs.onclick=()=>{hideOverlay();if(mode==='cpu'&&cur().turn!==myColor&&!over)thinkSoon()};
  o.querySelector('#chExit2').onclick=()=>{hideOverlay();window.home&&window.home()}}
 function startSolo(m,lv,c){
+ try{localStorage.removeItem(SAVE_KEY)}catch(_){}
  aiTok++;thinking=false;promoMs=null;mode=m;level=lv;myColor=m==='cpu'?c:'w';role=myColor;
  base=newState();hist=[];view=0;over=false;resultText='';selected=-1;targets=[];flipped=m==='cpu'&&myColor==='b';startAt=Date.now();startClock();
  hideOverlay();render();if(m==='cpu'&&myColor==='b')thinkSoon()}
@@ -307,6 +308,19 @@ function onRoomUpdate(){
  const ns=decode(st.position);if(!ns)return;view=hist.length;
  const mv=rp===c.ply+1?legal(c).find(m=>pkey(make(c,m))===pkey(ns)):null;
  if(mv){commit(mv,true)}else{base=ns;hist=[];view=0;selected=-1;targets=[];const a=assess(ns);if(a.over)finish(a);else render()}}
+/* ───────────── Save & resume (solo games only; live rooms are server-driven) ───────────── */
+const SAVE_KEY='necpra.resume.v1.chess';
+function saveSolo(){try{
+ if(mode==='room'||roomOf()||!started)return;
+ if(over||!hist.length){if(over)localStorage.removeItem(SAVE_KEY);return}
+ localStorage.setItem(SAVE_KEY,JSON.stringify({mode,level,myColor,flipped,base:encode(base),hist:hist.map(h=>({p:encode(h.s),m:h.m,san:h.san}))}))}catch(_){}}
+function restoreSolo(){try{
+ const d=JSON.parse(localStorage.getItem(SAVE_KEY)||'null');if(!d||!Array.isArray(d.hist)||!d.hist.length)return false;
+ const b=decode(d.base);if(!b)return false;const h=[];
+ for(const x of d.hist){const st=decode(x.p);if(!st||!x.m)return false;h.push({s:st,m:x.m,san:x.san||''})}
+ mode=d.mode==='pass'?'pass':'cpu';level=d.level||'medium';myColor=mode==='cpu'?(d.myColor==='b'?'b':'w'):'w';role=myColor;
+ base=b;hist=h;view=hist.length;over=false;resultText='';selected=-1;targets=[];flipped=!!d.flipped;startAt=Date.now();startClock();return true}catch(_){return false}}
+setInterval(saveSolo,1500);window.addEventListener('pagehide',saveSolo);document.addEventListener('visibilitychange',()=>{if(document.hidden)saveSolo()});
 function init(force){
  const sec=$('chess');if(!sec)return;
  const room=roomOf(),key=room?('room:'+room.code+':'+room.seed):'solo';
@@ -320,7 +334,7 @@ function init(force){
   hideOverlay();render();if(!(room.state&&room.state.position))publish(base);
   if(!listening){listening=true;window.addEventListener('game:room:update',onRoomUpdate)}
   const a=assess(base);if(a.over)finish(a);
- }else{mode=mode==='room'?'cpu':mode;base=newState();hist=[];view=0;over=false;resultText='';render();showMenu()}}
+ }else{mode=mode==='room'?'cpu':mode;if(!restoreSolo()){base=newState();hist=[];view=0;over=false;resultText=''}render();showMenu()}}
 window.addEventListener('game:match-ready',e=>{if(e.detail?.gameType==='chess')setTimeout(()=>init(false),30)});
 window.__MOOD_CHESS_OPEN__=()=>init(false);
 })();

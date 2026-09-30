@@ -97,7 +97,46 @@
 .gicon{width:72px;height:72px;border-radius:22px;display:grid;place-items:center;background:linear-gradient(145deg,var(--g1),var(--g2));box-shadow:inset 0 2px #ffffff55,inset 0 -6px 10px #0004,0 10px 20px #0006}
 .gicon svg{width:42px;height:42px}
 #crossword .wc-cell.wc-filled span{color:#fff;text-shadow:0 1px 3px #0006}
-</style></head><body><div id="app"><section id="home" class="screen active"><div class="top"><button class="icon" onclick="closeGames()">×</button><div class="title">NECPRA ARCADE</div><div class="coins" role="button" aria-label="Buy coins" style="cursor:pointer" onclick="window.__buyGameCoins&&window.__buyGameCoins()"><span id="sndBtn" role="button" aria-label="Sound and vibration" onclick="event.stopPropagation();toggleSound()" style="cursor:pointer;margin-right:10px;font-size:16px">🔊</span>🪙 <span id="coins">1,200</span></div></div><div class="home"><div class="hero"><div class="eyebrow">PREMIUM GAME ROOM</div><h1>Play. Flow. Win.</h1><p>Touch-first games with fluid animation, sound and satisfying feedback.</p></div><div class="grid"><div class="card" style="--a:#22c55e" onclick="openGame('water')"><div class="art"><span class="gicon" style="--g1:#34d399;--g2:#0f9f6e"><svg viewBox="0 0 48 48" fill="#fff" aria-hidden="true"><rect x="17" y="6" width="14" height="36" rx="7" fill="none" stroke="#fff" stroke-width="3"/><rect x="20" y="24" width="8" height="15" rx="4"/></svg></span></div><h3>Water Sort</h3><small>Pour, match & solve</small><div class="play">▶</div></div><div class="card" style="--a:#38bdf8" onclick="openGame('block')"><div class="art"><span class="gicon" style="--g1:#38bdf8;--g2:#2563eb"><svg viewBox="0 0 48 48" fill="#fff" aria-hidden="true"><rect x="7" y="7" width="15" height="15" rx="4"/><rect x="26" y="7" width="15" height="15" rx="4"/><rect x="7" y="26" width="15" height="15" rx="4"/><rect x="26" y="26" width="15" height="15" rx="4" opacity=".55"/></svg></span></div><h3>Block Puzzle</h3><small>Drag, clear & combo</small><div class="play">▶</div></div><div class="card" style="--a:#a855f7" onclick="openGame('trivia')"><div class="art"><span class="gicon" style="--g1:#c084fc;--g2:#6d28d9"><svg viewBox="0 0 48 48" fill="#fff" aria-hidden="true"><path d="M14 8h20v10a10 10 0 0 1-20 0z"/><path d="M14 12H8c0 6 3 9 7 9M34 12h6c0 6-3 9-7 9" fill="none" stroke="#fff" stroke-width="3"/><rect x="21" y="27" width="6" height="8"/><rect x="15" y="36" width="18" height="5" rx="2"/></svg></span></div><h3>Trivia Master</h3><small>Answer & climb</small><div class="play">▶</div></div><div class="card" style="--a:#f59e0b" onclick="openGame('crossword')"><div class="art"><span class="gicon" style="--g1:#fbbf24;--g2:#d97706"><svg viewBox="0 0 48 48" fill="#fff" aria-hidden="true"><rect x="5" y="9" width="17" height="17" rx="4"/><rect x="26" y="22" width="17" height="17" rx="4" opacity=".6"/><text x="13.5" y="22" font-size="13" font-weight="900" text-anchor="middle" fill="#d97706" font-family="system-ui,sans-serif">A</text><text x="34.5" y="35" font-size="13" font-weight="900" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif">B</text></svg></span></div><h3>Word Connect</h3><small>Swipe letters, fill the board</small><div class="play">▶</div></div><div class="card" style="--a:#22c55e" onclick="openGame('chess')"><div class="art"><span class="gicon" style="--g1:#94a3b8;--g2:#334155"><svg viewBox="0 0 48 48" fill="#fff" aria-hidden="true"><circle cx="24" cy="12" r="6"/><rect x="18" y="19" width="12" height="3" rx="1.5"/><path d="M20 23h8l3 11H17z"/><rect x="13" y="35" width="22" height="5" rx="2.5"/></svg></span></div><h3>Game Master Chess</h3><small>Live two-player strategy</small><div class="play">▶</div></div><div class="card" style="--a:#ff4d8d" onclick="openGame('daily')"><div class="art"><span class="gicon" style="--g1:#fb7185;--g2:#f97316"><svg viewBox="0 0 48 48" fill="#fff" aria-hidden="true"><path d="M24 5c1 7 9 11 9 20a9 9 0 0 1-18 0c0-4 2-6 4-8 0 3 1 4 3 4-1-6 0-11 2-16z"/></svg></span></div><h3>Daily Challenge</h3><small>Bonus level & rewards</small><div class="play">›</div></div></div><div class="stats"><div class="stat"><b id="games">0</b><span>Games</span></div><div class="stat"><b id="best">0</b><span>Best Score</span></div><div class="stat"><b id="streak">0</b><span>Streak</span></div></div></div></section>
+</style><style id="necpra-arcade-pro">
+/* Necpra Arcade — professional pass. The game screens are designed dark, so the arcade now keeps one
+   consistent dark palette instead of inheriting a light app theme (which made titles/arrows unreadable). */
+:root{--bg:#0a0e1c;--text:#f3f5ff;--muted:#a3adc8;--panel:#141a30;--g-line:rgba(255,255,255,.12);--gold:#ffc93c;--cyan:#5ad6ff;--shadow:0 16px 36px rgba(0,0,0,.5)}
+body,#app{--kyn-text-primary:#f3f5ff;--kyn-text-secondary:#a3adc8;--kyn-border:rgba(255,255,255,.12);--kyn-border-strong:rgba(255,255,255,.24);--kyn-bg-card:#171b31;--kyn-bg-root:#0a0e1c;--kyn-bg-overlay:rgba(6,9,20,.8);color-scheme:dark}
+html,body{background:#0a0e1c;color:#f3f5ff}
+.top .icon,.wc-top .icon{width:40px;height:40px;flex:none;display:grid;place-items:center;border-radius:13px;background:#ffffff12;border:1px solid #ffffff26;color:#fff;font-size:22px;line-height:1;transition:transform .12s,background .15s}
+.top .icon:active,.wc-top .icon:active{transform:scale(.92);background:#ffffff22}
+.top .title{color:#fff;font-weight:800;letter-spacing:.6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1}
+.coins[aria-label="Buy coins"]::after{content:"+";display:inline-grid;place-items:center;width:18px;height:18px;margin-left:8px;border-radius:50%;background:linear-gradient(#ffd766,#f0a91c);color:#2a1a00;font-weight:900;font-size:13px;line-height:1}
+#home{background:radial-gradient(120% 55% at 50% -6%,#41338a 0,#151839 46%,#0a0e1c 82%)}
+#home .top{background:rgba(10,14,28,.72);border-bottom:1px solid #ffffff14}
+.hero{padding:10px 2px 22px}
+.hero .eyebrow{color:#7ddcff;letter-spacing:2.4px}
+.hero h1{font-size:36px;letter-spacing:-.5px;background:linear-gradient(90deg,#fff 10%,#c4b5ff 55%,#79e0ff);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero p{color:var(--muted);font-size:14px;line-height:1.45;max-width:34ch}
+#home .card{min-height:214px;padding:16px 12px 60px;display:flex;flex-direction:column;align-items:center;text-align:center;
+ background:linear-gradient(160deg,color-mix(in srgb,var(--a) 24%,#1b1e39),#111327 72%);
+ border:1px solid color-mix(in srgb,var(--a) 38%,#ffffff12);box-shadow:0 14px 30px #0007,inset 0 1px #ffffff1c}
+#home .card:hover{transform:translateY(-2px)}
+#home .card .art{margin:6px 0 12px}
+#home .card h3{color:#fff;font-size:17px;font-weight:800;margin:2px 0}
+#home .card small{color:var(--muted);font-size:12px;line-height:1.35}
+#home .card .play{left:50%;right:auto;bottom:14px;transform:translateX(-50%);width:64px;height:32px;border-radius:999px;font-size:12px;box-shadow:0 6px 16px color-mix(in srgb,var(--a) 55%,transparent)}
+#home .card.wide{flex-direction:row;text-align:left;gap:14px;min-height:0;padding:16px 16px 16px 14px;align-items:center}
+#home .card.wide .play{position:static;transform:none;margin-left:auto;flex:none}
+.stats{gap:10px}
+.stat{padding:12px 8px;border-radius:18px;text-align:center;background:linear-gradient(#ffffff12,#ffffff06);border:1px solid #ffffff1a}
+.stat b{display:block;font-size:22px;color:#fff}
+.stat span{font-size:10px;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted)}
+#water .hint{top:auto;bottom:96px;left:50%;transform:translateX(-50%);width:min(88vw,340px);padding:8px 12px;border-radius:14px;background:#0a1125cc;border:1px solid #ffffff18;font-size:12px;letter-spacing:.8px;pointer-events:none}
+#water .hint span{display:block;margin-top:2px;font-size:11px;letter-spacing:0;color:#9eacc8}
+.wc-level{color:#cfe9f2;font-weight:800;letter-spacing:1px}
+.wc-level b{color:#fff}
+.action,.overlay .modal button{transition:transform .12s,filter .15s}
+.action:active,.overlay .modal button:active{transform:scale(.95)}
+.overlay .modal{border-radius:26px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head><body><div id="app"><section id="home" class="screen active"><div class="top"><button class="icon" onclick="closeGames()">×</button><div class="title">NECPRA ARCADE</div><div class="coins" role="button" aria-label="Buy coins" style="cursor:pointer" onclick="window.__buyGameCoins&&window.__buyGameCoins()"><span id="sndBtn" role="button" aria-label="Sound and vibration" onclick="event.stopPropagation();toggleSound()" style="cursor:pointer;margin-right:10px;font-size:16px">🔊</span>🪙 <span id="coins">1,200</span></div></div><div class="home"><div class="hero"><div class="eyebrow">PREMIUM GAME ROOM</div><h1>Play. Flow. Win.</h1><p>Touch-first games with fluid animation, sound and satisfying feedback.</p></div><div class="grid"><div class="card" style="--a:#22c55e" onclick="openGame('water')"><div class="art"><span class="gicon" style="--g1:#34d399;--g2:#0f9f6e"><svg viewBox="0 0 48 48" fill="#fff" aria-hidden="true"><rect x="17" y="6" width="14" height="36" rx="7" fill="none" stroke="#fff" stroke-width="3"/><rect x="20" y="24" width="8" height="15" rx="4"/></svg></span></div><h3>Water Sort</h3><small>Pour, match & solve</small><div class="play">▶</div></div><div class="card" style="--a:#38bdf8" onclick="openGame('block')"><div class="art"><span class="gicon" style="--g1:#38bdf8;--g2:#2563eb"><svg viewBox="0 0 48 48" fill="#fff" aria-hidden="true"><rect x="7" y="7" width="15" height="15" rx="4"/><rect x="26" y="7" width="15" height="15" rx="4"/><rect x="7" y="26" width="15" height="15" rx="4"/><rect x="26" y="26" width="15" height="15" rx="4" opacity=".55"/></svg></span></div><h3>Block Puzzle</h3><small>Drag, clear & combo</small><div class="play">▶</div></div><div class="card" style="--a:#a855f7" onclick="openGame('trivia')"><div class="art"><span class="gicon" style="--g1:#c084fc;--g2:#6d28d9"><svg viewBox="0 0 48 48" fill="#fff" aria-hidden="true"><path d="M14 8h20v10a10 10 0 0 1-20 0z"/><path d="M14 12H8c0 6 3 9 7 9M34 12h6c0 6-3 9-7 9" fill="none" stroke="#fff" stroke-width="3"/><rect x="21" y="27" width="6" height="8"/><rect x="15" y="36" width="18" height="5" rx="2"/></svg></span></div><h3>Trivia Master</h3><small>Answer & climb</small><div class="play">▶</div></div><div class="card" style="--a:#f59e0b" onclick="openGame('crossword')"><div class="art"><span class="gicon" style="--g1:#fbbf24;--g2:#d97706"><svg viewBox="0 0 48 48" fill="#fff" aria-hidden="true"><rect x="5" y="9" width="17" height="17" rx="4"/><rect x="26" y="22" width="17" height="17" rx="4" opacity=".6"/><text x="13.5" y="22" font-size="13" font-weight="900" text-anchor="middle" fill="#d97706" font-family="system-ui,sans-serif">A</text><text x="34.5" y="35" font-size="13" font-weight="900" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif">B</text></svg></span></div><h3>Word Connect</h3><small>Swipe letters, fill the board</small><div class="play">▶</div></div><div class="card" style="--a:#22c55e" onclick="openGame('chess')"><div class="art"><span class="gicon" style="--g1:#94a3b8;--g2:#334155"><svg viewBox="0 0 48 48" fill="#fff" aria-hidden="true"><circle cx="24" cy="12" r="6"/><rect x="18" y="19" width="12" height="3" rx="1.5"/><path d="M20 23h8l3 11H17z"/><rect x="13" y="35" width="22" height="5" rx="2.5"/></svg></span></div><h3>Game Master Chess</h3><small>Live two-player strategy</small><div class="play">▶</div></div><div class="card" style="--a:#ff4d8d" onclick="openGame('daily')"><div class="art"><span class="gicon" style="--g1:#fb7185;--g2:#f97316"><svg viewBox="0 0 48 48" fill="#fff" aria-hidden="true"><path d="M24 5c1 7 9 11 9 20a9 9 0 0 1-18 0c0-4 2-6 4-8 0 3 1 4 3 4-1-6 0-11 2-16z"/></svg></span></div><h3>Daily Challenge</h3><small>Bonus level & rewards</small><div class="play">›</div></div></div><div class="stats"><div class="stat"><b id="games">0</b><span>Games</span></div><div class="stat"><b id="best">0</b><span>Best Score</span></div><div class="stat"><b id="streak">0</b><span>Streak</span></div></div></div></section>
 <section id="water" class="screen"><div class="top"><button class="icon" onclick="home()">‹</button><div class="title">Water Sort</div><div class="coins">LV <span id="wl">1</span></div></div><div class="body"><canvas id="wc" class="canvas"></canvas><div id="waterHitTargets" class="water-hit-targets" aria-label="Water Sort tubes"></div><div class="hud"><div class="pill">SCORE <b id="ws">0</b></div><div class="pill">MOVES <b id="wm">0</b></div></div><div id="wh" class="hint">TAP A TUBE<span>Tap a tube to lift it, then choose a matching tube to pour the liquid</span></div><div class="actions"><button class="action" onclick="undo()">↶ UNDO</button><button class="action" onclick="waterHint()">💡 HINT</button><button class="action" onclick="addWaterTube()">＋ TUBE</button><button class="action primary" onclick="restartWater()">↻ RESTART</button></div></div><div id="wo" class="overlay"><div class="modal"><div class="big">🎉</div><h2>Level Complete!</h2><p>Clean pour. Perfect sort.</p><div class="row"><button onclick="restartWater()">Replay</button><button class="primary" onclick="nextWater()">Next Level</button></div></div></div><div id="wn" class="overlay"><div class="modal"><div class="big">🧩</div><h2>NO MOVES LEFT</h2><p>The puzzle is not solved and no legal pour remains.</p><div class="row"><button onclick="undo()">Undo</button><button class="primary" onclick="restartWater()">Restart</button></div></div></div></section>
 <section id="daily" class="screen"><div class="top"><button class="icon" onclick="home()">‹</button><div class="title">Daily Challenge</div><div class="coins">⏱ <span id="dt">03:00</span></div></div><div class="body"><canvas id="dc" class="canvas"></canvas><div class="hud"><div class="pill">DAILY <b id="ds">0</b></div><div class="pill">MOVES <b id="dm">0</b></div></div><div id="dh" class="hint">DAILY PUZZLE<span>Same puzzle for everyone today</span></div><div class="actions"><button class="action" onclick="dailyUndo()">↶ UNDO</button><button class="action primary" onclick="dailyRestart()">↻ RESTART</button><button class="action" onclick="home()">EXIT</button></div></div><div id="do" class="overlay"><div class="modal"><div class="big">🔥</div><h2>Daily Complete!</h2><p id="dot">You solved today's puzzle.</p><div class="row"><button onclick="dailyRestart()">Try Again</button><button class="primary" onclick="home()">Back to Arcade</button></div></div></div></section><section id="block" class="screen"><div class="top"><button class="icon" onclick="home()">‹</button><div class="title">Block Puzzle</div><div class="coins">LEVEL <span id="bl">1</span></div></div><div class="blockbody"><div><div class="score" id="bs">0</div><div class="target">LEVEL GOAL <b id="blockTarget">500</b> POINTS</div><div id="blockOpponent" class="block-opponent" hidden></div></div><div id="board" class="board"></div><div id="tray" class="tray"></div><div class="block-dock" id="blockControls"><button id="blockHold" class="block-hold" type="button" title="Hold" aria-label="Hold one piece">HOLD</button><button class="block-tool" type="button" onclick="rotateBlockPower()" title="Rotate" aria-label="Rotate"><b>↻</b></button><button class="block-tool" type="button" onclick="shuffleBlockPower()" title="Shuffle" aria-label="Shuffle"><b>⇄</b></button><button class="block-tool" type="button" onclick="blastBlockPower()" title="Blast" aria-label="Blast"><b>●</b></button></div></div><div id="bo" class="overlay"><div class="modal"><div class="big">🏆</div><h2>NO MOVES</h2><p id="bot">Score: 0</p><p>Reopen space for <b>10 coins</b> or restart the level.</p><div class="row"><button class="primary" onclick="continueBlockWithCoins()">🪙 10 COINS</button><button onclick="restartBlock()">Restart</button></div><button class="action" onclick="home()">Exit</button></div></div><div id="blockLevelComplete" class="overlay"><div class="modal"><div class="big">🎉</div><h2>LEVEL COMPLETE!</h2><p id="blockLevelText"></p><div class="row"><button onclick="restartBlock()">Replay</button><button class="primary" onclick="nextBlockLevel()">Next Level</button></div></div></div></section>
 <section id="trivia" class="screen trivia"><div class="top"><button class="icon" onclick="home()">‹</button><div class="title">Trivia Master</div><div class="coins" role="button" aria-label="Buy coins" style="cursor:pointer" onclick="window.__buyGameCoins&&window.__buyGameCoins()">🪙 <span id="tc">1,200</span></div></div><div class="tvbody"><canvas id="tp" class="tvparticles"></canvas><div class="tvcontent"><div class="tvtop"><div class="streak" id="ts">STREAK ×0</div><div class="prize" id="pr">1,000</div></div><div class="progress"><i id="prog"></i></div><div class="question" id="q">Loading…</div><div id="answers" class="answers"></div><div class="lifelines"><button id="l50" class="life" onclick="fifty()">50:50<small>HELP</small></button><button id="ls" class="life" onclick="skip()">↻<small>SKIP</small></button><button id="lh" class="life" onclick="hint()">💡<small>HINT</small></button></div></div></div><div id="to" class="overlay"><div class="modal"><div class="big">🎉</div><h2>Quiz Complete!</h2><p id="tot"></p><div class="row"><button onclick="home()">Home</button><button class="primary" onclick="openTriviaChooser()">Next Level</button></div></div></div></section><section id="crossword" class="screen"><div class="top"><button class="icon" onclick="home()">‹</button><div class="title">Word Connect</div></div></section><section id="chess" class="screen"></section></div>
@@ -162,7 +201,7 @@ window.__buyGameCoins=function(){const m=buildModal();document.getElementById('n
 setTimeout(syncServerCoins,1500);document.addEventListener('visibilitychange',()=>{if(!document.hidden)syncServerCoins()});
 })();
 </script>
-<script id="mood-crossword-v4" src="/games-crossword-v4.js?v=7.0"></script><script src="/games-chess-v1.js?v=2.0"></script><script>
+<script id="mood-crossword-v4" src="/games-crossword-v4.js?v=7.1"></script><script src="/games-chess-v1.js?v=2.1"></script><script>
 'use strict';const $=id=>document.getElementById(id),S=['home','water','daily','block','trivia','crossword','chess'];let data=JSON.parse(localStorage.getItem('moodArcadeV3')||'{}');data.coins??=1200;data.games??=0;data.best??=0;data.streak??=0;window.data=data;function save(){localStorage.setItem('moodArcadeV3',JSON.stringify(data));updateHome()}function updateHome(){$('coins').textContent=data.coins.toLocaleString();$('tc').textContent=data.coins.toLocaleString();$('games').textContent=data.games;$('best').textContent=data.best;$('streak').textContent=data.streak}function show(x){S.forEach(s=>$(s).classList.toggle('active',s===x))}
 // FIX (NAV BAR STILL VISIBLE INSIDE A GAME): home() and openGame() only ever
 // toggled which internal .screen was visible — nothing here ever told the
@@ -309,6 +348,8 @@ function waterRng(seed){let a=seed>>>0;return()=>{a+=0x6D2B79F5;let t=a;t=Math.i
 function scrambleWater(n,seed){const r=waterRng(seed),b=[];for(let c=0;c<n;c++)b.push([c,c,c,c]);b.push([]);b.push([]);let last=null,steps=18+Math.min(80,Math.floor(level*4));for(let s=0;s<steps;s++){let choices=[];for(let i=0;i<b.length;i++){if(!b[i].length)continue;let run=1,top=b[i].at(-1);for(let k=b[i].length-2;k>=0&&b[i][k]===top;k--)run++;for(let j=0;j<b.length;j++){if(i===j||b[j].length>=4)continue;if(last&&last.from===j&&last.to===i)continue;for(let amount=1;amount<=run&&amount+b[j].length<=4;amount++)choices.push({from:i,to:j,amount})}}if(!choices.length)break;let pick=choices[Math.floor(r()*choices.length)],from=b[pick.from],to=b[pick.to];for(let k=0;k<pick.amount;k++)to.push(from.pop());last={from:pick.from,to:pick.to}}return b}
 function waterStateSolved(){const non=bottles.filter(b=>b.length);return non.length===bottles.length-2&&non.every(solved)}
 function waterLegalMove(i,j){if(i===j)return false;const from=bottles[i],to=bottles[j];if(!from.length||to.length>=4)return false;const top=from.at(-1);return !to.length||to.at(-1)===top}
+/* Real stuck-detection: a move only counts if it changes something (pouring a single-colour tube into an empty one does not). */
+function hasWaterMove(){for(let i=0;i<bottles.length;i++){const from=bottles[i];if(!from.length)continue;const uniform=from.every(c=>c===from[0]);for(let j=0;j<bottles.length;j++){if(!waterLegalMove(i,j))continue;if(!bottles[j].length&&uniform)continue;return true}}return false}
 function waterHint(){if(anim||waterStateSolved())return;let best=null;for(let i=0;i<bottles.length;i++)for(let j=0;j<bottles.length;j++){if(!waterLegalMove(i,j))continue;const from=bottles[i],to=bottles[j],top=from.at(-1);let run=1;for(let k=from.length-2;k>=0&&from[k]===top;k--)run++;let gain=(to.length?run*3:run)+(to.length+run===4?8:0)+(from.length===run?5:0);if(!best||gain>best.gain)best={i,j,gain}}if(!best){$('wn').classList.add('show');return}selected=best.i;$('wh').innerHTML='HINT: MOVE TUBE '+(best.i+1)+' → '+(best.j+1)+'<span>Tap the highlighted tube, then the target tube</span>';$('wh').style.display='block';drawW();beep(780,.08)}
 function addWaterTube(){if(window.__waterExtraTubeUsed||waterStateSolved())return toast('Extra tube already used on this level');bottles.push([]);window.__waterExtraTubeUsed=true;drawW();syncWaterHitTargets();toast('Extra tube added');beep(660,.08)}
 function waterStars(){const par=Math.max(8,8+level*2);return moves<=par?3:moves<=Math.ceil(par*1.5)?2:1}
@@ -592,4 +633,91 @@ function dailyRestart(){initDaily()}
 function initDaily(){dailySeed=(()=>{let h=2166136261;for(const ch of dailyDate()){h^=ch.charCodeAt(0);h=Math.imul(h,16777619)}return h>>>0})();dailyInitState();$('dt').textContent='03:00';$('do').classList.remove('show');$('dh').style.display='block';$('ds').textContent=0;$('dm').textContent=0;let end=Date.now()+180000;dailyDeadline=end;clearInterval(window.__dailyTimer);window.__dailyTimer=setInterval(()=>{let left=Math.max(0,dailyDeadline-Date.now()),s=Math.ceil(left/1000),m=Math.floor(s/60),ss=String(s%60).padStart(2,'0');$('dt').textContent=String(m).padStart(2,'0')+':'+ss;if(!left){clearInterval(window.__dailyTimer);dailyDone=true;$('dot').textContent='Time is up. Come back tomorrow for a new puzzle.';$('do').classList.add('show')}},250);dailyResize()}
 function dailyResize(){let r=dc.getBoundingClientRect(),d=devicePixelRatio||1;dc.width=r.width*d;dc.height=r.height*d;dctx.setTransform(d,0,0,d,0,0);dailyDraw()}
 addEventListener('resize',dailyResize);dc.addEventListener('pointerdown',e=>{let r=dc.getBoundingClientRect();for(let i=0;i<dailyBottles.length;i++){let q=dailyGeom(i);if(e.clientX-r.left>=q.x&&e.clientX-r.left<=q.x+q.w&&e.clientY-r.top>=q.y&&e.clientY-r.top<=q.y+q.h){dailyTap(i);break}}});
-</script></body></html>
+</script><script id="necpra-resume">
+/* Save & resume: the arcade used to store only the LEVEL NUMBER, so leaving mid-level rebuilt the level from scratch
+   (and Block / Trivia / Daily even re-rolled random pieces / questions). This snapshots the live board of the game being
+   played and restores it when the same level is reopened. Live multiplayer rooms are never snapshotted or restored. */
+(function(){'use strict';
+const K='necpra.resume.v1.',inRoom=()=>!!window.__gameRoomMatch;
+const rd=k=>{try{return JSON.parse(localStorage.getItem(K+k)||'null')}catch(_){return null}};
+const wr=(k,v)=>{try{localStorage.setItem(K+k,JSON.stringify(v))}catch(_){}};
+const rm=k=>{try{localStorage.removeItem(K+k)}catch(_){}};
+const active=()=>{const a=document.querySelector('.screen.active');return a?a.id:''};
+const shown=id=>{const e=document.getElementById(id);return !!(e&&e.classList.contains('show'))};
+const okTubes=b=>Array.isArray(b)&&b.length>1&&b.length<=14&&b.every(t=>Array.isArray(t)&&t.length<=4&&t.every(Number.isInteger));
+let fresh={water:false,block:false,daily:false};
+
+/* ---------- snapshot (called every second while playing, on leaving, and when the page is hidden) ---------- */
+function snapWater(){if(inRoom()||active()!=='water')return;
+ if(shown('wo')||shown('wn')||waterStateSolved()||!(moves>0)){if(shown('wo')||waterStateSolved())rm('water');return}
+ wr('water',{level,bottles,moves,score,hist:hist.slice(-40),extra:!!window.__waterExtraTubeUsed})}
+function snapBlock(){if(inRoom()||active()!=='block')return;
+ if(blockLevelComplete||shown('bo')||shown('blockLevelComplete')){rm('block');return}
+ if(!(bscore>0)||!pieces.length)return;
+ wr('block',{level:Math.max(1,Number(localStorage.getItem('mood.block.level')||1)),board,bscore,bcombo,hold:holdPiece,
+  pieces:pieces.map(e=>({shape:+e.dataset.shape,color:+e.dataset.color}))})}
+function snapTrivia(){if(inRoom()||active()!=='trivia')return;
+ if(!qs.length||qi>=qs.length||shown('to')){rm('trivia');return}
+ wr('trivia',{level:triviaLevel(),qs,qi,tscore,tstreak,tcorrect,used})}
+function snapDaily(){if(active()!=='daily')return;
+ if(dailyDone||shown('do')){rm('daily');return}
+ if(!(dailyMoves>0))return;
+ wr('daily',{date:dailyDate(),bottles:dailyBottles,moves:dailyMoves,score:dailyScore,hist:dailyHist.slice(-40),left:Math.max(0,dailyDeadline-Date.now())})}
+function snapAll(){[snapWater,snapBlock,snapTrivia,snapDaily].forEach(f=>{try{f()}catch(_){}})}
+setInterval(snapAll,1000);
+addEventListener('pagehide',snapAll);
+document.addEventListener('visibilitychange',()=>{if(document.hidden)snapAll()});
+
+/* ---------- Water Sort ---------- */
+const _iw=window.initWater;
+window.initWater=function(){_iw.apply(this,arguments);
+ if(fresh.water||inRoom()){fresh.water=false;return}
+ const s=rd('water');if(!s||s.level!==level||!okTubes(s.bottles)||!(s.moves>0))return;
+ bottles=s.bottles;moves=s.moves|0;score=s.score|0;hist=Array.isArray(s.hist)?s.hist.filter(h=>typeof h==='string'):[];
+ window.__waterExtraTubeUsed=!!s.extra;selected=-1;
+ $('wm').textContent=moves;$('ws').textContent=score;$('wh').style.display='none';resizeW();
+ try{syncWaterHitTargets()}catch(_){}
+ try{toast('Level resumed')}catch(_){}};
+const _rw=window.restartWater;window.restartWater=function(){fresh.water=true;rm('water');return _rw.apply(this,arguments)};
+const _nw=window.nextWater;window.nextWater=function(){rm('water');return _nw.apply(this,arguments)};
+
+/* ---------- Block Puzzle ---------- */
+const _ib=window.initBlock;
+window.initBlock=function(){_ib.apply(this,arguments);
+ if(fresh.block||inRoom()){fresh.block=false;return}
+ const s=rd('block'),lv=Math.max(1,Number(localStorage.getItem('mood.block.level')||1));
+ if(!s||s.level!==lv||!Array.isArray(s.board)||s.board.length!==10||!s.board.every(r=>Array.isArray(r)&&r.length===10)||!Array.isArray(s.pieces)||!s.pieces.length||!(s.bscore>0))return;
+ board=s.board;bscore=+s.bscore||0;bcombo=+s.bcombo||0;holdPiece=s.hold&&Number.isInteger(s.hold.shape)?s.hold:null;
+ const t=$('tray');t.innerHTML='';pieces=[];
+ s.pieces.forEach(p=>{if(!shapes[p.shape])return;const e=makePiece(shapes[p.shape],p.color);e.dataset.shape=p.shape;e.dataset.color=p.color;t.appendChild(e);pieces.push(e);e.addEventListener('pointerdown',startDrag,{passive:false})});
+ lastPlacedCells=new Set();$('bs').textContent=Math.round(bscore);renderBlock();renderHold();updateBlockTarget();
+ try{toast('Level resumed')}catch(_){}};
+const _rb=window.restartBlock;window.restartBlock=function(){fresh.block=true;rm('block');return _rb.apply(this,arguments)};
+const _nb=window.nextBlockLevel;window.nextBlockLevel=function(){rm('block');return _nb.apply(this,arguments)};
+
+/* ---------- Trivia ---------- */
+const _st=window.startTrivia;
+window.startTrivia=function(){_st.apply(this,arguments);
+ if(inRoom())return;
+ const s=rd('trivia');if(!s||s.level!==triviaLevel()||!Array.isArray(s.qs)||!s.qs.length||!(s.qi<s.qs.length)||!(s.qi>0||s.tscore>0))return;
+ clearInterval(timer);clearTimeout(triviaAdvance);
+ qs=s.qs;qi=s.qi|0;tscore=+s.tscore||0;tstreak=+s.tstreak||0;tcorrect=+s.tcorrect||0;used=Object.assign({a:false,b:false,c:false},s.used||{});
+ [['l50','a'],['ls','b'],['lh','c']].forEach(([id,k])=>{const b=$(id);if(b)b.disabled=!!used[k]});
+ $('to').classList.remove('show');renderQ();try{toast('Quiz resumed')}catch(_){}};
+const _fq=window.finishQ;window.finishQ=function(){rm('trivia');return _fq.apply(this,arguments)};
+
+/* ---------- Daily Challenge (timer is paused while away) ---------- */
+const _id=window.initDaily;
+window.initDaily=function(){_id.apply(this,arguments);
+ if(fresh.daily){fresh.daily=false;return}
+ const s=rd('daily');if(!s||s.date!==dailyDate()||!okTubes(s.bottles)||!(s.left>0)||!(s.moves>0))return;
+ dailyBottles=s.bottles;dailyMoves=s.moves|0;dailyScore=s.score|0;dailyHist=Array.isArray(s.hist)?s.hist.filter(h=>typeof h==='string'):[];dailySelected=-1;
+ dailyDeadline=Date.now()+s.left;$('dm').textContent=dailyMoves;$('ds').textContent=dailyScore;$('dh').style.display='none';dailyDraw();
+ try{toast('Challenge resumed')}catch(_){}};
+const _dr=window.dailyRestart;window.dailyRestart=function(){fresh.daily=true;rm('daily');return _dr.apply(this,arguments)};
+
+/* leaving a game via the back arrow: capture the very latest state first */
+const _home=window.home;window.home=function(){try{snapAll()}catch(_){}return _home.apply(this,arguments)};
+})();
+</script>
+</body></html>
