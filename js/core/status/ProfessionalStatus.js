@@ -1112,6 +1112,8 @@ function boot(){if(!document.body)return;const style=document.createElement('sty
 .ns-compose-head>div{flex:1;min-width:0}
 #necpa-status-root .ns-brand .ns-close{display:none!important}\n#necpa-status-root.ns-mobile .ns-x{display:none}
 #necpa-status-root.ns-mobile .ns-arrow{display:none}
+#necpa-status-root.ns-mobile .ns-feed-back{display:inline-flex;align-items:center;justify-content:center;flex:none;order:-1;min-height:40px;padding:0 12px;font-weight:800}
+#necpa-status-root.ns-mobile .ns-main-head{flex-wrap:nowrap;align-items:center;gap:8px}
 #necpa-status-root.ns-mobile .ns-back{display:inline-flex;align-items:center;justify-content:center;flex:none}
 #necpa-status-root.ns-mobile .ns-browse{display:flex;align-items:center;justify-content:space-between;width:100%;border:0;border-radius:14px;padding:12px 14px;background:color-mix(in srgb,var(--status-accent,#2563eb) 10%,transparent);color:var(--status-accent,#2563eb);font-weight:800;font-size:14px;cursor:pointer}
 #necpa-status-root.ns-mobile .ns-brand .ns-close{order:-1;margin-right:12px}

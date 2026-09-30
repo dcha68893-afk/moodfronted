@@ -46,7 +46,7 @@ async function openRoom(){
  const m=roomModal();m.classList.add('show');if(!room){const code=new URLSearchParams(location.search).get('gameRoom');if(code)await joinRoom(code)}renderRoom();startRoomPoll();
 }
 function launchMatchIfReady(){if(!room||!['ready','playing'].includes(room.status))return;window.__gameRoomMatch=room;const active=document.querySelector('.screen.active')?.id;if(active!==room.gameType&&typeof window.openGame==='function'){try{window.openGame(room.gameType)}catch(_){}}const m=document.getElementById('gameRoomModal');if(m)m.classList.remove('show');renderLiveMatch();try{window.dispatchEvent(new CustomEvent('game:match-ready',{detail:room}))}catch(_){} }
-function startRoomPoll(){stopRoomPoll();roomPoll=setInterval(async()=>{if(!room)return;try{const j=await roomApi('/'+encodeURIComponent(room.code));room=j.room;if(j.role)window.__gameRoomRole=j.role;renderRoom();launchMatchIfReady()}catch(_){}},1500)}
+function startRoomPoll(){stopRoomPoll();roomPoll=setInterval(async()=>{if(!room)return;try{const j=await roomApi('/'+encodeURIComponent(room.code));const prevGame=room.gameType;room=j.room;if(prevGame&&room.gameType!==prevGame)toast('Your partner switched to '+(GAME_LABEL[room.gameType]||room.gameType));if(j.role)window.__gameRoomRole=j.role;renderRoom();launchMatchIfReady()}catch(_){}},1500)}
 function stopRoomPoll(){if(roomPoll){clearInterval(roomPoll);roomPoll=null}}
 async function roomState(state){
  if(!room||!room.code)return;
@@ -63,10 +63,35 @@ function renderLiveMatch(){
  const leftText=String(Math.floor(left/3600000)).padStart(2,'0')+':'+String(Math.floor(left/60000)%60).padStart(2,'0')+':'+String(Math.floor(left/1000)%60).padStart(2,'0');
  const list=(r.status==='finished'&&Array.isArray(r.state?.results))?r.state.results:(r.players||[]);
  const rows=list.map((p,i)=>'<div class="gm-row"><b>'+(p.rank?'#'+p.rank:'Player '+(i+1))+'</b><span>'+((p.completed?'✓ FINISHED':(p.progress?Math.round(p.progress)+'%':'PLAYING')))+' · '+(p.score==null?'—':Number(p.score).toLocaleString())+' pts'+(p.timeMs!=null?' · '+Math.round(p.timeMs/1000)+'s':'')+(p.rewardCoins!=null?' · 🪙 '+p.rewardCoins:'')+'</span></div>').join('');
- h.innerHTML='<div class="gm-head"><span>⚔️ '+String(r.gameType||'GAME').toUpperCase()+subject+'</span><b>'+(r.status==='finished'?'RESULTS':'TIME '+leftText)+'</b></div>'+rows+(r.status==='finished'?'<div class="gm-result">'+(r.winnerId?'🏆 Match winner receives the top-position reward.':'🤝 Draw — tied players receive the draw reward.')+'</div>':'');
+ h.innerHTML='<div class="gm-head"><span>⚔️ '+String(r.gameType||'GAME').toUpperCase()+subject+'</span><button id="gmChange" type="button" style="font-size:10px;font-weight:900;padding:3px 8px;border-radius:10px;background:var(--g-surface-hi);color:inherit">CHANGE GAME</button><b>'+(r.status==='finished'?'RESULTS':'TIME '+leftText)+'</b></div>'+rows+(r.status==='finished'?'<div class="gm-result">'+(r.winnerId?'🏆 Match winner receives the top-position reward.':'🤝 Draw — tied players receive the draw reward.')+'</div>':'');
 }
+document.addEventListener('click',e=>{if(e.target&&e.target.id==='gmChange'&&typeof window.home==='function')window.home()});
 window.__gameRoomState=roomState;window.__gameRoomComplete=roomComplete;
-function decorate(){applyTheme();let old=window.openGame;if(typeof old==='function'&&!window.__arcadeOpen){window.__arcadeOpen=1;window.openGame=function(g){document.body.dataset.game=g;const r=old.apply(this,arguments);setTimeout(()=>{applyTheme(g);data.games++;save();syncRoomButton()},50);return r}}
+/* ---- Switch game inside a live room (same code, same two players) ---- */
+const ROOM_GAME_LIST=['water','block','trivia','crossword','chess'];
+const GAME_LABEL={water:'Water Sort',block:'Block Puzzle',trivia:'Trivia Master',crossword:'Word Connect',chess:'Chess'};
+function shouldConfirmSwitch(g){return !!(room&&room.code&&['ready','playing','finished'].includes(room.status)&&(room.players||[]).length>=2&&g&&g!==room.gameType&&ROOM_GAME_LIST.includes(g))}
+function openGameNoPrompt(g){window.__roomLaunching=1;try{window.openGame(g)}finally{window.__roomLaunching=0}}
+async function changeRoomGame(g){
+ try{
+  const j=await roomApi('/'+encodeURIComponent(room.code)+'/change-game',{method:'POST',body:JSON.stringify({gameType:g,level:level(g),subject:g==='trivia'?(window.__triviaSelectedSubject||null):null})});
+  room=j.room;if(j.role)window.__gameRoomRole=j.role;window.__gameRoomMatch=room;
+  startRoomPoll();renderRoom();launchMatchIfReady();toast('Switched to '+(GAME_LABEL[g]||g)+' — same game code');
+ }catch(e){toast(e.message)}
+}
+function leaveRoomLocally(){stopRoomPoll();room=null;window.__gameRoomMatch=null;window.__gameRoomRole=null;renderLiveMatch();try{window.dispatchEvent(new CustomEvent('game:room:update',{detail:null}))}catch(_){}}
+function confirmSwitch(g){
+ let m=document.getElementById('gameSwitchModal');if(m)m.remove();
+ m=document.createElement('div');m.id='gameSwitchModal';m.className='game-room-modal show';
+ const cur=GAME_LABEL[room.gameType]||room.gameType,nxt=GAME_LABEL[g]||g;
+ m.innerHTML='<div class="game-room-card"><div class="game-room-icon">🔄</div><h2>Switch game?</h2><p class="game-room-status" style="min-height:0">End <b>'+cur+'</b> and play <b>'+nxt+'</b> with the same player. You keep the same game code <b>'+room.code+'</b>. Anyone new joining will need a new code.</p><div class="game-room-actions"><button class="game-room-primary" id="gsYes">END '+cur.toUpperCase()+' &amp; PLAY '+nxt.toUpperCase()+'</button><button id="gsSolo">Leave room &amp; play '+nxt+' alone</button><button id="gsNo">Keep playing '+cur+'</button></div></div>';
+ document.body.appendChild(m);
+ const close=()=>m.remove();
+ m.querySelector('#gsYes').onclick=()=>{close();changeRoomGame(g)};
+ m.querySelector('#gsSolo').onclick=()=>{close();leaveRoomLocally();openGameNoPrompt(g)};
+ m.querySelector('#gsNo').onclick=()=>{close();const a=document.querySelector('.screen.active')?.id;if(a!==room.gameType)openGameNoPrompt(room.gameType)};
+}
+function decorate(){applyTheme();let old=window.openGame;if(typeof old==='function'&&!window.__arcadeOpen){window.__arcadeOpen=1;window.openGame=function(g){if(!window.__roomLaunching&&shouldConfirmSwitch(g)){confirmSwitch(g);return}document.body.dataset.game=g;const r=old.apply(this,arguments);setTimeout(()=>{applyTheme(g);data.games++;save();syncRoomButton()},50);return r}}
  if(!document.getElementById('gameRoomButton')){const b=document.createElement('button');b.id='gameRoomButton';b.type='button';b.title='Play together';b.setAttribute('aria-label','Play together');b.innerHTML='<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3 20c0-4 3-6 6-6s6 2 6 6M15 14c3 0 6 1.5 6 5"/></svg>';Object.assign(b.style,{width:'34px',height:'34px',padding:'0',flex:'0 0 auto',display:'none',placeItems:'center',borderRadius:'50%',border:'1px solid var(--g-accent)',background:'var(--kyn-bg-card)',color:'var(--kyn-text-primary)',boxShadow:'var(--kyn-shadow-md)',zIndex:9997,cursor:'pointer'});b.onclick=openRoom;document.body.appendChild(b)}
  const oldHome=window.home;if(typeof oldHome==='function'&&!window.__arcadeHomeWrapped){window.__arcadeHomeWrapped=true;window.home=function(){stopRoomPoll();const r=oldHome.apply(this,arguments);syncRoomButton();return r}}
  function syncRoomButton(){const b=document.getElementById('gameRoomButton'),c=document.querySelector('[data-arcade-challenge]');const active=document.querySelector('.screen.active'),modal=active?.querySelector('.overlay.show');const visible=!!(active&&active.id!=='home'&&!modal);const host=visible?active.querySelector('.top,.wc-top,.ch-top'):null;[c,b].forEach(x=>{if(!x)return;x.style.display=visible?'grid':'none';if(!visible)return;if(host){x.style.position='static';if(x.parentNode!==host)host.appendChild(x)}else{x.style.position='fixed';x.style.top='12px';x.style.right=(x===c?'56px':'12px');if(x.parentNode!==document.body)document.body.appendChild(x)}});}

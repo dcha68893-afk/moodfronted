@@ -350,7 +350,42 @@ function clearPath(){
  st.path=[];
  document.querySelectorAll('.wc-letter.active').forEach(e=>e.classList.remove('active'));
  const svg=document.getElementById('wcLines'); if(svg)svg.innerHTML='';
- const cur=document.getElementById('wcCurrent'); if(cur)cur.innerHTML='&nbsp;';
+ st.tap=false;
+ const cur=document.getElementById('wcCurrent'); if(cur){cur.innerHTML='&nbsp;';cur.classList.remove('ok','bad');}
+}
+
+function pathWord(){return st.path.map(e=>e.dataset.letter).join('');}
+function setLabelState(state){const c=document.getElementById('wcCurrent');if(!c)return;c.classList.remove('ok','bad');if(state)c.classList.add(state);}
+function shakeWheel(){const w=document.getElementById('wcWheel');if(w)w.animate([{transform:'translateX(0)'},{transform:'translateX(-6px)'},{transform:'translateX(6px)'},{transform:'translateX(0)'}],{duration:250});}
+// Show a word that did not match in red for a moment (used after swipe submit)
+function showWrongWord(word){
+ const c=document.getElementById('wcCurrent');if(!c)return;
+ c.textContent=word;setLabelState('bad');
+ setTimeout(()=>{if(!st.path.length&&c.textContent===word){c.innerHTML='&nbsp;';setLabelState(null);}},800);
+}
+// Tap mode: player taps letters one by one (P, then O, then L => "POL").
+// The word is shown live; green while it can still become a puzzle word, red when it cannot.
+// When it completes a puzzle word the boxes on the board are filled in.
+function liveCheck(){
+ const word=pathWord();
+ updateCurrentLabel();
+ const unfound=st.lv.words.filter(w=>!st.found.has(w));
+ if(unfound.includes(word)){
+  setLabelState('ok');
+  markFound(word,false);
+  setTimeout(()=>{if(pathWord()===word)clearPath();},450);
+  return;
+ }
+ if(unfound.some(w=>w.startsWith(word))){setLabelState('ok');return;}
+ if(st.found.has(word)){
+  setLabelState('bad');toast('Already found');
+  setTimeout(()=>{if(pathWord()===word)clearPath();},700);
+  return;
+ }
+ setLabelState('bad');
+ toast(word+' \u2717 not in this puzzle');
+ shakeWheel();
+ setTimeout(()=>{if(pathWord()===word)clearPath();},800);
 }
 
 function updateCurrentLabel(){
@@ -413,14 +448,16 @@ function submitPath(){
    toast('Already found');
   } else {
    toast(word+' isn\u2019t in this puzzle');
-   const wheel=document.getElementById('wcWheel');
-   if(wheel)wheel.animate([{transform:'translateX(0)'},{transform:'translateX(-6px)'},{transform:'translateX(6px)'},{transform:'translateX(0)'}],{duration:250});
+   shakeWheel();
+   clearPath();
+   showWrongWord(word);
+   return;
   }
  }
  clearPath();
 }
 
-let dragging=false;
+let dragging=false,moved=false,downEl=null;
 function bindWheelEvents(){
  const wheel=document.getElementById('wcWheel');
  if(!wheel||wheel._wcBound)return;
@@ -428,14 +465,18 @@ function bindWheelEvents(){
  wheel.addEventListener('pointerdown',e=>{
   const el=elFromPoint(e.clientX,e.clientY);
   if(!el)return;
-  dragging=true;
-  clearPath();
+  dragging=true;moved=false;downEl=el;
+  if(!st.tap)clearPath();   // in tap mode keep the letters already tapped
   tryAdd(el);
   e.preventDefault();
  });
  window.addEventListener('pointermove',e=>{
   if(!dragging)return;
   const el=elFromPoint(e.clientX,e.clientY);
+  if(el&&el!==downEl&&!moved){
+   moved=true;
+   if(st.tap){clearPath();tryAdd(downEl);}   // dragging starts a fresh swipe
+  }
   if(el) tryAdd(el);
   else {
    const wrap=document.getElementById('wcWheelWrap');
@@ -445,8 +486,12 @@ function bindWheelEvents(){
  window.addEventListener('pointerup',()=>{
   if(!dragging)return;
   dragging=false;
-  submitPath();
+  if(!moved){st.tap=true;liveCheck();}   // simple tap -> tap mode
+  else submitPath();
  });
+ // tapping the word bar clears the current selection
+ const cur=document.getElementById('wcCurrent');
+ if(cur&&!cur._wcClr){cur._wcClr=true;cur.style.cursor='pointer';cur.addEventListener('click',()=>{if(st.path.length)clearPath();});}
 }
 
 window.addEventListener('resize',()=>{ const c=document.getElementById('crossword'); if(c&&c.classList.contains('active')&&document.getElementById('wcWheel')) renderWheel(); });
@@ -475,6 +520,7 @@ style.textContent=`
 .wc-tool small{font-size:8px;color:var(--kyn-text-secondary);font-weight:900;text-transform:uppercase}
 .wc-wheelwrap{position:relative;flex:0 0 auto;width:min(92vw,300px);height:min(92vw,300px);margin:4px auto 14px}
 .wc-lines{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2}
+.wc-current.ok{color:#22c55e}.wc-current.bad{color:#ef4444}
 .wc-traceline{fill:none;stroke:var(--kyn-accent-purple);stroke-width:5;stroke-linecap:round;stroke-linejoin:round;opacity:.85}
 .wc-wheel{position:absolute;inset:0;touch-action:none}
 .wc-letter{position:absolute;border-radius:50%;display:grid;place-items:center;font-weight:1000;background:var(--kyn-bg-card);border:2px solid var(--kyn-border-strong);box-shadow:var(--kyn-shadow-sm);user-select:none;transition:transform .08s,background .12s,border-color .12s}

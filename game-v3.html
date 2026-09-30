@@ -163,7 +163,7 @@ button:active,.answer:active{transform:scale(.96)}
 <script id="necpra-coins-module">
 /* Necpra Arcade coins: spend + M-Pesa top-up. Balance = window.data.coins (arcade wallet). */
 (function(){'use strict';if(window.__NECPRA_COINS__)return;window.__NECPRA_COINS__=1;
-const PACKS=[{kes:50,coins:100},{kes:100,coins:200},{kes:200,coins:400},{kes:500,coins:1000}];
+const PACKS=[{kes:5,coins:10},{kes:10,coins:20},{kes:50,coins:100}];const MIN_KES=5,MAX_KES=150000,COINS_PER_KES=2;
 const api=()=>String(window.API_BASE_URL||window.BACKEND_URL||'').replace(/\/$/,'');
 const tok=()=>{try{return localStorage.getItem('accessToken')||localStorage.getItem('token')||localStorage.getItem('kynecta_auth_token')||localStorage.getItem('authToken')||sessionStorage.getItem('accessToken')||sessionStorage.getItem('token')||sessionStorage.getItem('kynecta_auth_token')||''}catch(_){return''}};
 async function call(path,opt){const o=Object.assign({credentials:'include',headers:{'Content-Type':'application/json'}},opt||{});const t=tok();if(t)o.headers.Authorization='Bearer '+t;const r=await fetch(api()+'/api/games'+path,o);let j={};try{j=await r.json()}catch(_){}if(!r.ok)throw new Error(j.error||j.message||('HTTP '+r.status));return j}
@@ -178,17 +178,24 @@ const SEEN='necpra.coins.serverSeen';
 async function syncServerCoins(){try{const j=await call('/progress');const srv=Number(j.progress&&j.progress.coins)||0;const seen=localStorage.getItem(SEEN);if(seen===null){localStorage.setItem(SEEN,String(srv));return 0}const add=srv-Number(seen);localStorage.setItem(SEEN,String(srv));if(add>0&&window.data){window.data.coins=bal()+add;paint();return add}return 0}catch(_){return 0}}
 window.__syncServerCoins=syncServerCoins;
 function css(){if(document.getElementById('necpraBuyCss'))return;const s=document.createElement('style');s.id='necpraBuyCss';s.textContent='#necpraBuy{position:fixed;inset:0;z-index:10050;display:none;place-items:center;padding:16px;background:rgba(0,0,0,.72);backdrop-filter:blur(8px)}#necpraBuy.show{display:grid}#necpraBuy .nb{width:min(94vw,400px);max-height:92vh;overflow:auto;padding:20px;border-radius:24px;background:var(--kyn-bg-card,#1b2233);color:var(--kyn-text-primary,#fff);border:1px solid var(--kyn-border,#fff3);text-align:center;box-shadow:0 20px 60px #000b}#necpraBuy h2{margin:4px 0 2px}#necpraBuy .bal{font-size:12px;opacity:.75;margin-bottom:12px}#necpraBuy .packs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}#necpraBuy .pk{padding:12px 6px;border-radius:14px;border:2px solid var(--kyn-border,#fff3);background:var(--g-surface,#fff1);font-weight:900;color:inherit}#necpraBuy .pk.on{border-color:#22c55e;background:#22c55e26}#necpraBuy .pk small{display:block;font-size:11px;opacity:.8;margin-top:2px}#necpraBuy input{width:100%;height:46px;border-radius:14px;border:1px solid var(--kyn-border,#fff3);background:var(--g-surface,#fff1);color:inherit;text-align:center;font-size:17px;font-weight:800;margin:6px 0}#necpraBuy .go{width:100%;min-height:48px;border-radius:14px;background:#22c55e;color:#04210f;font-weight:1000;margin-top:6px}#necpraBuy .go:disabled{opacity:.55}#necpraBuy .cl{width:100%;min-height:40px;margin-top:6px;border-radius:14px;background:var(--g-surface,#fff1);color:inherit;font-weight:800}#necpraBuy .msg{min-height:34px;font-size:12px;margin-top:8px;opacity:.9}';document.head.appendChild(s)}
-let pack=PACKS[1],busy=false;
-function buildModal(){css();let m=document.getElementById('necpraBuy');if(m)return m;m=document.createElement('div');m.id='necpraBuy';m.innerHTML='<div class="nb"><div style="font-size:40px">🪙</div><h2>Buy Coins</h2><div class="bal" id="nbBal"></div><div class="packs" id="nbPacks"></div><input id="nbPhone" inputmode="tel" autocomplete="tel" placeholder="M-Pesa number e.g. 0712345678"><button class="go" id="nbGo">PAY WITH M-PESA</button><div class="msg" id="nbMsg"></div><button class="cl" id="nbClose">Close</button></div>';document.body.appendChild(m);
+let pack=PACKS[1],custom=false,busy=false;
+function buildModal(){css();let m=document.getElementById('necpraBuy');if(m)return m;m=document.createElement('div');m.id='necpraBuy';m.innerHTML='<div class="nb"><div style="font-size:40px">🪙</div><h2>Buy Coins</h2><div class="bal" id="nbBal"></div><div class="packs" id="nbPacks"></div><input id="nbCustom" type="number" inputmode="numeric" min="5" step="1" placeholder="Enter amount in KES (min 5)" style="display:none"><div class="bal" id="nbCalc"></div><input id="nbPhone" inputmode="tel" autocomplete="tel" placeholder="M-Pesa number e.g. 0712345678"><button class="go" id="nbGo">PAY WITH M-PESA</button><div class="msg" id="nbMsg"></div><button class="cl" id="nbClose">Close</button></div>';document.body.appendChild(m);
  m.querySelector('#nbClose').onclick=()=>{if(!busy)m.classList.remove('show')};m.addEventListener('click',e=>{if(e.target===m&&!busy)m.classList.remove('show')});
  m.querySelector('#nbGo').onclick=pay;return m}
-function drawPacks(){const w=document.getElementById('nbPacks');w.innerHTML='';PACKS.forEach(p=>{const b=document.createElement('button');b.className='pk'+(p===pack?' on':'');b.innerHTML='🪙 '+p.coins.toLocaleString()+'<small>KES '+p.kes+'</small>';b.onclick=()=>{if(busy)return;pack=p;drawPacks()};w.appendChild(b)})}
+function customKes(){const el=document.getElementById('nbCustom');return Math.floor(Number(el&&el.value)||0)}
+function curKes(){return custom?customKes():pack.kes}
+function updateCalc(){const k=curKes();const e=document.getElementById('nbCalc');if(!e)return;e.textContent=k>=MIN_KES?('You will get 🪙 '+(k*COINS_PER_KES).toLocaleString()+' coins for KES '+k.toLocaleString()):(custom?'Minimum is KES '+MIN_KES:'')}
+function drawPacks(){const w=document.getElementById('nbPacks');w.innerHTML='';PACKS.forEach(p=>{const b=document.createElement('button');b.className='pk'+(!custom&&p===pack?' on':'');b.innerHTML='🪙 '+p.coins.toLocaleString()+'<small>KES '+p.kes+'</small>';b.onclick=()=>{if(busy)return;pack=p;custom=false;drawPacks()};w.appendChild(b)});
+ const o=document.createElement('button');o.className='pk'+(custom?' on':'');o.innerHTML='✏️ Other<small>Your amount</small>';o.onclick=()=>{if(busy)return;custom=true;drawPacks();const c=document.getElementById('nbCustom');if(c)c.focus()};w.appendChild(o);
+ const c=document.getElementById('nbCustom');if(c){c.style.display=custom?'block':'none';if(!c._b){c._b=1;c.addEventListener('input',updateCalc)}}
+ updateCalc()}
 function msg(t){const e=document.getElementById('nbMsg');if(e)e.textContent=t||''}
 async function pay(){if(busy)return;const ph=document.getElementById('nbPhone').value.replace(/[\s-]/g,'');if(!/^(\+?254|0)?[71]\d{8}$/.test(ph)){msg('Enter a valid Safaricom number, e.g. 0712345678');return}
+ const kes=curKes();if(!Number.isInteger(kes)||kes<MIN_KES||kes>MAX_KES){msg('Enter an amount between KES '+MIN_KES+' and KES '+MAX_KES.toLocaleString());return}
  busy=true;const go=document.getElementById('nbGo');go.disabled=true;msg('Sending M-Pesa request…');
  try{localStorage.setItem('necpra.mpesa.phone',ph)}catch(_){}
  try{await syncServerCoins();const before=Number(localStorage.getItem(SEEN))||0;
-  await call('/coins/mpesa/stk',{method:'POST',body:JSON.stringify({amount:pack.kes,phone:ph})});
+  await call('/coins/mpesa/stk',{method:'POST',body:JSON.stringify({amount:kes,phone:ph})});
   msg('📲 Check your phone and enter your M-Pesa PIN…');
   const t0=Date.now();let credited=0;
   while(Date.now()-t0<120000){await new Promise(r=>setTimeout(r,3000));credited=await syncServerCoins();if(credited>0)break}
