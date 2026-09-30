@@ -85,6 +85,8 @@ function render(){
  const sec=document.getElementById('crossword');
  if(!sec)return;
  loadProgress();
+ const room=window.__gameRoomMatch;
+ if(room?.gameType==='crossword'&&room.level){st.idx=(Math.max(1,Number(room.level))-1)%WC_LEVELS.length;st.lap=Math.floor((Math.max(1,Number(room.level))-1)/WC_LEVELS.length);}
  st.lv=WC_LEVELS[st.idx];
  st.found=new Set(JSON.parse(localStorage.getItem('mood.wc.found.'+st.idx)||'[]'));
  // FIX (CROSSWORD-SOFT-LOCK-ON-REPLAY): a puzzle loading already 100% found
@@ -258,6 +260,7 @@ function markFound(word,silent){
  updateHud();
  const gain=10*word.length;
  coins(gain);
+ window.__gameRoomState?.({answered:st.found.size,correct:st.found.size,score:st.found.size*10,progress:Math.round(st.found.size/st.lv.words.length*100),currentLevel:wcEndlessLevel(),timeMs:window.__gameRoomMatch?.state?.matchStartedAt?Math.max(0,Date.now()-new Date(window.__gameRoomMatch.state.matchStartedAt).getTime()):0});
  if(!silent){
   toast('+'+gain+' \ud83e\ude99  '+word);
   burstAt(word);
@@ -287,7 +290,7 @@ function levelComplete(){
  coins(bonus);
  saveProgress();
  document.getElementById('wcCompleteText').textContent='You found every word in this puzzle. +'+bonus+' bonus coins, +1 hint.';
- if(window.__gameRoomComplete)window.__gameRoomComplete(st.found.size*10+bonus);
+ if(window.__gameRoomComplete)window.__gameRoomComplete(st.found.size*10+bonus,{timeMs:window.__gameRoomMatch?.state?.matchStartedAt?Math.max(0,Date.now()-new Date(window.__gameRoomMatch.state.matchStartedAt).getTime()):0,answered:st.found.size,correct:st.found.size});
  document.getElementById('wcCompleteOverlay').classList.add('show');
  try{
   if(window.data){ window.data.best=Math.max(window.data.best||0, st.found.size); window.data.streak=(window.data.streak||0)+1; if(typeof window.save==='function')window.save(); }
