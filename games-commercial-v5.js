@@ -34,19 +34,19 @@ function renderRoom(){
  renderLiveMatch();try{window.dispatchEvent(new CustomEvent('game:room:update',{detail:r}))}catch(_){}
 }
 async function createRoom(){
- try{const j=await roomApi('',{method:'POST',body:JSON.stringify({gameType:roomGame(),level:level(roomGame()),subject:window.__triviaSelectedSubject||null})});room=j.room;renderRoom();startRoomPoll();toast('Private game created');}
+ try{const j=await roomApi('',{method:'POST',body:JSON.stringify({gameType:roomGame(),level:level(roomGame()),subject:window.__triviaSelectedSubject||null})});room=j.room;window.__gameRoomRole=j.role||'host';renderRoom();startRoomPoll();toast('Private game created');}
  catch(e){toast(e.message)}
 }
 async function joinRoom(code){
  code=String(code||'').trim().toUpperCase().replace(/\s/g,'');if(code.length<6)return toast('Enter the game code');
- try{const j=await roomApi('/'+encodeURIComponent(code)+'/join',{method:'POST',body:'{}'});room=j.room;window.__gameRoomMatch=room;renderRoom();startRoomPoll();launchMatchIfReady();if(room.gameType!==roomGame()){document.body.dataset.game=room.gameType;try{window.openGame(room.gameType)}catch(_){} }toast('Joined '+room.gameType+' game');}
+ try{const j=await roomApi('/'+encodeURIComponent(code)+'/join',{method:'POST',body:'{}'});room=j.room;window.__gameRoomRole=j.role||'guest';window.__gameRoomMatch=room;renderRoom();startRoomPoll();launchMatchIfReady();if(room.gameType!==roomGame()){document.body.dataset.game=room.gameType;try{window.openGame(room.gameType)}catch(_){} }toast('Joined '+room.gameType+' game');}
  catch(e){toast(e.message)}
 }
 async function openRoom(){
  const m=roomModal();m.classList.add('show');if(!room){const code=new URLSearchParams(location.search).get('gameRoom');if(code)await joinRoom(code)}renderRoom();startRoomPoll();
 }
 function launchMatchIfReady(){if(!room||!['ready','playing'].includes(room.status))return;window.__gameRoomMatch=room;const active=document.querySelector('.screen.active')?.id;if(active!==room.gameType&&typeof window.openGame==='function'){try{window.openGame(room.gameType)}catch(_){}}const m=document.getElementById('gameRoomModal');if(m)m.classList.remove('show');renderLiveMatch();try{window.dispatchEvent(new CustomEvent('game:match-ready',{detail:room}))}catch(_){} }
-function startRoomPoll(){stopRoomPoll();roomPoll=setInterval(async()=>{if(!room)return;try{const j=await roomApi('/'+encodeURIComponent(room.code));room=j.room;renderRoom();launchMatchIfReady()}catch(_){}},1500)}
+function startRoomPoll(){stopRoomPoll();roomPoll=setInterval(async()=>{if(!room)return;try{const j=await roomApi('/'+encodeURIComponent(room.code));room=j.room;if(j.role)window.__gameRoomRole=j.role;renderRoom();launchMatchIfReady()}catch(_){}},1500)}
 function stopRoomPoll(){if(roomPoll){clearInterval(roomPoll);roomPoll=null}}
 async function roomState(state){
  if(!room||!room.code)return;

@@ -37,7 +37,7 @@
 #block .cell.filled:after,#block .piece i:after{height:23%;border-radius:6px;background:linear-gradient(#fff9,#fff0)}#block .cell.filled:before,#block .piece i:before{content:"";position:absolute;inset:3px;border-radius:6px;border:1px solid #fff4}
 #block .cell.just-placed{animation:blockPlacePop .44s cubic-bezier(.2,1.45,.3,1)}@keyframes blockPlacePop{0%{transform:scale(.68);filter:brightness(1.9)}65%{transform:scale(1.08);filter:brightness(1.25)}100%{transform:scale(1);filter:none}}
 #block .cell.preview{filter:brightness(1.35);transform:scale(.96);box-shadow:0 0 14px #ffd15c,inset 0 2px #fff8}
-#block .tray{width:min(96vw,540px);height:112px;padding:5px 10px;border-radius:18px;background:linear-gradient(#612e17,#32170c);border:2px solid #b86d38;box-shadow:inset 0 2px #fff2,0 8px 16px #0008}
+#block .tray{width:min(96vw,540px);height:150px;padding:8px 10px;overflow:hidden;border-radius:18px;background:linear-gradient(#612e17,#32170c);border:2px solid #b86d38;box-shadow:inset 0 2px #fff2,0 8px 16px #0008}
 #block .piece{filter:drop-shadow(0 9px 8px #0009)}#block .piece i{border-radius:8px;box-shadow:inset 0 3px #fff9,inset 0 -8px 10px #0008,0 3px 4px #0008}
 .block-hold-wrap{width:min(96vw,540px);padding:6px 10px;border-radius:17px;background:linear-gradient(#612e17,#32170c);border:2px solid #b86d38;box-shadow:inset 0 2px #fff2,0 7px 14px #0007}.block-hold-label{min-width:88px;color:#f4c77a}.block-hold{min-height:60px;border-radius:12px;background:#0003;border:1px dashed #d08b4c;color:#d8a96e}.block-hold.occupied{border-style:solid;border-color:#ffd15c;box-shadow:0 0 18px #ffd15c33}
 @media(max-width:420px){#block .board{width:96vw}.block-hold-label{min-width:72px}.block-hold{min-height:52px}}
@@ -75,7 +75,7 @@
 .ch-top{height:64px;display:flex;align-items:center;gap:12px;padding:10px 14px;background:rgba(9,15,25,.9);border-bottom:1px solid #fff2;color:#fff}.ch-top>div{flex:1}.ch-top small{display:block;color:#9eb0c8;font-size:9px;letter-spacing:1.5px;margin-top:2px}.ch-top span{font-variant-numeric:tabular-nums;font-weight:1000}.ch-meta{display:flex;justify-content:space-between;gap:8px;padding:10px 14px;font-size:11px;color:#b7c4d7}.ch-board{width:min(94vw,560px);aspect-ratio:1;margin:auto;display:grid;grid-template-columns:repeat(8,1fr);border:5px solid #182333;border-radius:16px;overflow:hidden;box-shadow:0 20px 55px #0009}.ch-sq{display:grid;place-items:center;font-size:clamp(28px,8vw,62px);line-height:1;transition:.12s;position:relative}.ch-sq.light{background:#e8edf2;color:#111}.ch-sq.dark{background:#587086;color:#111}.ch-sq.dark{color:#111}.ch-sq.selected{outline:4px solid #ffd34e;outline-offset:-4px;z-index:2}.ch-sq.legal:after{content:"";position:absolute;width:20%;height:20%;border-radius:50%;background:#1f2937aa}.ch-sq.last{box-shadow:inset 0 0 0 5px #ffd34e66}.ch-actions{display:flex;justify-content:center;padding:14px}.ch-actions button{min-width:130px;height:44px;border-radius:14px;background:var(--g-surface);border:1px solid var(--g-line);font-weight:900}@media(max-width:420px){.ch-board{width:96vw;border-width:3px}.ch-sq{font-size:11vw}}</style></head><body><div id="app"><section id="home" class="screen active"><div class="top"><button class="icon" onclick="closeGames()">×</button><div class="title">NECPRA ARCADE</div><div class="coins"><span id="sndBtn" role="button" aria-label="Sound and vibration" onclick="toggleSound()" style="cursor:pointer;margin-right:10px;font-size:16px">🔊</span>🪙 <span id="coins">1,200</span></div></div><div class="home"><div class="hero"><div class="eyebrow">PREMIUM GAME ROOM</div><h1>Play. Flow. Win.</h1><p>Touch-first games with fluid animation, sound and satisfying feedback.</p></div><div class="grid"><div class="card" style="--a:#22c55e" onclick="openGame('water')"><div class="art">🧪</div><h3>Water Sort</h3><small>Pour, match & solve</small><div class="play">▶</div></div><div class="card" style="--a:#38bdf8" onclick="openGame('block')"><div class="art">🧊</div><h3>Block Puzzle</h3><small>Drag, clear & combo</small><div class="play">▶</div></div><div class="card" style="--a:#a855f7" onclick="openGame('trivia')"><div class="art">🏆</div><h3>Trivia Master</h3><small>Answer & climb</small><div class="play">▶</div></div><div class="card" style="--a:#f59e0b" onclick="openGame('crossword')"><div class="art">🔤</div><h3>Word Connect</h3><small>Swipe letters, fill the board</small><div class="play">▶</div></div><div class="card" style="--a:#22c55e" onclick="openGame('chess')"><div class="art">♟</div><h3>Game Master Chess</h3><small>Live two-player strategy</small><div class="play">▶</div></div><div class="card wide" style="--a:#ff4d8d" onclick="openGame('daily')"><div class="art">🔥</div><div><h3>Daily Challenge</h3><small>Bonus level and rewards.</small></div><div class="play">›</div></div></div><div class="stats"><div class="stat"><b id="games">0</b><span>Games</span></div><div class="stat"><b id="best">0</b><span>Best Score</span></div><div class="stat"><b id="streak">0</b><span>Streak</span></div></div></div></section>
 <section id="water" class="screen"><div class="top"><button class="icon" onclick="home()">‹</button><div class="title">Water Sort</div><div class="coins">LV <span id="wl">1</span></div></div><div class="body"><canvas id="wc" class="canvas"></canvas><div id="waterHitTargets" class="water-hit-targets" aria-label="Water Sort tubes"></div><div class="hud"><div class="pill">SCORE <b id="ws">0</b></div><div class="pill">MOVES <b id="wm">0</b></div></div><div id="wh" class="hint">TAP A TUBE<span>Tap a tube to lift it, then choose a matching tube to pour the liquid</span></div><div class="actions"><button class="action" onclick="undo()">↶ UNDO</button><button class="action" onclick="waterHint()">💡 HINT</button><button class="action" onclick="addWaterTube()">＋ TUBE</button><button class="action primary" onclick="restartWater()">↻ RESTART</button></div></div><div id="wo" class="overlay"><div class="modal"><div class="big">🎉</div><h2>Level Complete!</h2><p>Clean pour. Perfect sort.</p><div class="row"><button onclick="restartWater()">Replay</button><button class="primary" onclick="nextWater()">Next Level</button></div></div></div><div id="wn" class="overlay"><div class="modal"><div class="big">🧩</div><h2>NO MOVES LEFT</h2><p>The puzzle is not solved and no legal pour remains.</p><div class="row"><button onclick="undo()">Undo</button><button class="primary" onclick="restartWater()">Restart</button></div></div></div></section>
 <section id="daily" class="screen"><div class="top"><button class="icon" onclick="home()">‹</button><div class="title">Daily Challenge</div><div class="coins">⏱ <span id="dt">03:00</span></div></div><div class="body"><canvas id="dc" class="canvas"></canvas><div class="hud"><div class="pill">DAILY <b id="ds">0</b></div><div class="pill">MOVES <b id="dm">0</b></div></div><div id="dh" class="hint">DAILY PUZZLE<span>Same puzzle for everyone today</span></div><div class="actions"><button class="action" onclick="dailyUndo()">↶ UNDO</button><button class="action primary" onclick="dailyRestart()">↻ RESTART</button><button class="action" onclick="home()">EXIT</button></div></div><div id="do" class="overlay"><div class="modal"><div class="big">🔥</div><h2>Daily Complete!</h2><p id="dot">You solved today's puzzle.</p><div class="row"><button onclick="dailyRestart()">Try Again</button><button class="primary" onclick="home()">Back to Arcade</button></div></div></div></section><section id="block" class="screen"><div class="top"><button class="icon" onclick="home()">‹</button><div class="title">Block Puzzle</div><div class="coins">LEVEL <span id="bl">1</span></div></div><div class="blockbody"><div><div class="score" id="bs">0</div><div class="target">LEVEL GOAL <b id="blockTarget">450</b> POINTS</div><div id="blockOpponent" class="block-opponent" hidden></div></div><div id="board" class="board"></div><div id="tray" class="tray"></div><div class="block-hold-wrap"><div class="block-hold-label">HOLD • ONE PIECE</div><button id="blockHold" class="block-hold" type="button">EMPTY</button></div><div class="block-controls" id="blockControls"><button class="block-tool" onclick="rotateBlockPower()"><b>↻</b><small>ROTATE</small></button><button class="block-tool" onclick="shuffleBlockPower()"><b>⇄</b><small>SHUFFLE</small></button><button class="block-tool" onclick="blastBlockPower()"><b>●</b><small>BLAST</small></button></div></div><div id="bo" class="overlay"><div class="modal"><div class="big">🏆</div><h2>NO MOVES</h2><p id="bot">Score: 0</p><p>Reopen space for <b>10 coins</b> or restart the level.</p><div class="row"><button class="primary" onclick="continueBlockWithCoins()">🪙 10 COINS</button><button onclick="restartBlock()">Restart</button></div><button class="action" onclick="home()">Exit</button></div></div><div id="blockLevelComplete" class="overlay"><div class="modal"><div class="big">🎉</div><h2>LEVEL COMPLETE!</h2><p id="blockLevelText"></p><div class="row"><button onclick="restartBlock()">Replay</button><button class="primary" onclick="nextBlockLevel()">Next Level</button></div></div></div></section>
-<section id="trivia" class="screen trivia"><div class="top"><button class="icon" onclick="home()">‹</button><div class="title">Trivia Master</div><div class="coins">🪙 <span id="tc">1,200</span></div></div><div class="tvbody"><canvas id="tp" class="tvparticles"></canvas><div class="tvcontent"><div class="tvtop"><div class="streak" id="ts">STREAK ×0</div><div class="prize" id="pr">1,000</div></div><div class="progress"><i id="prog"></i></div><div class="question" id="q">Loading…</div><div id="answers" class="answers"></div><div class="lifelines"><button id="l50" class="life" onclick="fifty()">50:50<small>HELP</small></button><button id="ls" class="life" onclick="skip()">↻<small>SKIP</small></button><button id="lh" class="life" onclick="hint()">💡<small>HINT</small></button></div></div></div><div id="triviaSubjects" class="overlay"><div class="modal trivia-subject-modal"><div class="big">🧠</div><h2>Choose a Subject</h2><p>Level <b id="triviaSubjectLevel">1</b> • 8 questions</p><div class="subject-grid"><button onclick="chooseTriviaSubject('general')">🌍<b>General</b><small>Mixed knowledge</small></button><button onclick="chooseTriviaSubject('science')">🔬<b>Science & Nature</b><small>Science, body & space</small></button><button onclick="chooseTriviaSubject('geography')">🗺️<b>Geography</b><small>Places & world facts</small></button><button onclick="chooseTriviaSubject('math')">➗<b>Math & Logic</b><small>Numbers & reasoning</small></button><button onclick="chooseTriviaSubject('history')">🏛️<b>History & Culture</b><small>People, art & culture</small></button></div><button class="action" onclick="home()">BACK TO ARCADE</button></div></div><div id="to" class="overlay"><div class="modal"><div class="big">🎉</div><h2>Quiz Complete!</h2><p id="tot"></p><div class="row"><button onclick="home()">Home</button><button class="primary" onclick="openTriviaChooser()">Next Level</button></div></div></div></section><section id="crossword" class="screen"><div class="top"><button class="icon" onclick="home()">‹</button><div class="title">Word Connect</div></div></section><section id="chess" class="screen"></section></div>
+<section id="trivia" class="screen trivia"><div class="top"><button class="icon" onclick="home()">‹</button><div class="title">Trivia Master</div><div class="coins">🪙 <span id="tc">1,200</span></div></div><div class="tvbody"><canvas id="tp" class="tvparticles"></canvas><div class="tvcontent"><div class="tvtop"><div class="streak" id="ts">STREAK ×0</div><div class="prize" id="pr">1,000</div></div><div class="progress"><i id="prog"></i></div><div class="question" id="q">Loading…</div><div id="answers" class="answers"></div><div class="lifelines"><button id="l50" class="life" onclick="fifty()">50:50<small>HELP</small></button><button id="ls" class="life" onclick="skip()">↻<small>SKIP</small></button><button id="lh" class="life" onclick="hint()">💡<small>HINT</small></button></div></div></div><div id="to" class="overlay"><div class="modal"><div class="big">🎉</div><h2>Quiz Complete!</h2><p id="tot"></p><div class="row"><button onclick="home()">Home</button><button class="primary" onclick="openTriviaChooser()">Next Level</button></div></div></div></section><section id="crossword" class="screen"><div class="top"><button class="icon" onclick="home()">‹</button><div class="title">Word Connect</div></div></section><section id="chess" class="screen"></section></div>
 <style>
 /* FIX (CROSSWORD-PLACEHOLDER-STUCK): the block above used to be a permanent
    "coming next" dead-end. games-crossword-v4.js now overwrites #crossword's
@@ -96,8 +96,49 @@ button:active,.answer:active{transform:scale(.96)}
 .stars i{font-style:normal;color:var(--g-line);text-shadow:none}
 @media (prefers-reduced-motion:reduce){.overlay.show .modal{animation:none}}
 </style><div id="toast" class="toast"></div>
+<script id="necpra-coins-module">
+/* Necpra Arcade coins: spend + M-Pesa top-up. Balance = window.data.coins (arcade wallet). */
+(function(){'use strict';if(window.__NECPRA_COINS__)return;window.__NECPRA_COINS__=1;
+const PACKS=[{kes:50,coins:100},{kes:100,coins:200},{kes:200,coins:400},{kes:500,coins:1000}];
+const api=()=>String(window.API_BASE_URL||window.BACKEND_URL||'').replace(/\/$/,'');
+const tok=()=>{try{return localStorage.getItem('accessToken')||localStorage.getItem('token')||localStorage.getItem('kynecta_auth_token')||localStorage.getItem('authToken')||sessionStorage.getItem('accessToken')||sessionStorage.getItem('token')||sessionStorage.getItem('kynecta_auth_token')||''}catch(_){return''}};
+async function call(path,opt){const o=Object.assign({credentials:'include',headers:{'Content-Type':'application/json'}},opt||{});const t=tok();if(t)o.headers.Authorization='Bearer '+t;const r=await fetch(api()+'/api/games'+path,o);let j={};try{j=await r.json()}catch(_){}if(!r.ok)throw new Error(j.error||j.message||('HTTP '+r.status));return j}
+const bal=()=>Number(window.data&&window.data.coins)||0;
+function paint(){try{window.save&&window.save()}catch(_){}const n=bal().toLocaleString();['coins','tc','wcCoinsDisp'].forEach(id=>{const e=document.getElementById(id);if(e)e.textContent=n});try{window.dispatchEvent(new CustomEvent('necpra:coins-changed',{detail:{coins:bal()}}))}catch(_){}}
+function say(m){try{if(typeof window.toast==='function')return window.toast(m)}catch(_){}try{const t=document.getElementById('wcToast');if(t){t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200)}}catch(_){}}
+/* Deduct coins. Returns true only if the coins were actually taken. */
+window.__spendGameCoins=async function(amount,reason){amount=Math.floor(Number(amount)||0);if(amount<=0)return true;if(!window.data||bal()<amount)return false;window.data.coins=bal()-amount;paint();return true};
+window.__gameCoinsBalance=bal;
+/* Credit coins that the server added (M-Pesa purchases and match rewards). */
+const SEEN='necpra.coins.serverSeen';
+async function syncServerCoins(){try{const j=await call('/progress');const srv=Number(j.progress&&j.progress.coins)||0;const seen=localStorage.getItem(SEEN);if(seen===null){localStorage.setItem(SEEN,String(srv));return 0}const add=srv-Number(seen);localStorage.setItem(SEEN,String(srv));if(add>0&&window.data){window.data.coins=bal()+add;paint();return add}return 0}catch(_){return 0}}
+window.__syncServerCoins=syncServerCoins;
+function css(){if(document.getElementById('necpraBuyCss'))return;const s=document.createElement('style');s.id='necpraBuyCss';s.textContent='#necpraBuy{position:fixed;inset:0;z-index:10050;display:none;place-items:center;padding:16px;background:rgba(0,0,0,.72);backdrop-filter:blur(8px)}#necpraBuy.show{display:grid}#necpraBuy .nb{width:min(94vw,400px);max-height:92vh;overflow:auto;padding:20px;border-radius:24px;background:var(--kyn-bg-card,#1b2233);color:var(--kyn-text-primary,#fff);border:1px solid var(--kyn-border,#fff3);text-align:center;box-shadow:0 20px 60px #000b}#necpraBuy h2{margin:4px 0 2px}#necpraBuy .bal{font-size:12px;opacity:.75;margin-bottom:12px}#necpraBuy .packs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}#necpraBuy .pk{padding:12px 6px;border-radius:14px;border:2px solid var(--kyn-border,#fff3);background:var(--g-surface,#fff1);font-weight:900;color:inherit}#necpraBuy .pk.on{border-color:#22c55e;background:#22c55e26}#necpraBuy .pk small{display:block;font-size:11px;opacity:.8;margin-top:2px}#necpraBuy input{width:100%;height:46px;border-radius:14px;border:1px solid var(--kyn-border,#fff3);background:var(--g-surface,#fff1);color:inherit;text-align:center;font-size:17px;font-weight:800;margin:6px 0}#necpraBuy .go{width:100%;min-height:48px;border-radius:14px;background:#22c55e;color:#04210f;font-weight:1000;margin-top:6px}#necpraBuy .go:disabled{opacity:.55}#necpraBuy .cl{width:100%;min-height:40px;margin-top:6px;border-radius:14px;background:var(--g-surface,#fff1);color:inherit;font-weight:800}#necpraBuy .msg{min-height:34px;font-size:12px;margin-top:8px;opacity:.9}';document.head.appendChild(s)}
+let pack=PACKS[1],busy=false;
+function buildModal(){css();let m=document.getElementById('necpraBuy');if(m)return m;m=document.createElement('div');m.id='necpraBuy';m.innerHTML='<div class="nb"><div style="font-size:40px">🪙</div><h2>Buy Coins</h2><div class="bal" id="nbBal"></div><div class="packs" id="nbPacks"></div><input id="nbPhone" inputmode="tel" autocomplete="tel" placeholder="M-Pesa number e.g. 0712345678"><button class="go" id="nbGo">PAY WITH M-PESA</button><div class="msg" id="nbMsg"></div><button class="cl" id="nbClose">Close</button></div>';document.body.appendChild(m);
+ m.querySelector('#nbClose').onclick=()=>{if(!busy)m.classList.remove('show')};m.addEventListener('click',e=>{if(e.target===m&&!busy)m.classList.remove('show')});
+ m.querySelector('#nbGo').onclick=pay;return m}
+function drawPacks(){const w=document.getElementById('nbPacks');w.innerHTML='';PACKS.forEach(p=>{const b=document.createElement('button');b.className='pk'+(p===pack?' on':'');b.innerHTML='🪙 '+p.coins.toLocaleString()+'<small>KES '+p.kes+'</small>';b.onclick=()=>{if(busy)return;pack=p;drawPacks()};w.appendChild(b)})}
+function msg(t){const e=document.getElementById('nbMsg');if(e)e.textContent=t||''}
+async function pay(){if(busy)return;const ph=document.getElementById('nbPhone').value.replace(/[\s-]/g,'');if(!/^(\+?254|0)?[71]\d{8}$/.test(ph)){msg('Enter a valid Safaricom number, e.g. 0712345678');return}
+ busy=true;const go=document.getElementById('nbGo');go.disabled=true;msg('Sending M-Pesa request…');
+ try{localStorage.setItem('necpra.mpesa.phone',ph)}catch(_){}
+ try{await syncServerCoins();const before=Number(localStorage.getItem(SEEN))||0;
+  await call('/coins/mpesa/stk',{method:'POST',body:JSON.stringify({amount:pack.kes,phone:ph})});
+  msg('📲 Check your phone and enter your M-Pesa PIN…');
+  const t0=Date.now();let credited=0;
+  while(Date.now()-t0<120000){await new Promise(r=>setTimeout(r,3000));credited=await syncServerCoins();if(credited>0)break}
+  if(credited>0){msg('✅ '+credited.toLocaleString()+' coins added!');document.getElementById('nbBal').textContent='Balance: 🪙 '+bal().toLocaleString();setTimeout(()=>{document.getElementById('necpraBuy').classList.remove('show')},1400)}
+  else msg('Payment not confirmed yet. If M-Pesa took your money, coins will appear shortly — reopen the game to refresh.');
+ }catch(e){msg(e.message||'Payment failed')}
+ busy=false;go.disabled=false}
+window.__buyGameCoins=function(){const m=buildModal();document.getElementById('nbBal').textContent='Balance: 🪙 '+bal().toLocaleString();drawPacks();try{const p=localStorage.getItem('necpra.mpesa.phone');if(p)document.getElementById('nbPhone').value=p}catch(_){}msg('');m.classList.add('show')};
+/* Pick up coins credited on the server (previous purchases / match rewards) */
+setTimeout(syncServerCoins,1500);document.addEventListener('visibilitychange',()=>{if(!document.hidden)syncServerCoins()});
+})();
+</script>
 <script id="mood-crossword-v4" src="/games-crossword-v4.js?v=7.0"></script><script src="/games-chess-v1.js"></script><script>
-'use strict';const $=id=>document.getElementById(id),S=['home','water','daily','block','trivia','crossword','chess'];let data=JSON.parse(localStorage.getItem('moodArcadeV3')||'{}');data.coins??=1200;data.games??=0;data.best??=0;data.streak??=0;function save(){localStorage.setItem('moodArcadeV3',JSON.stringify(data));updateHome()}function updateHome(){$('coins').textContent=data.coins.toLocaleString();$('tc').textContent=data.coins.toLocaleString();$('games').textContent=data.games;$('best').textContent=data.best;$('streak').textContent=data.streak}function show(x){S.forEach(s=>$(s).classList.toggle('active',s===x))}
+'use strict';const $=id=>document.getElementById(id),S=['home','water','daily','block','trivia','crossword','chess'];let data=JSON.parse(localStorage.getItem('moodArcadeV3')||'{}');data.coins??=1200;data.games??=0;data.best??=0;data.streak??=0;window.data=data;function save(){localStorage.setItem('moodArcadeV3',JSON.stringify(data));updateHome()}function updateHome(){$('coins').textContent=data.coins.toLocaleString();$('tc').textContent=data.coins.toLocaleString();$('games').textContent=data.games;$('best').textContent=data.best;$('streak').textContent=data.streak}function show(x){S.forEach(s=>$(s).classList.toggle('active',s===x))}
 // FIX (NAV BAR STILL VISIBLE INSIDE A GAME): home() and openGame() only ever
 // toggled which internal .screen was visible — nothing here ever told the
 // PARENT chat shell (chat.html, two iframes up) that a specific game had
@@ -289,22 +330,27 @@ function renderHold(){const h=$('blockHold');if(!h)return;h.innerHTML='';h.class
 function storeBlockPiece(el){if(!el||holdPiece){beep(180,.08,'square');toast(holdPiece?'HOLD is already occupied':'No piece to hold');return}holdPiece={shape:+el.dataset.shape,color:+el.dataset.color};el.remove();pieces=pieces.filter(x=>x!==el);renderHold();toast('Piece stored in HOLD');beep(650,.08);if(!pieces.length)newPieces()}
 function takeHoldPiece(){if(!holdPiece)return;const p=makePiece(shapes[holdPiece.shape],holdPiece.color);p.dataset.shape=holdPiece.shape;p.dataset.color=holdPiece.color;$('tray').appendChild(p);pieces.push(p);p.addEventListener('pointerdown',startDrag,{passive:false});holdPiece=null;renderHold();toast('Piece returned from HOLD');beep(620,.08)}
 function renderBlock(){let b=$('board');b.innerHTML='';for(let r=0;r<10;r++)for(let c=0;c<10;c++){let d=document.createElement('div');d.className='cell';d.dataset.r=r;d.dataset.c=c;if(board[r][c]>=0){d.classList.add('filled');d.style.background=`linear-gradient(145deg,#fff 0%,${bc[board[r][c]]} 14%,${bc[board[r][c]]} 58%,#6b1d00 100%)`;if(lastPlacedCells.has(r*10+c))d.classList.add('just-placed')}b.appendChild(d)}lastPlacedCells.clear();const target=$('blockTarget');if(target)target.textContent=blockLevelTarget();}
-function makePiece(s,col){let mr=Math.max(...s.map(x=>x[0])),mc=Math.max(...s.map(x=>x[1])) ,cell=Math.max(34,Math.min(44,innerWidth*.095)),d=document.createElement('div');d.className='piece';d.dataset.cellSize=cell;d.style.gridTemplateColumns=`repeat(${mc+1},${cell}px)`;d.style.gridTemplateRows=`repeat(${mr+1},${cell}px)`;s.forEach(([r,c])=>{let x=document.createElement('i');x.style.gridRow=r+1;x.style.gridColumn=c+1;x.style.background=`linear-gradient(135deg,#fff9 0%,${bc[col]} 18%,${bc[col]} 62%,#0007 100%)`;d.appendChild(x)});return d}
+function makePiece(s,col){let mr=Math.max(...s.map(x=>x[0])),mc=Math.max(...s.map(x=>x[1])) ,cell=Math.max(30,Math.min(38,innerWidth*.085)),d=document.createElement('div');d.className='piece';d.dataset.cellSize=cell;d.style.gridTemplateColumns=`repeat(${mc+1},${cell}px)`;d.style.gridTemplateRows=`repeat(${mr+1},${cell}px)`;s.forEach(([r,c])=>{let x=document.createElement('i');x.style.gridRow=r+1;x.style.gridColumn=c+1;x.style.background=`linear-gradient(135deg,#fff9 0%,${bc[col]} 18%,${bc[col]} 62%,#0007 100%)`;d.appendChild(x)});return d}
 function can(s,r,c){return s.every(([dr,dc])=>r+dr>=0&&r+dr<10&&c+dc>=0&&c+dc<10&&board[r+dr][c+dc]<0)}
 function hasAnyBlockMove(){const trayMove=pieces.some(p=>{const s=shapes[+p.dataset.shape];for(let r=0;r<10;r++)for(let c=0;c<10;c++)if(can(s,r,c))return true;return false});if(trayMove)return true;if(holdPiece){const s=shapes[holdPiece.shape];for(let r=0;r<10;r++)for(let c=0;c<10;c++)if(can(s,r,c))return true}return false}
 function newPieces(){let t=$('tray');t.innerHTML='';pieces=[];const diff=gameDifficulty('block'),pool=diff==='easy'?shapes.slice(0,8):diff==='hard'?shapes.slice(3):shapes;for(let i=0;i<3;i++){let s,col,e;let tries=0;do{s=pool[Math.random()*pool.length|0];col=Math.random()*bc.length|0;e=makePiece(s,col);tries++}while(tries<40&&i===0&&!Array.from({length:10},(_,r)=>Array.from({length:10},(_,c)=>can(s,r,c))).flat().some(Boolean));e.dataset.shape=shapes.indexOf(s);e.dataset.color=col;t.appendChild(e);pieces.push(e);e.addEventListener('pointerdown',startDrag,{passive:false})}}
-function findBlockAnchor(e,s,rct,cs){
+function blockGeom(){
+  // Measure the REAL cells (board border + padding + gap made the old width/10 maths drift).
+  const cells=$('board').children,a=cells[0].getBoundingClientRect(),b=cells[1].getBoundingClientRect(),c=cells[10].getBoundingClientRect();
+  return {left:a.left,top:a.top,cell:a.width,px:b.left-a.left,py:c.top-a.top};
+}
+function blockLift(G){return G.py*0.9} // piece floats above the finger so it stays visible
+function findBlockAnchor(e,s,G){
   const h=Math.max(...s.map(x=>x[0]))+1,w=Math.max(...s.map(x=>x[1]))+1;
-  // Anchor to the nearest valid board placement using the actual board cell
-  // centers. The previous calculation mixed the board's inner padding/gaps
-  // with the 10x10 cell size, so a drop visually inside a valid target could
-  // be rejected unless the pointer was nudged by a pixel or two.
-  const rawC=Math.round((e.clientX-rct.left-(w*cs)/2)/cs),rawR=Math.round((e.clientY-rct.top-(h*cs)/2)/cs);
+  const cx=e.clientX,cy=e.clientY-blockLift(G);
+  const fw=(w-1)*G.px+G.cell,fh=(h-1)*G.py+G.cell;
+  const rawC=Math.round((cx-G.left-fw/2)/G.px),rawR=Math.round((cy-G.top-fh/2)/G.py);
   let best=null;
-  for(let dr=-2;dr<=2;dr++)for(let dc=-2;dc<=2;dc++){
+  for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){
     const r=rawR+dr,c=rawC+dc;if(!can(s,r,c))continue;
-    const px=rct.left+(c+w/2)*cs,py=rct.top+(r+h/2)*cs;
-    const d=(e.clientX-px)**2+(e.clientY-py)**2;
+    const mx=G.left+c*G.px+fw/2,my=G.top+r*G.py+fh/2;
+    const d=Math.hypot(cx-mx,cy-my);
+    if(d>G.px*0.75)continue; // too far from the pointer: do not jump to a distant slot
     if(!best||d<best.d)best={r,c,d};
   }
   return best;
@@ -312,15 +358,17 @@ function findBlockAnchor(e,s,rct,cs){
 function startDrag(ev){
   const el=ev.currentTarget;if(!el||drag)return;ev.preventDefault();
   try{el.setPointerCapture?.(ev.pointerId)}catch(_){}
-  const s=shapes[+el.dataset.shape],rct=$('board').getBoundingClientRect(),cs=rct.width/10,h=Math.max(...s.map(x=>x[0]))+1,w=Math.max(...s.map(x=>x[1]))+1,col=+el.dataset.color;
-  let g=el.cloneNode(true);g.id='ghost';g.classList.add('ghost');const pieceCell=Number(el.dataset.cellSize)||28;g.style.transform=`translate(0,0) scale(${cs/pieceCell})`;document.body.appendChild(g);
-  el.style.opacity=.25;drag={el,s,c:col,rct,cs,h,w,ghost:g,r:NaN,col:NaN,pointerId:ev.pointerId,startX:ev.clientX,startY:ev.clientY,startAt:performance.now(),moved:false};moveDrag(ev);
+  const s=shapes[+el.dataset.shape],G=blockGeom(),h=Math.max(...s.map(x=>x[0]))+1,w=Math.max(...s.map(x=>x[1]))+1,col=+el.dataset.color;
+  let g=el.cloneNode(true);g.id='ghost';g.classList.add('ghost');
+  g.style.transform='none';g.style.gap=(G.px-G.cell)+'px';g.style.gridTemplateColumns='repeat('+w+','+G.cell+'px)';g.style.gridTemplateRows='repeat('+h+','+G.cell+'px)';
+  document.body.appendChild(g);
+  el.style.opacity=.25;drag={el,s,c:col,G,cs:G.px,h,w,ghost:g,r:NaN,col:NaN,pointerId:ev.pointerId,startX:ev.clientX,startY:ev.clientY,startAt:performance.now(),moved:false};moveDrag(ev);
 }
 function moveDrag(e){
-  if(!drag)return;let d=drag,g=d.ghost;if(Math.hypot(e.clientX-d.startX,e.clientY-d.startY)>8)d.moved=true;let a=findBlockAnchor(e,d.s,d.rct,d.cs);
+  if(!drag)return;let d=drag,g=d.ghost,G=d.G;if(Math.hypot(e.clientX-d.startX,e.clientY-d.startY)>8)d.moved=true;let a=findBlockAnchor(e,d.s,G);
   document.querySelectorAll('.preview').forEach(x=>x.classList.remove('preview'));
-  if(a){d.r=a.r;d.col=a.c;g.style.left=(d.rct.left+d.col*d.cs)+'px';g.style.top=(d.rct.top+d.r*d.cs)+'px';g.classList.add('drop-valid');d.s.forEach(([dr,dc])=>$('board').children[(d.r+dr)*10+d.col+dc]?.classList.add('preview'))}
-  else{d.r=NaN;d.col=NaN;g.style.left=(e.clientX-d.w*d.cs/2)+'px';g.style.top=(e.clientY-d.h*d.cs/2)+'px';g.classList.remove('drop-valid')}
+  if(a){d.r=a.r;d.col=a.c;g.style.left=(G.left+d.col*G.px)+'px';g.style.top=(G.top+d.r*G.py)+'px';g.classList.add('drop-valid');d.s.forEach(([dr,dc])=>$('board').children[(d.r+dr)*10+d.col+dc]?.classList.add('preview'))}
+  else{d.r=NaN;d.col=NaN;g.style.left=(e.clientX-(d.w*G.px-(G.px-G.cell))/2)+'px';g.style.top=(e.clientY-blockLift(G)-(d.h*G.py-(G.py-G.cell))/2)+'px';g.classList.remove('drop-valid')}
 }
 async function continueBlockWithCoins(){
  if(typeof window.__spendGameCoins!=='function'){toast('Coin wallet unavailable');return;}
@@ -442,16 +490,16 @@ function tierWeights(level){
 }
 function refillCyclePool(){triviaCyclePool=QUESTION_BANK.slice();for(let i=triviaCyclePool.length-1;i>0;i--){const j=Math.random()*(i+1)|0;[triviaCyclePool[i],triviaCyclePool[j]]=[triviaCyclePool[j],triviaCyclePool[i]]}}
 function triviaSubjectOf(q){const t=(q[0]+' '+q[1].join(' ')).toLowerCase();if(/capital|continent|ocean|mountain|desert|country|japan|australia|canada|fuji|sahara/.test(t))return 'geography';if(/shakespeare|romeo|juliet|mona lisa|leonardo|paper|china|guitar|guacamole|currency/.test(t))return 'history';if(/12 × 8|square root|prime|minutes|hexagon|sides|shape|rainbow|colors/.test(t))return 'math';if(/water|planet|gas|plant|chemical|bones|vitamin|atomic|atmosphere|cell|light|relativity|shark|organ|ph|element|oxygen|diamond|boiling|freezing/.test(t))return 'science';return 'general'}
-function drawTieredSet(level,n,subject='general'){
-  const w=tierWeights(level),picked=[];let pool=triviaCyclePool.filter(q=>subject==='general'||triviaSubjectOf(q)===subject);
-  if(pool.length<Math.min(4,n))pool=triviaCyclePool.slice();
+function drawTieredSet(level,n){
+  const w=tierWeights(level),picked=[],seen=new Set(),key=q=>String(q[0]).trim().toLowerCase();
   for(let i=0;i<n;i++){
-    if(!triviaCyclePool.length)refillCyclePool();
-    const available=pool.length?pool:triviaCyclePool;
+    if(!triviaCyclePool.some(q=>!seen.has(key(q))))refillCyclePool();
+    const avail=triviaCyclePool.filter(q=>!seen.has(key(q)));
+    if(!avail.length)break;
     const r=Math.random(),tier=r<w[1]?1:(r<w[1]+w[2]?2:3);
-    let idx=available.findIndex(q=>q[3]===tier);if(idx<0)idx=0;
-    const chosen=available[idx];const globalIdx=triviaCyclePool.indexOf(chosen);if(globalIdx>=0)triviaCyclePool.splice(globalIdx,1);
-    picked.push(chosen);pool=pool.filter(q=>q!==chosen);
+    const chosen=avail.find(q=>q[3]===tier)||avail[0];
+    const gi=triviaCyclePool.indexOf(chosen);if(gi>=0)triviaCyclePool.splice(gi,1);
+    seen.add(key(chosen));picked.push(chosen);
   }
   return picked;
 }
@@ -471,16 +519,17 @@ setTimeout(paintSound,0);
 // startTrivia(), but the function did not exist anywhere (ReferenceError) -- Trivia could not
 // start and Play Again did nothing, which looked like the app hanging. It (re)builds one level
 // from the tiered question pool and clears every timer/state left over from the previous run.
-function openTriviaChooser(){show('trivia');if(window.__gameRoomMatch?.gameType==='trivia'&&window.__gameRoomMatch?.state?.subject){selectedTriviaSubject=window.__gameRoomMatch.state.subject;window.__triviaSelectedSubject=selectedTriviaSubject;startTrivia();return}const ov=$('triviaSubjects');if(ov?.classList.contains('show'))return;if(ov){ov.classList.add('show');$('triviaSubjectLevel').textContent=triviaLevel()}}
-function chooseTriviaSubject(subject){selectedTriviaSubject=subject||'general';window.__triviaSelectedSubject=selectedTriviaSubject;$('triviaSubjects')?.classList.remove('show');startTrivia()}
+function openTriviaChooser(){show('trivia');selectedTriviaSubject='general';window.__triviaSelectedSubject=null;startTrivia()}
+function chooseTriviaSubject(){openTriviaChooser()}
 function competitiveTriviaSet(lv,subject,seed){
   let h=2166136261;for(const ch of String(seed||'')){h^=ch.charCodeAt(0);h=Math.imul(h,16777619)}
   h^=lv;h=Math.imul(h,16777619);
   const rnd=()=>{h|=0;h=(h+0x6D2B79F5)|0;let t=h;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return((t^t>>>14)>>>0)/4294967296};
-  let pool=QUESTION_BANK.filter(q=>subject==='general'||triviaSubjectOf(q)===subject);
-  if(pool.length<QUESTIONS_PER_LEVEL)pool=QUESTION_BANK.slice();
+  const pool=QUESTION_BANK.slice();
   for(let i=pool.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[pool[i],pool[j]]=[pool[j],pool[i]]}
-  const out=[];const targetHard=Math.min(5,Math.floor((lv-1)/4));for(const q of pool){if(out.length>=QUESTIONS_PER_LEVEL)break;if(q[3]>=Math.max(1,3-targetHard)||out.length+pool.length-i<=QUESTIONS_PER_LEVEL)out.push(q)}
+  const out=[],minTier=Math.max(1,3-Math.min(5,Math.floor((lv-1)/4)));
+  for(const q of pool){if(out.length>=QUESTIONS_PER_LEVEL)break;if(q[3]>=minTier)out.push(q)}
+  for(const q of pool){if(out.length>=QUESTIONS_PER_LEVEL)break;if(!out.includes(q))out.push(q)}
   return out.slice(0,QUESTIONS_PER_LEVEL);
 }
 function triviaMatchElapsed(){const t=window.__gameRoomMatch?.state?.matchStartedAt;return t?Math.max(0,Date.now()-new Date(t).getTime()):0}
@@ -489,7 +538,7 @@ function startTrivia(){
   qi=0;tscore=0;tstreak=0;tcorrect=0;used={a:false,b:false,c:false};
   ['l50','ls','lh'].forEach(id=>{const b=$(id);if(b)b.disabled=false});
   $('to').classList.remove('show');
-  if(window.__gameRoomMatch?.gameType==='trivia'&&window.__gameRoomMatch?.state?.subject)selectedTriviaSubject=window.__gameRoomMatch.state.subject;
+  selectedTriviaSubject='general';
   const match=window.__gameRoomMatch?.gameType==='trivia'&&window.__gameRoomMatch?.seed;
   qs=match?competitiveTriviaSet(triviaLevel(),selectedTriviaSubject,window.__gameRoomMatch.seed):drawTieredSet(triviaLevel(),QUESTIONS_PER_LEVEL,selectedTriviaSubject);
   if(!qs.length){refillCyclePool();qs=drawTieredSet(triviaLevel(),QUESTIONS_PER_LEVEL,selectedTriviaSubject)}

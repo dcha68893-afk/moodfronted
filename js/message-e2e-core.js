@@ -540,6 +540,32 @@
           }
         }
 
+        // FIX (APK-TO-CHROME-ENCRYPTED-MESSAGE): when the sender re-installs the
+        // app / logs in on a new device (APK, Play Store build), that device has
+        // NO ratchet state, so it opens a brand-new sending session. The
+        // receiver (Chrome) still holds the OLD session with advanced root/chain
+        // keys, so AES-GCM auth fails (OperationError) and this code used to
+        // give up forever -> "Encrypted message". Chrome<->Chrome works because
+        // both sides keep the same continuous session. Recover: try to open the
+        // envelope with a FRESH receiver session built from its header. The
+        // existing session is only replaced if that fresh decrypt succeeds, so
+        // a genuinely bad message can never wipe a healthy session.
+        if (hadSession && !REPAIRABLE_V3_ERRORS.has(firstErr?.message)) {
+          _diagLog('V3_PEER_SESSION_RESET_ATTEMPT', { msgId: msgIdForLog, peerUserId, reason: info.reason });
+          for (const forceRefresh of [false, true]) {
+            try {
+              const freshSession = await _initReceiverSessionFromHeader(identity, peerUserId, envelope, forceRefresh);
+              const { session: nextSession, plaintext } = await R.ratchetDecrypt(freshSession, envelope);
+              saveRatchetSession(peerUserId, nextSession);
+              _diagLog('V3_PEER_SESSION_RESET_SUCCEEDED', { msgId: msgIdForLog, peerUserId, forceRefresh });
+              return plaintext;
+            } catch (resetErr) {
+              _diagLog('V3_PEER_SESSION_RESET_FAILED', { msgId: msgIdForLog, peerUserId, forceRefresh, ..._errInfo(resetErr) });
+            }
+          }
+          throw firstErr;
+        }
+
         const repairable = hadSession && REPAIRABLE_V3_ERRORS.has(firstErr?.message);
         if (!repairable) throw firstErr;
 

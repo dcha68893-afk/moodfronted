@@ -109,7 +109,7 @@ function render(){
   '<div class="wc-boardwrap"><div class="wc-board" id="wcBoard"></div></div>'+
   '<div class="wc-current" id="wcCurrent">&nbsp;</div>'+
   '<div class="wc-toolbar">'+
-   '<button class="wc-tool" id="wcWordsBtn">\ud83d\udcd6<small>Words</small></button>'+
+   '<button class="wc-tool" id="wcWordsBtn">\ud83d\udcd6<small id="wcWordsSub">Words</small></button>'+
    '<button class="wc-tool" id="wcHintBtn">\ud83d\udca1<small>Hint</small></button>'+
    '<button class="wc-tool" id="wcShuffleBtn">\ud83d\udd00<small>Shuffle</small></button>'+
   '</div>'+
@@ -123,6 +123,7 @@ function render(){
   '<div class="wc-wordlist" id="wcWordList"></div>'+
   '<div class="row"><button class="primary" id="wcWordsClose">Close</button></div>'+
  '</div></div>'+
+ '<div id="wcWordsCostOverlay" class="overlay"><div class="modal"><div class="big">\ud83d\udcd6</div><h2>Open word list</h2><p>You used your 2 free opens today.<br>Opening it again costs <b>50 coins</b>.</p><div class="row"><button id="wcWordsCostNo">Cancel</button><button class="primary" id="wcWordsCostYes">Pay 50 coins</button></div></div></div>'+
  '<div id="wcCompleteOverlay" class="overlay"><div class="modal">'+
   '<div class="big">\ud83c\udf89</div><h2>Level Complete!</h2>'+
   '<p id="wcCompleteText"></p>'+
@@ -131,7 +132,11 @@ function render(){
  '<div id="wcToast" class="toast"></div>';
 
  document.getElementById('wcBack').onclick=()=>{ if(typeof window.home==='function')window.home(); };
- document.getElementById('wcWordsBtn').onclick=()=>document.getElementById('wcWordsOverlay').classList.add('show');
+ document.getElementById('wcWordsBtn').onclick=openWords;
+ document.getElementById('wcWordsCostNo').onclick=()=>document.getElementById('wcWordsCostOverlay').classList.remove('show');
+ document.getElementById('wcWordsCostYes').onclick=payForWords;
+ updateWordsBadge();
+ window.addEventListener('necpra:coins-changed',()=>{const el=document.getElementById('wcCoinsDisp');if(el)el.textContent=getCoins().toLocaleString()});
  document.getElementById('wcWordsClose').onclick=()=>document.getElementById('wcWordsOverlay').classList.remove('show');
  document.getElementById('wcHintBtn').onclick=useHint;
  document.getElementById('wcShuffleBtn').onclick=shuffleWheel;
@@ -184,6 +189,48 @@ function paintFound(){
  });
 }
 
+
+// ── Word list access: 2 free opens per DAY (any level), then 50 coins per open ──
+const WC_WORDS_FREE=2,WC_WORDS_COST=50;
+function wcUid(){
+ try{const a=JSON.parse(localStorage.getItem('kynecta_auth')||'null');const u=a&&((a.user&&a.user.id)||a.userId||a.id);if(u)return String(u)}catch(e){}
+ try{return String(window.__CURRENT_USER_ID__||localStorage.getItem('userId')||localStorage.getItem('user_id')||'anon')}catch(e){return 'anon'}
+}
+function wcDay(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+function wcWordsKey(){return 'mood.wc.wordsOpens.'+wcUid()+'.'+wcDay()}
+function wcWordsUsed(){return +(localStorage.getItem(wcWordsKey())||0)}
+function updateWordsBadge(){
+ const e=document.getElementById('wcWordsSub');if(!e)return;
+ const left=Math.max(0,WC_WORDS_FREE-wcWordsUsed());
+ e.textContent=left>0?('Words \u00b7 '+left+' free'):('Words \u00b7 '+WC_WORDS_COST+'\ud83e\ude99');
+}
+function showWordsModal(){renderWordList();document.getElementById('wcWordsOverlay').classList.add('show')}
+async function wcSpend(n){
+ if(typeof window.__spendGameCoins==='function')return await window.__spendGameCoins(n,'crossword-words');
+ if(getCoins()<n)return false;coins(-n);return true;
+}
+function openWords(){
+ const used=wcWordsUsed();
+ if(used<WC_WORDS_FREE){
+  localStorage.setItem(wcWordsKey(),String(used+1));updateWordsBadge();
+  toast('Free opens left today: '+(WC_WORDS_FREE-used-1));showWordsModal();return;
+ }
+ if(getCoins()<WC_WORDS_COST){
+  toast('Not enough coins \u2014 you need '+WC_WORDS_COST);
+  if(typeof window.__buyGameCoins==='function')window.__buyGameCoins();
+  return;
+ }
+ document.getElementById('wcWordsCostOverlay').classList.add('show');
+}
+async function payForWords(){
+ document.getElementById('wcWordsCostOverlay').classList.remove('show');
+ const ok=await wcSpend(WC_WORDS_COST);
+ if(!ok){toast('Not enough coins');if(typeof window.__buyGameCoins==='function')window.__buyGameCoins();return}
+ try{updateHud()}catch(e){}
+ const el=document.getElementById('wcCoinsDisp');if(el)el.textContent=getCoins().toLocaleString();
+ toast('-'+WC_WORDS_COST+' coins');showWordsModal();
+}
+
 function renderWordList(){
  const wrap=document.getElementById('wcWordList');
  if(!wrap)return;
@@ -191,7 +238,7 @@ function renderWordList(){
  st.lv.words.forEach(w=>{
   const row=document.createElement('div');
   row.className='wc-wrow'+(st.found.has(w)?' found':'');
-  row.innerHTML='<span class="wc-wlen">'+w.length+'</span><span class="wc-wtext">'+(st.found.has(w)?w:'\u2022'.repeat(w.length))+'</span>';
+  row.innerHTML='<span class="wc-wlen">'+w.length+'</span><span class="wc-wtext">'+w+'</span>';
   wrap.appendChild(row);
  });
 }
