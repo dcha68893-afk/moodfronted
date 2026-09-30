@@ -402,7 +402,7 @@ window.addEventListener('resize',()=>{ if(document.getElementById('crossword')&&
 
 const style=document.createElement('style');
 style.textContent=`
-.wc-wrap{height:100%;display:flex;flex-direction:column;background:transparent;color:var(--kyn-text-primary)}
+.wc-wrap{height:100%;display:flex;flex-direction:column;background:radial-gradient(circle at 50% 18%,#69d8ee12,transparent 35%);color:var(--kyn-text-primary)}
 .wc-top{height:54px;flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:0 12px}
 .wc-top .icon{width:38px;height:38px;font-size:20px}
 .wc-level{font-weight:900;font-size:13px;letter-spacing:1px;color:var(--kyn-text-secondary)}
