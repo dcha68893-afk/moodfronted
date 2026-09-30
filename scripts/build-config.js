@@ -168,13 +168,83 @@ if (toolParts.every(fs.existsSync)) {
 }
 
 function transformBackendUrlLiterals(text, fileName) {
-    if (fileName === 'runtime-config.js') return text;
-    const urlLiteral = /(["'`])((?:https?:\/\/)(?:[A-Za-z0-9.-]+\.onrender\.com|localhost|127\.0\.0\.1)(?::\d+)?)(\/[^"'`\s]*)?\1/g;
-    return text.replace(urlLiteral, (_match, quote, origin, suffix = '') => {
-        const cleanSuffix = suffix || '';
-        if (/^\/api(?:\/|$)/i.test(cleanSuffix)) return `window.__getApiBase()${cleanSuffix.slice(4)}`;
-        return `window.__getApiOrigin()${cleanSuffix}`;
-    });
+    if (fileName === 'runtime-config.js' || !/\.js$/i.test(fileName)) return text;
+
+    // Rewrite only complete single/double-quoted JavaScript string literals.
+    // The previous raw-text regex could match URL-looking text embedded inside
+    // a larger CSS/template string and replace it with a bare expression,
+    // producing invalid generated JavaScript.
+    const backendLiteral = /^(https?:\/\/(?:[A-Za-z0-9.-]+\.onrender\.com|localhost|127\.0\.0\.1)(?::\d+)?)(\/.*)?$/i;
+    let out = '';
+    let i = 0;
+    const backtick = String.fromCharCode(96);
+
+    while (i < text.length) {
+        const ch = text[i];
+
+        if (ch === '/' && text[i + 1] === '/') {
+            const end = text.indexOf('\n', i + 2);
+            const stop = end < 0 ? text.length : end;
+            out += text.slice(i, stop);
+            i = stop;
+            continue;
+        }
+
+        if (ch === '/' && text[i + 1] === '*') {
+            const end = text.indexOf('*/', i + 2);
+            const stop = end < 0 ? text.length : end + 2;
+            out += text.slice(i, stop);
+            i = stop;
+            continue;
+        }
+
+        if (ch === backtick) {
+            let j = i + 1;
+            while (j < text.length) {
+                if (text[j] === '\\') { j += 2; continue; }
+                if (text[j] === backtick) { j++; break; }
+                j++;
+            }
+            out += text.slice(i, j);
+            i = j;
+            continue;
+        }
+
+        if (ch !== '"' && ch !== "'") {
+            out += ch;
+            i++;
+            continue;
+        }
+
+        const quote = ch;
+        let j = i + 1;
+        while (j < text.length) {
+            if (text[j] === '\\') { j += 2; continue; }
+            if (text[j] === quote) break;
+            if (text[j] === '\n' || text[j] === '\r') break;
+            j++;
+        }
+
+        if (j >= text.length || text[j] !== quote) {
+            out += text.slice(i, j);
+            i = j;
+            continue;
+        }
+
+        const rawValue = text.slice(i + 1, j);
+        const match = rawValue.match(backendLiteral);
+        if (!match) {
+            out += text.slice(i, j + 1);
+        } else {
+            const suffix = match[2] || '';
+            out += /^\/api(?:\/|$)/i.test(suffix)
+                ? 'window.__getApiBase()' + suffix.slice(4)
+                : 'window.__getApiOrigin()' + suffix;
+        }
+        i = j + 1;
+    }
+
+    return out;
 }
 
 function processArtifacts(dir) {
