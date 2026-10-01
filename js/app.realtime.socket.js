@@ -1703,7 +1703,10 @@
                     this._emitStateChange();
                 }
 
-                const slowPollDelay = SOCKET_CONFIG.reconnectMaxDelay; // e.g. 60s, forever
+                // Jittered (+/-25%): a fixed delay made every client that fell into
+                // slow-poll during the same outage retry in lockstep against a
+                // backend that is just coming back up.
+                const slowPollDelay = Math.round(SOCKET_CONFIG.reconnectMaxDelay * (0.75 + Math.random() * 0.5)); // ~60s, forever
                 this._reconnectTimer = setTimeout(() => {
                     // Don't increment _reconnectAttempts further — stay in slow-poll
                     // mode until a connection actually succeeds (which resets it to 0).
