@@ -83,17 +83,17 @@
     <link rel="apple-touch-icon" href="icons/necpra-192.png">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Necpra - Messaging, Friends, Accommodation & Marketplace</title>
+    <title>Necpra - Messaging, Friends, Accommodation & Marketplace | Official Android App</title>
 
     <!-- SEO: description + canonical -->
-    <meta name="description" content="Necpra is a messaging and social app for chats, friends, accommodation and marketplace services. Use Necpra on the web, Android and desktop.">
+    <meta name="description" content="Necpra is the official messaging and social app for chats, friends, accommodation and marketplace services. Use Necpra on the web or download the official Android app.">
     <link rel="canonical" href="https://necpra.co.ke/">
     <meta name="robots" content="index, follow">
 
     <!-- Open Graph (Facebook, WhatsApp link previews, etc.) -->
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="Necpra">
-    <meta property="og:title" content="Necpra - Messaging, Friends, Accommodation & Marketplace">
+    <meta property="og:title" content="Necpra - Messaging, Friends, Accommodation & Marketplace | Official Android App">
     <meta property="og:description" content="One app for messaging, friends, accommodation and marketplace. Fast, private, and free.">
     <meta property="og:url" content="https://necpra.co.ke/">
     <meta property="og:image" content="https://necpra.co.ke/icons/necpra-512.png">
@@ -136,7 +136,8 @@
           "@id": "https://necpra.co.ke/#app",
           "name": "Necpra",
           "url": "https://necpra.co.ke/",
-          "description": "Necpra is a messaging and social app for chats, friends, accommodation and marketplace services.",
+          "downloadUrl": "https://necpra.co.ke/download/",
+          "description": "Necpra is a messaging and social app for chats, friends, accommodation and marketplace services. The official Android app can be downloaded from https://necpra.co.ke/download/.",
           "applicationCategory": "SocialNetworkingApplication",
           "operatingSystem": ["Web", "Android"],
           "image": "https://necpra.co.ke/icons/necpra-512.png",
@@ -2474,7 +2475,8 @@
                     </div>
                     <div class="landing-cta-row landing-cta-row-secondary">
                         <button type="button" class="landing-ghost-btn" id="landingGoogleBtn"><i class="fab fa-google"></i> Continue with Google</button>
-                        <button type="button" class="landing-ghost-btn" id="landingInstallBtn"><i class="fas fa-arrow-down"></i> Install App</button>
+                        <a class="landing-ghost-btn" id="landingAndroidDownloadBtn" href="/download/" aria-label="Download the official Necpra Android app"><i class="fab fa-android"></i> Download Android App</a>
+                        <button type="button" class="landing-ghost-btn" id="landingInstallBtn"><i class="fas fa-arrow-down"></i> Install Web App</button>
                         <div class="pwa-status" id="landingPwaStatus" hidden>
                             <span class="pwa-status-badge"><i class="fas fa-check-circle"></i> Installed</span>
                             <button type="button" class="pwa-status-btn" id="landingOpenAppBtn"><i class="fas fa-external-link-alt"></i> Open App</button>
@@ -2483,6 +2485,7 @@
                             <span class="pwa-status-meta" id="landingPwaOffline"></span>
                         </div>
                         <p class="pwa-install-hint" id="landingPwaHint" hidden></p>
+                        <p class="landing-download-note">Android users: <a href="/download/">download the official Necpra APK</a>.</p>
                     </div>
                 </div>
             </header>
