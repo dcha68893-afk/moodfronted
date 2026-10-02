@@ -12,15 +12,18 @@ function card(u,extra=''){const rel=relationship(u);return `<article class="card
 function wire(){document.querySelectorAll('[data-action]').forEach(b=>b.onclick=()=>{const u=state._map?.get(Number(b.closest('.card').dataset.id));if(u)action(b.dataset.action,u,b)})}
 function notifyParent(){try{parent.postMessage({type:'FRIENDS_PAGE_CHANGED',payload:{page:state.tab},source:'friends-iframe'},'*')}catch(e){}}
 function setTab(t){state.tab=t;notifyParent();render()}
-function readFriendsCache(){try{return JSON.parse(localStorage.getItem('knecta_friends_cache')||'[]')}catch(_){return[]}}
-async function loadFriends(){try{const r=await FriendsService.list({limit:100,offset:0});state.friends=users(r);state.total=data(r).total||state.friends.length;state._offline=false}catch(e){
+function accountId(){try{const a=JSON.parse(localStorage.getItem('kynecta_auth')||'null');const u=a?.user||{};return String(u.id??u.userId??u.uid??u._id||localStorage.getItem('userId')||'guest')}catch(_){return String(localStorage.getItem('userId')||'guest')}}
+function readFriendsCache(){try{return JSON.parse(localStorage.getItem('knecta_friends_cache:'+accountId())||localStorage.getItem('knecta_friends_cache')||'[]')}catch(_){return[]}}
+function readRequestsCache(){try{return JSON.parse(localStorage.getItem('knecta_friend_requests_cache:'+accountId())||'null')||null}catch(_){return null}}
+function writeFriendsCaches(){try{localStorage.setItem('knecta_friends_cache:'+accountId(),JSON.stringify(state.friends||[]));localStorage.setItem('knecta_friend_requests_cache:'+accountId(),JSON.stringify({incoming:state.incoming||[],outgoing:state.outgoing||[]}))}catch(_){} }
+async function loadFriends(){try{const r=await FriendsService.list({limit:100,offset:0});state.friends=users(r);state.total=data(r).total||state.friends.length;state._offline=false;writeFriendsCaches()}catch(e){
 // FIX (FRIENDS-NO-OFFLINE-CACHE): services.friend.js already caches the
 // friends list to localStorage on every successful load (cacheFriends()) —
 // it just never got read back on failure. Fall back to it instead of
 // throwing and blanking the whole screen, matching how other modules
 // already behave when offline.
 const cached=readFriendsCache();if(cached.length){state.friends=cached;state.total=cached.length;state._offline=true}else throw e}}
-async function loadRequests(){const [a,o]=await Promise.all([FriendsService.incoming({limit:100,offset:0}),FriendsService.outgoing({limit:100,offset:0})]);state.incoming=users(a);state.outgoing=users(o);try{parent.postMessage({type:'FRIENDS_REQUEST_COUNT',payload:{count:state.incoming.length},source:'friends-iframe'},'*')}catch(e){}}
+async function loadRequests(){try{const [a,o]=await Promise.all([FriendsService.incoming({limit:100,offset:0}),FriendsService.outgoing({limit:100,offset:0})]);state.incoming=users(a);state.outgoing=users(o);writeFriendsCaches();try{parent.postMessage({type:'FRIENDS_REQUEST_COUNT',payload:{count:state.incoming.length},source:'friends-iframe'},'*')}catch(e){}}catch(e){const cached=readRequestsCache();if(cached){state.incoming=Array.isArray(cached.incoming)?cached.incoming:[];state.outgoing=Array.isArray(cached.outgoing)?cached.outgoing:[];state._offline=true;return}throw e}}
 function _friendSuggestionsEnabled(){try{const raw=localStorage.getItem('knecta_settings_cache');if(!raw)return true;const f=JSON.parse(raw)?.data?.friends;if(!f)return true;return f.friendSuggestions!==false}catch(_){return true}}
 async function loadDiscover(){if(state.query){const r=await FriendsService.search(state.query,50);state.discover=users(r);state.discoverReason='search';return}
   // FIX (Friends architecture audit, item #9): friends.friendSuggestions has
@@ -45,5 +48,5 @@ async function refresh(){if(state.loading)return;state.loading=true;try{try{awai
 if(state.friends.length||state.incoming.length||state.outgoing.length)render();else $('content').innerHTML='<div class="error">'+esc(e.message)+'</div>'}finally{state.loading=false}}
 $('searchBtn').onclick=async()=>{state.query=$('search').value.trim();state.tab='discover';notifyParent();await refresh()};$('search').addEventListener('keydown',e=>{if(e.key==='Enter')$('searchBtn').click()});$('refresh').onclick=()=>refresh();
 window.addEventListener('message',e=>{if(e.data?.type==='FRIENDS_LIST_UPDATE'||e.data?.type==='FRIEND_REQUEST_SENT')refresh();else if(e.data?.type==='FRIENDS_NAV'&&e.data.payload?.page)setTab(e.data.payload.page)});window.addEventListener('FRIENDS_LIST_UPDATE',refresh);
-(async()=>{try{await loadRequests();await loadFriends();render();notifyParent();const target=new URLSearchParams(location.search).get('target');if(target){$('search').value=target;state.query=target;state.tab='discover';notifyParent();await refresh()}}catch(e){$('content').innerHTML='<div class="error">'+esc(e.message)+'</div>'}})();
+(async()=>{let failed=false;try{await loadRequests()}catch(_){failed=true}try{await loadFriends()}catch(_){failed=true}if(failed)state._offline=true;render();notifyParent();const target=new URLSearchParams(location.search).get('target');if(target){$('search').value=target;state.query=target;state.tab='discover';notifyParent();await refresh()}}catch(e){$('content').innerHTML='<div class="error">'+esc(e.message)+'</div>'}})();
 })();</script></body></html>

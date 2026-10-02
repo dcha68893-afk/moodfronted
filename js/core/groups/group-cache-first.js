@@ -22,7 +22,7 @@
       const a = raw ? JSON.parse(raw) : null;
       const u = a && a.user;
       const id = u && (u.id != null ? u.id : (u.userId != null ? u.userId : (u.uid != null ? u.uid : u._id)));
-      return id == null ? '' : String(id);
+      if(id != null)return String(id);const direct=localStorage.getItem('userId')||localStorage.getItem('currentUserId');if(direct)return String(direct);try{const u=JSON.parse(localStorage.getItem('currentUser')||localStorage.getItem('user')||'null');const n=u&&(u.id??u.userId??u.uid??u._id);if(n!=null)return String(n)}catch(_){}return '';
     } catch (_) { return ''; }
   }
 

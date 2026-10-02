@@ -28,6 +28,9 @@ const tokenCandidates=()=>{
   try{const a=JSON.parse(localStorage.getItem('auth')||'null');add(a?.token);add(a?.accessToken)}catch(_){}
   return out;
 };
+const statusCacheKey=(path)=>{const u=currentUser();return 'necpra_status_cache_'+String(u.id||'guest')+'_'+String(path||'/').replace(/[^a-z0-9_-]+/gi,'_')};
+const readStatusCache=(path)=>{try{const v=JSON.parse(localStorage.getItem(statusCacheKey(path))||'null');return v?.data??null}catch(_){return null}};
+const writeStatusCache=(path,data)=>{try{localStorage.setItem(statusCacheKey(path),JSON.stringify({data,timestamp:Date.now()}))}catch(_){} };
 const token=()=>{
   const c=tokenCandidates();if(!c.length)return '';
   const now=Date.now()/1000;let best='',bestExp=-1;
@@ -73,6 +76,7 @@ const saveInterests=v=>{try{localStorage.setItem(interestsKey(),JSON.stringify(v
 // backoff instead of surfacing a raw network error to the user.
 async function fetchRetry(url,init,attempts){
   attempts=attempts||4;
+  if(navigator.onLine===false)throw new Error('OFFLINE');
   for(let i=0;i<attempts;i++){
     try{
       const r=await fetch(url,init);
@@ -82,18 +86,7 @@ async function fetchRetry(url,init,attempts){
   }
   throw new Error('The server is starting up. Please try again in a moment.');
 }
-async function api(path,opts={}){
-  const send=()=>{
-    const headers=Object.assign({'Content-Type':'application/json'},opts.headers||{});
-    const t=token();if(t)headers.Authorization=/^Bearer /i.test(t)?t:'Bearer '+t;
-    return fetchRetry(apiUrl(path),Object.assign({},opts,{headers}));
-  };
-  let r=await send();
-  if(r.status===401&&await refreshAuth().catch(()=>false))r=await send();
-  const data=await r.json().catch(()=>({}));
-  if(!r.ok)throw new Error(data.message||data.error||('Request failed '+r.status));
-  return data;
-}
+async function api(path,opts={}){const method=String(opts.method||'GET').toUpperCase(),cached=method==='GET'?readStatusCache(path):null;try{const headers=Object.assign({'Content-Type':'application/json'},opts.headers||{});const t=token();if(t)headers.Authorization=/^Bearer /i.test(t)?t:'Bearer '+t;let r=await fetchRetry(apiUrl(path),Object.assign({},opts,{headers}));if(r.status===401&&await refreshAuth().catch(()=>false)){r=await fetchRetry(apiUrl(path),Object.assign({},opts,{headers}))}const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.message||data.error||('Request failed '+r.status));if(method==='GET')writeStatusCache(path,data);return data}catch(e){if(method==='GET'&&cached!=null)return cached;if(e?.message==='OFFLINE')throw new Error("You're offline — showing last-loaded Status data when available.");throw e}}
 function avatar(u,cls='ns-avatar'){
   const url=window.Identity?.resolveAvatar?.(u)||u?.avatar||u?.photoURL||'';
   const name=window.Identity?.resolveDisplayName?.(u)||u?.displayName||u?.username||'User';

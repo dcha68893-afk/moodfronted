@@ -276,7 +276,7 @@ const DELIVERY_OPTIONS = [
 
 const PAY_OPTIONS = [
     { id:'mpesa', name:'M-Pesa',          icon:'📱', desc:'Lipa na M-Pesa STK Push' },
-    { id:'card',  name:'Card Payment',    icon:'💳', desc:'Visa / Mastercard (coming soon)', disabled:true },
+    { id:'card',  name:'Card Payment',    icon:'💳', desc:'Secure Visa / Mastercard checkout', disabled:false },
     { id:'cod',   name:'Cash on Delivery',icon:'💵', desc:'Pay when you receive your order' },
     { id:'wallet',name:'Wallet Balance',  icon:'👛', desc:'Wallet system coming soon', disabled:true },
 ];
@@ -581,7 +581,7 @@ function _renderPaymentStep() {
 }
 
 function _renderPayDetails(phone) {
-    if (_state.paymentMethod === 'mpesa') {
+    if (_state.paymentMethod === 'card') { return '<div style="background:#eff6ff;border-radius:10px;padding:12px 14px;font-size:13px;color:#1e40af">You will be redirected to a secure Flutterwave checkout. Necpra never collects your full card number.</div>'; }\n    if (_state.paymentMethod === 'mpesa') {
         return `<div class="co-mpesa-phone">
             <label>M-Pesa Phone Number</label>
             <input id="coMpesaPhone" value="${_esc(phone)}" placeholder="0712 345 678" style="width:100%;border:none;background:none;font-size:15px;font-weight:600;color:#111;outline:none;box-sizing:border-box" oninput="window._jmMpesaPhone(this.value)" />
@@ -777,6 +777,8 @@ window._jmPlaceOrder = async function() {
 
     if (_state.paymentMethod === 'mpesa') {
         _doMpesaPayment(order);
+    } else if (_state.paymentMethod === 'card') {
+        _doCardPayment(order);
     } else {
         _finishOrder(order);
     }
@@ -815,7 +817,7 @@ async function _doMpesaPayment(order) {
     _pollMpesa(order, _state.mpesaRequestId, 0);
 }
 
-function _showMpesaWaiting(order) {
+async function _doCardPayment(order){const total=Math.max(0,_state.subtotal+_state.deliveryFee-_state.couponDiscount);const r=await _api('POST','/marketplace/payment/card',{order_id:order.id,amount:total,currency:'KES',email:localStorage.getItem('userEmail')||undefined});if(r?.data?.checkout_url){window.location.href=r.data.checkout_url;return;}document.getElementById('coMpesaWaiting')?.remove();_toast(r?.message||'Card checkout could not be started','error','💳');}\n\nfunction _showMpesaWaiting(order) {
     document.getElementById('coMpesaWaiting')?.remove();
     const ov = document.createElement('div');
     ov.id = 'coMpesaWaiting';

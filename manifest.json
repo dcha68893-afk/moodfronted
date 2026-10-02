@@ -3,7 +3,7 @@
   "name": "Necpra",
   "short_name": "Necpra",
   "description": "Necpra is a messaging and social platform for chats, friends, accommodation and marketplace services.",
-  "start_url": "/",
+  "start_url": "/chat.html",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",
@@ -32,7 +32,7 @@
   "prefer_related_applications": false,
   "related_applications": [],
   "display_override": [
-    "standalone",
-    "minimal-ui"
+    "window-controls-overlay",
+    "standalone"
   ]
 }

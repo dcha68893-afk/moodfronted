@@ -3347,7 +3347,7 @@
             }, delay);
         }
 
-        dismissLoadingScreen(350);
+        let __bootReady=false;function dismissLoadingScreenWhenReady(){if(__bootReady)return;__bootReady=true;dismissLoadingScreen(120);try{window.Capacitor?.Plugins?.SplashScreen?.hide?.()}catch(_){} }window.addEventListener('message',function(e){if(e.data?.type==='CHILD_READY'&&e.data?.module==='messages')dismissLoadingScreenWhenReady()});setTimeout(dismissLoadingScreenWhenReady,4500);
         
         // ======================================================================
         // CHAT AND CALL PANEL DETECTION FOR MOBILE
