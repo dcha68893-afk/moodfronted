@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Necpa frontend build.
+ * Necpra frontend build.
  *
  * Browser runtime configuration is generated from .env/deployment variables.
  * Application source must not contain deployment-specific backend URLs.
@@ -98,16 +98,6 @@ function copyTree(sourceDir, targetDir, relative = '') {
 
 copyTree(ROOT, DIST);
 
-// On Render, mirror the current signed APK into the same-origin download path.
-// Do not do this in GitHub Actions: the Android workflow runs this build before
-// publishing the next APK, and bundling the previous APK would be wasteful.
-if (process.env.RENDER === 'true' && process.env.GITHUB_ACTIONS !== 'true') {
-    execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'sync-latest-apk.js')], {
-        cwd: ROOT,
-        stdio: 'inherit'
-    });
-}
-
 
 const runtimeConfig = `// GENERATED FILE — DO NOT EDIT. Change .env/deployment environment and rebuild.\nwindow.__NEXIPA_RUNTIME_CONFIG__ = Object.freeze(${JSON.stringify({ BACKEND_URL, FRONTEND_URL, GOOGLE_CLIENT_ID }, null, 2)});\n`;
 fs.mkdirSync(path.join(DIST, 'js'), { recursive: true });
@@ -150,7 +140,7 @@ function mergeStatusCoreFragments(dir) {
         fs.writeFileSync(outputFile, combined, 'utf8');
         for (const item of parts) fs.rmSync(item.file, { force: true });
         mergedCount++;
-        console.log(`[Necpa build] Merged ${parts.length} status fragments -> ${path.relative(ROOT, outputFile)}`);
+        console.log(`[Necpra build] Merged ${parts.length} status fragments -> ${path.relative(ROOT, outputFile)}`);
     }
 
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -175,7 +165,7 @@ if (toolParts.every(fs.existsSync)) {
         "// ES-module entrypoint for the split Tools core.\nexport * from './Tool-core.part1.js';\nexport * from './Tool-core.part2.js';\nexport * from './Tool-core.part3.js';\n",
         'utf8'
     );
-    console.log('[Necpa build] Created Tool-core.js ES-module entrypoint; preserved Tool-core.part1/2/3.js.');
+    console.log('[Necpra build] Created Tool-core.js ES-module entrypoint; preserved Tool-core.part1/2/3.js.');
 }
 
 function transformBackendUrlLiterals(text, fileName) {
@@ -315,7 +305,7 @@ function processArtifacts(dir) {
     })(dir);
     if (skippedTransform.length) {
         console.warn(
-            `[Necpa build] Kept original literal backend URL in ${skippedTransform.length} file(s) ` +
+            `[Necpra build] Kept original literal backend URL in ${skippedTransform.length} file(s) ` +
             `because rewriting it produced invalid JavaScript: ${skippedTransform.join(', ')}. ` +
             `These files still work (they use the literal fallback URL); investigate transformBackendUrlLiterals ` +
             `in scripts/build-config.js if a dynamic origin is required there.`
@@ -399,6 +389,6 @@ function processHtml(dir) {
 }
 processHtml(DIST);
 
-console.log(`[Necpa build] Backend configured from deployment environment: ${BACKEND_URL}`);
-console.log(`[Necpa build] Output: ${DIST}`);
-console.log('[Necpa build] Generated JavaScript syntax validation passed.');
+console.log(`[Necpra build] Backend configured from deployment environment: ${BACKEND_URL}`);
+console.log(`[Necpra build] Output: ${DIST}`);
+console.log('[Necpra build] Generated JavaScript syntax validation passed.');
