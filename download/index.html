@@ -33,7 +33,6 @@
     ol{margin:0;padding-left:21px;color:#596579;line-height:1.8}
     .small{font-size:12px;color:#7a8496;line-height:1.55;margin-top:22px}
     .small code{background:#f1f4f8;padding:2px 5px;border-radius:5px}
-    .android-only,.desktop-note{display:none}
     @media(min-width:620px){.download{flex-direction:row}.download .btn{flex:1}}
   </style>
 </head>
@@ -53,11 +52,11 @@
         <span class="pill">Android</span>
         <span class="pill">Free</span>
         <span class="pill">Package: com.necpa</span>
-        <span class="pill" id="version">APK version: checking…</span>
+        <span class="pill" id="version">APK status: checking…</span>
       </div>
 
       <div class="download">
-        <a id="apkButton" class="btn primary" href="/downloads/necpra-android.apk" download>Download APK</a>
+        <a id="apkButton" class="btn primary" href="https://github.com/dcha68893-afk/moodfronted/releases/latest/download/necpra-android.apk">Download APK</a>
         <a class="btn secondary" href="/">Open Necpra Web</a>
       </div>
       <div id="notice" class="notice"></div>
@@ -78,13 +77,13 @@
         <p class="small">The Android shell is configured to load the live Necpra website, so normal web application updates do not require a new APK. A new APK is needed when the native Android shell itself changes.</p>
       </div>
 
-      <p class="small">Official download page: <code>https://necpra.co.ke/download/</code></p>
+      <p class="small">APK files are published as official GitHub Releases from the Necpra source repository. The download URL always targets the latest release.</p>
     </section>
   </main>
 
   <script>
     (function(){
-      var apkUrl='/downloads/necpra-android.apk';
+      var apkUrl='https://github.com/dcha68893-afk/moodfronted/releases/latest/download/necpra-android.apk';
       var btn=document.getElementById('apkButton');
       var notice=document.getElementById('notice');
       var version=document.getElementById('version');
@@ -94,9 +93,7 @@
         notice.style.display='block';
       }
 
-      var ua=navigator.userAgent||'';
-      var android=/Android/i.test(ua);
-      if(!android){
+      if(!/Android/i.test(navigator.userAgent||'')){
         showNotice('You are viewing this page on a non-Android device. The APK is intended for Android phones and tablets. You can still send this page to an Android device.');
       }
 
@@ -105,14 +102,12 @@
           var size=r.headers.get('content-length');
           var label='APK ready';
           if(size){
-            var mb=(Number(size)/1048576).toFixed(1);
-            label+=' · '+mb+' MB';
+            label+=' · '+(Number(size)/1048576).toFixed(1)+' MB';
           }
           version.textContent=label;
         }else{
           btn.classList.add('disabled');
-          btn.removeAttribute('download');
-          showNotice('The download page is live, but the signed APK file has not been published to the download location yet. Publish the signed APK as /downloads/necpra-android.apk, then this button will become active automatically.');
+          showNotice('The download page is live, but no latest signed APK has been published yet. Run the GitHub Actions APK workflow to publish it.');
           version.textContent='APK awaiting publication';
         }
       }).catch(function(){

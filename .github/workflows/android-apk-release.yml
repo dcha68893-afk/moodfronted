@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   android-release:
@@ -63,22 +63,22 @@ jobs:
         working-directory: android
         run: ./gradlew --no-daemon --stacktrace assembleRelease
 
-      - name: Publish APK into website output
+      - name: Prepare APK
         run: |
-          mkdir -p dist/downloads
-          cp android/app/build/outputs/apk/release/app-release.apk dist/downloads/necpra-android.apk
-          test -s dist/downloads/necpra-android.apk
+          mkdir -p release
+          cp android/app/build/outputs/apk/release/app-release.apk release/necpra-android.apk
+          test -s release/necpra-android.apk
 
-      - name: Deploy website and APK
-        uses: FirebaseExtended/action-hosting-deploy@v0
-        with:
-          repoToken: '${{ secrets.GITHUB_TOKEN }}'
-          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_UNICONNECT }}'
-          channelId: live
-          projectId: uniconnect-ee95c
-          entryPoint: './dist'
-
-      - name: Verify published artifact
+      - name: Publish APK as GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          ls -lh dist/downloads/necpra-android.apk
-          echo "Necpra APK prepared at /downloads/necpra-android.apk"
+          VERSION=$(sed -n 's/.*versionName "\([^"]*\)".*/\1/p' android/app/build.gradle | head -1)
+          TAG="android-v${VERSION}-build-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" release/necpra-android.apk             --target "$GITHUB_SHA"             --title "Necpra Android v${VERSION} (Build ${GITHUB_RUN_NUMBER})"             --notes "Signed Necpra Android APK for direct installation. Package: com.necpa. This release was built by GitHub Actions using the configured Necpra release signing key."             --latest
+
+      - name: Verify release
+        run: |
+          VERSION=$(sed -n 's/.*versionName "\([^"]*\)".*/\1/p' android/app/build.gradle | head -1)
+          echo "Necpra Android v${VERSION} published."
+          ls -lh release/necpra-android.apk
