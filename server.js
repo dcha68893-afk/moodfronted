@@ -434,6 +434,8 @@ function snapshotDevState() {
     marketplace: Array.isArray(devState.marketplace) ? devState.marketplace : [],
     purchases: Array.isArray(devState.purchases) ? devState.purchases : [],
     payments: Array.isArray(devState.payments) ? devState.payments : [],
+    carts: serializeMap(devState.carts),
+    reviews: serializeMap(devState.reviews),
   };
 }
 
@@ -473,6 +475,8 @@ function hydrateDevState() {
     devState.marketplace = Array.isArray(parsed.marketplace) ? parsed.marketplace : [];
     devState.purchases = Array.isArray(parsed.purchases) ? parsed.purchases : [];
     devState.payments = Array.isArray(parsed.payments) ? parsed.payments : [];
+    devState.carts = hydrateMap(parsed.carts);
+    devState.reviews = hydrateMap(parsed.reviews);
   } catch (error) {
     console.warn("[DEV-STATE] Failed to hydrate:", error.message);
   }
@@ -2243,46 +2247,48 @@ function apiDataForPath(req, user) {
   }
 
   if (routePath === "/payments/process" && method === "POST") {
-    const payment = {
-      id: `payment_${Date.now()}`,
-      userId: user?.id || req.body?.buyerId || "guest",
-      amount: req.body?.amount || 0,
-      currency: req.body?.currency || "KES",
-      paymentMethod: req.body?.paymentMethod || "card",
-      phone: req.body?.phone || req.body?.mpesaPhone || null,
-      status: "completed",
-      createdAt: new Date().toISOString(),
-    };
-    devState.payments.unshift(payment);
-    return { body: { success: true, data: payment, payment } };
+    const methodName=String(req.body?.paymentMethod||"card").toLowerCase();
+    const payment={id:`payment_${Date.now()}`,userId:user?.id||req.body?.buyerId||"guest",listingId:req.body?.listingId||null,orderId:req.body?.orderId||null,amount:Number(req.body?.amount||0),currency:req.body?.currency||"KES",paymentMethod:methodName,phone:req.body?.phone||req.body?.mpesaPhone||null,status:methodName==="cod"?"authorized_cod":"pending",providerConfigured:false,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};
+    devState.payments.unshift(payment); scheduleDevStatePersist();
+    return {body:{success:true,data:payment,payment,requiresGatewayConfirmation:methodName!=="cod"}};
   }
 
   if (routePath.startsWith("/marketplace")) {
     const listings = ensureMarketplaceSeed();
     const listingIdMatch = routePath.match(/^\/marketplace\/listings\/([^/]+)(?:\/([^/]+))?$/);
 
-    if (routePath === "/marketplace/orders/mine" && method === "GET") {
-      const buyerId = String(user?.id || "guest");
-      const orders = devState.purchases
-        .filter((purchase) => String(purchase.buyerId) === buyerId)
-        .map((purchase) => ({
-          ...purchase,
-          status: purchase.status || "paid",
-        }));
-      return { body: { success: true, data: { orders, total: orders.length } } };
+    if (routePath === "/marketplace/cart" && method === "GET") {
+      const userId=String(user?.id||"guest"), items=devState.carts.get(userId)||[];
+      const enriched=items.map(item=>{const listing=listings.find(l=>String(l.id)===String(item.listingId));return listing?{...item,listing}:null;}).filter(Boolean);
+      const subtotal=enriched.reduce((s,i)=>s+(Number(i.listing.price)||0)*(Number(i.quantity)||1),0);
+      return {body:{success:true,data:{items:enriched,subtotal,total:subtotal,currency:"KES"}}};
     }
-
+    if (routePath === "/marketplace/cart" && method === "POST") {
+      const userId=String(user?.id||"guest"), listingId=String(req.body?.listingId||""), quantity=Math.max(1,Number(req.body?.quantity||1)), listing=listings.find(l=>String(l.id)===listingId);
+      if(!listing)return {status:404,body:{success:false,error:"Listing not found",data:null}};
+      const items=devState.carts.get(userId)||[], existing=items.find(i=>String(i.listingId)===listingId);
+      if(existing)existing.quantity+=quantity;else items.push({listingId,quantity,addedAt:new Date().toISOString()});
+      devState.carts.set(userId,items);scheduleDevStatePersist();return {body:{success:true,data:{items}}};
+    }
+    if (routePath === "/marketplace/cart" && method === "PUT") {
+      const userId=String(user?.id||"guest"), listingId=String(req.body?.listingId||""), quantity=Math.max(1,Number(req.body?.quantity||1)), items=devState.carts.get(userId)||[], item=items.find(i=>String(i.listingId)===listingId);
+      if(!item)return {status:404,body:{success:false,error:"Cart item not found",data:null}};item.quantity=quantity;devState.carts.set(userId,items);scheduleDevStatePersist();return {body:{success:true,data:{items}}};
+    }
+    if (routePath === "/marketplace/cart" && method === "DELETE") {
+      const userId=String(user?.id||"guest"), listingId=String(req.body?.listingId||req.query?.listingId||""), items=(devState.carts.get(userId)||[]).filter(i=>String(i.listingId)!==listingId);
+      devState.carts.set(userId,items);scheduleDevStatePersist();return {body:{success:true,data:{items}}};
+    }
+    if (routePath === "/marketplace/orders/mine" && method === "GET") {
+      const buyerId=String(user?.id||"guest"),orders=devState.purchases.filter(p=>String(p.buyerId)===buyerId);
+      return {body:{success:true,data:{orders,total:orders.length}}};
+    }
     if (routePath === "/marketplace/orders" && method === "POST") {
-      const order = {
-        id: `order_${Date.now()}`,
-        buyerId: String(user?.id || req.body?.buyerId || "guest"),
-        listingId: req.body?.listingId || null,
-        productId: req.body?.productId || req.body?.listingId || null,
-        status: "paid",
-        createdAt: new Date().toISOString(),
-      };
-      devState.purchases.unshift(order);
-      return { body: { success: true, data: { order } } };
+      const buyerId=String(user?.id||req.body?.buyerId||"guest"),listingId=req.body?.listingId||req.body?.productId||null,listing=listingId?listings.find(l=>String(l.id)===String(listingId)):null;
+      if(!listing)return {status:404,body:{success:false,error:"Listing not found",data:null}};
+      const quantity=Math.max(1,Number(req.body?.quantity||1)),methodName=String(req.body?.paymentMethod||"card").toLowerCase();
+      const order={id:`order_${Date.now()}`,buyerId,sellerId:String(listing.sellerId||""),listingId:String(listing.id),productId:String(listing.id),quantity,unitPrice:Number(listing.price||0),total:Number(listing.price||0)*quantity,currency:listing.currency||"KES",status:methodName==="cod"?"confirmed_cod":"pending_payment",paymentStatus:methodName==="cod"?"cod":"pending",deliveryStatus:"processing",shippingAddress:req.body?.shippingAddress||null,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};
+      devState.purchases.unshift(order);devState.carts.set(buyerId,(devState.carts.get(buyerId)||[]).filter(i=>String(i.listingId)!==String(listing.id)));scheduleDevStatePersist();
+      return {body:{success:true,data:{order}}};
     }
 
     const cancelOrderMatch = routePath.match(/^\/marketplace\/orders\/([^/]+)\/cancel$/);
@@ -2296,22 +2302,9 @@ function apiDataForPath(req, user) {
       return { body: { success: true, data: { order } } };
     }
 
-    const reviewListMatch = routePath.match(/^\/marketplace\/listings\/([^/]+)\/reviews$/);
-    if (reviewListMatch && method === "GET") {
-      return { body: { success: true, data: { reviews: [], total: 0 } } };
-    }
-
-    if (reviewListMatch && method === "POST") {
-      const review = {
-        id: `review_${Date.now()}`,
-        listingId: reviewListMatch[1],
-        reviewerId: String(user?.id || "guest"),
-        rating: Number(req.body?.rating || 5),
-        comment: req.body?.comment || "",
-        createdAt: new Date().toISOString(),
-      };
-      return { body: { success: true, data: { review } } };
-    }
+    const reviewListMatch=routePath.match(/^\/marketplace\/listings\/([^/]+)\/reviews$/);
+    if(reviewListMatch&&method==="GET"){const reviews=devState.reviews.get(String(reviewListMatch[1]))||[];return {body:{success:true,data:{reviews,total:reviews.length}}};}
+    if(reviewListMatch&&method==="POST"){const listingId=String(reviewListMatch[1]),listing=listings.find(l=>String(l.id)===listingId);if(!listing)return {status:404,body:{success:false,error:"Listing not found",data:null}};const rating=Math.min(5,Math.max(1,Number(req.body?.rating||5))),bucket=devState.reviews.get(listingId)||[];const review={id:`review_${Date.now()}`,listingId,reviewerId:String(user?.id||"guest"),rating,comment:String(req.body?.comment||"").trim(),createdAt:new Date().toISOString()};bucket.unshift(review);devState.reviews.set(listingId,bucket);listing.rating=bucket.reduce((s,r)=>s+Number(r.rating||0),0)/bucket.length;listing.reviewCount=bucket.length;scheduleDevStatePersist();return {body:{success:true,data:{review,rating:listing.rating,reviewCount:listing.reviewCount}}};}
 
     const helpfulMatch = routePath.match(/^\/marketplace\/reviews\/([^/]+)\/helpful$/);
     if (helpfulMatch && method === "POST") {

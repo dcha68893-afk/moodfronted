@@ -3449,32 +3449,16 @@
                     var headers = {'Content-Type':'application/json'};
                     if (token) headers['Authorization'] = 'Bearer ' + token;
 
-                    // Step 1: Record purchase
-                    var purchaseResp = await fetch('/api/marketplace/listings/' + listing.id + '/purchase', {
-                        method: 'POST', headers: headers, credentials: 'include',
-                        body: JSON.stringify({ buyerId: window.currentUser?.id })
-                    }).then(function(r){ return r.json(); }).catch(function(){ return {success:false}; });
-
-                    // Step 2: Process payment
+                    var orderResp = await fetch('/api/marketplace/orders',{method:'POST',headers:headers,credentials:'include',body:JSON.stringify({listingId:listing.id,quantity:1,paymentMethod:method,shippingAddress:window._jmCheckoutAddress||null})}).then(function(r){return r.json();}).catch(function(){return {success:false};});
+                    if(!orderResp.success) throw new Error(orderResp.message||'Could not create order');
                     var payResp = await fetch('/api/payments/process', {
                         method: 'POST', headers: headers, credentials: 'include',
                         body: JSON.stringify(payload)
                     }).then(function(r){ return r.json(); }).catch(function(){ return {success:false}; });
 
-                    processing.style.display = 'none';
-                    confirmBtn.disabled = false;
-
-                    if (method === 'mpesa') {
-                        document.getElementById('processingText').textContent = 'Check your phone for the M-Pesa prompt!';
-                        processing.style.display = 'block';
-                        setTimeout(function(){
-                            closePurchaseModal();
-                            if (window.showNotification) window.showNotification('M-Pesa STK Push sent! Check your phone.', 'success');
-                        }, 3000);
-                    } else {
-                        closePurchaseModal();
-                        if (window.showNotification) window.showNotification('Payment successful! Thank you.', 'success');
-                    }
+                    processing.style.display='none';confirmBtn.disabled=false;
+                    var payment=payResp&&(payResp.data?.payment||payResp.payment);if(!payResp.success||!payment)throw new Error(payResp.message||'Payment could not be started');
+                    closePurchaseModal();if(window.showNotification)window.showNotification(payment.status==='pending'?'Order created. Payment is pending confirmation.':'Order placed successfully.',payment.status==='pending'?'info':'success');
                 } catch(err) {
                     processing.style.display = 'none';
                     confirmBtn.disabled = false;

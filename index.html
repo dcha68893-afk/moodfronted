@@ -21,10 +21,19 @@
          this tag, config.js has nothing to read, BACKEND_URL stays empty, and
          google-auth.js silently refuses to render its button since it depends on
          window.GOOGLE_CLIENT_ID coming from this same config. -->
+    <script>
+    (function(){
+      function reveal(){document.documentElement.removeAttribute("data-necpa-session");document.documentElement.setAttribute("data-necpa-boot","public");document.getElementById("necpraBootSplash")?.remove();}
+      function keep(){document.documentElement.setAttribute("data-necpa-session","active");document.documentElement.removeAttribute("data-necpa-boot");document.getElementById("necpraBootSplash")?.remove();}
+      ["necpa-session-invalid","auth:session:ended","auth-logout"].forEach(function(e){window.addEventListener(e,reveal);});
+      window.addEventListener("necpa-session-ready",function(){try{var a=JSON.parse(localStorage.getItem("kynecta_auth")||"null");a&&a.token&&a.user?keep():reveal();}catch(_){reveal();}});
+      window.addEventListener("load",function(){setTimeout(function(){if(document.documentElement.getAttribute("data-necpa-boot")!=="restoring")return;try{var a=JSON.parse(localStorage.getItem("kynecta_auth")||"null");a&&a.token&&a.user?keep():reveal();}catch(_){reveal();}},4500);},{once:true});
+    })();
+    </script>
     <script src="/js/runtime-config.js"></script>
     <script src="/js/config.js"></script>
     <script>
-    (function(){try{var raw=localStorage.getItem("kynecta_auth"),a=raw?JSON.parse(raw):null,t=a&&a.token,v=false;if(t&&t.split(".").length===3){var p=t.split(".")[1].replace(/-/g,"+").replace(/_/g,"/"),x=JSON.parse(atob(p+"=".repeat((4-p.length%4)%4)));v=!x.exp||x.exp*1000>Date.now()}if(v&&a.user)document.documentElement.setAttribute("data-necpa-session","active")}catch(_){}})();
+    (function(){try{var a=JSON.parse(localStorage.getItem("kynecta_auth")||"null");if(a&&a.token&&a.user){document.documentElement.setAttribute("data-necpa-session","active");document.documentElement.setAttribute("data-necpa-boot","restoring");}else document.documentElement.setAttribute("data-necpa-boot","public");}catch(_){document.documentElement.setAttribute("data-necpa-boot","public");}})();
     </script>
     <script>
     // FIX (HARDCODED-BACKEND-URL-BYPASSES-DOTENV): this used to hardcode
@@ -257,6 +266,16 @@
         html[data-necpa-session="active"] .landing-screen { display:none !important; }
         html[data-necpa-session="active"] #app-container { display:flex !important; }
         html[data-necpa-session="active"] #iframe-container { display:block !important; }
+        html[data-necpa-boot="restoring"] .landing-screen,
+        html[data-necpa-boot="restoring"] #app-container,
+        html[data-necpa-boot="restoring"] #iframe-container,
+        html[data-necpa-boot="restoring"] body > *:not(#necpraBootSplash){visibility:hidden !important;}
+        #necpraBootSplash{position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:18px;background:var(--bg-color,#111827);color:var(--text-primary,#fff);visibility:hidden}
+        html[data-necpa-boot="restoring"] #necpraBootSplash{visibility:visible!important}
+        #necpraBootSplash .boot-icon{width:86px;height:86px;border-radius:24px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#2563eb,#7c3aed);box-shadow:0 14px 45px rgba(37,99,235,.35);color:#fff;font-size:38px}
+        #necpraBootSplash .boot-spinner{width:28px;height:28px;border:3px solid rgba(255,255,255,.18);border-top-color:#fff;border-radius:50%;animation:necpraBootSpin .8s linear infinite}
+        #necpraBootSplash .boot-text{font-size:13px;opacity:.72}
+        @keyframes necpraBootSpin{to{transform:rotate(360deg)}}
         /* FIX (LOGIN-PAGE-DEAD-APP-NAV): #bottom-nav (Home/Explore/Notifications/
            Profile/Settings/Close — the authenticated app's nav, all dead href="#"
            links) was already hidden above, but its round toggle button was not,
@@ -1713,7 +1732,7 @@
          and pwa-mobile-install.js (both deleted). -->
     <script src="/pwa-manager.js"></script>
 <style id="necpra-consent-style">#necpraConsentGate{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:20px}.necpra-consent-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.68);backdrop-filter:blur(7px)}.necpra-consent-card{position:relative;width:min(560px,100%);max-height:90vh;overflow:auto;background:var(--card-bg,#fff);color:var(--text-color,#111);border-radius:22px;padding:26px;box-shadow:0 24px 80px rgba(0,0,0,.3)}.necpra-consent-list{display:grid;gap:10px;margin:18px 0}.necpra-consent-list>div{padding:13px;border-radius:12px;background:rgba(127,127,127,.09)}.necpra-consent-actions,.necpra-consent-links{display:flex;gap:9px;flex-wrap:wrap;margin:14px 0}.necpra-consent-actions button,.necpra-consent-options button{border:0;border-radius:11px;padding:11px 15px;cursor:pointer;background:rgba(127,127,127,.14);color:inherit}.necpra-consent-actions .primary,.necpra-consent-options .primary{background:#2563eb;color:#fff}.necpra-consent-options{display:grid;gap:12px;border-top:1px solid rgba(127,127,127,.2);padding-top:15px}</style></head>
-<body>
+<body><div id="necpraBootSplash" aria-live="polite"><div class="boot-icon"><i class="fas fa-comments"></i></div><div class="boot-spinner"></div><div class="boot-text">Opening Necpra…</div></div>
     <!-- ====================================================================== -->
     <!-- LANDING EXPERIENCE — public entry screen shown before login/register.  -->
     <!-- Pure add-on: does not touch auth-panel, sidebars, or any auth logic.   -->
