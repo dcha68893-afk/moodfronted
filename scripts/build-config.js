@@ -98,6 +98,17 @@ function copyTree(sourceDir, targetDir, relative = '') {
 
 copyTree(ROOT, DIST);
 
+// On Render, mirror the current signed APK into the same-origin download path.
+// Do not do this in GitHub Actions: the Android workflow runs this build before
+// publishing the next APK, and bundling the previous APK would be wasteful.
+if (process.env.RENDER === 'true' && process.env.GITHUB_ACTIONS !== 'true') {
+    execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'sync-latest-apk.js')], {
+        cwd: ROOT,
+        stdio: 'inherit'
+    });
+}
+
+
 const runtimeConfig = `// GENERATED FILE — DO NOT EDIT. Change .env/deployment environment and rebuild.\nwindow.__NEXIPA_RUNTIME_CONFIG__ = Object.freeze(${JSON.stringify({ BACKEND_URL, FRONTEND_URL, GOOGLE_CLIENT_ID }, null, 2)});\n`;
 fs.mkdirSync(path.join(DIST, 'js'), { recursive: true });
 fs.writeFileSync(path.join(DIST, 'js', 'runtime-config.js'), runtimeConfig, 'utf8');
