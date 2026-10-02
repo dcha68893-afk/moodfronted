@@ -61,7 +61,7 @@ jobs:
 
       - name: Build signed release APK
         working-directory: android
-        run: ./gradlew --no-daemon --stacktrace assembleRelease
+        run: bash ./gradlew --no-daemon --stacktrace assembleRelease
 
       - name: Prepare APK
         run: |
@@ -75,7 +75,7 @@ jobs:
         run: |
           VERSION=$(sed -n 's/.*versionName "\([^"]*\)".*/\1/p' android/app/build.gradle | head -1)
           TAG="android-v${VERSION}-build-${GITHUB_RUN_NUMBER}"
-          gh release create "$TAG" release/necpra-android.apk             --target "$GITHUB_SHA"             --title "Necpra Android v${VERSION} (Build ${GITHUB_RUN_NUMBER})"             --notes "Signed Necpra Android APK for direct installation. Package: com.necpa. This release was built by GitHub Actions using the configured Necpra release signing key."             --latest
+          gh release create "$TAG" release/necpra-android.apk --target "$GITHUB_SHA" --title "Necpra Android v${VERSION} (Build ${GITHUB_RUN_NUMBER})" --notes "Signed Necpra Android APK for direct installation. Package: com.necpa. This release was built by GitHub Actions using the configured Necpra release signing key." --latest
 
       - name: Verify release
         run: |
