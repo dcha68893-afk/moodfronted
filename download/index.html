@@ -4,10 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#2563eb">
-  <meta name="description" content="Download the official Necpra Android app directly from necpra.co.ke.">
+  <meta name="description" content="Download the official Necpra Android app in Kenya. Get the latest signed Necpra APK directly from the official Necpra website.">
   <link rel="icon" href="/icons/necpra-192.png">
   <link rel="apple-touch-icon" href="/icons/necpra-192.png">
-  <title>Download Necpra for Android</title>
+  <link rel="canonical" href="https://necpra.co.ke/download/"><meta name="robots" content="index,follow"><meta name="keywords" content="Necpra app download, Necpra Android app, download Necpra Kenya, Necpra APK, Necpra app Kenya"><title>Necpra App Download — Android APK Kenya</title>
   <style>
     :root{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#172033;background:#f5f8ff}
     *{box-sizing:border-box}
@@ -56,7 +56,7 @@
       </div>
 
       <div class="download">
-        <a id="apkButton" class="btn primary" href="https://github.com/dcha68893-afk/moodfronted/releases/latest/download/necpra-android.apk">Download APK</a>
+        <a id="apkButton" class="btn primary" href="https://github.com/dcha68893-afk/moodfronted/releases/latest/download/necpra-android.apk" download="necpra-android.apk">Download Android App</a>
         <a class="btn secondary" href="/">Open Necpra Web</a>
       </div>
       <div id="notice" class="notice"></div>
@@ -77,7 +77,7 @@
         <p class="small">The Android shell is configured to load the live Necpra website, so normal web application updates do not require a new APK. A new APK is needed when the native Android shell itself changes.</p>
       </div>
 
-      <p class="small">APK files are published as official GitHub Releases from the Necpra source repository. The download URL always targets the latest release.</p>
+      <p class="small">The APK is published automatically from the official Necpra release pipeline. The button below starts the APK download without sending the user to the GitHub release page. GitHub remains the release storage/CDN behind the download.</p>
     </section>
   </main>
 
@@ -101,17 +101,54 @@
         if(r.ok){
           var size=r.headers.get('content-length');
           var label='APK ready';
-          if(size){
-            label+=' · '+(Number(size)/1048576).toFixed(1)+' MB';
-          }
+          if(size) label+=' · '+(Number(size)/1048576).toFixed(1)+' MB';
           version.textContent=label;
         }else{
           btn.classList.add('disabled');
-          showNotice('The download page is live, but no latest signed APK has been published yet. Run the GitHub Actions APK workflow to publish it.');
+          showNotice('The download page is live, but no latest signed APK has been published yet. Run the Android release workflow to publish it.');
           version.textContent='APK awaiting publication';
         }
       }).catch(function(){
         version.textContent='APK status unavailable';
+      });
+
+      // Keep the user on necpra.co.ke while starting the APK download.
+      // The browser fetches the release asset as a Blob and then triggers
+      // a local download instead of navigating to the GitHub release page.
+      btn.addEventListener('click',function(e){
+        e.preventDefault();
+        if(btn.dataset.downloading==='1') return;
+        btn.dataset.downloading='1';
+        var original=btn.textContent;
+        btn.textContent='Preparing download…';
+        showNotice('Preparing the latest Necpra APK. Please wait…');
+        fetch(apkUrl,{cache:'no-store',redirect:'follow'})
+          .then(function(r){
+            if(!r.ok) throw new Error('HTTP '+r.status);
+            return r.blob();
+          })
+          .then(function(blob){
+            var objectUrl=URL.createObjectURL(blob);
+            var a=document.createElement('a');
+            a.href=objectUrl;
+            a.download='necpra-android.apk';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(function(){URL.revokeObjectURL(objectUrl);},60000);
+            showNotice('Download started. Open the downloaded APK to install Necpra.');
+          })
+          .catch(function(){
+            // Some mobile browsers block cross-origin Blob downloads.
+            // Fall back to GitHub's documented latest-asset URL so the APK
+            // still remains downloadable instead of leaving a dead button.
+            showNotice('Your browser blocked the in-page download. Opening the official APK download now…');
+            window.location.href=apkUrl;
+          })
+          .finally(function(){
+            btn.dataset.downloading='0';
+            btn.textContent=original;
+          });
       });
     })();
   </script>
