@@ -15,7 +15,14 @@
 
   /* ---------------- 1:1 MESSAGE HARDENING ---------------- */
   let identityCache=new Map();
-  async function loadIdentityCache(){
+  let _identityLoading=false, _identityLastLoad=0;
+  const IDENTITY_MIN_GAP_MS=30000;      // never refetch the chat list more than once / 30s
+  const IDENTITY_REFRESH_MS=180000;     // background refresh (was 12s, even in hidden tabs)
+  async function loadIdentityCache(force){
+    if(_identityLoading) return;
+    if(!force && Date.now()-_identityLastLoad<IDENTITY_MIN_GAP_MS) return;
+    if(typeof navigator!=='undefined' && navigator.onLine===false) return;
+    _identityLoading=true; _identityLastLoad=Date.now();
     try{
       const j=await jsonGet('/chats?limit=100');
       const chats=j?.data?.chats||[];
@@ -25,12 +32,20 @@
       });
       patchConversationRows();
     }catch(_){ }
+    finally{ _identityLoading=false; }
   }
   function patchConversationRows(){
+    if(typeof document!=='undefined' && document.hidden) return;
     document.querySelectorAll('.conv-item[data-chat-id]').forEach(row=>{
       const x=identityCache.get(String(row.dataset.chatId)); if(!x) return;
-      const name=row.querySelector('.conv-name'); if(name){ const star=/^⭐\s*/.exec(name.textContent||''); name.textContent=(star?star[0]:'')+x.name; }
-      const img=row.querySelector('.conv-avatar'); if(img&&x.avatar) img.src=x.avatar;
+      const name=row.querySelector('.conv-name');
+      if(name){
+        const star=/^⭐\s*/.exec(name.textContent||'');
+        const want=(star?star[0]:'')+x.name;
+        if(name.textContent!==want) name.textContent=want;   // only touch the DOM when it differs
+      }
+      const img=row.querySelector('.conv-avatar');
+      if(img&&x.avatar&&img.getAttribute('src')!==x.avatar) img.src=x.avatar;
     });
   }
   function hardenMessageModule(){
@@ -63,9 +78,13 @@
       return originalSend.call(M,a);
     };
     M.__necpraHardeningV1=true;
-    loadIdentityCache();
-    setInterval(loadIdentityCache,12000);
-    setInterval(patchConversationRows,1200);
+    loadIdentityCache(true);
+    if(!window.__necpraIdentityTimers){
+      window.__necpraIdentityTimers=true;
+      setInterval(()=>{ if(!document.hidden) loadIdentityCache(); },IDENTITY_REFRESH_MS);
+      setInterval(patchConversationRows,2500);
+      document.addEventListener('visibilitychange',()=>{ if(!document.hidden){ loadIdentityCache(); patchConversationRows(); } });
+    }
     return true;
   }
   const waitM=setInterval(()=>{if(hardenMessageModule()) clearInterval(waitM);},250);
