@@ -19,7 +19,7 @@
   if (window.__OfflineMessageQueue) return;
 
   const DB_NAME    = 'kyn_offline_queue';
-  const DB_VERSION = 2;
+  const DB_VERSION = 3;
   const STORE_NAME = 'pending_messages';
 
   const PRIORITY = Object.freeze({ HIGH: 3, MEDIUM: 2, LOW: 1 });
@@ -55,6 +55,7 @@
             store.createIndex('priority',  'priority',  { unique: false });
             store.createIndex('createdAt', 'createdAt', { unique: false });
             store.createIndex('chatId',    'chatId',    { unique: false });
+            store.createIndex('accountId', 'accountId', { unique: false });
           }
         };
         req.onsuccess = e => {
@@ -167,7 +168,7 @@
       this._listeners   = [];
       this._sendHandler = null;          // set by caller: async fn(entry) => void
       this._maxRetries  = 8;
-      this._expireMs    = 24 * 60 * 60 * 1000; // 24h
+      this._expireMs    = 7 * 24 * 60 * 60 * 1000; // 7 days
     }
 
     async init() {
@@ -183,7 +184,7 @@
       if (this._queue.size > 0) {
         setTimeout(() => this.flushAll().catch(() => {}), 4000);
       }
-      console.log(`[OfflineQueue] ✅ Initialized — ${this._queue.size} queued`);
+      console.log(`[OfflineQueue] ✅ Initialized — ${this._queue.size} queued for current account`);
     }
 
     // ── Public API ──────────────────────────────────────────────────────────
@@ -199,9 +200,24 @@
      * Returns the entry. Message appears in UI optimistically immediately.
      */
     async enqueue(msg) {
+      const accountId = (function () {
+    try {
+      const direct = window._kynCurrentUserId || window.currentUser?.id || window.currentUser?.userId || window.currentUser?.uid || window.currentUser?._id;
+      if (direct != null && String(direct) !== '') return String(direct);
+    } catch (_) {}
+    try {
+      const raw = localStorage.getItem('kynecta_auth');
+      const auth = raw ? JSON.parse(raw) : null;
+      const id = auth?.user?.id ?? auth?.user?.userId ?? auth?.user?.uid ?? auth?.user?._id;
+      if (id != null && String(id) !== '') return String(id);
+    } catch (_) {}
+    return null;
+  })();
+      if (!accountId) throw new Error('Cannot queue message without an authenticated account');
       const entry = {
         id:        msg.localId || msg.id || this._genId(),
         chatId:    msg.chatId  || msg.conversationId || null,
+        accountId,
         type:      msg.type    || 'message',
         priority:  MSG_TYPE_PRIORITY[msg.type] || PRIORITY.MEDIUM,
         payload:   msg,
@@ -252,10 +268,25 @@
      */
     async markInFlight(msg) {
       const id = msg.localId || msg.id;
-      if (!id) return null; // no stable id to dedupe against later — skip rather than risk a duplicate entry
+      if (!id) return null;
+      const accountId = (function () {
+    try {
+      const direct = window._kynCurrentUserId || window.currentUser?.id || window.currentUser?.userId || window.currentUser?.uid || window.currentUser?._id;
+      if (direct != null && String(direct) !== '') return String(direct);
+    } catch (_) {}
+    try {
+      const raw = localStorage.getItem('kynecta_auth');
+      const auth = raw ? JSON.parse(raw) : null;
+      const id = auth?.user?.id ?? auth?.user?.userId ?? auth?.user?.uid ?? auth?.user?._id;
+      if (id != null && String(id) !== '') return String(id);
+    } catch (_) {}
+    return null;
+  })();
+      if (!accountId) return null;
       const entry = {
         id,
         chatId:    msg.chatId  || msg.conversationId || null,
+        accountId,
         type:      msg.type    || 'message',
         priority:  MSG_TYPE_PRIORITY[msg.type] || PRIORITY.MEDIUM,
         payload:   msg,
@@ -408,7 +439,24 @@
             await this._persistence.remove(entry.id);
             continue;
           }
-          entry.state = 'QUEUED'; // reset SENDING state from crash
+          const accountId = (function () {
+    try {
+      const direct = window._kynCurrentUserId || window.currentUser?.id || window.currentUser?.userId || window.currentUser?.uid || window.currentUser?._id;
+      if (direct != null && String(direct) !== '') return String(direct);
+    } catch (_) {}
+    try {
+      const raw = localStorage.getItem('kynecta_auth');
+      const auth = raw ? JSON.parse(raw) : null;
+      const id = auth?.user?.id ?? auth?.user?.userId ?? auth?.user?.uid ?? auth?.user?._id;
+      if (id != null && String(id) !== '') return String(id);
+    } catch (_) {}
+    return null;
+  })();
+          if (!accountId || !entry.accountId || String(entry.accountId) !== String(accountId)) {
+            await this._persistence.remove(entry.id);
+            continue;
+          }
+          entry.state = 'QUEUED';
           this._queue.set(entry.id, entry);
         }
       } catch (err) {

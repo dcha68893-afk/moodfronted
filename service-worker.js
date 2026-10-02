@@ -24,7 +24,7 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.45.0';
+const SW_VERSION = '19.46.0';
 // FIX: bumped so activate() drops every existing cache immediately on this
 // deploy — anyone with a stale pre-rebuild group.html (or the old, now-
 // deleted group-core-*/group-os-* files, or the misspelled necpra-* icons
@@ -82,7 +82,7 @@ const SW_VERSION = '19.45.0';
 // are no longer cached or executed as code; navigations fall back to the cached shell after 6s.
 // v74: profile-photo fix (js/avatar-fix.js added, message.html + js/config.js changed). Bump forces every installed
 // PWA/Android app to drop old copies and show the 'Update ready - Refresh' banner.
-const CACHE_NAME = 'necpra-static-v80';
+const CACHE_NAME = 'necpra-static-v81';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -91,7 +91,7 @@ const CORE_STATIC_ASSETS = [
   '/friend.html','/chat.html',
   '/js/api.core.js','/js/api.request.js','/js/api.auth.js','/js/api.messages.js',
   '/js/app.core.bootstrap.js','/js/app.core.session.js','/js/app.core.ui.js','/js/app.ui.auth.js',
-  '/js/app.cache.js','/js/app.cache.unified.js','/js/authStorage.js','/js/app.offline.queue.js','/js/auth.session.manager.js',
+  '/js/app.cache.js','/js/app.cache.unified.js','/js/authStorage.js','/js/app.offline.queue.js','/js/core/queue/OfflineMessageQueue.js','/js/auth.session.manager.js',
   '/js/app.runtime.authority.js','/js/auth.account.limit.js','/js/google-auth.js','/js/app.offline.bootstrap.js',
   '/friend.css','/css/suppress-webgl.css','/js/status-runtime-hardening.js','/js/marketplace-category-images.js'
 ];
@@ -109,7 +109,7 @@ const NETWORK_FIRST_PATTERNS = [
   /\/js\/app\.cache\.js/i,/\/js\/app\.ui\.auth\.js/i,/\/js\/app\.realtime\.socket\.js/i,
   /\/js\/app\.runtime\.authority\.js/i,/\/js\/api\.core\.js/i,/\/js\/messages-core\.js/i,
   /\/js\/messages-ui\.js/i,/\/js\/message-client\.js/i,/\/js\/e2e-store-v2\.js/i,
-  /\/js\/message-local-db\.js/i,/\/js\/message-realtime-bridge\.js/i,/\/MessageLifecycleClient\.js/i,
+  /\/js\/message-local-db\.js/i,/\/js\/core\/queue\/OfflineMessageQueue\.js/i,/\/js\/message-realtime-bridge\.js/i,/\/MessageLifecycleClient\.js/i,
   /\/messages-core\.bootstrap\.js/i,/\/messages-core\.operations\.js/i,/\/messages-core\.ui-bridge\.js/i,
   /\/messageSync\.engine\.js/i,/\/status-core-runtime\.js/i,/\/status-core\.part[1-3]\.js/i,
   /\/status-core-transport\.js/i,/\/status-core-state\.js/i,/\/status-ui\.js/i,

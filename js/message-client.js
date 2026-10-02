@@ -707,6 +707,41 @@
         };
     }
 
+    function installOfflineMessageQueue() {
+        const queue = window.__OfflineMessageQueue;
+        if (!queue || typeof queue.setSendHandler !== 'function') return false;
+        queue.setSendHandler(async (payload) => {
+            const body = payload?._offlineSendBody || payload;
+            if (!body?.clientMessageId) throw new Error('Offline message payload is incomplete');
+            const res = await api().post('/messages', body);
+            if (!res?.success) throw new Error(res?.message || 'Message send failed');
+            const data = res.data || {};
+            const chatId = data.chatId ?? body.chatId;
+            if (data.id != null && chatId != null) {
+                applyIncomingMessage(Object.assign({}, data, {
+                    chatId, clientMessageId: body.clientMessageId,
+                    displayContent: payload.displayContent || undefined
+                }), { fromSelf: true });
+            } else {
+                const found = findMessageByClientMessageId(body.clientMessageId);
+                if (found) {
+                    found.msg.status = 'sent';
+                    notify('delivery-state:updated', { chatId: found.chatId, messageId: found.msg.id });
+                }
+            }
+            return res;
+        });
+        return true;
+    }
+
+    (function ensureOfflineMessageQueue() {
+        if (installOfflineMessageQueue()) return;
+        let attempts = 0;
+        const timer = setInterval(() => {
+            if (installOfflineMessageQueue() || ++attempts >= 40) clearInterval(timer);
+        }, 100);
+    })();
+
     // Generates the sender-local ID sendMessage() attaches to every outgoing
     // message. The backend uses (senderId, clientMessageId) as an idempotency
     // key (messageDeliveryService.sendMessage — a retry with the same ID
@@ -1044,12 +1079,39 @@
             return last;
         };
 
+        const queue = window.__OfflineMessageQueue;
+        const offlinePayload = { ...sendBody, _offlineSendBody: sendBody, displayContent: content, localId: clientMessageId };
+        if (queue?.markInFlight) { try { await queue.markInFlight(offlinePayload); } catch (_) {} }
+
+        if (!navigator.onLine) {
+            if (!queue?.enqueue) {
+                bucket.set(optimisticId, Object.assign({}, optimisticMessage, { status: 'failed' }));
+                notify('message:failed', { chatId: optimisticMessage.chatId, clientMessageId, error: 'Offline message queue is unavailable' });
+                return { success: false, error: 'Offline message queue is unavailable' };
+            }
+            try {
+                await queue.enqueue(offlinePayload);
+                bucket.set(optimisticId, Object.assign({}, optimisticMessage, { status: 'queued', offlineQueued: true }));
+                notify('message:queued', { chatId: optimisticMessage.chatId, clientMessageId, offline: true });
+                notify('delivery-state:updated', { chatId: optimisticMessage.chatId, messageId: optimisticId, status: 'queued' });
+                return { success: true, queued: true, offline: true, clientMessageId };
+            } catch (err) {
+                bucket.set(optimisticId, Object.assign({}, optimisticMessage, { status: 'failed' }));
+                notify('message:failed', { chatId: optimisticMessage.chatId, clientMessageId, error: err?.message || 'Could not queue message offline' });
+                return { success: false, error: err?.message || 'Could not queue message offline' };
+            }
+        }
+
         let res;
         try { res = await postWithRetry(); } catch (err) { res = { success: false, message: err && err.message }; }
 
-        if (res && res.alreadyDelivered) return { success: true, alreadyDelivered: true };
+        if (res && res.alreadyDelivered) {
+            if (queue?.markDelivered) { try { await queue.markDelivered(clientMessageId); } catch (_) {} }
+            return { success: true, alreadyDelivered: true };
+        }
 
         if (res && res.success) {
+            if (queue?.markDelivered) { try { await queue.markDelivered(clientMessageId); } catch (_) {} }
             // Success handling lives OUTSIDE the failure try/catch on purpose: nothing that
             // goes wrong while tidying local state may ever flip a delivered message to 'failed'.
             const data = res.data || {};
@@ -1091,8 +1153,18 @@
             return { success: true, alreadyDelivered: true };
         }
         if (await verifyDeliveredOnServer(chatId || optimisticMessage.chatId, clientMessageId, content)) {
+            if (queue?.markDelivered) { try { await queue.markDelivered(clientMessageId); } catch (_) {} }
             return { success: true, alreadyDelivered: true, verified: true };
         }
+        if (queue?.enqueue && (navigator.onLine === false || res?.status >= 500 || !res?.status)) {
+            try {
+                await queue.enqueue(offlinePayload);
+                bucket.set(optimisticId, Object.assign({}, optimisticMessage, { status: 'queued', offlineQueued: true }));
+                notify('message:queued', { chatId: optimisticMessage.chatId, clientMessageId, offline: navigator.onLine === false });
+                return { success: true, queued: true, clientMessageId };
+            } catch (_) {}
+        }
+        if (queue?.markDelivered) { try { await queue.markDelivered(clientMessageId); } catch (_) {} }
         bucket.set(optimisticId, Object.assign({}, optimisticMessage, { status: 'failed' }));
         notify('message:failed', { chatId: optimisticMessage.chatId, clientMessageId, error: res && res.message });
         return { success: false, error: res && res.message };
