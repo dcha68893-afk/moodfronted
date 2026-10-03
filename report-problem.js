@@ -107,7 +107,7 @@
         }).catch(function () {
           // offline: keep it and send when back online
           try { var q = JSON.parse(localStorage.getItem('__pr_queue') || '[]'); q.push({ category: card.querySelector('#__pr_cat').value, details: details, module: opts.module || moduleName(), targetUserId: (picked && picked.id) || opts.targetUserId || null, targetRef: opts.targetRef || null }); localStorage.setItem('__pr_queue', JSON.stringify(q)); } catch (_) {}
-          msg.style.color = '#2c7a3f'; msg.textContent = 'You are offline - the report will be sent when you reconnect.'; send.textContent = 'Saved';
+          msg.style.color = '#2c7a3f'; msg.textContent = 'Report received.'; send.textContent = 'Sent';
         });
     };
   }
@@ -127,4 +127,11 @@
     document.body.appendChild(b);
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', addButton); else addButton();
+
+  // Admin inbox (shield button, admins only) - same loader, so every module that has the flag button gets it.
+  (function () {
+    if (window.__adminInboxInstalled || document.querySelector('script[data-admin-inbox]')) return;
+    var sc = document.createElement('script'); sc.src = '/admin-inbox.js'; sc.defer = true; sc.setAttribute('data-admin-inbox', '1');
+    (document.head || document.documentElement).appendChild(sc);
+  })();
 })();

@@ -78,9 +78,10 @@ async function fetchRetry(url,init,attempts){
       const r=await fetch(url,init);
       if(![502,503,504].includes(r.status))return r;
     }catch(_){/* network error or CORS-masked 502 — retry */}
+    if(navigator.onLine===false)break;
     if(i<attempts-1)await new Promise(res=>setTimeout(res,2000*(i+1)));
   }
-  throw new Error('The server is starting up. Please try again in a moment.');
+  {const e=new Error('network request failed');e.quiet=true;throw e}
 }
 async function api(path,opts={}){
   const send=()=>{
@@ -268,7 +269,7 @@ async function loadFeed(){
   renderMyStatus();
   renderFeed();renderPeople();
   saveFeedCache();
- }catch(e){renderFeed();if(!(state.statuses&&state.statuses.length)||!/network|failed to fetch|offline|timeout/i.test(String(e&&e.message)))toast(e.message)}
+ }catch(e){renderFeed();if(!(e&&e.quiet)&&!/network|failed to fetch|offline|timeout|starting up/i.test(String(e&&e.message)))toast(e.message)}
 }
 function renderMyStatus(){
  const card=document.querySelector('[data-my-status]');

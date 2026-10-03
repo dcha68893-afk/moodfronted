@@ -6125,7 +6125,7 @@
       });
 
       window.addEventListener("offline", () => {
-        this.showErrorToUser("You are offline. Some features may be limited.", "warning");
+        /* offline is silent: saved data keeps working, no warning shown */
       });
 
       console.log("✅ Error handling setup complete");

@@ -24,7 +24,7 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.46.0';
+const SW_VERSION = '19.47.0';
 // FIX: bumped so activate() drops every existing cache immediately on this
 // deploy — anyone with a stale pre-rebuild group.html (or the old, now-
 // deleted group-core-*/group-os-* files, or the misspelled necpra-* icons
@@ -82,7 +82,7 @@ const SW_VERSION = '19.46.0';
 // are no longer cached or executed as code; navigations fall back to the cached shell after 6s.
 // v74: profile-photo fix (js/avatar-fix.js added, message.html + js/config.js changed). Bump forces every installed
 // PWA/Android app to drop old copies and show the 'Update ready - Refresh' banner.
-const CACHE_NAME = 'necpra-static-v84';
+const CACHE_NAME = 'necpra-static-v85';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -92,7 +92,7 @@ const CORE_STATIC_ASSETS = [
   '/js/app.core.bootstrap.js','/js/app.core.session.js','/js/app.core.ui.js','/js/app.ui.auth.js',
   '/js/app.cache.js','/js/app.cache.unified.js','/js/authStorage.js','/js/app.offline.queue.js','/js/auth.session.manager.js',
   '/js/app.runtime.authority.js','/js/auth.account.limit.js','/js/google-auth.js','/js/app.offline.bootstrap.js',
-  '/app-protect.js','/session-restore.js','/report-problem.js','/js/runtime-config.js','/js/config.js','/js/theme.engine.js','/js/settings-broadcast-listener.js','/js/necpa-session-resilience.js','/js/services.friend.js'
+  '/app-protect.js','/session-restore.js','/report-problem.js','/admin-inbox.js','/js/runtime-config.js','/js/config.js','/js/offline-first.js','/js/theme.engine.js','/js/settings-broadcast-listener.js','/js/necpa-session-resilience.js','/js/services.friend.js'
 ];
 
 const NETWORK_FIRST_PATTERNS = [
@@ -130,7 +130,7 @@ const NETWORK_FIRST_PATTERNS = [
   // already hit and fixed for the friend module and marketplace files
   // below. Swapped the dead legacy entries for the real, still-actively-
   // edited files group.html depends on today.
-  /\/group\.html/i,/\/js\/groupMessaging\.client\.js/i,/\/js\/groupEncryption\.client\.js/i,/\/js\/group-platform\.js/i,/\/js\/group-message-local-db\.js/i,/\/js\/core\/groups\/group-cache-first\.js/i,/\/js\/group-chat-features\.js/i,/\/js\/group-message-cache\.js/i,
+  /\/group\.html/i,/\/js\/groupMessaging\.client\.js/i,/\/js\/groupEncryption\.client\.js/i,/\/js\/group-platform\.js/i,/\/js\/group-message-local-db\.js/i,/\/js\/core\/groups\/group-cache-first\.js/i,/\/js\/offline-first\.js/i,/\/js\/group-discover\.js/i,/\/admin-inbox\.js/i,/\/js\/group-chat-features\.js/i,/\/js\/group-message-cache\.js/i,
   /\/friend-core\.ui-bridge\.js/i,
   // ROOT-CAUSE FIX (fixes to the friend module silently not appearing after
   // deploy — "some changes show, others don't"): friend.html and friend.css

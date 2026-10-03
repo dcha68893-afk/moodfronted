@@ -3905,7 +3905,7 @@ initializeIframeCoordination: function() {
       
       // Network error handler
       window.addEventListener('offline', () => {
-        this.showErrorToUser('You are offline. Some features may be limited.', 'warning');
+        /* offline is silent: saved data keeps working, no warning shown */
       });
       
       console.log('✅ Error handling setup complete');
@@ -7725,7 +7725,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       
       // Show warning (use native console to avoid recursion)
       this.nativeConsole.warn.call(console, 'Network offline');
-      this.showErrorToUser('You are offline. Some features may be limited.', 'warning');
+      /* offline is silent: saved data keeps working, no warning shown */
       
       // Dispatch event safely
       this.dispatchErrorEvent('network-offline', errorDetails);

@@ -4834,8 +4834,7 @@
       // Network error handling
       UI_SAFETY.safeEventListener(window, 'offline', () => {
         UI_SAFETY.guard(this._componentId, () => {
-          UI_STATE.transitionTo(UI_STATE.STATES.OFFLINE, 'network_offline');
-          this.showPageError('You are offline', 'Please check your internet connection');
+          /* offline is silent: saved data keeps working, so no error page is shown */
         });
       });
       
