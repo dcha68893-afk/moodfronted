@@ -32,8 +32,11 @@
     document.body.appendChild(shield);
   }
   function hide() { if (shield) { shield.remove(); shield = null; } }
+  // Blur occurs during normal browser/UI interactions. It must never cover the
+  // entire Necpra shell with a dark shield. Only a genuinely hidden document
+  // gets the privacy shield, and it is removed as soon as the document returns.
   document.addEventListener('visibilitychange', function () { document.hidden ? show() : hide(); });
-  window.addEventListener('blur', show); window.addEventListener('focus', hide);
+  window.addEventListener('focus', hide);
 
   // 3. deterrents
   document.addEventListener('keydown', function (e) {

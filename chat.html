@@ -3258,9 +3258,11 @@
                     // fatal.
                     const src = d.payload && d.payload.source;
                     const errCode = d.payload && d.payload.error;
-                    if (src === 'friends') return true;
-                    if (errCode === 'UNAUTHORIZED_API_CALL') return true;
-                    return errCode === undefined && src === undefined; // unknown-shape AUTH_ERROR: treat as fatal rather than silently drop
+                    // Only a confirmed unauthorized response may end the session.
+                    // Generic module AUTH_ERROR events can represent network/boot failures.
+                    if (errCode === 'UNAUTHORIZED_API_CALL' || errCode === 'TOKEN_EXPIRED') return true;
+                    const status = Number(d.payload && (d.payload.status || d.payload.statusCode || d.payload.httpStatus));
+                    return status === 401 || status === 403;
                 }
                 default:
                     return false;
