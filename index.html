@@ -1,6 +1,18 @@
 <!DOCTYPE html>
 <html lang="en">
-<head><script src="/session-restore.js"></script><script src="/app-protect.js"></script>
+<head>
+<script>
+    (function(){try{var raw=localStorage.getItem("kynecta_auth"),a=raw?JSON.parse(raw):null,t=a&&a.token,v=false;if(t&&t.split(".").length===3){var p=t.split(".")[1].replace(/-/g,"+").replace(/_/g,"/"),x=JSON.parse(atob(p+"=".repeat((4-p.length%4)%4)));v=!x.exp||x.exp*1000>Date.now()}if(v&&a.user)document.documentElement.setAttribute("data-necpa-session","active");
+    /* WhatsApp-style launch: a returning user (saved token + user) goes straight to the app.
+       Done here, before first paint, so the landing/login page never flashes. An expired
+       access token is refreshed (or the user sent to login with ?reason=) inside chat.html.
+       Login is only shown after logout, session invalidation (?reason=) or for new users. */
+    if(a&&a.user&&t&&!/[?&](reason|logout|force)=/.test(location.search)&&window.top===window.self){
+        document.documentElement.style.visibility="hidden";
+        location.replace("chat.html");
+    }}catch(_){}})();
+    </script>
+<script src="/session-restore.js"></script><script src="/app-protect.js"></script>
     <script>
     (function () {
         try {
@@ -23,17 +35,6 @@
          window.GOOGLE_CLIENT_ID coming from this same config. -->
     <script src="/js/runtime-config.js"></script>
     <script src="/js/config.js"></script>
-    <script>
-    (function(){try{var raw=localStorage.getItem("kynecta_auth"),a=raw?JSON.parse(raw):null,t=a&&a.token,v=false;if(t&&t.split(".").length===3){var p=t.split(".")[1].replace(/-/g,"+").replace(/_/g,"/"),x=JSON.parse(atob(p+"=".repeat((4-p.length%4)%4)));v=!x.exp||x.exp*1000>Date.now()}if(v&&a.user)document.documentElement.setAttribute("data-necpa-session","active");
-    /* WhatsApp-style launch: a returning user (saved token + user) goes straight to the app.
-       Done here, before first paint, so the landing/login page never flashes. An expired
-       access token is refreshed (or the user sent to login with ?reason=) inside chat.html.
-       Login is only shown after logout, session invalidation (?reason=) or for new users. */
-    if(a&&a.user&&t&&!/[?&](reason|logout|force)=/.test(location.search)&&window.top===window.self){
-        document.documentElement.style.visibility="hidden";
-        location.replace("chat.html");
-    }}catch(_){}})();
-    </script>
     <script>
     // FIX (HARDCODED-BACKEND-URL-BYPASSES-DOTENV): this used to hardcode
     // https://noxopa.onrender.com directly, so BACKEND_URL in .env /

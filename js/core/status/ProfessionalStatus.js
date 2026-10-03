@@ -238,7 +238,24 @@ function normalizeStatus(s){
  if(!x.type&&x.mediaMime)x.type=String(x.mediaMime).startsWith('video/')?'video':String(x.mediaMime).startsWith('image/')?'image':'text';
  return x;
 }
+// CACHE-FIRST FEED: the last loaded feed (mine + friends/discover) is kept per user and tab in
+// localStorage and painted the moment the screen opens; the network then only updates it.
+function feedCacheKey(){return 'necpa_status_feed_cache_'+String((currentUser()||{}).id||'guest')+'_'+(state.tab==='discover'?'discover':'friends')}
+function saveFeedCache(){try{localStorage.setItem(feedCacheKey(),JSON.stringify({mine:state.mine||[],statuses:state.statuses||[]}))}catch(_){}}
+function hydrateFeedCache(){
+ try{
+  const c=JSON.parse(localStorage.getItem(feedCacheKey())||'null');
+  if(!c)return false;
+  const now=Date.now(),live=x=>!x||!x.expiresAt||!(Date.parse(x.expiresAt)<now);
+  state.mine=(c.mine||[]).filter(live);state.statuses=(c.statuses||[]).filter(live);
+  renderMyStatus();renderFeed();renderPeople();
+  return true;
+ }catch(_){return false}
+}
 async function loadFeed(){
+ try{
+  if(state._feedTab!==state.tab||!(state.statuses&&state.statuses.length)){state._feedTab=state.tab;hydrateFeedCache()}
+ }catch(_){}
  try{
   const me=currentUser();
   const mine=(await api('/my')).data||[];
@@ -250,7 +267,8 @@ async function loadFeed(){
     .sort((a,b)=>Date.parse(b.createdAt||0)-Date.parse(a.createdAt||0));
   renderMyStatus();
   renderFeed();renderPeople();
- }catch(e){renderFeed();toast(e.message)}
+  saveFeedCache();
+ }catch(e){renderFeed();if(!(state.statuses&&state.statuses.length)||!/network|failed to fetch|offline|timeout/i.test(String(e&&e.message)))toast(e.message)}
 }
 function renderMyStatus(){
  const card=document.querySelector('[data-my-status]');

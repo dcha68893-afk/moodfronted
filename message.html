@@ -9,6 +9,19 @@
      explanation of why a literal in this spot breaks under the build. -->
 <script src="/js/runtime-config.js"></script>
 <script src="/js/config.js"></script>
+<!-- FAST CACHE START: message-local-db.js is self-contained (IndexedDB + localStorage only),
+     so it loads right after config.js and the cached chat list is requested NOW, in
+     parallel with the ~17 heavy scripts below, instead of after them. message-client.js
+     consumes window.__kynConvCachePromise. -->
+<script src="/js/message-local-db.js"></script>
+<script>
+  window.__kynConvListSettled = false;
+  try {
+    window.__kynConvCachePromise = window.KynectaMessageCache
+      ? Promise.resolve(window.KynectaMessageCache.getConversations()).catch(function () { return []; })
+      : Promise.resolve([]);
+  } catch (_) { window.__kynConvCachePromise = Promise.resolve([]); }
+</script>
 <script src="/js/avatar-fix.js?v=20260924-1"></script>
 <script src="/js/theme.engine.js"></script>
 <!-- FIX (SETTINGS-NOT-APPLIED-EVERYWHERE): this listener's own header comment
@@ -543,7 +556,6 @@
        register first, so it actually intercepts and isolates group
        payloads before message-client.js can touch them. -->
   <script src="/js/group-message-isolation.js"></script>
-  <script src="/js/message-local-db.js"></script>
   <script src="/js/message-client.js"></script>
 
 
@@ -756,6 +768,26 @@
       return (await _kynHashPin(pin)) === stored;
     }
 
+    // Sidebar rebuilds are coalesced to at most one per frame (rAF, with a 60 ms timer
+    // fallback for throttled/hidden frames). Cache hydrate and list refresh fire one
+    // update per chat; each used to rebuild the whole sidebar synchronously.
+    let _convRenderQueued = false;
+    function scheduleConversationListRender() {
+      if (_convRenderQueued) return;
+      _convRenderQueued = true;
+      const run = () => {
+        if (!_convRenderQueued) return;
+        _convRenderQueued = false;
+        renderConversationList();
+      };
+      if (window.requestAnimationFrame) window.requestAnimationFrame(run);
+      setTimeout(run, 60);
+    }
+    // Never leave skeleton rows up forever if cache and network both stall.
+    setTimeout(() => {
+      if (!window.__kynConvListSettled) { window.__kynConvListSettled = true; scheduleConversationListRender(); }
+    }, 5000);
+
     function renderConversationList() {
       if (viewingArchived) return; // don't let realtime updates overwrite the archived view
       const lockedIds = _kynCLGetSet('locked_chats');
@@ -787,6 +819,11 @@
           ${(c.unreadCount > 0 || forcedUnread.has(String(c.chatId))) ? `<span class="unread-badge">${c.unreadCount > 99 ? '99+' : (c.unreadCount || '')}</span>` : ''}
         </div>`;
 
+      if (convs.length === 0 && lockedConvs.length === 0 && !window.__kynConvListSettled) {
+        // Cache not read / first server answer not in yet: leave the list empty (no skeleton,
+        // and no false "No conversations yet" message). The rows appear the moment the cache loads.
+        return;
+      }
       if (convs.length === 0 && lockedConvs.length === 0) {
         convListEl.innerHTML = `
           <div class="empty-conv-list">
@@ -2720,8 +2757,12 @@
         case 'settings:changed':
           if (data && data.section === 'chat' && data.key === 'autoCorrect') applyAutoCorrectSetting();
           break;
+        case 'conversations:hydrated':
+        case 'conversations:settled':
+          scheduleConversationListRender();
+          break;
         case 'conversation:updated':
-          renderConversationList();
+          scheduleConversationListRender();
           // FIX (HEADER-SAYS-OFFLINE): presence changes arrive as conversation updates but
           // never re-sent the header to the parent, so it kept whatever it showed on open.
           try {
@@ -2759,7 +2800,7 @@
           if (data && data.chatId === window.MessageModule.getActiveChatId()) {
             renderMessages(data.chatId, { preserveScroll: true });
           }
-          renderConversationList();
+          scheduleConversationListRender();
           break;
         case 'typing:changed': {
           if (data.chatId !== window.MessageModule.getActiveChatId()) break;

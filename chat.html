@@ -476,8 +476,10 @@
            so every path still goes through the same open-chat logic — it just
            never paints the in-between list state. Ordinary navigation to the
            Messages tab (browsing the list on purpose) never applies this class. */
+        /* NEVER HIDE THE UI: the veil class is still toggled by the open-chat logic, but it no
+           longer hides the Messages panel (it used to for up to 3s on notification/deep-link opens). */
         #messagesContent.chat-opening-veil {
-            visibility: hidden !important;
+            visibility: visible !important;
         }
 
         /* Iframes are hidden via visibility+pointer-events so their JS initialises
@@ -1756,14 +1758,50 @@
             return true;
         }
 
-        function warmAll() {
-            ['statusIframe','groupIframe','friendsIframe','settingsIframe','toolsIframe','gamesIframe'].forEach(load);
-            window.__modulesWarmed = true;
+        // PRIORITY WARM-UP (so a tab tap never lands on an empty iframe):
+        //  - the messages iframe boots first and alone;
+        //  - once it has loaded (6s safety net) the other modules boot in usage order, ONE AT A
+        //    TIME, each freeing the slot on load (4s cap) so a slow module cannot stall the rest;
+        //  - tapping a tab loads that module IMMEDIATELY and pauses the queue until it has
+        //    loaded (6s cap), so the module the user is waiting for gets the full bandwidth.
+        var QUEUE = ['statusIframe','groupIframe','friendsIframe','settingsIframe','toolsIframe','gamesIframe'];
+        var SLOTS = 1, running = 0, queueOn = false, urgent = 0;
+
+        function pump() {
+            if (!queueOn) return;
+            while (running < SLOTS && urgent === 0 && QUEUE.length) {
+                var id = QUEUE.shift();
+                var f = document.getElementById(id);
+                if (!f || f.getAttribute('src')) continue;
+                running++;
+                (function (fr) {
+                    var released = false;
+                    function rel() { if (released) return; released = true; running--; setTimeout(pump, 120); }
+                    fr.addEventListener('load', function () { fr.__kynLoaded = true; rel(); }, { once: true });
+                    setTimeout(rel, 4000);
+                })(f);
+                load(id);
+            }
+            if (!QUEUE.length && running === 0) window.__modulesWarmed = true;
         }
+
+        function warmAll() { queueOn = true; pump(); }
 
         window.__loadModuleIframe = function (page) {
             var id = MAP[String(page || '').toLowerCase()];
-            if (id) load(id);
+            if (!id) return;
+            var f = document.getElementById(id);
+            if (!f) return;
+            var wasLoaded = !!f.getAttribute('src');
+            QUEUE = QUEUE.filter(function (q) { return q !== id; });
+            if (!wasLoaded) {
+                urgent++;
+                var freed = false;
+                var free = function () { if (freed) return; freed = true; urgent = Math.max(0, urgent - 1); pump(); };
+                f.addEventListener('load', function () { f.__kynLoaded = true; free(); }, { once: true });
+                setTimeout(free, 6000);
+                load(id);
+            }
         };
         window.__warmAllModules = warmAll;
 
@@ -1775,8 +1813,20 @@
                     console.warn('[Necpra] Module warm-up failed:', e);
                 }
             };
-            if (window.requestAnimationFrame) window.requestAnimationFrame(begin);
-            else setTimeout(begin, 0);
+            var msg = document.getElementById('messagesIframe');
+            var started = false;
+            function once() { if (started) return; started = true; setTimeout(begin, 200); }
+            // NO RACING: the other modules boot ONE AT A TIME, and only after the messages
+            // iframe has finished loading, so they never compete with it. (Until a module's turn
+            // comes, tapping its tab shows its last saved screen instantly - see __kynSnap.)
+            if (msg) {
+                try {
+                    var d = msg.contentDocument;
+                    if (d && d.readyState === 'complete' && d.location.href !== 'about:blank') once();
+                } catch (_) {}
+                msg.addEventListener('load', once, { once: true });
+            }
+            setTimeout(once, 6000);   // safety net if the messages iframe never reports load
         }
 
         if (document.readyState === 'loading') {
@@ -1822,6 +1872,133 @@
     <div id="gamesContent" class="iframe-container hidden">
         <iframe id="gamesIframe" class="content-iframe" data-src="game.html" data-module="games"></iframe>
     </div>
+    <script>
+    // LAST-SCREEN SNAPSHOTS (instant UI before a module has booted):
+    // Every module iframe's rendered screen is saved (scripts stripped) in the Cache API,
+    // per signed-in user. When a module is on screen but its iframe has not finished booting
+    // - the Messages module at app open, or a tab tapped before its background warm-up got
+    // to it - the saved screen is painted instantly in a non-interactive overlay and removed
+    // the moment the real iframe has loaded. Nothing waits on a tap or on the network.
+    (function () {
+        var CACHE = 'necpra-ui-snapshots-v1';
+        var MODS = {
+            messages: ['messagesIframe', 'messagesContent'], status: ['statusIframe', 'statusContent'],
+            group: ['groupIframe', 'groupContent'], friends: ['friendsIframe', 'friendsContent'],
+            settings: ['settingsIframe', 'settingsContent'], tools: ['toolsIframe', 'toolsContent'],
+            games: ['gamesIframe', 'gamesContent']
+        };
+        var last = {}, overlays = {};
+
+        function uid() {
+            try {
+                var a = JSON.parse(localStorage.getItem('kynecta_auth') || 'null');
+                var u = a && a.user, id = u && (u.id != null ? u.id : (u.userId != null ? u.userId : u._id));
+                return id != null ? String(id) : null;
+            } catch (_) { return null; }
+        }
+        function key(m) { var u = uid(); return u ? '/__snapshot/' + u + '/' + m : null; }
+        function open() { return window.caches ? caches.open(CACHE) : Promise.reject(new Error('no cache api')); }
+        function modOfPage(page) {
+            page = String(page || '').toLowerCase();
+            var alias = { groups: 'group', friend: 'friends', tool: 'tools', marketplace: 'tools', game: 'games' };
+            page = alias[page] || page;
+            return MODS[page] ? page : null;
+        }
+
+        function serialize(doc) {
+            var root = doc.documentElement.cloneNode(true);
+            root.querySelectorAll('script,noscript,iframe,object,embed,video,audio,canvas').forEach(function (n) { n.remove(); });
+            var head = root.querySelector('head');
+            if (head) {
+                var base = doc.createElement('base'); base.setAttribute('href', location.origin + '/');
+                head.insertBefore(base, head.firstChild);
+            }
+            return '<!DOCTYPE html>' + root.outerHTML;
+        }
+
+        function capture(m) {
+            try {
+                if (!m || !MODS[m]) return;
+                var k = key(m); if (!k) return;
+                var f = document.getElementById(MODS[m][0]);
+                if (!f || !f.getAttribute('src') || f.__kynLoaded !== true) return;
+                if (m === 'messages' && document.body.classList.contains('chat-panel-active')) return; // keep the LIST, not an open chat
+                var now = Date.now(); if (last[m] && now - last[m] < 4000) return;
+                var doc = f.contentDocument; if (!doc || !doc.body || doc.readyState === 'loading') return;
+                if ((doc.body.innerText || '').trim().length < 80) return;                              // never save an empty/loading screen
+                last[m] = now;
+                var html = serialize(doc);
+                open().then(function (c) { return c.put(k, new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })); }).catch(function () {});
+            } catch (_) {}
+        }
+
+        function removeOverlay(m) {
+            var o = overlays[m]; if (!o) return;
+            delete overlays[m];
+            if (o.parentNode) o.parentNode.removeChild(o);
+        }
+
+        function show(m) {
+            try {
+                if (!m || !MODS[m] || overlays[m]) return;
+                var f = document.getElementById(MODS[m][0]), box = document.getElementById(MODS[m][1]);
+                if (!f || !box || f.__kynLoaded === true) return;
+                var k = key(m); if (!k) return;
+                overlays[m] = true;   // reserve so repeated calls don't stack
+                open().then(function (c) { return c.match(k); })
+                    .then(function (r) { return r ? r.text() : null; })
+                    .then(function (html) {
+                        if (!html || f.__kynLoaded === true || overlays[m] !== true) { if (overlays[m] === true) delete overlays[m]; return; }
+                        var o = document.createElement('iframe');
+                        o.className = 'kyn-snap';
+                        o.setAttribute('sandbox', 'allow-same-origin');   // no scripts: purely a picture of the last screen
+                        o.setAttribute('aria-hidden', 'true'); o.tabIndex = -1;
+                        o.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;border:0;z-index:5;pointer-events:none;background:inherit;';
+                        o.srcdoc = html;
+                        box.appendChild(o);
+                        overlays[m] = o;
+                        setTimeout(function () { removeOverlay(m); }, 15000);   // failsafe: never leave it up
+                    }).catch(function () { if (overlays[m] === true) delete overlays[m]; });
+            } catch (_) {}
+        }
+
+        function clearAll() {
+            try { if (window.caches) caches.delete(CACHE); } catch (_) {}
+            Object.keys(overlays).forEach(removeOverlay);
+        }
+
+        // Mark each iframe loaded (only once it really has a src), drop its overlay shortly after,
+        // and take a snapshot a few seconds after it has settled.
+        Object.keys(MODS).forEach(function (m) {
+            var f = document.getElementById(MODS[m][0]); if (!f) return;
+            f.addEventListener('load', function () {
+                if (!f.getAttribute('src')) return;
+                f.__kynLoaded = true;
+                setTimeout(function () { removeOverlay(m); }, 250);
+                setTimeout(function () { capture(m); }, 3000);
+            });
+        });
+
+        window.__kynSnap = {
+            show: show, capture: capture, clear: clearAll,
+            showForPage: function (page) { show(modOfPage(page)); },
+            leave: function (page) { capture(modOfPage(page)); }
+        };
+
+        // Keep the saved screens fresh: periodically for the visible module, and whenever the app is backgrounded.
+        setInterval(function () { capture(modOfPage(window.__currentPage || 'messages')); }, 20000);
+        document.addEventListener('visibilitychange', function () {
+            if (document.visibilityState === 'hidden') Object.keys(MODS).forEach(capture);
+        });
+        // Private data: wiped on account switch / sign-out elsewhere; reads are also per-user keyed.
+        window.addEventListener('kyn:accountSwitchWipe', clearAll);
+        window.addEventListener('storage', function (e) { if (e.key === 'kynecta_auth' && !e.newValue) clearAll(); });
+
+        // App open: paint the last Messages screen instantly (skip when a specific chat is being opened).
+        try { if (!sessionStorage.getItem('pending_chat')) show('messages'); } catch (_) { show('messages'); }
+    })();
+    </script>
+
     <style>
         .mobile-nav-icon[data-page="tools"] .ecom-nav-badge,
         .nav-icon[data-page="tools"] .ecom-nav-badge {
@@ -2820,7 +2997,9 @@
         function navigateToPage(page, options = {}) {
             _chatLog('[Navigation] navigateToPage called with:', page, options);
             if ((page === 'tools' || page === 'tool' || page === 'marketplace') && window.__loadToolsIframe) window.__loadToolsIframe();
+            if (window.__kynSnap && window.__currentPage && window.__currentPage !== page) window.__kynSnap.leave(window.__currentPage);
             if (window.__loadModuleIframe) window.__loadModuleIframe(page);
+            if (window.__kynSnap) window.__kynSnap.showForPage(page);
             if (!page) {
                 console.warn('[Navigation] No page provided to navigateToPage');
                 return;

@@ -143,26 +143,35 @@
     });
   }
 
+  // PARALLEL DOWNLOAD, ORDERED EXECUTION: dynamically inserted scripts with
+  // async=false are all fetched at once but executed in insertion order, so a
+  // whole list is inserted in one go instead of awaiting each file in turn
+  // (~35 sequential round-trips per iframe before). Groups still run one after
+  // another because later groups depend on earlier ones (and the mesh group is conditional).
+  function loadScripts(list) {
+    return Promise.all(list.map(loadScript));
+  }
+
   async function bootstrap() {
     console.log(`[Phase6Bootstrap] 🚀 Necpa loading ${MODULES.length} modules from ${BASE}`);
 
-    for (const m of MODULES) await loadScript(BASE + m);
+    await loadScripts(MODULES.map(m => BASE + m));
 
     // ── Phase 10: load transport runtime + deletion registry ─────────────
-    for (const src of PHASE10_MODULES) await loadScript(src);
+    await loadScripts(PHASE10_MODULES);
     console.log('[Phase6Bootstrap] ✅ Phase 10 production hardening modules loaded');
 
     // ── Mesh Engine (rich /mesh/ stack): crypto → transport → router → engine → bridge ──
     // FIX Bug2: Only load mesh modules if MeshCrypto is not already declared (iframe guard)
     if (!window.MeshCrypto) {
-      for (const src of MESH_MODULES) await loadScript(src);
+      await loadScripts(MESH_MODULES);
       console.log('[Phase6Bootstrap] ✅ Mesh engine stack loaded (MeshCrypto + MeshTransport + MeshRouter + MeshEngine)');
     } else {
       console.log('[Phase6Bootstrap] ℹ️ MeshCrypto already loaded — skipping MESH_MODULES (iframe guard)');
     }
 
     // ── Phase 11: load Central Orchestration Runtime ──────────────────────
-    for (const m of PHASE11_MODULES) await loadScript(BASE + m);
+    await loadScripts(PHASE11_MODULES.map(m => BASE + m));
     console.log('[Phase6Bootstrap] ✅ Phase 11 Central Orchestration Runtime loaded');
 
     const elapsed = Date.now() - startTs;

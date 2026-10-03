@@ -29,38 +29,8 @@
         } catch (_) {}
     }
 
-    // BOOT GUARD: top-level pages stay invisible (background already painted by the
-    // theme boot below) until scripts, styles and icon fonts have settled, so a slow
-    // cold start never shows half-styled markup. Always released by a hard timeout.
-    (function bootGuard() {
-        try {
-            if (window.top !== window.self) return;
-            var root = document.documentElement;
-            root.classList.add('kyn-booting');
-            var st = document.createElement('style');
-            st.id = 'kyn-boot-guard';
-            st.textContent = 'html.kyn-booting body{visibility:hidden!important}';
-            (document.head || root).appendChild(st);
-            var done = false;
-            function release() {
-                if (done) return;
-                done = true;
-                root.classList.remove('kyn-booting');
-                if (st.parentNode) st.parentNode.removeChild(st);
-            }
-            function afterFonts() {
-                var t = setTimeout(release, 800);
-                try {
-                    if (document.fonts && document.fonts.ready) {
-                        document.fonts.ready.then(function () { clearTimeout(t); requestAnimationFrame(release); });
-                    } else { clearTimeout(t); release(); }
-                } catch (_) { release(); }
-            }
-            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', afterFonts, { once: true });
-            else afterFonts();
-            setTimeout(release, 3000);
-        } catch (_) {}
-    })();
+    // NO BOOT GUARD: the page body is never hidden while loading. Every page paints
+    // immediately (the theme boot below already sets the background before first paint).
 
     var runtime = window.__NEXIPA_RUNTIME_CONFIG__ || window.__NECPRA_RUNTIME_CONFIG__ || {};
     var configuredOrigin = String(runtime.BACKEND_URL || window.BACKEND_URL || '').trim().replace(/\/+$/, '');

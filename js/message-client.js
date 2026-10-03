@@ -2042,6 +2042,14 @@
     // though the conversations genuinely exist server-side. This is a
     // transport-timing bug, not a real "you have no chats" state. Retries
     // with backoff instead of giving up after one try.
+    // The sidebar shows loading rows (not "No conversations yet") until the cache has been
+    // read or the server has answered once; this flips that and tells the UI to re-render.
+    function _markListSettled() {
+        if (window.__kynConvListSettled) return;
+        window.__kynConvListSettled = true;
+        notify('conversations:settled', {});
+    }
+
     async function loadConversations(attempt = 0) {
         try {
             // Chats that exist right now (from memory / the disk cache). Only THESE may be pruned below — a chat that
@@ -2052,6 +2060,7 @@
             if (!res || res.success === false) throw new Error((res && res.message) || 'Failed to load conversation list');
             const chats = (res.data && Array.isArray(res.data.chats)) ? res.data.chats : [];
             state.convLoadFailed = false;
+            _markListSettled();
             // FIX (DELETED / ARCHIVED CHATS STAYED IN THE LIST): this only ever ADDED conversations, so anything hidden or
             // archived (here or on another device) lingered from the cache forever. When the server returned the complete
             // list (the request is capped at 50), drop cached conversations it no longer lists. The open chat is left alone.
@@ -2093,6 +2102,7 @@
             if (attempt < 5) {
                 setTimeout(() => loadConversations(attempt + 1), Math.min(1000 * (attempt + 1), 8000));
             } else {
+                _markListSettled();
                 // Not a permanent give-up: the cached list stays on screen, and the 'online' / tab-visible handlers below retry.
                 console.error('[MessageModule] Conversation list refresh failed after 6 attempts; will retry when back online');
             }
@@ -2153,10 +2163,23 @@
     // in flight.
     (function hydrateConversationsFromCache() {
         if (!window.KynectaMessageCache) return;
-        state.hydrating = window.KynectaMessageCache.getConversations().then((cached) => {
+        // message.html starts this read right after config.js (window.__kynConvCachePromise),
+        // long before this file is reached; fall back to reading now if it is absent.
+        const source = window.__kynConvCachePromise || window.KynectaMessageCache.getConversations();
+        state.hydrating = Promise.resolve(source).then((cached) => {
+            // Straight into state: no per-chat notify (that rebuilt the whole sidebar once per
+            // cached chat) and NO persistConversation write-back (these rows just came from the DB).
+            // A conversation already in memory is newer than the cache, so it wins.
+            let added = 0;
             (cached || []).forEach((conv) => {
-                if (conv && conv.chatId != null) upsertConversationMeta(conv.chatId, conv);
+                if (!conv || conv.chatId == null || state.conversations.has(conv.chatId)) return;
+                state.conversations.set(conv.chatId, Object.assign({ unreadCount: 0 }, conv));
+                added++;
             });
+            if (added > 0) {
+                window.__kynConvListSettled = true;
+                notify('conversations:hydrated', { count: added });
+            }
         }).catch(() => {});
     })();
     // A failed refresh (offline, cold server) used to be final for the page session. Try again when the connection returns or

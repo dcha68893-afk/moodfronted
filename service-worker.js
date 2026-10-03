@@ -82,12 +82,12 @@ const SW_VERSION = '19.46.0';
 // are no longer cached or executed as code; navigations fall back to the cached shell after 6s.
 // v74: profile-photo fix (js/avatar-fix.js added, message.html + js/config.js changed). Bump forces every installed
 // PWA/Android app to drop old copies and show the 'Update ready - Refresh' banner.
-const CACHE_NAME = 'necpra-static-v83';
+const CACHE_NAME = 'necpra-static-v84';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
   '/index.html','/manifest.json','/icons/necpra-192.png','/icons/necpra-512.png',
-  '/chat.html',
+  '/','/chat.html','/message.html','/status.html','/group.html','/friend.html','/settings.html','/Tools.html','/game.html',
   '/js/api.core.js','/js/api.request.js','/js/api.auth.js','/js/api.messages.js',
   '/js/app.core.bootstrap.js','/js/app.core.session.js','/js/app.core.ui.js','/js/app.ui.auth.js',
   '/js/app.cache.js','/js/app.cache.unified.js','/js/authStorage.js','/js/app.offline.queue.js','/js/auth.session.manager.js',
@@ -202,37 +202,89 @@ function badAssetResponse(request,res){
   // A script/stylesheet answered with an HTML page is never valid code: it is a wake-up/404/fallback page.
   try{const d=request.destination;if(d!=='script'&&d!=='style'&&d!=='worker')return false;const ct=(res.headers.get('content-type')||'').toLowerCase();return ct.indexOf('text/html')!==-1;}catch(_){return false;}
 }
-async function navigation(request){
+// Documents are cached under origin+pathname (no query/hash) so /chat.html?x=1 and
+// /chat.html hit the same shell, and start_url "/" has its own entry.
+function navKey(url){try{const u=new URL(url,self.location.origin);return u.origin+u.pathname;}catch(_){return url;}}
+const NAV_TIMEOUT_MS=6000;
+// Chrome refuses to answer a navigation with a response flagged redirected=true, so any
+// stored/served document is rebuilt as a plain 200 response without that flag. Also keeps
+// the Tools.html marketplace script injection in ONE place (used by precache + refresh).
+async function cleanNav(url,r){
+  let body=null;
+  const headers=new Headers(r.headers);
+  if(new URL(url,self.location.origin).pathname==='/Tools.html'){
+    try{
+      let h=await r.clone().text();
+      const tag='<script src="/js/marketplace-category-images.js"></script>';
+      if(h.includes('</body>')&&!h.includes(tag))h=h.replace('</body>',tag+'</body>');
+      headers.set('content-type','text/html; charset=utf-8');
+      headers.delete('content-length');headers.delete('content-encoding');
+      body=h;
+    }catch(_){body=null;}
+  }
+  if(body===null&&!r.redirected)return r;
+  if(body===null){headers.delete('content-length');headers.delete('content-encoding');body=await r.clone().blob();}
+  return new Response(body,{status:r.status,statusText:r.statusText,headers});
+}
+async function refreshNav(request,cache){
+  const r=await fetch(request.url,{cache:'no-cache',credentials:'same-origin'});
+  if(!r.ok)return null;
+  const clean=await cleanNav(request.url,r);
+  await cache.put(navKey(request.url),clean.clone()).catch(()=>{});
+  return clean;
+}
+async function navigation(request,event){
   const cache=await caches.open(CACHE_NAME);
-  const cachedNav=await cache.match(request);
-  // App-shell navigations are cache-first. The worker version is bumped with
-  // shell changes, so an installed app receives a new generation without
-  // downloading chat.html on every launch. If no cached copy exists, fetch it.
-  if(cachedNav && !stale(cachedNav)) return cachedNav;
-  try{
-    let r=await fetch(request,{cache:'no-cache'});
-    if(r.ok){
-      if(new URL(request.url).pathname==='/Tools.html'){
-        try{
-          let h=await r.text();
-          const tag='<script src="/js/marketplace-category-images.js"></script>';
-          if(h.includes('</body>')&&!h.includes(tag))h=h.replace('</body>',tag+'</body>');
-          const headers=new Headers(r.headers);
-          headers.set('content-type','text/html; charset=utf-8');
-          r=new Response(h,{status:r.status,statusText:r.statusText,headers});
-        }catch(_){}
-      }
-      cache.put(request.url,r.clone()).catch(()=>{});
-      return r;
+  const key=navKey(request.url);
+  // INSTANT OPEN: always answer from the cached page when there is one, then refresh it in
+  // the background for the next launch. (Before, a launch right after a deploy had to wait on
+  // the network, and with no timeout a cold server meant a long blank screen.)
+  let cachedNav=await cache.match(key);
+  if(cachedNav){
+    if(cachedNav.redirected)cachedNav=await cleanNav(request.url,cachedNav);
+    const bg=refreshNav(request,cache).catch(()=>null);
+    if(event&&event.waitUntil)event.waitUntil(bg);
+    return cachedNav;
+  }
+  // Nothing cached for this exact page: race the network against a 6s timeout that falls
+  // back to any cached app shell. If no shell is cached either, keep waiting for the network.
+  const net=refreshNav(request,cache).catch(()=>null);
+  const timeout=new Promise(res=>setTimeout(()=>res('timeout'),NAV_TIMEOUT_MS));
+  const first=await Promise.race([net,timeout]);
+  if(first&&first!=='timeout')return first;
+  const shell=async()=>{
+    for(const u of ['/','/index.html','/chat.html']){
+      let r=await cache.match(new URL(u,self.location.origin).href);
+      if(r){if(r.redirected)r=await cleanNav(u,r);return r;}
     }
-  }catch(_){}
-  const exact=await cache.match(request);if(exact)return exact;
-  for(const u of ['/index.html','/','/chat.html']){const r=await cache.match(new URL(u,self.location.origin).href);if(r)return r;}
+    return null;
+  };
+  if(first==='timeout'){
+    const s2=await shell();if(s2){if(event&&event.waitUntil)event.waitUntil(net);return s2;}
+    const late=await net;if(late)return late;
+  }
+  const s3=await shell();if(s3)return s3;
   return new Response(OFFLINE_SHELL,{status:200,headers:{'Content-Type':'text/html;charset=utf-8'}});
 }
-async function networkFirst(request){
+// UI CODE IS CACHE-FIRST WITH BACKGROUND REFRESH (was: network-first with NO timeout, which made
+// every module wait on the network - a slow/cold server meant a blank UI even with files cached).
+//  - cached copy exists  -> return it immediately, refresh the cache in the background
+//  - nothing cached yet  -> go to the network (first launch after a deploy), cache the result
+// A deploy bumps CACHE_NAME and re-precaches the core files, so new code is picked up on the
+// first launch after the deploy and refreshed again on every later one.
+async function networkFirst(request,event){
   const cache=await caches.open(CACHE_NAME);
-  try{const r=await fetch(request,{cache:'no-cache'});if(r.ok&&!badAssetResponse(request,r)){await cache.put(request,r.clone()).catch(()=>{});return r;}const old=await cache.match(request);return old||r;}catch(_){const old=await cache.match(request);return old||new Response('Resource unavailable offline',{status:503});}
+  const old=await cache.match(request);
+  const refresh=fetch(request,{cache:'no-cache'}).then(async r=>{
+    if(r&&r.ok&&!badAssetResponse(request,r)){await cache.put(request,r.clone()).catch(()=>{});}
+    return r;
+  });
+  if(old){
+    if(event&&event.waitUntil)event.waitUntil(refresh.catch(()=>null));else refresh.catch(()=>null);
+    return old;
+  }
+  try{const r=await refresh;if(r.ok&&!badAssetResponse(request,r))return r;return r;}
+  catch(_){return new Response('Resource unavailable offline',{status:503});}
 }
 async function staticAsset(request){
   const cache=await caches.open(CACHE_NAME);const old=await cache.match(request);if(old&&!stale(old))return old;
@@ -241,16 +293,16 @@ async function staticAsset(request){
 async function api(request){try{return await fetch(request);}catch(_){return new Response(JSON.stringify({error:'Network request failed',offline:true}),{status:503,headers:{'Content-Type':'application/json'}});}}
 
 self.addEventListener('install',event=>{
-  event.waitUntil(caches.open(CACHE_NAME).then(cache=>Promise.all(CORE_STATIC_ASSETS.map(a=>fetch(a,{cache:'no-store',credentials:'same-origin'}).then(r=>r.ok?cache.put(a,r):null).catch(()=>null)))).then(()=>console.log('[SW] Installed '+SW_VERSION)));
+  event.waitUntil(caches.open(CACHE_NAME).then(cache=>Promise.all(CORE_STATIC_ASSETS.map(a=>fetch(a,{cache:'no-store',credentials:'same-origin'}).then(async r=>{if(!r.ok)return null;const isDoc=a==='/'||/\.html$/i.test(a);return cache.put(isDoc?navKey(a):a,isDoc?await cleanNav(a,r):r);}).catch(()=>null)))).then(()=>console.log('[SW] Installed '+SW_VERSION)));
 });
 self.addEventListener('activate',event=>{
-  event.waitUntil(caches.keys().then(names=>Promise.all(names.filter(n=>n!==CACHE_NAME).map(n=>caches.delete(n)))).then(()=>self.clients.claim()).then(()=>self.clients.matchAll({type:'window',includeUncontrolled:true})).then(cs=>cs.forEach(c=>c.postMessage({type:'SW_UPDATED',version:SW_VERSION}))));
+  event.waitUntil(caches.keys().then(names=>Promise.all(names.filter(n=>n!==CACHE_NAME&&n.indexOf('necpra-ui-snapshots')!==0).map(n=>caches.delete(n)))).then(()=>self.clients.claim()).then(()=>self.clients.matchAll({type:'window',includeUncontrolled:true})).then(cs=>cs.forEach(c=>c.postMessage({type:'SW_UPDATED',version:SW_VERSION}))));
 });
 self.addEventListener('fetch',event=>{
   const r=event.request,url=r.url;if(r.method!=='GET')return;
-  if(r.mode==='navigate'||r.destination==='document'){event.respondWith(navigation(r));return;}
+  if(r.mode==='navigate'||r.destination==='document'){event.respondWith(navigation(r,event));return;}
   if(isApi(url)){event.respondWith(api(r));return;}
-  if(local(url)&&isNetworkFirst(url)){event.respondWith(networkFirst(r));return;}
+  if(local(url)&&isNetworkFirst(url)){event.respondWith(networkFirst(r,event));return;}
   // Non-critical HTML/CSS/JS/JSON uses the cache-first path below. Critical
   // authentication/E2E/realtime assets remain explicitly network-first above.
   // The SW version is bumped whenever this runtime changes, so deployed code
