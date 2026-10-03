@@ -1,7 +1,7 @@
 {
   "name": "uniconnectsphere",
   "version": "1.0.5",
-  "description": "Nexipa/Kynecta frontend \u2014 static PWA client (Vanilla JS)",
+  "description": "Nexipa/Kynecta frontend — static PWA client (Vanilla JS)",
   "private": true,
   "scripts": {
     "build": "node scripts/build-config.js",
@@ -16,6 +16,7 @@
     "@capacitor/core": "^8.5.2",
     "@capacitor/splash-screen": "^8.0.2",
     "@capacitor/status-bar": "^8.0.3",
-    "@capgo/capacitor-social-login": "^8.5.11"
+    "@capgo/capacitor-social-login": "^8.5.11",
+    "@capacitor/push-notifications": "^8.1.3"
   }
 }

@@ -98,6 +98,13 @@ function copyTree(sourceDir, targetDir, relative = '') {
 
 copyTree(ROOT, DIST);
 
+const nativePushPlugin = path.join(ROOT, 'node_modules', '@capacitor', 'push-notifications', 'dist', 'plugin.js');
+if (fs.existsSync(nativePushPlugin)) {
+    const vendorDir = path.join(DIST, 'vendor');
+    fs.mkdirSync(vendorDir, { recursive: true });
+    fs.copyFileSync(nativePushPlugin, path.join(vendorDir, 'capacitor-push-notifications.js'));
+}
+
 
 const runtimeConfig = `// GENERATED FILE — DO NOT EDIT. Change .env/deployment environment and rebuild.\nwindow.__NEXIPA_RUNTIME_CONFIG__ = Object.freeze(${JSON.stringify({ BACKEND_URL, FRONTEND_URL, GOOGLE_CLIENT_ID }, null, 2)});\n`;
 fs.mkdirSync(path.join(DIST, 'js'), { recursive: true });
