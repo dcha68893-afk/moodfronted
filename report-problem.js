@@ -14,8 +14,10 @@
   ];
   function pick(f) { for (var i = 0; i < f.length; i++) { try { var v = f[i](); if (v) return v; } catch (_) {} } return ''; }
   function base() {
-    return String(pick([function () { return window.__getApiBase && window.__getApiBase(); }, function () { return window.API_BASE_URL; },
-      function () { return window.parent.__getApiBase && window.parent.__getApiBase(); }, function () { return window.parent.API_BASE_URL; }]) || '').replace(/\/$/, '');
+    // __getApiBase() already ends in "/api" (see js/config.js) and every call below appends "/api/admin/...",
+    // which produced "/api/api/admin/problem-reports" -> 404 "Route ... not found". Always reduce to the origin.
+    return String(pick([function () { return window.__getApiOrigin && window.__getApiOrigin(); }, function () { return window.__getApiBase && window.__getApiBase(); }, function () { return window.API_BASE_URL; },
+      function () { return window.parent.__getApiOrigin && window.parent.__getApiOrigin(); }, function () { return window.parent.__getApiBase && window.parent.__getApiBase(); }, function () { return window.parent.API_BASE_URL; }]) || '').replace(/\/+$/, '').replace(/\/api$/, '');
   }
   function token() {
     return pick([function () { return window.__kynToken; }, function () { return window.__accessToken; },
@@ -38,6 +40,11 @@
       '<div style="font-size:13px;color:#666;margin-bottom:12px">Goes straight to the admin team. Module: <b>' + (opts.module || moduleName()) + '</b></div>' +
       '<select id="__pr_cat" style="width:100%;padding:11px;border:1px solid #ddd;border-radius:10px;font-size:15px;margin-bottom:10px">' +
       CATS.map(function (c) { return '<option value="' + c[0] + '">' + c[1] + '</option>'; }).join('') + '</select>' +
+      '<div style="position:relative;margin-bottom:10px">' +
+        '<div id="__pr_picked" style="display:none;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border:1px solid #f97316;border-radius:10px;background:#fff7ed;font-size:14px"></div>' +
+        '<input id="__pr_who" type="text" autocomplete="off" placeholder="Who is causing this? Search a username (optional)" style="width:100%;box-sizing:border-box;padding:11px;border:1px solid #ddd;border-radius:10px;font-size:15px">' +
+        '<div id="__pr_sug" style="display:none;position:absolute;left:0;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid #ddd;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);max-height:200px;overflow:auto;z-index:2"></div>' +
+      '</div>' +
       '<textarea id="__pr_txt" rows="5" placeholder="What happened? Include names, links or what you were doing." style="width:100%;box-sizing:border-box;padding:11px;border:1px solid #ddd;border-radius:10px;font-size:15px;resize:vertical"></textarea>' +
       '<div id="__pr_msg" style="font-size:13px;min-height:18px;margin:8px 0;color:#c0392b"></div>' +
       '<div style="display:flex;gap:10px"><button id="__pr_cancel" style="flex:1;padding:12px;border:0;border-radius:10px;background:#eee;font-size:15px">Cancel</button>' +
@@ -48,6 +55,42 @@
     card.querySelector('#__pr_cancel').onclick = close;
     if (opts.category) card.querySelector('#__pr_cat').value = opts.category;
     var msg = card.querySelector('#__pr_msg'), send = card.querySelector('#__pr_send');
+
+    // Tag the user who is causing the problem (optional). Pre-filled when a screen passes targetUserId.
+    var picked = opts.targetUserId ? { id: opts.targetUserId, name: opts.targetName || 'Selected user' } : null;
+    var whoInput = card.querySelector('#__pr_who'), sug = card.querySelector('#__pr_sug'), chip = card.querySelector('#__pr_picked'), searchTimer = null, searchSeq = 0;
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (ch) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]; }); }
+    function renderPicked() {
+      if (picked) {
+        chip.style.display = 'flex'; whoInput.style.display = 'none'; sug.style.display = 'none';
+        chip.innerHTML = '<span>Reporting: <b>' + esc(picked.name) + '</b></span><button type="button" id="__pr_unpick" style="border:0;background:transparent;font-size:18px;line-height:1;color:#666;padding:2px 6px">&times;</button>';
+        chip.querySelector('#__pr_unpick').onclick = function () { picked = null; renderPicked(); whoInput.focus(); };
+      } else { chip.style.display = 'none'; chip.innerHTML = ''; whoInput.style.display = 'block'; }
+    }
+    renderPicked();
+    whoInput.addEventListener('input', function () {
+      var q = whoInput.value.trim().replace(/^@/, '');
+      clearTimeout(searchTimer);
+      if (q.length < 2) { sug.style.display = 'none'; return; }
+      searchTimer = setTimeout(function () {
+        var seq = ++searchSeq;
+        fetch(base() + '/api/users/search?limit=6&q=' + encodeURIComponent(q), { credentials: 'include', headers: { Authorization: 'Bearer ' + token() } })
+          .then(function (r) { return r.json(); })
+          .then(function (j) {
+            if (seq !== searchSeq) return;
+            var users = (j && j.data && j.data.users) || [];
+            if (!users.length) { sug.innerHTML = '<div style="padding:10px 12px;font-size:13px;color:#888">No users found</div>'; sug.style.display = 'block'; return; }
+            sug.innerHTML = users.map(function (u) {
+              var label = u.displayName || u.username || ('User ' + u.id);
+              return '<div data-id="' + esc(u.id) + '" data-name="' + esc(label) + '" style="padding:10px 12px;font-size:14px;cursor:pointer;border-bottom:1px solid #f1f1f1"><b>' + esc(label) + '</b>' + (u.username && u.username !== label ? ' <span style="color:#888">@' + esc(u.username) + '</span>' : '') + '</div>';
+            }).join('');
+            sug.style.display = 'block';
+            Array.prototype.forEach.call(sug.children, function (row) {
+              row.onclick = function () { if (!row.dataset.id) return; picked = { id: Number(row.dataset.id), name: row.dataset.name }; whoInput.value = ''; renderPicked(); };
+            });
+          }).catch(function () { sug.style.display = 'none'; });
+      }, 250);
+    });
     send.onclick = function () {
       var details = card.querySelector('#__pr_txt').value.trim();
       if (details.length < 5) { msg.textContent = 'Please describe the problem.'; return; }
@@ -56,14 +99,14 @@
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token() },
         body: JSON.stringify({ category: card.querySelector('#__pr_cat').value, details: details, module: opts.module || moduleName(),
-          targetUserId: opts.targetUserId || null, targetRef: opts.targetRef || null, subject: opts.subject || '' })
+          targetUserId: (picked && picked.id) || opts.targetUserId || null, targetRef: opts.targetRef || null, subject: opts.subject || '' })
       }).then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); })
         .then(function (x) {
           if (x.ok && x.j.success !== false) { card.innerHTML = '<div style="padding:24px 8px;text-align:center"><div style="font-size:34px">&#10003;</div><div style="font-weight:700;margin:8px 0">Report sent</div><div style="font-size:14px;color:#666">The admin team will review it and you will get an update.</div><button id="__pr_ok" style="margin-top:16px;padding:11px 26px;border:0;border-radius:10px;background:#f97316;color:#fff;font-weight:700">Done</button></div>'; card.querySelector('#__pr_ok').onclick = close; }
           else { msg.textContent = (x.j && x.j.message) || 'Could not send. Try again.'; send.disabled = false; send.textContent = 'Send report'; }
         }).catch(function () {
           // offline: keep it and send when back online
-          try { var q = JSON.parse(localStorage.getItem('__pr_queue') || '[]'); q.push({ category: card.querySelector('#__pr_cat').value, details: details, module: opts.module || moduleName(), targetUserId: opts.targetUserId || null, targetRef: opts.targetRef || null }); localStorage.setItem('__pr_queue', JSON.stringify(q)); } catch (_) {}
+          try { var q = JSON.parse(localStorage.getItem('__pr_queue') || '[]'); q.push({ category: card.querySelector('#__pr_cat').value, details: details, module: opts.module || moduleName(), targetUserId: (picked && picked.id) || opts.targetUserId || null, targetRef: opts.targetRef || null }); localStorage.setItem('__pr_queue', JSON.stringify(q)); } catch (_) {}
           msg.style.color = '#2c7a3f'; msg.textContent = 'You are offline - the report will be sent when you reconnect.'; send.textContent = 'Saved';
         });
     };

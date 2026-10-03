@@ -415,6 +415,13 @@
         try {
             var form = document.getElementById('necpraPasswordAssistForm');
             if (!form) { form = document.createElement('form'); form.id = 'necpraPasswordAssistForm'; form.hidden = true; form.addEventListener('submit', function (e) { e.preventDefault(); }); document.body.appendChild(form); }
+            // Chrome's accessibility audit wants a (optionally hidden) username field next to any password field in a form.
+            if (!form.querySelector('input[autocomplete="username"]')) {
+                var hiddenUser = document.createElement('input');
+                hiddenUser.type = 'text'; hiddenUser.name = 'username'; hiddenUser.autocomplete = 'username';
+                hiddenUser.hidden = true; hiddenUser.tabIndex = -1; hiddenUser.setAttribute('aria-hidden', 'true');
+                form.insertBefore(hiddenUser, form.firstChild);
+            }
             function scan(root) {
                 (root || document).querySelectorAll('input[type="password"]').forEach(function (input) { if (!input.closest('form') && !input.getAttribute('form')) input.setAttribute('form', 'necpraPasswordAssistForm'); });
                 (root || document).querySelectorAll('[aria-hidden="true"]').forEach(function (el) { if (el.contains(document.activeElement)) { try { document.activeElement.blur(); } catch (_) {} } });
