@@ -555,6 +555,7 @@
        Moving this tag ABOVE message-client.js's makes this file's listener
        register first, so it actually intercepts and isolates group
        payloads before message-client.js can touch them. -->
+  <script src="/js/group-unread-store.js"></script>
   <script src="/js/group-message-isolation.js"></script>
   <script src="/js/message-client.js"></script>
 
@@ -646,7 +647,23 @@
       if (!lastMessage) return '';
       const statusPreview = _statusReplyPreviewText(lastMessage);
       if (statusPreview !== null) return statusPreview;
-      if (lastMessage.displayContent !== undefined && lastMessage.displayContent !== 'Decrypting…') return lastMessage.displayContent;
+      // FIX (PREVIEW STUCK ON "Encrypted message"): a placeholder used to be accepted as final here
+      // without checking whether the text had since resolved. Look at the open chat's message cache
+      // and the E2E core's decrypt cache first; only fall back to the placeholder if both come up empty.
+      const _isPh = (t) => t === 'Decrypting…' || t === '🔒 Encrypted message' || t === '🔒 Unable to decrypt this message';
+      if (lastMessage.displayContent !== undefined && !_isPh(lastMessage.displayContent)) return lastMessage.displayContent;
+      if (lastMessage.displayContent !== undefined && lastMessage.displayContent !== 'Decrypting…') {
+        try {
+          if (chatId != null && lastMessage.id != null) {
+            const m0 = window.MessageModule.getMessages(chatId).find(x => String(x.id) === String(lastMessage.id));
+            if (m0 && m0.displayContent !== undefined && !_isPh(m0.displayContent)) return m0.displayContent;
+          }
+          const peek = window.KynectaE2E && typeof window.KynectaE2E.peekDecryptedText === 'function'
+            ? window.KynectaE2E.peekDecryptedText(lastMessage) : null;
+          if (typeof peek === 'string' && peek && !_isPh(peek)) return peek;
+        } catch (_) {}
+        return lastMessage.displayContent;
+      }
       const c = lastMessage.content;
       const looksEncrypted = typeof c === 'string' && /^\s*\{/.test(c) && c.indexOf('"v"') !== -1;
       if (lastMessage.displayContent === 'Decrypting…' || looksEncrypted) {
@@ -2167,6 +2184,18 @@
     window.addEventListener('message', (event) => {
       const data = event.data;
       if (!data || typeof data !== 'object') return;
+      // FIX (HARDWARE BACK LEFT THE CHAT OPEN): on back, the shell clears its own chat flag and posts
+      // GO_BACK_TO_CHAT_LIST, but nothing here handled it, so this iframe stayed on the chat while the shell
+      // believed it was on the list (the next back then jumped modules). Do exactly what the in-chat back arrow does.
+      if (data.type === 'GO_BACK_TO_CHAT_LIST') {
+        try {
+          const aid = window.MessageModule && window.MessageModule.getActiveChatId && window.MessageModule.getActiveChatId();
+          const shown = chatPanelEl && !chatPanelEl.classList.contains('hide-on-mobile');
+          const btn = document.getElementById('backBtn');
+          if (aid && shown && btn && !btn.disabled) btn.click();
+        } catch (_) {}
+        return;
+      }
       if (data.type === 'MODULE_FOCUSED') {
         const activeId = window.MessageModule && window.MessageModule.getActiveChatId && window.MessageModule.getActiveChatId();
         const panelVisible = chatPanelEl && !chatPanelEl.classList.contains('hide-on-mobile');

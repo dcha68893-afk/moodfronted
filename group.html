@@ -1,4 +1,4 @@
-<!doctype html><html lang="en"><head><script src="/session-restore.js"></script><script src="/app-protect.js"></script><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Groups</title><script src="/js/runtime-config.js"></script><script src="/js/config.js"></script><script src="/js/theme.engine.js"></script><script src="/js/e2e-encryption.js"></script><script src="/js/e2e-session-init.js" defer></script><script src="/js/settings-broadcast-listener.js"></script><script src="/js/necpa-session-resilience.js"></script><script src="js/core/groups/group-cache-first.js"></script><script src="js/groupMessaging.client.js"></script><script src="js/group-platform.js"></script><style>
+<!doctype html><html lang="en"><head><script src="/session-restore.js"></script><script src="/app-protect.js"></script><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Groups</title><script src="/js/runtime-config.js"></script><script src="/js/config.js"></script><script src="/js/theme.engine.js"></script><script src="/js/e2e-encryption.js"></script><script src="/js/e2e-session-init.js" defer></script><script src="/js/settings-broadcast-listener.js"></script><script src="/js/necpa-session-resilience.js"></script><script src="js/core/groups/group-cache-first.js"></script><script src="js/groupMessaging.client.js"></script><script src="js/group-unread-store.js"></script><script src="js/group-platform.js"></script><style>
 :root{--bg:var(--kyn-bg-root);--surface:var(--kyn-bg-panel);--surface2:var(--kyn-bg-input);--border:var(--kyn-border);--text:var(--kyn-text-primary);--muted:var(--kyn-text-muted);--primary:var(--kyn-accent-secondary)}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden}body{background:var(--bg);color:var(--text);font:14px system-ui,-apple-system,"Segoe UI",Roboto,Arial}button,input,textarea{font:inherit}button{cursor:pointer}.layout{height:100%;display:grid;grid-template-columns:minmax(250px,32%) 1fr}.sidebar,.panel{min-width:0;min-height:0}.sidebar{border-right:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column}.side-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--border);font-weight:800}.toolbar{display:flex;gap:7px;padding:10px}.search{flex:1;min-width:0;padding:9px;border:1px solid var(--border);border-radius:11px;background:var(--surface2);color:inherit}.refresh{border:1px solid var(--border);border-radius:10px;background:var(--surface2);color:inherit;padding:8px 11px}.groups{flex:1;overflow:auto;padding:0 10px}.group{width:100%;display:flex;align-items:center;gap:10px;padding:10px;border:1px solid transparent;border-radius:13px;background:transparent;color:inherit;text-align:left;margin-bottom:5px}.group:hover,.group.active{background:var(--surface2);border-color:var(--border)}.avatar{width:43px;height:43px;border-radius:13px;background:linear-gradient(135deg,#dbeafe,#c4b5fd);display:grid;place-items:center;font-weight:800;color:#1e40af;flex:0 0 auto;background-size:cover;background-position:center}.groupmain{min-width:0;flex:1}.name{font-weight:750;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.meta{font-size:11px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.empty{text-align:center;color:var(--muted);padding:40px 18px}
 .unread-badge{flex:0 0 auto;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:#ef4444;color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;line-height:1}
 /* No in-panel header any more: the parent shell's #globalHeader owns the
@@ -444,11 +444,11 @@ function openGroup(id){
     .catch(err=>console.warn('[GroupCrypto] startup:',err?.message||err));
   S.current=g;window.__GROUP_CHAT_ID=String(id);window.__GROUP_CHAT_TYPE='group';
   $('input').disabled=false;$('send').disabled=false;['searchToggle','pinnedToggle','mediaToggle'].forEach(bid=>{const b=$(bid);if(b)b.disabled=false});
-  S.messages=[];markRead(id);renderMessages(false);renderGroups();setMobileChat(true);const meta=currentGroupMeta(g);postParent('GROUP_PANEL_OPEN',meta);postSelf('GROUP_PANEL_OPEN',meta);
+  S.messages=[];try{window.KynGroupUnread&&window.KynGroupUnread.setOpen(id)}catch(_){}markRead(id);renderMessages(false);renderGroups();setMobileChat(true);const meta=currentGroupMeta(g);postParent('GROUP_PANEL_OPEN',meta);postSelf('GROUP_PANEL_OPEN',meta);
   window.dispatchEvent(new CustomEvent('kyn:group:open',{detail:{groupId:String(id)}}));groupMessageState.failed.clear();S._hydrating=hydrateGroupHistory(id);loadMessages();loadPins();clearInterval(S.poll);S.poll=setInterval(loadMessages,5000);
   renderKeyGapNotice(null);checkKeyGap(id);
 }
-function closeGroup(){S.current=null;window.__GROUP_CHAT_ID=null;window.__GROUP_CHAT_TYPE=null;clearInterval(S.poll);S.poll=null;$('input').value='';$('input').disabled=true;$('send').disabled=true;['searchToggle','pinnedToggle','mediaToggle'].forEach(bid=>{const b=$(bid);if(b)b.disabled=true});closeSubbars();S.messages=[];S.pins=[];renderMessages(false);setMobileChat(false);renderGroups();postParent('GROUP_PANEL_CLOSED',{});postSelf('GROUP_PANEL_CLOSE',{});renderKeyGapNotice(null);window.dispatchEvent(new CustomEvent('kyn:group:close'))}
+function closeGroup(){try{window.KynGroupUnread&&window.KynGroupUnread.setOpen(null)}catch(_){}S.current=null;window.__GROUP_CHAT_ID=null;window.__GROUP_CHAT_TYPE=null;clearInterval(S.poll);S.poll=null;$('input').value='';$('input').disabled=true;$('send').disabled=true;['searchToggle','pinnedToggle','mediaToggle'].forEach(bid=>{const b=$(bid);if(b)b.disabled=true});closeSubbars();S.messages=[];S.pins=[];renderMessages(false);setMobileChat(false);renderGroups();postParent('GROUP_PANEL_CLOSED',{});postSelf('GROUP_PANEL_CLOSE',{});renderKeyGapNotice(null);window.dispatchEvent(new CustomEvent('kyn:group:close'))}
 function makeGroupClientId(){return 'group-'+(crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random().toString(36).slice(2));}
 // POST /messages is idempotent on clientMessageId server-side (the same route the 1:1 chat uses), so a
 // transient failure (Render cold start / 502 / dropped connection) can be retried safely.
@@ -690,14 +690,12 @@ $('purposeSave')?.addEventListener('click',savePurpose);
 // Persisted so a badge still shows after a reload/relaunch, not just for
 // the lifetime of this tab. Kept keyed by group id, count only (no message
 // bodies) — enough to render "N new" without duplicating message storage.
-const UNREAD_KEY='kyn_group_unread_v1';
-function loadUnread(){try{S.unread=JSON.parse(localStorage.getItem(UNREAD_KEY)||'{}')||{}}catch(_){S.unread={}}}
-function saveUnread(){try{localStorage.setItem(UNREAD_KEY,JSON.stringify(S.unread))}catch(_){}}
-const _unreadSeen=new Set();
-function bumpUnread(groupId,msgId){const k=String(groupId);
-  if(msgId!=null){const sk=k+':'+msgId;if(_unreadSeen.has(sk))return;_unreadSeen.add(sk);if(_unreadSeen.size>2000)_unreadSeen.delete(_unreadSeen.values().next().value)}
-  S.unread[k]=(Number(S.unread[k])||0)+1;saveUnread();renderGroups()}
-function markRead(groupId){const k=String(groupId);if(!S.unread[k])return;delete S.unread[k];saveUnread();renderGroups()}
+// Unread state lives in the shared per-account store (js/group-unread-store.js) so the
+// Messages screen's Groups strip and this page always agree. S.unread is just a render cache.
+function loadUnread(){try{S.unread=window.KynGroupUnread?window.KynGroupUnread.all():{}}catch(_){S.unread={}}}
+function bumpUnread(groupId,msgId,senderId){if(!window.KynGroupUnread)return;if(window.KynGroupUnread.bump(groupId,msgId,senderId)){loadUnread();renderGroups()}}
+function markRead(groupId){if(!window.KynGroupUnread)return;if(!window.KynGroupUnread.get(groupId))return;window.KynGroupUnread.clear(groupId);loadUnread();renderGroups()}
+try{window.KynGroupUnread&&window.KynGroupUnread.onChange(()=>{loadUnread();try{renderGroups()}catch(_){}})}catch(_){}
 
 // FIX (MESSAGE-LOST-WHEN-GROUP-CLOSED): this used to bail out entirely
 // (`if(!S.current||...)return`) unless the incoming message belonged to
@@ -767,7 +765,7 @@ function handleRealtime(ev){
     // Don't badge your own message back at you just because this tab
     // happens to be looking at a different group right now.
     if(String(message.senderId||message.userId||'')===uid())return;
-    bumpUnread(groupId,message.id||message.messageId);
+    bumpUnread(groupId,message.id||message.messageId,message.senderId||message.userId);
 }
 
 $('search')?.addEventListener('input',e=>{S.q=e.target.value;renderGroups()});
@@ -795,6 +793,7 @@ $('searchInput')?.addEventListener('input',e=>{clearTimeout(S._searchT);const q=
 $('pinnedToggle')?.addEventListener('click',()=>toggleSubbar('pinnedBar',renderPins));
 $('mediaToggle')?.addEventListener('click',()=>toggleSubbar('mediaBar',renderMedia));
 window.addEventListener('kyn:group:message',handleRealtime);
+window.addEventListener('pagehide',()=>{try{window.KynGroupUnread&&window.KynGroupUnread.setOpen(null)}catch(_){}});
 window.addEventListener('message',e=>{
   const d=e.data;if(!d||typeof d!=='object')return;
   if(d.type==='group:message'||d.type==='GROUP_MESSAGE'){handleRealtime({detail:d});return}
@@ -806,6 +805,10 @@ window.addEventListener('message',e=>{
   // our DOM directly — same contract message.html's compose panel already
   // answers to for 1:1 chats.
   if(d.type==='PARENT_GROUP_CLOSE'||d.type==='GO_BACK_TO_LIST'){closeGroup();return}
+  // The Groups iframe is never destroyed, so a group can stay "open" in it while the user is on
+  // another screen. It only counts as open (no unread) while this module is actually on screen.
+  if(d.type==='MODULE_BLURRED'){try{window.KynGroupUnread&&window.KynGroupUnread.setOpen(null)}catch(_){}return}
+  if(d.type==='MODULE_FOCUSED'){try{if(S.current&&window.KynGroupUnread){window.KynGroupUnread.setOpen(S.current.id);markRead(S.current.id)}}catch(_){}}
   if(d.type==='PARENT_REFRESH_GROUPS'){loadGroups();return}
   if(d.type==='OPEN_GROUP_BY_ID'){const gid=d.payload&&d.payload.groupId;if(!gid)return;if(S.groups.length)openGroup(gid);else loadGroups().then(()=>openGroup(gid));return}
   if(d.type==='PARENT_GROUP_ACTION'){const action=d.payload&&d.payload.action;if(action==='members'||action==='info')showMembers();else if(action==='settings')showSettings();else if(action==='purpose')showPurpose();return}

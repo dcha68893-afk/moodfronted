@@ -3174,6 +3174,15 @@
                 }
             }
 
+            // Visibility-only signal (does NOT reset the group's panel): lets group.html stop treating its
+            // open group as "being read" while another module is on screen.
+            if (page !== 'group' && window.__lastActivePage === 'group') {
+                const _grpBlur = document.getElementById('groupIframe');
+                if (_grpBlur && _grpBlur.contentWindow) {
+                    _grpBlur.contentWindow.postMessage({ type: 'MODULE_BLURRED', source: 'parent', timestamp: Date.now() }, '*');
+                }
+            }
+
             if (page === 'messages') sendFriendsToMessagesIframe();
             if (page === 'group')    sendFriendsToGroupIframe();
             if (page === 'status')   sendFriendsToStatusIframe();
@@ -6797,6 +6806,16 @@
                 // enforced on the backend's socket emit for this reason).
                 function _fwdGroupMessage(data) {
                     _fwdToGroupIframe('GROUP_MESSAGE', data);
+                    // FIX (GROUP UNREAD NEVER COUNTED IN MESSAGES): group.html only loads when Groups is first opened,
+                    // and this relay used to feed only that iframe. The Messages screen (which shows the Groups strip)
+                    // never heard about group messages, so nothing was counted there. Forward once to it too, under
+                    // its own type so private-chat handlers can never mistake it for a DM.
+                    try {
+                        const mf = document.getElementById('messagesIframe');
+                        if (mf && mf.contentWindow) {
+                            mf.contentWindow.postMessage({ type: 'GROUP_MESSAGE_FOR_MESSAGES', payload: data, source: 'ws-group-bridge', timestamp: Date.now() }, '*');
+                        }
+                    } catch (_) {}
                 }
 
                 function _fwdGroupLocalSync(data) {

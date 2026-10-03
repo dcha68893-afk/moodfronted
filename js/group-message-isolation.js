@@ -25,7 +25,9 @@
   window.__necpraGroupMessageIsolationLoaded = true;
 
   const GROUPS = new Map();
-  const UNREAD = new Map();
+  // Unread counts come from the shared per-account store (js/group-unread-store.js), also used by group.html.
+  const store = () => window.KynGroupUnread || null;
+  const unreadOf = (id) => { try { return store() ? store().get(id) : 0; } catch (_) { return 0; } };
   let groupLoadInFlight = null;
   let sidebar = null;
   let toastTimer = null;
@@ -111,8 +113,8 @@
     if (!rows) return;
 
     const groups = Array.from(GROUPS.values()).sort((a, b) => {
-      const au = Number(UNREAD.get(String(a.id)) || 0);
-      const bu = Number(UNREAD.get(String(b.id)) || 0);
+      const au = unreadOf(a.id);
+      const bu = unreadOf(b.id);
       if (au !== bu) return bu - au;
       return String(a.name || '').localeCompare(String(b.name || ''));
     });
@@ -125,7 +127,7 @@
 
     rows.innerHTML = groups.map(group => {
       const id = String(group.id);
-      const unread = Number(UNREAD.get(id) || 0);
+      const unread = unreadOf(id);
       const initial = escapeHtml(String(group.name || 'G').trim().slice(0, 1).toUpperCase() || 'G');
       const avatar = group.avatar
         ? `<img class="message-group-avatar" src="${escapeHtml(group.avatar)}" alt="">`
@@ -135,7 +137,7 @@
           ${avatar}
           <span class="message-group-meta">
             <strong>${escapeHtml(group.name || 'Unnamed group')}</strong>
-            <small>${unread ? 'This group has new message' : `${Number(group.participantCount || group.participants?.length || 0)} members`}</small>
+            <small>${unread ? `${unread > 99 ? '99+' : unread} new message${unread === 1 ? '' : 's'}` : `${Number(group.participantCount || group.participants?.length || 0)} members`}</small>
           </span>
           ${unread ? `<span class="message-group-unread">${unread > 99 ? '99+' : unread}</span>` : ''}
         </button>`;
@@ -150,7 +152,7 @@
     const id = String(groupId || '');
     const group = GROUPS.get(id);
     if (!id || !group) return;
-    UNREAD.delete(id);
+    try { store() && store().clear(id); } catch (_) {}
     renderSidebar();
 
     try {
@@ -192,7 +194,7 @@
       toast.type = 'button';
       document.body.appendChild(toast);
     }
-    toast.textContent = `👥 ${name}: This group has new message`;
+    toast.textContent = `👥 ${name}: new message`;
     toast.onclick = () => openGroup(String(group.id));
     toast.classList.add('visible');
     clearTimeout(toastTimer);
@@ -216,6 +218,20 @@
     return explicitlyGroupPayload(payload) || (id && GROUPS.has(id));
   }
 
+  // Count one incoming group message (own messages, the open group, and repeats are skipped by the store),
+  // then refresh the strip and show the toast only if it really counted.
+  function countGroupMessage(groupId, message) {
+    const st = store();
+    if (!st || !groupId) return;
+    const counted = st.bump(groupId, message && (message.id ?? message.messageId), message && (message.senderId ?? message.userId ?? message.sender?.id));
+    if (!counted) return;
+    renderSidebar();
+    showNotification(GROUPS.get(String(groupId)) || { id: groupId, name: 'Group' }, message);
+  }
+
+  // Other iframe (group.html) changed the counts: redraw.
+  try { window.KynGroupUnread && window.KynGroupUnread.onChange(() => renderSidebar()); } catch (_) {}
+
   // Capture phase is deliberate. It runs before message-client.js's normal
   // bubble-phase handler. Any explicitly identified group message is stopped
   // before it can enter private-chat state. The backend's canonical group
@@ -236,19 +252,29 @@
         name: payload.groupName || payload.chatName || payload.group?.name || 'Group',
         avatar: payload.groupAvatar || payload.group?.avatar || null,
       };
-      if (groupId) {
-        GROUPS.set(groupId, group);
-        UNREAD.set(groupId, Number(UNREAD.get(groupId) || 0) + 1);
+      if (groupId) GROUPS.set(groupId, group);
+      countGroupMessage(groupId, payload);
+      return;
+    }
+
+    // Group message relayed by the shell (chat.html) for the Messages screen.
+    if (data.type === 'GROUP_MESSAGE_FOR_MESSAGES') {
+      const d = data.payload || {};
+      const message = d.message ?? d.payload?.message ?? d.payload ?? d;
+      const gid = String(d.groupId ?? message?.groupId ?? d.payload?.groupId ?? message?.chatId ?? '');
+      if (!gid || !message) return;
+      if (!GROUPS.has(gid)) {
+        GROUPS.set(gid, { id: gid, name: d.groupName || message.groupName || d.group?.name || 'Group', avatar: d.group?.avatar || null });
+        loadGroups();                                   // fetch the real name/avatar/member count
       }
-      renderSidebar();
-      showNotification(group, payload);
+      countGroupMessage(gid, message);
       return;
     }
 
     if (data.type === 'GROUP_PANEL_OPEN') {
       const groupId = String(data.payload?.id || data.payload?.chatId || data.payload?.groupId || '');
       if (groupId) {
-        UNREAD.delete(groupId);
+        try { store() && store().clear(groupId); } catch (_) {}
         renderSidebar();
       }
     }

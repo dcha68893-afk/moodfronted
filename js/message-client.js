@@ -297,7 +297,7 @@
         upsertConversationMeta(chatId, {
             lastMessage: message,
             unreadCount: fromSelf ? (state.conversations.get(chatId)?.unreadCount || 0)
-                                  : (chatId === state.activeChatId ? 0 : (state.conversations.get(chatId)?.unreadCount || 0) + 1),
+                                  : ((chatId === state.activeChatId && !_tabHidden()) ? 0 : (state.conversations.get(chatId)?.unreadCount || 0) + 1),
             // FIX (RECEIVER-SEES-"User"-INSTEAD-OF-REAL-NAME): for a chat that
             // already existed, otherUser.username was already populated by
             // loadConversations() from GET /chats, which computes
@@ -1098,12 +1098,46 @@
         return { success: false, error: res && res.message };
     }
 
+    // FIX (UNREAD COUNT NEVER CLEARED): opening a chat never told the server
+    // anything, and markRead() returned before the server call when read
+    // receipts were off, so the next /chats refresh restored the old badge.
+    // The backend's POST /messages/read already accepts {chatId, silent}:
+    // silent = counts as read for THIS user's badge, sender not notified.
+    const _recentlyRead = new Map();            // chatId(String) -> timestamp of last local mark-read
+    const RECENT_READ_WINDOW_MS = 15000;
+    function _tabHidden() { try { return document.visibilityState === 'hidden'; } catch (_) { return false; } }
+    function _isRecentlyRead(chatId) {
+        const t = _recentlyRead.get(String(chatId));
+        return !!t && (Date.now() - t) < RECENT_READ_WINDOW_MS;
+    }
+    function _receiptsOff() { return settingsState.privacy.readReceipts === false; }
+
+    async function markChatRead(chatId) {
+        if (chatId == null || /^pending:/.test(String(chatId))) return;
+        _recentlyRead.set(String(chatId), Date.now());
+        upsertConversationMeta(chatId, { unreadCount: 0 });
+        try {
+            await api().post('/messages/read', { chatId: Number(chatId), silent: _receiptsOff() });
+        } catch (_) { /* local badge already cleared; next open/visibility retries */ }
+        _recentlyRead.set(String(chatId), Date.now());   // restart the window after the server has it
+    }
+
     async function markRead(chatId, messageIds) {
         if (!messageIds || messageIds.length === 0) return;
+        _recentlyRead.set(String(chatId), Date.now());
         upsertConversationMeta(chatId, { unreadCount: 0 });
-        if (settingsState.privacy.readReceipts === false) return; // instant, no refresh needed
-        try { await api().post('/messages/read', { messageIds }); } catch (_) {}
+        try { await api().post('/messages/read', { messageIds, silent: _receiptsOff() }); } catch (_) {}
     }
+
+    // Tab was hidden while the open chat received messages: they stayed unread.
+    // Clear them once the user is actually looking at the chat again.
+    try {
+        document.addEventListener('visibilitychange', () => {
+            if (_tabHidden() || state.activeChatId == null) return;
+            const c = state.conversations.get(state.activeChatId);
+            if (c && c.unreadCount > 0) markChatRead(state.activeChatId);
+        });
+    } catch (_) {}
 
     async function deleteMessage(chatId, messageId, { forEveryone = false } = {}) {
         try {
@@ -1372,7 +1406,7 @@
             if (data.type === 'message:new') {
                 const payload = data.payload || {};
                 applyIncomingMessage(payload, { fromSelf: payload.senderId === window._kynCurrentUserId });
-                if (payload.chatId === state.activeChatId) markRead(payload.chatId, [payload.id]);
+                if (payload.chatId === state.activeChatId && !_tabHidden() && payload.senderId !== window._kynCurrentUserId) markRead(payload.chatId, [payload.id]);
                 return;
             }
             if (data.type === 'message:sent') {
@@ -1855,6 +1889,8 @@
             }
         });
 
+        if (resolvedChatId && !_tabHidden()) markChatRead(resolvedChatId);
+
         if (resolvedChatId) {
             await hydrateFromCacheThenSync(resolvedChatId);
             if (messageId && !isStale()) notify('message:scroll-to', { chatId: resolvedChatId, messageId });
@@ -2081,14 +2117,14 @@
                 // already resolved (from cache/decrypt) when the list is (re)loaded.
                 const prevConv = state.conversations.get(c.id);
                 const prevLast = prevConv && prevConv.lastMessage;
-                const keepDisplay = (prevLast && lastRaw && String(prevLast.id) === String(lastRaw.id) && prevLast.displayContent !== 'Decrypting…') ? prevLast.displayContent : undefined;
+                const keepDisplay = (prevLast && lastRaw && String(prevLast.id) === String(lastRaw.id) && !_PLACEHOLDER_DISPLAY.has(prevLast.displayContent)) ? prevLast.displayContent : undefined;
                 upsertConversationMeta(c.id, {
                     otherUser: Object.assign({}, prevConv && prevConv.otherUser, {
                         id: c.otherParticipant.id,
                         username: c.otherParticipant.displayName || c.otherParticipant.username,
                         avatar: c.otherParticipant.avatar,
                     }),
-                    unreadCount: c.unreadCount || 0,
+                    unreadCount: ((String(c.id) === String(state.activeChatId == null ? '' : state.activeChatId) && !_tabHidden()) || _isRecentlyRead(c.id)) ? 0 : (c.unreadCount || 0),
                     lastMessage: lastRaw ? Object.assign(
                         { id: lastRaw.id, content: lastRaw.content, type: lastRaw.type, createdAt: lastRaw.createdAt, senderId: lastRaw.senderId, chatId: c.id },
                         keepDisplay !== undefined ? { displayContent: keepDisplay } : {}
@@ -2117,6 +2153,7 @@
         sendMessage,
         uploadAttachment,
         markRead,
+        markChatRead,
         deleteMessage,
         bulkDeleteMessages,
         editMessage,
