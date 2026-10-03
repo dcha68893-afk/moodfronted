@@ -4258,6 +4258,7 @@ export async function createDigitalListing(title, description, fileData, options
             description: optimistic.description,
             price: optimistic.price,
             category: 'digital',
+            subcategory: options.subcategory || '',
             type: 'digital',
             images: fileData?.url ? [fileData.url] : [],
             available: true
@@ -5436,6 +5437,7 @@ window.addEventListener('message', function(evt) {
             try {
                 const pid = payload.product_id;
                 if (pid) {
+                    try { window.__kyntMarkProductDeleted && window.__kyntMarkProductDeleted(pid); } catch(_) {}
                     const store = ecom.ProductEngine.getStore();
                     store.products.delete(String(pid));
                     store.products.delete(Number(pid));

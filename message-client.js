@@ -746,10 +746,13 @@
     }
 
     async function markRead(chatId, messageIds) {
-        if (!messageIds || messageIds.length === 0) return;
+        // empty messageIds = mark the whole chat read (used when a chat is opened)
+        messageIds = messageIds || [];
         upsertConversationMeta(chatId, { unreadCount: 0 });
-        if (settingsState.privacy.readReceipts === false) return; // instant, no refresh needed
-        try { await api().post('/messages/read', { messageIds }); } catch (_) {}
+        // Always tell the server (badge correct on every device/reload); flagged silent
+        // when read receipts are off so the sender is not notified.
+        const silent = settingsState.privacy.readReceipts === false;
+        try { await api().post('/messages/read', { chatId, messageIds, silent }); } catch (_) {}
     }
 
     async function deleteMessage(chatId, messageId, { forEveryone = false } = {}) {
@@ -1387,6 +1390,8 @@
 
         state.activeChatId = normalizeChatId(resolvedChatId);
         resolvedChatId = state.activeChatId;
+        // WhatsApp behaviour: opening a chat zeroes its badge and marks everything read.
+        try { markRead(resolvedChatId, []); } catch (_) {}
         notify('chat:open-requested', { conversationId: normalizeChatId(resolvedChatId), userId: normalizedUserId || userId, messageId });
 
         // Pre-warm the recipient key fetch now, not on first keystroke/send —
@@ -1592,8 +1597,17 @@
     // with backoff instead of giving up after one try.
     async function loadConversations(attempt = 0) {
         try {
-            const res = await api().get('/chats?limit=50');
+            // Cache-first + delta: the cached list is already on screen (see
+            // hydrateConversationsFromCache). Ask only for chats that changed since the last
+            // sync; do a full refresh when there is no cache or it is older than 24h.
+            let _since = '', _syncStart = new Date().toISOString();
+            try {
+                const last = localStorage.getItem('kyn_chats_synced_at'), full = Number(localStorage.getItem('kyn_chats_full_at') || 0);
+                if (last && state.conversations.size > 0 && (Date.now() - full) < 24 * 3600 * 1000) _since = new Date(new Date(last).getTime() - 60000).toISOString();
+            } catch (_) {}
+            const res = await api().get('/chats?limit=50' + (_since ? '&updatedSince=' + encodeURIComponent(_since) : ''));
             if (!res || res.success === false) throw new Error((res && res.message) || 'Failed to load conversation list');
+            try { localStorage.setItem('kyn_chats_synced_at', _syncStart); if (!_since) localStorage.setItem('kyn_chats_full_at', String(Date.now())); } catch (_) {}
             const chats = (res.data && Array.isArray(res.data.chats)) ? res.data.chats : [];
             _warmupKnownContactKeys(chats);
             chats.filter(c => c.type === 'direct' && c.otherParticipant).forEach(c => {
@@ -1609,7 +1623,9 @@
                         online: c.otherParticipant.status === 'online',
                         lastSeen: c.otherParticipant.lastSeen || null,
                     },
-                    unreadCount: c.unreadCount || 0,
+                    // delivered messages are deleted from the server (mailbox model), so the server count can
+                    // drop to 0 while they are still unread HERE; keep the larger of local/server.
+                    unreadCount: Math.max(c.unreadCount || 0, (state.conversations.get(c.id) && state.conversations.get(c.id).unreadCount) || 0),
                     lastMessage: lastRaw ? { id: lastRaw.id, content: lastRaw.content, type: lastRaw.type, createdAt: lastRaw.createdAt, senderId: lastRaw.senderId, chatId: c.id } : null,
                 });
                 if (lastRaw) decryptForDisplay(c.id, { id: lastRaw.id, chatId: c.id, content: lastRaw.content, type: lastRaw.type, senderId: lastRaw.senderId, createdAt: lastRaw.createdAt });

@@ -3313,7 +3313,12 @@ async function publishListingFromModal() {
             const opts = {
                 price:       price || '0',
                 condition:   condition,
-                category:    document.getElementById('digitalCategory')?.value || 'digital',
+                category:    'digital',
+                // Browse tiles use these labels (Software, Antivirus, Office Software,
+                // E-Books, Music, Games) - map the dropdown value onto them.
+                subcategory: ({software:'Software',antivirus:'Antivirus',office:'Office Software',
+                               ebooks:'E-Books',notes:'E-Books',courses:'E-Books',templates:'Software',design:'Software',
+                               audio:'Music',games:'Games'})[document.getElementById('digitalCategory')?.value] || '',
                 visibility:  UIState.selectedTrustCircle,
                 moodContext: UIState.selectedMoodContext,
                 template:    UIState.selectedTemplate,
@@ -5475,7 +5480,17 @@ window._jmUpdateWishlistBadge = _updateWishlistBadge;
 // Root-level nav tabs (home, categories, cart, wishlist, account) reset the stack
 // so tapping a bottom-tab never leaves a stale history entry to jump back to.
 const _NAV_TABS = new Set(['home','categories','cart','wishlist','account']);
-const _navStack = []; // [{page, subpage}, ...]
+// Proxy so every push/pop/reset reports the new depth to the parent shell
+// (via back-nav.js), letting the hardware back button step back inside Tools.
+const _navStack = new Proxy([], {
+    set(t, k, v) {
+        t[k] = v;
+        if (k === 'length') {
+            try { queueMicrotask(() => { if (typeof window.__reportBackState === 'function') window.__reportBackState(); }); } catch (_) {}
+        }
+        return true;
+    }
+}); // [{page, subpage}, ...]
 
 function _navBack() {
     if (_navStack.length > 1) {
@@ -5589,6 +5604,8 @@ function _nav(page, subpage) {
 }
 window._jmNav  = _nav;
 window._jmBack = _navBack;
+window.__moduleBackDepth   = () => Math.max(0, _navStack.length - 1);
+window.__moduleBackHandler = () => { if (_navStack.length > 1) { _navBack(); return true; } return false; };
 
 // ── Shared bottom-sheet chooser used by both the Messages and WhatsApp icons
 // FEATURE 5: previously the WhatsApp icon just opened a hardcoded number
@@ -6962,8 +6979,16 @@ function _renderProductsPage(subpage) {
         .then(products => {
             let list = products || [];
             if (subcat) {
-                const target = subcat.trim().toLowerCase();
-                list = list.filter(p => (p.subcategory || '').trim().toLowerCase() === target);
+                // Normalise (case, plural, punctuation) so 'Repair'/'Repairs' and
+                // 'E-Books'/'ebooks' match. Listings saved before subcategories
+                // existed fall back to a title/tag keyword match.
+                const _n = s => String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'').replace(/s$/,'');
+                const target = _n(subcat);
+                list = list.filter(p => {
+                    if (p.subcategory) return _n(p.subcategory) === target;
+                    const hay = _n((p.title||'') + (p.tags||[]).join(''));
+                    return target.length > 3 && hay.includes(target);
+                });
             }
             if (brand) {
                 const bTarget = brand.trim().toLowerCase();
@@ -7918,6 +7943,8 @@ window._jmEditAddr = function(idx) {
 // ── PRODUCT GRID (shared) ──────────────────────────────────────────────────
 function _renderGrid(container, listings) {
     if (!container) return;
+    // never render a listing an admin/seller has deleted (any category, cached or not)
+    if (Array.isArray(listings) && window.__kyntProductGone) listings = listings.filter(p => !window.__kyntProductGone(p && (p.id ?? p.product_id)));
     if (!listings?.length) {
         container.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:#9ca3af;min-height:50vh;display:flex;flex-direction:column;align-items:center;justify-content:center"><div style="font-size:40px;margin-bottom:12px">🔍</div><div>No products found</div></div>`;
         return;

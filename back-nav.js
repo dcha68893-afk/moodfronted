@@ -45,6 +45,32 @@
         }
         return null;
     }
+    // Generic "open" overlays used across modules: sheets, drawers, side panels,
+    // dialogs that show via an open/active/show class. Covers panels that are not
+    // in TRACKED_PANELS so back closes them one at a time in every module.
+    var OPEN_SELECTOR = [
+        '.modal.active', '.modal.open', '.modal.show',
+        '.modal-overlay.active', '.modal-overlay.open', '.modal-overlay.show',
+        '.bottom-sheet.open', '.bottom-sheet.active', '.sheet.open', '.sheet.active',
+        '.drawer.open', '.drawer.active', '.side-panel.open', '.side-panel.active',
+        '.sidebar.open', '.sidebar.active:not(#permanentSidebar)', '.sub-panel.open', '.sub-panel.active',
+        '[role="dialog"].open', '[role="dialog"].active', '[role="dialog"].show',
+        '.overlay.open', '.overlay.active'
+    ].join(',');
+    function _visibleOpenOverlay() {
+        var els;
+        try { els = document.querySelectorAll(OPEN_SELECTOR); } catch (_) { return null; }
+        for (var i = els.length - 1; i >= 0; i--) {
+            var el = els[i];
+            if (el.style.display === 'none' || el.hidden) continue;
+            return el;
+        }
+        return null;
+    }
+    function _closeOpenOverlay(el) {
+        ['open', 'active', 'show'].forEach(function (c) { el.classList.remove(c); });
+        if (el.hasAttribute('open')) el.removeAttribute('open');
+    }
     function _topmostVisiblePanelId() {
         for (var i = 0; i < TRACKED_PANELS.length; i++) {
             var el = document.getElementById(TRACKED_PANELS[i]);
@@ -55,6 +81,16 @@
             if (!generic.id) generic.id = '_backnav_anon_' + Math.random().toString(36).slice(2, 8);
             return generic.id;
         }
+        var ov = _visibleOpenOverlay();
+        if (ov) {
+            if (!ov.id) ov.id = '_backnav_ov_' + Math.random().toString(36).slice(2, 8);
+            return ov.id;
+        }
+        // Module-level sub-pages (e.g. Tools: categories -> products -> detail).
+        // A module sets window.__moduleBackDepth() / window.__moduleBackHandler().
+        try {
+            if (typeof window.__moduleBackDepth === 'function' && window.__moduleBackDepth() > 0) return '__module_subpage';
+        } catch (_) {}
         return null;
     }
     var _lastReportedPanel = null;
@@ -81,7 +117,7 @@
             for (var i = 0; i < mutations.length; i++) {
                 var t = mutations[i].target;
                 if (!t || t.nodeType !== 1) continue;
-                if ((t.id && TRACKED_PANELS.indexOf(t.id) !== -1) || t.classList.contains('modal') || t.classList.contains('modal-overlay')) {
+                if ((t.id && TRACKED_PANELS.indexOf(t.id) !== -1) || t.classList.contains('modal') || t.classList.contains('modal-overlay') || (t.matches && t.matches('.bottom-sheet,.sheet,.drawer,.side-panel,.sidebar,.sub-panel,.overlay,[role="dialog"]'))) {
                     _reportPanelStateToParent();
                     return;
                 }
@@ -90,6 +126,8 @@
         observer.observe(document.body, { attributes: true, attributeFilter: ['style', 'class'], subtree: true });
     }
     _installPanelWatcher();
+    // Let modules re-report their state right after their own navigation changes.
+    window.__reportBackState = _reportPanelStateToParent;
 
     // Companion to the watcher above: lets the parent's hardware-back
     // handler actually close the panel it was just told about, without
@@ -147,6 +185,22 @@
             }
             return;
         }
+
+        // 1b2. Generic open sheets/drawers/side panels (see OPEN_SELECTOR).
+        var openOv = _visibleOpenOverlay();
+        if (openOv) {
+            _closeOpenOverlay(openOv);
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ type: 'SCREEN_STATE_CHANGED', restore: null, timestamp: Date.now() }, '*');
+            }
+            return;
+        }
+
+        // 1c. Module-level sub-page stack (Tools etc.): step back inside the
+        // module one page at a time before anything leaves the module.
+        try {
+            if (typeof window.__moduleBackHandler === 'function' && window.__moduleBackHandler() === true) return;
+        } catch (_) {}
 
         // 2. If we have internal history, go to previous page
         if (_history.length > 0) {

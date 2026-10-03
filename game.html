@@ -1,4 +1,4 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover"><title>Necpra Games</title><script src="/js/runtime-config.js"></script><script src="/js/config.js"></script><script src="/js/theme.engine.js"></script><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--kyn-bg-root);color:var(--kyn-text-primary)}iframe{display:block;width:100%;height:100%;border:0}</style></head><body><iframe id="games" src="game-v3.html" title="Necpra Games"></iframe><script>
+<!doctype html><html lang="en"><head><script src="/session-restore.js"></script><script src="/app-protect.js"></script><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover"><title>Necpra Games</title><script src="/js/runtime-config.js"></script><script src="/js/config.js"></script><script src="/js/theme.engine.js"></script><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--kyn-bg-root);color:var(--kyn-text-primary)}iframe{display:block;width:100%;height:100%;border:0}</style></head><body><iframe id="games" src="game-v3.html" title="Necpra Games"></iframe><script>
 // FIX (NAV BAR STILL VISIBLE INSIDE A GAME, cont'd): relay the arcade's own
 // GAMES_PANEL_OPENED/CLOSED notice (see game-v3.html's notifyGamesPanel()) up
 // to chat.html. This file sits between them (chat.html -> this file's iframe
@@ -30,4 +30,4 @@ window.addEventListener('message',function(ev){
 // does the one thing left that has to happen from here: injecting the
 // gameplay-enhancement scripts once the arcade document exists.
 (function(){'use strict';var f=document.getElementById('games');f.addEventListener('load',function(){var d=f.contentDocument;if(!d)return;var files=[['mood-v4-loader','/games-v4-enhancements.js?v=4.4'],['mood-crossword-v4','/games-crossword-v4.js?v=6.1'],['mood-arcade-v5','/games-commercial-v5.js?v=5.3']];files.forEach(function(x){if(!d.getElementById(x[0])){var s=d.createElement('script');s.id=x[0];s.src=x[1];s.async=false;d.body.appendChild(s)}})})})();
-</script></body></html>
+</script><script src="back-nav.js"></script><script src="report-problem.js" defer></script></body></html>

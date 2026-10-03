@@ -11,7 +11,11 @@
       "*.onrender.com",
       "*.googleusercontent.com",
       "accounts.google.com",
-      "res.cloudinary.com"
+      "res.cloudinary.com",
+      "*.google.com",
+      "*.gstatic.com",
+      "accounts.youtube.com",
+      "*.googleapis.com"
     ],
     "url": "https://necpra.co.ke/",
     "errorPath": "index.html"

@@ -154,6 +154,47 @@ async function _api(method, endpoint, body = null) {
 // SECTION 3 — PRODUCT ENGINE
 // ══════════════════════════════════════════════════════════════════════
 
+/* ---- Deleted-listing tombstones -------------------------------------------
+   An admin/seller delete must disappear from EVERY place (home, categories, search,
+   cart, wishlist, cached lists) and must not come back when a device reconnects.
+   Deleted ids are remembered on the device (survive offline/restart) and synced
+   from the server (GET /products/deleted-ids) so missed deletes are caught too. */
+const _TOMB_KEY = 'knt_deleted_products_v1', _TOMB_SYNC_KEY = 'knt_deleted_sync_v1';
+const _tomb = (() => { try { return new Set((JSON.parse(localStorage.getItem(_TOMB_KEY) || '[]')).map(String)); } catch (_) { return new Set(); } })();
+function _productGone(id) { return id != null && _tomb.has(String(id)); }
+function _purgeDeleted(ids) {
+    ids.forEach(raw => {
+        const id = String(raw);
+        _tomb.add(id);
+        [id, Number(id)].forEach(k => { _store.products.delete(k); _store.cart.delete(k); _store.wishlist.delete(k); });
+    });
+    const keep = p => !_productGone(p && p.id);
+    _store.featured = _store.featured.filter(keep); _store.trending = _store.trending.filter(keep);
+    _store.flash_sales = _store.flash_sales.filter(keep); _store.recent = _store.recent.filter(keep);
+    _store.searchIndex = _store.searchIndex.filter(keep);
+    try { localStorage.setItem(_TOMB_KEY, JSON.stringify(Array.from(_tomb).slice(-5000))); } catch (_) {}
+    _lsSave(_LS.CART, Array.from(_store.cart.values())); _lsSave(_LS.WISHLIST, Array.from(_store.wishlist));
+    try { document.querySelectorAll(ids.map(i => `[data-product-id="${i}"],[data-id="${i}"]`).join(',')).forEach(el => el.remove()); } catch (_) {}
+    window.dispatchEvent(new CustomEvent('ecom:products-deleted', { detail: { ids: ids.map(String) } }));
+}
+async function _syncDeleted() {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    try {
+        const since = localStorage.getItem(_TOMB_SYNC_KEY) || '';
+        const resp = await _api('GET', '/api/marketplace/products/deleted-ids' + (since ? '?since=' + encodeURIComponent(since) : ''));
+        const ids = resp?.data?.ids || resp?.ids || [];
+        if (ids.length) _purgeDeleted(ids);
+        const t = resp?.data?.serverTime || resp?.serverTime; if (t) localStorage.setItem(_TOMB_SYNC_KEY, t);
+    } catch (_) {}
+}
+window.__kyntProductGone = _productGone;
+window.__kyntMarkProductDeleted = id => _purgeDeleted([id]);
+window.__kyntSyncDeleted = _syncDeleted;
+window.addEventListener('online', _syncDeleted);
+setTimeout(_syncDeleted, 1500);
+// drop anything a previous session saved for a listing that has since been deleted
+setTimeout(() => { if (_tomb.size) _purgeDeleted(Array.from(_tomb)); }, 0);
+
 const ProductEngine = {
 
     async init() {
@@ -188,7 +229,8 @@ const ProductEngine = {
 
         const resp = await _api('GET', `/api/marketplace/products?${params}`);
         const raw  = resp?.data?.products || resp?.products || [];
-        const normalized = raw.map(_normalizeProduct);
+        _syncDeleted();
+        const normalized = raw.map(_normalizeProduct).filter(p => !_productGone(p.id));
 
         normalized.forEach(p => _store.products.set(p.id, p));
 
@@ -209,6 +251,7 @@ const ProductEngine = {
     },
 
     async getProduct(id) {
+        if (_productGone(id)) return null;
         if (_store.products.has(id)) return _store.products.get(id);
         const resp = await _api('GET', `/api/marketplace/products/${id}`);
         const raw = resp?.data?.product || resp?.product;

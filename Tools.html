@@ -1,6 +1,6 @@
 ﻿<!DOCTYPE html>
 <html lang="en">
-<head>
+<head><script src="/session-restore.js"></script><script src="/app-protect.js"></script>
 <!-- FIX: load the shared runtime-config-driven config.js before anything
      hardcodes the backend origin here — see chat.html for the full
      explanation of why a literal in this spot breaks under the build. -->
@@ -2105,6 +2105,9 @@
                                 <option value="ebooks">E-books &amp; Guides</option>
                                 <option value="design">Design Assets</option>
                                 <option value="software">Software &amp; Apps</option>
+                                <option value="antivirus">Antivirus</option>
+                                <option value="office">Office Software</option>
+                                <option value="games">Games</option>
                                 <option value="audio">Audio &amp; Music</option>
                                 <option value="courses">Courses &amp; Tutorials</option>
                                 <option value="other">Other</option>
@@ -3944,5 +3947,5 @@
     if (!wire()) document.addEventListener('DOMContentLoaded', wire, { once: true });
 })();
 </script>
-</body>
+<script src="report-problem.js" defer></script></body>
 </html>

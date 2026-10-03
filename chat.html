@@ -1,6 +1,6 @@
 ﻿<!DOCTYPE html>
 <html lang="en">
-<head>
+<head><script src="/session-restore.js"></script><script src="/app-protect.js"></script>
     <!-- FIX (recursive window.__getApiOrigin / "not a function" on load):
          this page never loaded js/config.js. It used to define its own
          copy of __isLocalEnvironment/__getApiOrigin/__getApiBase further
@@ -1716,21 +1716,33 @@
         <iframe id="messagesIframe" class="content-iframe" src="message.html" data-module="messages"></iframe>
     </div>
     <div id="statusContent" class="iframe-container hidden">
-        <iframe id="statusIframe" class="content-iframe" src="status.html" data-module="status"></iframe>
+        <iframe id="statusIframe" class="content-iframe" data-src="status.html" data-module="status"></iframe>
     </div>
     <div id="groupContent" class="iframe-container hidden">
         <iframe id="groupIframe" class="content-iframe" src="group.html" data-module="group"></iframe>
     </div>
     <div id="friendsContent" class="iframe-container hidden">
-        <iframe id="friendsIframe" class="content-iframe" src="friend.html" data-module="friends" allow="camera; microphone; geolocation"></iframe>
+        <iframe id="friendsIframe" class="content-iframe" data-src="friend.html" data-module="friends" allow="camera; microphone; geolocation"></iframe>
     </div>
     <div id="settingsContent" class="iframe-container hidden">
-        <iframe id="settingsIframe" class="content-iframe" src="settings.html" data-module="settings"></iframe>
+        <iframe id="settingsIframe" class="content-iframe" data-src="settings.html" data-module="settings"></iframe>
     </div>
     <div id="toolsContent" class="iframe-container hidden">
         <iframe id="toolsIframe" class="content-iframe" data-src="Tools.html" data-module="tools"></iframe>
     </div>
     <script>
+    // Lazy module loading (less data at launch): messages + groups + tools load as before.
+    // Games load only when opened; Status/Friends/Settings load shortly after launch
+    // (their badges/settings are needed) or immediately when the user opens them.
+    (function () {
+        var MAP = { games:'gamesIframe', game:'gamesIframe', status:'statusIframe', friends:'friendsIframe', friend:'friendsIframe', settings:'settingsIframe' };
+        function load(id) { var f = document.getElementById(id); if (f && !f.getAttribute('src')) { var s = f.getAttribute('data-src'); if (s) f.setAttribute('src', s); } }
+        window.__loadModuleIframe = function (page) { if (MAP[page]) load(MAP[page]); };
+        function later() { ['statusIframe','friendsIframe','settingsIframe'].forEach(function (id, i) { setTimeout(function () { load(id); }, 2500 + i * 1500); }); }
+        if (document.readyState === 'complete') later(); else window.addEventListener('load', later, { once: true });
+    })();
+    </script>
+<script>
     // Tools/Marketplace pulls ~2.5 MB of scripts (video.js, chart.js, jQuery, the marketplace
     // bundles). It used to start loading in parallel with everything else on launch. It now
     // loads once the app is idle (or immediately when the user opens it), so chat/status/group
@@ -1774,7 +1786,7 @@
         <i class="fas fa-user-plus" style="font-size:16px;pointer-events:none;"></i>
     </button>
     <div id="gamesContent" class="iframe-container hidden">
-        <iframe id="gamesIframe" class="content-iframe" src="game.html" data-module="games"></iframe>
+        <iframe id="gamesIframe" class="content-iframe" data-src="game.html" data-module="games"></iframe>
     </div>
     <style>
         .mobile-nav-icon[data-page="tools"] .ecom-nav-badge,
@@ -2646,6 +2658,14 @@
                 return true;
             }
 
+            // Floating "+" action menu: close it first.
+            const _cMenu = document.getElementById('centerActionMenu');
+            if (_cMenu && _cMenu.classList.contains('open')) {
+                closeCenterMenu();
+                logProcessStatus('back-navigation', true, 'closed-center-menu');
+                return true;
+            }
+
             const profileModal = document.getElementById('profileModal');
             if (profileModal && profileModal.classList.contains('active')) {
                 profileModal.classList.remove('active');
@@ -2766,6 +2786,7 @@
         function navigateToPage(page, options = {}) {
             _chatLog('[Navigation] navigateToPage called with:', page, options);
             if ((page === 'tools' || page === 'tool' || page === 'marketplace') && window.__loadToolsIframe) window.__loadToolsIframe();
+            if (window.__loadModuleIframe) window.__loadModuleIframe(page);
             if (!page) {
                 console.warn('[Navigation] No page provided to navigateToPage');
                 return;
@@ -3318,7 +3339,12 @@
             // app has genuinely nothing left to handle but the browser still
             // has its own history state to reconcile with.
             const handled = handleAppBackNavigation();
-            if (handled) return;
+            if (handled) {
+                // Re-arm the history buffer so the NEXT hardware-back press
+                // reaches this handler too instead of leaving the app.
+                syncBrowserHistoryState(window.__currentPage || 'messages', false);
+                return;
+            }
 
             const statePage = event && event.state && event.state.appNav ? event.state.page : null;
             if (statePage && statePage !== window.__currentPage) {

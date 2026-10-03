@@ -14,9 +14,19 @@ import ee.forgr.capacitor.social.login.SocialLoginPlugin;
 public class MainActivity extends BridgeActivity implements ModifiedMainActivityForSocialLoginPlugin {
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        // Set BEFORE the window/WebView exist so no frame can ever be captured.
+        try { getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE); } catch (Exception ignored) {}
         super.onCreate(savedInstanceState);
         try { getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE); } catch (Exception ignored) {}
         try { getBridge().getWebView().getSettings().setTextZoom(100); } catch (Exception ignored) {}
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        // Re-assert after dialogs/Google sign-in return, and hide the recents thumbnail.
+        try { getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE); } catch (Exception ignored) {}
+        try { if (android.os.Build.VERSION.SDK_INT >= 33) setRecentsScreenshotEnabled(false); } catch (Throwable ignored) {}
     }
 
     @Override

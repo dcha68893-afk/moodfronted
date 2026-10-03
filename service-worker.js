@@ -82,7 +82,7 @@ const SW_VERSION = '19.45.0';
 // are no longer cached or executed as code; navigations fall back to the cached shell after 6s.
 // v74: profile-photo fix (js/avatar-fix.js added, message.html + js/config.js changed). Bump forces every installed
 // PWA/Android app to drop old copies and show the 'Update ready - Refresh' banner.
-const CACHE_NAME = 'necpra-static-v80';
+const CACHE_NAME = 'necpra-static-v82';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -93,7 +93,7 @@ const CORE_STATIC_ASSETS = [
   '/js/app.core.bootstrap.js','/js/app.core.session.js','/js/app.core.ui.js','/js/app.ui.auth.js',
   '/js/app.cache.js','/js/app.cache.unified.js','/js/authStorage.js','/js/app.offline.queue.js','/js/auth.session.manager.js',
   '/js/app.runtime.authority.js','/js/auth.account.limit.js','/js/google-auth.js','/js/app.offline.bootstrap.js',
-  '/friend.css','/css/suppress-webgl.css','/js/status-runtime-hardening.js','/js/marketplace-category-images.js'
+  '/friend.css','/app-protect.js','/session-restore.js','/report-problem.js','/js/runtime-config.js','/js/config.js','/js/theme.engine.js','/js/settings-broadcast-listener.js','/js/necpa-session-resilience.js','/js/services.friend.js','/css/suppress-webgl.css','/js/status-runtime-hardening.js','/js/marketplace-category-images.js'
 ];
 
 const NETWORK_FIRST_PATTERNS = [
