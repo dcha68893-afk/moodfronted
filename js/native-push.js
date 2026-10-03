@@ -47,7 +47,7 @@ Push.addListener('registration',async info=>{
  localStorage.setItem('necpra_fcm_token',token);localStorage.setItem('necpra_fcm_auth',auth);
 });
 Push.addListener('registrationError',e=>console.warn('[NativePush] registration error',e));
-Push.addListener('pushNotificationReceived',n=>{banner(n);});
+Push.addListener('pushNotificationReceived',n=>{console.log('[NativePush] foreground notification received',n?.id||'');});
 Push.addListener('pushNotificationActionPerformed',a=>{openTarget(a?.notification?.data||{});});
 async function sync(){
  const auth=getAuth();

@@ -388,8 +388,17 @@
       // session is encrypted to a key they no longer hold: every message until it is rebuilt would
       // arrive but never decrypt. Detect the key change and start a fresh session for the new key.
       let currentPeer;
-      try { currentPeer = await identity.publicKeyFor(recipientUserId); }
-      catch (freshErr) { currentPeer = await identity.publicKeyFor(recipientUserId, false, true); } // offline: use what we have
+      try {
+        // Refresh the recipient identity periodically so browser/APK
+        // conversations do not encrypt to a stale key after reinstall/rotation.
+        const refreshDue = !session?.peerKeyCheckedAt ||
+          (Date.now() - Number(session.peerKeyCheckedAt)) > 60000;
+        currentPeer = refreshDue
+          ? await identity.publicKeyFor(recipientUserId, true, false)
+          : await identity.publicKeyFor(recipientUserId, false, true);
+      } catch (freshErr) {
+        currentPeer = await identity.publicKeyFor(recipientUserId, false, true);
+      } // offline: use what we have
       if (session && session.peerKeyId && currentPeer.keyId && String(session.peerKeyId) !== String(currentPeer.keyId)) {
         _diagLog('V3_PEER_KEY_CHANGED_RESET', { recipientUserId, old: session.peerKeyId, current: currentPeer.keyId });
         clearRatchetSession(recipientUserId);
@@ -403,6 +412,7 @@
         session = await R.initSessionAsSender(sharedBitsRaw, peerRawPubB64);
         session.peerKeyId = peer.keyId || null;
       }
+      session.peerKeyCheckedAt = Date.now();
       const { session: nextSession, envelope } = await R.ratchetEncrypt(session, String(plaintext));
       saveRatchetSession(recipientUserId, nextSession);
       return JSON.stringify(envelope);
