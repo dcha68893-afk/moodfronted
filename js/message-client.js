@@ -1161,6 +1161,17 @@
         }
     }
 
+    // Finds the real key of a message in a bucket regardless of number/string id type.
+    function bucketKeyFor(bucket, id) {
+        if (!bucket || id == null) return undefined;
+        if (bucket.has(id)) return id;
+        const n = Number(id);
+        if (Number.isFinite(n) && bucket.has(n)) return n;
+        const t = String(id);
+        if (bucket.has(t)) return t;
+        return undefined;
+    }
+
     async function editMessage(chatId, messageId, content) {
         try {
             let outgoingContent = content;
@@ -1189,13 +1200,16 @@
             const res = await api().put(`/messages/${messageId}`, { content: outgoingContent });
             if (res && res.success) {
                 const bucket = state.messagesByConversation.get(chatId);
-                if (bucket && bucket.has(messageId)) {
-                    bucket.set(messageId, Object.assign({}, bucket.get(messageId), {
+                // FIX: the UI hands us the id as a string (dataset/DOM) while the bucket is keyed by the
+                // numeric server id — bucket.has('123') was false, so the edit never reached the UI.
+                const key = bucketKeyFor(bucket, messageId);
+                if (key !== undefined) {
+                    bucket.set(key, Object.assign({}, bucket.get(key), {
                         content: res.data.content, displayContent: content, isEdited: true, editedAt: res.data.editedAt,
                     }));
-                    notify('message:edited', { chatId, messageId });
-                    persistMessage(chatId, bucket.get(messageId));
+                    persistMessage(chatId, bucket.get(key));
                 }
+                notify('message:edited', { chatId, messageId: key !== undefined ? key : messageId });
                 return { success: true };
             }
             return { success: false, error: res && res.message };
@@ -1476,14 +1490,31 @@
         // reaches this iframe through the generic REALTIME_EVENT: wildcard
         // forwarder — KynectaRealtime.on() is the correct way to receive it.
         if (window.KynectaRealtime && window.KynectaRealtime.on) {
-            window.KynectaRealtime.on('message:edited', (payload) => {
+            window.KynectaRealtime.on('message:edited', async (payload) => {
+                if (!payload) return;
                 const bucket = state.messagesByConversation.get(payload.chatId);
-                if (bucket && bucket.has(payload.messageId)) {
-                    bucket.set(payload.messageId, Object.assign({}, bucket.get(payload.messageId), {
-                        content: payload.content, isEdited: true, editedAt: payload.editedAt,
-                    }));
+                const key = bucketKeyFor(bucket, payload.messageId);
+                if (key === undefined) {          // conversation not loaded yet: just refresh the list preview
                     notify('message:edited', { chatId: payload.chatId, messageId: payload.messageId });
+                    return;
                 }
+                const mine = payload.editedBy != null && String(payload.editedBy) === String(window._kynCurrentUserId);
+                const prev = bucket.get(key);
+                if (mine && prev.displayContent !== undefined) {
+                    // my own edit echoed back (or from this device): plaintext is already shown, only flag it
+                    bucket.set(key, Object.assign({}, prev, { content: payload.content, isEdited: true, editedAt: payload.editedAt }));
+                } else {
+                    // FIX: receivers kept showing the OLD text because only `content` (ciphertext) was replaced
+                    // while the rendered `displayContent` was left untouched, and decryptForDisplay() skips
+                    // messages that already have a displayContent. Invalidate it and decrypt the new ciphertext.
+                    decryptResults.delete(String(payload.chatId) + ':' + String(key));
+                    bucket.set(key, Object.assign({}, prev, {
+                        content: payload.content, isEdited: true, editedAt: payload.editedAt, displayContent: undefined,
+                    }));
+                    try { await decryptForDisplay(payload.chatId, bucket.get(key)); } catch (_) {}
+                }
+                persistMessage(payload.chatId, bucket.get(key));
+                notify('message:edited', { chatId: payload.chatId, messageId: key });
             });
             window.KynectaRealtime.on('message:reaction', (payload) => {
                 const bucket = state.messagesByConversation.get(payload.chatId);

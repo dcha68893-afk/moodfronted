@@ -636,38 +636,47 @@ const OrderEngine = {
 
 const PaymentEngine = {
 
-    async initiateMpesa({ phone, amount, orderId, description = '' }) {
-        if (!phone || !amount || !orderId) return { success: false, message: 'Missing payment fields' };
+    async initiateMpesa({ phone, amount, orderId, description = '', orderIds = null }) {
+        if (!phone || !orderId) return { success: false, message: 'Missing payment fields' };
 
         // Normalize phone to 254XXXXXXXXX
         const normalized = _normalizeMpesaPhone(phone);
-        if (!normalized) return { success: false, message: 'Invalid phone number' };
+        if (!normalized) return { success: false, message: 'Enter a valid Safaricom number, e.g. 0712 345 678' };
 
+        // `amount` and `callback_url` are NOT sent: the server computes the amount from the
+        // order(s) and takes the callback URL only from its own config.
         const resp = await _api('POST', '/api/payments/mpesa/stk-push', {
-            phone: normalized, amount, order_id: orderId,
+            phone: normalized, order_id: orderId,
+            ...(Array.isArray(orderIds) && orderIds.length ? { order_ids: orderIds } : {}),
             description: description || `Payment for order #${orderId.slice(-6)}`,
-            callback_url: `${window.location.origin}/api/payments/mpesa/callback`,
         });
 
-        if (resp?.success || resp?.data?.CheckoutRequestID) {
-            const requestId = resp.data?.CheckoutRequestID || resp.checkout_request_id;
+        const requestId = resp?.data?.checkoutRequestId || resp?.data?.CheckoutRequestID || resp?.checkout_request_id || null;
+        if (resp?.success && requestId) {
             window.dispatchEvent(new CustomEvent('ecom:payment-initiated', {
-                detail: { method: 'mpesa', phone: normalized, amount, orderId, requestId }
+                detail: { method: 'mpesa', phone: normalized, amount: resp.data?.amount ?? amount, orderId, requestId }
             }));
             return { success: true, requestId, message: 'STK push sent to your phone. Enter M-Pesa PIN.' };
         }
         return { success: false, message: resp?.message || 'M-Pesa initiation failed' };
     },
 
-    async verifyMpesa({ requestId, orderId }) {
-        const resp = await _api('POST', '/api/payments/mpesa/verify', { request_id: requestId, order_id: orderId });
-        if (resp?.success || resp?.data?.status === 'paid') {
+    async verifyMpesa({ requestId, orderId, orderIds = null }) {
+        const resp = await _api('POST', '/api/payments/mpesa/verify', {
+            request_id: requestId, order_id: orderId,
+            ...(Array.isArray(orderIds) && orderIds.length ? { order_ids: orderIds } : {}),
+        });
+        // BUG FIX: `resp.success` is true for a *pending* poll too, so the old check marked
+        // unpaid orders as paid. Only status === 'paid' counts.
+        const status = resp?.data?.status || (resp?.data?.paid ? 'paid' : 'pending');
+        if (status === 'paid') {
             await OrderEngine.updateStatus(orderId, ORDER_STATUS.PAID, 'M-Pesa payment confirmed');
             window.dispatchEvent(new CustomEvent('ecom:payment-success', { detail: { method: 'mpesa', orderId } }));
             _socketEmit('payment:confirmed', { order_id: orderId, method: 'mpesa' });
-            return { success: true };
+            return { success: true, status };
         }
-        return { success: false, pending: resp?.data?.status === 'pending' };
+        if (status === 'failed') return { success: false, failed: true, status, message: resp?.data?.reason || 'Payment failed or was cancelled' };
+        return { success: false, pending: true, status };
     },
 
     async initiateCardPayment({ card, amount, orderId }) {
@@ -704,11 +713,13 @@ const PaymentEngine = {
 };
 
 function _normalizeMpesaPhone(phone) {
-    const digits = String(phone).replace(/\D/g, '');
-    if (digits.startsWith('254') && digits.length === 12) return digits;
-    if (digits.startsWith('0') && digits.length === 10) return '254' + digits.slice(1);
-    if (digits.length === 9) return '254' + digits;
-    return null;
+    // Handles 0712345678, 712345678, 254712345678, +254 712-345-678, 00254712345678, 0112345678
+    let s = String(phone || '').replace(/\D/g, '');
+    if (s.startsWith('00254')) s = s.slice(2);
+    if (s.startsWith('254')) { /* ok */ }
+    else if (s.startsWith('0')) s = '254' + s.slice(1);
+    else if (/^[71]\d{8}$/.test(s)) s = '254' + s;
+    return /^254[71]\d{8}$/.test(s) ? s : null;
 }
 
 // ══════════════════════════════════════════════════════════════════════

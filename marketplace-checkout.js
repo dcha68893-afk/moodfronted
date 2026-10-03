@@ -794,25 +794,45 @@ async function _doMpesaPayment(order) {
     // to undefined -> 0, so `amount` was always 0 and the backend's own
     // `if (!phone || !amount || !order_id)` guard rejected the request
     // every single time, regardless of what the buyer actually owed.
-    const total = parseFloat(order.total ?? order.total_price ?? 0);
-    const phone = _state.mpesaPhone.replace(/^0/,'254').replace(/^\+/,'');
+    // The server computes the amount from the order(s) and owns the callback URL,
+    // so only the phone number and order ids are sent.
+    const phone = _normalizeMpesaPhone(_state.mpesaPhone);
+    if (!phone) {
+        document.getElementById('coMpesaWaiting')?.remove();
+        _toast('Enter a valid Safaricom number, e.g. 0712 345 678.','error','❌');
+        _finishOrder({ ...order, status: 'pending' });
+        return;
+    }
+    const orderIds = Array.isArray(order.orders) && order.orders.length ? order.orders : [order.id];
 
     const r = await _api('POST','/marketplace/payment/mpesa',{
-        phone, amount: Math.ceil(total), order_id: order.id,
+        phone, order_id: order.id, order_ids: orderIds,
         description: `Order #${order.id?.slice(-8)||'KNT'}`,
     });
 
-    _state.mpesaRequestId = r?.data?.checkout_request_id || r?.checkout_request_id;
+    // Backend returns { checkoutRequestId, status }. Older shapes are still accepted.
+    const d = r?.data || r || {};
+    _state.mpesaRequestId = d.checkoutRequestId || d.CheckoutRequestID || d.checkout_request_id || null;
 
-    if (!_state.mpesaRequestId) {
+    if (!_state.mpesaRequestId || r?._error || r?.success === false) {
         document.getElementById('coMpesaWaiting')?.remove();
-        _toast('M-Pesa request failed. Please try again.','error','❌');
+        _toast(r?.message || 'M-Pesa request failed. Please try again.','error','❌');
         _finishOrder({ ...order, status: 'pending' });
         return;
     }
 
     // Poll for payment confirmation
     _pollMpesa(order, _state.mpesaRequestId, 0);
+}
+
+// Accepts 0712345678, 712345678, 254712345678, +254 712-345-678, 00254..., 0112345678
+function _normalizeMpesaPhone(v) {
+    let s = String(v || '').replace(/\D/g, '');
+    if (s.startsWith('00254')) s = s.slice(2);
+    if (s.startsWith('254')) { /* ok */ }
+    else if (s.startsWith('0')) s = '254' + s.slice(1);
+    else if (/^[71]\d{8}$/.test(s)) s = '254' + s;
+    return /^254[71]\d{8}$/.test(s) ? s : null;
 }
 
 function _showMpesaWaiting(order) {
@@ -841,20 +861,35 @@ function _showMpesaWaiting(order) {
 }
 
 async function _pollMpesa(order, requestId, attempt) {
-    if (attempt > 20) {
+    const MAX_ATTEMPTS = 30;                                   // ~90 seconds
+    if (!document.getElementById('coMpesaWaiting')) return;    // buyer chose "I'll Pay Later"
+    if (attempt > MAX_ATTEMPTS) {
         document.getElementById('coMpesaWaiting')?.remove();
-        _toast('Payment timed out. Order saved as pending.','warning','⏱️');
+        _toast('Payment not confirmed yet. Order saved as pending.','warning','⏱️');
         _finishOrder({ ...order, status:'pending' });
         return;
     }
     await new Promise(r=>setTimeout(r,3000));
-    const r = await _api('POST','/marketplace/payment/mpesa/verify',{ request_id: requestId, order_id: order.id });
-    if (r?.data?.paid || r?.paid) {
+    if (!document.getElementById('coMpesaWaiting')) return;
+
+    const r = await _api('POST','/marketplace/payment/mpesa/verify',{
+        request_id: requestId, order_id: order.id,
+        order_ids: Array.isArray(order.orders) && order.orders.length ? order.orders : [order.id],
+    });
+    // Backend returns { status: 'paid' | 'pending' | 'failed' }. A network blip / non-2xx just retries.
+    const d = r?.data || {};
+    const status = r?._error ? 'pending' : (d.status || (d.paid ? 'paid' : 'pending'));
+
+    if (status === 'paid') {
         document.getElementById('coMpesaWaiting')?.remove();
         _finishOrder({ ...order, status:'paid' });
+    } else if (status === 'failed') {
+        document.getElementById('coMpesaWaiting')?.remove();
+        _toast(d.reason || 'M-Pesa payment was cancelled or failed. You can retry from your Orders.','error','❌');
+        _finishOrder({ ...order, status:'pending' });
     } else {
         const st = document.getElementById('coMpesaStatus');
-        if (st) st.textContent = `Waiting… (${attempt+1}/20)`;
+        if (st) st.textContent = `Waiting… (${attempt+1}/${MAX_ATTEMPTS})`;
         _pollMpesa(order, requestId, attempt+1);
     }
 }

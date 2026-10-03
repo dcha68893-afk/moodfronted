@@ -352,7 +352,7 @@ function startEdit(id,currentContent){const next=prompt('Edit message:',currentC
     if(!(await ensureE2EReady())||!window.KynectaGroupE2E)throw new Error(e2eNotReadyMessage());
     outgoing=await window.KynectaGroupE2E.encryptForGroup(S.current?.id,trimmed,groupMemberIds(S.current));
   }catch(e){alert(e.message||'Could not encrypt the edited message');return}
-  api(`/group-messages/message/${encodeURIComponent(id)}`,{method:'PATCH',body:JSON.stringify({content:outgoing})}).then(()=>{const idx=S.messages.findIndex(m=>String(m.id||m.messageId)===String(id));if(idx!==-1){S.messages[idx]={...S.messages[idx],content:trimmed,isEdited:true};renderMessages(false)}}).catch(e=>alert(e.message||'Could not edit message'))
+  api(`/group-messages/message/${encodeURIComponent(id)}`,{method:'PATCH',body:JSON.stringify({content:outgoing})}).then(()=>{try{groupMessageState.plaintext.set(String(id),trimmed);groupMessageState.lastCiphertext.set(String(id),outgoing)}catch(_){}const idx=S.messages.findIndex(m=>String(m.id||m.messageId)===String(id));if(idx!==-1){S.messages[idx]={...S.messages[idx],content:trimmed,isEdited:true,editedAt:new Date().toISOString()};renderMessages(false)}}).catch(e=>alert(e.message||'Could not edit message'))
 })()}
 /* ── Delete for me ─────────────────────────────────────────────────────────
    Stored per member (userId + group) so it survives reloads/cache-first hydration and works even against a backend that
@@ -797,6 +797,12 @@ window.addEventListener('pagehide',()=>{try{window.KynGroupUnread&&window.KynGro
 window.addEventListener('message',e=>{
   const d=e.data;if(!d||typeof d!=='object')return;
   if(d.type==='group:message'||d.type==='GROUP_MESSAGE'){handleRealtime({detail:d});return}
+  /* FIX: group edits never showed on other members' screens — nothing here listened for the edit event, so the
+     old text stayed until a full reload. Re-fetch the list; knownPlain() already treats a changed cipher as 'needs decrypt'. */
+  if(d.type==='group:message:edited'||d.type==='group:message:updated'){const p=d.payload||d.data||d;const gid=p&&(p.groupId||p.chatId||(p.message&&p.message.chatId));
+    if(!gid||String(gid)!==String(S.current?.id))return;
+    if(Number(p.editedBy)===Number(uid())&&groupMessageState.plaintext.has(String(p.messageId||(p.message&&p.message.id))))return;   // my own edit: already shown
+    clearTimeout(S._editT);S._editT=setTimeout(()=>{S._pendTries=0;loadMessages()},150);return}
   if(d.type==='group:message:deleted'){const p=d.payload||d.data||d;if(!p||String(p.groupId)!==String(S.current?.id))return;
     const mineFromOtherDevice=Number(p.deletedBy)===Number(uid());
     /* a "delete for me" by someone else must NEVER remove the message here; only delete-for-everyone (or my own action) does */
