@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1095423479218",
+    "project_id": "necpra",
+    "storage_bucket": "necpra.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1095423479218:android:0c0eadf63aae4f8ba128ab",
+        "android_client_info": {
+          "package_name": "com.necpa"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCbExCpjVvZLKsOoaC8vNwIc6_raxnPkZQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

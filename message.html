@@ -1974,17 +1974,29 @@
           break;
         }
         case 'report': {
-          // FIX (Play Store compliance audit #6): completes the Report menu
-          // item — matches the reason set the backend route (and the
-          // existing MessageReport model) actually accepts.
-          const reasons = ['spam', 'harassment', 'hate_speech', 'violence', 'sexual_content', 'misinformation', 'other'];
-          const reason = prompt(`Report this message. Reason (${reasons.join(', ')}):`, 'spam');
-          if (!reason || !reasons.includes(reason.trim())) {
-            if (reason !== null) alert('Please enter one of: ' + reasons.join(', '));
-            return;
+          // One canonical report path: the shared "Report a problem" sheet (report-problem.js). It lets the
+          // reporter keep/remove this message, tag the sender, add a note and attach photos/files, and posts to
+          // /api/admin/problem-reports so the admin sees all of it under Tool > Admin > Module Admin > Messages.
+          if (String(current.senderId) === String(window._kynCurrentUserId)) { alert('You cannot report your own message.'); return; }
+          const att = current.metadata && current.metadata.attachment;
+          const media = att && att.url ? [{ url: att.url, name: att.originalName || att.name || 'Attachment', type: att.type || '', mimeType: att.mimeType || '' }] : [];
+          const shown = typeof current.displayContent === 'string' ? current.displayContent : '';
+          // Never send decrypt placeholders as if they were the message text.
+          const text = /^(Decrypting|.{0,3}\s?Encrypted message|.{0,3}\s?Unable to decrypt)/i.test(shown) ? '' : shown;
+          const snap = {
+            messageId, chatId, senderId: current.senderId,
+            senderName: (current.sender && (current.sender.displayName || current.sender.username)) || '',
+            text, type: current.type || (att ? att.type : 'text'), media, sentAt: current.sentAt || current.createdAt || null,
+          };
+          if (typeof window.openProblemReport === 'function') {
+            window.openProblemReport({ module: 'Chat', category: 'inappropriate_content', targetUserId: current.senderId, targetName: snap.senderName, message: snap });
+          } else {
+            const reasons = ['spam', 'harassment', 'hate_speech', 'violence', 'sexual_content', 'misinformation', 'other'];
+            const reason = prompt(`Report this message. Reason (${reasons.join(', ')}):`, 'spam');
+            if (!reason || !reasons.includes(reason.trim())) { if (reason !== null) alert('Please enter one of: ' + reasons.join(', ')); return; }
+            const res = await window.MessageModule.reportMessage(chatId, messageId, reason.trim());
+            alert(res && res.success ? 'Message reported. Thank you for helping keep Necpra safe.' : (res?.message || 'Could not submit report.'));
           }
-          const res = await window.MessageModule.reportMessage(chatId, messageId, reason.trim());
-          alert(res && res.success ? 'Message reported. Thank you for helping keep Necpra safe.' : (res?.message || 'Could not submit report.'));
           break;
         }
       }

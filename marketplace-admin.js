@@ -403,6 +403,7 @@ async function renderAdminDashboard(container) {
                 ['admin-tickets',   '🎧', 'Support', 0],
                 ['admin-notify',    '🔔', 'Notify', 0],
                 ['admin-settings',  '⚙️', 'Settings', 0],
+                ['admin-modules',   '🧩', 'Module Admin', 0],
                 ['admin-audit',     '📋', 'Audit Log', 0],
                 ['admin-approval',  '✅', 'Approve', d.products?.pending||0],
             ].map(([page,icon,label,badge])=>`
@@ -1049,6 +1050,163 @@ async function renderAdminAudit(container) {
     </div>`);
 }
 
+// ═════════════════════════════════════════════════════════════════════
+// 16. MODULE ADMIN — one place for every module's admin work
+//     (replaces the old per-module shield "admin box" / admin-inbox.js)
+//     Data: /api/admin/problem-reports (tagged with the module it was filed
+//     from) and /api/admin/reports (reported chat messages).
+// ═════════════════════════════════════════════════════════════════════
+const ADM_MODULES = [
+    { key:'Chat',     icon:'💬', label:'Messages',  hint:'Reported chats, harassment, scams, spam' },
+    { key:'Friends',  icon:'👥', label:'Friends',   hint:'Fake accounts, abusive requests' },
+    { key:'Groups',   icon:'🫂', label:'Groups',    hint:'Group abuse, spam, bad members' },
+    { key:'Status',   icon:'🟣', label:'Status',    hint:'Inappropriate or harmful status posts' },
+    { key:'Games',    icon:'🎮', label:'Games',     hint:'Cheating, bugs, abuse in games' },
+    { key:'Settings', icon:'⚙️', label:'Settings',  hint:'Account / privacy / 2FA problems' },
+    { key:'Market',   icon:'🛒', label:'Marketplace', hint:'Scams, payment issues, bad listings' },
+    { key:'App',      icon:'📱', label:'General App', hint:'Anything not tied to one module' },
+];
+const ADM_CATS = ['scam','harassment','bias','hate_speech','spam','inappropriate_content','fake_account','payment_issue','bug','error','other'];
+window.__admMod = window.__admMod || { module:'', status:'pending', category:'' };
+
+async function _admFetchReports(status, category) {
+    const q = '?limit=300' + (status?`&status=${encodeURIComponent(status)}`:'') + (category?`&category=${encodeURIComponent(category)}`:'');
+    const r = await _api('GET', '/admin/problem-reports' + q);
+    return r?._error ? { error:r._error, rows:[] } : { rows:r?.data||[] };
+}
+
+// --- Evidence rendering (reported message + files the reporter attached) -------------
+function _admSafeUrl(u) { try { const x = new URL(String(u||''), location.href); return /^https?:$/.test(x.protocol) ? x.href : ''; } catch (_) { return ''; } }
+function _admFileTile(f) {
+    const url = _admSafeUrl(f && f.url); if (!url) return '';
+    const mime = String(f.mimeType||''), kind = f.type || '';
+    const u = _esc(url);
+    if (kind === 'image' || mime.startsWith('image/')) return `<a href="${u}" target="_blank" rel="noopener noreferrer"><img src="${u}" referrerpolicy="no-referrer" loading="lazy" alt="${_esc(f.name||'image')}" style="max-width:120px;max-height:120px;border-radius:8px;object-fit:cover;border:1px solid #e5e7eb"></a>`;
+    if (kind === 'video' || mime.startsWith('video/')) return `<video src="${u}" controls preload="metadata" style="max-width:220px;border-radius:8px"></video>`;
+    if (kind === 'audio' || mime.startsWith('audio/')) return `<audio src="${u}" controls preload="none"></audio>`;
+    return `<a class="adm-btn adm-btn-secondary" href="${u}" target="_blank" rel="noopener noreferrer">📄 ${_esc(f.name||'File')}</a>`;
+}
+function _admEvidence(r) {
+    const ref = r.messageRef, atts = Array.isArray(r.attachments) ? r.attachments : [];
+    let h = '';
+    if (ref && ref.messageId) {
+        h += `<div style="margin-top:8px;border-left:4px solid #f97316;background:#fff7ed;border-radius:8px;padding:8px 10px">
+            <div style="font-size:11px;font-weight:800;color:#9a3412">Reported message #${_esc(ref.messageId)} · ${_esc(ref.type||'message')} · from @${_esc(ref.senderName||ref.senderId||'?')}${ref.sentAt?' · '+_time(ref.sentAt):''}
+                <span class="adm-badge ${ref.verified?'green':'yellow'}">${ref.verified?'verified in chat':'unverified'}</span></div>
+            ${ref.text ? `<div style="font-size:13px;margin-top:4px;white-space:pre-wrap;word-break:break-word">${_esc(ref.text)}</div>` : '<div style="font-size:12px;color:#9ca3af;margin-top:4px">No text copy attached</div>'}
+            ${(ref.media||[]).length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${ref.media.map(_admFileTile).join('')}</div>` : ''}
+            <div style="font-size:10px;color:#9a3412;margin-top:4px">Text and media are the reporter's copy (chats are end-to-end encrypted). Sender, chat and time are checked against the server.</div>
+        </div>`;
+    }
+    if (atts.length) h += `<div style="margin-top:8px"><div style="font-size:11px;font-weight:800;color:#374151;margin-bottom:4px">Attached by reporter (${atts.length})</div><div style="display:flex;gap:6px;flex-wrap:wrap">${atts.map(_admFileTile).join('')}</div></div>`;
+    return h;
+}
+
+async function renderAdminModules(container) {
+    if (!_isAdmin()) { container.innerHTML = _pageShell('Module Admin', _noAccess()); return; }
+    container.innerHTML = _pageShell('Module Admin', `<div style="padding:20px;text-align:center">⏳</div>`);
+    const { rows, error } = await _admFetchReports('pending', '');
+    const counts = {}; rows.forEach(r => { const m = r.module || 'App'; counts[m] = (counts[m]||0) + 1; });
+    const known = new Set(ADM_MODULES.map(m => m.key));
+    const extra = Object.keys(counts).filter(k => !known.has(k)).map(k => ({ key:k, icon:'📂', label:k, hint:'Other reports' }));
+    container.innerHTML = _pageShell('Module Admin', `
+        ${error ? `<div style="margin:12px;background:#fef3c7;border-radius:12px;padding:12px;font-size:13px;color:#92400e">Could not load reports: ${_esc(error)}</div>` : ''}
+        <div class="adm-section">
+            <div class="adm-section-title">All modules</div>
+            <button class="adm-btn adm-btn-primary adm-btn-full" onclick="window._admOpenModule('')">📥 Open full reports inbox (${rows.length} pending)</button>
+        </div>
+        <div class="adm-section">
+            <div class="adm-section-title">Moderate by module</div>
+            <div class="adm-nav">
+                ${[...ADM_MODULES, ...extra].map(m => `
+                <button class="adm-nav-item" onclick="window._admOpenModule('${_esc(m.key)}')">
+                    <span class="adm-nav-icon">${m.icon}</span>
+                    <span class="adm-nav-label">${_esc(m.label)}${counts[m.key]>0?`<span class="adm-nav-badge">${counts[m.key]}</span>`:''}</span>
+                </button>`).join('')}
+            </div>
+        </div>`);
+}
+window._admOpenModule = (key) => { window.__admMod = { module:key, status:'pending', category:'' }; window._jmNavMore('admin-module'); };
+
+async function renderAdminModule(container) {
+    if (!_isAdmin()) { container.innerHTML = _pageShell('Module Admin', _noAccess()); return; }
+    const st = window.__admMod;
+    const meta = ADM_MODULES.find(m => m.key === st.module);
+    const title = st.module ? `${meta?.label || st.module} Admin` : 'All Reports';
+    container.innerHTML = _pageShell(title, `<div style="padding:20px;text-align:center">⏳</div>`, 'admin-modules');
+    const { rows: all, error } = await _admFetchReports(st.status, st.category);
+    const rows = all.filter(r => !st.module || (r.module || 'App') === st.module);
+    // Chat module also gets the reported-messages queue.
+    let msgReports = [];
+    if (st.module === 'Chat' || !st.module) {
+        const mr = await _api('GET', '/admin/reports' + (st.status ? `?status=${encodeURIComponent(st.status)}` : ''));
+        msgReports = mr?._error ? [] : (mr?.data || []);
+    }
+    window.__admModRows = rows;
+    container.innerHTML = _pageShell(title, `
+        ${meta ? `<div style="padding:10px 14px 0;font-size:12px;color:#6b7280">${_esc(meta.hint)}</div>` : ''}
+        <div class="adm-filter-row" style="padding:10px 12px 0;display:flex;gap:6px;flex-wrap:wrap">
+            ${['pending','reviewed','actioned','dismissed'].map(s => `<button class="adm-filter-btn ${st.status===s?'active':''}" onclick="window._admModFilter('status','${s}')">${s}</button>`).join('')}
+            <select class="adm-search-input" style="max-width:170px" onchange="window._admModFilter('category',this.value)">
+                <option value="">All categories</option>
+                ${ADM_CATS.map(c => `<option value="${c}" ${st.category===c?'selected':''}>${c.replace(/_/g,' ')}</option>`).join('')}
+            </select>
+        </div>
+        ${error ? `<div style="margin:12px;background:#fee2e2;border-radius:12px;padding:12px;font-size:13px;color:#991b1b">${_esc(error)}</div>` : ''}
+        <div style="padding:12px">
+        ${rows.length ? rows.map(r => {
+            const canAct = r.status === 'pending' || r.status === 'reviewed';
+            return `<div class="adm-row" style="display:block;margin-bottom:10px">
+                <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
+                    <b style="font-size:13px">${_esc(String(r.category||'').replace(/_/g,' '))}</b>
+                    <span class="adm-badge gray">${_esc(r.module||'App')}</span>
+                    <span class="adm-badge ${r.status==='pending'?'yellow':r.status==='actioned'?'green':'gray'}">${_esc(r.status)}</span>
+                </div>
+                <div style="font-size:11px;color:#6b7280;margin-bottom:6px">From @${_esc(r.reporterName||r.reporterId)}${r.targetUserId?` · About @${_esc(r.targetName||r.targetUserId)}`:''} · ${_time(r.createdAt)}</div>
+                <div style="font-size:13px;color:#111;white-space:pre-wrap;word-break:break-word">${_esc(r.details)}</div>
+                ${_admEvidence(r)}
+                ${r.actionTaken ? `<div style="font-size:11px;color:#6b7280;margin-top:6px">Action: ${_esc(r.actionTaken)}${r.adminNote?` — ${_esc(r.adminNote)}`:''}</div>` : ''}
+                ${canAct ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
+                    ${r.targetUserId ? `<button class="adm-btn adm-btn-warning" onclick="window._admReportAct(${Number(r.id)},'warn')">⚠️ Warn</button>
+                    <button class="adm-btn adm-btn-danger" onclick="window._admReportAct(${Number(r.id)},'suspend')">⏸️ Suspend</button>
+                    <button class="adm-btn adm-btn-danger" onclick="window._admReportAct(${Number(r.id)},'remove')">🗑️ Remove</button>` : ''}
+                    ${r.messageRef&&r.messageRef.verified ? `<button class="adm-btn adm-btn-danger" onclick="window._admReportAct(${Number(r.id)},'remove_message')">🗑️ Remove message</button>` : ''}
+                    <button class="adm-btn adm-btn-secondary" onclick="window._admReportAct(${Number(r.id)},'respond')">💬 Reply</button>
+                    <button class="adm-btn adm-btn-secondary" onclick="window._admReportAct(${Number(r.id)},'dismiss')">Dismiss</button>
+                </div>` : ''}
+            </div>`;
+        }).join('') : '<div style="padding:30px;text-align:center;color:#9ca3af">No reports here</div>'}
+        </div>
+        ${msgReports.length ? `<div class="adm-section"><div class="adm-section-title">Reported messages (${msgReports.length})</div>
+            ${msgReports.map(m => `<div class="adm-row" style="display:block;margin-bottom:8px">
+                <div style="font-size:12px;font-weight:800">${_esc(m.reason||'reported')} <span class="adm-badge gray">${_esc(m.status||'')}</span></div>
+                <div style="font-size:12px;color:#6b7280;margin:4px 0">Message #${_esc(String(m.messageId||''))}${m.messageType?' ('+_esc(m.messageType)+')':''}${m.messageDeleted?' · deleted':''} · chat ${_esc(String(m.chatId||''))}${m.senderName?' · from @'+_esc(m.senderName):''}${m.reporterName?' · reported by @'+_esc(m.reporterName):''} · ${_time(m.createdAt)}</div>
+                ${m.details ? `<div style="font-size:13px">${_esc(m.details)}</div>` : ''}
+                ${m.status==='pending'||m.status==='reviewed' ? `<div style="display:flex;gap:6px;margin-top:8px">
+                    <button class="adm-btn adm-btn-success" onclick="window._admMsgReportSet(${Number(m.id)},'actioned')">Actioned</button>
+                    <button class="adm-btn adm-btn-secondary" onclick="window._admMsgReportSet(${Number(m.id)},'dismissed')">Dismiss</button></div>` : ''}
+            </div>`).join('')}</div>` : ''}`, 'admin-modules');
+}
+window._admModFilter = (k, v) => { window.__admMod[k] = v; window._jmNavMore('admin-module'); };
+window._admReportAct = async (id, action) => {
+    let note = '';
+    if (action === 'respond') { note = prompt('Reply to the reporter:', '') || ''; if (!note.trim()) return; }
+    else if (action === 'warn') { note = prompt('Warning message (optional):', '') || ''; }
+    else if (action === 'remove_message') { if (!confirm('Remove this message for everyone in the chat?')) return; }
+    else if (action === 'suspend' || action === 'remove') {
+        if (!confirm(action === 'remove' ? 'Remove this account and its marketplace listings?' : 'Suspend this account?')) return;
+        note = prompt('Reason (shown to the user, optional):', '') || '';
+    }
+    const r = await _api('PATCH', '/admin/problem-reports/' + id, { action, message: note });
+    if (r && !r._error) { _toast('Done', 'success', '✅'); window._jmNavMore('admin-module'); }
+    else _toast(r?._error || 'Could not apply that action', 'error', '❌');
+};
+window._admMsgReportSet = async (id, status) => {
+    const r = await _api('PATCH', '/admin/reports/' + id, { status });
+    if (r && !r._error) { _toast('Updated', 'success', '✅'); window._jmNavMore('admin-module'); }
+    else _toast(r?._error || 'Could not update', 'error', '❌');
+};
+
 // ══════════════════════════════════════════════════════════════════════════════
 // NAV ROUTING — Register all admin pages
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1069,6 +1227,8 @@ const ADMIN_ROUTES = {
     'admin-notify':     renderAdminNotify,
     'admin-settings':   renderAdminSettings,
     'admin-audit':      renderAdminAudit,
+    'admin-modules':    renderAdminModules,
+    'admin-module':     renderAdminModule,
 };
 
 const _prevNav = window._jmNavMore;
