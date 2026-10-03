@@ -1712,30 +1712,32 @@
     </div>
 
     <!-- IFrame Containers for each module -->
+    <!-- MODULE WARM-START: all feature iframes boot in the background after the
+         shell starts painting, then remain mounted so navigation only changes
+         visibility instead of downloading/booting the module on first click. -->
     <div id="messagesContent" class="iframe-container">
-        <iframe id="messagesIframe" class="content-iframe" src="message.html" data-module="messages"></iframe>
+        <iframe id="messagesIframe" class="content-iframe" src="message.html" data-module="messages" loading="eager"></iframe>
     </div>
     <div id="statusContent" class="iframe-container hidden">
-        <iframe id="statusIframe" class="content-iframe" data-src="status.html" data-module="status"></iframe>
+        <iframe id="statusIframe" class="content-iframe" data-src="status.html" data-module="status" loading="eager"></iframe>
     </div>
     <div id="groupContent" class="iframe-container hidden">
-        <iframe id="groupIframe" class="content-iframe" data-src="group.html" data-module="group"></iframe>
+        <iframe id="groupIframe" class="content-iframe" data-src="group.html" data-module="group" loading="eager"></iframe>
     </div>
     <div id="friendsContent" class="iframe-container hidden">
-        <iframe id="friendsIframe" class="content-iframe" data-src="friend.html" data-module="friends" allow="camera; microphone; geolocation"></iframe>
+        <iframe id="friendsIframe" class="content-iframe" data-src="friend.html" data-module="friends" allow="camera; microphone; geolocation" loading="eager"></iframe>
     </div>
     <div id="settingsContent" class="iframe-container hidden">
-        <iframe id="settingsIframe" class="content-iframe" data-src="settings.html" data-module="settings"></iframe>
+        <iframe id="settingsIframe" class="content-iframe" data-src="settings.html" data-module="settings" loading="eager"></iframe>
     </div>
     <div id="toolsContent" class="iframe-container hidden">
-        <iframe id="toolsIframe" class="content-iframe" data-src="Tools.html" data-module="tools"></iframe>
+        <iframe id="toolsIframe" class="content-iframe" data-src="Tools.html" data-module="tools" loading="eager"></iframe>
     </div>
     <script>
-    // TRUE MODULE LAZY-LOADING:
-    // Only Messages is loaded by the initial shell. Every other feature iframe
-    // stays as data-src until the user actually opens that feature. This avoids
-    // booting hidden module JavaScript, opening duplicate realtime/cache paths,
-    // or downloading feature bundles the user never requested.
+    // WARM ALL MODULES:
+    // Messages stays visible first, while every other module is booted in a
+    // hidden iframe immediately after the first paint. Each iframe stays alive,
+    // so returning to a module does not restart its UI or boot sequence.
     (function () {
         var MAP = {
             status:'statusIframe', group:'groupIframe', groups:'groupIframe',
@@ -1743,32 +1745,59 @@
             settings:'settingsIframe', tools:'toolsIframe', marketplace:'toolsIframe',
             games:'gamesIframe', game:'gamesIframe'
         };
+
         function load(id) {
             var f = document.getElementById(id);
-            if (f && !f.getAttribute('src')) {
-                var s = f.getAttribute('data-src');
-                if (s) f.setAttribute('src', s);
+            if (!f) return false;
+            if (!f.getAttribute('src')) {
+                var src = f.getAttribute('data-src');
+                if (src) f.setAttribute('src', src);
             }
+            return true;
         }
+
+        function warmAll() {
+            ['statusIframe','groupIframe','friendsIframe','settingsIframe','toolsIframe','gamesIframe'].forEach(load);
+            window.__modulesWarmed = true;
+        }
+
         window.__loadModuleIframe = function (page) {
             var id = MAP[String(page || '').toLowerCase()];
             if (id) load(id);
         };
+        window.__warmAllModules = warmAll;
+
+        function startWarmup() {
+            if (window.__modulesWarmupStarted) return;
+            window.__modulesWarmupStarted = true;
+            var begin = function () {
+                try { warmAll(); } catch (e) {
+                    console.warn('[Necpra] Module warm-up failed:', e);
+                }
+            };
+            if (window.requestAnimationFrame) window.requestAnimationFrame(begin);
+            else setTimeout(begin, 0);
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', startWarmup, { once: true });
+        } else {
+            startWarmup();
+        }
     })();
     </script>
-<script>
-    // Marketplace/Tools is fully on-demand. Keep the public helper used by
-    // navigation code, but never schedule an idle/background load.
+    <script>
+    // Tools/Marketplace uses the same warm-start loader as every other module.
+    // Keep these compatibility helpers for existing navigation code.
     (function () {
         var f = document.getElementById('toolsIframe');
         if (!f) return;
-        function load() {
-            if (f.getAttribute('src')) return;
-            var s = f.getAttribute('data-src');
-            if (s) f.setAttribute('src', s);
-        }
-        window.__loadToolsIframe = load;
-        window.__toolsIframeLoaded = function () { return !!f.getAttribute('src'); };
+        window.__loadToolsIframe = function () {
+            if (window.__loadModuleIframe) window.__loadModuleIframe('tools');
+        };
+        window.__toolsIframeLoaded = function () {
+            return !!f.getAttribute('src');
+        };
     })();
     </script>
 
