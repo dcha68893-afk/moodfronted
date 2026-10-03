@@ -163,15 +163,21 @@
     }).catch(function () { return null; });
   }
 
-  // Check immediately on launch and whenever the installed app returns to the
-  // foreground. Reopening the APK should be enough to pick up a deployment.
+  // Update checks are intentionally throttled. The previous implementation
+  // called registration.update() on every focus/pageshow/visibility transition,
+  // which turns normal app switching into repeated network traffic. One check
+  // at launch, then at most once every six hours, preserves deployment pickup
+  // without turning foreground events into a polling loop.
   function scheduleUpdateCheck() {
     if (!('serviceWorker' in navigator)) return;
-    var run = function () { checkForUpdateNow(); };
-    window.addEventListener('pageshow', run, { passive: true });
-    window.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') run(); });
-    window.addEventListener('focus', run, { passive: true });
-    setTimeout(run, 500);
+    var KEY = 'necpra:sw:last-update-check:v1';
+    var MAX_AGE = 6 * 60 * 60 * 1000;
+    var now = Date.now();
+    var last = 0;
+    try { last = Number(localStorage.getItem(KEY) || 0); } catch (_) {}
+    if (last && now - last < MAX_AGE) return;
+    try { localStorage.setItem(KEY, String(now)); } catch (_) {}
+    setTimeout(function () { checkForUpdateNow(); }, 1200);
   }
   scheduleUpdateCheck();
 

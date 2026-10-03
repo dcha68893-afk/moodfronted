@@ -24,7 +24,7 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.45.0';
+const SW_VERSION = '19.46.0';
 // FIX: bumped so activate() drops every existing cache immediately on this
 // deploy — anyone with a stale pre-rebuild group.html (or the old, now-
 // deleted group-core-*/group-os-* files, or the misspelled necpra-* icons
@@ -82,18 +82,17 @@ const SW_VERSION = '19.45.0';
 // are no longer cached or executed as code; navigations fall back to the cached shell after 6s.
 // v74: profile-photo fix (js/avatar-fix.js added, message.html + js/config.js changed). Bump forces every installed
 // PWA/Android app to drop old copies and show the 'Update ready - Refresh' banner.
-const CACHE_NAME = 'necpra-static-v82';
+const CACHE_NAME = 'necpra-static-v83';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
   '/index.html','/manifest.json','/icons/necpra-192.png','/icons/necpra-512.png',
-  '/Tool.css','/Tool-ui.js','/Tool-core.part1.js','/Tool-core.part2.js','/Tool-core.part3.js',
-  '/friend.html','/chat.html',
+  '/chat.html',
   '/js/api.core.js','/js/api.request.js','/js/api.auth.js','/js/api.messages.js',
   '/js/app.core.bootstrap.js','/js/app.core.session.js','/js/app.core.ui.js','/js/app.ui.auth.js',
   '/js/app.cache.js','/js/app.cache.unified.js','/js/authStorage.js','/js/app.offline.queue.js','/js/auth.session.manager.js',
   '/js/app.runtime.authority.js','/js/auth.account.limit.js','/js/google-auth.js','/js/app.offline.bootstrap.js',
-  '/friend.css','/app-protect.js','/session-restore.js','/report-problem.js','/js/runtime-config.js','/js/config.js','/js/theme.engine.js','/js/settings-broadcast-listener.js','/js/necpa-session-resilience.js','/js/services.friend.js','/css/suppress-webgl.css','/js/status-runtime-hardening.js','/js/marketplace-category-images.js'
+  '/app-protect.js','/session-restore.js','/report-problem.js','/js/runtime-config.js','/js/config.js','/js/theme.engine.js','/js/settings-broadcast-listener.js','/js/necpa-session-resilience.js','/js/services.friend.js'
 ];
 
 const NETWORK_FIRST_PATTERNS = [
@@ -206,14 +205,34 @@ function badAssetResponse(request,res){
 async function navigation(request){
   const cache=await caches.open(CACHE_NAME);
   const cachedNav=await cache.match(request);
-  try{let r=await (cachedNav?Promise.race([fetch(request),new Promise((_,rej)=>setTimeout(()=>rej(new Error('nav-timeout')),6000))]):fetch(request));if(r.ok){if(new URL(request.url).pathname==='/Tools.html'){try{let h=await r.text();const tag='<script src="/js/marketplace-category-images.js"></script>';if(h.includes('</body>')&&!h.includes(tag))h=h.replace('</body>',tag+'</body>');const headers=new Headers(r.headers);headers.set('content-type','text/html; charset=utf-8');r=new Response(h,{status:r.status,statusText:r.statusText,headers})}catch(_){}}cache.put(request.url,r.clone()).catch(()=>{});return r;}}catch(_){}
+  // App-shell navigations are cache-first. The worker version is bumped with
+  // shell changes, so an installed app receives a new generation without
+  // downloading chat.html on every launch. If no cached copy exists, fetch it.
+  if(cachedNav && !stale(cachedNav)) return cachedNav;
+  try{
+    let r=await fetch(request,{cache:'no-cache'});
+    if(r.ok){
+      if(new URL(request.url).pathname==='/Tools.html'){
+        try{
+          let h=await r.text();
+          const tag='<script src="/js/marketplace-category-images.js"></script>';
+          if(h.includes('</body>')&&!h.includes(tag))h=h.replace('</body>',tag+'</body>');
+          const headers=new Headers(r.headers);
+          headers.set('content-type','text/html; charset=utf-8');
+          r=new Response(h,{status:r.status,statusText:r.statusText,headers});
+        }catch(_){}
+      }
+      cache.put(request.url,r.clone()).catch(()=>{});
+      return r;
+    }
+  }catch(_){}
   const exact=await cache.match(request);if(exact)return exact;
-  for(const u of ['/index.html','/','/friend.html','/chat.html']){const r=await cache.match(new URL(u,self.location.origin).href);if(r)return r;}
+  for(const u of ['/index.html','/','/chat.html']){const r=await cache.match(new URL(u,self.location.origin).href);if(r)return r;}
   return new Response(OFFLINE_SHELL,{status:200,headers:{'Content-Type':'text/html;charset=utf-8'}});
 }
 async function networkFirst(request){
   const cache=await caches.open(CACHE_NAME);
-  try{const r=await fetch(request,{cache:'no-store'});if(r.ok&&!badAssetResponse(request,r)){await cache.put(request,r.clone()).catch(()=>{});return r;}const old=await cache.match(request);return old||r;}catch(_){const old=await cache.match(request);return old||new Response('Resource unavailable offline',{status:503});}
+  try{const r=await fetch(request,{cache:'no-cache'});if(r.ok&&!badAssetResponse(request,r)){await cache.put(request,r.clone()).catch(()=>{});return r;}const old=await cache.match(request);return old||r;}catch(_){const old=await cache.match(request);return old||new Response('Resource unavailable offline',{status:503});}
 }
 async function staticAsset(request){
   const cache=await caches.open(CACHE_NAME);const old=await cache.match(request);if(old&&!stale(old))return old;
@@ -232,7 +251,11 @@ self.addEventListener('fetch',event=>{
   if(r.mode==='navigate'||r.destination==='document'){event.respondWith(navigation(r));return;}
   if(isApi(url)){event.respondWith(api(r));return;}
   if(local(url)&&isNetworkFirst(url)){event.respondWith(networkFirst(r));return;}
-  if(local(url)&&isLiveCodeAsset(url)){event.respondWith(networkFirst(r));return;}
+  // Non-critical HTML/CSS/JS/JSON uses the cache-first path below. Critical
+  // authentication/E2E/realtime assets remain explicitly network-first above.
+  // The SW version is bumped whenever this runtime changes, so deployed code
+  // still gets a clean cache generation without forcing a network request on
+  // every module load.
   if(local(url)&&isStatic(url)){event.respondWith(staticAsset(r));return;}
   // FIX: cross-origin requests (Google/Cloudinary/ui-avatars profile photos) go straight to the network.
   // Re-fetching them from inside the worker made them subject to the worker's CSP connect-src and to its

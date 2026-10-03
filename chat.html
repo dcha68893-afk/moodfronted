@@ -1719,7 +1719,7 @@
         <iframe id="statusIframe" class="content-iframe" data-src="status.html" data-module="status"></iframe>
     </div>
     <div id="groupContent" class="iframe-container hidden">
-        <iframe id="groupIframe" class="content-iframe" src="group.html" data-module="group"></iframe>
+        <iframe id="groupIframe" class="content-iframe" data-src="group.html" data-module="group"></iframe>
     </div>
     <div id="friendsContent" class="iframe-container hidden">
         <iframe id="friendsIframe" class="content-iframe" data-src="friend.html" data-module="friends" allow="camera; microphone; geolocation"></iframe>
@@ -1731,23 +1731,34 @@
         <iframe id="toolsIframe" class="content-iframe" data-src="Tools.html" data-module="tools"></iframe>
     </div>
     <script>
-    // Lazy module loading (less data at launch): messages + groups + tools load as before.
-    // Games load only when opened; Status/Friends/Settings load shortly after launch
-    // (their badges/settings are needed) or immediately when the user opens them.
+    // TRUE MODULE LAZY-LOADING:
+    // Only Messages is loaded by the initial shell. Every other feature iframe
+    // stays as data-src until the user actually opens that feature. This avoids
+    // booting hidden module JavaScript, opening duplicate realtime/cache paths,
+    // or downloading feature bundles the user never requested.
     (function () {
-        var MAP = { games:'gamesIframe', game:'gamesIframe', status:'statusIframe', friends:'friendsIframe', friend:'friendsIframe', settings:'settingsIframe' };
-        function load(id) { var f = document.getElementById(id); if (f && !f.getAttribute('src')) { var s = f.getAttribute('data-src'); if (s) f.setAttribute('src', s); } }
-        window.__loadModuleIframe = function (page) { if (MAP[page]) load(MAP[page]); };
-        function later() { ['statusIframe','friendsIframe','settingsIframe'].forEach(function (id, i) { setTimeout(function () { load(id); }, 2500 + i * 1500); }); }
-        if (document.readyState === 'complete') later(); else window.addEventListener('load', later, { once: true });
+        var MAP = {
+            status:'statusIframe', group:'groupIframe', groups:'groupIframe',
+            friends:'friendsIframe', friend:'friendsIframe',
+            settings:'settingsIframe', tools:'toolsIframe', marketplace:'toolsIframe',
+            games:'gamesIframe', game:'gamesIframe'
+        };
+        function load(id) {
+            var f = document.getElementById(id);
+            if (f && !f.getAttribute('src')) {
+                var s = f.getAttribute('data-src');
+                if (s) f.setAttribute('src', s);
+            }
+        }
+        window.__loadModuleIframe = function (page) {
+            var id = MAP[String(page || '').toLowerCase()];
+            if (id) load(id);
+        };
     })();
     </script>
 <script>
-    // Tools/Marketplace pulls ~2.5 MB of scripts (video.js, chart.js, jQuery, the marketplace
-    // bundles). It used to start loading in parallel with everything else on launch. It now
-    // loads once the app is idle (or immediately when the user opens it), so chat/status/group
-    // become usable first. It is still loaded shortly after launch because the cart badge and
-    // order-notification dot on the nav are produced by this module.
+    // Marketplace/Tools is fully on-demand. Keep the public helper used by
+    // navigation code, but never schedule an idle/background load.
     (function () {
         var f = document.getElementById('toolsIframe');
         if (!f) return;
@@ -1758,12 +1769,6 @@
         }
         window.__loadToolsIframe = load;
         window.__toolsIframeLoaded = function () { return !!f.getAttribute('src'); };
-        function scheduleIdle() {
-            if (window.requestIdleCallback) window.requestIdleCallback(load, { timeout: 6000 });
-            else setTimeout(load, 1500);
-        }
-        if (document.readyState === 'complete') setTimeout(scheduleIdle, 3000);
-        else window.addEventListener('load', function () { setTimeout(scheduleIdle, 3000); }, { once: true });
     })();
     </script>
 
