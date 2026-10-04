@@ -4,6 +4,13 @@
 
   var Plugins = window.Capacitor.Plugins || {};
 
+  function nativeApiOrigin() {
+    var o = '';
+    try { o = window.__getApiOrigin ? window.__getApiOrigin() : (window.BACKEND_URL || ''); } catch (_) {}
+    o = String(o || '').replace(/\/api\/?$/, '').replace(/\/+$/, '');
+    return /^https:\/\//i.test(o) ? o : '';
+  }
+
   // One stable JS boundary for Android-only capabilities.
   var native = Plugins.NecpraNative;
   if (native) {
@@ -38,7 +45,10 @@
           accessToken: accessToken,
           refreshToken: refreshToken || '',
           userJson: user ? JSON.stringify(user) : '',
-          expiresAt: Number(expiresAt || 0)
+          expiresAt: Number(expiresAt || 0),
+          // Tell the native layer which backend the web layer really uses, so
+          // background sync can't drift to a hard-coded, different host.
+          apiOrigin: nativeApiOrigin()
         });
       },
       authGetSession: function () { return native.authGetSession(); },
@@ -123,11 +133,11 @@
         }
       }
       Object.keys(snapshot).forEach(function (key) {
-        var match = key.match(/^messages_(\d+)$/);
+        var match = key.match(/^messages_([A-Za-z0-9_-]+)$/);
         if (match) {
-          window.NecpraSocialOfflineCache.put(origin + '/api/messages?chatId=' + match[1] + '&limit=100', snapshot[key]).catch(function(){});
+          window.NecpraSocialOfflineCache.put(origin + '/api/messages/' + match[1] + '?limit=100', snapshot[key]).catch(function(){});
         }
-        var groupMatch = key.match(/^groupMessages_(\d+)$/);
+        var groupMatch = key.match(/^groupMessages_([A-Za-z0-9_-]+)$/);
         if (groupMatch) {
           window.NecpraSocialOfflineCache.put(origin + '/api/group-messages/' + groupMatch[1] + '/messages?limit=100', snapshot[key]).catch(function(){});
         }
@@ -136,8 +146,10 @@
     } catch (_) {}
   }
 
-  publishNativeAuthSession();
-  consumeNativeSnapshot();
+  // The snapshot is only readable once the native session is unlocked, and
+  // unlocking may show a biometric prompt, so consume AFTER publish settles
+  // (the old code raced the prompt and was rejected as "locked").
+  publishNativeAuthSession().then(consumeNativeSnapshot, consumeNativeSnapshot);
   setTimeout(consumeNativeSnapshot, 3000);
   window.addEventListener('load', function () { setTimeout(consumeNativeSnapshot, 500); }, { once: true });
 
@@ -182,6 +194,61 @@
       }
     } catch (_) {}
   });
+
+  // Cold-start links are parked natively (the WebView isn't loaded yet when the
+  // intent arrives). Pull once our listener above is registered.
+  (async function pullPendingDeepLink() {
+    try {
+      if (!window.NecpraNative || !Plugins.NecpraNative || !Plugins.NecpraNative.getPendingDeepLink) return;
+      var r = await Plugins.NecpraNative.getPendingDeepLink();
+      if (r && r.url) {
+        setTimeout(function () {
+          window.dispatchEvent(new CustomEvent('necpra:native-deeplink', { detail: { url: r.url } }));
+        }, 600);
+      }
+    } catch (_) {}
+  })();
+
+  // ---------------------------------------------------------------------
+  // Single refresher. The backend ROTATES refresh tokens and revokes every
+  // session when an old one is replayed (outside a 60 s grace). Native
+  // background sync rotates the token behind the WebView's back, and several
+  // web modules still call /api/auth/refresh themselves with a copy that is now
+  // stale. On Android, route every such call through the one native refresher.
+  // Callers keep working: they get a normal refresh-shaped JSON response.
+  // NOTE: only affects code that looks up window.fetch at call time.
+  // ---------------------------------------------------------------------
+  if (window.NecpraNative && window.NecpraNative.authRefresh && !window.__NECPRA_REFRESH_SHIM__) {
+    window.__NECPRA_REFRESH_SHIM__ = true;
+    var realFetch = window.fetch.bind(window);
+    window.fetch = function (input, init) {
+      try {
+        var url = typeof input === 'string' ? input : (input && input.url) || '';
+        var method = String((init && init.method) || (input && input.method) || 'GET').toUpperCase();
+        var path = new URL(url, window.location.href).pathname;
+        if (method === 'POST' && /\/api\/auth\/refresh\/?$/.test(path)) {
+          return window.NecpraNative.authRefresh().then(function (r) {
+            // refreshToken is deliberately NOT echoed: the real one lives only in
+            // the native store, and the web copy must never be used to refresh.
+            return new Response(JSON.stringify({
+              success: true,
+              token: r.accessToken,
+              accessToken: r.accessToken,
+              expiresIn: r.expiresIn
+            }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+          }, function (err) {
+            var expired = err && (err.code === 'SESSION_EXPIRED');
+            return new Response(JSON.stringify({
+              success: false,
+              message: expired ? 'Refresh token not found or expired' : 'Native session unavailable, retry',
+              errorCode: expired ? 'NATIVE_SESSION_EXPIRED' : 'NATIVE_SESSION_UNAVAILABLE'
+            }), { status: expired ? 401 : 503, headers: { 'Content-Type': 'application/json' } });
+          });
+        }
+      } catch (_) {}
+      return realFetch(input, init);
+    };
+  }
 
   var SplashScreen = Plugins.SplashScreen;
   var StatusBar = Plugins.StatusBar;

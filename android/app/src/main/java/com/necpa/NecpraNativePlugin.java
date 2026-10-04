@@ -1,115 +1,78 @@
 package com.necpa;
 
+import android.Manifest;
 import android.app.Activity;
+import android.app.KeyguardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Build;
-import android.content.SharedPreferences;
-import android.provider.Settings;
-import android.util.Base64;
-import android.webkit.MimeTypeMap;
 
 import androidx.biometric.BiometricManager;
 import androidx.biometric.BiometricPrompt;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
+import androidx.fragment.app.FragmentActivity;
 
 import com.getcapacitor.ActivityResult;
-import com.getcapacitor.annotation.ActivityCallback;
-import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
+import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.ActivityCallback;
+import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
 
 import java.io.BufferedInputStream;
-import java.io.BufferedReader;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.security.KeyStore;
-import java.util.Iterator;
 import java.util.concurrent.Executor;
 
-import javax.crypto.Cipher;
-import javax.crypto.KeyGenerator;
-import javax.crypto.SecretKey;
-import javax.crypto.spec.GCMParameterSpec;
-
-import org.json.JSONArray;
-import org.json.JSONObject;
-
-@CapacitorPlugin(name = "NecpraNative")
-public class NecpraNativePlugin extends Plugin {
-    private static final String KEYSTORE = "AndroidKeyStore";
-    private static final String KEY_ALIAS = "necpra_secure_storage_v1";
-    private static final String PREFS = "necpra_secure_storage";
-    private static final String AUTH_PREFS = "necpra_native_auth";
-    private static final String BACKGROUND_PREFS = "necpra_native_background";
-    private static final int GCM_TAG_BITS = 128;
-    private static final long UNLOCK_WINDOW_MS = 15 * 60 * 1000L;
-    private static final String BACKEND_ORIGIN = "https://nexorah-xnv6.onrender.com";
-
-    private SecretKey getOrCreateKey() throws Exception {
-        KeyStore ks = KeyStore.getInstance(KEYSTORE);
-        ks.load(null);
-        if (ks.containsAlias(KEY_ALIAS)) {
-            return ((KeyStore.SecretKeyEntry) ks.getEntry(KEY_ALIAS, null)).getSecretKey();
+@CapacitorPlugin(
+        name = "NecpraNative",
+        permissions = {
+                @Permission(strings = { Manifest.permission.CAMERA }, alias = "camera")
         }
-        KeyGenerator generator = KeyGenerator.getInstance("AES", KEYSTORE);
-        generator.init(256);
-        return generator.generateKey();
-    }
+)
+public class NecpraNativePlugin extends Plugin {
+    private static final String PREFS = "necpra_secure_storage";
+    private static final long UNLOCK_WINDOW_MS = 15 * 60 * 1000L;
 
-    private String encrypt(String value) throws Exception {
-        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey());
-        byte[] ciphertext = cipher.doFinal(value.getBytes(StandardCharsets.UTF_8));
-        return Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP) + ":" +
-                Base64.encodeToString(ciphertext, Base64.NO_WRAP);
-    }
+    /** Set by MainActivity on a cold-start deep link; the web layer pulls it once it is ready. */
+    static volatile String pendingDeepLink = null;
 
-    private String decrypt(String packed) throws Exception {
-        String[] parts = packed.split(":", 2);
-        if (parts.length != 2) throw new IllegalArgumentException("Malformed secure value");
-        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-        cipher.init(
-                Cipher.DECRYPT_MODE,
-                getOrCreateKey(),
-                new GCMParameterSpec(GCM_TAG_BITS, Base64.decode(parts[0], Base64.NO_WRAP))
-        );
-        return new String(
-                cipher.doFinal(Base64.decode(parts[1], Base64.NO_WRAP)),
-                StandardCharsets.UTF_8
-        );
-    }
+    // ---------------------------------------------------------------------
+    // Prefs / crypto helpers (single implementation lives in NativeBackgroundSync)
+    // ---------------------------------------------------------------------
 
     private SharedPreferences securePrefs() {
         return getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
     private SharedPreferences authPrefs() {
-        return getContext().getSharedPreferences(AUTH_PREFS, Context.MODE_PRIVATE);
+        return getContext().getSharedPreferences(NativeBackgroundSync.AUTH_PREFS, Context.MODE_PRIVATE);
     }
 
-    private void putEncrypted(SharedPreferences prefs, String key, String value) throws Exception {
-        if (value == null) prefs.edit().remove(key).apply();
-        else prefs.edit().putString(key, encrypt(value)).apply();
+    private SharedPreferences backgroundPrefs() {
+        return getContext().getSharedPreferences(NativeBackgroundSync.BACKGROUND_PREFS, Context.MODE_PRIVATE);
     }
 
-    private String getDecrypted(SharedPreferences prefs, String key) throws Exception {
-        String packed = prefs.getString(key, null);
-        return packed == null ? null : decrypt(packed);
+    private boolean isNativeUnlocked() {
+        return System.currentTimeMillis() <= authPrefs().getLong("unlockedUntil", 0L);
     }
+
+    // ---------------------------------------------------------------------
+    // Generic secure key/value storage (Keystore AES-GCM)
+    // ---------------------------------------------------------------------
 
     @PluginMethod
     public void secureSet(PluginCall call) {
@@ -120,7 +83,7 @@ public class NecpraNativePlugin extends Plugin {
             return;
         }
         try {
-            putEncrypted(securePrefs(), key, value);
+            NativeBackgroundSync.putEncrypted(securePrefs(), key, value);
             call.resolve();
         } catch (Exception e) {
             call.reject("Secure storage failed", e);
@@ -136,7 +99,7 @@ public class NecpraNativePlugin extends Plugin {
         }
         try {
             JSObject result = new JSObject();
-            String value = getDecrypted(securePrefs(), key);
+            String value = NativeBackgroundSync.getDecrypted(securePrefs(), key);
             result.put("value", value == null ? JSObject.NULL : value);
             call.resolve(result);
         } catch (Exception e) {
@@ -167,14 +130,10 @@ public class NecpraNativePlugin extends Plugin {
 
     // ---------------------------------------------------------------------
     // Native authentication/session store.
-    // Tokens are never persisted in plaintext SharedPreferences on Android.
-    // The refresh token is intentionally available to WorkManager so native
-    // background synchronization can continue without a WebView.
+    // Tokens are encrypted with a Keystore key. The refresh token is
+    // intentionally readable by WorkManager so background sync works without
+    // a WebView.
     // ---------------------------------------------------------------------
-
-    private boolean isNativeUnlocked() {
-        return System.currentTimeMillis() <= authPrefs().getLong("unlockedUntil", 0L);
-    }
 
     @PluginMethod
     public void authSetSession(PluginCall call) {
@@ -182,18 +141,28 @@ public class NecpraNativePlugin extends Plugin {
         String refreshToken = call.getString("refreshToken");
         String userJson = call.getString("userJson");
         Long expiresAt = call.getLong("expiresAt", 0L);
+        String apiOrigin = NativeBackgroundSync.normalizeOrigin(call.getString("apiOrigin"));
         if (accessToken == null || accessToken.trim().isEmpty()) {
             call.reject("accessToken is required");
             return;
         }
         try {
             SharedPreferences p = authPrefs();
-            putEncrypted(p, "accessToken", accessToken);
-            putEncrypted(p, "refreshToken", refreshToken);
-            putEncrypted(p, "userJson", userJson);
-            p.edit().putLong("expiresAt", expiresAt == null ? 0L : expiresAt)
+            NativeBackgroundSync.putEncrypted(p, "accessToken", accessToken);
+            // An empty string means "web did not have one": keep the existing
+            // (possibly newer) refresh token instead of wiping it.
+            if (refreshToken != null && !refreshToken.isEmpty()) {
+                NativeBackgroundSync.putEncrypted(p, "refreshToken", refreshToken);
+            }
+            if (userJson != null && !userJson.isEmpty()) {
+                NativeBackgroundSync.putEncrypted(p, "userJson", userJson);
+            }
+            SharedPreferences.Editor e = p.edit()
+                    .putLong("expiresAt", expiresAt == null ? 0L : expiresAt)
                     .putLong("unlockedUntil", System.currentTimeMillis() + UNLOCK_WINDOW_MS)
-                    .apply();
+                    .remove("refreshRejectedAt");
+            if (apiOrigin != null) e.putString("apiOrigin", apiOrigin);
+            e.commit();
             call.resolve();
         } catch (Exception e) {
             call.reject("Native session storage failed", e);
@@ -205,9 +174,9 @@ public class NecpraNativePlugin extends Plugin {
         try {
             SharedPreferences p = authPrefs();
             JSObject out = new JSObject();
-            String access = getDecrypted(p, "accessToken");
-            String refresh = getDecrypted(p, "refreshToken");
-            String user = getDecrypted(p, "userJson");
+            String access = NativeBackgroundSync.getDecrypted(p, "accessToken");
+            String refresh = NativeBackgroundSync.getDecrypted(p, "refreshToken");
+            String user = NativeBackgroundSync.getDecrypted(p, "userJson");
             long expiresAt = p.getLong("expiresAt", 0L);
             long unlockedUntil = p.getLong("unlockedUntil", 0L);
 
@@ -216,71 +185,128 @@ public class NecpraNativePlugin extends Plugin {
             out.put("locked", locked);
             out.put("unlockedUntil", unlockedUntil);
             out.put("expiresAt", expiresAt);
-            // Do not release credentials to the WebView until the native
-            // unlock window is active. WorkManager uses the encrypted store
-            // directly and never crosses this WebView boundary.
-            out.put("accessToken", locked ? JSObject.NULL : (access == null ? JSObject.NULL : access));
-            out.put("refreshToken", locked ? JSObject.NULL : (refresh == null ? JSObject.NULL : refresh));
-            out.put("userJson", locked ? JSObject.NULL : (user == null ? JSObject.NULL : user));
+            // Credentials are not released to the WebView while locked.
+            out.put("accessToken", locked || access == null ? JSObject.NULL : access);
+            out.put("refreshToken", locked || refresh == null ? JSObject.NULL : refresh);
+            out.put("userJson", locked || user == null ? JSObject.NULL : user);
             call.resolve(out);
         } catch (Exception e) {
-            call.reject("Native session read failed", e);
+            // The Keystore key is gone/invalidated (restore, OEM bug, lock-screen
+            // reset). The stored ciphertext can never be read again, so treat it
+            // as "signed out" rather than failing forever.
+            NativeBackgroundSync.clearAll(getContext());
+            JSObject out = new JSObject();
+            out.put("hasSession", false);
+            out.put("locked", false);
+            call.resolve(out);
         }
     }
 
     @PluginMethod
     public void authUnlock(PluginCall call) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
-            call.reject("Android 9 or newer is required");
+        promptUnlock(call, true);
+    }
+
+    @PluginMethod
+    public void biometricAuthenticate(PluginCall call) {
+        promptUnlock(call, false);
+    }
+
+    /**
+     * BiometricPrompt must be created and shown on the main thread (Capacitor
+     * runs plugin methods on a background thread), and it works from API 23, so
+     * the old "Android 9 or newer" restriction wrongly locked API 24-27 users
+     * out of their own session forever.
+     */
+    @SuppressWarnings("deprecation")
+    private void promptUnlock(PluginCall call, boolean extendSessionWindow) {
+        Activity activity = getActivity();
+        if (!(activity instanceof FragmentActivity)) {
+            call.reject("No activity available for authentication");
             return;
         }
+        activity.runOnUiThread(() -> {
+            try {
+                boolean api30 = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R;
+                int allowed = api30
+                        ? (BiometricManager.Authenticators.BIOMETRIC_STRONG
+                                | BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+                        : BiometricManager.Authenticators.BIOMETRIC_WEAK;
 
-        Executor executor = ContextCompat.getMainExecutor(getContext());
-        BiometricPrompt prompt = new BiometricPrompt(
-                getActivity(),
-                executor,
-                new BiometricPrompt.AuthenticationCallback() {
-                    @Override
-                    public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result) {
+                boolean canPrompt = BiometricManager.from(getContext()).canAuthenticate(allowed)
+                        == BiometricManager.BIOMETRIC_SUCCESS;
+                if (!api30 && !canPrompt) {
+                    // Pre-Android-11: a PIN/pattern-only device is still promptable
+                    // through the (deprecated) device-credential flag.
+                    KeyguardManager km = (KeyguardManager) getContext().getSystemService(Context.KEYGUARD_SERVICE);
+                    canPrompt = km != null && km.isDeviceSecure();
+                }
+
+                if (!canPrompt) {
+                    // No screen lock and nothing enrolled: there is nothing to
+                    // verify against, and demanding it would lock the user out
+                    // permanently. Unlock without a prompt and say so.
+                    if (extendSessionWindow) {
                         long until = System.currentTimeMillis() + UNLOCK_WINDOW_MS;
-                        authPrefs().edit().putLong("unlockedUntil", until).apply();
+                        authPrefs().edit().putLong("unlockedUntil", until).commit();
                         JSObject out = new JSObject();
                         out.put("authenticated", true);
                         out.put("unlockedUntil", until);
+                        out.put("noDeviceCredential", true);
                         call.resolve(out);
+                    } else {
+                        call.reject("No biometric or device credential is set up on this device");
                     }
-
-                    @Override
-                    public void onAuthenticationError(int errorCode, CharSequence errString) {
-                        call.reject(errString != null ? errString.toString() : "Authentication failed");
-                    }
-
-                    @Override
-                    public void onAuthenticationFailed() {
-                        // Android keeps the prompt available for another attempt.
-                    }
+                    return;
                 }
-        );
 
-        BiometricPrompt.PromptInfo.Builder builder = new BiometricPrompt.PromptInfo.Builder()
-                .setTitle(call.getString("title", "Unlock Necpra"))
-                .setSubtitle(call.getString("subtitle", "Verify your identity"))
-                .setConfirmationRequired(false);
+                Executor executor = ContextCompat.getMainExecutor(getContext());
+                BiometricPrompt prompt = new BiometricPrompt((FragmentActivity) activity, executor,
+                        new BiometricPrompt.AuthenticationCallback() {
+                            @Override
+                            public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result) {
+                                JSObject out = new JSObject();
+                                out.put("authenticated", true);
+                                if (extendSessionWindow) {
+                                    long until = System.currentTimeMillis() + UNLOCK_WINDOW_MS;
+                                    authPrefs().edit().putLong("unlockedUntil", until).commit();
+                                    out.put("unlockedUntil", until);
+                                }
+                                call.resolve(out);
+                            }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            builder.setAllowedAuthenticators(
-                    BiometricManager.Authenticators.BIOMETRIC_STRONG |
-                    BiometricManager.Authenticators.DEVICE_CREDENTIAL
-            );
-        } else {
-            builder.setNegativeButtonText(call.getString("cancelText", "Cancel"));
-        }
-        prompt.authenticate(builder.build());
+                            @Override
+                            public void onAuthenticationError(int errorCode, CharSequence errString) {
+                                call.reject(errString != null ? errString.toString() : "Authentication failed");
+                            }
+
+                            @Override
+                            public void onAuthenticationFailed() {
+                                // The prompt stays open for another attempt.
+                            }
+                        });
+
+                BiometricPrompt.PromptInfo.Builder builder = new BiometricPrompt.PromptInfo.Builder()
+                        .setTitle(call.getString("title", "Unlock Necpra"))
+                        .setSubtitle(call.getString("subtitle", "Verify your identity"))
+                        .setConfirmationRequired(false);
+                if (api30) {
+                    builder.setAllowedAuthenticators(allowed);
+                } else {
+                    builder.setDeviceCredentialAllowed(true); // no negative button allowed with this
+                }
+                prompt.authenticate(builder.build());
+            } catch (Throwable t) {
+                call.reject("Authentication could not be started", new Exception(t));
+            }
+        });
     }
 
     @PluginMethod
     public void authClearSession(PluginCall call) {
-        authPrefs().edit().clear().apply();
+        // Tokens + user + apiOrigin, plus the encrypted offline snapshot and
+        // background status, so nothing about the previous account survives.
+        NativeBackgroundSync.clearAll(getContext());
         call.resolve();
     }
 
@@ -288,55 +314,36 @@ public class NecpraNativePlugin extends Plugin {
     public void authRefresh(PluginCall call) {
         new Thread(() -> {
             try {
-                if (System.currentTimeMillis() > authPrefs().getLong("unlockedUntil", 0L)) {
+                if (!isNativeUnlocked()) {
                     call.reject("Native session is locked");
                     return;
                 }
-                String refresh = getDecrypted(authPrefs(), "refreshToken");
-                if (refresh == null || refresh.trim().isEmpty()) {
-                    call.reject("No native refresh token");
-                    return;
-                }
-
-                JSONObject body = new JSONObject().put("refreshToken", refresh);
-                JSONObject response = requestJson(
-                        "POST",
-                        BACKEND_ORIGIN + "/api/auth/refresh",
-                        body.toString(),
-                        null
-                );
-
-                String access = response.optString("accessToken", response.optString("token", ""));
-                String newRefresh = response.optString("refreshToken", refresh);
-                if (access.isEmpty()) {
-                    call.reject("Refresh endpoint returned no access token");
-                    return;
-                }
-
-                long expiresIn = response.optLong("expiresIn", 24 * 60 * 60);
-                long expiresAt = System.currentTimeMillis() + (expiresIn * 1000L);
-                putEncrypted(authPrefs(), "accessToken", access);
-                putEncrypted(authPrefs(), "refreshToken", newRefresh);
-                authPrefs().edit().putLong("expiresAt", expiresAt)
-                        .putLong("unlockedUntil", System.currentTimeMillis() + UNLOCK_WINDOW_MS)
-                        .apply();
+                // Single-flight with the background worker: the backend rotates
+                // refresh tokens, so two uncoordinated refreshers can revoke the
+                // user's sessions.
+                String access = NativeBackgroundSync.refreshSession(getContext());
+                SharedPreferences p = authPrefs();
+                String refresh = NativeBackgroundSync.getDecrypted(p, "refreshToken");
+                long expiresAt = p.getLong("expiresAt", 0L);
+                p.edit().putLong("unlockedUntil", System.currentTimeMillis() + UNLOCK_WINDOW_MS).commit();
 
                 JSObject out = new JSObject();
                 out.put("success", true);
                 out.put("accessToken", access);
-                out.put("refreshToken", newRefresh);
-                out.put("expiresIn", expiresIn);
+                out.put("refreshToken", refresh == null ? JSObject.NULL : refresh);
                 out.put("expiresAt", expiresAt);
+                out.put("expiresIn", Math.max(0L, (expiresAt - System.currentTimeMillis()) / 1000L));
                 call.resolve(out);
+            } catch (NativeBackgroundSync.SessionExpiredException e) {
+                call.reject("Native session expired", "SESSION_EXPIRED", e);
             } catch (Throwable t) {
-                call.reject("Native token refresh failed", t);
+                call.reject("Native token refresh failed", t instanceof Exception ? (Exception) t : new Exception(t));
             }
         }).start();
     }
 
     // ---------------------------------------------------------------------
-    // Authenticated native background snapshot sync.
-    // This uses the same Render API; it does not create a second backend.
+    // Background sync bridge
     // ---------------------------------------------------------------------
 
     @PluginMethod
@@ -351,12 +358,59 @@ public class NecpraNativePlugin extends Plugin {
                 JSObject out = new JSObject();
                 out.put("success", true);
                 out.put("syncedAt", authPrefs().getLong("lastNativeSyncAt", System.currentTimeMillis()));
-                out.put("snapshot", authPrefs().getString("lastNativeSyncSnapshot", null));
+                out.put("snapshot", orNull(NativeBackgroundSync.readSnapshot(getContext())));
                 call.resolve(out);
             } catch (Throwable t) {
-                call.reject("Native sync failed", t);
+                call.reject("Native sync failed", t instanceof Exception ? (Exception) t : new Exception(t));
             }
         }).start();
+    }
+
+    @PluginMethod
+    public void getBackgroundSnapshot(PluginCall call) {
+        if (!isNativeUnlocked()) {
+            call.reject("Native session is locked");
+            return;
+        }
+        new Thread(() -> {
+            JSObject out = new JSObject();
+            out.put("snapshot", orNull(NativeBackgroundSync.readSnapshot(getContext())));
+            out.put("syncedAt", authPrefs().getLong("lastNativeSyncAt", 0L));
+            call.resolve(out);
+        }).start();
+    }
+
+    @PluginMethod
+    public void backgroundStatus(PluginCall call) {
+        SharedPreferences b = backgroundPrefs();
+        JSObject out = new JSObject();
+        out.put("lastRunAt", b.getLong("lastRunAt", 0L));
+        out.put("lastBackendCheckAt", b.getLong("lastBackendCheckAt", 0L));
+        out.put("lastBackendStatus", b.getInt("lastBackendStatus", 0));
+        out.put("backendReachable", b.getBoolean("backendReachable", false));
+        out.put("syncRequested", b.getBoolean("syncRequested", false));
+        out.put("syncRequestedAt", b.getLong("syncRequestedAt", 0L));
+        out.put("lastNativeSyncAt", authPrefs().getLong("lastNativeSyncAt", 0L));
+        call.resolve(out);
+    }
+
+    @PluginMethod
+    public void clearBackgroundSyncRequest(PluginCall call) {
+        backgroundPrefs().edit().putBoolean("syncRequested", false).commit();
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void getPendingDeepLink(PluginCall call) {
+        String url = pendingDeepLink;
+        pendingDeepLink = null;
+        JSObject out = new JSObject();
+        out.put("url", orNull(url));
+        call.resolve(out);
+    }
+
+    private static Object orNull(String s) {
+        return s == null ? JSObject.NULL : s;
     }
 
     // ---------------------------------------------------------------------
@@ -405,8 +459,30 @@ public class NecpraNativePlugin extends Plugin {
         }
     }
 
+    /**
+     * The manifest declares CAMERA. When an app declares CAMERA, ACTION_IMAGE_CAPTURE
+     * throws SecurityException unless the runtime permission has been granted, and
+     * nothing was ever requesting it. Ask first.
+     */
     @PluginMethod
     public void takePhoto(PluginCall call) {
+        if (getPermissionState("camera") != PermissionState.GRANTED) {
+            requestPermissionForAlias("camera", call, "cameraPermissionCallback");
+            return;
+        }
+        launchCamera(call);
+    }
+
+    @PermissionCallback
+    private void cameraPermissionCallback(PluginCall call) {
+        if (getPermissionState("camera") == PermissionState.GRANTED) {
+            launchCamera(call);
+        } else {
+            call.reject("Camera permission was denied", "PERMISSION_DENIED");
+        }
+    }
+
+    private void launchCamera(PluginCall call) {
         try {
             File file = new File(getContext().getCacheDir(), "necpra-photo-" + System.currentTimeMillis() + ".jpg");
             Uri uri = FileProvider.getUriForFile(
@@ -454,11 +530,20 @@ public class NecpraNativePlugin extends Plugin {
             call.reject("uri is required");
             return;
         }
+        Uri uri = Uri.parse(uriString);
+        // Only content:// URIs (FileProvider / picker). A file:// URI would crash
+        // with FileUriExposedException and could expose app-private paths.
+        if (!"content".equalsIgnoreCase(uri.getScheme())) {
+            call.reject("Only content:// URIs can be shared");
+            return;
+        }
         Intent send = new Intent(Intent.ACTION_SEND);
         send.setType(call.getString("mimeType", "*/*"));
-        send.putExtra(Intent.EXTRA_STREAM, Uri.parse(uriString));
+        send.putExtra(Intent.EXTRA_STREAM, uri);
         send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        getContext().startActivity(Intent.createChooser(send, call.getString("title", "Share with")));
+        Intent chooser = Intent.createChooser(send, call.getString("title", "Share with"));
+        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        getContext().startActivity(chooser);
         call.resolve();
     }
 
@@ -476,23 +561,19 @@ public class NecpraNativePlugin extends Plugin {
         }
 
         new Thread(() -> {
+            HttpURLConnection c = null;
             try {
-                String access = getDecrypted(authPrefs(), "accessToken");
-                HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
-                c.setConnectTimeout(15000);
-                c.setReadTimeout(60000);
-                c.setUseCaches(false);
-                c.setRequestProperty("Accept", "*/*");
-                if (access != null) c.setRequestProperty("Authorization", "Bearer " + access);
+                // Only our own backend gets the bearer token; a CDN / third-party
+                // host must never receive it.
+                boolean ours = NativeBackgroundSync.isBackendUrl(getContext(), url);
+                String access = ours ? NativeBackgroundSync.getDecrypted(authPrefs(), "accessToken") : null;
 
+                c = open(url, access);
                 int status = c.getResponseCode();
-                if (status == 401 && getDecrypted(authPrefs(), "refreshToken") != null) {
-                    access = refreshAccessTokenSync(getDecrypted(authPrefs(), "refreshToken"));
+                if (status == 401 && ours) {
                     c.disconnect();
-                    c = (HttpURLConnection) new URL(url).openConnection();
-                    c.setConnectTimeout(15000);
-                    c.setReadTimeout(60000);
-                    c.setRequestProperty("Authorization", "Bearer " + access);
+                    access = NativeBackgroundSync.refreshSession(getContext());
+                    c = open(url, access);
                     status = c.getResponseCode();
                 }
                 if (status < 200 || status >= 300) throw new Exception("Download failed with HTTP " + status);
@@ -506,7 +587,6 @@ public class NecpraNativePlugin extends Plugin {
                     int n;
                     while ((n = in.read(buffer)) >= 0) out.write(buffer, 0, n);
                 }
-                c.disconnect();
 
                 Uri uri = FileProvider.getUriForFile(
                         getContext(),
@@ -519,9 +599,21 @@ public class NecpraNativePlugin extends Plugin {
                 out.put("path", file.getAbsolutePath());
                 call.resolve(out);
             } catch (Throwable t) {
-                call.reject("Download failed", t);
+                call.reject("Download failed", t instanceof Exception ? (Exception) t : new Exception(t));
+            } finally {
+                if (c != null) c.disconnect();
             }
         }).start();
+    }
+
+    private static HttpURLConnection open(String url, String accessToken) throws Exception {
+        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+        c.setConnectTimeout(15000);
+        c.setReadTimeout(60000);
+        c.setUseCaches(false);
+        c.setRequestProperty("Accept", "*/*");
+        if (accessToken != null) c.setRequestProperty("Authorization", "Bearer " + accessToken);
+        return c;
     }
 
     @PluginMethod
@@ -538,30 +630,36 @@ public class NecpraNativePlugin extends Plugin {
             call.reject("Secure endpoint and file uri are required");
             return;
         }
+        final String fileName = safeFileName(call.getString("fileName", "upload"));
+        final String safeField = fieldName.replaceAll("[^A-Za-z0-9_\\-]", "_");
+        final String safeMime = mimeType.replaceAll("[\\r\\n\"]", "");
 
         new Thread(() -> {
             HttpURLConnection c = null;
             try {
-                String access = getDecrypted(authPrefs(), "accessToken");
+                boolean ours = NativeBackgroundSync.isBackendUrl(getContext(), endpoint);
+                String access = ours ? NativeBackgroundSync.getDecrypted(authPrefs(), "accessToken") : null;
                 Uri uri = Uri.parse(uriString);
+                if (!"content".equalsIgnoreCase(uri.getScheme())) throw new Exception("Only content:// files can be uploaded");
+
                 String boundary = "----NecpraBoundary" + System.currentTimeMillis();
                 c = (HttpURLConnection) new URL(endpoint).openConnection();
                 c.setDoOutput(true);
                 c.setRequestMethod("POST");
                 c.setConnectTimeout(15000);
                 c.setReadTimeout(60000);
+                c.setChunkedStreamingMode(16 * 1024); // don't buffer whole files in memory
                 c.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
                 c.setRequestProperty("Accept", "application/json");
                 if (access != null) c.setRequestProperty("Authorization", "Bearer " + access);
 
-                String fileName = safeFileName(call.getString("fileName", "upload"));
                 try (OutputStream out = c.getOutputStream();
                      InputStream in = getContext().getContentResolver().openInputStream(uri)) {
-                    String header = "--" + boundary + "\r\n" +
-                            "Content-Disposition: form-data; name=\"" + fieldName + "\"; filename=\"" + fileName + "\"\r\n" +
-                            "Content-Type: " + mimeType + "\r\n\r\n";
-                    out.write(header.getBytes(StandardCharsets.UTF_8));
                     if (in == null) throw new Exception("Could not open selected file");
+                    String header = "--" + boundary + "\r\n" +
+                            "Content-Disposition: form-data; name=\"" + safeField + "\"; filename=\"" + fileName + "\"\r\n" +
+                            "Content-Type: " + safeMime + "\r\n\r\n";
+                    out.write(header.getBytes(StandardCharsets.UTF_8));
                     byte[] buffer = new byte[8192];
                     int n;
                     while ((n = in.read(buffer)) >= 0) out.write(buffer, 0, n);
@@ -569,11 +667,15 @@ public class NecpraNativePlugin extends Plugin {
                 }
 
                 int status = c.getResponseCode();
-                String response = readText(status >= 200 && status < 400 ? c.getInputStream() : c.getErrorStream());
+                String response = NativeBackgroundSync.readText(
+                        status >= 200 && status < 400 ? c.getInputStream() : c.getErrorStream());
                 if (status == 401) {
-                    // Let the web/native refresh path handle the session; don't
-                    // blindly replay a potentially non-idempotent upload.
-                    throw new Exception("Upload authentication expired");
+                    // A streamed body can't be replayed, so refresh now (so the
+                    // caller's retry works) but don't resend automatically.
+                    if (ours) {
+                        try { NativeBackgroundSync.refreshSession(getContext()); } catch (Throwable ignored) {}
+                    }
+                    throw new Exception("Upload authentication expired - retry the upload");
                 }
                 if (status < 200 || status >= 300) throw new Exception("Upload failed with HTTP " + status);
 
@@ -582,7 +684,7 @@ public class NecpraNativePlugin extends Plugin {
                 out.put("data", response);
                 call.resolve(out);
             } catch (Throwable t) {
-                call.reject("Upload failed", t);
+                call.reject("Upload failed", t instanceof Exception ? (Exception) t : new Exception(t));
             } finally {
                 if (c != null) c.disconnect();
             }
@@ -591,57 +693,13 @@ public class NecpraNativePlugin extends Plugin {
 
     private static String safeFileName(String value) {
         String name = value == null || value.trim().isEmpty() ? "download" : value.trim();
-        name = name.replaceAll("[\\\\/:*?<>|]", "_");
+        name = name.replaceAll("[\\\\/:*?\"<>|\\r\\n]", "_").replaceAll("^\\.+", "_");
         return name.length() > 120 ? name.substring(0, 120) : name;
     }
 
     // ---------------------------------------------------------------------
     // Biometric/device status and diagnostics
     // ---------------------------------------------------------------------
-
-    @PluginMethod
-    public void biometricAuthenticate(PluginCall call) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
-            call.reject("Biometric authentication requires Android 9 or newer");
-            return;
-        }
-
-        Executor executor = ContextCompat.getMainExecutor(getContext());
-        BiometricPrompt prompt = new BiometricPrompt(
-                getActivity(),
-                executor,
-                new BiometricPrompt.AuthenticationCallback() {
-                    @Override
-                    public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result) {
-                        JSObject out = new JSObject();
-                        out.put("authenticated", true);
-                        call.resolve(out);
-                    }
-
-                    @Override
-                    public void onAuthenticationError(int errorCode, CharSequence errString) {
-                        call.reject(errString != null ? errString.toString() : "Biometric authentication failed");
-                    }
-
-                    @Override
-                    public void onAuthenticationFailed() {}
-                }
-        );
-
-        BiometricPrompt.PromptInfo.Builder builder = new BiometricPrompt.PromptInfo.Builder()
-                .setTitle(call.getString("title", "Unlock Necpra"))
-                .setSubtitle(call.getString("subtitle", "Verify your identity"))
-                .setConfirmationRequired(false);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            builder.setAllowedAuthenticators(
-                    BiometricManager.Authenticators.BIOMETRIC_STRONG |
-                    BiometricManager.Authenticators.DEVICE_CREDENTIAL
-            );
-        } else {
-            builder.setNegativeButtonText(call.getString("cancelText", "Cancel"));
-        }
-        prompt.authenticate(builder.build());
-    }
 
     @PluginMethod
     public void biometricStatus(PluginCall call) {

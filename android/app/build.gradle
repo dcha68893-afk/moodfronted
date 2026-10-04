@@ -23,18 +23,28 @@ android {
             def keyAliasValue = project.findProperty("NECPA_KEY_ALIAS")
             def storePasswordValue = project.findProperty("NECPA_STORE_PASSWORD")
             def keyPasswordValue = project.findProperty("NECPA_KEY_PASSWORD")
+            def haveAll = keystoreFile && keyAliasValue && storePasswordValue && keyPasswordValue
 
-            if (!keystoreFile || !keyAliasValue || !storePasswordValue || !keyPasswordValue) {
+            // This block runs at *configuration* time, so throwing here (as before)
+            // broke even `assembleDebug` on any machine/CI without the release
+            // keystore. Only insist on the properties when a release/bundle task
+            // is actually requested.
+            def releaseRequested = gradle.startParameter.taskNames.any {
+                def t = it.toLowerCase()
+                t.contains("release") || t.contains("bundle")
+            }
+
+            if (haveAll) {
+                storeFile file(keystoreFile)
+                storePassword storePasswordValue
+                keyAlias keyAliasValue
+                keyPassword keyPasswordValue
+            } else if (releaseRequested) {
                 throw new GradleException(
                     "Missing Necpra release signing properties. Configure " +
                     "NECPA_STORE_FILE, NECPA_KEY_ALIAS, NECPA_STORE_PASSWORD and NECPA_KEY_PASSWORD in your user Gradle properties."
                 )
             }
-
-            storeFile file(keystoreFile)
-            storePassword storePasswordValue
-            keyAlias keyAliasValue
-            keyPassword keyPasswordValue
         }
     }
 

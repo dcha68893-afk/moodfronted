@@ -37,7 +37,9 @@ public class MainActivity extends BridgeActivity implements ModifiedMainActivity
         super.onCreate(savedInstanceState);
 
         scheduleNativeBackgroundMaintenance();
-        dispatchDeepLink(getIntent());
+        // Only on a real cold start: on a config-change recreate the same
+        // intent is re-delivered and would replay the link.
+        if (savedInstanceState == null) dispatchDeepLink(getIntent(), true);
 
         try {
             getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE);
@@ -51,7 +53,7 @@ public class MainActivity extends BridgeActivity implements ModifiedMainActivity
     public void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        dispatchDeepLink(intent);
+        dispatchDeepLink(intent, false);
     }
 
     private void scheduleNativeBackgroundMaintenance() {
@@ -70,26 +72,42 @@ public class MainActivity extends BridgeActivity implements ModifiedMainActivity
         }
     }
 
-    private void dispatchDeepLink(Intent intent) {
+    private void dispatchDeepLink(Intent intent, boolean coldStart) {
         if (intent == null) return;
         Uri uri = intent.getData();
         if (uri == null) return;
 
         String raw = uri.toString();
+        // https only (plain http was accepted here but is not declared in the manifest).
         boolean allowed = "necpra".equalsIgnoreCase(uri.getScheme()) ||
-                (("https".equalsIgnoreCase(uri.getScheme()) || "http".equalsIgnoreCase(uri.getScheme())) &&
+                ("https".equalsIgnoreCase(uri.getScheme()) &&
                         "necpra.co.ke".equalsIgnoreCase(uri.getHost()));
+        if (!allowed) return;
 
-        if (!allowed || getBridge() == null || getBridge().getWebView() == null) return;
+        // Consume it so re-delivery of this intent can't replay the link.
+        intent.setData(null);
+
+        if (coldStart) {
+            // The WebView hasn't loaded yet, so there is nobody to receive an
+            // event (the old fixed 800 ms delay raced the page load and often
+            // lost the link). Park it; native-init.js pulls it once its
+            // listener is registered.
+            NecpraNativePlugin.pendingDeepLink = raw;
+            return;
+        }
+
+        if (getBridge() == null || getBridge().getWebView() == null) {
+            NecpraNativePlugin.pendingDeepLink = raw;
+            return;
+        }
 
         try {
             String payload = JSONObject.quote(raw);
             String javascript =
                     "window.dispatchEvent(new CustomEvent('necpra:native-deeplink'," +
                     "{detail:{url:" + payload + "}}));";
-
-            getBridge().getWebView().postDelayed(() ->
-                    getBridge().getWebView().evaluateJavascript(javascript, null), 800);
+            getBridge().getWebView().post(() ->
+                    getBridge().getWebView().evaluateJavascript(javascript, null));
         } catch (Throwable t) {
             Log.w("NecpraDeepLink", "Could not forward deep link", t);
         }

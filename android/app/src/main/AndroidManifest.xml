@@ -34,6 +34,18 @@
                 <data android:scheme="necpra" />
             </intent-filter>
 
+            <!-- Verified https links. MainActivity already accepted these but no
+                 filter existed, so Android never delivered them. For autoVerify to
+                 succeed https://necpra.co.ke/.well-known/assetlinks.json must list
+                 this app's package (com.necpa) and signing-cert SHA-256. Until it
+                 does, links simply open in the browser. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="necpra.co.ke" />
+            </intent-filter>
+
         </activity>
 
         <provider
@@ -48,6 +60,7 @@
     </application>
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />

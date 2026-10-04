@@ -1,7 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Previously this exposed the ENTIRE shared external storage root
+  (<external-path path="." />) plus all app-private files. Only the two
+  directories the native plugin actually shares from are exposed now:
+    cache/            camera captures   (takePhoto)
+    files/downloads/  authenticated downloads (downloadFile)
+-->
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
-    <external-path name="my_images" path="." />
-    <cache-path name="my_cache_images" path="." />
-  <files-path name="app_files" path="." />
-  <external-files-path name="external_files" path="." />
+    <cache-path name="necpra_cache" path="." />
+    <files-path name="necpra_downloads" path="downloads/" />
 </paths>
