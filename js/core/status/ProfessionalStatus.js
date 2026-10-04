@@ -12,6 +12,8 @@ const currentUser=()=>{
   catch(_){}
   try{const a=JSON.parse(localStorage.getItem('user')||'null');if(a?.id)return a;}
   catch(_){}
+  try{const a=JSON.parse(localStorage.getItem('kynecta_auth')||'null');const u=a?.user;if(u?.id)return u;}
+  catch(_){}
   const id=localStorage.getItem('userId')||localStorage.getItem('currentUserId');
   return id?{id:Number(id)}:{};
 };

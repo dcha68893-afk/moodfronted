@@ -42,6 +42,7 @@
   if (window.NecpraPWA) return;
 
   var SW_URL = '/service-worker.js';
+  var APK_DOWNLOAD_URL = '/download/';
   var DISMISS_KEY = 'necpa_pwa_dismissed_ts';
   var LEGACY_DISMISS_KEYS = ['pwa_dismissed_ts', 'necpa_pwa_mobile_dismissed'];
   var INSTALLED_KEY = 'necpa_pwa_installed';
@@ -184,7 +185,8 @@
   /* ======================================================================
    * 2. Install state
    * ====================================================================== */
-  var deferredPrompt = null;   // the saved beforeinstallprompt event
+  var deferredPrompt = null;   // kept only for non-Android web installs
+  var androidApkMode = isAndroid && !isStandalone();
   var subscribers = [];
 
   function snapshot() {
@@ -224,6 +226,10 @@
    * ====================================================================== */
   async function install() {
     if (isStandalone()) return { outcome: 'installed' };
+    if (isAndroid) {
+      window.location.assign(APK_DOWNLOAD_URL);
+      return { outcome: 'apk-download' };
+    }
     var evt = deferredPrompt;
     if (!evt) return { outcome: 'unavailable' };
     deferredPrompt = null;            // a prompt event can be used exactly once
@@ -295,10 +301,15 @@
     }
     if (isAndroid) {
       if (b.inApp) {
-        return { kind: 'android-inapp', title: 'Install Necpra',
-          text: 'This in-app browser cannot install apps. Open ' + location.host + ' in Chrome first.',
-          steps: ['Open this page in Chrome', 'Tap ⋮ (menu)', 'Choose Install app or Add to Home screen'] };
+        return { kind: 'android-inapp', title: 'Get the Necpra Android app',
+          text: 'The Android app is distributed as an APK. Open this page in Chrome to download the official APK.',
+          steps: ['Open this page in Chrome', 'Tap Download Android App', 'Allow the APK installation when Android asks'] };
       }
+      return { kind: 'android-apk', title: 'Get the Necpra Android app',
+        text: 'Use the official Necpra Android APK instead of installing Necpra as a PWA. Your browser will open the official APK download page.',
+        steps: ['Tap Download Android App', 'Allow the APK to download', 'Open the APK and install Necpra'] };
+    }
+    if (false) {
       if (b.firefox) {
         return { kind: 'android-firefox', title: 'Install Necpra',
           text: 'In Firefox, tap ⋮ and choose Install.', steps: ['Tap ⋮ (menu)', 'Choose Install'] };
@@ -345,7 +356,8 @@
       if (!window.isSecureContext) return { code: 'insecure', message: 'Installing an app needs a secure (https) connection.' };
       if (isIOS) return { code: 'ios', message: 'iPhone and iPad have no install prompt — use Share → Add to Home Screen in Safari.' };
       var b = browserInfo();
-      if (b.inApp) return { code: 'in-app-browser', message: 'You are inside another app’s browser, which cannot install apps. Open ' + location.host + ' in Chrome.' };
+      if (b.inApp) return { code: 'android-apk', message: 'Necpra uses the official Android APK here instead of a PWA. Open the APK download page.' };
+      if (isAndroid) return { code: 'android-apk', message: 'Necpra uses the official Android APK here instead of a PWA.' };
       if (b.miui || b.uc || b.opera || b.firefox) return { code: 'unsupported-browser', message: 'This browser does not offer a one-tap install for this site. Open ' + location.host + ' in Chrome.' };
       var manifestProblem = await checkManifest();
       if (manifestProblem) return { code: 'manifest', message: manifestProblem };
@@ -358,6 +370,10 @@
   // Called from a click handler. Native prompt when we have one, dialog otherwise.
   function requestInstall() {
     if (isStandalone()) return;
+    if (isAndroid) {
+      openInstallDialog();
+      return;
+    }
     if (deferredPrompt) {
       install().then(function (r) {
         if (r.outcome === 'accepted' || r.outcome === 'installed') closeInstallDialog(false);
@@ -395,6 +411,16 @@
   if (isTop) {
     window.addEventListener('beforeinstallprompt', function (event) {
       if (isStandalone()) return;
+      if (isAndroid) {
+        // Android users must install the native APK, not a second PWA copy.
+        // preventDefault() suppresses the browser's install promotion where supported.
+        event.preventDefault();
+        deferredPrompt = null;
+        androidApkMode = true;
+        emit();
+        scheduleAutoDialog(300);
+        return;
+      }
       event.preventDefault();          // defer Chrome's own mini-infobar; we present the prompt ourselves
       deferredPrompt = event;          // saved here, used by install()
       ls('del', INSTALLED_KEY);        // Chrome only offers this when the app is NOT installed
@@ -492,6 +518,15 @@
       return;
     }
 
+    if (isAndroid) {
+      card.appendChild(mk('p', 'np-text', 'Install the official Necpra Android app. Do not install Necpra as a PWA; the Android app is distributed as a signed APK.'));
+      card.appendChild(button('Download Android APK', '', function () {
+        closeInstallDialog(false);
+        window.location.assign(APK_DOWNLOAD_URL);
+      }));
+      card.appendChild(button('Not now', 'np-quiet', function () { closeInstallDialog(true); }));
+      return;
+    }
     if (deferredPrompt) {
       card.appendChild(mk('p', 'np-text', 'Install Necpra on your device for faster access and offline support.'));
       if (sheetHint) card.appendChild(mk('p', 'np-hint', sheetHint));
@@ -577,7 +612,7 @@
     if (!isTop || isStandalone()) return;
     if (isIOS) { scheduleAutoDialog(4000); return; }              // iOS: Share → Add to Home Screen, nothing else
     if (isAndroid && ls('get', INSTALLED_KEY) !== '1') {
-      setTimeout(function () { if (!deferredPrompt) scheduleAutoDialog(0); }, 8000);
+      setTimeout(function () { if (!deferredPrompt) scheduleAutoDialog(1200); }, 1200);
     }
   }
 
@@ -727,6 +762,14 @@
 
   function boot() {
     applyInstalledClass();
+    androidApkMode = isAndroid && !isStandalone();
+    if (isAndroid) {
+      document.documentElement.classList.add('necpra-android-apk-mode');
+      document.querySelectorAll('#landingInstallBtn,#authInstallBtn,[data-pwa-install]').forEach(function (b) {
+        b.textContent = 'Get Android App';
+        b.setAttribute('aria-label', 'Get the Necpra Android app');
+      });
+    }
     scheduleManualFallback();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });

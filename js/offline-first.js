@@ -20,7 +20,7 @@
   var STORE = 'responses';
   var MAX_ENTRIES = 400;
   var MAX_BYTES = 1500000;           // skip single responses above ~1.5 MB
-  var SLOW_MS = 6000;                // when a saved copy exists, do not make the user wait longer than this
+  var SLOW_MS = 1800;                // when a saved copy exists, do not make the user wait longer than this
   var DENY = /\/(auth|login|logout|register|signup|token|tokens|refresh|2fa|two-?factor|two-?step|encryption|keys|prekeys|devices|payments?|invoices?|admin|push|turn|ice|health|upload|uploads|otp|verify|password|sessions?)(\/|\?|$)/i;
 
   var nativeFetch = window.fetch ? window.fetch.bind(window) : null;

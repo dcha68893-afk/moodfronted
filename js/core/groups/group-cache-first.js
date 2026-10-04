@@ -22,7 +22,18 @@
       const a = raw ? JSON.parse(raw) : null;
       const u = a && a.user;
       const id = u && (u.id != null ? u.id : (u.userId != null ? u.userId : (u.uid != null ? u.uid : u._id)));
-      return id == null ? '' : String(id);
+      if (id != null) return String(id);
+    } catch (_) {}
+    try {
+      const u = window.currentUser || window.__kynUser;
+      const id = u && (u.id != null ? u.id : (u.userId != null ? u.userId : (u.uid != null ? u.uid : u._id)));
+      if (id != null) return String(id);
+    } catch (_) {}
+    try {
+      const id = localStorage.getItem('userId') || localStorage.getItem('currentUserId');
+      if (id) return String(id);
+    } catch (_) {}
+    return '';
     } catch (_) { return ''; }
   }
 
