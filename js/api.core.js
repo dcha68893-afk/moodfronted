@@ -53,6 +53,8 @@ let isRateLimitError;
 // Token security - SINGLE SOURCE OF TRUTH
 let AUTH_TOKEN = null;
 let TOKEN_READY = false;
+let NATIVE_REFRESH_TOKEN = null;
+let NATIVE_AUTH_READY = false;
 
 // ============================================================================
 // PARENT ORCHESTRATION STATE
@@ -713,6 +715,19 @@ function getStorageBridge() {
 }
 
 function getAuthToken() {
+    // Android native session is the sole persistent credential source in the APK.
+    // The WebView keeps only the current access token in memory.
+    try {
+        const nativeSession = window.__NECPRA_NATIVE_AUTH_SNAPSHOT__;
+        if (nativeSession?.accessToken && typeof nativeSession.accessToken === 'string') {
+            AUTH_TOKEN = nativeSession.accessToken;
+            NATIVE_REFRESH_TOKEN = nativeSession.refreshToken || null;
+            NATIVE_AUTH_READY = true;
+            TOKEN_READY = true;
+            return AUTH_TOKEN;
+        }
+    } catch (_) {}
+
     // Priority 1: Memory token
     if (AUTH_TOKEN && typeof AUTH_TOKEN === 'string' && AUTH_TOKEN.length > 20) {
         return AUTH_TOKEN;
@@ -757,6 +772,9 @@ function getAuthToken() {
 }
 
 function _saveAuthToStorage(token, user = null) {
+    // Native Android persistence is handled by api.auth -> NecpraNative.
+    // Never create a second plaintext/localStorage credential store in the APK.
+    if (window.Capacitor?.isNativePlatform?.()) return true;
     try {
         if (!token || typeof token !== 'string') return false;
         
@@ -780,6 +798,12 @@ function _saveAuthToStorage(token, user = null) {
 }
 
 function _clearAuthFromStorage() {
+    if (window.Capacitor?.isNativePlatform?.()) {
+        try { window.NecpraNative?.authClearSession?.(); } catch (_) {}
+        NATIVE_REFRESH_TOKEN = null;
+        NATIVE_AUTH_READY = false;
+        return true;
+    }
     // Skip clearing during self-tests
     if (window._selfTestMode) {
         console.log('[TOKEN] Skipping storage clear - self-test mode active');
@@ -2830,6 +2854,12 @@ TokenManager = {
     
     _setTokenInternal: function(token) {
         try {
+            if (window.Capacitor?.isNativePlatform?.()) {
+                if (window.__NECPRA_NATIVE_AUTH_SNAPSHOT__) {
+                    window.__NECPRA_NATIVE_AUTH_SNAPSHOT__.accessToken = sanitizeToken(token);
+                }
+                return true;
+            }
             if (!token || typeof token !== 'string') {
                 return false;
             }
@@ -2867,19 +2897,31 @@ TokenManager = {
             }
             
             setUserToken(token, true, 'TokenManager');
-            
+
             const sanitizedToken = sanitizeToken(token);
-            SecureStorage.setItem(this.TOKEN_KEY, sanitizedToken, true);
-            
-            if (refreshToken) {
-                const sanitizedRefreshToken = sanitizeToken(refreshToken);
-                SecureStorage.setItem(this.REFRESH_TOKEN_KEY, sanitizedRefreshToken, true);
-            }
-            
             const expiryTime = Date.now() + (expiresIn * 1000);
-            localStorage.setItem(this.TOKEN_EXPIRY_KEY, expiryTime.toString());
-            localStorage.setItem(this.TOKEN_CREATED_KEY, Date.now().toString());
-            localStorage.setItem(this.TOKEN_TYPE_KEY, tokenType);
+
+            if (window.Capacitor?.isNativePlatform?.()) {
+                NATIVE_REFRESH_TOKEN = refreshToken || NATIVE_REFRESH_TOKEN;
+                window.__NECPRA_NATIVE_AUTH_SNAPSHOT__ = {
+                    ...(window.__NECPRA_NATIVE_AUTH_SNAPSHOT__ || {}),
+                    accessToken: sanitizedToken,
+                    refreshToken: NATIVE_REFRESH_TOKEN,
+                    expiresAt: expiryTime,
+                    native: true
+                };
+                // Durable native persistence is performed by api.auth's
+                // canonical authSetSession call. Do not write tokens to WebView storage.
+            } else {
+                SecureStorage.setItem(this.TOKEN_KEY, sanitizedToken, true);
+                if (refreshToken) {
+                    const sanitizedRefreshToken = sanitizeToken(refreshToken);
+                    SecureStorage.setItem(this.REFRESH_TOKEN_KEY, sanitizedRefreshToken, true);
+                }
+                localStorage.setItem(this.TOKEN_EXPIRY_KEY, expiryTime.toString());
+                localStorage.setItem(this.TOKEN_CREATED_KEY, Date.now().toString());
+                localStorage.setItem(this.TOKEN_TYPE_KEY, tokenType);
+            }
             
             if (typeof updateGlobalAccessToken === 'function') {
                 updateGlobalAccessToken();
@@ -2899,6 +2941,10 @@ TokenManager = {
     
     getRefreshToken: function() {
         try {
+            if (window.Capacitor?.isNativePlatform?.()) {
+                return NATIVE_REFRESH_TOKEN ||
+                    window.__NECPRA_NATIVE_AUTH_SNAPSHOT__?.refreshToken || null;
+            }
             return SecureStorage.getItem(this.REFRESH_TOKEN_KEY, true, false);
         } catch (error) {
             console.error('[TOKEN-MANAGER] Get refresh token error:', error);
@@ -3012,6 +3058,7 @@ TokenManager = {
     },
     
     migrateLegacyTokens: function() {
+        if (window.Capacitor?.isNativePlatform?.()) return false;
         try {
             const legacyKeys = [
                 'accessToken', 'necpa_token', 'token', 'necpa_auth_token',
@@ -3046,6 +3093,22 @@ TokenManager = {
         }
     }
 };
+
+(function installNativeAuthHydration() {
+    function apply(snapshot) {
+        if (!snapshot?.accessToken) return;
+        try {
+            NATIVE_REFRESH_TOKEN = snapshot.refreshToken || null;
+            NATIVE_AUTH_READY = true;
+            setUserToken(snapshot.accessToken, true, 'native.auth');
+            if (snapshot.user && typeof setUserData === 'function') setUserData(snapshot.user, true);
+            TOKEN_READY = true;
+            SESSION_READY = true;
+        } catch (_) {}
+    }
+    window.addEventListener('necpra:native-auth-ready', function (e) { apply(e.detail || window.__NECPRA_NATIVE_AUTH_SNAPSHOT__); });
+    setTimeout(function () { apply(window.__NECPRA_NATIVE_AUTH_SNAPSHOT__); }, 0);
+})();
 
 encryptToken = function(token) {
     SecureStorage.setItem('temp_token', token, true);
