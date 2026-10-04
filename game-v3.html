@@ -649,7 +649,7 @@ function dailyRestart(){initDaily()}
 function initDaily(){dailySeed=(()=>{let h=2166136261;for(const ch of dailyDate()){h^=ch.charCodeAt(0);h=Math.imul(h,16777619)}return h>>>0})();dailyInitState();$('dt').textContent='03:00';$('do').classList.remove('show');$('dh').style.display='block';$('ds').textContent=0;$('dm').textContent=0;let end=Date.now()+180000;dailyDeadline=end;clearInterval(window.__dailyTimer);window.__dailyTimer=setInterval(()=>{let left=Math.max(0,dailyDeadline-Date.now()),s=Math.ceil(left/1000),m=Math.floor(s/60),ss=String(s%60).padStart(2,'0');$('dt').textContent=String(m).padStart(2,'0')+':'+ss;if(!left){clearInterval(window.__dailyTimer);dailyDone=true;$('dot').textContent='Time is up. Come back tomorrow for a new puzzle.';$('do').classList.add('show')}},250);dailyResize()}
 function dailyResize(){let r=dc.getBoundingClientRect(),d=devicePixelRatio||1;dc.width=r.width*d;dc.height=r.height*d;dctx.setTransform(d,0,0,d,0,0);dailyDraw()}
 addEventListener('resize',dailyResize);dc.addEventListener('pointerdown',e=>{let r=dc.getBoundingClientRect();for(let i=0;i<dailyBottles.length;i++){let q=dailyGeom(i);if(e.clientX-r.left>=q.x&&e.clientX-r.left<=q.x+q.w&&e.clientY-r.top>=q.y&&e.clientY-r.top<=q.y+q.h){dailyTap(i);break}}});
-</script><script id="necpra-resume">
+</script><script src="/games-professional-3d.js"></script><script id="necpra-resume">
 /* Save & resume: the arcade used to store only the LEVEL NUMBER, so leaving mid-level rebuilt the level from scratch
    (and Block / Trivia / Daily even re-rolled random pieces / questions). This snapshots the live board of the game being
    played and restores it when the same level is reopened. Live multiplayer rooms are never snapshotted or restored. */

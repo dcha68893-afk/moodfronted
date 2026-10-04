@@ -8095,9 +8095,11 @@ function _initSortChips() {
 }
 
 // ── SUPPORT ACTIONS ────────────────────────────────────────────────────────
-window._jmOpenSupport = function() {
-    if (typeof openChat === 'function') { openChat('support','Support'); return; }
-    _toast('Opening support chat…', 'info', '💬');
+window._jmOpenSupport = async function() {
+    // Admin support is a real WhatsApp contact, not a fake user id.
+    // Passing the string "support" into /messages/resolve/:userId caused
+    // a server-side 500 because direct-chat resolution requires a numeric user.
+    await _jmOpenAdminWhatsApp();
 };
 window._jmOpenWhatsApp = async function() {
     const choice = await _jmShowChooser({
