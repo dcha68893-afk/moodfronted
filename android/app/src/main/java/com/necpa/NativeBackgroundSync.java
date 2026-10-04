@@ -56,6 +56,53 @@ public final class NativeBackgroundSync {
             }
         }
 
+        // Pull bounded message history for the conversations/groups returned
+        // above. This keeps the native worker authenticated while reusing the
+        // backend's existing message APIs; no second message database is created.
+        try {
+            JSONObject chats = snapshot.optJSONObject("chats");
+            org.json.JSONArray chatList = extractArray(chats, "chats", "conversations");
+            if (chatList != null) {
+                int count = Math.min(chatList.length(), 50);
+                for (int i = 0; i < count; i++) {
+                    JSONObject chat = chatList.optJSONObject(i);
+                    if (chat == null) continue;
+                    int id = chat.optInt("id", chat.optInt("chatId", 0));
+                    if (id <= 0) continue;
+                    try {
+                        snapshot.put("messages_" + id,
+                                request("GET", BACKEND_ORIGIN + "/api/messages?chatId=" + id + "&limit=100", null, access));
+                    } catch (AuthFailure e) {
+                        access = refreshAccessToken(auth, refresh);
+                        snapshot.put("messages_" + id,
+                                request("GET", BACKEND_ORIGIN + "/api/messages?chatId=" + id + "&limit=100", null, access));
+                    } catch (Exception ignored) {}
+                }
+            }
+        } catch (Exception ignored) {}
+
+        try {
+            JSONObject groups = snapshot.optJSONObject("groups");
+            org.json.JSONArray groupList = extractArray(groups, "groups", "data");
+            if (groupList != null) {
+                int count = Math.min(groupList.length(), 50);
+                for (int i = 0; i < count; i++) {
+                    JSONObject group = groupList.optJSONObject(i);
+                    if (group == null) continue;
+                    int id = group.optInt("id", group.optInt("groupId", 0));
+                    if (id <= 0) continue;
+                    try {
+                        snapshot.put("groupMessages_" + id,
+                                request("GET", BACKEND_ORIGIN + "/api/group-messages/" + id + "/messages?limit=100", null, access));
+                    } catch (AuthFailure e) {
+                        access = refreshAccessToken(auth, refresh);
+                        snapshot.put("groupMessages_" + id,
+                                request("GET", BACKEND_ORIGIN + "/api/group-messages/" + id + "/messages?limit=100", null, access));
+                    } catch (Exception ignored) {}
+                }
+            }
+        } catch (Exception ignored) {}
+
         long now = System.currentTimeMillis();
         auth.edit().putLong("lastNativeSyncAt", now)
                 .putString("lastNativeSyncSnapshot", snapshot.toString())
@@ -106,6 +153,22 @@ public final class NativeBackgroundSync {
         if (status == 401) throw new AuthFailure();
         if (status < 200 || status >= 300) throw new Exception("HTTP " + status);
         return text.isEmpty() ? new JSONObject() : new JSONObject(text);
+    }
+
+    private static org.json.JSONArray extractArray(JSONObject object, String... keys) {
+        if (object == null) return null;
+        for (String key : keys) {
+            Object value = object.opt(key);
+            if (value instanceof org.json.JSONArray) return (org.json.JSONArray) value;
+            if (value instanceof JSONObject) {
+                JSONObject nested = (JSONObject) value;
+                for (String nestedKey : new String[]{"chats", "conversations", "groups", "data"}) {
+                    Object n = nested.opt(nestedKey);
+                    if (n instanceof org.json.JSONArray) return (org.json.JSONArray) n;
+                }
+            }
+        }
+        return null;
     }
 
     private static final class AuthFailure extends Exception {}
