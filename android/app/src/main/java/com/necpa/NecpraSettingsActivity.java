@@ -568,7 +568,7 @@ public class NecpraSettingsActivity extends AppCompatActivity {
     private void deleteDir(java.io.File f){if(f==null||!f.exists())return;if(f.isDirectory()){java.io.File[] a=f.listFiles();if(a!=null)for(java.io.File x:a)deleteDir(x);}f.delete();}
     private void sectionTitle(String s){title.setText(s);body.addView(t(s,20,text,true));}
     private LinearLayout card(){LinearLayout c=new LinearLayout(this);c.setOrientation(LinearLayout.VERTICAL);c.setPadding(8,4,8,4);android.graphics.drawable.GradientDrawable g=new android.graphics.drawable.GradientDrawable();g.setColor(card);g.setCornerRadius(18);c.setBackground(g);return c;}
-    private TextView cardText(String s){TextView t=t(s,14,sub,false);t.setPadding(16,16,16,16);body.addView(t);return t;}
+    private TextView cardText(String s){TextView t=t(s,14,sub,false);t.setPadding(16,16,16,16);return t;}
     private View divider(){View v=new View(this);v.setBackgroundColor(line);v.setLayoutParams(new LinearLayout.LayoutParams(-1,1));return v;}
     private View row(String a,String b,Runnable r){LinearLayout x=new LinearLayout(this);x.setOrientation(LinearLayout.VERTICAL);x.setPadding(16,15,16,15);x.addView(t(a,16,text,true));x.addView(t(b,13,sub,false));x.setOnClickListener(v->r.run());return x;}
     private Button button(String s,boolean danger,View.OnClickListener l){Button b=new Button(this);b.setText(s);b.setAllCaps(false);b.setTextColor(danger?DANGER:Color.WHITE);b.setOnClickListener(l);android.graphics.drawable.GradientDrawable g=new android.graphics.drawable.GradientDrawable();g.setCornerRadius(12);g.setColor(danger?card:PRIMARY);if(danger)g.setStroke(1,DANGER);b.setBackground(g);body.addView(b);return b;}
