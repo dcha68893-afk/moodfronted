@@ -66,6 +66,12 @@
 
         <!-- Native Settings screen. Not exported: only MainActivity via the native plugin can start it. -->
         <activity
+            android:name=".Necpra3DWaterSortActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/AppTheme.NoActionBar" />
+
+        <activity
             android:name=".NecpraSettingsActivity"
             android:exported="false"
             android:theme="@style/AppTheme.NoActionBar"
