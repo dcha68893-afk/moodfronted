@@ -74,15 +74,15 @@
   // Native Profile / Settings routing (Android APK only - this file's body never runs in a browser
   // or the PWA, so those keep using the existing web Profile/Settings untouched).
   //
-  //   Step 4 (testing):   leave NATIVE_PROFILE_DEFAULT = false and opt in on a test device with
+  //   Step 4 (testing):   use the native screen by default; set localStorage to 0 on a test device to roll back with
   //                       localStorage.setItem('necpra_native_profile', '1')   (DevTools console)
-  //   Step 5 (switch):    set NATIVE_PROFILE_DEFAULT = true. The APK now opens the native screen;
+  //   Step 5 (switch):    default is now native; the APK opens the native screen;
   //                       localStorage 'necpra_native_profile' = '0' stays available as a kill switch.
   //
   // An older APK that does not contain the native screen rejects nativeProfileAvailable(), and the
   // web Profile/Settings is used instead, so deploying this file before the new APK is safe.
   // ---------------------------------------------------------------------------------------------
-  var NATIVE_PROFILE_DEFAULT = false;
+  var NATIVE_PROFILE_DEFAULT = true;
   var nativeProfileReady = null; // null = unknown, true/false after the first probe
 
   function nativeProfileFlag() {
@@ -218,7 +218,7 @@
   // Native Friends routing (Android APK only - this file's body never runs in a browser or the PWA,
   // so those keep using the existing web Friends module untouched).
   //
-  //   Step 4 (testing):   leave NATIVE_FRIENDS_DEFAULT = false and opt in on a test device with
+  //   Step 4 (testing):   use the native screen by default; set localStorage to 0 on a test device to roll back with
   //                       localStorage.setItem('necpra_native_friends', '1')   (DevTools console)
   //   Step 6 (switch):    set NATIVE_FRIENDS_DEFAULT = true. The APK now opens the native screen;
   //                       localStorage 'necpra_native_friends' = '0' stays available as a kill switch.
@@ -226,7 +226,7 @@
   // An older APK without the native screen rejects nativeFriendsAvailable() and the web Friends
   // module is used instead, so deploying this file before the new APK is safe.
   // ---------------------------------------------------------------------------------------------
-  var NATIVE_FRIENDS_DEFAULT = false;
+  var NATIVE_FRIENDS_DEFAULT = true;
   var nativeFriendsReady = null;
   var nativeFriendsOpen = false;
 
