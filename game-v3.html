@@ -570,7 +570,7 @@ function drawTieredSet(level,n,subject){
   const source=QUESTION_BANK.filter(q=>!subject||subject==='general'||triviaSubjectOf(q)===subject);
   if(source.length) triviaCyclePool=source.slice();
   for(let i=0;i<n;i++){
-    if(!triviaCyclePool.some(q=>!seen.has(key(q))))refillCyclePool();
+    if(!triviaCyclePool.some(q=>!seen.has(key(q))))refillCyclePool(subject);
     const avail=triviaCyclePool.filter(q=>!seen.has(key(q)));
     if(!avail.length)break;
     const r=Math.random(),tier=r<w[1]?1:(r<w[1]+w[2]?2:3);
