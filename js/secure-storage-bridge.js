@@ -27,7 +27,10 @@
 
         const value = result && result.value;
         if (value !== null && value !== undefined) return value;
-      } catch (_) {}
+      } catch (err) {
+        console.warn('[SecureStorage] Native secure read failed:', err?.message || err);
+        return null;
+      }
     }
 
     try { return localStorage.getItem(key); } catch (_) { return null; }
@@ -47,7 +50,8 @@
         try { localStorage.removeItem(key); } catch (_) {}
         return true;
       } catch (err) {
-        console.warn('[SecureStorage] native set failed, falling back to localStorage:', err?.message || err);
+        console.warn('[SecureStorage] Native secure set failed; refusing plaintext fallback:', err?.message || err);
+        return false;
       }
     }
 
@@ -72,7 +76,10 @@
       try {
         if (plugin.secureRemove) await plugin.secureRemove({ key });
         else await plugin.remove({ key });
-      } catch (_) {}
+      } catch (err) {
+        console.warn('[SecureStorage] Native secure remove failed:', err?.message || err);
+      }
+      return;
     }
 
     try { localStorage.removeItem(key); } catch (_) {}
