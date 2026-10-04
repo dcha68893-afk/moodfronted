@@ -523,6 +523,50 @@ public class NecpraNativePlugin extends Plugin {
         call.resolve(out);
     }
 
+    // ---------------------------------------------------------------------
+    // Native Profile / Settings screen (NecpraProfileActivity)
+    // ---------------------------------------------------------------------
+
+    /** Lets the web layer detect the screen; an older APK rejects this call, so the web falls back. */
+    @PluginMethod
+    public void nativeProfileAvailable(PluginCall call) {
+        JSObject out = new JSObject();
+        out.put("available", true);
+        call.resolve(out);
+    }
+
+    @PluginMethod
+    public void openNativeProfile(PluginCall call) {
+        try {
+            Intent intent = new Intent(getContext(), NecpraProfileActivity.class);
+            intent.putExtra(NecpraProfileActivity.EXTRA_SECTION, call.getString("section", "home"));
+            startActivityForResult(call, intent, "nativeProfileResult");
+        } catch (Exception e) {
+            call.reject("Native profile could not be opened", e);
+        }
+    }
+
+    @ActivityCallback
+    private void nativeProfileResult(PluginCall call, ActivityResult result) {
+        JSObject out = new JSObject();
+        out.put("closed", true);
+        Intent d = result == null ? null : result.getData();
+        if (d != null) {
+            out.put("loggedOut", d.getBooleanExtra(NecpraProfileActivity.RES_LOGGED_OUT, false));
+            out.put("sessionExpired", d.getBooleanExtra(NecpraProfileActivity.RES_SESSION_EXPIRED, false));
+            out.put("locked", d.getBooleanExtra(NecpraProfileActivity.RES_LOCKED, false));
+            boolean changed = d.getBooleanExtra(NecpraProfileActivity.RES_CHANGED, false);
+            out.put("profileChanged", changed);
+            if (changed) {
+                out.put("avatar", d.getStringExtra("avatar"));
+                out.put("username", d.getStringExtra("username"));
+                out.put("displayName", d.getStringExtra("displayName"));
+                out.put("bio", d.getStringExtra("bio"));
+            }
+        }
+        call.resolve(out);
+    }
+
     @PluginMethod
     public void shareFile(PluginCall call) {
         String uriString = call.getString("uri");

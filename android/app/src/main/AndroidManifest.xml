@@ -59,6 +59,15 @@
 
         </activity>
 
+        <!-- Native Profile / Settings screen. Not exported: only MainActivity (via NecpraNativePlugin)
+             can start it. configChanges keeps in-progress edits across rotation. -->
+        <activity
+            android:name=".NecpraProfileActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme.NoActionBar"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:windowSoftInputMode="adjustResize" />
+
         <!-- Native FCM receiver: builds WhatsApp-style grouped notifications in every app state and
              forwards everything else to the Capacitor push plugin. It REPLACES Capacitor's own
              MessagingService (removed below) so only one service handles each push. -->

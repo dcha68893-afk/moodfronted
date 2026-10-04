@@ -62,9 +62,155 @@
       downloadFile: function (url, fileName) { return native.downloadFile({url:url, fileName:fileName || 'download'}); },
       uploadFile: function (endpoint, uri, fieldName, mimeType, fileName) {
         return native.uploadFile({endpoint:endpoint, uri:uri, fieldName:fieldName || 'file', mimeType:mimeType || '*/*', fileName:fileName || 'upload'});
-      }
+      },
+      nativeProfileAvailable: function () { return native.nativeProfileAvailable(); },
+      openNativeProfile: function (section) { return native.openNativeProfile({section: section || 'home'}); }
     };
   }
+
+  // ---------------------------------------------------------------------------------------------
+  // Native Profile / Settings routing (Android APK only - this file's body never runs in a browser
+  // or the PWA, so those keep using the existing web Profile/Settings untouched).
+  //
+  //   Step 4 (testing):   leave NATIVE_PROFILE_DEFAULT = false and opt in on a test device with
+  //                       localStorage.setItem('necpra_native_profile', '1')   (DevTools console)
+  //   Step 5 (switch):    set NATIVE_PROFILE_DEFAULT = true. The APK now opens the native screen;
+  //                       localStorage 'necpra_native_profile' = '0' stays available as a kill switch.
+  //
+  // An older APK that does not contain the native screen rejects nativeProfileAvailable(), and the
+  // web Profile/Settings is used instead, so deploying this file before the new APK is safe.
+  // ---------------------------------------------------------------------------------------------
+  var NATIVE_PROFILE_DEFAULT = false;
+  var nativeProfileReady = null; // null = unknown, true/false after the first probe
+
+  function nativeProfileFlag() {
+    try {
+      var v = localStorage.getItem('necpra_native_profile');
+      if (v === '1') return true;
+      if (v === '0') return false;
+    } catch (_) {}
+    return NATIVE_PROFILE_DEFAULT;
+  }
+
+  async function probeNativeProfile() {
+    if (nativeProfileReady !== null) return nativeProfileReady;
+    try {
+      var r = await window.NecpraNative.nativeProfileAvailable();
+      nativeProfileReady = !!(r && r.available);
+    } catch (_) {
+      nativeProfileReady = false; // older APK without the screen
+    }
+    return nativeProfileReady;
+  }
+
+  var nativeProfileOpen = false;
+
+  async function openNativeProfileScreen(section) {
+    if (nativeProfileOpen) return true;
+    nativeProfileOpen = true;
+    try {
+      var result = await window.NecpraNative.openNativeProfile(section);
+      handleNativeProfileResult(result);
+      return true;
+    } catch (err) {
+      console.warn('[native-profile] could not open native screen:', err && err.message ? err.message : err);
+      return false;
+    } finally {
+      nativeProfileOpen = false;
+    }
+  }
+
+  function handleNativeProfileResult(r) {
+    if (!r) return;
+
+    // Signed out (or the backend rejected the refresh token) inside the native screen. The native
+    // side has already wiped the Keystore session; finish the web side with the app's own logout path.
+    if (r.loggedOut || r.sessionExpired) {
+      try {
+        if (typeof _performFullLogoutRedirect === 'function') { _performFullLogoutRedirect('native_logout'); return; }
+      } catch (_) {}
+      try {
+        if (window.AppRuntimeAuthority && typeof window.AppRuntimeAuthority.clearSession === 'function') {
+          window.AppRuntimeAuthority.clearSession({ emit: false, reason: 'native_logout' });
+        } else if (window.AuthStorage && typeof window.AuthStorage.clearAuth === 'function') {
+          window.AuthStorage.clearAuth();
+        }
+      } catch (_) {}
+      window.location.replace('index.html');
+      return;
+    }
+
+    // "Lock now": the session is withheld from the WebView until the user passes the native unlock.
+    if (r.locked && window.NecpraNative && window.NecpraNative.authUnlock) {
+      window.NecpraNative.authUnlock('Unlock Necpra', 'Unlock your secure session').catch(function () {});
+    }
+
+    // Profile edited natively: refresh the shell header/modal without a reload. Display values only,
+    // no credentials.
+    if (r.profileChanged) {
+      try {
+        if (r.avatar) localStorage.setItem('user_avatar', r.avatar);
+        if (r.bio != null) localStorage.setItem('user_bio', r.bio);
+        if (r.displayName) localStorage.setItem('user_displayName', r.displayName);
+      } catch (_) {}
+      try {
+        if (typeof currentUserProfile !== 'undefined' && currentUserProfile) {
+          if (r.avatar) currentUserProfile.avatar = r.avatar;
+          if (r.username) currentUserProfile.username = r.username;
+          if (r.bio != null) currentUserProfile.bio = r.bio;
+          if (typeof updateProfileUI === 'function') updateProfileUI();
+        }
+      } catch (_) {}
+      try { window.dispatchEvent(new CustomEvent('necpra:native-profile-updated', { detail: r })); } catch (_) {}
+    }
+  }
+
+  // chat.html's profile entry points are plain global functions: the Settings button/tab goes through
+  // navigateToPage('settings') and "Edit Profile" calls openProfileEditPanel(). Wrap both so that, when
+  // the native screen is enabled and present, they open it; otherwise the original web code runs.
+  function installNativeProfileRouting() {
+    if (!window.NecpraNative || !window.NecpraNative.openNativeProfile) return;
+    if (window.__necpraProfileRoutingInstalled) return;
+    if (typeof window.navigateToPage !== 'function' && typeof window.openProfileEditPanel !== 'function') return;
+    window.__necpraProfileRoutingInstalled = true;
+
+    var origNavigate = window.navigateToPage;
+    if (typeof origNavigate === 'function') {
+      window.navigateToPage = function (page) {
+        var self = this, args = arguments;
+        if (nativeProfileFlag() && /^settings?$/.test(String(page || ''))) {
+          probeNativeProfile().then(function (ok) {
+            if (!ok) return origNavigate.apply(self, args);
+            return openNativeProfileScreen('home').then(function (opened) {
+              if (!opened) return origNavigate.apply(self, args);
+            });
+          });
+          return;
+        }
+        return origNavigate.apply(this, args);
+      };
+    }
+
+    var origEdit = window.openProfileEditPanel;
+    if (typeof origEdit === 'function') {
+      window.openProfileEditPanel = function () {
+        var self = this, args = arguments;
+        if (nativeProfileFlag()) {
+          probeNativeProfile().then(function (ok) {
+            if (!ok) return origEdit.apply(self, args);
+            return openNativeProfileScreen('edit').then(function (opened) {
+              if (!opened) return origEdit.apply(self, args);
+            });
+          });
+          return;
+        }
+        return origEdit.apply(this, args);
+      };
+    }
+  }
+
+  installNativeProfileRouting();
+  if (document.readyState !== 'complete') window.addEventListener('load', installNativeProfileRouting, { once: true });
 
   // Android deliberately never writes kynecta_auth to WebView storage (tokens live in the native
   // store), so the offline caches / local message DBs could not tell whose data they hold and cached

@@ -82,7 +82,8 @@ const SW_VERSION = '19.48.0';
 // are no longer cached or executed as code; navigations fall back to the cached shell after 6s.
 // v74: profile-photo fix (js/avatar-fix.js added, message.html + js/config.js changed). Bump forces every installed
 // PWA/Android app to drop old copies and show the 'Update ready - Refresh' banner.
-const CACHE_NAME = 'necpra-static-v88';
+// v89: native-init.js (native Profile/Settings routing) is now network-first so an installed APK never runs a stale copy.
+const CACHE_NAME = 'necpra-static-v89';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -98,7 +99,7 @@ const CORE_STATIC_ASSETS = [
 const NETWORK_FIRST_PATTERNS = [
   // FIX: config.js (global brand/config layer every page runs) and the group send path were served stale-while-
   // revalidate, so a fix could sit on the server for a full session before an installed app ran it.
-  /\/js\/config\.js/i,/\/js\/avatar-fix\.js/i,/\/js\/groupMessaging\.client\.js/i,/\/group\.html/i,
+  /\/native-init\.js/i,/\/js\/config\.js/i,/\/js\/avatar-fix\.js/i,/\/js\/groupMessaging\.client\.js/i,/\/group\.html/i,
   /\/js\/theme\.engine\.js/i,/\/theme\.colors\.css/i,/\/js\/e2e-encryption\.js/i,
   /\/js\/e2e-session-init\.js/i,/\/js\/api\.request\.js/i,/\/js\/message-e2e-core\.js/i,
   /\/js\/message-e2e-compat\.js/i,/\/message\.html/i,
