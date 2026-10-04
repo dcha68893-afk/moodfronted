@@ -172,6 +172,10 @@ public class NecpraNativePlugin extends Plugin {
     // background synchronization can continue without a WebView.
     // ---------------------------------------------------------------------
 
+    private boolean isNativeUnlocked() {
+        return System.currentTimeMillis() <= authPrefs().getLong("unlockedUntil", 0L);
+    }
+
     @PluginMethod
     public void authSetSession(PluginCall call) {
         String accessToken = call.getString("accessToken");
@@ -333,6 +337,10 @@ public class NecpraNativePlugin extends Plugin {
 
     @PluginMethod
     public void backgroundSyncNow(PluginCall call) {
+        if (!isNativeUnlocked()) {
+            call.reject("Native session is locked");
+            return;
+        }
         new Thread(() -> {
             try {
                 NativeBackgroundSync.run(getContext());
@@ -452,6 +460,10 @@ public class NecpraNativePlugin extends Plugin {
 
     @PluginMethod
     public void downloadFile(PluginCall call) {
+        if (!isNativeUnlocked()) {
+            call.reject("Native session is locked");
+            return;
+        }
         final String url = call.getString("url");
         final String requestedName = call.getString("fileName", "download");
         if (url == null || !url.startsWith("https://")) {
@@ -510,6 +522,10 @@ public class NecpraNativePlugin extends Plugin {
 
     @PluginMethod
     public void uploadFile(PluginCall call) {
+        if (!isNativeUnlocked()) {
+            call.reject("Native session is locked");
+            return;
+        }
         String endpoint = call.getString("endpoint");
         String uriString = call.getString("uri");
         String fieldName = call.getString("fieldName", "file");
