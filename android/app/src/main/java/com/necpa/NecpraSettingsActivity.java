@@ -356,9 +356,80 @@ public class NecpraSettingsActivity extends AppCompatActivity {
     private void security() {
         sectionTitle("Security");
         body.addView(cardText("Session storage is protected by Android Keystore. App lock uses the native device credential/biometric gate."));
-        button("Lock now",false,v -> { auth().edit().putLong("unlockedUntil",0).apply(); finishWithResult(); });
+        toggle("Login notifications","loginNotifications",bool(sec("security"),"loginNotifications",true),"security");
+        select("Session timeout","sessionTimeout",str(sec("security"),"sessionTimeout","off"),
+                new String[]{"15min","30min","1hr","8hr","off"});
+        button("Two-factor authentication",false,v -> load2FAStatus());
+        button("Change password",false,v -> changePassword());
         button("View active sessions",false,v -> loadSessions());
         button("Terminate all other sessions",true,v -> terminateAll());
+        button("Lock now",false,v -> { auth().edit().putLong("unlockedUntil",0).apply(); finishWithResult(); });
+        saveButton();
+    }
+
+    private void load2FAStatus() {
+        io.execute(() -> {
+            try {
+                JSONObject r = request("GET","/api/settings/2fa/status",null);
+                JSONObject d = r.optJSONObject("data");
+                boolean enabled = d != null && d.optBoolean("enabled", false);
+                runOnUiThread(() -> {
+                    if (enabled) disable2FA();
+                    else setup2FA();
+                });
+            } catch (Throwable e) { runOnUiThread(() -> toast("Could not read 2FA status")); }
+        });
+    }
+
+    private void setup2FA() {
+        io.execute(() -> {
+            try {
+                JSONObject r = request("POST","/api/settings/2fa/setup",new JSONObject());
+                JSONObject d = r.optJSONObject("data");
+                String secret = d == null ? "" : d.optString("secret","");
+                String uri = d == null ? "" : d.optString("otpauthUrl",d.optString("qrCode",""));
+                runOnUiThread(() -> {
+                    LinearLayout box = new LinearLayout(this); box.setOrientation(LinearLayout.VERTICAL); box.setPadding(20,10,20,10);
+                    TextView info = t("Use Google Authenticator/Authy. If the QR cannot be scanned on this phone, copy the manual secret.",14,sub,false);
+                    box.addView(info);
+                    EditText key = new EditText(this); key.setText(secret); key.setTextIsSelectable(true); key.setSingleLine(true); box.addView(key);
+                    if (!uri.isEmpty()) box.addView(t("Authenticator URI: "+uri,11,sub,false));
+                    EditText code = new EditText(this); code.setHint("6-digit code"); code.setInputType(2); box.addView(code);
+                    new AlertDialog.Builder(this).setTitle("Set up 2FA").setView(box)
+                        .setNegativeButton("Cancel",null).setPositiveButton("Activate",(d,w) -> verify2FA(code.getText().toString().replaceAll("\\D",""))).show();
+                });
+            } catch (Throwable e) { runOnUiThread(() -> toast("2FA setup failed")); }
+        });
+    }
+
+    private void verify2FA(String token) {
+        if (token.length()!=6) { toast("Enter the 6-digit code"); return; }
+        io.execute(() -> { try {
+            JSONObject b=new JSONObject(); b.put("token",token); request("POST","/api/settings/2fa/verify",b);
+            runOnUiThread(() -> toast("2FA enabled"));
+        } catch(Throwable e) { runOnUiThread(() -> toast("Invalid 2FA code")); }});
+    }
+
+    private void disable2FA() {
+        LinearLayout box=new LinearLayout(this); box.setOrientation(LinearLayout.VERTICAL); box.setPadding(20,10,20,10);
+        EditText pass=new EditText(this); pass.setHint("Account password"); pass.setInputType(0x81); box.addView(pass);
+        EditText code=new EditText(this); code.setHint("6-digit authenticator code"); code.setInputType(2); box.addView(code);
+        new AlertDialog.Builder(this).setTitle("Disable 2FA").setView(box)
+            .setNegativeButton("Cancel",null).setPositiveButton("Disable",(d,w)->io.execute(()->{try{
+                JSONObject b=new JSONObject();b.put("password",pass.getText().toString());b.put("token",code.getText().toString().replaceAll("\\D",""));request("POST","/api/settings/2fa/disable",b);
+                runOnUiThread(()->toast("2FA disabled"));
+            }catch(Throwable e){runOnUiThread(()->toast("Could not disable 2FA"));}})).show();
+    }
+
+    private void changePassword() {
+        LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(20,10,20,10);
+        EditText current=new EditText(this);current.setHint("Current password (if already set)");current.setInputType(0x81);box.addView(current);
+        EditText next=new EditText(this);next.setHint("New password");next.setInputType(0x81);box.addView(next);
+        EditText confirm=new EditText(this);confirm.setHint("Confirm new password");confirm.setInputType(0x81);box.addView(confirm);
+        new AlertDialog.Builder(this).setTitle("Change password").setView(box).setNegativeButton("Cancel",null).setPositiveButton("Save",(d,w)->{
+            if(!next.getText().toString().equals(confirm.getText().toString()) || next.length()<8){toast("Passwords must match and be at least 8 characters");return;}
+            io.execute(()->{try{JSONObject b=new JSONObject();if(current.length()>0)b.put("currentPassword",current.getText().toString());b.put("newPassword",next.getText().toString());b.put("confirmPassword",confirm.getText().toString());request("POST","/api/settings/change-password",b);runOnUiThread(()->toast("Password changed"));}catch(Throwable e){runOnUiThread(()->toast("Password change failed"));}});
+        }).show();
     }
 
     private void danger() {
