@@ -34,16 +34,6 @@
                 <data android:scheme="necpra" />
             </intent-filter>
 
-            <intent-filter android:autoVerify="true">
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="necpra.co.ke" android:pathPrefix="/chat/" />
-                <data android:scheme="https" android:host="necpra.co.ke" android:pathPrefix="/group/" />
-                <data android:scheme="https" android:host="necpra.co.ke" android:pathPrefix="/status/" />
-                <data android:scheme="https" android:host="necpra.co.ke" android:pathPrefix="/marketplace/" />
-            </intent-filter>
-
         </activity>
 
         <provider

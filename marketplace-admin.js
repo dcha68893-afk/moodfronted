@@ -1127,6 +1127,7 @@ async function renderAdminModules(container) {
         </div>`);
 }
 window._admOpenModule = (key) => { window.__admMod = { module:key, status:'pending', category:'' }; window._jmNavMore('admin-module'); };
+window._jmOpenAdminModules = function(){try{window._jmNavMore('admin-modules')}catch(_){const host=document.getElementById('sidebar')||document.querySelector('.sidebar')||document.body;if(typeof renderAdminModules==='function')renderAdminModules(host)}};
 
 async function renderAdminModule(container) {
     if (!_isAdmin()) { container.innerHTML = _pageShell('Module Admin', _noAccess()); return; }
@@ -1311,3 +1312,5 @@ if (typeof _origRenderAccount === 'function') {
 
 console.log('[marketplace-admin.js] ✅ Admin command center loaded — role:', (window.currentUser||window.__kynUser||{}).role||'unknown');
 })();
+
+(function(){function w(){document.querySelectorAll('.adm-nav-item').forEach(function(b){if(b.__necpraModuleAdminWired)return;if((b.textContent||'').toLowerCase().indexOf('module admin')<0)return;b.__necpraModuleAdminWired=true;b.onclick=function(e){e.preventDefault();e.stopPropagation();window._jmOpenAdminModules?.()}})}document.addEventListener('click',function(){setTimeout(w,0)},true);[200,500,1000,2000].forEach(function(t){setTimeout(w,t)})})();
