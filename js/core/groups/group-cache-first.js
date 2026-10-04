@@ -34,7 +34,6 @@
       if (id) return String(id);
     } catch (_) {}
     return '';
-    } catch (_) { return ''; }
   }
 
   function read() {
