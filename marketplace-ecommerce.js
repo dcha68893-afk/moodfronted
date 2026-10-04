@@ -125,7 +125,8 @@ async function _api(method, endpoint, body = null) {
             console.error('[marketplace-ecommerce] API base URL is not configured.');
             return null;
         }
-        const res = await fetch(baseUrl + '/api' + endpoint, {
+        const normalizedEndpoint = String(endpoint || '').replace(/^\/api(?=\/|$)/, '');
+        const res = await fetch(baseUrl + '/api' + normalizedEndpoint, {
             method: method.toUpperCase(),
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
             ...(body && method !== 'GET' ? { body: JSON.stringify(body) } : {})
