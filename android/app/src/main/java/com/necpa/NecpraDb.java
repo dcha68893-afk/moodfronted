@@ -30,7 +30,7 @@ import java.util.List;
                 NecpraDb.Conv.class, NecpraDb.Msg.class, NecpraDb.Att.class,
                 NecpraDb.React.class, NecpraDb.Receipt.class, NecpraDb.Draft.class
         },
-        version = 1,
+        version = 2,
         exportSchema = false)
 public abstract class NecpraDb extends RoomDatabase {
 
@@ -87,6 +87,10 @@ public abstract class NecpraDb extends RoomDatabase {
         public String name;
         public String mime;
         public long size;
+        /** True when the file at {@link #url} is an encrypted attachment envelope (see NecpraAttachmentCrypto). */
+        @androidx.room.ColumnInfo(defaultValue = "0") public boolean encrypted;
+        /** Local copy: the outgoing file until the send is acknowledged, or the decrypted/downloaded file. Null when unknown. */
+        public String localPath;
     }
 
     @Entity(tableName = "reactions", indices = {@Index(value = {"messageLocalId", "userId"}, unique = true)})
@@ -146,6 +150,10 @@ public abstract class NecpraDb extends RoomDatabase {
         @Insert void insertAtts(List<Att> a);
         @Query("DELETE FROM attachments WHERE messageLocalId = :id") void delAtts(long id);
         @Query("SELECT * FROM attachments WHERE messageLocalId IN (:ids)") List<Att> attsFor(List<Long> ids);
+        @Query("SELECT * FROM attachments WHERE messageLocalId = :id ORDER BY id ASC") List<Att> attsOf(long id);
+        @Update void updateAtt(Att a);
+        /** Live (not deleted) messages of a chat at or after a server id: used to notice deletions the sync feed never reports. */
+        @Query("SELECT * FROM messages WHERE chatId = :chat AND serverId >= :min AND deleted = 0") List<Msg> liveFrom(long chat, long min);
         @Insert(onConflict = OnConflictStrategy.REPLACE) void insertReacts(List<React> r);
         @Query("DELETE FROM reactions WHERE messageLocalId = :id") void delReacts(long id);
         @Query("SELECT * FROM reactions WHERE messageLocalId IN (:ids)") List<React> reactsFor(List<Long> ids);
@@ -162,6 +170,14 @@ public abstract class NecpraDb extends RoomDatabase {
 
     // ------------------------------------------------------------------ lifecycle
 
+    /** v1 -> v2: attachments learn whether they are encrypted and where a local copy lives. Keeps every stored message. */
+    static final androidx.room.migration.Migration MIGRATION_1_2 = new androidx.room.migration.Migration(1, 2) {
+        @Override public void migrate(@NonNull androidx.sqlite.db.SupportSQLiteDatabase db) {
+            db.execSQL("ALTER TABLE attachments ADD COLUMN encrypted INTEGER NOT NULL DEFAULT 0");
+            db.execSQL("ALTER TABLE attachments ADD COLUMN localPath TEXT");
+        }
+    };
+
     private static volatile NecpraDb inst;
 
     static NecpraDb get(Context c) {
@@ -170,6 +186,7 @@ public abstract class NecpraDb extends RoomDatabase {
         synchronized (NecpraDb.class) {
             if (inst == null) {
                 inst = Room.databaseBuilder(c.getApplicationContext(), NecpraDb.class, FILE)
+                        .addMigrations(MIGRATION_1_2)
                         .fallbackToDestructiveMigration()
                         .build();
             }

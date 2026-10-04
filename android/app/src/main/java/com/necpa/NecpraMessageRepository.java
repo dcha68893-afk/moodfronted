@@ -2,6 +2,9 @@ package com.necpa;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.database.Cursor;
+import android.net.Uri;
+import android.provider.OpenableColumns;
 import android.os.Handler;
 import android.os.Looper;
 
@@ -18,7 +21,12 @@ import androidx.work.WorkerParameters;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -103,6 +111,16 @@ public final class NecpraMessageRepository {
         instance = null;
         NecpraDb.wipe(app);
         app.getSharedPreferences(META_PREFS, Context.MODE_PRIVATE).edit().clear().commit();
+        deleteTree(new File(app.getFilesDir(), "outbox"));
+        deleteTree(new File(app.getCacheDir(), "att"));
+    }
+
+    private static void deleteTree(File f) {
+        try {
+            File[] kids = f.listFiles();
+            if (kids != null) for (File k : kids) deleteTree(k);
+            f.delete();
+        } catch (Exception ignored) { }
     }
 
     private final Context app;
@@ -461,8 +479,11 @@ public final class NecpraMessageRepository {
 
             // children
             JSONObject meta = row.optJSONObject("metadata");
+            Map<String, String> keepLocal = new HashMap<>();
+            for (NecpraDb.Att o : d.attsOf(m.localId)) if (o.localPath != null && o.url != null) keepLocal.put(o.url, o.localPath);
             d.delAtts(m.localId);
             List<NecpraDb.Att> atts = attachmentsOf(m.localId, row, meta, open(m.body));
+            for (NecpraDb.Att a : atts) { String lp = keepLocal.get(a.url); if (lp != null && new File(lp).exists()) a.localPath = lp; }
             if (!atts.isEmpty()) d.insertAtts(atts);
             d.delReacts(m.localId);
             List<NecpraDb.React> rs = reactionsOf(m.localId, row.optJSONObject("reactions"), meta);
@@ -523,7 +544,10 @@ public final class NecpraMessageRepository {
         if (arr != null) {
             for (int i = 0; i < arr.length(); i++) { NecpraDb.Att a = attFrom(localId, type, arr.optJSONObject(i)); if (a != null) out.add(a); }
         } else {
-            NecpraDb.Att a = attFrom(localId, type, meta);
+            // The web client (message-client.js sendMessage) sends ONE attachment as metadata.attachment — the key this
+            // method used to miss, which is why files/images from web users never showed up natively.
+            NecpraDb.Att a = meta == null ? null : attFrom(localId, type, meta.optJSONObject("attachment"));
+            if (a == null) a = attFrom(localId, type, meta);
             if (a == null && plain != null && plain.trim().startsWith("{")) { try { a = attFrom(localId, type, new JSONObject(plain)); } catch (Exception ignored) { } }
             if (a == null) { String c = str(row, "content"); if (c != null && c.startsWith("https://")) { JSONObject o = new JSONObject(); try { o.put("url", c); } catch (Exception ignored) { } a = attFrom(localId, type, o); } }
             if (a != null) out.add(a);
@@ -538,9 +562,10 @@ public final class NecpraMessageRepository {
         if (url == null || url.isEmpty()) return null;
         NecpraDb.Att a = new NecpraDb.Att();
         a.messageLocalId = localId; a.url = url; a.kind = type;
-        a.name = str(o, "fileName") != null ? str(o, "fileName") : str(o, "name");
+        a.name = str(o, "fileName") != null ? str(o, "fileName") : (str(o, "originalName") != null ? str(o, "originalName") : str(o, "name"));
         a.mime = str(o, "mimeType") != null ? str(o, "mimeType") : str(o, "mime");
         a.size = o.optLong("size", o.optLong("fileSize", 0));
+        a.encrypted = o.optBoolean("encrypted", false);
         return a;
     }
 
@@ -680,6 +705,7 @@ public final class NecpraMessageRepository {
             try {
                 if (chatId <= 0 || dao().conv(chatId) == null) { refreshConversations(); if (chatId <= 0) return; }
                 syncChat(chatId);
+                refreshRecent(chatId);
             } catch (Exception ignored) { }
         });
     }
@@ -710,16 +736,22 @@ public final class NecpraMessageRepository {
                 long peer = conv == null ? 0 : conv.peerId;
                 try {
                     if (peer <= 0) { fail(m, "This chat can't be sent from the native screen"); continue; }
+                    String mType = m.type == null || m.type.isEmpty() ? "text" : m.type;
+                    boolean media = isMediaType(mType);
+                    JSONObject attMeta = media ? uploadPending(m, peer) : null;   // file first; its URL is stored so a retry never re-uploads
                     if (m.envelope == null) {
                         String plain = open(m.body);
-                        if (plain == null) { fail(m, "Message text is no longer available"); continue; }
-                        String env = NecpraE2EStore.engine(app).encrypt(plain, String.valueOf(peer));
-                        m.envelope = seal(env);
-                        d.updateMsg(m);                    // ciphertext is persisted BEFORE the POST: retries resend the same envelope
+                        if (plain == null && !media) { fail(m, "Message text is no longer available"); continue; }
+                        if (plain != null) {               // media without a caption has no text to encrypt
+                            String env = NecpraE2EStore.engine(app).encrypt(plain, String.valueOf(peer));
+                            m.envelope = seal(env);
+                            d.updateMsg(m);                // ciphertext is persisted BEFORE the POST: retries resend the same envelope
+                        }
                     }
-                    String mType = m.type == null || m.type.isEmpty() ? "text" : m.type;
+                    String sealed = m.envelope == null ? null : open(m.envelope);
                     JSONObject body = new JSONObject().put("chatId", m.chatId).put("receiverId", peer)
-                            .put("content", open(m.envelope)).put("type", mType).put("clientMessageId", m.clientMessageId);
+                            .put("content", sealed == null ? "" : sealed).put("type", mType).put("clientMessageId", m.clientMessageId);
+                    if (attMeta != null) body.put("metadata", new JSONObject().put("attachment", attMeta));
                     if ("status_reply".equals(mType)) {
                         try {
                             JSONObject it = new JSONObject(open(m.body));
@@ -749,6 +781,8 @@ public final class NecpraMessageRepository {
                 } catch (IOException offline) {
                     m.attempts++; m.lastError = "Waiting for network"; d.updateMsg(m);
                     retryLater = true; break;
+                } catch (AttachmentException e) {
+                    fail(m, e.getMessage());
                 } catch (IllegalStateException e) {
                     String msg = e.getMessage() == null ? "Could not encrypt message" : e.getMessage();
                     if (msg.contains("not provisioned")) { fireNotice("Secure messaging isn't set up on this device yet", false); return true; }
@@ -775,6 +809,385 @@ public final class NecpraMessageRepository {
                     .build();
             WorkManager.getInstance(app).enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.REPLACE, req);
         } catch (Throwable ignored) { }
+    }
+
+    // ------------------------------------------------------------------ attachments
+
+    /**
+     * false  = files are uploaded as-is, exactly like the web client does today (message-client.js uploads the raw file and
+     *          its own comment says attachment encryption is not wired). Web users can open them.
+     * true   = files are encrypted first (NecpraE2E#encryptAttachment, same format as the web's encryptAttachment) and the
+     *          message metadata says {encrypted:true}. Flip this ONLY after the web client decrypts on display, otherwise
+     *          web users see an undecodable file. Receiving encrypted files works regardless of this flag.
+     */
+    static final boolean ENCRYPT_OUTGOING_ATTACHMENTS = false;
+
+    static final long MAX_UPLOAD_BYTES = 50L * 1024 * 1024;   // server default MAX_UPLOAD_SIZE
+
+    /** Same whitelist as routes/files.js; anything else is rejected there, so reject it here with a readable reason. */
+    private static final java.util.Set<String> UPLOAD_MIMES = new java.util.HashSet<>(java.util.Arrays.asList(
+            "image/jpeg", "image/png", "image/gif", "image/webp", "image/heic", "image/heif", "image/jpg",
+            "audio/mpeg", "audio/mp4", "audio/ogg", "audio/wav", "audio/webm", "audio/aac", "audio/mp3", "audio/x-m4a", "audio/3gpp",
+            "video/mp4", "video/webm", "video/ogg", "video/quicktime", "video/3gpp",
+            "application/pdf", "application/msword", "text/plain", "text/csv", "application/rtf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.ms-powerpoint", "application/vnd.openxmlformats-officedocument.presentationml.presentation"));
+
+    /** A problem the user can read (unsupported type, too big, rejected by the server). Not retried. */
+    static final class AttachmentException extends Exception { AttachmentException(String m) { super(m); } }
+
+    static boolean isMediaType(String t) { return "image".equals(t) || "video".equals(t) || "audio".equals(t) || "file".equals(t); }
+
+    private static String kindForMime(String mime) {
+        if (mime == null) return "file";
+        if (mime.startsWith("image/")) return "image";
+        if (mime.startsWith("video/")) return "video";
+        if (mime.startsWith("audio/")) return "audio";
+        return "file";
+    }
+
+    private static String extOf(String name) {
+        if (name == null) return "";
+        int i = name.lastIndexOf('.');
+        if (i < 0 || name.length() - i > 8) return "";
+        return name.substring(i).replaceAll("[^A-Za-z0-9.]", "");
+    }
+
+    /**
+     * Copies a picked file into app storage and queues it. Blocking (file copy): call off the UI thread.
+     * The copy is what gets uploaded, so the send survives the picker's temporary permission, a process kill and offline time.
+     */
+    void sendAttachment(long chatId, Uri uri, String caption, long replyToServerId) throws Exception {
+        if (chatId <= 0 || uri == null) return;
+        android.content.ContentResolver cr = app.getContentResolver();
+        String name = null; long declared = -1;
+        try (Cursor c = cr.query(uri, new String[]{OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE}, null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                int ni = c.getColumnIndex(OpenableColumns.DISPLAY_NAME), si = c.getColumnIndex(OpenableColumns.SIZE);
+                if (ni >= 0 && !c.isNull(ni)) name = c.getString(ni);
+                if (si >= 0 && !c.isNull(si)) declared = c.getLong(si);
+            }
+        }
+        String mime = cr.getType(uri);
+        if (mime == null || "application/octet-stream".equals(mime)) {
+            String ext = extOf(name).replace(".", "").toLowerCase(Locale.US);
+            String guess = ext.isEmpty() ? null : android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext);
+            if (guess != null) mime = guess;
+        }
+        if (mime == null || !UPLOAD_MIMES.contains(mime.toLowerCase(Locale.US))) throw new AttachmentException("This file type can't be sent");
+        mime = mime.toLowerCase(Locale.US);
+        long limit = ENCRYPT_OUTGOING_ATTACHMENTS ? NecpraAttachmentCrypto.MAX_ENCRYPTED_BYTES : MAX_UPLOAD_BYTES;
+        if (declared > limit) throw new AttachmentException("File is too large (max " + (limit / (1024 * 1024)) + " MB)");
+        if (name == null || name.isEmpty()) name = "file" + (mime.contains("/") ? "." + mime.substring(mime.indexOf('/') + 1) : "");
+
+        File dir = new File(app.getFilesDir(), "outbox"); dir.mkdirs();
+        File out = new File(dir, newClientId() + extOf(name));
+        long total = 0;
+        try (InputStream in = cr.openInputStream(uri); OutputStream os = new FileOutputStream(out)) {
+            if (in == null) throw new AttachmentException("Couldn't read that file");
+            byte[] buf = new byte[16 * 1024]; int n;
+            while ((n = in.read(buf)) > 0) {
+                total += n;
+                if (total > limit) { os.close(); out.delete(); throw new AttachmentException("File is too large (max " + (limit / (1024 * 1024)) + " MB)"); }
+                os.write(buf, 0, n);
+            }
+        } catch (AttachmentException e) { throw e; }
+        catch (Exception e) { out.delete(); throw new AttachmentException("Couldn't read that file"); }
+
+        String kind = kindForMime(mime);
+        String cap = caption == null ? "" : caption.trim();
+        if (cap.length() > MAX_TEXT) cap = cap.substring(0, MAX_TEXT);
+        NecpraDb.ChatDao d = dao();
+        NecpraDb.Msg m = new NecpraDb.Msg();
+        m.chatId = chatId; m.senderId = me(); m.mine = true; m.type = kind;
+        m.clientMessageId = newClientId();
+        m.body = cap.isEmpty() ? null : seal(cap);
+        m.status = ST_QUEUED; m.cryptoState = CS_OK; m.sortTs = System.currentTimeMillis();
+        m.replyToServerId = replyToServerId;
+        m.localId = d.insertMsg(m);
+        NecpraDb.Att a = new NecpraDb.Att();
+        a.messageLocalId = m.localId; a.kind = kind; a.url = Uri.fromFile(out).toString(); a.localPath = out.getAbsolutePath();
+        a.name = name; a.mime = mime; a.size = total;
+        d.insertAtts(Collections.singletonList(a));
+        d.delDraft(chatId);
+        refreshPreview(chatId);
+        fireMessages(chatId); fireConversations();
+        drainAsync();
+    }
+
+    /**
+     * Makes sure the first attachment of a queued message is on the server and returns the {@code metadata.attachment}
+     * object the web client expects ({url, type, mimeType, size, originalName}). The uploaded URL is saved on the row as
+     * soon as it exists, so a retry after a failed POST skips the upload.
+     */
+    private JSONObject uploadPending(NecpraDb.Msg m, long peer) throws Exception {
+        NecpraDb.ChatDao d = dao();
+        List<NecpraDb.Att> atts = d.attsOf(m.localId);
+        if (atts.isEmpty()) return null;
+        NecpraDb.Att a = atts.get(0);
+        if (a.url == null || !a.url.startsWith("https://")) {
+            File src = a.localPath == null ? null : new File(a.localPath);
+            if (src == null || !src.exists()) throw new AttachmentException("The file is no longer available");
+            JSONObject up;
+            if (ENCRYPT_OUTGOING_ATTACHMENTS) {
+                byte[] plain = readAll(src, NecpraAttachmentCrypto.MAX_ENCRYPTED_BYTES);
+                JSONObject env = NecpraE2EStore.engine(app).encryptAttachment(plain, String.valueOf(peer));
+                File tmp = new File(app.getCacheDir(), "enc-" + newClientId() + ".enc");
+                try {
+                    try (OutputStream os = new FileOutputStream(tmp)) { os.write(env.toString().getBytes(StandardCharsets.UTF_8)); }
+                    up = uploadFile(tmp, "text/plain", newClientId() + ".enc");   // text/plain is on the server whitelist; octet-stream is not
+                } finally { tmp.delete(); }
+                a.encrypted = true;
+            } else {
+                up = uploadFile(src, a.mime, a.name);
+            }
+            String url = str(up, "url");
+            if (url == null || !url.startsWith("https://")) throw new AttachmentException("Upload failed (the server returned an unsafe address)");
+            a.url = url;
+            d.updateAtt(a);
+        }
+        JSONObject meta = new JSONObject().put("url", a.url).put("type", a.kind).put("mimeType", a.mime)
+                .put("size", a.size).put("originalName", a.name == null ? "file" : a.name);
+        if (a.encrypted) meta.put("encrypted", true);
+        return meta;
+    }
+
+    private static byte[] readAll(File f, long cap) throws IOException {
+        if (f.length() > cap) throw new IOException("too large");
+        try (InputStream in = new java.io.FileInputStream(f)) {
+            ByteArrayOutputStream bo = new ByteArrayOutputStream((int) Math.max(32, f.length()));
+            byte[] buf = new byte[16 * 1024]; int n;
+            while ((n = in.read(buf)) > 0) bo.write(buf, 0, n);
+            return bo.toByteArray();
+        }
+    }
+
+    /** POST /api/files/upload (multipart, streamed from disk). Same auth + single-refresh path as {@link #request}. */
+    private JSONObject uploadFile(File f, String mime, String filename) throws Exception {
+        String boundary = "----necpra" + Long.toHexString(rnd.nextLong() & Long.MAX_VALUE);
+        String safeName = (filename == null ? "file" : filename).replaceAll("[\\r\\n\"\\\\]", "_");
+        byte[] head = ("--" + boundary + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"" + safeName + "\"\r\nContent-Type: "
+                + (mime == null ? "application/octet-stream" : mime) + "\r\n\r\n").getBytes(StandardCharsets.UTF_8);
+        byte[] tail = ("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8);
+        boolean retried = false;
+        while (true) {
+            SharedPreferences auth = app.getSharedPreferences(NativeBackgroundSync.AUTH_PREFS, Context.MODE_PRIVATE);
+            String access = NativeBackgroundSync.getDecrypted(auth, "accessToken");
+            if (access == null || access.isEmpty()) access = NativeBackgroundSync.refreshSession(app);
+            HttpURLConnection h = null; int status; String text;
+            try {
+                h = (HttpURLConnection) new URL(NativeBackgroundSync.backendOrigin(app) + "/api/files/upload").openConnection();
+                h.setRequestMethod("POST"); h.setConnectTimeout(15000); h.setReadTimeout(120000); h.setUseCaches(false);
+                h.setRequestProperty("Accept", "application/json");
+                h.setRequestProperty("Authorization", "Bearer " + access);
+                h.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+                h.setDoOutput(true);
+                h.setFixedLengthStreamingMode(head.length + f.length() + tail.length);
+                try (OutputStream os = h.getOutputStream(); InputStream in = new java.io.FileInputStream(f)) {
+                    os.write(head);
+                    byte[] buf = new byte[16 * 1024]; int n;
+                    while ((n = in.read(buf)) > 0) os.write(buf, 0, n);
+                    os.write(tail); os.flush();
+                }
+                status = h.getResponseCode();
+                text = NativeBackgroundSync.readText(status >= 200 && status < 400 ? h.getInputStream() : h.getErrorStream());
+            } finally { if (h != null) h.disconnect(); }
+            if (status == 401) {
+                if (retried) throw new NativeBackgroundSync.SessionExpiredException("Unauthorized after refresh");
+                retried = true; NativeBackgroundSync.refreshSession(app); continue;
+            }
+            JSONObject json = null;
+            try { json = new JSONObject(text == null || text.trim().isEmpty() ? "{}" : text); } catch (Exception ignored) { }
+            if (status >= 200 && status < 300 && json != null) { JSONObject data = json.optJSONObject("data"); return data != null ? data : json; }
+            if (status == 408 || status == 425 || status == 429 || status >= 500) throw new IOException("Upload busy, will retry");
+            String why = json == null ? null : json.optString("message", null);
+            if (status == 413) why = "File is too large";
+            throw new AttachmentException(why == null || why.isEmpty() ? "Upload rejected (HTTP " + status + ")" : why);
+        }
+    }
+
+    /**
+     * Returns a plaintext local copy of an attachment, downloading (and, for encrypted ones, decrypting) it first.
+     * Blocking: call off the UI thread. {@code peerId} is the other participant of the chat; {@code mine} says who sent it.
+     */
+    File fetchAttachment(NecpraDb.Att a, boolean mine, long peerId) throws Exception {
+        if (a.localPath != null) { File f = new File(a.localPath); if (f.exists()) return f; }
+        if (a.url == null || !a.url.startsWith("https://")) throw new IOException("Attachment not available");
+        File dir = new File(app.getCacheDir(), "att"); dir.mkdirs();
+        String ext = extOf(a.name);
+        if (ext.isEmpty() && a.mime != null) { String e = android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(a.mime); if (e != null) ext = "." + e; }
+        String key;
+        try {
+            byte[] dg = java.security.MessageDigest.getInstance("SHA-256").digest(a.url.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(); for (int i = 0; i < 12; i++) sb.append(String.format(Locale.US, "%02x", dg[i]));
+            key = sb.toString();
+        } catch (Exception e) { key = Integer.toHexString(a.url.hashCode()); }
+        File dest = new File(dir, key + ext);
+        if (dest.exists() && dest.length() > 0) { a.localPath = dest.getAbsolutePath(); dao().updateAtt(a); return dest; }
+
+        File part = new File(dir, key + ".part");
+        HttpURLConnection h = null;
+        try {
+            h = (HttpURLConnection) new URL(a.url).openConnection();
+            h.setConnectTimeout(15000); h.setReadTimeout(120000); h.setUseCaches(false);
+            if (a.url.startsWith(NativeBackgroundSync.backendOrigin(app))) {     // our own origin may want the session; third-party CDNs never get it
+                String access = NativeBackgroundSync.getDecrypted(app.getSharedPreferences(NativeBackgroundSync.AUTH_PREFS, Context.MODE_PRIVATE), "accessToken");
+                if (access != null && !access.isEmpty()) h.setRequestProperty("Authorization", "Bearer " + access);
+            }
+            int st = h.getResponseCode();
+            if (st < 200 || st >= 300) throw new IOException("HTTP " + st);
+            long cap = a.encrypted ? NecpraAttachmentCrypto.MAX_ENCRYPTED_BYTES * 2L : MAX_UPLOAD_BYTES + 1024;
+            long total = 0;
+            try (InputStream in = h.getInputStream(); OutputStream os = new FileOutputStream(part)) {
+                byte[] buf = new byte[16 * 1024]; int n;
+                while ((n = in.read(buf)) > 0) { total += n; if (total > cap) throw new IOException("Attachment too large"); os.write(buf, 0, n); }
+            }
+        } finally { if (h != null) h.disconnect(); }
+
+        if (a.encrypted) {
+            try {
+                JSONObject env = new JSONObject(new String(readAll(part, NecpraAttachmentCrypto.MAX_ENCRYPTED_BYTES * 2L), StandardCharsets.UTF_8));
+                byte[] plain = NecpraE2EStore.engine(app).decryptAttachment(env, String.valueOf(peerId), mine);
+                try (OutputStream os = new FileOutputStream(dest)) { os.write(plain); }
+            } catch (Exception e) { throw new IOException("Couldn't decrypt this attachment on this device"); }
+            finally { part.delete(); }
+        } else if (!part.renameTo(dest)) { part.delete(); throw new IOException("Couldn't store the attachment"); }
+
+        a.localPath = dest.getAbsolutePath();
+        dao().updateAtt(a);
+        return dest;
+    }
+
+    // ------------------------------------------------------------------ edit, delete, block, unfriend
+
+    static final long EDIT_WINDOW_MS = 15L * 60 * 1000;   // server: PATCH/PUT /api/messages/:id
+
+    boolean canEdit(NecpraDb.Msg m) {
+        return m.mine && m.serverId > 0 && "text".equals(m.type) && m.status != ST_FAILED && System.currentTimeMillis() - m.sortTs < EDIT_WINDOW_MS;
+    }
+
+    /** Encrypts the new text (same ratchet as a new message) and PUTs it. The local text changes only after the server accepted it. */
+    void editMessage(long localId, String newText) throws Exception {
+        String clean = newText == null ? "" : newText.trim();
+        if (clean.isEmpty()) throw new IOException("Message can't be empty");
+        if (clean.length() > MAX_TEXT) clean = clean.substring(0, MAX_TEXT);
+        NecpraDb.ChatDao d = dao();
+        NecpraDb.Msg m = d.byLocal(localId);
+        if (m == null || !canEdit(m)) throw new IOException("This message can no longer be edited");
+        NecpraDb.Conv conv = d.conv(m.chatId);
+        long peer = conv == null ? 0 : conv.peerId;
+        if (peer <= 0) throw new IOException("This chat can't be edited from the native screen");
+        String env = NecpraE2EStore.engine(app).encrypt(clean, String.valueOf(peer));
+        Resp r = request("PUT", "/api/messages/" + m.serverId, new JSONObject().put("content", env));
+        if (!r.ok()) throw new IOException(r.message());
+        m.body = seal(clean); m.edited = true;
+        d.updateMsg(m);
+        refreshPreview(m.chatId);
+        fireMessages(m.chatId); fireConversations();
+    }
+
+    /** "Delete for me" or (own messages, server enforces its time window) "delete for everyone". */
+    void deleteMessage(long localId, boolean forEveryone) throws Exception {
+        NecpraDb.ChatDao d = dao();
+        NecpraDb.Msg m = d.byLocal(localId);
+        if (m == null) return;
+        if (m.serverId > 0) {
+            Resp r = request("DELETE", "/api/messages/" + m.serverId + "?deleteForEveryone=" + (forEveryone && m.mine), null);
+            if (!r.ok()) throw new IOException(r.message());
+        } else {
+            m.status = ST_FAILED;                    // never sent: make sure the queue can't send it after it was deleted
+        }
+        m.deleted = true; m.envelope = null;
+        d.updateMsg(m);
+        refreshPreview(m.chatId);
+        fireMessages(m.chatId); fireConversations();
+    }
+
+    /** POST /api/profile/:id/block */
+    void blockUser(long userId) throws Exception {
+        Resp r = request("POST", "/api/profile/" + userId + "/block", new JSONObject());
+        if (!r.ok()) throw new IOException(r.message());
+    }
+
+    /** DELETE /api/friends/:id */
+    void unfriend(long userId) throws Exception {
+        Resp r = request("DELETE", "/api/friends/" + userId, null);
+        if (!r.ok()) throw new IOException(r.message());
+    }
+
+    /**
+     * The /sync feed only ever returns messages NEWER than the cursor, so edits, deletions, receipts and reactions on messages
+     * already on the device never arrive through it. This re-reads the newest page and applies exactly those changes to rows we
+     * already have. It never creates rows (that stays the job of {@link #syncChat}) and decrypts an edit at most once.
+     */
+    void refreshRecent(long chatId) throws Exception {
+        NecpraDb.ChatDao d = dao();
+        NecpraDb.Conv conv = d.conv(chatId);
+        if (conv == null || !"direct".equals(conv.type)) return;
+        synchronized (lock(chatId)) {
+            Resp r = request("GET", "/api/messages/" + chatId + "?limit=" + PAGE, null);
+            if (!r.ok()) throw new IOException(r.message());
+            JSONArray rows = r.json == null ? null : r.json.optJSONArray("data");
+            if (rows == null || rows.length() == 0) return;
+            long me = me(), peer = conv.peerId;
+            java.util.Set<Long> seen = new java.util.HashSet<>();
+            long minId = Long.MAX_VALUE, maxId = 0;
+            NecpraE2E engine = null;
+            boolean changed = false;
+            for (int i = 0; i < rows.length(); i++) {
+                JSONObject row = rows.optJSONObject(i); if (row == null) continue;
+                long sid = row.optLong("id"); if (sid <= 0) continue;
+                seen.add(sid); minId = Math.min(minId, sid); maxId = Math.max(maxId, sid);
+                NecpraDb.Msg m = d.byServer(chatId, sid);
+                if (m == null) continue;
+                boolean dirty = false;
+                if (m.mine) {
+                    int st = Math.max(m.status, statusOf(row));
+                    if (st != m.status && m.status != ST_QUEUED && m.status != ST_FAILED) { m.status = st; dirty = true; }
+                    if (peer > 0) {
+                        List<NecpraDb.Receipt> rc = new ArrayList<>();
+                        long dAt = parseIso(str(row, "deliveredAt")), rAt = parseIso(str(row, "readAt"));
+                        if (m.status >= ST_DELIVERED) rc.add(receipt(m.localId, peer, "delivered", dAt > 0 ? dAt : m.sortTs));
+                        if (m.status >= ST_READ) rc.add(receipt(m.localId, peer, "read", rAt > 0 ? rAt : m.sortTs));
+                        if (!rc.isEmpty()) d.insertReceipts(rc);
+                    }
+                }
+                boolean serverEdited = row.optBoolean("isEdited", false);
+                if (serverEdited && !m.edited) {
+                    String content = str(row, "content");
+                    if (!m.mine && content != null && NecpraE2E.looksEncrypted(content)) {
+                        try {
+                            if (engine == null) engine = NecpraE2EStore.engine(app);
+                            m.body = seal(engine.decrypt(content, String.valueOf(m.senderId), false));
+                            m.cryptoState = CS_OK;
+                        } catch (Exception ignored) { /* keep the previous text; the edit is marked seen so it is not retried */ }
+                    } else if (!m.mine && content != null && !NecpraE2E.looksEncrypted(content)) { m.body = seal(content); }
+                    m.edited = true; dirty = true;      // our own edits already updated the local text when they were sent
+                }
+                if (dirty) { d.updateMsg(m); changed = true; }
+                JSONObject meta = row.optJSONObject("metadata");
+                List<NecpraDb.React> fresh = reactionsOf(m.localId, row.optJSONObject("reactions"), meta);
+                List<NecpraDb.React> old = d.reactsFor(Collections.singletonList(m.localId));
+                if (!sameReactions(old, fresh)) { d.delReacts(m.localId); if (!fresh.isEmpty()) d.insertReacts(fresh); changed = true; }
+            }
+            // The page holds the newest non-deleted messages. A local message inside that id range that the server no longer
+            // lists was deleted (for everyone, or for this user on another device).
+            long floor = rows.length() < PAGE ? 1 : minId;
+            for (NecpraDb.Msg m : d.liveFrom(chatId, floor)) {
+                if (m.serverId <= 0 || m.serverId > maxId || seen.contains(m.serverId)) continue;
+                m.deleted = true; d.updateMsg(m); changed = true;
+            }
+            if (changed) { refreshPreview(chatId); fireMessages(chatId); fireConversations(); }
+        }
+    }
+
+    private static boolean sameReactions(List<NecpraDb.React> a, List<NecpraDb.React> b) {
+        if (a.size() != b.size()) return false;
+        Map<Long, String> m = new HashMap<>();
+        for (NecpraDb.React x : a) m.put(x.userId, x.emoji);
+        for (NecpraDb.React x : b) if (!java.util.Objects.equals(m.get(x.userId), x.emoji)) return false;
+        return true;
     }
 
     /** Runs the queue in the background (network back, app closed). */

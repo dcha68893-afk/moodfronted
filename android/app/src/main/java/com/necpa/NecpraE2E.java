@@ -173,6 +173,40 @@ public final class NecpraE2E {
         }
     }
 
+    // ------------------------------------------------------------------ attachments (encryptAttachment / decryptAttachment)
+
+    /**
+     * Encrypts file bytes for {@code recipientUserId} in the web client's attachment envelope {v:2, spk, iv, ct}.
+     * Stateless: unlike chat text it does not touch the ratchet, so a retry simply produces a fresh envelope.
+     */
+    public JSONObject encryptAttachment(byte[] data, String recipientUserId) throws Exception {
+        if (recipientUserId == null || recipientUserId.isEmpty()) throw new IllegalArgumentException("Recipient is required for secure messaging");
+        PeerKey peer = directory.publicKeyFor(recipientUserId, false);
+        byte[] sharedBits = shared(identityPriv, peer.spkiB64);
+        return NecpraAttachmentCrypto.seal(data, sharedBits, NecpraAttachmentCrypto.info(myUserId, recipientUserId), identityPubSpkiB64);
+    }
+
+    /**
+     * @param peerId the OTHER participant (sender for incoming files, recipient for files I sent)
+     * @param own    true when I sent it: the envelope's spk is then MY key, so the peer's directory key is used instead
+     */
+    public byte[] decryptAttachment(JSONObject envelope, String peerId, boolean own) throws Exception {
+        String[] infos = {NecpraAttachmentCrypto.info(myUserId, peerId), NecpraAttachmentCrypto.legacyInfo(myUserId, peerId)};
+        Exception last = null;
+        // 1) the key the envelope names (incoming only), 2) the cached directory key, 3) a forced refresh (peer rotated its key)
+        for (int attempt = 0; attempt < 3; attempt++) {
+            String spki;
+            if (attempt == 0 && !own && envelope.has("spk") && !envelope.isNull("spk")) spki = envelope.getString("spk");
+            else if (attempt == 0) spki = directory.publicKeyFor(peerId, false).spkiB64;
+            else spki = directory.publicKeyFor(peerId, attempt == 2).spkiB64;
+            byte[] sharedBits = shared(identityPriv, spki);
+            for (String info : infos) {
+                try { return NecpraAttachmentCrypto.open(envelope, sharedBits, info); } catch (Exception e) { last = e; }
+            }
+        }
+        throw last != null ? last : new IllegalStateException("Could not decrypt attachment");
+    }
+
     // ------------------------------------------------------------------ decrypt (decryptEnvelopeV3)
 
     private JSONObject receiverSession(String peerId, JSONObject envelope, boolean forceRefresh) throws Exception {

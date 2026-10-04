@@ -5,8 +5,11 @@
   directories the native plugin actually shares from are exposed now:
     cache/            camera captures   (takePhoto)
     files/downloads/  authenticated downloads (downloadFile)
+    files/outbox/     native chat attachments being sent
 -->
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <cache-path name="necpra_cache" path="." />
     <files-path name="necpra_downloads" path="downloads/" />
+    <!-- Native chat: copies of files being sent (opened from the chat bubble before/after upload) -->
+    <files-path name="necpra_outbox" path="outbox/" />
 </paths>

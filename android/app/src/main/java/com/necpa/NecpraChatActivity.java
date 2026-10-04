@@ -4,6 +4,8 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.net.Uri;
@@ -15,6 +17,7 @@ import android.text.InputFilter;
 import android.text.InputType;
 import android.text.TextUtils;
 import android.text.TextWatcher;
+import android.util.LruCache;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -26,15 +29,21 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.FileProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Native chat screen (Phase 3): header, message list, composer.
@@ -74,7 +83,12 @@ public class NecpraChatActivity extends AppCompatActivity implements NecpraMessa
     private String replyToPreview;
     private final Runnable saveDraft = () -> { final long id = chatId; final String txt = input.getText().toString(); if (id > 0) repo.async(() -> repo.saveDraft(id, txt)); };
     private NecpraRealtime rt;
-    private TextView nameView, subView;
+    private TextView nameView, subView, attachBtn;
+    private final ActivityResultLauncher<String> picker = registerForActivityResult(new ActivityResultContracts.GetContent(), this::onPicked);
+    private final LruCache<String, Bitmap> thumbs = new LruCache<String, Bitmap>(Math.max(2048, (int) (Runtime.getRuntime().maxMemory() / 1024 / 8))) {
+        @Override protected int sizeOf(String k, Bitmap b) { return b.getByteCount() / 1024; }
+    };
+    private final Set<String> thumbLoading = new HashSet<>();
     private ImageView avatarImg; private TextView avatarLetter;
     private boolean peerTyping, peerOnline;
     private long lastTypingEmit;
@@ -125,6 +139,9 @@ public class NecpraChatActivity extends AppCompatActivity implements NecpraMessa
         nameView = name; subView = sub;
         names.addView(name); names.addView(sub);
         header.addView(names, nlp);
+        TextView more = new TextView(this); more.setText("\u22EE"); more.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24); more.setTextColor(t.text);
+        more.setGravity(Gravity.CENTER); more.setContentDescription("More options"); more.setOnClickListener(v -> showChatMenu());
+        header.addView(more, new LinearLayout.LayoutParams(dp(40), dp(44)));
         root.addView(header, new LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         banner = new TextView(this);
@@ -154,6 +171,10 @@ public class NecpraChatActivity extends AppCompatActivity implements NecpraMessa
         LinearLayout composer = new LinearLayout(this);
         composer.setOrientation(LinearLayout.HORIZONTAL); composer.setGravity(Gravity.BOTTOM);
         composer.setBackgroundColor(t.surface); composer.setPadding(dp(8), dp(8), dp(8), dp(8));
+        attachBtn = new TextView(this);
+        attachBtn.setText("+"); attachBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 28); attachBtn.setTextColor(t.accent); attachBtn.setGravity(Gravity.CENTER);
+        attachBtn.setContentDescription("Attach a file"); attachBtn.setOnClickListener(v -> { if (ready && chatId > 0) picker.launch("*/*"); });
+        composer.addView(attachBtn, new LinearLayout.LayoutParams(dp(40), dp(42)));
         input = new EditText(this);
         input.setHint("Message"); input.setHintTextColor(t.subtext); input.setTextColor(t.text);
         input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
@@ -189,6 +210,7 @@ public class NecpraChatActivity extends AppCompatActivity implements NecpraMessa
             String why = repo.lastProvisionError();
             showBanner("Secure messaging isn't set up on this device yet" + (why != null && !why.isEmpty() ? " \u2014 " + why : ""));
             input.setEnabled(false); input.setHint("Unavailable until secure messaging is set up");
+            attachBtn.setAlpha(0.45f);
         }
         updateSend();
     }
@@ -228,7 +250,7 @@ public class NecpraChatActivity extends AppCompatActivity implements NecpraMessa
         peerOnline = online; refreshSub();
     }
     @Override public void onConnectionChanged(boolean connected) {
-        if (connected) syncNow();                       // catch up on anything missed while the socket was down
+        if (connected) { syncNow(); refreshNow(); }      // catch up on anything missed while the socket was down
         else { peerTyping = false; peerOnline = false; refreshSub(); }
         if (resumed) { handler.removeCallbacks(poll); handler.postDelayed(poll, connected ? POLL_LIVE_MS : POLL_MS); }
     }
@@ -258,7 +280,15 @@ public class NecpraChatActivity extends AppCompatActivity implements NecpraMessa
             runOnUiThread(() -> { if (input.getText().length() == 0 && draft != null && !draft.isEmpty()) input.setText(draft); });
         });
         reload(true, 0, 0);
+        refreshNow();
         if (resumed) { repo.addListener(this); handler.removeCallbacks(poll); handler.post(poll); }
+    }
+
+    /** /sync only reports NEW messages; this also pulls edits, deletions, receipts and reactions on messages we already have. */
+    private void refreshNow() {
+        if (chatId <= 0 || !ready) return;
+        final long id = chatId;
+        repo.async(() -> { try { repo.refreshRecent(id); } catch (Exception ignored) { } });
     }
 
     @Override protected void onResume() {
@@ -374,11 +404,14 @@ public class NecpraChatActivity extends AppCompatActivity implements NecpraMessa
         List<String> labels = new ArrayList<>(); final List<Runnable> acts = new ArrayList<>();
         if (it.msg.mine && it.msg.status == NecpraMessageRepository.ST_FAILED) { labels.add("Retry sending"); acts.add(() -> repo.retry(it.msg.localId)); }
         if (it.msg.serverId > 0) { labels.add("Reply"); acts.add(() -> setReply(it)); }
+        if (it.text != null && repo.canEdit(it.msg)) { labels.add("Edit"); acts.add(() -> promptEdit(it)); }
         if (it.text != null) {
             labels.add("Copy");
             acts.add(() -> { ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE); if (cm != null) { cm.setPrimaryClip(ClipData.newPlainText("message", it.text)); Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show(); } });
         }
         if (it.msg.serverId > 0) { labels.add("React"); acts.add(() -> showReactions(it)); }
+        if (!it.atts.isEmpty() && it.msg.status != NecpraMessageRepository.ST_QUEUED) { labels.add("Open attachment"); acts.add(() -> openAttachment(it.atts.get(0), it.msg)); }
+        labels.add("Delete"); acts.add(() -> promptDelete(it));
         if (labels.isEmpty()) return;
         new AlertDialog.Builder(this).setItems(labels.toArray(new String[0]), (d, which) -> acts.get(which).run()).show();
     }
@@ -390,9 +423,128 @@ public class NecpraChatActivity extends AppCompatActivity implements NecpraMessa
         })).show();
     }
 
-    private void openAttachment(NecpraDb.Att a) {
-        if (a.url == null || !a.url.startsWith("https://")) return;
-        try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(a.url))); } catch (Exception ignored) { }
+    private void promptEdit(final NecpraMessageRepository.Item it) {
+        final EditText e = new EditText(this);
+        e.setText(it.text); e.setSelection(e.length());
+        e.setFilters(new InputFilter[]{new InputFilter.LengthFilter(NecpraMessageRepository.MAX_TEXT)});
+        e.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        FrameLayout box = new FrameLayout(this); box.setPadding(dp(20), dp(8), dp(20), 0); box.addView(e);
+        new AlertDialog.Builder(this).setTitle("Edit message").setView(box)
+                .setPositiveButton("Save", (d, w) -> {
+                    final String v = e.getText().toString();
+                    if (v.trim().isEmpty() || v.trim().equals(it.text)) return;
+                    repo.async(() -> {
+                        try { repo.editMessage(it.msg.localId, v); }
+                        catch (NativeBackgroundSync.SessionExpiredException ex) { runOnUiThread(() -> onNotice("Session expired", true)); }
+                        catch (IOException ex) { runOnUiThread(() -> Toast.makeText(this, ex.getMessage() == null ? "Couldn't edit \u2014 check your connection" : ex.getMessage(), Toast.LENGTH_LONG).show()); }
+                        catch (Exception ex) { runOnUiThread(() -> Toast.makeText(this, "Couldn't edit this message", Toast.LENGTH_SHORT).show()); }
+                    });
+                }).setNegativeButton("Cancel", null).show();
+    }
+
+    private void promptDelete(final NecpraMessageRepository.Item it) {
+        final boolean both = it.msg.mine && it.msg.serverId > 0;
+        final String[] labels = both ? new String[]{"Delete for me", "Delete for everyone"} : new String[]{"Delete for me"};
+        new AlertDialog.Builder(this).setTitle("Delete message").setItems(labels, (d, which) -> repo.async(() -> {
+            try { repo.deleteMessage(it.msg.localId, both && which == 1); }
+            catch (NativeBackgroundSync.SessionExpiredException ex) { runOnUiThread(() -> onNotice("Session expired", true)); }
+            catch (Exception ex) { runOnUiThread(() -> Toast.makeText(this, "Couldn't delete \u2014 check your connection", Toast.LENGTH_SHORT).show()); }
+        })).setNegativeButton("Cancel", null).show();
+    }
+
+    private void showChatMenu() {
+        if (peerId <= 0) return;
+        new AlertDialog.Builder(this).setItems(new String[]{"Remove friend", "Block " + title}, (d, which) -> {
+            final boolean block = which == 1;
+            new AlertDialog.Builder(this)
+                    .setTitle(block ? "Block " + title + "?" : "Remove " + title + " as a friend?")
+                    .setMessage(block ? "They won't be able to message you." : "You can add them again later.")
+                    .setPositiveButton(block ? "Block" : "Remove", (d2, w2) -> repo.async(() -> {
+                        try {
+                            if (block) repo.blockUser(peerId); else repo.unfriend(peerId);
+                            runOnUiThread(() -> { Toast.makeText(this, block ? "Blocked" : "Removed", Toast.LENGTH_SHORT).show(); finish(); });
+                        } catch (NativeBackgroundSync.SessionExpiredException ex) {
+                            runOnUiThread(() -> onNotice("Session expired", true));
+                        } catch (Exception ex) {
+                            runOnUiThread(() -> Toast.makeText(this, ex instanceof IOException && ex.getMessage() != null ? ex.getMessage() : "Couldn't do that \u2014 check your connection", Toast.LENGTH_LONG).show());
+                        }
+                    })).setNegativeButton("Cancel", null).show();
+        }).show();
+    }
+
+    // ---------------------------------------------------------------- attachments
+
+    private void onPicked(Uri uri) {
+        if (uri == null || chatId <= 0 || !ready) return;
+        final long id = chatId;
+        final String caption = input.getText().toString();
+        final long replyId = replyTo == null ? 0 : replyTo.serverId;
+        Toast.makeText(this, "Preparing file\u2026", Toast.LENGTH_SHORT).show();
+        repo.async(() -> {
+            try {
+                repo.sendAttachment(id, uri, caption, replyId);
+                runOnUiThread(() -> {
+                    if (input.getText().toString().equals(caption)) input.setText("");
+                    clearReply();
+                    windowSize = Math.max(windowSize, adapter.getItemCount() + 1);
+                    reload(true, 0, 0);
+                });
+            } catch (NecpraMessageRepository.AttachmentException ex) {
+                runOnUiThread(() -> Toast.makeText(this, ex.getMessage(), Toast.LENGTH_LONG).show());
+            } catch (Exception ex) {
+                runOnUiThread(() -> Toast.makeText(this, "Couldn't send that file", Toast.LENGTH_SHORT).show());
+            }
+        });
+    }
+
+    /** Plain https files open in the viewer straight away; encrypted ones (and our own pending copies) are fetched, decrypted and shared through the FileProvider. */
+    private void openAttachment(final NecpraDb.Att a, final NecpraDb.Msg m) {
+        if (a.url == null) return;
+        if (!a.encrypted && a.localPath == null) {
+            if (!a.url.startsWith("https://")) return;
+            try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(a.url))); } catch (Exception ignored) { }
+            return;
+        }
+        Toast.makeText(this, a.encrypted ? "Decrypting\u2026" : "Opening\u2026", Toast.LENGTH_SHORT).show();
+        repo.async(() -> {
+            try {
+                final File f = repo.fetchAttachment(a, m.mine, peerId);
+                runOnUiThread(() -> {
+                    try {
+                        Uri u = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", f);
+                        String mime = a.mime == null || a.mime.isEmpty() ? "*/*" : a.mime;
+                        startActivity(new Intent(Intent.ACTION_VIEW).setDataAndType(u, mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION));
+                    } catch (android.content.ActivityNotFoundException ex) {
+                        Toast.makeText(this, "No app can open this file", Toast.LENGTH_SHORT).show();
+                    } catch (Exception ex) {
+                        Toast.makeText(this, "Couldn't open this file", Toast.LENGTH_SHORT).show();
+                    }
+                });
+            } catch (Exception ex) {
+                runOnUiThread(() -> Toast.makeText(this, ex instanceof IOException && ex.getMessage() != null ? ex.getMessage() : "Couldn't load the attachment", Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    private static Bitmap decodeThumb(File f, int maxPx) {
+        BitmapFactory.Options o = new BitmapFactory.Options(); o.inJustDecodeBounds = true;
+        BitmapFactory.decodeFile(f.getAbsolutePath(), o);
+        if (o.outWidth <= 0 || o.outHeight <= 0) return null;
+        int sample = 1; while (o.outWidth / (sample * 2) >= maxPx || o.outHeight / (sample * 2) >= maxPx) sample *= 2;
+        o = new BitmapFactory.Options(); o.inSampleSize = sample;
+        return BitmapFactory.decodeFile(f.getAbsolutePath(), o);
+    }
+
+    private void loadThumb(final NecpraDb.Att a, final boolean mine, final String key, final ImageView target) {
+        synchronized (thumbLoading) { if (!thumbLoading.add(key)) return; }
+        repo.async(() -> {
+            Bitmap b = null;
+            try { b = decodeThumb(repo.fetchAttachment(a, mine, peerId), 720); } catch (Throwable ignored) { }
+            synchronized (thumbLoading) { thumbLoading.remove(key); }
+            final Bitmap bmp = b;
+            if (bmp != null) thumbs.put(key, bmp);
+            runOnUiThread(() -> { if (bmp != null && key.equals(target.getTag())) target.setImageBitmap(bmp); });
+        });
     }
 
     // ---------------------------------------------------------------- adapter
@@ -404,8 +556,8 @@ public class NecpraChatActivity extends AppCompatActivity implements NecpraMessa
         @Override public int getItemViewType(int p) { return items.get(p).msg.mine ? 1 : 0; }
 
         final class VH extends RecyclerView.ViewHolder {
-            final LinearLayout bubble; final TextView reply, text, attach, reacts, meta;
-            VH(View root, LinearLayout b, TextView r, TextView tx, TextView at, TextView rc, TextView m) { super(root); bubble = b; reply = r; text = tx; attach = at; reacts = rc; meta = m; }
+            final LinearLayout bubble; final TextView reply, text, attach, reacts, meta; final ImageView thumb;
+            VH(View root, LinearLayout b, TextView r, TextView tx, TextView at, TextView rc, TextView m, ImageView th) { super(root); bubble = b; reply = r; text = tx; attach = at; reacts = rc; meta = m; thumb = th; }
         }
 
         @Override public VH onCreateViewHolder(ViewGroup p, int type) {
@@ -427,11 +579,14 @@ public class NecpraChatActivity extends AppCompatActivity implements NecpraMessa
             TextView reacts = new TextView(c); reacts.setTextColor(fg); reacts.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
             TextView meta = new TextView(c); meta.setTextColor(sub); meta.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11); meta.setGravity(Gravity.END);
             LinearLayout.LayoutParams gap = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT); gap.bottomMargin = dp(4);
-            bubble.addView(reply, gap); bubble.addView(text); bubble.addView(attach); bubble.addView(reacts);
+            ImageView thumb = new ImageView(c); thumb.setAdjustViewBounds(true); thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            thumb.setMaxWidth(maxW); thumb.setMaxHeight(dp(260)); thumb.setMinimumWidth(dp(160)); thumb.setMinimumHeight(dp(120)); thumb.setVisibility(View.GONE);
+            thumb.setBackground(NecpraConversationsActivity.rounded(mine ? 0x33FFFFFF : (t.dark ? 0xFF111827 : 0xFFE5E7EB), 10, c));
+            bubble.addView(reply, gap); bubble.addView(thumb, gap); bubble.addView(text); bubble.addView(attach); bubble.addView(reacts);
             LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT); mlp.topMargin = dp(2);
             bubble.addView(meta, mlp);
             row.addView(bubble, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            return new VH(row, bubble, reply, text, attach, reacts, meta);
+            return new VH(row, bubble, reply, text, attach, reacts, meta, thumb);
         }
 
         @Override public void onBindViewHolder(VH h, int pos) {
@@ -453,13 +608,25 @@ public class NecpraChatActivity extends AppCompatActivity implements NecpraMessa
             h.text.setVisibility(body.isEmpty() ? View.GONE : View.VISIBLE);
             h.text.setTypeface(Typeface.DEFAULT, placeholder ? Typeface.ITALIC : Typeface.NORMAL);
 
-            if (it.atts.isEmpty()) h.attach.setVisibility(View.GONE);
+            if (it.atts.isEmpty()) { h.attach.setVisibility(View.GONE); h.thumb.setVisibility(View.GONE); h.thumb.setTag(null); }
             else {
-                StringBuilder sb = new StringBuilder();
-                for (NecpraDb.Att a : it.atts) { if (sb.length() > 0) sb.append('\n'); sb.append("image".equals(a.kind) ? "\uD83D\uDCF7 " : "\uD83D\uDCCE ").append(a.name != null && !a.name.isEmpty() ? a.name : NecpraMessageRepository.labelForType(a.kind)); }
-                h.attach.setText(sb); h.attach.setVisibility(View.VISIBLE);
                 final NecpraDb.Att first = it.atts.get(0);
-                h.attach.setOnClickListener(v -> openAttachment(first));
+                final boolean isImage = "image".equals(first.kind) || (first.mime != null && first.mime.startsWith("image/"));
+                if (isImage) {
+                    final String key = m.localId + ":" + first.url;
+                    h.thumb.setTag(key); h.thumb.setImageDrawable(null); h.thumb.setVisibility(View.VISIBLE);
+                    Bitmap cached = thumbs.get(key);
+                    if (cached != null) h.thumb.setImageBitmap(cached); else loadThumb(first, m.mine, key, h.thumb);
+                    h.thumb.setOnClickListener(v -> openAttachment(first, m));
+                    h.thumb.setOnLongClickListener(v -> { showActions(it); return true; });
+                    h.attach.setVisibility(View.GONE);
+                } else {
+                    h.thumb.setVisibility(View.GONE); h.thumb.setTag(null);
+                    StringBuilder sb = new StringBuilder();
+                    for (NecpraDb.Att a : it.atts) { if (sb.length() > 0) sb.append('\n'); sb.append("image".equals(a.kind) ? "\uD83D\uDCF7 " : "\uD83D\uDCCE ").append(a.name != null && !a.name.isEmpty() ? a.name : NecpraMessageRepository.labelForType(a.kind)); }
+                    h.attach.setText(sb); h.attach.setVisibility(View.VISIBLE);
+                    h.attach.setOnClickListener(v -> { if (m.status != NecpraMessageRepository.ST_QUEUED) openAttachment(first, m); });
+                }
             }
 
             if (it.reactions.isEmpty()) h.reacts.setVisibility(View.GONE);
