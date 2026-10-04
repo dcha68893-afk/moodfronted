@@ -396,7 +396,7 @@ public class NecpraSettingsActivity extends AppCompatActivity {
                     if (!uri.isEmpty()) box.addView(t("Authenticator URI: "+uri,11,sub,false));
                     EditText code = new EditText(this); code.setHint("6-digit code"); code.setInputType(2); box.addView(code);
                     new AlertDialog.Builder(this).setTitle("Set up 2FA").setView(box)
-                        .setNegativeButton("Cancel",null).setPositiveButton("Activate",(d,w) -> verify2FA(code.getText().toString().replaceAll("\\D",""))).show();
+                        .setNegativeButton("Cancel",null).setPositiveButton("Activate",(dialog,w) -> verify2FA(code.getText().toString().replaceAll("\\D",""))).show();
                 });
             } catch (Throwable e) { runOnUiThread(() -> toast("2FA setup failed")); }
         });

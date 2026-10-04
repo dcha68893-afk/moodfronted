@@ -64,13 +64,13 @@ public class MainActivity extends BridgeActivity implements ModifiedMainActivity
     }
 
     @Override
-    protected void onStart() {
+    public void onStart() {
         super.onStart();
         NecpraNotifier.appForeground = true;
     }
 
     @Override
-    protected void onStop() {
+    public void onStop() {
         NecpraNotifier.appForeground = false;
         super.onStop();
     }

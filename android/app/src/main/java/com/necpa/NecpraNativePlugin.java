@@ -15,7 +15,7 @@ import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 import androidx.fragment.app.FragmentActivity;
 
-import com.getcapacitor.ActivityResult;
+import androidx.activity.result.ActivityResult;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.PermissionState;
