@@ -3155,6 +3155,36 @@ sanitizeToken = function(token) {
 };
 
 refreshTokenIfNeeded = async function() {
+    if (window.Capacitor?.isNativePlatform?.() && window.NecpraNative?.authRefresh) {
+        if (TokenManager._refreshLock && TokenManager._refreshPromise) return TokenManager._refreshPromise;
+        TokenManager._refreshLock = true;
+        TokenManager._refreshPromise = (async function () {
+            try {
+                const result = await window.NecpraNative.authRefresh();
+                if (!result?.success || !result?.accessToken) {
+                    return {success:false, error:'Native refresh failed', requiresReauth:true};
+                }
+                const token = result.accessToken;
+                NATIVE_REFRESH_TOKEN = result.refreshToken || NATIVE_REFRESH_TOKEN;
+                window.__NECPRA_NATIVE_AUTH_SNAPSHOT__ = {
+                    ...(window.__NECPRA_NATIVE_AUTH_SNAPSHOT__ || {}),
+                    accessToken: token,
+                    refreshToken: NATIVE_REFRESH_TOKEN,
+                    expiresAt: Number(result.expiresAt || Date.now() + Number(result.expiresIn || 86400) * 1000),
+                    native: true
+                };
+                setUserToken(token, true, 'native.token.refresh');
+                return {success:true, token:token, refreshed:true, expiresIn:result.expiresIn};
+            } catch (error) {
+                return {success:false, error:error?.message || 'Native refresh failed', requiresReauth:false};
+            } finally {
+                TokenManager._refreshLock = false;
+                TokenManager._refreshPromise = null;
+            }
+        })();
+        return TokenManager._refreshPromise;
+    }
+
     if (TokenManager._refreshLock && TokenManager._refreshPromise) {
         return TokenManager._refreshPromise;
     }
