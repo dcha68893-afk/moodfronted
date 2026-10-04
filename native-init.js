@@ -138,6 +138,8 @@
 
   publishNativeAuthSession();
   consumeNativeSnapshot();
+  setTimeout(consumeNativeSnapshot, 3000);
+  window.addEventListener('load', function () { setTimeout(consumeNativeSnapshot, 500); }, { once: true });
 
   var lastNativeSyncSignal=0;
   async function consumeNativeBackgroundSync(){
