@@ -1933,6 +1933,14 @@
     // CRITICAL FIX: FIXED getUserToken with proper AUTH_TOKEN access
     function getUserToken() {
         try {
+            if (window.Capacitor?.isNativePlatform?.()) {
+                const nativeSession = window.__NECPRA_NATIVE_AUTH_SNAPSHOT__;
+                if (nativeSession?.accessToken) {
+                    AUTH_TOKEN = nativeSession.accessToken;
+                    TOKEN_READY = true;
+                    return AUTH_TOKEN;
+                }
+            }
             // Priority 1: Memory token (using the closure variable)
             if (AUTH_TOKEN && typeof AUTH_TOKEN === 'string' && AUTH_TOKEN.length > 20) {
                 return AUTH_TOKEN;
