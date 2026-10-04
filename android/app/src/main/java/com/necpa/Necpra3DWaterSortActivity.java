@@ -55,7 +55,7 @@ public final class Necpra3DWaterSortActivity extends Activity {
         FrameLayout.LayoutParams sp=new FrameLayout.LayoutParams(-1,dp(38),Gravity.BOTTOM);sp.bottomMargin=dp(70);root.addView(statusView,sp);
 
         LinearLayout controls=new LinearLayout(this);controls.setGravity(Gravity.CENTER);controls.setPadding(dp(8),0,dp(8),dp(10));
-        controls.addView(btn("↶",v->game.undo()),cp());controls.addView(btn("💡",v->game.hint()),cp());controls.addView(btn("↻",v->game.restart()),cp());controls.addView(btn("Ⅱ",v->{game.togglePause();}),cp());controls.addView(btn("EXIT",v->finish()),cp());
+        controls.addView(btn("↶",v->game.undo()),cp());controls.addView(btn("💡",v->game.hint()),cp());controls.addView(btn("↻",v->game.restart()),cp());controls.addView(btn("NEXT",v->{if(game.isSolved()){level++;game.setLevel(level);statusView.setText("LEVEL "+level+" • NEW PUZZLE");}}),cp());controls.addView(btn("Ⅱ",v->{game.togglePause();}),cp());controls.addView(btn("EXIT",v->finish()),cp());
         root.addView(controls,bottom());
         setContentView(root);
     }
@@ -77,7 +77,7 @@ final class WaterSort3DView extends android.opengl.GLSurfaceView {
     private final WaterSortRenderer renderer;private final Listener listener;private final Deque<int[][]> history=new ArrayDeque<>();
     private int[][] tubes;private int selected=-1,moves,score,level;private boolean paused,solved;private long lastTap;
     WaterSort3DView(Context c,int lvl,Listener l){super(c);level=lvl;listener=l;setEGLContextClientVersion(2);tubes=makeLevel(level);renderer=new WaterSortRenderer(tubes,()->invalidate());setRenderer(renderer);setRenderMode(RENDERMODE_CONTINUOUSLY);}
-    boolean isPaused(){return paused;} void togglePause(){paused=!paused;renderer.paused=paused;invalidate();}
+    boolean isPaused(){return paused;} boolean isSolved(){return solved;} void setLevel(int lvl){level=Math.max(1,lvl);restart();} void togglePause(){paused=!paused;renderer.paused=paused;invalidate();}
     void restart(){tubes=makeLevel(level);selected=-1;moves=0;score=0;solved=false;history.clear();renderer.setTubes(tubes);state(false);}
     void undo(){if(history.isEmpty()||paused||solved)return;tubes=history.pop();selected=-1;moves=Math.max(0,moves-1);score=Math.max(0,score-8);renderer.setTubes(tubes);listener.feedback();state(false);}
     void hint(){if(paused||solved)return;int[] m=findMove();if(m==null){state(true);return;}selected=m[0];renderer.selected=m[0];renderer.hintTarget=m[1];listener.feedback();invalidate();}
