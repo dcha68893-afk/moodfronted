@@ -109,7 +109,7 @@
       if (!raw || !window.NecpraSocialOfflineCache?.put) return;
       var snapshot = JSON.parse(raw);
       var origin = window.__getApiOrigin ? window.__getApiOrigin() : (window.BACKEND_URL || 'https://nexorah-xnv6.onrender.com');
-      origin = String(origin).replace(/\\/api\\/?$/, '').replace(/\\/$/, '');
+      origin = String(origin).replace(/\/api\/?$/, '').replace(/\/$/, '');
       var mapping = {
         chats: '/api/chats?limit=100',
         friends: '/api/friends?limit=100',
@@ -123,11 +123,11 @@
         }
       }
       Object.keys(snapshot).forEach(function (key) {
-        var match = key.match(/^messages_(\\d+)$/);
+        var match = key.match(/^messages_(\d+)$/);
         if (match) {
           window.NecpraSocialOfflineCache.put(origin + '/api/messages?chatId=' + match[1] + '&limit=100', snapshot[key]).catch(function(){});
         }
-        var groupMatch = key.match(/^groupMessages_(\\d+)$/);
+        var groupMatch = key.match(/^groupMessages_(\d+)$/);
         if (groupMatch) {
           window.NecpraSocialOfflineCache.put(origin + '/api/group-messages/' + groupMatch[1] + '/messages?limit=100', snapshot[key]).catch(function(){});
         }
