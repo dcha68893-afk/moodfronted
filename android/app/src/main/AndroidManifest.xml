@@ -64,6 +64,21 @@
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:windowSoftInputMode="adjustResize" />
 
+        <!-- Native Messages (conversation list + chat). Not exported: only MainActivity (via NecpraNativePlugin) can start them. -->
+        <activity
+            android:name=".NecpraConversationsActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme.NoActionBar"
+            android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".NecpraChatActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme.NoActionBar"
+            android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
+            android:windowSoftInputMode="adjustResize" />
+
         <!-- Native Settings screen. Not exported: only MainActivity via the native plugin can start it. -->
         <activity
             android:name=".Necpra3DWaterSortActivity"

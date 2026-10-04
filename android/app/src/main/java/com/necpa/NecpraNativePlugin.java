@@ -559,6 +559,8 @@ public class NecpraNativePlugin extends Plugin {
         String user = NecpraE2EStore.provisionedUser(getContext());
         out.put("provisioned", user != null);
         if (user != null) out.put("userId", user);
+        String why = NecpraE2EStore.lastError(getContext());
+        if (user == null && why != null) out.put("lastError", why);   // why the last hand-over failed (shown in the native Messages banner)
         call.resolve(out);
     }
 
@@ -569,14 +571,62 @@ public class NecpraNativePlugin extends Plugin {
         final String legacy = call.getString("legacyPassword");
         try {
             NecpraE2EStore.provision(getContext(), userId, secret, legacy); // runs on the plugin thread, not the UI thread
+            NecpraE2EStore.setLastError(getContext(), null);
             JSObject out = new JSObject();
             out.put("provisioned", true);
             call.resolve(out);
         } catch (IllegalStateException e) {
-            call.reject(e.getMessage() == null ? "E2E identity could not be provisioned" : e.getMessage());
+            String why = e.getMessage() == null ? "E2E identity could not be provisioned" : e.getMessage();
+            NecpraE2EStore.setLastError(getContext(), why);
+            call.reject(why);
         } catch (Exception e) {
+            NecpraE2EStore.setLastError(getContext(), "Could not reach the server to restore your identity key");
             call.reject("E2E identity could not be provisioned", e);
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // Native Messages (conversation list + chat). The web layer only routes here when e2eStatus() reports the
+    // identity as provisioned for the signed-in account; otherwise the web Messages module keeps working untouched.
+    // ---------------------------------------------------------------------
+
+    @PluginMethod
+    public void nativeMessagesAvailable(PluginCall call) {
+        JSObject out = new JSObject();
+        out.put("available", true);
+        out.put("ready", NecpraE2EStore.provisionedUser(getContext()) != null);
+        call.resolve(out);
+    }
+
+    /** Opens the conversation list, or the chat directly when chatId / peerId is given (e.g. "Message" tapped on a friend). */
+    @PluginMethod
+    public void openNativeMessages(PluginCall call) {
+        try {
+            long chatId = call.getLong("chatId", 0L);
+            long peerId = call.getLong("peerId", 0L);
+            Intent intent;
+            if (chatId > 0 || peerId > 0) {
+                intent = NecpraChatActivity.intent(getContext(), chatId, peerId, call.getString("title", "Chat"), call.getString("avatar"));
+            } else {
+                intent = new Intent(getContext(), NecpraConversationsActivity.class);
+            }
+            startActivityForResult(call, intent, "nativeMessagesResult");
+        } catch (Exception e) {
+            call.reject("Native messages could not be opened", e);
+        }
+    }
+
+    @ActivityCallback
+    private void nativeMessagesResult(PluginCall call, ActivityResult result) {
+        JSObject out = new JSObject();
+        out.put("closed", true);
+        Intent d = result == null ? null : result.getData();
+        if (d != null) {
+            out.put("sessionExpired", d.getBooleanExtra(NecpraConversationsActivity.RES_SESSION_EXPIRED, false));
+            long groupId = d.getLongExtra(NecpraConversationsActivity.RES_GROUP_ID, 0L);
+            if (groupId > 0) out.put("groupId", groupId);   // groups stay in the web module
+        }
+        call.resolve(out);
     }
 
     @PluginMethod

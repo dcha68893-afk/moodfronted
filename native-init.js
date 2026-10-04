@@ -69,6 +69,16 @@
       },
       nativeProfileAvailable: function () { return native.nativeProfileAvailable(); },
       openNativeProfile: function (section) { return native.openNativeProfile({section: section || 'home'}); },
+      nativeMessagesAvailable: function () { return native.nativeMessagesAvailable(); },
+      openNativeMessages: function (opts) {
+        opts = opts || {};
+        var args = {};
+        if (opts.chatId) args.chatId = Number(opts.chatId);
+        if (opts.peerId) args.peerId = Number(opts.peerId);
+        if (opts.title) args.title = String(opts.title);
+        if (opts.avatar) args.avatar = String(opts.avatar);
+        return native.openNativeMessages(args);
+      },
       nativeFriendsAvailable: function () { return native.nativeFriendsAvailable(); },
       openNativeFriends: function (section) { return native.openNativeFriends({section: section || 'friends'}); }
     };
@@ -282,23 +292,31 @@
       } catch (_) {}
     }
 
-    // "Message" tapped on a friend: hand over to the shell's existing open-chat path.
+    // "Message" tapped on a friend: open the native chat when it is enabled and ready, otherwise hand over
+    // to the shell's existing open-chat path (unchanged web behaviour).
     if (r.chatUserId) {
-      try {
-        window.postMessage({
-          type: 'SWITCH_MODULE',
-          module: 'messages',
-          payload: {
-            userId: Number(r.chatUserId),
-            userName: r.chatUserName || 'User',
-            avatar: r.chatAvatar || null,
-            findExisting: true,
-            timestamp: Date.now(),
+      var openWebChat = function () {
+        try {
+          window.postMessage({
+            type: 'SWITCH_MODULE',
+            module: 'messages',
+            payload: {
+              userId: Number(r.chatUserId),
+              userName: r.chatUserName || 'User',
+              avatar: r.chatAvatar || null,
+              findExisting: true,
+              timestamp: Date.now(),
+              source: 'native-friends'
+            },
             source: 'native-friends'
-          },
-          source: 'native-friends'
-        }, window.location.origin);
-      } catch (_) {}
+          }, window.location.origin);
+        } catch (_) {}
+      };
+      if (typeof openNativeMessagesScreen === 'function') {
+        openNativeMessagesScreen({ peerId: r.chatUserId, title: r.chatUserName, avatar: r.chatAvatar }).then(function (opened) {
+          if (!opened) openWebChat();
+        }, openWebChat);
+      } else openWebChat();
     }
   }
 
@@ -344,6 +362,92 @@
 
   installNativeFriendsRouting();
   if (document.readyState !== 'complete') window.addEventListener('load', installNativeFriendsRouting, { once: true });
+
+  // ---------------------------------------------------------------------------------------------
+  // Native Messages routing (Android APK only). OFF by default until Phase 1 has been proven on a real
+  // phone; switch on for a test device with
+  //     localStorage.setItem('necpra_native_messages', '1')      (off again: '0')
+  // and flip NATIVE_MESSAGES_DEFAULT to true once it passes. The native screens are only used when the
+  // native E2E identity is provisioned for the signed-in account; in every other case (older APK, flag off,
+  // no identity backup, native failure) the existing web Messages module runs exactly as before.
+  // ---------------------------------------------------------------------------------------------
+  var NATIVE_MESSAGES_DEFAULT = false;
+  var nativeMessagesOpen = false;
+
+  function nativeMessagesFlag() {
+    try {
+      var v = localStorage.getItem('necpra_native_messages');
+      if (v === '1') return true;
+      if (v === '0') return false;
+    } catch (_) {}
+    return NATIVE_MESSAGES_DEFAULT;
+  }
+
+  function nativeUserIdHint() {
+    try { var a = JSON.parse(localStorage.getItem('kynecta_auth') || 'null'); var id = a && ((a.user && a.user.id) || a.userId); if (id != null) return String(id); } catch (_) {}
+    try { var n = JSON.parse(localStorage.getItem('necpa_user') || 'null'); if (n && n.id != null) return String(n.id); } catch (_) {}
+    try { var id2 = localStorage.getItem('currentUserId') || localStorage.getItem('userId'); if (id2) return String(id2); } catch (_) {}
+    return null;
+  }
+
+  // True only when the native screens exist AND hold this account's identity key.
+  async function nativeMessagesUsable() {
+    if (!window.NecpraNative || !window.NecpraNative.nativeMessagesAvailable || !window.NecpraNative.e2eStatus) return false;
+    try {
+      var a = await window.NecpraNative.nativeMessagesAvailable();
+      if (!a || !a.available) return false;
+      var st = await window.NecpraNative.e2eStatus();
+      if (!st || !st.provisioned) return false;
+      var uid = nativeUserIdHint();
+      return !uid || String(st.userId) === uid;
+    } catch (_) { return false; } // older APK without the screens
+  }
+
+  // Resolves true when a native screen was shown (and has been closed again), false when the caller should fall back to web.
+  async function openNativeMessagesScreen(opts) {
+    if (!nativeMessagesFlag() || nativeMessagesOpen) return false;
+    if (!(await nativeMessagesUsable())) return false;
+    nativeMessagesOpen = true;
+    try {
+      var result = await window.NecpraNative.openNativeMessages(opts || {});
+      if (result && (result.sessionExpired)) handleNativeProfileResult({ sessionExpired: true });
+      if (result && result.groupId) {
+        try { window.dispatchEvent(new CustomEvent('kyn:openGroup', { detail: { groupId: String(result.groupId) } })); } catch (_) {}
+      }
+      return true;
+    } catch (err) {
+      console.warn('[native-messages] could not open native screen:', err && err.message ? err.message : err);
+      return false;
+    } finally {
+      nativeMessagesOpen = false;
+    }
+  }
+
+  // The bottom-nav "Messages" button goes through navigateToPage('messages'). Only a deliberate switch FROM another
+  // page opens the native list (the app's own start-up navigation, history-back and the web home stay untouched).
+  function installNativeMessagesRouting() {
+    if (!window.NecpraNative || !window.NecpraNative.openNativeMessages) return;
+    if (window.__necpraMessagesRoutingInstalled) return;
+    if (typeof window.navigateToPage !== 'function') return;
+    window.__necpraMessagesRoutingInstalled = true;
+
+    var origNavigate = window.navigateToPage;
+    window.navigateToPage = function (page, options) {
+      var self = this, args = arguments;
+      var deliberate = /^messages?$/.test(String(page || '')) && window.__currentPage && !/^messages?$/.test(String(window.__currentPage))
+        && !(options && options.fromHistory) && nativeMessagesFlag();
+      if (deliberate) {
+        openNativeMessagesScreen({}).then(function (opened) {
+          if (!opened) return origNavigate.apply(self, args);
+        });
+        return;
+      }
+      return origNavigate.apply(this, args);
+    };
+  }
+
+  installNativeMessagesRouting();
+  if (document.readyState !== 'complete') window.addEventListener('load', installNativeMessagesRouting, { once: true });
 
   // Android deliberately never writes kynecta_auth to WebView storage (tokens live in the native
   // store), so the offline caches / local message DBs could not tell whose data they hold and cached

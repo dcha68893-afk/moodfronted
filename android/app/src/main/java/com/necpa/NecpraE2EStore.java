@@ -46,6 +46,21 @@ final class NecpraE2EStore {
     static synchronized void clearAll(Context c) {
         cached = null; cachedFor = null;
         prefs(c).edit().clear().commit();
+        c.getApplicationContext().getSharedPreferences(DIAG_PREFS, Context.MODE_PRIVATE).edit().clear().commit();
+    }
+
+    // ------------------------------------------------------------------ diagnostics (user-safe text only, never key material)
+
+    private static final String DIAG_PREFS = "necpra_native_e2e_diag";
+
+    /** Last reason {@link #provision} failed (e.g. no identity backup on the server), or null. Cleared on success. */
+    static String lastError(Context c) {
+        return c.getApplicationContext().getSharedPreferences(DIAG_PREFS, Context.MODE_PRIVATE).getString("lastError", null);
+    }
+
+    static void setLastError(Context c, String message) {
+        SharedPreferences d = c.getApplicationContext().getSharedPreferences(DIAG_PREFS, Context.MODE_PRIVATE);
+        if (message == null) d.edit().remove("lastError").commit(); else d.edit().putString("lastError", message).commit();
     }
 
     // ------------------------------------------------------------------ provisioning

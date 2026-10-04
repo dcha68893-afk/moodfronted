@@ -70,6 +70,10 @@ dependencies {
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation "androidx.biometric:biometric:1.1.0"
     implementation "androidx.work:work-runtime:2.10.1"
+    // Native Messages (Phase 2/3): local database + list rendering.
+    implementation "androidx.room:room-runtime:2.7.2"
+    annotationProcessor "androidx.room:room-compiler:2.7.2"
+    implementation "androidx.recyclerview:recyclerview:1.4.0"
     // The native FCM service extends FirebaseMessagingService directly. The Capacitor push plugin
     // declares this as a private (implementation) dependency, so the app must declare it itself.
     implementation "com.google.firebase:firebase-messaging:25.0.1"

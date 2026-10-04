@@ -453,5 +453,6 @@ public final class NativeBackgroundSync {
         context.getSharedPreferences(AUTH_PREFS, Context.MODE_PRIVATE).edit().clear().commit();
         NecpraFriendsActivity.wipeAvatarCache(context); // cached friend avatars are removed with the session
         NecpraE2EStore.clearAll(context);               // native identity key + ratchet sessions go with the session
+        NecpraMessageRepository.reset(context);         // native chat database + send queue go with the session
     }
 }
