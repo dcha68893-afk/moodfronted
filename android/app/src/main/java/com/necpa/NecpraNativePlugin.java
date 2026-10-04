@@ -563,7 +563,7 @@ public class NecpraNativePlugin extends Plugin {
 
     private static String safeFileName(String value) {
         String name = value == null || value.trim().isEmpty() ? "download" : value.trim();
-        name = name.replaceAll("[\\\\/:*?\\\"<>|]", "_");
+        name = name.replaceAll("[\\\\/:*?<>|]", "_");
         return name.length() > 120 ? name.substring(0, 120) : name;
     }
 
