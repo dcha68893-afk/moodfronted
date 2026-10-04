@@ -835,7 +835,6 @@ public class NecpraProfileActivity extends AppCompatActivity {
             case "edit": titleView.setText("Edit profile"); buildEdit(); break;
             case "account": titleView.setText("Account"); buildAccount(); break;
             case "security": titleView.setText("Security"); buildSecurity(); break;
-            case "settings": titleView.setText("Settings"); buildSettings(); break;
             default: titleView.setText("Profile"); buildHome(); break;
         }
         setOffline(offline);
@@ -1051,45 +1050,6 @@ public class NecpraProfileActivity extends AppCompatActivity {
     }
 
 
-
-    private View toggle(String title, boolean value, final String section, final String key) {
-        return toggleRaw(title, value, (b, on) -> saveSetting(section, key, on, b, !on));
-    }
-
-    private View toggleRaw(String title, boolean value, final ToggleListener l) {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(16), dp(14), dp(16), dp(14));
-        TextView t = text(title, 16, cText, false);
-        row.addView(t, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        final SwitchCompat sw = new SwitchCompat(this);
-        sw.setChecked(value);
-        sw.setEnabled(!offline);
-        final boolean[] programmatic = {false};
-        sw.setOnCheckedChangeListener((b, on) -> {
-            if (programmatic[0]) return;
-            programmatic[0] = true; // block re-entry while the save is in flight; saveSetting reverts on failure
-            l.onToggle(new SwitchHandle(sw, programmatic), on);
-        });
-        row.addView(sw);
-        return row;
-    }
-
-    private interface ToggleListener { void onToggle(SwitchHandle h, boolean on); }
-
-    private static final class SwitchHandle {
-        final SwitchCompat sw; final boolean[] lock;
-        SwitchHandle(SwitchCompat sw, boolean[] lock) { this.sw = sw; this.lock = lock; }
-        void revertTo(boolean value) { sw.setChecked(value); lock[0] = false; }
-        void release() { lock[0] = false; }
-    }
-
-
-
-    // ------------------------------------------------------------------
-    // Logout
-    // ------------------------------------------------------------------
 
     private void confirmLogout() {
         new AlertDialog.Builder(this)
