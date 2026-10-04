@@ -585,8 +585,25 @@
     // CANONICAL auth persistence function — use this exclusively (see Fix #10 note above).
     // Writes both expiresIn (duration) and expiresAt (absolute ms) so AuthStorage.isTokenExpiringSoon()
     // works regardless of which field is checked.
-    function _persistAuthData(token, user, refreshToken = null, expiresIn = null) {
+    async function _persistAuthData(token, user, refreshToken = null, expiresIn = null) {
         try {
+            if (window.Capacitor?.isNativePlatform?.() && window.NecpraNative?.authSetSession) {
+                await window.NecpraNative.authSetSession(
+                    token,
+                    refreshToken || '',
+                    user || null,
+                    Date.now() + (Number(expiresIn || 86400) * 1000)
+                );
+                window.__NECPRA_NATIVE_AUTH_SNAPSHOT__ = {
+                    ...(window.__NECPRA_NATIVE_AUTH_SNAPSHOT__ || {}),
+                    accessToken: token,
+                    refreshToken: refreshToken || window.__NECPRA_NATIVE_AUTH_SNAPSHOT__?.refreshToken || null,
+                    user: user || null,
+                    expiresAt: Date.now() + (Number(expiresIn || 86400) * 1000),
+                    native: true
+                };
+                return true;
+            }
             if (!token) {
                 console.warn('⚠️ [AUTH] Cannot persist auth data without token');
                 return false;
@@ -650,6 +667,19 @@
     
     function _loadPersistedAuthData() {
         try {
+            if (window.Capacitor?.isNativePlatform?.()) {
+                const nativeSession = window.__NECPRA_NATIVE_AUTH_SNAPSHOT__;
+                if (nativeSession?.accessToken) {
+                    return {
+                        token: nativeSession.accessToken,
+                        refreshToken: nativeSession.refreshToken || null,
+                        user: nativeSession.user || null,
+                        expiresAt: nativeSession.expiresAt || null,
+                        native: true
+                    };
+                }
+                return null;
+            }
             const stored = _safeStorageGet(CONFIG.AUTH_STORAGE_KEY);
             if (!stored) {
                 console.log('🔍 [AUTH] No persisted auth data found');
@@ -683,6 +713,11 @@
     
     function _clearPersistedAuthData() {
         try {
+            if (window.Capacitor?.isNativePlatform?.()) {
+                try { window.NecpraNative?.authClearSession?.(); } catch (_) {}
+                window.__NECPRA_NATIVE_AUTH_SNAPSHOT__ = null;
+                return true;
+            }
             _safeStorageRemove(CONFIG.AUTH_STORAGE_KEY);
             
             // Clear legacy keys
@@ -1959,6 +1994,18 @@
                 console.error('❌ [AUTH] Token failed safety validation');
                 return false;
             }
+            if (window.Capacitor?.isNativePlatform?.()) {
+                AUTH_TOKEN = token;
+                TOKEN_READY = true;
+                _registerTokenWithCoreSystem(token);
+                window.__accessToken = token;
+                window.token = token;
+                return true;
+            }
+            if (!_validateTokenSafety(token)) {
+                console.error('❌ [AUTH] Token failed safety validation');
+                return false;
+            }
             
             console.log('🔐 [AUTH] Setting user token...');
             
@@ -2032,6 +2079,14 @@
     
     function clearUserToken() {
         try {
+            if (window.Capacitor?.isNativePlatform?.()) {
+                AUTH_TOKEN = null;
+                TOKEN_READY = false;
+                try { window.NecpraNative?.authClearSession?.(); } catch (_) {}
+                window.__NECPRA_NATIVE_AUTH_SNAPSHOT__ = null;
+                try { window.__userToken = null; window.__accessToken = null; window.token = null; } catch (_) {}
+                return true;
+            }
             console.log('🔐 [AUTH] Clearing user token...');
             
             // Clear memory token (CRITICAL FIX)
@@ -2202,6 +2257,28 @@
     }
     
     async function refreshToken() {
+        if (window.Capacitor?.isNativePlatform?.() && window.NecpraNative?.authRefresh) {
+            try {
+                if (!_isOnline()) return false;
+                const refreshed = await window.NecpraNative.authRefresh();
+                if (!refreshed?.success || !refreshed?.accessToken) return false;
+                AUTH_TOKEN = refreshed.accessToken;
+                TOKEN_READY = true;
+                window.__NECPRA_NATIVE_AUTH_SNAPSHOT__ = {
+                    ...(window.__NECPRA_NATIVE_AUTH_SNAPSHOT__ || {}),
+                    accessToken: refreshed.accessToken,
+                    refreshToken: refreshed.refreshToken || window.__NECPRA_NATIVE_AUTH_SNAPSHOT__?.refreshToken || null,
+                    expiresAt: Number(refreshed.expiresAt || Date.now() + Number(refreshed.expiresIn || 86400) * 1000),
+                    native: true
+                };
+                _registerTokenWithCoreSystem(refreshed.accessToken);
+                _emitEvent('session-refreshed', { newToken: refreshed.accessToken, expiresIn: refreshed.expiresIn });
+                return true;
+            } catch (e) {
+                return false;
+            }
+        }
+
         // CRITICAL FIX: Check if offline first - don't attempt refresh when offline
         if (!_isOnline()) {
             console.log('[API-AUTH] 📴 Device offline - skipping token refresh');
@@ -2856,7 +2933,7 @@
     // paths persist the session (storage, events, legacy keys) identically.
     // Previously this logic lived only inside login(), which meant the 2FA
     // challenge path (added below) had nothing to reuse.
-    function _completeSession(token, data, identifierUsed, payloadType) {
+    async function _completeSession(token, data, identifierUsed, payloadType) {
         const expiresIn = data.expiresIn || data.data?.expiresIn || CONFIG.DEFAULT_TOKEN_EXPIRY;
 
         let user = data.user || data.data?.user || data.data;
@@ -2872,7 +2949,7 @@
         const refreshToken = data.refreshToken || data.data?.refreshToken || null;
 
         // ===== Persist session (unified storage helper) =====
-        const persisted = _persistAuthData(token, user, refreshToken, expiresIn);
+        const persisted = await _persistAuthData(token, user, refreshToken, expiresIn);
         if (!persisted) {
             console.error('❌ [AUTH] Failed to persist auth data');
             return {
@@ -2901,12 +2978,14 @@
         // Prevent background validation flicker right after login
         window.__LAST_LOGIN_TIME__ = Date.now();
 
-        // Legacy/compat keys consumed by chat.html, sockets, sync manager, etc.
-        localStorage.setItem('auth_token', token);
-        localStorage.setItem('authToken', token);
-        localStorage.setItem('accessToken', token);
-        localStorage.setItem('necpa_token', token);
-        localStorage.setItem('auth_user', JSON.stringify(user));
+        // Browser compatibility keys are intentionally not written by the APK.
+        if (!window.Capacitor?.isNativePlatform?.()) {
+            localStorage.setItem('auth_token', token);
+            localStorage.setItem('authToken', token);
+            localStorage.setItem('accessToken', token);
+            localStorage.setItem('necpa_token', token);
+            localStorage.setItem('auth_user', JSON.stringify(user));
+        }
 
         const tokenStored = setUserToken(token, expiresIn);
         if (!tokenStored) {
@@ -2920,11 +2999,11 @@
             };
         }
 
-        if (refreshToken) {
+        if (refreshToken && !window.Capacitor?.isNativePlatform?.()) {
             _safeStorageSet(CONFIG.REFRESH_TOKEN_KEY, refreshToken);
         }
 
-        _safeStorageSet('USER_DATA', JSON.stringify(user));
+        if (!window.Capacitor?.isNativePlatform?.()) _safeStorageSet('USER_DATA', JSON.stringify(user));
         window.currentUser = user;
         try { if (user.e2eWrapSecret) { sessionStorage.setItem('kyn_e2e_pw_session', String(user.e2eWrapSecret)); sessionStorage.removeItem('kyn_e2e_secret_unavailable'); } } catch (_) {}
 
@@ -3294,48 +3373,37 @@
             console.log('✅ [AUTH] User data:', user);
             
             if (token) {
-                // Store token in multiple locations
                 try {
-                    // FIX-DUPLICATE-TOKEN-STORAGE (consolidation): this used to write
-                    // its own hand-rolled 'kynecta_auth' object here
-                    // (`{ token, user, timestamp }`) directly via localStorage,
-                    // completely bypassing js/authStorage.js's saveAuth() — the
-                    // single module every other read path (AuthStorage.getAuth/
-                    // getSession/getToken) treats as authoritative. Two concrete
-                    // problems that caused: (1) the shape didn't match what
-                    // AuthStorage writes (no refreshToken/expiresAt/issuedAt/
-                    // _version), so any code relying on those fields after a
-                    // registration-flow login silently got undefined; (2) the
-                    // account-switch detection in saveAuth() — which wipes the
-                    // previous account's local message history/IndexedDB data
-                    // when a different user id logs in on the same device — never
-                    // ran for this path, since it lives inside saveAuth() and this
-                    // wrote straight to localStorage instead of calling it. Route
-                    // through AuthStorage.saveAuth() (falling back to the old raw
-                    // write only if that module hasn't loaded) so registration
-                    // goes through the exact same single source of truth as every
-                    // other login path.
-                    const _authStorageHandled = !!(window.AuthStorage && typeof window.AuthStorage.saveAuth === 'function');
-                    if (_authStorageHandled) {
-                        // AuthStorage.saveAuth() already writes token/accessToken/
-                        // USER_TOKEN/necpa_token (see LEGACY_TOKEN_KEYS in
-                        // authStorage.js) — the 4 lines below were re-writing the
-                        // exact same keys with the exact same value a second time
-                        // on this path. Removed as dead-weight duplication; kept
-                        // only for the fallback branch where AuthStorage isn't
-                        // loaded and nothing else has written these keys yet.
-                        window.AuthStorage.saveAuth({ token, user, expiresAt: Date.now() + (typeof CONFIG !== 'undefined' && CONFIG.DEFAULT_TOKEN_EXPIRY ? CONFIG.DEFAULT_TOKEN_EXPIRY : 24 * 60 * 60 * 1000) });
+                    const refreshToken = data.refreshToken || data.data?.refreshToken || null;
+                    if (window.Capacitor?.isNativePlatform?.() && window.NecpraNative?.authSetSession) {
+                        await window.NecpraNative.authSetSession(
+                            token,
+                            refreshToken || '',
+                            user || null,
+                            Date.now() + 24 * 60 * 60 * 1000
+                        );
+                        window.__NECPRA_NATIVE_AUTH_SNAPSHOT__ = {
+                            accessToken: token,
+                            refreshToken: refreshToken,
+                            user: user || null,
+                            expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+                            native: true
+                        };
                     } else {
-                        localStorage.setItem('kynecta_auth', JSON.stringify({ token, user, timestamp: Date.now() }));
-                        localStorage.setItem('token', token);
-                        localStorage.setItem('accessToken', token);
-                        localStorage.setItem('USER_TOKEN', token);
-                        localStorage.setItem('necpa_token', token);
+                        const _authStorageHandled = !!(window.AuthStorage && typeof window.AuthStorage.saveAuth === 'function');
+                        if (_authStorageHandled) {
+                            window.AuthStorage.saveAuth({ token, user, expiresAt: Date.now() + 24 * 60 * 60 * 1000 });
+                        } else {
+                            localStorage.setItem('kynecta_auth', JSON.stringify({ token, user, timestamp: Date.now() }));
+                            localStorage.setItem('token', token);
+                            localStorage.setItem('accessToken', token);
+                            localStorage.setItem('USER_TOKEN', token);
+                            localStorage.setItem('necpa_token', token);
+                        }
                     }
                     window.token = token;
                     window.accessToken = token;
                     if (user) window.currentUser = user;
-                    console.log('✅ [AUTH] Token stored in all locations');
                 } catch (e) {
                     console.warn('⚠️ [AUTH] Failed to store token:', e);
                 }
