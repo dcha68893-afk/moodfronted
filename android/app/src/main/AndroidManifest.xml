@@ -10,7 +10,9 @@
         android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@style/AppTheme">
 
-        <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:resource="@string/default_notification_channel_id" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:resource="@string/default_notification_channel_id" />
 
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
@@ -25,6 +27,23 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="necpra" />
+            </intent-filter>
+
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="necpra.co.ke" android:pathPrefix="/chat/" />
+                <data android:scheme="https" android:host="necpra.co.ke" android:pathPrefix="/group/" />
+                <data android:scheme="https" android:host="necpra.co.ke" android:pathPrefix="/status/" />
+                <data android:scheme="https" android:host="necpra.co.ke" android:pathPrefix="/marketplace/" />
+            </intent-filter>
+
         </activity>
 
         <provider
@@ -34,26 +53,15 @@
             android:grantUriPermissions="true">
             <meta-data
                 android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/file_paths"></meta-data>
+                android:resource="@xml/file_paths" />
         </provider>
     </application>
 
-    <!-- Permissions -->
-
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-
-    <!-- CAMERA / RECORD_AUDIO: needed for Status capture and voice notes. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
-    <!--
-      Declares camera as used-but-not-required so this app remains
-      installable on camera-less devices (e.g. some tablets) where camera
-      features are simply unavailable — without this, the Play Store would
-      assume camera hardware is mandatory and hide the app from those
-      devices entirely.
-    -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
