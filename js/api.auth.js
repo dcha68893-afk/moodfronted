@@ -2961,8 +2961,9 @@
             };
         }
 
-        // Compatibility mirror into AuthStorage, if present
-        if (window.AuthStorage && window.AuthStorage.saveSession) {
+        // Browser compatibility mirror only. Android uses the native store as
+        // the sole durable credential source.
+        if (!window.Capacitor?.isNativePlatform?.() && window.AuthStorage && window.AuthStorage.saveSession) {
             try {
                 window.AuthStorage.saveSession({
                     token,
