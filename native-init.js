@@ -51,6 +51,10 @@
           apiOrigin: nativeApiOrigin()
         });
       },
+      e2eStatus: function () { return native.e2eStatus(); },
+      e2eProvision: function (userId, secret, legacyPassword) {
+        return native.e2eProvision({userId:String(userId), secret:String(secret || ''), legacyPassword:String(legacyPassword || '')});
+      },
       authGetSession: function () { return native.authGetSession(); },
       authUnlock: function (title, subtitle) {
         return native.authUnlock({title:title || 'Unlock Necpra', subtitle:subtitle || 'Verify your identity'});
@@ -455,6 +459,35 @@
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')setTimeout(consumeNativeBackgroundSync,500);});
   window.addEventListener('focus',()=>setTimeout(consumeNativeBackgroundSync,500));
   setTimeout(consumeNativeBackgroundSync,1500);
+
+  // One-time hand-over of the E2E identity to the native layer (needed by the native Messages screen).
+  // Native restores the SAME identity from the server backup using the session wrap secret the web layer already
+  // holds; the secret is not stored natively. Retries quietly until the web layer has the secret + user id.
+  (function e2eHandover() {
+    var tries = 0, busy = false;
+    function currentUserId() {
+      try { var a = JSON.parse(localStorage.getItem('kynecta_auth') || 'null'); var id = a && ((a.user && a.user.id) || a.userId); if (id != null) return String(id); } catch (_) {}
+      try { var u = JSON.parse(localStorage.getItem('user') || localStorage.getItem('currentUser') || 'null'); var id2 = u && (u.id || u.userId); if (id2 != null) return String(id2); } catch (_) {}
+      return null;
+    }
+    async function attempt() {
+      if (busy || !window.NecpraNative || !window.NecpraNative.e2eStatus) return;
+      var uid = currentUserId(), secret = null, legacy = null;
+      try { secret = sessionStorage.getItem('kyn_e2e_pw_session'); legacy = sessionStorage.getItem('kyn_e2e_pw_legacy_session'); } catch (_) {}
+      if (!uid || !secret) return;
+      busy = true;
+      try {
+        var st = await window.NecpraNative.e2eStatus();
+        if (st && st.provisioned && String(st.userId) === uid) { tries = 99; return; }
+        await window.NecpraNative.e2eProvision(uid, secret, legacy);
+        tries = 99;
+      } catch (e) {
+        try { console.warn('[NativeE2E] hand-over not completed:', (e && e.message) || e); } catch (_) {}
+      } finally { busy = false; }
+    }
+    var timer = setInterval(function () { if (++tries > 40) return clearInterval(timer); attempt(); }, 4000);
+    setTimeout(attempt, 2500);
+  })();
 
   // Android forwards verified Necpra links here. Web navigation remains the
   // single owner of the actual screen/UI, so browser and APK stay aligned.

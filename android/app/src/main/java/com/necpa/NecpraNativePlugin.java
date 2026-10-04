@@ -547,6 +547,38 @@ public class NecpraNativePlugin extends Plugin {
         call.resolve(out);
     }
 
+    // ---------------------------------------------------------------------
+    // Native E2E hand-over (see NecpraE2EStore). The web layer already holds the session's wrap secret;
+    // it passes it here once so native can restore the user's EXISTING identity key from the server backup.
+    // The secret is used for that single unwrap and is never stored natively.
+    // ---------------------------------------------------------------------
+
+    @PluginMethod
+    public void e2eStatus(PluginCall call) {
+        JSObject out = new JSObject();
+        String user = NecpraE2EStore.provisionedUser(getContext());
+        out.put("provisioned", user != null);
+        if (user != null) out.put("userId", user);
+        call.resolve(out);
+    }
+
+    @PluginMethod
+    public void e2eProvision(PluginCall call) {
+        final String userId = call.getString("userId");
+        final String secret = call.getString("secret");
+        final String legacy = call.getString("legacyPassword");
+        try {
+            NecpraE2EStore.provision(getContext(), userId, secret, legacy); // runs on the plugin thread, not the UI thread
+            JSObject out = new JSObject();
+            out.put("provisioned", true);
+            call.resolve(out);
+        } catch (IllegalStateException e) {
+            call.reject(e.getMessage() == null ? "E2E identity could not be provisioned" : e.getMessage());
+        } catch (Exception e) {
+            call.reject("E2E identity could not be provisioned", e);
+        }
+    }
+
     @PluginMethod
     public void openNativeFriends(PluginCall call) {
         try {
