@@ -122,6 +122,16 @@
           await window.NecpraSocialOfflineCache.put(origin + mapping[key], snapshot[key]);
         }
       }
+      Object.keys(snapshot).forEach(function (key) {
+        var match = key.match(/^messages_(\\d+)$/);
+        if (match) {
+          window.NecpraSocialOfflineCache.put(origin + '/api/messages?chatId=' + match[1] + '&limit=100', snapshot[key]).catch(function(){});
+        }
+        var groupMatch = key.match(/^groupMessages_(\\d+)$/);
+        if (groupMatch) {
+          window.NecpraSocialOfflineCache.put(origin + '/api/group-messages/' + groupMatch[1] + '/messages?limit=100', snapshot[key]).catch(function(){});
+        }
+      });
       window.dispatchEvent(new CustomEvent('necpra:native-snapshot-imported', {detail:{syncedAt:result?.syncedAt || 0}}));
     } catch (_) {}
   }
