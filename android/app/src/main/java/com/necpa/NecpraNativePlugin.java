@@ -191,7 +191,9 @@ public class NecpraNativePlugin extends Plugin {
             putEncrypted(p, "accessToken", accessToken);
             putEncrypted(p, "refreshToken", refreshToken);
             putEncrypted(p, "userJson", userJson);
-            p.edit().putLong("expiresAt", expiresAt == null ? 0L : expiresAt).apply();
+            p.edit().putLong("expiresAt", expiresAt == null ? 0L : expiresAt)
+                    .putLong("unlockedUntil", System.currentTimeMillis() + UNLOCK_WINDOW_MS)
+                    .apply();
             call.resolve();
         } catch (Exception e) {
             call.reject("Native session storage failed", e);
