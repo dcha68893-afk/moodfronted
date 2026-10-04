@@ -282,6 +282,10 @@ public class NecpraNativePlugin extends Plugin {
     public void authRefresh(PluginCall call) {
         new Thread(() -> {
             try {
+                if (System.currentTimeMillis() > authPrefs().getLong("unlockedUntil", 0L)) {
+                    call.reject("Native session is locked");
+                    return;
+                }
                 String refresh = getDecrypted(authPrefs(), "refreshToken");
                 if (refresh == null || refresh.trim().isEmpty()) {
                     call.reject("No native refresh token");
