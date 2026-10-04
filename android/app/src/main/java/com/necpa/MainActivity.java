@@ -6,6 +6,7 @@ import android.os.Bundle;
 import android.util.Log;
 import android.view.WindowManager;
 
+import androidx.core.app.RemoteInput;
 import androidx.work.Constraints;
 import androidx.work.ExistingPeriodicWorkPolicy;
 import androidx.work.NetworkType;
@@ -34,12 +35,18 @@ public class MainActivity extends BridgeActivity implements ModifiedMainActivity
         } catch (Exception ignored) {}
 
         registerPlugin(NecpraNativePlugin.class);
+        registerPlugin(NecpraNotifyPlugin.class);
         super.onCreate(savedInstanceState);
+
+        // Channels must exist before the first push can be shown while the UI never ran.
+        try { NecpraNotifier.ensureChannels(getApplicationContext()); } catch (Throwable ignored) {}
 
         scheduleNativeBackgroundMaintenance();
         // Only on a real cold start: on a config-change recreate the same
         // intent is re-delivered and would replay the link.
-        if (savedInstanceState == null) dispatchDeepLink(getIntent(), true);
+        if (savedInstanceState == null) {
+            if (!handleNotificationAction(getIntent(), true)) dispatchDeepLink(getIntent(), true);
+        }
 
         try {
             getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE);
@@ -53,7 +60,19 @@ public class MainActivity extends BridgeActivity implements ModifiedMainActivity
     public void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        dispatchDeepLink(intent, false);
+        if (!handleNotificationAction(intent, false)) dispatchDeepLink(intent, false);
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        NecpraNotifier.appForeground = true;
+    }
+
+    @Override
+    protected void onStop() {
+        NecpraNotifier.appForeground = false;
+        super.onStop();
     }
 
     private void scheduleNativeBackgroundMaintenance() {
@@ -72,6 +91,41 @@ public class MainActivity extends BridgeActivity implements ModifiedMainActivity
         }
     }
 
+    /**
+     * Reply typed into a message notification. The text is queued for the web layer, which sends it
+     * through the normal end-to-end-encrypted pipeline (the keys live in the WebView), and the chat
+     * is opened so the user sees it go out. Returns true if this intent was a notification reply.
+     */
+    private boolean handleNotificationAction(Intent intent, boolean coldStart) {
+        if (intent == null || !NecpraNotifier.ACTION_REPLY.equals(intent.getAction())) return false;
+
+        String kind = intent.getStringExtra(NecpraNotifier.EXTRA_KIND);
+        String id = intent.getStringExtra(NecpraNotifier.EXTRA_ID);
+        Bundle results = RemoteInput.getResultsFromIntent(intent);
+        CharSequence text = results == null ? null : results.getCharSequence(NecpraNotifier.KEY_REPLY_TEXT);
+
+        // Consume so a re-delivered intent can never send the same reply twice.
+        intent.setAction(null);
+        intent.removeExtra(NecpraNotifier.EXTRA_KIND);
+        intent.removeExtra(NecpraNotifier.EXTRA_ID);
+
+        if (kind == null || id == null) return true;
+        String clean = text == null ? "" : text.toString().trim();
+        if (!clean.isEmpty()) NecpraNotifyPlugin.queueReply(kind, id, clean);
+
+        // Clear the notification (it also stops the "sending" spinner on the inline reply box).
+        NecpraNotifier.cancelConversation(getApplicationContext(), NecpraNotifier.key(kind, id));
+
+        String link = "necpra://" + ("g".equals(kind) ? "group/" : "chat/") + Uri.encode(id);
+        forwardLink(link, coldStart);
+
+        if (!clean.isEmpty() && !coldStart && getBridge() != null && getBridge().getWebView() != null) {
+            getBridge().getWebView().post(() -> getBridge().getWebView().evaluateJavascript(
+                    "window.dispatchEvent(new CustomEvent('necpra:native-notification-reply'));", null));
+        }
+        return true;
+    }
+
     private void dispatchDeepLink(Intent intent, boolean coldStart) {
         if (intent == null) return;
         Uri uri = intent.getData();
@@ -87,6 +141,10 @@ public class MainActivity extends BridgeActivity implements ModifiedMainActivity
         // Consume it so re-delivery of this intent can't replay the link.
         intent.setData(null);
 
+        forwardLink(raw, coldStart);
+    }
+
+    private void forwardLink(String raw, boolean coldStart) {
         if (coldStart) {
             // The WebView hasn't loaded yet, so there is nobody to receive an
             // event (the old fixed 800 ms delay raced the page load and often

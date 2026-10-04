@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="necpra_notif_reply">Reply</string>
+    <string name="necpra_notif_mark_read">Mark as read</string>
+    <string name="necpra_notif_new_message">New message</string>
+</resources>
