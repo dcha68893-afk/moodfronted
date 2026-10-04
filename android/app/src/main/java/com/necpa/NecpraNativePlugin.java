@@ -598,6 +598,42 @@ public class NecpraNativePlugin extends Plugin {
         call.resolve(out);
     }
 
+    /** The web layer decides whether native owns direct messages (flag on AND native identity usable). */
+    @PluginMethod
+    public void setDmOwner(PluginCall call) {
+        boolean on = Boolean.TRUE.equals(call.getBoolean("enabled", false));
+        NecpraDmOwner.set(getContext(), on);
+        JSObject out = new JSObject();
+        out.put("owner", NecpraDmOwner.isOwner(getContext()));
+        call.resolve(out);
+    }
+
+    @PluginMethod
+    public void dmOwner(PluginCall call) {
+        JSObject out = new JSObject();
+        out.put("owner", NecpraDmOwner.isOwner(getContext()));
+        call.resolve(out);
+    }
+
+    /** Status reaction/comment for the creator, encrypted and queued natively ({ownerId, interaction: JSON string}). */
+    @PluginMethod
+    public void sendStatusInteraction(final PluginCall call) {
+        final long ownerId = call.getLong("ownerId", 0L);
+        final String interaction = call.getString("interaction");
+        if (ownerId <= 0 || interaction == null || interaction.isEmpty()) { call.reject("Missing ownerId or interaction"); return; }
+        if (!NecpraDmOwner.isOwner(getContext())) { call.reject("Native messaging is not active"); return; }
+        final NecpraMessageRepository repo = NecpraMessageRepository.get(getContext());
+        repo.async(() -> {
+            try {
+                boolean ok = repo.sendStatusInteraction(ownerId, interaction);
+                JSObject out = new JSObject(); out.put("queued", ok);
+                call.resolve(out);
+            } catch (Exception e) {
+                call.reject(e.getMessage() == null ? "Could not send the interaction" : e.getMessage(), e);
+            }
+        });
+    }
+
     /** Opens the conversation list, or the chat directly when chatId / peerId is given (e.g. "Message" tapped on a friend). */
     @PluginMethod
     public void openNativeMessages(PluginCall call) {

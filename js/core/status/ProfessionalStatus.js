@@ -511,6 +511,13 @@ async function sendStatusInteraction(s,payload){
  const text=String(payload?.text||'').trim(), kind=payload?.kind==='reaction'?'reaction':'comment';
  const interaction={statusId:s.id,statusType:s.type||'text',kind,emoji:kind==='reaction'?(payload?.emoji||''):null,text:kind==='comment'?text:'',caption:String(s.caption||s.content||'').slice(0,500)};
  const clientMessageId='status-'+s.id+'-'+kind+'-'+Date.now()+'-'+Math.random().toString(36).slice(2,10);
+ // Native owns DM crypto on Android: the private copy is encrypted and queued natively (type status_reply),
+ // never through the WebView ratchet.
+ const _top=window.top||window;
+ if(typeof _top.__necpraNativeOwnsDMs==='function'&&_top.__necpraNativeOwnsDMs()&&_top.NecpraNative&&_top.NecpraNative.sendStatusInteraction){
+   await _top.NecpraNative.sendStatusInteraction(ownerId,JSON.stringify(interaction));
+   return null;
+ }
  if(!(await ensureSecureReady())) throw new Error('Secure messaging is still unlocking. Please try again in a moment.');
  const start=await fetchRetry(apiOrigin()+'/api/chats/start',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token()},body:JSON.stringify({userId:ownerId})});
  const startData=await start.json().catch(()=>({}));

@@ -52,6 +52,11 @@
         });
       },
       e2eStatus: function () { return native.e2eStatus(); },
+      setDmOwner: function (enabled) { return native.setDmOwner({enabled: !!enabled}); },
+      dmOwner: function () { return native.dmOwner(); },
+      sendStatusInteraction: function (ownerId, interactionJson) {
+        return native.sendStatusInteraction({ownerId: Number(ownerId), interaction: String(interactionJson)});
+      },
       e2eProvision: function (userId, secret, legacyPassword) {
         return native.e2eProvision({userId:String(userId), secret:String(secret || ''), legacyPassword:String(legacyPassword || '')});
       },
@@ -364,14 +369,14 @@
   if (document.readyState !== 'complete') window.addEventListener('load', installNativeFriendsRouting, { once: true });
 
   // ---------------------------------------------------------------------------------------------
-  // Native Messages routing (Android APK only). OFF by default until Phase 1 has been proven on a real
-  // phone; switch on for a test device with
-  //     localStorage.setItem('necpra_native_messages', '1')      (off again: '0')
-  // and flip NATIVE_MESSAGES_DEFAULT to true once it passes. The native screens are only used when the
+  // Native Messages routing (Android APK only). ON by default now that native owns direct messages;
+  // kill switch for a test device:  localStorage.setItem('necpra_native_messages', '0')   (back on: '1').
+  // NOTE: turning it off hands DMs back to the WebView, whose ratchet state is NOT the native one, so do it
+  // only on a device you are willing to re-sync (sign out / in). The native screens are only used when the
   // native E2E identity is provisioned for the signed-in account; in every other case (older APK, flag off,
   // no identity backup, native failure) the existing web Messages module runs exactly as before.
   // ---------------------------------------------------------------------------------------------
-  var NATIVE_MESSAGES_DEFAULT = false;
+  var NATIVE_MESSAGES_DEFAULT = true;
   var nativeMessagesOpen = false;
 
   function nativeMessagesFlag() {
@@ -448,6 +453,41 @@
 
   installNativeMessagesRouting();
   if (document.readyState !== 'complete') window.addEventListener('load', installNativeMessagesRouting, { once: true });
+
+  // ---------------------------------------------------------------------------------------------
+  // Who owns direct-message crypto: the SAME decision is mirrored natively (NecpraDmOwner) and in
+  // localStorage['necpra_native_dm_owner'], which js/message-e2e-core.js reads synchronously to refuse to
+  // encrypt/decrypt a DM in the WebView. The WebView and native keep separate ratchet states, and a
+  // ratchet key is single-use, so exactly one side may ever advance a chat.
+  // ---------------------------------------------------------------------------------------------
+  window.__necpraNativeOwnsDMs = function () {
+    try { return localStorage.getItem('necpra_native_dm_owner') === '1'; } catch (_) { return false; }
+  };
+
+  async function syncDmOwner() {
+    if (!window.NecpraNative || !window.NecpraNative.setDmOwner) return false;
+    var on = false;
+    try { on = nativeMessagesFlag() && (await nativeMessagesUsable()); } catch (_) { on = false; }
+    try { localStorage.setItem('necpra_native_dm_owner', on ? '1' : '0'); } catch (_) {}
+    try { await window.NecpraNative.setDmOwner(on); } catch (_) {}
+    return on;
+  }
+  window.__necpraSyncDmOwner = syncDmOwner;
+
+  // Opens the native chat for a chat id (notification tap, deep link, push relay). Resolves true when shown.
+  window.__necpraOpenNativeChat = function (chatId) {
+    var id = Number(chatId);
+    if (!id || !isFinite(id)) return Promise.resolve(false);
+    return openNativeMessagesScreen({ chatId: id });
+  };
+
+  (function dmOwnerLoop() {
+    var tries = 0;
+    function tick() { syncDmOwner(); }
+    setTimeout(tick, 1500);
+    var timer = setInterval(function () { if (++tries > 60) return clearInterval(timer); tick(); }, 5000);
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) tick(); });
+  })();
 
   // Android deliberately never writes kynecta_auth to WebView storage (tokens live in the native
   // store), so the offline caches / local message DBs could not tell whose data they hold and cached
@@ -585,6 +625,7 @@
         if (st && st.provisioned && String(st.userId) === uid) { tries = 99; return; }
         await window.NecpraNative.e2eProvision(uid, secret, legacy);
         tries = 99;
+        if (window.__necpraSyncDmOwner) window.__necpraSyncDmOwner();
       } catch (e) {
         try { console.warn('[NativeE2E] hand-over not completed:', (e && e.message) || e); } catch (_) {}
       } finally { busy = false; }

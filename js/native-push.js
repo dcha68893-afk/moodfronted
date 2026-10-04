@@ -281,6 +281,7 @@ async function sendReply(r){
 async function pullReplies(attempt){
  attempt=attempt||0;
  if(!Notify||pullingReplies)return;
+ if(typeof window.__necpraNativeOwnsDMs==='function'&&window.__necpraNativeOwnsDMs())return;   // native sends DM replies itself
  pullingReplies=true; let retry=false;
  try{
   const out=await Notify.getPendingReplies(); const list=(out&&out.replies)||[];

@@ -603,20 +603,84 @@ public final class NecpraMessageRepository {
     void send(long chatId, String text, long replyToServerId) {
         final String clean = text == null ? "" : text.trim();
         if (clean.isEmpty()) return;
-        final String capped = clean.length() > MAX_TEXT ? clean.substring(0, MAX_TEXT) : clean;
+        io.execute(() -> { enqueue(chatId, "text", clean, replyToServerId); drainAsync(); });
+    }
+
+    /** Blocking: insert the queued row (plaintext kept locally, own messages can never be decrypted again). */
+    private long enqueue(long chatId, String type, String text, long replyToServerId) {
+        final String capped = text.length() > MAX_TEXT ? text.substring(0, MAX_TEXT) : text;
+        NecpraDb.ChatDao d = dao();
+        NecpraDb.Msg m = new NecpraDb.Msg();
+        m.chatId = chatId; m.senderId = me(); m.mine = true; m.type = type == null ? "text" : type;
+        m.clientMessageId = newClientId();
+        m.body = seal(capped);
+        m.status = ST_QUEUED; m.cryptoState = CS_OK; m.sortTs = System.currentTimeMillis();
+        m.replyToServerId = replyToServerId;
+        m.localId = d.insertMsg(m);
+        d.delDraft(chatId);
+        refreshPreview(chatId);
+        fireMessages(chatId); fireConversations();
+        return m.localId;
+    }
+
+    /** Blocking send for callers that must finish before the process may be killed (notification reply). */
+    boolean sendNow(long chatId, String text) throws Exception {
+        final String clean = text == null ? "" : text.trim();
+        if (clean.isEmpty() || chatId <= 0) return false;
+        enqueue(chatId, "text", clean, 0);
+        drain();
+        return true;
+    }
+
+    /** Status reaction/comment for a creator: same encrypted pipeline as a chat message (type status_reply). */
+    boolean sendStatusInteraction(long peerId, String interactionJson) throws Exception {
+        if (peerId <= 0 || interactionJson == null || interactionJson.isEmpty()) return false;
+        long chatId = resolveDirectChat(peerId, null, null);
+        enqueue(chatId, "status_reply", interactionJson, 0);
+        drain();
+        return true;
+    }
+
+    /** Resolve the chat id a notification refers to ("123" or the "u<senderId>" fallback). */
+    long chatIdForNotification(String id) throws Exception {
+        if (id == null) return 0;
+        if (id.matches("^[0-9]+$")) return Long.parseLong(id);
+        if (id.startsWith("u") && id.substring(1).matches("^[0-9]+$")) return resolveDirectChat(Long.parseLong(id.substring(1)), null, null);
+        return 0;
+    }
+
+    /**
+     * Notification preview for a pushed DM, decrypted natively. Runs the normal catch-up so the message is
+     * ingested (and its ratchet key consumed) exactly once, then reads the stored plaintext.
+     * @return {title, text} or null when the generic server preview should be used.
+     */
+    String[] pushPreview(long chatId, long messageId) {
+        if (chatId <= 0 || !ready()) return null;
+        try {
+            NecpraDb.Conv conv = dao().conv(chatId);
+            if (conv == null) { refreshConversations(); conv = dao().conv(chatId); }
+            if (conv == null || !"direct".equals(conv.type)) return null;
+            syncChat(chatId);
+            NecpraDb.Msg m = messageId > 0 ? dao().byServer(chatId, messageId) : dao().newest(chatId);
+            if (m == null || m.mine) return null;
+            String text;
+            if (!"text".equals(m.type)) text = labelForType(m.type);
+            else if (m.cryptoState == CS_OK || m.cryptoState == CS_PLAIN) text = open(m.body);
+            else text = null;
+            if (text == null || text.isEmpty()) return null;
+            conv = dao().conv(chatId);
+            return new String[]{conv == null ? null : conv.title, text.length() > 300 ? text.substring(0, 300) : text};
+        } catch (Throwable t) { return null; }
+    }
+
+    /** A socket event said this chat changed: catch up through the single ingest path. chatId 0 = refresh the list. */
+    void onRealtimeChat(final long chatId) {
+        if (!ready()) return;
         io.execute(() -> {
-            NecpraDb.ChatDao d = dao();
-            NecpraDb.Msg m = new NecpraDb.Msg();
-            m.chatId = chatId; m.senderId = me(); m.mine = true; m.type = "text";
-            m.clientMessageId = newClientId();
-            m.body = seal(capped);                 // own sent messages can never be decrypted again — keep the plaintext
-            m.status = ST_QUEUED; m.cryptoState = CS_OK; m.sortTs = System.currentTimeMillis();
-            m.replyToServerId = replyToServerId;
-            m.localId = d.insertMsg(m);
-            d.delDraft(chatId);
-            refreshPreview(chatId);
-            fireMessages(chatId); fireConversations();
-            drainAsync();
+            try {
+                if (chatId <= 0 || dao().conv(chatId) == null) { refreshConversations(); if (chatId <= 0) return; }
+                syncChat(chatId);
+            } catch (Exception ignored) { }
         });
     }
 
@@ -653,8 +717,16 @@ public final class NecpraMessageRepository {
                         m.envelope = seal(env);
                         d.updateMsg(m);                    // ciphertext is persisted BEFORE the POST: retries resend the same envelope
                     }
+                    String mType = m.type == null || m.type.isEmpty() ? "text" : m.type;
                     JSONObject body = new JSONObject().put("chatId", m.chatId).put("receiverId", peer)
-                            .put("content", open(m.envelope)).put("type", "text").put("clientMessageId", m.clientMessageId);
+                            .put("content", open(m.envelope)).put("type", mType).put("clientMessageId", m.clientMessageId);
+                    if ("status_reply".equals(mType)) {
+                        try {
+                            JSONObject it = new JSONObject(open(m.body));
+                            body.put("metadata", new JSONObject().put("statusInteraction", it)
+                                    .put("statusId", it.opt("statusId")).put("statusType", it.opt("statusType")).put("kind", it.opt("kind")));
+                        } catch (Exception ignored) { }
+                    }
                     if (m.replyToServerId > 0) body.put("replyToId", m.replyToServerId);
                     Resp r = request("POST", "/api/messages", body);
                     if (r.ok()) {

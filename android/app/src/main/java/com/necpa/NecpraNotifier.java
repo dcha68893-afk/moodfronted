@@ -42,8 +42,8 @@ import java.util.Map;
  *  - suppression of the chat that is currently open on screen
  *  - lock-screen privacy (public version shows only "New message")
  *
- * The text shown is whatever the server put in the push. Messages are end-to-end encrypted,
- * so until the keys move to native storage this is the server's generic preview.
+ * Direct messages owned by native (see NecpraDmOwner) are decrypted here for the preview, open the native
+ * chat on tap and are replied to natively. Otherwise the text is the server's generic preview.
  */
 final class NecpraNotifier {
     private static final String TAG = "NecpraNotifier";
@@ -69,6 +69,8 @@ final class NecpraNotifier {
 
     /** true while MainActivity is started (between onStart and onStop). */
     static volatile boolean appForeground = false;
+    /** true while a native Messages screen (NecpraChatActivity) is resumed. */
+    static volatile boolean nativeForeground = false;
     /** "c:123" / "g:45" while that conversation is on screen, else null. Reported by the web layer. */
     static volatile String activeKey = null;
 
@@ -85,6 +87,10 @@ final class NecpraNotifier {
     }
 
     private static String nz(String s) { return s == null ? "" : s.trim(); }
+
+    private static long parseLong(String s) {
+        try { return s == null ? 0 : Long.parseLong(s.trim()); } catch (Exception e) { return 0; }
+    }
 
     // ------------------------------------------------------------------ channels
 
@@ -122,7 +128,7 @@ final class NecpraNotifier {
         String key = key(kind, id);
 
         // Chat is open on screen -> WhatsApp shows nothing. Also clear any stale one.
-        if (appForeground && key.equals(activeKey)) {
+        if ((appForeground || nativeForeground) && key.equals(activeKey)) {
             cancelConversation(ctx, key);
             return true;
         }
@@ -135,6 +141,17 @@ final class NecpraNotifier {
         if (body.isEmpty()) body = nz(fallbackBody);
         if (title.isEmpty()) title = "Necpra";
         if (body.isEmpty()) body = "New message";
+
+        // Native owns this DM: decrypt the preview here (the push itself only carries a generic text).
+        final boolean nativeDm = !group && NecpraDmOwner.isOwner(ctx);
+        final long nativeChatId = nativeDm ? parseLong(id) : 0;
+        if (nativeDm && nativeChatId > 0) {
+            String[] pv = NecpraMessageRepository.get(ctx).pushPreview(nativeChatId, parseLong(d.get("messageId")));
+            if (pv != null) {
+                if (pv[1] != null && !pv[1].isEmpty()) body = pv[1];
+                if (pv[0] != null && !pv[0].isEmpty() && !"Chat".equals(pv[0])) title = pv[0];
+            }
+        }
 
         String senderName;
         String text;
@@ -191,9 +208,16 @@ final class NecpraNotifier {
         // Tap -> existing deep-link path (MainActivity -> kyn:openChat / kyn:openGroup)
         Uri link = Uri.parse("necpra://" + (group ? "group/" : "chat/") + Uri.encode(id)
                 + (msgId.isEmpty() ? "" : "?messageId=" + Uri.encode(msgId)));
-        Intent open = new Intent(ctx, MainActivity.class)
+        Intent open;
+        if (nativeDm && nativeChatId > 0) {
+            // Native chat screen directly (no WebView, no kyn:openChat).
+            open = NecpraChatActivity.intent(ctx, nativeChatId, parseLong(d.get("senderId")), senderName, nz(d.get("imageUrl")))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        } else {
+            open = new Intent(ctx, MainActivity.class)
                 .setAction(Intent.ACTION_VIEW).setData(link)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        }
         PendingIntent contentPi = PendingIntent.getActivity(ctx, (key + "#open").hashCode(), open,
                 PendingIntent.FLAG_UPDATE_CURRENT | immutableFlag);
 
@@ -223,14 +247,25 @@ final class NecpraNotifier {
                         .setShowsUserInterface(false).build());
         if (Build.VERSION.SDK_INT < 26) b.setDefaults(Notification.DEFAULT_ALL);
 
-        // Reply is offered for 1:1 chats. It opens the app and sends through the normal encrypted
-        // pipeline (keys live in the WebView; a native background send must wait for native keys).
+        // Reply is offered for 1:1 chats. Native-owned DMs are sent in the background by the receiver (encrypted
+        // natively, no UI); otherwise it falls back to opening the app and the web pipeline.
         if (!group) {
-            Intent reply = new Intent(ctx, MainActivity.class)
-                    .setAction(ACTION_REPLY).putExtra(EXTRA_KIND, kind).putExtra(EXTRA_ID, id)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-            PendingIntent replyPi = PendingIntent.getActivity(ctx, (key + "#reply").hashCode(), reply,
-                    PendingIntent.FLAG_UPDATE_CURRENT | mutableFlag);
+            PendingIntent replyPi;
+            boolean showsUi;
+            if (nativeDm && nativeChatId > 0) {
+                Intent reply = new Intent(ctx, NecpraNotificationActionReceiver.class)
+                        .setAction(ACTION_REPLY).putExtra(EXTRA_KIND, kind).putExtra(EXTRA_ID, id);
+                replyPi = PendingIntent.getBroadcast(ctx, (key + "#reply").hashCode(), reply,
+                        PendingIntent.FLAG_UPDATE_CURRENT | mutableFlag);
+                showsUi = false;
+            } else {
+                Intent reply = new Intent(ctx, MainActivity.class)
+                        .setAction(ACTION_REPLY).putExtra(EXTRA_KIND, kind).putExtra(EXTRA_ID, id)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                replyPi = PendingIntent.getActivity(ctx, (key + "#reply").hashCode(), reply,
+                        PendingIntent.FLAG_UPDATE_CURRENT | mutableFlag);
+                showsUi = true;
+            }
             RemoteInput ri = new RemoteInput.Builder(KEY_REPLY_TEXT)
                     .setLabel(ctx.getString(R.string.necpra_notif_reply)).build();
             b.addAction(new NotificationCompat.Action.Builder(R.drawable.ic_notif_reply,
@@ -238,7 +273,7 @@ final class NecpraNotifier {
                     .addRemoteInput(ri)
                     .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY)
                     .setAllowGeneratedReplies(false)
-                    .setShowsUserInterface(true).build());
+                    .setShowsUserInterface(showsUi).build());
         }
 
         NotificationManagerCompat.from(ctx).notify(key, CHILD_ID, b.build());

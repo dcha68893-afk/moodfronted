@@ -209,6 +209,7 @@ public class NecpraConversationsActivity extends AppCompatActivity implements Ne
         super.onResume();
         resumed = true;
         repo.addListener(this);
+        NecpraRealtime.get(this).start();            // live list: new messages / receipts trigger the normal catch-up
         repo.drainAsync();
         handler.removeCallbacks(poll); handler.post(poll);
         reload();
@@ -218,6 +219,7 @@ public class NecpraConversationsActivity extends AppCompatActivity implements Ne
         resumed = false;
         handler.removeCallbacks(poll);
         repo.removeListener(this);
+        NecpraRealtime.get(this).stop();
         super.onPause();
     }
 

@@ -42,12 +42,13 @@ import java.util.Map;
  * The list is rendered from the local Room database only. Opening a chat paints local history immediately, then
  * catches up from /sync?sinceId=; scrolling to the top pages older history with ?before=. Sends are queued with a
  * stable clientMessageId, shown at once, and retried by the repository until the server acknowledges them.
- * No socket is used natively: while the screen is open it polls /sync every few seconds.
+ * Live updates (messages, receipts, typing, presence) come from NecpraRealtime (Socket.IO); the /sync poll stays as a slow safety net
+ * (fast while the socket is down).
  */
-public class NecpraChatActivity extends AppCompatActivity implements NecpraMessageRepository.Listener {
+public class NecpraChatActivity extends AppCompatActivity implements NecpraMessageRepository.Listener, NecpraRealtime.Listener {
 
     private static final String X_CHAT = "chatId", X_PEER = "peerId", X_TITLE = "title", X_AVATAR = "avatar";
-    private static final long POLL_MS = 3_000L;
+    private static final long POLL_MS = 3_000L, POLL_LIVE_MS = 20_000L, TYPING_EMIT_MS = 2_500L, TYPING_IDLE_MS = 4_000L, PEER_TYPING_TTL_MS = 6_000L;
     private static final String[] EMOJIS = {"\uD83D\uDC4D", "\u2764\uFE0F", "\uD83D\uDE02", "\uD83D\uDE2E", "\uD83D\uDE22", "\uD83D\uDE4F"};
 
     static Intent intent(Context c, long chatId, long peerId, String title, String avatar) {
@@ -72,13 +73,22 @@ public class NecpraChatActivity extends AppCompatActivity implements NecpraMessa
     private NecpraDb.Msg replyTo;
     private String replyToPreview;
     private final Runnable saveDraft = () -> { final long id = chatId; final String txt = input.getText().toString(); if (id > 0) repo.async(() -> repo.saveDraft(id, txt)); };
+    private NecpraRealtime rt;
+    private TextView nameView, subView;
+    private ImageView avatarImg; private TextView avatarLetter;
+    private boolean peerTyping, peerOnline;
+    private long lastTypingEmit;
+    private static final String SUB_BASE = "\uD83D\uDD12 End-to-end encrypted";
     private final Runnable poll = new Runnable() {
-        @Override public void run() { if (!resumed) return; syncNow(); handler.postDelayed(this, POLL_MS); }
+        @Override public void run() { if (!resumed) return; syncNow(); handler.postDelayed(this, rt != null && rt.isConnected() ? POLL_LIVE_MS : POLL_MS); }
     };
+    private final Runnable stopTyping = () -> { lastTypingEmit = 0; if (rt != null) rt.typing(chatId, false); };
+    private final Runnable peerTypingExpire = () -> { peerTyping = false; refreshSub(); };
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
         repo = NecpraMessageRepository.get(this);
+        rt = NecpraRealtime.get(this);
         t = new NecpraConversationsActivity.Theme(this);
         Intent in = getIntent();
         chatId = in.getLongExtra(X_CHAT, 0); peerId = in.getLongExtra(X_PEER, 0);
@@ -107,10 +117,12 @@ public class NecpraChatActivity extends AppCompatActivity implements NecpraMessa
         FrameLayout av = NecpraConversationsActivity.avatarView(this, 40, t, iv, lt);
         header.addView(av);
         NecpraConversationsActivity.bindAvatar(iv[0], lt[0], avatar, title);
+        avatarImg = iv[0]; avatarLetter = lt[0];
         LinearLayout names = new LinearLayout(this); names.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f); nlp.leftMargin = dp(10);
         TextView name = new TextView(this); name.setText(title); name.setTextColor(t.text); name.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17); name.setTypeface(Typeface.DEFAULT_BOLD); name.setSingleLine(true); name.setEllipsize(TextUtils.TruncateAt.END);
-        TextView sub = new TextView(this); sub.setText("\uD83D\uDD12 End-to-end encrypted"); sub.setTextColor(t.subtext); sub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        TextView sub = new TextView(this); sub.setText(SUB_BASE); sub.setTextColor(t.subtext); sub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        nameView = name; subView = sub;
         names.addView(name); names.addView(sub);
         header.addView(names, nlp);
         root.addView(header, new LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -163,7 +175,14 @@ public class NecpraChatActivity extends AppCompatActivity implements NecpraMessa
         input.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
             @Override public void onTextChanged(CharSequence s, int a, int b, int c) { }
-            @Override public void afterTextChanged(Editable s) { updateSend(); handler.removeCallbacks(saveDraft); handler.postDelayed(saveDraft, 600); }
+            @Override public void afterTextChanged(Editable s) {
+                updateSend(); handler.removeCallbacks(saveDraft); handler.postDelayed(saveDraft, 600);
+                if (s.length() > 0 && ready && chatId > 0) {
+                    long now = System.currentTimeMillis();
+                    if (now - lastTypingEmit >= TYPING_EMIT_MS) { lastTypingEmit = now; rt.typing(chatId, true); }
+                    handler.removeCallbacks(stopTyping); handler.postDelayed(stopTyping, TYPING_IDLE_MS);
+                } else if (s.length() == 0) { handler.removeCallbacks(stopTyping); stopTyping.run(); }
+            }
         });
         sendBtn.setOnClickListener(v -> doSend());
         if (!ready) {
@@ -183,13 +202,44 @@ public class NecpraChatActivity extends AppCompatActivity implements NecpraMessa
         sendBtn.setAlpha(on ? 1f : 0.45f); sendBtn.setEnabled(on);
     }
 
+    /** Opened from a notification / deep link with only a chat id: take name, avatar and peer from the local row. */
+    private void adoptConversation(NecpraDb.Conv c) {
+        if (peerId <= 0 && c.peerId > 0) peerId = c.peerId;
+        boolean generic = title == null || title.isEmpty() || "Chat".equals(title);
+        if (generic && c.title != null && !c.title.isEmpty() && !"Chat".equals(c.title)) {
+            title = c.title; nameView.setText(title);
+            if (avatar == null || avatar.isEmpty()) avatar = c.avatar;
+            NecpraConversationsActivity.bindAvatar(avatarImg, avatarLetter, avatar, title);
+        }
+    }
+
+    private void refreshSub() { subView.setText(peerTyping ? "typing\u2026" : (peerOnline ? "online" : SUB_BASE)); }
+
+    // ---------------------------------------------------------------- realtime
+
+    @Override public void onTyping(long cid, long userId, boolean typing) {
+        if (cid != chatId || (peerId > 0 && userId != peerId)) return;
+        peerTyping = typing; handler.removeCallbacks(peerTypingExpire);
+        if (typing) handler.postDelayed(peerTypingExpire, PEER_TYPING_TTL_MS);
+        refreshSub();
+    }
+    @Override public void onPresence(long userId, boolean online) {
+        if (peerId <= 0 || userId != peerId) return;
+        peerOnline = online; refreshSub();
+    }
+    @Override public void onConnectionChanged(boolean connected) {
+        if (connected) syncNow();                       // catch up on anything missed while the socket was down
+        else { peerTyping = false; peerOnline = false; refreshSub(); }
+        if (resumed) { handler.removeCallbacks(poll); handler.postDelayed(poll, connected ? POLL_LIVE_MS : POLL_MS); }
+    }
+
     // ---------------------------------------------------------------- lifecycle
 
     private void resolveThenStart() {
         repo.async(() -> {
             try {
                 final long id = repo.resolveDirectChat(peerId, title, avatar);
-                runOnUiThread(() -> { chatId = id; start(); });
+                runOnUiThread(() -> { chatId = id; if (resumed) { NecpraNotifier.activeKey = NecpraNotifier.key("c", String.valueOf(id)); NecpraNotifier.cancelConversation(this, NecpraNotifier.activeKey); } start(); });
             } catch (Exception e) {
                 runOnUiThread(() -> showBanner("Couldn't open this chat \u2014 check your connection"));
             }
@@ -197,6 +247,12 @@ public class NecpraChatActivity extends AppCompatActivity implements NecpraMessa
     }
 
     private void start() {
+        repo.async(() -> {
+            NecpraDb.Conv found = null;
+            for (NecpraDb.Conv c : repo.loadConversations()) if (c.chatId == chatId) { found = c; break; }
+            final NecpraDb.Conv known = found;
+            if (known != null) runOnUiThread(() -> adoptConversation(known));
+        });
         repo.async(() -> {
             final String draft = repo.loadDraft(chatId);
             runOnUiThread(() -> { if (input.getText().length() == 0 && draft != null && !draft.isEmpty()) input.setText(draft); });
@@ -210,6 +266,9 @@ public class NecpraChatActivity extends AppCompatActivity implements NecpraMessa
         resumed = true;
         ready = repo.ready();
         repo.addListener(this);
+        rt.addListener(this); rt.start();
+        NecpraNotifier.nativeForeground = true;
+        if (chatId > 0) { NecpraNotifier.activeKey = NecpraNotifier.key("c", String.valueOf(chatId)); NecpraNotifier.cancelConversation(this, NecpraNotifier.activeKey); }
         repo.drainAsync();
         if (chatId > 0) { handler.removeCallbacks(poll); handler.post(poll); }
     }
@@ -217,6 +276,10 @@ public class NecpraChatActivity extends AppCompatActivity implements NecpraMessa
     @Override protected void onPause() {
         resumed = false;
         handler.removeCallbacks(poll); handler.removeCallbacks(saveDraft);
+        handler.removeCallbacks(stopTyping); handler.removeCallbacks(peerTypingExpire); stopTyping.run();
+        rt.removeListener(this); rt.stop();
+        NecpraNotifier.nativeForeground = false;
+        if (NecpraNotifier.activeKey != null && NecpraNotifier.activeKey.equals(NecpraNotifier.key("c", String.valueOf(chatId)))) NecpraNotifier.activeKey = null;
         if (chatId > 0 && input != null) { final long id = chatId; final String txt = input.getText().toString(); repo.async(() -> repo.saveDraft(id, txt)); }
         repo.removeListener(this);
         super.onPause();

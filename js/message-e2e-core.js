@@ -207,7 +207,20 @@
   }
   async function init() { return ensureIdentity(); }
 
+  // NATIVE-OWNS-DMs GUARD. In the Android app, direct-message crypto is owned by the native layer once it
+  // has taken over (native-init.js mirrors NecpraDmOwner into localStorage). The WebView and native each
+  // hold their OWN Double Ratchet state per chat and a ratchet message key is single-use, so the WebView
+  // must never encrypt or decrypt a DM while native owns it — two copies cannot both advance.
+  function nativeOwnsDMs() {
+    try {
+      return !!(global.Capacitor && global.Capacitor.isNativePlatform && global.Capacitor.isNativePlatform())
+        && global.localStorage.getItem('necpra_native_dm_owner') === '1';
+    } catch (_) { return false; }
+  }
+  class NativeOwnedError extends Error { constructor() { super('Direct messages are handled by the native app'); this.name = 'NativeOwnedError'; this.nativeOwned = true; } }
+
   async function encryptForChat(plaintext, chatId, recipientUserId) {
+    if (nativeOwnsDMs()) throw new NativeOwnedError();
     // FORWARD-SECRECY FIX (audit P0 — was: static per-pair key reused
     // forever): try the new Double Ratchet path (js/e2e-ratchet-v3.js)
     // first. Falls back to the original static-key v2 scheme only if the
@@ -731,6 +744,7 @@
   async function decryptFromChat(encContent, chatId, peerUserId, isOwnMessage, msgIdForLog) {
     const env = parseEnvelope(encContent);
     if (!env) return encContent;
+    if (nativeOwnsDMs()) throw new NativeOwnedError();   // never consume a ratchet key the native copy owns
     _diagLog('ENVELOPE_PARSED', { msgId: msgIdForLog, chatId, peerUserId, isOwnMessage, envVersion: env.v });
     if (env.v === 3) {
       let v3Err;
@@ -887,6 +901,7 @@
       }
       return typeof message?.content === 'string' ? message.content : (message?.content || '');
     }
+    if (nativeOwnsDMs()) return opts.fallbackText === undefined ? '' : opts.fallbackText;   // no decrypt, no retry queue
     if (decryptCache.has(id)) return decryptCache.get(id); if (inflight.has(id)) return inflight.get(id);
     const entry = pending.get(id) || { chatId, subscribers: new Set() }; pending.set(id, entry);
     if (typeof opts.onResolved === 'function') entry.subscribers.add(opts.onResolved);

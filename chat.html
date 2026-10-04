@@ -7868,6 +7868,16 @@ window.__groupHdrHide = hideGroupHeader;
         window.addEventListener('kyn:openChat', function (e) {
             const d = (e && e.detail) || {};
             if (!d.chatId) return;
+            // Android: once native owns direct messages, every "open this chat" request (notification tap,
+            // deep link, push relay) opens the native chat instead of the WebView Messages module.
+            if (typeof window.__necpraNativeOwnsDMs === 'function' && window.__necpraNativeOwnsDMs() &&
+                typeof window.__necpraOpenNativeChat === 'function') {
+                window.__necpraOpenNativeChat(d.chatId).then(function (opened) { if (!opened) openInWeb(d); }, function () { openInWeb(d); });
+                return;
+            }
+            openInWeb(d);
+        });
+        function openInWeb(d) {
             try { navigateToPage('messages'); } catch (_) {}
             try { document.body.classList.add('chat-panel-active'); } catch (_) {}
             let _attempts = 0;
@@ -7893,7 +7903,7 @@ window.__groupHdrHide = hideGroupHeader;
                 }
             });
             _post();
-        });
+        }
     })();
     </script>
     <!-- FIX (VERIFIED-MISSING-DEEP-LINK: group message notifications never

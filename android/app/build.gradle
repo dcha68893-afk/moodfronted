@@ -70,6 +70,8 @@ dependencies {
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation "androidx.biometric:biometric:1.1.0"
     implementation "androidx.work:work-runtime:2.10.1"
+    // Native realtime (typing, presence, live messages) - Socket.IO client matching the server's socket.io 4.x.
+    implementation('io.socket:socket.io-client:2.1.0') { exclude group: 'org.json', module: 'json' }
     // Native Messages (Phase 2/3): local database + list rendering.
     implementation "androidx.room:room-runtime:2.7.2"
     annotationProcessor "androidx.room:room-compiler:2.7.2"

@@ -1,5 +1,6 @@
 package com.necpa;
 
+import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
@@ -92,9 +93,9 @@ public class MainActivity extends BridgeActivity implements ModifiedMainActivity
     }
 
     /**
-     * Reply typed into a message notification. The text is queued for the web layer, which sends it
-     * through the normal end-to-end-encrypted pipeline (the keys live in the WebView), and the chat
-     * is opened so the user sees it go out. Returns true if this intent was a notification reply.
+     * Reply typed into a message notification (legacy path, only used when native does not own DMs).
+     * The text is queued for the web layer, which sends it through its own encrypted pipeline, and the
+     * chat is opened so the user sees it go out. When native owns DMs the reply is sent natively instead. Returns true if this intent was a notification reply.
      */
     private boolean handleNotificationAction(Intent intent, boolean coldStart) {
         if (intent == null || !NecpraNotifier.ACTION_REPLY.equals(intent.getAction())) return false;
@@ -111,6 +112,25 @@ public class MainActivity extends BridgeActivity implements ModifiedMainActivity
 
         if (kind == null || id == null) return true;
         String clean = text == null ? "" : text.toString().trim();
+
+        // Native owns direct messages: send natively and open the native chat. Never queue for the WebView.
+        if ("c".equals(kind) && NecpraDmOwner.isOwner(getApplicationContext())) {
+            final Context appCtx = getApplicationContext();
+            final String fid = id, ftext = clean;
+            new Thread(() -> {
+                try {
+                    NecpraMessageRepository repo = NecpraMessageRepository.get(appCtx);
+                    long chatId = repo.chatIdForNotification(fid);
+                    if (chatId > 0) {
+                        if (!ftext.isEmpty()) repo.sendNow(chatId, ftext);
+                        runOnUiThread(() -> startActivity(NecpraChatActivity.intent(MainActivity.this, chatId, 0, "Chat", null)));
+                    }
+                } catch (Throwable t) { Log.w("NecpraNotifAction", "native reply failed", t); }
+            }, "necpra-main-reply").start();
+            NecpraNotifier.cancelConversation(appCtx, NecpraNotifier.key(kind, id));
+            return true;
+        }
+
         if (!clean.isEmpty()) NecpraNotifyPlugin.queueReply(kind, id, clean);
 
         // Clear the notification (it also stops the "sending" spinner on the inline reply box).
