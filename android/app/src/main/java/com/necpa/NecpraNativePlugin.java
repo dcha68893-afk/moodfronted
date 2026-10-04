@@ -5,6 +5,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
+import android.content.SharedPreferences;
+
+import androidx.biometric.BiometricManager;
 import android.util.Base64;
 
 import androidx.biometric.BiometricPrompt;
@@ -36,6 +39,7 @@ public class NecpraNativePlugin extends Plugin {
     private static final String KEY_ALIAS = "necpra_secure_storage_v1";
     private static final String PREFS = "necpra_secure_storage";
     private static final int GCM_TAG_BITS = 128;
+    private static final String BACKGROUND_PREFS = "necpra_native_background";
 
     private SecretKey getOrCreateKey() throws Exception {
         KeyStore ks = KeyStore.getInstance(KEYSTORE);
@@ -309,6 +313,32 @@ public class NecpraNativePlugin extends Plugin {
                 .build();
 
         prompt.authenticate(info);
+    }
+
+    @PluginMethod
+    public void biometricStatus(PluginCall call) {
+        JSObject out=new JSObject();
+        try {
+            int r=BiometricManager.from(getContext()).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG);
+            out.put("available",r==BiometricManager.BIOMETRIC_SUCCESS); out.put("status",r);
+        } catch(Throwable t) { out.put("available",false); out.put("status",-1); }
+        call.resolve(out);
+    }
+
+    @PluginMethod
+    public void backgroundStatus(PluginCall call) {
+        SharedPreferences p=getContext().getSharedPreferences(BACKGROUND_PREFS,Context.MODE_PRIVATE);
+        JSObject o=new JSObject();
+        o.put("lastRunAt",p.getLong("lastRunAt",0L)); o.put("lastBackendCheckAt",p.getLong("lastBackendCheckAt",0L));
+        o.put("lastBackendStatus",p.getInt("lastBackendStatus",0)); o.put("networkConnected",p.getBoolean("networkConnected",false));
+        o.put("backendReachable",p.getBoolean("backendReachable",false)); o.put("syncRequested",p.getBoolean("syncRequested",false));
+        o.put("syncRequestedAt",p.getLong("syncRequestedAt",0L)); call.resolve(o);
+    }
+
+    @PluginMethod
+    public void clearBackgroundSyncRequest(PluginCall call) {
+        getContext().getSharedPreferences(BACKGROUND_PREFS,Context.MODE_PRIVATE).edit().putBoolean("syncRequested",false).apply();
+        call.resolve();
     }
 
     @PluginMethod

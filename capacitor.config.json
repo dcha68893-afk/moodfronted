@@ -2,24 +2,6 @@
   "appId": "com.necpa",
   "appName": "Necpra",
   "webDir": "dist",
-  "server": {
-    "androidScheme": "https",
-    "cleartext": false,
-    "allowNavigation": [
-      "necpra.co.ke",
-      "*.necpra.co.ke",
-      "*.onrender.com",
-      "*.googleusercontent.com",
-      "accounts.google.com",
-      "res.cloudinary.com",
-      "*.google.com",
-      "*.gstatic.com",
-      "accounts.youtube.com",
-      "*.googleapis.com"
-    ],
-    "url": "https://necpra.co.ke/",
-    "errorPath": "index.html"
-  },
   "plugins": {
     "SplashScreen": {
       "launchShowDuration": 0,

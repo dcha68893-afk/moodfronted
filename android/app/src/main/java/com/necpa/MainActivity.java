@@ -6,7 +6,9 @@ import android.os.Bundle;
 import android.util.Log;
 import android.view.WindowManager;
 
+import androidx.work.Constraints;
 import androidx.work.ExistingPeriodicWorkPolicy;
+import androidx.work.NetworkType;
 import androidx.work.PeriodicWorkRequest;
 import androidx.work.WorkManager;
 
@@ -54,8 +56,9 @@ public class MainActivity extends BridgeActivity implements ModifiedMainActivity
 
     private void scheduleNativeBackgroundMaintenance() {
         try {
+            Constraints constraints = new Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build();
             PeriodicWorkRequest request = new PeriodicWorkRequest.Builder(
-                    NecpraBackgroundWorker.class, 15, TimeUnit.MINUTES).build();
+                    NecpraBackgroundWorker.class, 15, TimeUnit.MINUTES).setConstraints(constraints).build();
 
             WorkManager.getInstance(getApplicationContext()).enqueueUniquePeriodicWork(
                     BACKGROUND_WORK_NAME,

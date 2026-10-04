@@ -59,6 +59,12 @@
     }
   }
 
+  async function biometricUnlock(title, subtitle) {
+    const plugin=nativePlugin(); if(!plugin?.biometricAuthenticate)return {authenticated:false,native:false};
+    return plugin.biometricAuthenticate({title:title||'Unlock Necpra',subtitle:subtitle||'Verify your identity'});
+  }
+  async function biometricStatus(){const plugin=nativePlugin();if(!plugin?.biometricStatus)return {available:false,native:false};return plugin.biometricStatus();}
+
   async function removeItem(key) {
     const plugin = nativePlugin();
 
@@ -76,6 +82,8 @@
     getItem,
     setItem,
     removeItem,
+    biometricUnlock,
+    biometricStatus,
     isNativeBacked: () => !!nativePlugin()
   };
 })(window);

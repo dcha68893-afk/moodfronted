@@ -29,9 +29,23 @@
           subtitle:subtitle || 'Verify your identity'
         });
       },
-      deviceInfo: function () { return native.deviceInfo(); }
+      deviceInfo: function () { return native.deviceInfo(); },
+      biometricStatus: function () { return native.biometricStatus(); },
+      backgroundStatus: function () { return native.backgroundStatus(); },
+      clearBackgroundSyncRequest: function () { return native.clearBackgroundSyncRequest(); }
     };
   }
+
+  var lastNativeSyncSignal=0;
+  async function consumeNativeBackgroundSync(){
+    if(!window.NecpraNative?.backgroundStatus)return;
+    try{var s=await window.NecpraNative.backgroundStatus();var at=Number(s?.syncRequestedAt||0);if(!s?.syncRequested||at<=lastNativeSyncSignal)return;lastNativeSyncSignal=at;
+      if(window.KynectaSync?.syncAll){await window.KynectaSync.syncAll();await window.NecpraNative.clearBackgroundSyncRequest?.();window.dispatchEvent(new CustomEvent('necpra:native-background-sync-complete',{detail:{requestedAt:at}}));}}
+    catch(_){}
+  }
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')setTimeout(consumeNativeBackgroundSync,500);});
+  window.addEventListener('focus',()=>setTimeout(consumeNativeBackgroundSync,500));
+  setTimeout(consumeNativeBackgroundSync,1500);
 
   // Android forwards verified Necpra links here. Web navigation remains the
   // single owner of the actual screen/UI, so browser and APK stay aligned.

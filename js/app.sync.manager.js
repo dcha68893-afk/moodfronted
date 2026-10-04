@@ -50,6 +50,7 @@
       };
 
       this._setupEventListeners();
+      window.addEventListener('necpra:native-background-sync-complete',()=>{if(!this._isSyncing)this.syncAll().catch(()=>{});});
       if (SYNC_CONFIG.autoSync) this.startAutoSync();
 
       window.KynectaSync = this;
