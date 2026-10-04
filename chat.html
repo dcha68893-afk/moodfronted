@@ -1950,6 +1950,12 @@
                     .then(function (html) {
                         if (!html || f.__kynLoaded === true || overlays[m] !== true) { if (overlays[m] === true) delete overlays[m]; return; }
                         var o = document.createElement('iframe');
+                        /* Cached snapshots are untrusted presentation HTML. Strip executable/resource-bearing nodes again before assigning srcdoc so old cache entries cannot trigger sandbox script warnings or run stale module code. */
+                        try {
+                            var snapDoc = new DOMParser().parseFromString(html, 'text/html');
+                            snapDoc.querySelectorAll('script,noscript,iframe,object,embed,video,audio,canvas,form,input,button').forEach(function (n) { n.remove(); });
+                            html = '<!DOCTYPE html>' + snapDoc.documentElement.outerHTML;
+                        } catch (_) {}
                         o.className = 'kyn-snap';
                         o.setAttribute('sandbox', 'allow-same-origin');   // no scripts: purely a picture of the last screen
                         o.setAttribute('aria-hidden', 'true'); o.tabIndex = -1;

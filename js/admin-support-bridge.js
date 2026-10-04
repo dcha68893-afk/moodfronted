@@ -15,8 +15,15 @@
     try{await call('/admin/reports',{method:'POST',body:JSON.stringify({messageId,chatId,reason,details})});alert('Report submitted to the administrators.')}catch(e){console.error('[AdminSupport] report failed',e);alert(e.message||'Unable to submit report.');}
   }
   async function chatWithAdmin(){
-    try{const data=await call('/admin/contact',{method:'POST',body:'{}'});const chatId=data?.chatId;const admin=data?.admin||{};if(!chatId)throw new Error('No administrator chat is available.');const payload={type:'OPEN_CONVERSATION',chatId,userId:admin.userId,username:admin.username,displayName:admin.displayName,source:'admin-support'};window.postMessage(payload,'*');window.dispatchEvent(new CustomEvent('kyn:open-conversation',{detail:payload}));window.parent?.postMessage(payload,'*');}
-    catch(e){console.error('[AdminSupport] admin chat failed',e);alert(e.message||'Unable to open the administrator chat.');}
+    try{
+      // The Tools WhatsApp icon must use the configured ADMIN_WHATSAPP_NUMBER.
+      // /admin/contact is for an in-app admin account and cannot resolve a phone
+      // number by itself. Calling it here caused 500s when no admin user row/role
+      // was configured even though the WhatsApp number was present in .env.
+      const data=await call('/admin/whatsapp');
+      if(!data?.url)throw new Error('Admin WhatsApp is not configured.');
+      window.open(data.url,'_blank','noopener,noreferrer');
+    }catch(e){console.error('[AdminSupport] admin WhatsApp failed',e);alert(e.message||'Unable to open administrator WhatsApp.');}
   }
   async function whatsappAdmin(){
     try{const data=await call('/admin/whatsapp');if(!data?.url)throw new Error('Admin WhatsApp is not configured.');window.open(data.url,'_blank','noopener,noreferrer');}
