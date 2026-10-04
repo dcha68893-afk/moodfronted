@@ -317,7 +317,9 @@ public class NecpraNativePlugin extends Plugin {
                 long expiresAt = System.currentTimeMillis() + (expiresIn * 1000L);
                 putEncrypted(authPrefs(), "accessToken", access);
                 putEncrypted(authPrefs(), "refreshToken", newRefresh);
-                authPrefs().edit().putLong("expiresAt", expiresAt).apply();
+                authPrefs().edit().putLong("expiresAt", expiresAt)
+                        .putLong("unlockedUntil", System.currentTimeMillis() + UNLOCK_WINDOW_MS)
+                        .apply();
 
                 JSObject out = new JSObject();
                 out.put("success", true);
