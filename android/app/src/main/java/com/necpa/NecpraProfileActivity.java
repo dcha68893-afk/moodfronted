@@ -1050,37 +1050,7 @@ public class NecpraProfileActivity extends AppCompatActivity {
         }), matchWithBottom(0));
     }
 
-    private void buildSettings() {
-        JSONObject priv = settings.optJSONObject("privacy");
-        JSONObject notif = settings.optJSONObject("notifications");
-        if (priv == null) priv = new JSONObject();
-        if (notif == null) notif = new JSONObject();
-        if (offline) body.addView(label("Settings can be changed when you're online."));
 
-        body.addView(label("Privacy"));
-        LinearLayout p = card();
-        p.setPadding(0, 0, 0, 0);
-        p.addView(toggle("Online status", priv.optBoolean("onlineStatus", true), "privacy", "onlineStatus"));
-        p.addView(divider());
-        p.addView(toggle("Read receipts", priv.optBoolean("readReceipts", true), "privacy", "readReceipts"));
-        p.addView(divider());
-        p.addView(toggle("Typing indicators", priv.optBoolean("typingIndicators", true), "privacy", "typingIndicators"));
-        p.addView(divider());
-        final boolean friendsOnly = "friendsOnly".equals(priv.optString("profileVisibility", "everyone"));
-        p.addView(toggleRaw("Profile visible to friends only", friendsOnly, (b, on) ->
-                saveSetting("privacy", "profileVisibility", on ? "friendsOnly" : "everyone", b, !on)));
-        body.addView(p, matchWithBottom(12));
-
-        body.addView(label("Notifications"));
-        LinearLayout n = card();
-        n.setPadding(0, 0, 0, 0);
-        n.addView(toggle("Notifications", notif.optBoolean("enabled", true), "notifications", "enabled"));
-        n.addView(divider());
-        n.addView(toggle("Sound", notif.optBoolean("notificationSound", true), "notifications", "notificationSound"));
-        n.addView(divider());
-        n.addView(toggle("Vibration", notif.optBoolean("notificationVibration", true), "notifications", "notificationVibration"));
-        body.addView(n, matchWithBottom(0));
-    }
 
     private View toggle(String title, boolean value, final String section, final String key) {
         return toggleRaw(title, value, (b, on) -> saveSetting(section, key, on, b, !on));
@@ -1115,23 +1085,7 @@ public class NecpraProfileActivity extends AppCompatActivity {
         void release() { lock[0] = false; }
     }
 
-    private void saveSetting(String section, String key, Object value, SwitchHandle h, boolean revertValue) {
-        JSONObject body1 = new JSONObject();
-        try { body1.put(key, value); } catch (Exception ignored) {}
-        background(() -> {
-            request("PUT", "/api/settings/" + section, body1, null, null);
-            ui.post(() -> {
-                try {
-                    JSONObject sec = settings.optJSONObject(section);
-                    if (sec == null) { sec = new JSONObject(); settings.put(section, sec); }
-                    sec.put(key, value);
-                } catch (Exception ignored) {}
-                saveCache();
-                h.release();
-            });
-        }, () -> { h.revertTo(revertValue); toast("No connection. Setting was not changed."); },
-                msg -> { h.revertTo(revertValue); toast(msg); });
-    }
+
 
     // ------------------------------------------------------------------
     // Logout

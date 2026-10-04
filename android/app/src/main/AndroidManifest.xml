@@ -45,18 +45,6 @@
                 <data android:scheme="necpra" />
             </intent-filter>
 
-            <!-- Verified https links. MainActivity already accepted these but no
-                 filter existed, so Android never delivered them. For autoVerify to
-                 succeed https://necpra.co.ke/.well-known/assetlinks.json must list
-                 this app's package (com.necpa) and signing-cert SHA-256. Until it
-                 does, links simply open in the browser. -->
-            <intent-filter android:autoVerify="true">
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="necpra.co.ke" />
-            </intent-filter>
-
         </activity>
 
         <!-- Native Profile / Settings screen. Not exported: only MainActivity (via NecpraNativePlugin)
@@ -74,6 +62,14 @@
             android:exported="false"
             android:theme="@style/AppTheme.NoActionBar"
             android:configChanges="orientation|screenSize|keyboardHidden"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- Native Settings screen. Not exported: only MainActivity via the native plugin can start it. -->
+        <activity
+            android:name=".NecpraSettingsActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme.NoActionBar"
+            android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
             android:windowSoftInputMode="adjustResize" />
 
         <!-- Native FCM receiver: builds WhatsApp-style grouped notifications in every app state and
