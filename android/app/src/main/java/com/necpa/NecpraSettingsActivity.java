@@ -461,10 +461,7 @@ public class NecpraSettingsActivity extends AppCompatActivity {
         e.setOnFocusChangeListener((v,h)->{if(!h)try{sec(section).put(key,e.getText().toString());}catch(Exception ignored){}});
     }
 
-    private void saveButton(){
-        Button b=button("Save settings",false,v->{if(offline){toast("Connect to the Internet to save settings");return;}saveAll();});
-        body.addView(b);
-    }
+    private void saveButton(){ button("Save settings",false,v->{if(offline){toast("Connect to the Internet to save settings");return;}saveAll();}); }
 
     private void saveAll(){
         io.execute(()->{try{
