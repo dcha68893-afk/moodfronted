@@ -2093,7 +2093,8 @@
                 try { window.NecpraNative?.authClearSession?.(); } catch (_) {}
                 window.__NECPRA_NATIVE_AUTH_SNAPSHOT__ = null;
                 try { window.__userToken = null; window.__accessToken = null; window.token = null; } catch (_) {}
-                return true;
+                // Do NOT return here: the WebView copies (storage, account hints, window props) must
+                // be cleared too, otherwise the next account inherits them.
             }
             console.log('🔐 [AUTH] Clearing user token...');
             

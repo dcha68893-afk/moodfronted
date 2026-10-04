@@ -84,6 +84,7 @@ import {
     getMoodColor,
     terminateSession,
     terminateAllSessions,
+    handleLogout,
     unblockUser,
     clearChatCache,
     clearMediaCache,
@@ -1006,6 +1007,31 @@ export function buildSettingsMenu() {
         
         menuContainer.appendChild(menuItem);
     });
+    
+    // Log out (handleLogout() existed in settings-core.js but nothing in the UI called it)
+    const logoutItem = document.createElement('a');
+    logoutItem.href = '#';
+    logoutItem.className = 'menu-item';
+    logoutItem.id = 'menu-logout';
+    logoutItem.style.color = 'var(--danger-color)';
+    logoutItem.innerHTML = `
+        <div class="menu-icon"><i class="fas fa-sign-out-alt"></i></div>
+        <div class="menu-text">Log out</div>
+    `;
+    logoutItem.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showConfirmation('Log out', 'Log out of this device? Your messages stay safe on the server.', async () => {
+            try {
+                const ok = await handleLogout();
+                if (!ok) showNotification('Could not log out. Please try again.', 'error');
+            } catch (err) {
+                console.error('Logout failed:', err);
+                showNotification('Could not log out. Please try again.', 'error');
+            }
+        });
+    });
+    menuContainer.appendChild(logoutItem);
     
     addConnectionStatusIndicator();
 }

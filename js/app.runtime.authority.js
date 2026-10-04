@@ -254,11 +254,11 @@
             window.AuthStorage.clearAuth();
         } else {
             localStorage.removeItem('kynecta_auth');
-            // Logout / invalid session: drop device-kept unlock secret + sync cursors so the
-            // next person on this device never inherits them.
-            ['kyn_persist_kyn_e2e_pw_session','kyn_persist_kyn_e2e_pw_legacy_session','kyn_chats_synced_at','kyn_chats_full_at','knecta_friend_requests_cache','knecta_friend_discover_cache'].forEach(function (k) { try { localStorage.removeItem(k); } catch (_) {} });
-            try { sessionStorage.removeItem('kyn_e2e_pw_session'); sessionStorage.removeItem('kyn_e2e_pw_legacy_session'); } catch (_) {}
         }
+        // Logout / invalid session: ALWAYS drop the device-kept unlock secret + sync cursors so the
+        // next person on this device never inherits them (previously skipped when AuthStorage existed).
+        ['kyn_persist_kyn_e2e_pw_session','kyn_persist_kyn_e2e_pw_legacy_session','kyn_chats_synced_at','kyn_chats_full_at','knecta_friend_requests_cache','knecta_friend_discover_cache','necpa_user','userId','currentUserId'].forEach(function (k) { try { localStorage.removeItem(k); } catch (_) {} });
+        try { sessionStorage.removeItem('kyn_e2e_pw_session'); sessionStorage.removeItem('kyn_e2e_pw_legacy_session'); } catch (_) {}
 
         if (window.Session && typeof window.Session.clearSession === 'function') {
             try {

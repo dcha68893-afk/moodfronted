@@ -52,6 +52,27 @@
     const uid = _myUserId();
     return uid ? `${STORE_KEY_PREFIX}_${uid}` : STORE_KEY_PREFIX;
   }
+  // SINGLE STORAGE LOCATION for the wrapped identity: the newer e2e-identity-core.js keeps it in
+  // KynectaSecureStorage (Android Keystore-backed on the APK, localStorage in browsers) while this
+  // legacy code kept writing/reading raw localStorage. On Android the two never saw each other's
+  // blob, so a cold start could find "no identity" and silently generate (rotate) a new key. Both now
+  // go through KynectaSecureStorage under the same key name; it falls back to localStorage itself.
+  async function _idGet() {
+    const k = _storeKey();
+    try { const s = window.KynectaSecureStorage; if (s) { const v = await s.getItem(k); if (v) return v; } } catch (_) {}
+    try { return localStorage.getItem(k); } catch (_) { return null; }
+  }
+  async function _idSet(value) {
+    const k = _storeKey();
+    try { const s = window.KynectaSecureStorage; if (s && (await s.setItem(k, value))) return true; } catch (_) {}
+    // Only if secure storage refused: keep the identity (never orphan it). Readers fall back to it.
+    try { localStorage.setItem(k, value); return true; } catch (_) { return false; }
+  }
+  function _idRemove() {
+    const k = _storeKey();
+    try { const s = window.KynectaSecureStorage; if (s) s.removeItem(k); } catch (_) {}
+    try { localStorage.removeItem(k); } catch (_) {}
+  }
   const PUB_CACHE = new Map();               // userId → CryptoKey (public key cache, this page load only)
   // FIX (403-treated-as-transient): tracks WHY the last key fetch for a
   // userId came back empty, so encryptForChat() below can tell a
@@ -364,7 +385,7 @@
       // login on this device is instant/local, same as the device the
       // identity originally came from.
       const encPrivKey = await _encryptPrivateKey(pkcs8, password);
-      localStorage.setItem(_storeKey(), JSON.stringify({ encPrivKey, pubKey: _myPubKeyB64, keyId: _myKeyId, registered: true }));
+      await _idSet(JSON.stringify({ encPrivKey, pubKey: _myPubKeyB64, keyId: _myKeyId, registered: true }));
 
       // Tell the server about this device (adds a user_devices row / touches
       // deviceId) without disturbing the shared identity key itself.
@@ -390,7 +411,7 @@
     // password is available, regardless of which branch below runs.
     await _getOrCreateLocalWrapKey(password).catch(e => console.warn('[E2E] Local wrap key derivation failed:', e.message));
 
-    const stored = localStorage.getItem(_storeKey());
+    const stored = await _idGet();
     if (stored) {
       try {
         const obj     = JSON.parse(stored);
@@ -464,7 +485,7 @@
             console.log('[E2E] ✅ Keys recovered via legacy password — migrating storage to new wrap secret.');
             try {
               const reEncPrivKey = await _encryptPrivateKey(pkcs8, password);
-              localStorage.setItem(_storeKey(), JSON.stringify({ encPrivKey: reEncPrivKey, pubKey: _myPubKeyB64, keyId: _myKeyId }));
+              await _idSet(JSON.stringify({ encPrivKey: reEncPrivKey, pubKey: _myPubKeyB64, keyId: _myKeyId }));
               // Also refresh the server-side backup under the new wrap
               // secret so a future device restore (see
               // _restoreIdentityFromServerBackup below) doesn't hand back a
@@ -535,7 +556,7 @@
     // the next attempt just because the network hiccuped. `registered` is
     // persisted alongside it so a later init() (see the "load from storage"
     // branch above) knows whether it still owes the server a confirmation.
-    localStorage.setItem(_storeKey(), JSON.stringify({ encPrivKey, pubKey: pubKeyB64, keyId, registered }));
+    await _idSet(JSON.stringify({ encPrivKey, pubKey: pubKeyB64, keyId, registered }));
 
     _myPrivKey   = kp.privateKey;
     _myPubKeyB64 = pubKeyB64;
@@ -635,9 +656,9 @@
       if (ok) {
         _bgRegistrationTimer = null;
         try {
-          const stored = JSON.parse(localStorage.getItem(_storeKey()) || '{}');
+          const stored = JSON.parse((await _idGet()) || '{}');
           stored.registered = true;
-          localStorage.setItem(_storeKey(), JSON.stringify(stored));
+          await _idSet(JSON.stringify(stored));
         } catch (_) {}
         _markEnabled();
         console.log('[E2E] ✅ Background key registration succeeded — E2E now ready');
@@ -1707,7 +1728,7 @@
     get publicKey() { return _myPubKeyB64; },
     get keyId() { return _myKeyId; },
     clearKeys() {
-      localStorage.removeItem(_storeKey());
+      _idRemove();
       _myPrivKey = null; _myPubKeyB64 = null; _myKeyId = null; _enabled = false;
       PUB_CACHE.clear();
       // CRYPTO-PIPELINE: a decrypted-text cache or a retry queue surviving a

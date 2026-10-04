@@ -3,5 +3,5 @@
     <string name="app_name">Necpra</string>
     <string name="title_activity_main">Necpra</string>
     <string name="package_name">com.necpa</string>
-    <string name="custom_url_scheme">com.necpa</string>
+    <string name="custom_url_scheme">necpra</string>
 </resources>

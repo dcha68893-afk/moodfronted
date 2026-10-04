@@ -6405,9 +6405,13 @@ async function handleLogout() {
     }
     
     try {
-        await authorizedRequest('/api/auth/logout', { method: 'POST' });
+        // Server-side revoke is best-effort: being offline (or a failed call) must never
+        // leave the user unable to log out of this device.
+        try { await authorizedRequest('/api/auth/logout', { method: 'POST' }); }
+        catch (revokeError) { console.warn('[settings-core] Server logout failed, clearing local session anyway:', revokeError && revokeError.message); }
         
         await MessageTransport.send('SESSION_INVALIDATED', {});
+        try { await MessageTransport.send('LOGOUT', {}); } catch (_) {}
         
         isAuthenticated = false;
         clearSession();

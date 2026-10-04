@@ -66,6 +66,22 @@
     };
   }
 
+  // Android deliberately never writes kynecta_auth to WebView storage (tokens live in the native
+  // store), so the offline caches / local message DBs could not tell whose data they hold and cached
+  // nothing. Publish a NON-SECRET account-id hint (no tokens) that they all read.
+  function writeAccountHint(user) {
+    try {
+      var id = user && (user.id != null ? user.id : (user.userId != null ? user.userId : (user.uid != null ? user.uid : user._id)));
+      if (id == null || id === '') return;
+      id = String(id);
+      var slim = { id: id };
+      ['username', 'displayName', 'name', 'avatar'].forEach(function (k) { if (user[k] != null) slim[k] = user[k]; });
+      localStorage.setItem('necpa_user', JSON.stringify(slim));
+      localStorage.setItem('userId', id);
+      localStorage.setItem('currentUserId', id);
+    } catch (_) {}
+  }
+
   async function publishNativeAuthSession() {
     if (!window.NecpraNative?.authGetSession) return null;
     try {
@@ -95,6 +111,7 @@
 
       var user = null;
       try { user = session.userJson ? JSON.parse(session.userJson) : null; } catch (_) {}
+      writeAccountHint(user);
       window.__NECPRA_NATIVE_AUTH_SNAPSHOT__ = {
         accessToken: accessToken,
         refreshToken: session?.refreshToken || null,
@@ -227,7 +244,18 @@
         var method = String((init && init.method) || (input && input.method) || 'GET').toUpperCase();
         var path = new URL(url, window.location.href).pathname;
         if (method === 'POST' && /\/api\/auth\/refresh\/?$/.test(path)) {
-          return window.NecpraNative.authRefresh().then(function (r) {
+          // After 15 min the native session locks and authRefresh rejects with "locked".
+          // Unlock (biometric prompt) and retry once instead of failing with 503.
+          var refreshOnce = function () {
+            return window.NecpraNative.authRefresh().catch(function (err) {
+              var msg = String((err && (err.message || err.errorMessage)) || err || '');
+              if (!/locked/i.test(msg)) throw err;
+              return window.NecpraNative.authUnlock('Unlock Necpra', 'Unlock your secure session').then(function () {
+                return window.NecpraNative.authRefresh();
+              });
+            });
+          };
+          return refreshOnce().then(function (r) {
             // refreshToken is deliberately NOT echoed: the real one lives only in
             // the native store, and the web copy must never be used to refresh.
             return new Response(JSON.stringify({

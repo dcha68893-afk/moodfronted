@@ -391,8 +391,11 @@
       try {
         // Refresh the recipient identity periodically so browser/APK
         // conversations do not encrypt to a stale key after reinstall/rotation.
+        // Was 60 s: for a minute after the recipient re-installed / rotated, every message was
+        // encrypted to their OLD key and could never be decrypted. Check before (almost) every send;
+        // the short window only de-duplicates bursts of messages.
         const refreshDue = !session?.peerKeyCheckedAt ||
-          (Date.now() - Number(session.peerKeyCheckedAt)) > 60000;
+          (Date.now() - Number(session.peerKeyCheckedAt)) > 2000;
         currentPeer = refreshDue
           ? await identity.publicKeyFor(recipientUserId, true, false)
           : await identity.publicKeyFor(recipientUserId, false, true);
@@ -413,8 +416,17 @@
         session.peerKeyId = peer.keyId || null;
       }
       session.peerKeyCheckedAt = Date.now();
+      if (currentPeer && currentPeer.keyId) session.peerKeyId = currentPeer.keyId;
       const { session: nextSession, envelope } = await R.ratchetEncrypt(session, String(plaintext));
       saveRatchetSession(recipientUserId, nextSession);
+      // Self-describing envelope (outside the authenticated header, so wire-compatible with old
+      // clients): the sender's public key + ids. The receiver can start a session from the key that
+      // was really used instead of depending on a registry lookup / stale cache.
+      try {
+        if (identity.publicKey) envelope.spk = identity.publicKey;
+        if (identity.keyId) envelope.kid = identity.keyId;
+        if (currentPeer && currentPeer.keyId) envelope.rkid = currentPeer.keyId;
+      } catch (_) {}
       return JSON.stringify(envelope);
     });
   }
@@ -438,8 +450,17 @@
   // also needlessly burn a bogus DH computation against the local
   // session).
   async function _initReceiverSessionFromHeader(identity, peerUserId, envelope, forceRefresh = false) {
-    const peer = await identity.publicKeyFor(peerUserId, forceRefresh, /* allowStale */ true);
-    const sharedBitsRaw = await crypto.subtle.deriveBits({ name: 'ECDH', public: peer.key }, identity.privateKey, 256);
+    // Prefer the sender key embedded in the envelope (what was actually used); a forced refresh
+    // (the retry paths) deliberately goes to the registry instead.
+    let peerKey = null;
+    if (!forceRefresh && envelope && envelope.spk && typeof identity.importPeerKey === 'function') {
+      try { peerKey = await identity.importPeerKey(envelope.spk); } catch (_) { peerKey = null; }
+    }
+    if (!peerKey) {
+      const peer = await identity.publicKeyFor(peerUserId, forceRefresh, /* allowStale */ true);
+      peerKey = peer.key;
+    }
+    const sharedBitsRaw = await crypto.subtle.deriveBits({ name: 'ECDH', public: peerKey }, identity.privateKey, 256);
     const myPrivJwk = await crypto.subtle.exportKey('jwk', identity.privateKey);
     return global.KynectaRatchet.initSessionAsReceiver(sharedBitsRaw, myPrivJwk, envelope.hdr.dh);
   }
