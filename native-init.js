@@ -32,9 +32,114 @@
       deviceInfo: function () { return native.deviceInfo(); },
       biometricStatus: function () { return native.biometricStatus(); },
       backgroundStatus: function () { return native.backgroundStatus(); },
-      clearBackgroundSyncRequest: function () { return native.clearBackgroundSyncRequest(); }
+      clearBackgroundSyncRequest: function () { return native.clearBackgroundSyncRequest(); },
+      authSetSession: function (accessToken, refreshToken, user, expiresAt) {
+        return native.authSetSession({
+          accessToken: accessToken,
+          refreshToken: refreshToken || '',
+          userJson: user ? JSON.stringify(user) : '',
+          expiresAt: Number(expiresAt || 0)
+        });
+      },
+      authGetSession: function () { return native.authGetSession(); },
+      authUnlock: function (title, subtitle) {
+        return native.authUnlock({title:title || 'Unlock Necpra', subtitle:subtitle || 'Verify your identity'});
+      },
+      authRefresh: function () { return native.authRefresh(); },
+      authClearSession: function () { return native.authClearSession(); },
+      backgroundSyncNow: function () { return native.backgroundSyncNow(); },
+      getBackgroundSnapshot: function () { return native.getBackgroundSnapshot(); },
+      downloadFile: function (url, fileName) { return native.downloadFile({url:url, fileName:fileName || 'download'}); },
+      uploadFile: function (endpoint, uri, fieldName, mimeType, fileName) {
+        return native.uploadFile({endpoint:endpoint, uri:uri, fieldName:fieldName || 'file', mimeType:mimeType || '*/*', fileName:fileName || 'upload'});
+      }
     };
   }
+
+  async function publishNativeAuthSession() {
+    if (!window.NecpraNative?.authGetSession) return null;
+    try {
+      var session = await window.NecpraNative.authGetSession();
+      if (!session?.hasSession) return null;
+
+      if (session.locked) {
+        try {
+          await window.NecpraNative.authUnlock('Unlock Necpra', 'Unlock your secure session');
+          session = await window.NecpraNative.authGetSession();
+        } catch (_) {
+          window.dispatchEvent(new CustomEvent('necpra:native-auth-locked', {detail:{reason:'biometric-required'}}));
+          return null;
+        }
+      }
+
+      var accessToken = session?.accessToken;
+      if (!accessToken) {
+        try {
+          var refreshed = await window.NecpraNative.authRefresh();
+          accessToken = refreshed?.accessToken || null;
+          session = await window.NecpraNative.authGetSession();
+        } catch (_) {}
+      }
+
+      if (!accessToken) return null;
+
+      var user = null;
+      try { user = session.userJson ? JSON.parse(session.userJson) : null; } catch (_) {}
+      window.__NECPRA_NATIVE_AUTH_SNAPSHOT__ = {
+        accessToken: accessToken,
+        refreshToken: session?.refreshToken || null,
+        user: user,
+        expiresAt: Number(session?.expiresAt || 0),
+        native: true
+      };
+      window.dispatchEvent(new CustomEvent('necpra:native-auth-ready', {
+        detail: window.__NECPRA_NATIVE_AUTH_SNAPSHOT__
+      }));
+      return window.__NECPRA_NATIVE_AUTH_SNAPSHOT__;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function consumeNativeSnapshot() {
+    if (!window.NecpraNative?.getBackgroundSnapshot) return;
+    try {
+      var result = await window.NecpraNative.getBackgroundSnapshot();
+      var raw = result?.snapshot;
+      if (!raw || !window.NecpraSocialOfflineCache?.put) return;
+      var snapshot = JSON.parse(raw);
+      var origin = window.__getApiOrigin ? window.__getApiOrigin() : (window.BACKEND_URL || 'https://nexorah-xnv6.onrender.com');
+      origin = String(origin).replace(/\/api\/?$/, '').replace(/\/$/, '');
+      var mapping = {
+        chats: '/api/chats?limit=100',
+        friends: '/api/friends?limit=100',
+        groups: '/api/groups?limit=100',
+        status: '/api/status?limit=100',
+        settings: '/api/settings'
+      };
+      for (var key in mapping) {
+        if (snapshot[key] !== undefined) {
+          await window.NecpraSocialOfflineCache.put(origin + mapping[key], snapshot[key]);
+        }
+      }
+      Object.keys(snapshot).forEach(function (key) {
+        var match = key.match(/^messages_(\d+)$/);
+        if (match) {
+          window.NecpraSocialOfflineCache.put(origin + '/api/messages?chatId=' + match[1] + '&limit=100', snapshot[key]).catch(function(){});
+        }
+        var groupMatch = key.match(/^groupMessages_(\d+)$/);
+        if (groupMatch) {
+          window.NecpraSocialOfflineCache.put(origin + '/api/group-messages/' + groupMatch[1] + '/messages?limit=100', snapshot[key]).catch(function(){});
+        }
+      });
+      window.dispatchEvent(new CustomEvent('necpra:native-snapshot-imported', {detail:{syncedAt:result?.syncedAt || 0}}));
+    } catch (_) {}
+  }
+
+  publishNativeAuthSession();
+  consumeNativeSnapshot();
+  setTimeout(consumeNativeSnapshot, 3000);
+  window.addEventListener('load', function () { setTimeout(consumeNativeSnapshot, 500); }, { once: true });
 
   var lastNativeSyncSignal=0;
   async function consumeNativeBackgroundSync(){

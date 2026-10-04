@@ -142,8 +142,15 @@
     }
   };
 
+  async function put(url, data) {
+    if (!url || data === undefined) return false;
+    await write(url, data);
+    return true;
+  }
+
   window.NecpraSocialOfflineCache = {
     get: responseFromCache,
+    put: put,
     clearAccount: async function () {
       var owner = accountId();
       try {
