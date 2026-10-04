@@ -64,7 +64,9 @@
         return native.uploadFile({endpoint:endpoint, uri:uri, fieldName:fieldName || 'file', mimeType:mimeType || '*/*', fileName:fileName || 'upload'});
       },
       nativeProfileAvailable: function () { return native.nativeProfileAvailable(); },
-      openNativeProfile: function (section) { return native.openNativeProfile({section: section || 'home'}); }
+      openNativeProfile: function (section) { return native.openNativeProfile({section: section || 'home'}); },
+      nativeFriendsAvailable: function () { return native.nativeFriendsAvailable(); },
+      openNativeFriends: function (section) { return native.openNativeFriends({section: section || 'friends'}); }
     };
   }
 
@@ -211,6 +213,133 @@
 
   installNativeProfileRouting();
   if (document.readyState !== 'complete') window.addEventListener('load', installNativeProfileRouting, { once: true });
+
+  // ---------------------------------------------------------------------------------------------
+  // Native Friends routing (Android APK only - this file's body never runs in a browser or the PWA,
+  // so those keep using the existing web Friends module untouched).
+  //
+  //   Step 4 (testing):   leave NATIVE_FRIENDS_DEFAULT = false and opt in on a test device with
+  //                       localStorage.setItem('necpra_native_friends', '1')   (DevTools console)
+  //   Step 6 (switch):    set NATIVE_FRIENDS_DEFAULT = true. The APK now opens the native screen;
+  //                       localStorage 'necpra_native_friends' = '0' stays available as a kill switch.
+  //
+  // An older APK without the native screen rejects nativeFriendsAvailable() and the web Friends
+  // module is used instead, so deploying this file before the new APK is safe.
+  // ---------------------------------------------------------------------------------------------
+  var NATIVE_FRIENDS_DEFAULT = false;
+  var nativeFriendsReady = null;
+  var nativeFriendsOpen = false;
+
+  function nativeFriendsFlag() {
+    try {
+      var v = localStorage.getItem('necpra_native_friends');
+      if (v === '1') return true;
+      if (v === '0') return false;
+    } catch (_) {}
+    return NATIVE_FRIENDS_DEFAULT;
+  }
+
+  async function probeNativeFriends() {
+    if (nativeFriendsReady !== null) return nativeFriendsReady;
+    try {
+      var r = await window.NecpraNative.nativeFriendsAvailable();
+      nativeFriendsReady = !!(r && r.available);
+    } catch (_) {
+      nativeFriendsReady = false; // older APK without the screen
+    }
+    return nativeFriendsReady;
+  }
+
+  function handleNativeFriendsResult(r) {
+    if (!r) return;
+    if (r.sessionExpired) { handleNativeProfileResult({ sessionExpired: true }); return; }
+
+    // Pending-requests badge in the shell header.
+    try {
+      var badge = document.getElementById('friendsRequestsBadge');
+      if (badge && r.requestCount != null) {
+        var n = Number(r.requestCount) || 0;
+        badge.textContent = String(n);
+        badge.style.display = n > 0 ? '' : 'none';
+      }
+    } catch (_) {}
+
+    // Keep the web shell's copy of the friends list (used by messages/status/groups) in step with
+    // what was changed natively. Display fields only, no credentials.
+    if (r.friendsChanged && r.friendsJson) {
+      try {
+        var list = JSON.parse(r.friendsJson);
+        if (Array.isArray(list)) {
+          try { localStorage.setItem('knecta_friends_cache', JSON.stringify(list)); } catch (_) {}
+          try { if (window.KynectaStore && window.KynectaStore.set) window.KynectaStore.set('friends.list', list); } catch (_) {}
+          ['sendFriendsToMessagesIframe', 'sendFriendsToStatusIframe', 'sendFriendsToGroupIframe', 'sendFriendsToToolsIframe']
+            .forEach(function (fn) { try { if (typeof window[fn] === 'function') window[fn](list); } catch (_) {} });
+        }
+      } catch (_) {}
+    }
+
+    // "Message" tapped on a friend: hand over to the shell's existing open-chat path.
+    if (r.chatUserId) {
+      try {
+        window.postMessage({
+          type: 'SWITCH_MODULE',
+          module: 'messages',
+          payload: {
+            userId: Number(r.chatUserId),
+            userName: r.chatUserName || 'User',
+            avatar: r.chatAvatar || null,
+            findExisting: true,
+            timestamp: Date.now(),
+            source: 'native-friends'
+          },
+          source: 'native-friends'
+        }, window.location.origin);
+      } catch (_) {}
+    }
+  }
+
+  async function openNativeFriendsScreen(section) {
+    if (nativeFriendsOpen) return true;
+    nativeFriendsOpen = true;
+    try {
+      var result = await window.NecpraNative.openNativeFriends(section);
+      handleNativeFriendsResult(result);
+      return true;
+    } catch (err) {
+      console.warn('[native-friends] could not open native screen:', err && err.message ? err.message : err);
+      return false;
+    } finally {
+      nativeFriendsOpen = false;
+    }
+  }
+
+  // The bottom-nav Friends button, the "+" menu entry and the Add-Friend button all go through the
+  // global navigateToPage('friends'). When the native screen is enabled and present it opens instead;
+  // otherwise (older APK, flag off, native failure) the original web Friends runs.
+  function installNativeFriendsRouting() {
+    if (!window.NecpraNative || !window.NecpraNative.openNativeFriends) return;
+    if (window.__necpraFriendsRoutingInstalled) return;
+    if (typeof window.navigateToPage !== 'function') return;
+    window.__necpraFriendsRoutingInstalled = true;
+
+    var origNavigate = window.navigateToPage;
+    window.navigateToPage = function (page) {
+      var self = this, args = arguments;
+      if (nativeFriendsFlag() && /^friends?$/.test(String(page || ''))) {
+        probeNativeFriends().then(function (ok) {
+          if (!ok) return origNavigate.apply(self, args);
+          return openNativeFriendsScreen('friends').then(function (opened) {
+            if (!opened) return origNavigate.apply(self, args);
+          });
+        });
+        return;
+      }
+      return origNavigate.apply(this, args);
+    };
+  }
+
+  installNativeFriendsRouting();
+  if (document.readyState !== 'complete') window.addEventListener('load', installNativeFriendsRouting, { once: true });
 
   // Android deliberately never writes kynecta_auth to WebView storage (tokens live in the native
   // store), so the offline caches / local message DBs could not tell whose data they hold and cached

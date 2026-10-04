@@ -68,6 +68,14 @@
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:windowSoftInputMode="adjustResize" />
 
+        <!-- Native Friends screen. Not exported: only MainActivity (via NecpraNativePlugin) can start it. -->
+        <activity
+            android:name=".NecpraFriendsActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme.NoActionBar"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:windowSoftInputMode="adjustResize" />
+
         <!-- Native FCM receiver: builds WhatsApp-style grouped notifications in every app state and
              forwards everything else to the Capacitor push plugin. It REPLACES Capacitor's own
              MessagingService (removed below) so only one service handles each push. -->

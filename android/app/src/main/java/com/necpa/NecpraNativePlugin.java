@@ -535,6 +535,50 @@ public class NecpraNativePlugin extends Plugin {
         call.resolve(out);
     }
 
+    // ---------------------------------------------------------------------
+    // Native Friends screen (NecpraFriendsActivity)
+    // ---------------------------------------------------------------------
+
+    /** Lets the web layer detect the screen; an older APK rejects this call, so the web falls back. */
+    @PluginMethod
+    public void nativeFriendsAvailable(PluginCall call) {
+        JSObject out = new JSObject();
+        out.put("available", true);
+        call.resolve(out);
+    }
+
+    @PluginMethod
+    public void openNativeFriends(PluginCall call) {
+        try {
+            Intent intent = new Intent(getContext(), NecpraFriendsActivity.class);
+            intent.putExtra(NecpraFriendsActivity.EXTRA_SECTION, call.getString("section", "friends"));
+            startActivityForResult(call, intent, "nativeFriendsResult");
+        } catch (Exception e) {
+            call.reject("Native friends could not be opened", e);
+        }
+    }
+
+    @ActivityCallback
+    private void nativeFriendsResult(PluginCall call, ActivityResult result) {
+        JSObject out = new JSObject();
+        out.put("closed", true);
+        Intent d = result == null ? null : result.getData();
+        if (d != null) {
+            out.put("sessionExpired", d.getBooleanExtra(NecpraFriendsActivity.RES_SESSION_EXPIRED, false));
+            out.put("friendsChanged", d.getBooleanExtra(NecpraFriendsActivity.RES_CHANGED, false));
+            out.put("requestCount", d.getIntExtra(NecpraFriendsActivity.RES_REQUEST_COUNT, 0));
+            String friendsJson = d.getStringExtra(NecpraFriendsActivity.RES_FRIENDS_JSON);
+            if (friendsJson != null) out.put("friendsJson", friendsJson);
+            long chatUserId = d.getLongExtra(NecpraFriendsActivity.RES_CHAT_USER_ID, 0L);
+            if (chatUserId > 0) {
+                out.put("chatUserId", chatUserId);
+                out.put("chatUserName", d.getStringExtra(NecpraFriendsActivity.RES_CHAT_USER_NAME));
+                out.put("chatAvatar", d.getStringExtra(NecpraFriendsActivity.RES_CHAT_AVATAR));
+            }
+        }
+        call.resolve(out);
+    }
+
     @PluginMethod
     public void openNativeProfile(PluginCall call) {
         try {

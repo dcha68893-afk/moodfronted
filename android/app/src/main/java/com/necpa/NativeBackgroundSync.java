@@ -451,5 +451,6 @@ public final class NativeBackgroundSync {
         }
         context.getSharedPreferences(BACKGROUND_PREFS, Context.MODE_PRIVATE).edit().clear().commit();
         context.getSharedPreferences(AUTH_PREFS, Context.MODE_PRIVATE).edit().clear().commit();
+        NecpraFriendsActivity.wipeAvatarCache(context); // cached friend avatars are removed with the session
     }
 }
