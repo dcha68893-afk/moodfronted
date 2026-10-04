@@ -2967,6 +2967,10 @@ TokenManager = {
     
     isTokenExpired: function() {
         try {
+            if (window.Capacitor?.isNativePlatform?.()) {
+                const expiry = Number(window.__NECPRA_NATIVE_AUTH_SNAPSHOT__?.expiresAt || 0);
+                return !expiry || Date.now() >= expiry;
+            }
             const expiryStr = localStorage.getItem(this.TOKEN_EXPIRY_KEY);
             if (!expiryStr) return true;
             
@@ -2980,6 +2984,10 @@ TokenManager = {
     
     getTokenExpiry: function() {
         try {
+            if (window.Capacitor?.isNativePlatform?.()) {
+                const expiry = Number(window.__NECPRA_NATIVE_AUTH_SNAPSHOT__?.expiresAt || 0);
+                return expiry || null;
+            }
             const expiryStr = localStorage.getItem(this.TOKEN_EXPIRY_KEY);
             return expiryStr ? parseInt(expiryStr, 10) : null;
         } catch (error) {
