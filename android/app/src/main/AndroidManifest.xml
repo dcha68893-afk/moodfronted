@@ -14,6 +14,15 @@
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:resource="@string/default_notification_channel_id" />
 
+        <!-- Status-bar icon + accent colour for push notifications. Without these Android
+             falls back to the full-colour launcher icon, which it draws as a plain white square. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_stat_necpra" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/necpra_push_accent" />
+
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
             android:name=".MainActivity"
