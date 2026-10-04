@@ -205,13 +205,17 @@ public class NecpraNativePlugin extends Plugin {
             long expiresAt = p.getLong("expiresAt", 0L);
             long unlockedUntil = p.getLong("unlockedUntil", 0L);
 
+            boolean locked = System.currentTimeMillis() > unlockedUntil;
             out.put("hasSession", access != null || refresh != null);
-            out.put("locked", System.currentTimeMillis() > unlockedUntil);
+            out.put("locked", locked);
             out.put("unlockedUntil", unlockedUntil);
             out.put("expiresAt", expiresAt);
-            out.put("accessToken", access == null ? JSObject.NULL : access);
-            out.put("refreshToken", refresh == null ? JSObject.NULL : refresh);
-            out.put("userJson", user == null ? JSObject.NULL : user);
+            // Do not release credentials to the WebView until the native
+            // unlock window is active. WorkManager uses the encrypted store
+            // directly and never crosses this WebView boundary.
+            out.put("accessToken", locked ? JSObject.NULL : (access == null ? JSObject.NULL : access));
+            out.put("refreshToken", locked ? JSObject.NULL : (refresh == null ? JSObject.NULL : refresh));
+            out.put("userJson", locked ? JSObject.NULL : (user == null ? JSObject.NULL : user));
             call.resolve(out);
         } catch (Exception e) {
             call.reject("Native session read failed", e);
