@@ -582,8 +582,16 @@ public class NecpraNativePlugin extends Plugin {
     @PluginMethod
     public void openNativeProfile(PluginCall call) {
         try {
+            String section = call.getString("section", "home");
+            if ("settings".equals(section) || section.startsWith("settings:")) {
+                Intent intent = new Intent(getContext(), NecpraSettingsActivity.class);
+                String requested = section.startsWith("settings:") ? section.substring("settings:".length()) : "home";
+                intent.putExtra(NecpraSettingsActivity.EXTRA_SECTION, requested);
+                startActivityForResult(call, intent, "nativeSettingsResult");
+                return;
+            }
             Intent intent = new Intent(getContext(), NecpraProfileActivity.class);
-            intent.putExtra(NecpraProfileActivity.EXTRA_SECTION, call.getString("section", "home"));
+            intent.putExtra(NecpraProfileActivity.EXTRA_SECTION, section);
             startActivityForResult(call, intent, "nativeProfileResult");
         } catch (Exception e) {
             call.reject("Native profile could not be opened", e);
@@ -607,6 +615,21 @@ public class NecpraNativePlugin extends Plugin {
                 out.put("displayName", d.getStringExtra("displayName"));
                 out.put("bio", d.getStringExtra("bio"));
             }
+        }
+        call.resolve(out);
+    }
+
+    @ActivityCallback
+    private void nativeSettingsResult(PluginCall call, ActivityResult result) {
+        JSObject out = new JSObject();
+        out.put("closed", true);
+        Intent d = result == null ? null : result.getData();
+        if (d != null) {
+            boolean changed = d.getBooleanExtra(NecpraSettingsActivity.RES_CHANGED, false);
+            out.put("settingsChanged", changed);
+            out.put("profileChanged", changed);
+            out.put("loggedOut", d.getBooleanExtra(NecpraSettingsActivity.RES_LOGGED_OUT, false));
+            out.put("accountDeleted", d.getBooleanExtra(NecpraSettingsActivity.RES_ACCOUNT_DELETED, false));
         }
         call.resolve(out);
     }
