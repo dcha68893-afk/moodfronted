@@ -840,4 +840,14 @@ public class NecpraNativePlugin extends Plugin {
         out.put("packageName", getContext().getPackageName());
         call.resolve(out);
     }
+
+    @PluginMethod
+    public void openNativeGame(PluginCall call) {
+        String game = call.getString("game", "water3d");
+        if (!"water3d".equalsIgnoreCase(game)) { call.reject("Unsupported native game"); return; }
+        Intent intent = new Intent(getContext(), Necpra3DWaterSortActivity.class);
+        intent.putExtra("level", Math.max(1, call.getInt("level", 1)));
+        getContext().startActivity(intent);
+        call.resolve();
+    }
 }
