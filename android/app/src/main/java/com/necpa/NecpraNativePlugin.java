@@ -665,6 +665,51 @@ public class NecpraNativePlugin extends Plugin {
         call.resolve(out);
     }
 
+    /** Native landing / login / sign up. Returns {action:"login"|"google"|"closed"}; a login also carries the session data. */
+    @PluginMethod
+    public void openNativeAuth(PluginCall call) {
+        try {
+            Intent intent = new Intent(getContext(), NecpraAuthActivity.class);
+            String start = call.getString("start");
+            String reason = call.getString("reason");
+            if (start != null) intent.putExtra(NecpraAuthActivity.EXTRA_START, start);
+            if (reason != null) intent.putExtra(NecpraAuthActivity.EXTRA_REASON, reason);
+            startActivityForResult(call, intent, "nativeAuthResult");
+        } catch (Exception e) {
+            call.reject("Native login could not be opened", e);
+        }
+    }
+
+    @PluginMethod
+    public void nativeAuthAvailable(PluginCall call) {
+        JSObject out = new JSObject();
+        out.put("available", true);
+        call.resolve(out);
+    }
+
+    @ActivityCallback
+    private void nativeAuthResult(PluginCall call, ActivityResult result) {
+        JSObject out = new JSObject();
+        Intent d = result == null ? null : result.getData();
+        String action = d == null ? null : d.getStringExtra(NecpraAuthActivity.RES_ACTION);
+        if (result == null || result.getResultCode() != android.app.Activity.RESULT_OK || action == null) {
+            out.put("action", "closed");
+            call.resolve(out);
+            return;
+        }
+        out.put("action", action);
+        if (NecpraAuthActivity.ACTION_LOGIN.equals(action)) {
+            NecpraAuthActivity.Pending p = NecpraAuthActivity.takePending();   // one-shot, in-memory only
+            if (p == null) { out.put("action", "closed"); call.resolve(out); return; }
+            out.put("token", p.token);
+            out.put("refreshToken", p.refreshToken);
+            out.put("userJson", p.userJson);
+            out.put("expiresAt", p.expiresAt);
+            out.put("password", p.password);
+        }
+        call.resolve(out);
+    }
+
     @PluginMethod
     public void openNativeFriends(PluginCall call) {
         try {

@@ -85,7 +85,15 @@
         return native.openNativeMessages(args);
       },
       nativeFriendsAvailable: function () { return native.nativeFriendsAvailable(); },
-      openNativeFriends: function (section) { return native.openNativeFriends({section: section || 'friends'}); }
+      openNativeFriends: function (section) { return native.openNativeFriends({section: section || 'friends'}); },
+      nativeAuthAvailable: function () { return native.nativeAuthAvailable(); },
+      openNativeAuth: function (opts) {
+        opts = opts || {};
+        var args = {};
+        if (opts.start) args.start = String(opts.start);
+        if (opts.reason) args.reason = String(opts.reason);
+        return native.openNativeAuth(args);
+      }
     };
   }
 
@@ -632,6 +640,13 @@
     }
     var timer = setInterval(function () { if (++tries > 40) return clearInterval(timer); attempt(); }, 4000);
     setTimeout(attempt, 2500);
+    // Event-driven triggers so a brand-new or slow-starting account does not depend on the 4s polling window:
+    // the web layer announces when it has the identity ready (it creates + backs it up on first load), a login
+    // just completed, or the app came back to the foreground. attempt() is a no-op once provisioned.
+    function kick() { if (tries >= 99) return; setTimeout(attempt, 300); }
+    try { document.addEventListener('kyn:e2eUnlocked', kick); } catch (_) {}
+    try { window.addEventListener('auth-login-success', kick); } catch (_) {}
+    try { document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') kick(); }); } catch (_) {}
   })();
 
   // Android forwards verified Necpra links here. Web navigation remains the
@@ -746,6 +761,129 @@
     if (!SplashScreen) return;
     try { SplashScreen.hide({ fadeOutDuration: 200 }).catch(function () {}); } catch (_) {}
   }
+
+  // ---------------------------------------------------------------------------------------------
+  // Native Landing / Login / Sign up (Android APK only). The native screen only collects credentials and talks to
+  // the same /api/auth endpoints; it never saves a session. On success the page finishes the login through the one
+  // existing path, finalizeLoginSuccess() (web storage, E2E wrap secret, two-accounts-per-device cap, and
+  // AppRuntimeAuthority -> authSetSession for the native store). If the APK has no native login, the flag is off or
+  // anything fails, the original web landing/login stays exactly as it was.
+  // ---------------------------------------------------------------------------------------------
+  var NATIVE_AUTH_DEFAULT = true;
+  var nativeAuthOpen = false, nativeAuthReady = null;
+
+  function nativeAuthFlag() {
+    try {
+      var v = localStorage.getItem('necpra_native_auth');
+      if (v === '1') return true;
+      if (v === '0') return false;
+    } catch (_) {}
+    return NATIVE_AUTH_DEFAULT;
+  }
+
+  async function probeNativeAuth() {
+    if (nativeAuthReady !== null) return nativeAuthReady;
+    try {
+      var r = await window.NecpraNative.nativeAuthAvailable();
+      nativeAuthReady = !!(r && r.available);
+    } catch (_) {
+      nativeAuthReady = false; // older APK without the screen
+    }
+    return nativeAuthReady;
+  }
+
+  function showWebLandingAgain() {
+    try { document.documentElement.classList.remove('necpra-native-auth-pending'); } catch (_) {}
+  }
+
+  function waitFor(test, ms) {
+    return new Promise(function (resolve) {
+      var t0 = Date.now();
+      (function tick() {
+        var ok = false;
+        try { ok = !!test(); } catch (_) {}
+        if (ok) return resolve(true);
+        if (Date.now() - t0 > ms) return resolve(false);
+        setTimeout(tick, 100);
+      })();
+    });
+  }
+
+  async function finishNativeLogin(r) {
+    var ready = await waitFor(function () { return typeof window.finalizeLoginSuccess === 'function' && window.CoreUtils; }, 5000);
+    if (!ready) { showWebLandingAgain(); return; }
+    var user = null;
+    try { if (r.userJson) user = JSON.parse(r.userJson); } catch (_) {}
+    var response = {
+      token: r.token,
+      refreshToken: r.refreshToken || null,
+      user: user,
+      expiresAt: r.expiresAt || null
+    };
+    try {
+      window.finalizeLoginSuccess(response, r.password || '');
+    } catch (err) {
+      console.warn('[native-auth] could not finish login:', err && err.message ? err.message : err);
+      showWebLandingAgain();
+    }
+  }
+
+  function startWebGoogle() {
+    showWebLandingAgain();
+    try { var b = document.getElementById('landingLoginBtn'); if (b) b.click(); } catch (_) {}   // opens the login form
+    var tries = 0;
+    (function tick() {
+      var g = document.querySelector('#googleSignInLoginContainer button');
+      if (g) { g.click(); return; }                 // the existing native Google sign-in (js/google-auth.js)
+      if (++tries < 40) setTimeout(tick, 150);
+    })();
+  }
+
+  async function openNativeAuthScreen(opts) {
+    if (!nativeAuthFlag() || nativeAuthOpen) return false;
+    if (!(await probeNativeAuth())) return false;
+    nativeAuthOpen = true;
+    try {
+      var r = await window.NecpraNative.openNativeAuth(opts || {});
+      if (r && r.action === 'login' && r.token) { await finishNativeLogin(r); }
+      else if (r && r.action === 'google') { startWebGoogle(); }
+      else { showWebLandingAgain(); }               // closed: fall back to the web landing
+      return true;
+    } catch (err) {
+      console.warn('[native-auth] could not open native screen:', err && err.message ? err.message : err);
+      showWebLandingAgain();
+      return false;
+    } finally {
+      nativeAuthOpen = false;
+    }
+  }
+
+  function hasStoredWebToken() {
+    try {
+      return ['authToken', 'necpa_token', 'token', 'accessToken', 'USER_TOKEN'].some(function (k) { return !!localStorage.getItem(k); });
+    } catch (_) { return false; }
+  }
+
+  function installNativeAuthLaunch() {
+    if (!window.NecpraNative || !window.NecpraNative.openNativeAuth) return;
+    if (window.__necpraAuthLaunchInstalled) return;
+    if (!document.getElementById('landingScreen')) return;            // only the landing/login page (index.html)
+    if (!nativeAuthFlag()) return;
+    window.__necpraAuthLaunchInstalled = true;
+
+    var reason = null;
+    try { reason = new URLSearchParams(window.location.search).get('reason'); } catch (_) {}
+    // A stored token means the page's own session check will take the user straight into the app.
+    if (!reason && hasStoredWebToken()) return;
+    try { document.documentElement.classList.add('necpra-native-auth-pending'); } catch (_) {}   // no flash of the web landing
+    var opts = reason ? { start: 'login', reason: 'Your session expired. Please log in again.' } : {};
+    openNativeAuthScreen(opts).then(function (opened) {
+      if (!opened) showWebLandingAgain();
+    });
+  }
+
+  installNativeAuthLaunch();
+  if (document.readyState !== 'complete') window.addEventListener('load', installNativeAuthLaunch, { once: true });
 
   if (document.readyState === 'complete') {
     requestAnimationFrame(function () { requestAnimationFrame(hideSplash); });

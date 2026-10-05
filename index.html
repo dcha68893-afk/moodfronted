@@ -2386,6 +2386,7 @@
         }
     </style>
 
+    <style>.necpra-native-auth-pending #landingScreen,.necpra-native-auth-pending #authPanel{visibility:hidden}</style>
     <div class="landing-screen" id="landingScreen" role="dialog" aria-label="Welcome to Necpra">
         <button type="button" class="landing-skip" id="landingSkip" aria-label="Skip to login">Skip</button>
         <div class="landing-scroll">
@@ -2413,19 +2414,18 @@
                                     <div class="lp-bubble other lp-typing lp-slide-in" style="animation-delay:.95s"><span></span><span></span><span></span></div>
                                 </div>
                                 <div class="landing-phone-screen" data-screen="friends">
-                                    <div class="lp-fr-head"><i class="fas fa-user-plus"></i><span>Friend requests</span><span class="lp-fr-badge">2</span></div>
+                                    <div class="lp-fr-head"><i class="fas fa-user-plus"></i><span>Friend requests</span></div>
                                     <div class="lp-fr-row"><span class="lp-avatar-chip a"></span><span class="lp-line w60"></span><span class="lp-fr-btn">Accept</span></div>
                                     <div class="lp-fr-label">Suggested for you</div>
                                     <div class="lp-fr-row"><span class="lp-avatar-chip b"></span><span class="lp-line w40"></span><span class="lp-fr-btn add">Add</span></div>
-                                    <div class="lp-community-tag"><i class="fas fa-location-dot"></i> 5 people nearby</div>
+                                    
                                 </div>
                                 <div class="landing-phone-screen" data-screen="accommodation">
                                     <div class="lp-ac-search"><i class="fas fa-magnifying-glass"></i><span>Rooms near campus</span></div>
                                     <div class="lp-ac-card">
                                         <div class="lp-ac-photo"><i class="fas fa-bed"></i></div>
-                                        <div class="lp-ac-title">Furnished student room, Kilimani</div>
-                                        <div class="lp-ac-price">KSh 8,500 / month</div>
-                                        <div class="lp-ac-btn">Check availability &amp; book</div>
+                                        <div class="lp-ac-title">Browse rooms and rentals</div>
+                                                                                <div class="lp-ac-btn">Check availability &amp; book</div>
                                     </div>
                                 </div>
                                 <div class="landing-phone-screen" data-screen="market">
@@ -2438,9 +2438,9 @@
                                 </div>
                                 <div class="landing-phone-screen" data-screen="community">
                                     <div class="lp-community-header"><i class="fas fa-users"></i><span class="lp-line w60"></span></div>
-                                    <div class="lp-avatar-cluster"><span class="lp-avatar-chip a"></span><span class="lp-avatar-chip b"></span><span class="lp-avatar-chip c"></span><span class="lp-avatar-chip more">+128</span></div>
-                                    <div class="lp-bubble other lp-slide-in">Welcome to Devs United 👋</div>
-                                    <div class="lp-community-tag"><i class="fas fa-bolt"></i> 12 online now</div>
+                                    <div class="lp-avatar-cluster"><span class="lp-avatar-chip a"></span><span class="lp-avatar-chip b"></span><span class="lp-avatar-chip c"></span></div>
+                                    <div class="lp-bubble other lp-slide-in">Welcome to the group 👋</div>
+                                    
                                 </div>
                                 <div class="landing-phone-screen" data-screen="status">
                                     <div class="lp-status-row">
@@ -2460,16 +2460,11 @@
                     <p class="landing-subtitle">Necpra brings your chats, friends, places to stay and shopping into one fast, secure app — on any device.</p>
 
                     <div class="landing-stat-row" aria-label="Necpra by the numbers">
-                        <div class="landing-stat"><span class="landing-stat-num"><i class="fas fa-star"></i> 4.8</span><span class="landing-stat-label">User rating</span></div>
-                        <div class="landing-stat"><span class="landing-stat-num">1+</span><span class="landing-stat-label">Countries</span></div>
-                        <div class="landing-stat"><span class="landing-stat-num">99.9%</span><span class="landing-stat-label">Uptime</span></div>
                         <div class="landing-stat"><span class="landing-stat-num"><i class="fas fa-lock"></i></span><span class="landing-stat-label">End-to-end encrypted</span></div>
                     </div>
 
                     <div class="landing-trust-strip" aria-label="Why people trust Necpra">
                         <span class="landing-trust-pill"><i class="fas fa-lock"></i> End-to-End Encrypted</span>
-                        <span class="landing-trust-pill"><i class="fas fa-globe"></i> Trusted Worldwide</span>
-                        <span class="landing-trust-pill"><i class="fas fa-paper-plane"></i> Millions of Messages Delivered</span>
                         <span class="landing-trust-pill"><i class="fas fa-shield-alt"></i> Fast &amp; Secure</span>
                     </div>
 
@@ -2633,16 +2628,11 @@
 
             <footer class="landing-footer">
                 <div class="landing-footer-links">
-                    <!-- No Privacy/Terms/Contact/Help/About pages exist yet in
-                         this app, so these are placeholders (as the footer
-                         spec requires the links to be present). They route to
-                         the login screen for now rather than doing nothing;
-                         swap in real hrefs once those pages exist. -->
-                    <a href="#" class="landing-footer-link">Privacy</a>
-                    <a href="#" class="landing-footer-link">Terms</a>
-                    <a href="#" class="landing-footer-link">Contact</a>
-                    <a href="#" class="landing-footer-link">Help</a>
-                    <a href="#" class="landing-footer-link">About</a>
+                    <a href="/legal/privacy.html" class="landing-footer-link">Privacy</a>
+                    <a href="/legal/terms.html" class="landing-footer-link">Terms</a>
+                    <a href="/contact/" class="landing-footer-link">Contact</a>
+                    <a href="/help/" class="landing-footer-link">Help</a>
+                    <a href="/about/" class="landing-footer-link">About</a>
                 </div>
                 <div class="landing-footer-meta">&copy; <span id="landingYear"></span> Necpra</div>
             </footer>
@@ -2700,12 +2690,6 @@
                 <p class="tagline">Connect with the world</p>
             </div>
             
-            <div class="stats-grid">
-                <div class="stat-card"><div class="stat-number">2M+</div><div class="stat-label">Active Users</div></div>
-                <div class="stat-card"><div class="stat-number">200+</div><div class="stat-label">Countries</div></div>
-                <div class="stat-card"><div class="stat-number">50+</div><div class="stat-label">Languages</div></div>
-                <div class="stat-card"><div class="stat-number">100K+</div><div class="stat-label">Chat Rooms</div></div>
-            </div>
             
             <div class="feature-showcase">
                 <h2>✨ Features</h2>
@@ -2725,13 +2709,6 @@
                 </div>
             </div>
 
-            <div class="social-proof">
-                <h2>🌟 Testimonials</h2>
-                <div class="testimonial">
-                    <div class="testimonial-content">"Made friends across 3 continents! Translation is amazing."</div>
-                    <div class="testimonial-author"><div class="testimonial-avatar">SR</div><div class="testimonial-info"><h4>Sarah R.</h4><p>Spain</p></div></div>
-                </div>
-            </div>
             
             <div class="download-section">
                 <h2>📱 Get The App</h2>
@@ -2752,12 +2729,6 @@
                 <p class="tagline">Connect with the world, one chat at a time</p>
             </div>
             
-            <div class="stats-grid">
-                <div class="stat-card"><div class="stat-number">2M+</div><div class="stat-label">Active Users</div></div>
-                <div class="stat-card"><div class="stat-number">200+</div><div class="stat-label">Countries</div></div>
-                <div class="stat-card"><div class="stat-number">50+</div><div class="stat-label">Languages</div></div>
-                <div class="stat-card"><div class="stat-number">100K+</div><div class="stat-label">Chat Rooms</div></div>
-            </div>
             
             <div class="feature-showcase">
                 <h2>✨ Platform Features</h2>
@@ -2778,13 +2749,6 @@
                 </div>
             </div>
 
-            <div class="social-proof">
-                <h2>🌟 Success Stories</h2>
-                <div class="testimonial">
-                    <div class="testimonial-content">"Necpra helped me find amazing friends across continents!"</div>
-                    <div class="testimonial-author"><div class="testimonial-avatar">SR</div><div class="testimonial-info"><h4>jackson elvis</h4><p>Spain • Regular User</p></div></div>
-                </div>
-            </div>
             
             <div class="download-section">
                 <h2>📱 Get The App</h2>
@@ -3135,11 +3099,6 @@
                     <div class="feature-card"><div class="feature-icon"><i class="fas fa-users"></i></div><div class="feature-content"><h3>Group &amp; Community Chats</h3><p>Stay close with everyone that matters</p></div></div>
                     <div class="feature-card"><div class="feature-icon"><i class="fas fa-language"></i></div><div class="feature-content"><h3>Real-time Translation</h3><p>AI-powered multilingual chat</p></div></div>
                 </div>
-                <div class="mmp-stat-row">
-                    <div class="mmp-stat"><span class="mmp-stat-num"><i class="fas fa-star"></i> 4.8/5</span><span class="mmp-stat-label">Average Review</span></div>
-                    <div class="mmp-stat"><span class="mmp-stat-num">1+</span><span class="mmp-stat-label">Countries</span></div>
-                    <div class="mmp-stat"><span class="mmp-stat-num">99.9%</span><span class="mmp-stat-label">Uptime</span></div>
-                </div>
             </aside>
         </div>
 
@@ -3171,23 +3130,7 @@
                 <!-- Reviews + Countries: quick-scan trust stats to keep the
                      page moving instead of leaving a gap after the feature
                      grid. -->
-                <div class="mmp-stat-row">
-                    <div class="mmp-stat"><span class="mmp-stat-num"><i class="fas fa-star"></i> 4.8/5</span><span class="mmp-stat-label">Average Review</span></div>
-                    <div class="mmp-stat"><span class="mmp-stat-num">1+</span><span class="mmp-stat-label">Countries</span></div>
-                    <div class="mmp-stat"><span class="mmp-stat-num">99.9%</span><span class="mmp-stat-label">Uptime</span></div>
-                </div>
 
-                <div class="social-proof">
-                    <h2>🌟 Reviews &amp; Success Stories</h2>
-                    <div class="testimonial">
-                        <div class="testimonial-content">"Necpra helped me find amazing friends across continents!"</div>
-                        <div class="testimonial-author"><div class="testimonial-avatar">SR</div><div class="testimonial-info"><h4>jackson elvis</h4><p>Spain • Regular User</p></div></div>
-                    </div>
-                    <div class="testimonial">
-                        <div class="testimonial-content">"I found a furnished room near campus and booked it without leaving the app."</div>
-                        <div class="testimonial-author"><div class="testimonial-avatar">DK</div><div class="testimonial-info"><h4>eliza mwita</h4><p>South Korea • Regular User</p></div></div>
-                    </div>
-                </div>
 
                 <!-- Screenshots: real in-app screens aren't bundled in this
                      repo as static image assets yet, so this reuses the same
@@ -5501,9 +5444,6 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
         if (registerBtn) registerBtn.addEventListener('click', function () { goToForm('register'); });
         if (loginBtn) loginBtn.addEventListener('click', function () { goToForm('login'); });
         if (skipBtn) skipBtn.addEventListener('click', function () { goToForm('login'); });
-        document.querySelectorAll('.landing-footer-link').forEach(function (link) {
-            link.addEventListener('click', function (e) { e.preventDefault(); goToForm('login'); });
-        });
         // "Continue with Google" opens the login view where the real Google
         // Sign-In button (rendered by google-auth.js into
         // #googleSignInLoginContainer) already lives — this avoids running a
