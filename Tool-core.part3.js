@@ -5022,9 +5022,31 @@ export async function inviteTeamMemberWrapper(email, role = 'member') {
     return inviteTeamMember(email, role);
 }
 
+function _findNativeChatOpener() {
+    // Tools.html runs inside an iframe of the app shell; native-init.js lives in the top window.
+    const wins = [window];
+    try { if (window.parent && window.parent !== window) wins.push(window.parent); } catch (_) {}
+    try { if (window.top && window.top !== window) wins.push(window.top); } catch (_) {}
+    for (const w of wins) {
+        try { if (typeof w.__necpraOpenNativeChatWithPeer === 'function') return w.__necpraOpenNativeChatWithPeer; } catch (_) {}
+    }
+    return null;
+}
+
 export async function openChat(userId, userName) {
     try {
         if (!isActive()) return false;
+        // FIX (Chat with Admin / Chat with Seller never opened the in-app message panel): on the
+        // Android app open the NATIVE conversation for this user (same screen the Messages tab
+        // and Friends → Message use). Only numeric user ids can be native peers.
+        const _peer = Number(userId);
+        if (_peer > 0 && isFinite(_peer)) {
+            const _nativeOpen = _findNativeChatOpener();
+            if (_nativeOpen) {
+                const _title = (typeof userName === 'string' ? userName : (userName && (userName.seller_name || userName.name))) || 'Chat';
+                try { if (await _nativeOpen(_peer, _title)) return true; } catch (_) {}
+            }
+        }
         // ROOT-CAUSE FIX (CHAT-WITH-ADMIN-DOES-NOTHING): this posted a message
         // of type 'OPEN_CHAT' — a type the parent shell (chat.html) never
         // listens for at all. The parent's real, working "open a 1:1 chat

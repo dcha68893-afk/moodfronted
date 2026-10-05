@@ -84,6 +84,15 @@
         if (opts.avatar) args.avatar = String(opts.avatar);
         return native.openNativeMessages(args);
       },
+      nativeToolsAvailable: function () { return native.nativeToolsAvailable(); },
+      openNativeTools: function (opts) {
+        opts = opts || {};
+        var args = {};
+        if (opts.tree) args.tree = String(opts.tree);
+        if (opts.category) args.category = String(opts.category);
+        if (opts.start) args.start = String(opts.start);
+        return native.openNativeTools(args);
+      },
       nativeFriendsAvailable: function () { return native.nativeFriendsAvailable(); },
       openNativeFriends: function (section) { return native.openNativeFriends({section: section || 'friends'}); },
       nativeAuthAvailable: function () { return native.nativeAuthAvailable(); },
@@ -481,6 +490,74 @@
     return on;
   }
   window.__necpraSyncDmOwner = syncDmOwner;
+
+  // ---------------------------------------------------------------------------------------------
+  // Native Categories / marketplace browse (Tools module). Kill switch:
+  //   localStorage.setItem('necpra_native_tools', '0')
+  // Resolves { opened:true, openProductId? } when the native screen was shown and closed, or
+  // { opened:false } when the caller should keep using the web Categories page (older APK, flag off).
+  // Chat taps inside the screen open the native Messages screen (web chat as fallback).
+  // ---------------------------------------------------------------------------------------------
+  var nativeToolsOpen = false;
+  var nativeToolsReady = null;
+
+  function nativeToolsFlag() {
+    try { return localStorage.getItem('necpra_native_tools') !== '0'; } catch (_) { return true; }
+  }
+
+  async function probeNativeTools() {
+    if (nativeToolsReady !== null) return nativeToolsReady;
+    try {
+      var r = await window.NecpraNative.nativeToolsAvailable();
+      nativeToolsReady = !!(r && r.available);
+    } catch (_) { nativeToolsReady = false; }
+    return nativeToolsReady;
+  }
+
+  window.__necpraOpenNativeTools = async function (treeJson, category, start) {
+    if (!window.NecpraNative || !window.NecpraNative.openNativeTools) return { opened: false };
+    if (!nativeToolsFlag() || nativeToolsOpen) return { opened: false };
+    if (!(await probeNativeTools())) return { opened: false };
+    nativeToolsOpen = true;
+    try {
+      var result = await window.NecpraNative.openNativeTools({ tree: treeJson, category: category, start: start });
+      if (result && result.sessionExpired) { handleNativeProfileResult({ sessionExpired: true }); return { opened: true }; }
+      if (result && result.chatUserId) {
+        var openWebChat = function () {
+          try {
+            window.postMessage({
+              type: 'SWITCH_MODULE', module: 'messages',
+              payload: { userId: Number(result.chatUserId), userName: result.chatUserName || 'User', findExisting: true, timestamp: Date.now(), source: 'native-tools' },
+              source: 'native-tools'
+            }, window.location.origin);
+          } catch (_) {}
+        };
+        var shown = false;
+        try { shown = await openNativeMessagesScreen({ peerId: result.chatUserId, title: result.chatUserName }); } catch (_) {}
+        if (!shown) openWebChat();
+      }
+      return {
+        opened: true,
+        openProductId: result && result.openProductId ? String(result.openProductId) : '',
+        cartChanged: !!(result && result.cartChanged),
+        checkout: !!(result && result.checkout),
+        openWeb: result && result.openWeb ? String(result.openWeb) : ''
+      };
+    } catch (err) {
+      console.warn('[native-tools] could not open native screen:', err && err.message ? err.message : err);
+      return { opened: false };
+    } finally {
+      nativeToolsOpen = false;
+    }
+  };
+
+  // Opens the native 1:1 chat with a user id (Tools → Chat with Admin / Chat with Seller).
+  // Resolves true when the native screen was shown, false when the caller should use the web shell.
+  window.__necpraOpenNativeChatWithPeer = function (peerId, title, avatar) {
+    var id = Number(peerId);
+    if (!id || !isFinite(id)) return Promise.resolve(false);
+    return openNativeMessagesScreen({ peerId: id, title: title || 'Chat', avatar: avatar || '' });
+  };
 
   // Opens the native chat for a chat id (notification tap, deep link, push relay). Resolves true when shown.
   window.__necpraOpenNativeChat = function (chatId) {

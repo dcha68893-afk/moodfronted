@@ -2014,6 +2014,15 @@ const CoreBridge = {
 const renderers = {
     marketplaceList: withErrorBoundary('MarketplaceList', function() {
         if (!DOM.marketplaceListContent) return;
+        // FIX (listings blink/spark): every 'marketplace:data-updated' event wiped the grid and
+        // re-added each card on a stagger. Skip the render when nothing visible changed, and
+        // cancel a previous render still in flight so cards never duplicate or flash.
+        const _sigList = (Array.isArray(allListings) ? allListings : []).map(l =>
+            [l.id, l.updatedAt || '', l.price, l.status, l.available, (l.images && l.images[0]) || ''].join(':')).join('|')
+            + '#' + UIState.activeTab + '#' + (currentMoodFilter || '');
+        if (DOM.marketplaceListContent.dataset.renderSig === _sigList && DOM.marketplaceListContent.children.length) return;
+        DOM.marketplaceListContent.dataset.renderSig = _sigList;
+        const _renderToken = (window.__mpRenderToken = (window.__mpRenderToken || 0) + 1);
         DOM.marketplaceListContent.innerHTML = '';
 
         if (!allListings || allListings.length === 0) {
@@ -2064,7 +2073,7 @@ const renderers = {
         });
 
         filtered.forEach((listing, idx) => {
-            if (isListingVisibleToUser(listing)) setTimeout(() => renderers.addListingItem(listing), idx * 18);
+            if (isListingVisibleToUser(listing)) setTimeout(() => { if (window.__mpRenderToken === _renderToken) renderers.addListingItem(listing); }, idx * 18);
         });
         // Update Jumia count after staggered render
         setTimeout(() => { const c=document.getElementById('jmProductCount'); if(c) c.textContent=`(${filtered.length})`; }, filtered.length*18+200);
@@ -5593,7 +5602,44 @@ function _navDirect(page, subpage, _pushHistory) {
 }
 
 // ── Page navigation (public) ───────────────────────────────────────────────
+// Android app: the Categories icon (header / bottom tab) opens the NATIVE Categories screen.
+// Falls through to the web page when the app is older, the kill switch is on, or anything fails.
+function _jmNativeToolsOpener() {
+    const wins = [window];
+    try { if (window.parent && window.parent !== window) wins.push(window.parent); } catch (_) {}
+    try { if (window.top && window.top !== window.parent && window.top !== window) wins.push(window.top); } catch (_) {}
+    for (const w of wins) { try { if (typeof w.__necpraOpenNativeTools === 'function') return w.__necpraOpenNativeTools; } catch (_) {} }
+    return null;
+}
+function _jmCatTreeForNative() {
+    try {
+        return JSON.stringify((window._JM_CATS || []).map(c => ({
+            id: c.id, name: c.name, icon: c.icon || '',
+            sections: (c.sections || []).map(sec => ({ name: sec.name, subs: (sec.subs || []).map(x => ({ name: x.name, img: x.img || '' })) }))
+        })));
+    } catch (_) { return ''; }
+}
+let _jmNativeToolsBusy = false;
 function _nav(page, subpage) {
+    if ((page === 'categories' || page === 'cart' || page === 'orders' || page === 'wishlist') && !_jmNativeToolsBusy) {
+        const opener = _jmNativeToolsOpener();
+        if (opener) {
+            _jmNativeToolsBusy = true;
+            const _start = page === 'categories' ? '' : page;
+            Promise.resolve(opener(_jmCatTreeForNative(), page === 'categories' ? (subpage || '') : '', _start))
+                .then(r => {
+                    _jmNativeToolsBusy = false;
+                    if (!r || !r.opened) { _nav(page, subpage); return; }   // not native -> original web page
+                    // The native screen edits the server cart: pull it into the web cart so the two never diverge.
+                    if (r.cartChanged) { try { window.CartEngine && window.CartEngine.syncFromServer && window.CartEngine.syncFromServer().catch(() => {}); } catch (_) {} }
+                    if (r.checkout) { try { _nav('cart'); } catch (_) {} setTimeout(() => { try { window._jmCheckout && window._jmCheckout(); } catch (_) {} }, 400); return; }
+                    if (r.openProductId && typeof window._jmOpenProduct === 'function') { window._jmOpenProduct(r.openProductId); return; }
+                    if (r.openWeb === 'menu' && typeof window._jmShowMore === 'function') { window._jmShowMore(); }
+                })
+                .catch(() => { _jmNativeToolsBusy = false; _nav(page, subpage); });
+            return;
+        }
+    }
     // Bottom-tab taps reset the stack entirely (they are top-level destinations)
     if (_NAV_TABS.has(page)) {
         _navStack.length = 0;
@@ -5854,6 +5900,11 @@ function _renderHScroll(containerId, listings, sectionId) {
     if (!el) return;
     if (!listings?.length) { if(sec) sec.style.display='none'; return; }
     if (sec) sec.style.display = '';
+
+    // FIX (blinking): identical data → leave the DOM alone.
+    const _hsig = listings.slice(0,10).map(p => [p.id, p.price, p.updated_at || '', (p.images && p.images[0]) || ''].join(':')).join('|');
+    if (el.dataset.sig === _hsig && el.children.length) return;
+    el.dataset.sig = _hsig;
 
     el.innerHTML = listings.slice(0,10).map(p => {
         const pr = _price(p), op = _origPrice(p), disc = _discount(p);
@@ -6953,6 +7004,7 @@ function _renderProductsPage(subpage) {
     if (!container) return;
 
     const [catId, subcat, brand] = (subpage||'').split(':');
+    if (!catId) _jmRemoveCatToolbar();
     if (title) title.innerHTML = `← ${brand || subcat || catId || 'Products'}`;
 
     const ecom = window.EcomMarketplace;
@@ -6975,9 +7027,18 @@ function _renderProductsPage(subpage) {
     // still forgives minor casing/whitespace differences between the
     // category-picker's label and what got saved on the listing — it just
     // no longer masks a genuine mismatch by falling back.
-    ecom.ProductEngine.loadProducts({ category: catId || '', limit: 100 })
+    // FIX ("No products found" in Categories → Digital/Services/Physical → sub-category):
+    // 1) uses the side-effect-free fetchProducts() (no Home overwrite / blink);
+    // 2) 'digital' / 'services' are browse GROUPS, matched by listing TYPE as well as category;
+    // 3) the sub-category compare also reads metadata.subcategory and forgives plurals/case.
+    const _grp = { digital: 'digital', services: 'service', service: 'service' }[String(catId || '').toLowerCase()] || '';
+    const _fetchRows = ecom.ProductEngine.fetchProducts
+        ? ecom.ProductEngine.fetchProducts({ category: catId || '', type: _grp, limit: 100 })
+        : ecom.ProductEngine.loadProducts({ category: catId || '', limit: 100 });
+    _fetchRows
         .then(products => {
             let list = products || [];
+            if (_grp) list = list.filter(p => !p.type || p.type === _grp || p.category === catId);
             if (subcat) {
                 // Normalise (case, plural, punctuation) so 'Repair'/'Repairs' and
                 // 'E-Books'/'ebooks' match. Listings saved before subcategories
@@ -6985,7 +7046,8 @@ function _renderProductsPage(subpage) {
                 const _n = s => String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'').replace(/s$/,'');
                 const target = _n(subcat);
                 list = list.filter(p => {
-                    if (p.subcategory) return _n(p.subcategory) === target;
+                    const _ps = p.subcategory || (p.metadata && p.metadata.subcategory) || '';
+                    if (_ps) return _n(_ps) === target;
                     const hay = _n((p.title||'') + (p.tags||[]).join(''));
                     return target.length > 3 && hay.includes(target);
                 });
@@ -6993,7 +7055,7 @@ function _renderProductsPage(subpage) {
             if (brand) {
                 const bTarget = brand.trim().toLowerCase();
                 list = list.filter(p => (p.brand || '').trim().toLowerCase() === bTarget);
-                _renderGrid(container, list);
+                _jmCatToolbar(container, catId, subcat, brand, list)();
                 return;
             }
             // No brand chosen yet — offer a brand picker only if this
@@ -7001,11 +7063,59 @@ function _renderProductsPage(subpage) {
             const brands = Array.from(new Set(
                 list.map(p => (p.brand || '').trim()).filter(Boolean)
             )).sort((a, b) => a.localeCompare(b));
-            if (!subcat || !brands.length) { _renderGrid(container, list); return; }
+            if (!subcat || !brands.length) { _jmCatToolbar(container, catId, subcat, brand, list)(); return; }
+            _jmRemoveCatToolbar();
             _renderBrandPicker(container, catId, subcat, brands, list.length);
         })
         .catch(() => { _renderGrid(container, []); });
 }
+
+
+// ── Jumia-style category results toolbar ─────────────────────────────────
+// Sticky row above the grid: sibling sub-category chips (tap to jump), the
+// "N products" count, and a sort selector. Only approved/live listings reach
+// here (the backend filters on approval), so the count is what a buyer can buy.
+function _jmCatToolbar(container, catId, subcat, brand, list) {
+    const host = container.parentNode;
+    let bar = document.getElementById('jmCatToolbar');
+    if (!bar) {
+        bar = document.createElement('div');
+        bar.id = 'jmCatToolbar';
+        bar.style.cssText = 'position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid #eee;padding:8px 10px 6px';
+        host.insertBefore(bar, container);
+    }
+    const cat = (typeof _JM_CATS !== 'undefined' ? _JM_CATS : []).find(c => c.id === catId);
+    const subs = cat ? cat.sections.flatMap(sec => sec.subs.map(x => x.name)) : [];
+    const chips = subs.map(n => {
+        const on = n === subcat;
+        return `<span data-sub="${_esc(n)}" style="flex:0 0 auto;padding:6px 12px;border-radius:16px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid ${on ? '#f68b1e' : '#ddd'};background:${on ? '#fff3e6' : '#fff'};color:${on ? '#f68b1e' : '#444'}">${_esc(n)}</span>`;
+    }).join('');
+    bar.innerHTML = `
+        ${chips ? `<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;scrollbar-width:none">${chips}</div>` : ''}
+        <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;color:#555">
+            <span><b>${list.length}</b> product${list.length === 1 ? '' : 's'}</span>
+            <label>Sort: <select id="jmCatSort" style="border:1px solid #ddd;border-radius:6px;padding:3px 6px;font-size:12px;background:#fff">
+                <option value="newest">Newest</option><option value="price_low">Price: low to high</option>
+                <option value="price_high">Price: high to low</option><option value="rating">Top rated</option>
+                <option value="popular">Popular</option></select></label>
+        </div>`;
+    bar.querySelectorAll('[data-sub]').forEach(el => el.addEventListener('click', () => _nav('products', catId + ':' + el.dataset.sub)));
+    const sel = bar.querySelector('#jmCatSort');
+    sel.value = window.__jmCatSort || 'newest';
+    const sorters = {
+        newest: (a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0),
+        price_low: (a, b) => (a.price || 0) - (b.price || 0),
+        price_high: (a, b) => (b.price || 0) - (a.price || 0),
+        rating: (a, b) => (b.rating || 0) - (a.rating || 0),
+        popular: (a, b) => (b.views || 0) - (a.views || 0),
+    };
+    const apply = () => { _renderGrid(container, [...list].sort(sorters[sel.value] || sorters.newest)); };
+    sel.addEventListener('change', () => { window.__jmCatSort = sel.value; apply(); });
+    const active = bar.querySelector('[data-sub][style*="#f68b1e"]');
+    if (active && active.scrollIntoView) { try { active.scrollIntoView({ inline: 'center', block: 'nearest' }); } catch (_) {} }
+    return apply;
+}
+function _jmRemoveCatToolbar() { const b = document.getElementById('jmCatToolbar'); if (b) b.remove(); }
 
 function _renderBrandPicker(container, catId, subcat, brands, totalCount) {
     const esc = (typeof _esc === 'function') ? _esc : (s => String(s||''));
@@ -8043,6 +8153,7 @@ function _doSearch(q) {
         const title = document.getElementById('jmProductsTitle');
         if (title) title.textContent = `← Results: "${q}"`;
         const container = document.getElementById('jmProductsContent');
+        _jmRemoveCatToolbar();   // search results are not a category view
         const ecom = window.EcomMarketplace;
         // ROOT-CAUSE FIX (DIRECT-SEARCH-SHOWS-INCOMPLETE/STALE-RESULTS): this
         // used to call ecom.ProductEngine.search(q) — the same client-side-
@@ -8095,9 +8206,23 @@ function _initSortChips() {
 }
 
 // ── SUPPORT ACTIONS ────────────────────────────────────────────────────────
-window._jmOpenSupport = function() {
-    if (typeof openChat === 'function') { openChat('support','Support'); return; }
-    _toast('Opening support chat…', 'info', '💬');
+window._jmOpenSupport = async function() {
+    // FIX (Chat with Admin did not open the admin conversation): it called openChat('support')
+    // with a user id that does not exist, and only ever posted to the WebView shell. Resolve the
+    // real admin user id from the backend, then open the NATIVE message screen for that user
+    // (falls back to the web shell, then to WhatsApp, so it can never be a dead button).
+    let admin = null;
+    try {
+        const res = await (window.apiCall ? window.apiCall('/tools/admin-contact') : fetch('/api/tools/admin-contact').then(r => r.json()));
+        admin = res?.data || res || null;
+    } catch (_) {}
+    const adminId = admin && (admin.adminUserId || admin.userId);
+    if (adminId) {
+        const opener = window.openChat || (typeof openChat === 'function' ? openChat : null);
+        if (opener && await opener(adminId, admin.name || 'Support')) return;
+    }
+    if (admin && admin.whatsapp) { await _jmOpenAdminWhatsApp(); return; }
+    _toast('Support chat is not available right now', 'error', '⚠️');
 };
 window._jmOpenWhatsApp = async function() {
     const choice = await _jmShowChooser({

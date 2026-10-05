@@ -57,6 +57,14 @@
             android:windowSoftInputMode="adjustResize" />
 
         <!-- Native Friends screen. Not exported: only MainActivity (via NecpraNativePlugin) can start it. -->
+        <!-- Native Categories / Marketplace browse. Not exported: only MainActivity (via NecpraNativePlugin) starts it. -->
+        <activity
+            android:name=".NecpraToolsActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme.NoActionBar"
+            android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
+            android:windowSoftInputMode="adjustResize" />
+
         <activity
             android:name=".NecpraFriendsActivity"
             android:exported="false"

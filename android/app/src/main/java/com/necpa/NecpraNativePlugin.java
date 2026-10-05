@@ -711,6 +711,52 @@ public class NecpraNativePlugin extends Plugin {
     }
 
     @PluginMethod
+    public void nativeToolsAvailable(PluginCall call) {
+        JSObject out = new JSObject();
+        out.put("available", true);
+        call.resolve(out);
+    }
+
+    /** Opens the native Categories / marketplace browse screen. `tree` is the web layer's category tree (JSON string). */
+    @PluginMethod
+    public void openNativeTools(PluginCall call) {
+        try {
+            Intent intent = new Intent(getContext(), NecpraToolsActivity.class);
+            String tree = call.getString("tree");
+            if (tree != null) intent.putExtra(NecpraToolsActivity.EXTRA_TREE, tree);
+            String category = call.getString("category");
+            if (category != null) intent.putExtra(NecpraToolsActivity.EXTRA_CATEGORY, category);
+            String start = call.getString("start");
+            if (start != null) intent.putExtra(NecpraToolsActivity.EXTRA_START, start);
+            startActivityForResult(call, intent, "nativeToolsResult");
+        } catch (Exception e) {
+            call.reject("Native categories could not be opened", e);
+        }
+    }
+
+    @ActivityCallback
+    private void nativeToolsResult(PluginCall call, ActivityResult result) {
+        JSObject out = new JSObject();
+        out.put("closed", true);
+        Intent d = result == null ? null : result.getData();
+        if (d != null) {
+            out.put("sessionExpired", d.getBooleanExtra(NecpraToolsActivity.RES_SESSION_EXPIRED, false));
+            long chatUserId = d.getLongExtra(NecpraToolsActivity.RES_CHAT_USER_ID, 0L);
+            if (chatUserId > 0) {
+                out.put("chatUserId", chatUserId);
+                out.put("chatUserName", d.getStringExtra(NecpraToolsActivity.RES_CHAT_USER_NAME));
+            }
+            out.put("cartChanged", d.getBooleanExtra(NecpraToolsActivity.RES_CART_CHANGED, false));
+            out.put("checkout", d.getBooleanExtra(NecpraToolsActivity.RES_CHECKOUT, false));
+            String openWeb = d.getStringExtra(NecpraToolsActivity.RES_OPEN_WEB);
+            if (openWeb != null) out.put("openWeb", openWeb);
+            String pid = d.getStringExtra(NecpraToolsActivity.RES_OPEN_PRODUCT_ID);
+            if (pid != null && !pid.isEmpty()) out.put("openProductId", pid);
+        }
+        call.resolve(out);
+    }
+
+    @PluginMethod
     public void openNativeFriends(PluginCall call) {
         try {
             Intent intent = new Intent(getContext(), NecpraFriendsActivity.class);

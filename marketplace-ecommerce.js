@@ -29,7 +29,7 @@ const _normalizeProduct = (raw) => ({
     title:           String(raw.title || ''),
     description:     String(raw.description || ''),
     category:        String(raw.category || 'general'),
-    subcategory:     String(raw.subcategory || ''),
+    subcategory:     String(raw.subcategory || raw.metadata?.subcategory || ''),
     images:          Array.isArray(raw.images) && raw.images.length ? raw.images : [raw.imageUrl, raw.image_url, raw.mediaUrl, raw.media_url, raw.image].filter(Boolean),
     price:           parseFloat(raw.price) || 0,
     original_price:  parseFloat(raw.original_price || raw.originalPrice) || 0,
@@ -41,7 +41,7 @@ const _normalizeProduct = (raw) => ({
     location:        String(raw.location || raw.city || ''),
     tags:            Array.isArray(raw.tags) ? raw.tags : [],
     condition:       String(raw.condition || 'new'),
-    brand:           String(raw.brand || ''),
+    brand:           String(raw.brand || raw.metadata?.brand || ''),
     sku:             String(raw.sku || ''),
     weight:          parseFloat(raw.weight) || 0,
     specifications:  raw.specifications || raw.metadata?.specs || {},
@@ -53,6 +53,7 @@ const _normalizeProduct = (raw) => ({
     flash_price:     parseFloat(raw.flash_price || raw.flashSalePrice) || 0,
     available:       raw.available !== false && (raw.stock_quantity ?? raw.stockQuantity ?? 1) > 0,
     // ── Approval lifecycle (critical for seller module) ────────────────────
+    type:            String(raw.type || ''),
     status:          String(raw.status || 'pending_review'),
     approval_status: String(raw.approval_status || raw.approvalStatus || 'pending'),
     rejection_reason:raw.rejection_reason || raw.rejectionReason || null,
@@ -196,6 +197,13 @@ setTimeout(_syncDeleted, 1500);
 // drop anything a previous session saved for a listing that has since been deleted
 setTimeout(() => { if (_tomb.size) _purgeDeleted(Array.from(_tomb)); }, 0);
 
+function _extractProductRows(resp) {
+    if (!resp) return [];
+    const d = resp.data;
+    if (Array.isArray(d)) return d;
+    return d?.products || d?.listings || resp.products || resp.listings || (Array.isArray(resp) ? resp : []) || [];
+}
+
 const ProductEngine = {
 
     async init() {
@@ -222,32 +230,52 @@ const ProductEngine = {
         WishlistEngine.syncFromServer().catch(() => {});
     },
 
-    /** Fetch all products from backend and populate store */
-    async loadProducts({ category = '', search = '', page = 1, limit = 40, sort = 'newest' } = {}) {
+    /**
+     * Side-effect-free fetch (category / subcategory browsing, searches).
+     * FIX: it never touches the Home store (featured/trending/recent/searchIndex)
+     * and never fires 'ecom:products-loaded', so opening a category cannot make
+     * the Home listing re-render / blink.
+     * Accepts every response shape the backend produces:
+     *   {data:{products:[]}} | {products:[]} | {data:[]} | {listings:[]}
+     */
+    async fetchProducts({ category = '', subcategory = '', type = '', search = '', page = 1, limit = 100, sort = 'newest' } = {}) {
         const params = new URLSearchParams({ page, limit, sort });
-        if (category) params.set('category', category);
-        if (search)   params.set('search', search);
-
+        if (category)    params.set('category', category);
+        if (subcategory) params.set('subcategory', subcategory);
+        if (type)        params.set('type', type);
+        if (search)      params.set('search', search);
         const resp = await _api('GET', `/api/marketplace/products?${params}`);
-        const raw  = resp?.data?.products || resp?.products || [];
-        _syncDeleted();
-        const normalized = raw.map(_normalizeProduct).filter(p => !_productGone(p.id));
+        const raw  = _extractProductRows(resp);
+        return raw.map(_normalizeProduct).filter(p => p.id && !_productGone(p.id));
+    },
 
+    /** Fetch products and (for UNFILTERED loads only) populate the Home store */
+    async loadProducts({ category = '', subcategory = '', type = '', search = '', page = 1, limit = 40, sort = 'newest' } = {}) {
+        const normalized = await this.fetchProducts({ category, subcategory, type, search, page, limit, sort });
+        _syncDeleted();
         normalized.forEach(p => _store.products.set(p.id, p));
 
-        // Also build featured/trending/flash from the same data
+        // FIX (Home listings keep blinking): any filtered load (category tile,
+        // search, sort) used to overwrite the Home rows and broadcast
+        // 'ecom:products-loaded', re-rendering Home every time. Only the plain
+        // unfiltered Home load may do that now, and only if something changed.
+        const isHomeLoad = !category && !subcategory && !type && !search && Number(page) === 1;
+        if (!isHomeLoad) return normalized;
+
+        const sig = normalized.map(p => p.id + ':' + (p.updated_at || '') + ':' + p.price + ':' + p.status).join('|');
+        if (_store.__homeSig === sig) return normalized;   // nothing changed → no re-render
+        _store.__homeSig = sig;
+
         _store.featured    = normalized.filter(p => p.is_featured).slice(0, 12);
         _store.trending    = [...normalized].sort((a,b) => b.views - a.views).slice(0, 12);
         _store.flash_sales = normalized.filter(p => p.is_flash_sale);
         _store.recent      = [...normalized].sort((a,b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 20);
         _store.searchIndex = normalized;
 
-        // Emit event for UI layer
         window.dispatchEvent(new CustomEvent('ecom:products-loaded', { detail: {
             products: normalized, featured: _store.featured, trending: _store.trending,
             flash: _store.flash_sales, recent: _store.recent
         }}));
-
         return normalized;
     },
 
