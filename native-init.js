@@ -93,6 +93,13 @@
         if (opts.start) args.start = String(opts.start);
         return native.openNativeTools(args);
       },
+      nativeStatusAvailable: function () { return native.nativeStatusAvailable(); },
+      openNativeStatus: function (opts) {
+        opts = opts || {};
+        var args = { section: opts.section || 'feed' };
+        if (opts.userId) args.userId = Number(opts.userId);
+        return native.openNativeStatus(args);
+      },
       nativeFriendsAvailable: function () { return native.nativeFriendsAvailable(); },
       openNativeFriends: function (section) { return native.openNativeFriends({section: section || 'friends'}); },
       nativeAuthAvailable: function () { return native.nativeAuthAvailable(); },
@@ -470,6 +477,92 @@
 
   installNativeMessagesRouting();
   if (document.readyState !== 'complete') window.addEventListener('load', installNativeMessagesRouting, { once: true });
+
+  // ---------------------------------------------------------------------------------------------
+  // Native Status routing (Android APK only). Same shape as Messages: ON by default, kill switch for a test device:
+  //   localStorage.setItem('necpra_native_status', '0')   (back on: '1')
+  // Reactions/replies send an encrypted private copy to the creator, which only the native layer may do once native
+  // owns DMs - so the native Status screen is used exactly when the native Messages identity is usable
+  // (nativeMessagesUsable). In every other case (older APK, flag off, identity not provisioned, native failure) the
+  // existing web Status module runs unchanged. Vibes stays in the web module: the native screen's "Vibes" button
+  // closes it and opens the web Status page straight into Vibes.
+  // ---------------------------------------------------------------------------------------------
+  var NATIVE_STATUS_DEFAULT = true;
+  var nativeStatusOpen = false;
+
+  function nativeStatusFlag() {
+    try {
+      var v = localStorage.getItem('necpra_native_status');
+      if (v === '1') return true;
+      if (v === '0') return false;
+    } catch (_) {}
+    return NATIVE_STATUS_DEFAULT;
+  }
+
+  async function nativeStatusUsable() {
+    if (!window.NecpraNative || !window.NecpraNative.nativeStatusAvailable) return false;
+    try {
+      var a = await window.NecpraNative.nativeStatusAvailable();
+      if (!a || !a.available) return false;
+    } catch (_) { return false; }            // older APK without the screen
+    return nativeMessagesUsable();
+  }
+
+  // Resolves { opened, openVibes }. opened=false means the caller should run the web Status instead.
+  async function openNativeStatusScreen(opts) {
+    if (!nativeStatusFlag() || nativeStatusOpen) return { opened: false };
+    if (!(await nativeStatusUsable())) return { opened: false };
+    nativeStatusOpen = true;
+    try {
+      var result = await window.NecpraNative.openNativeStatus(opts || {});
+      if (result && result.sessionExpired) handleNativeProfileResult({ sessionExpired: true });
+      if (result && result.statusChanged) {
+        try { window.dispatchEvent(new CustomEvent('necpra:native-status-updated', { detail: result })); } catch (_) {}
+      }
+      return { opened: true, openVibes: !!(result && result.openVibes) };
+    } catch (err) {
+      console.warn('[native-status] could not open native screen:', err && err.message ? err.message : err);
+      return { opened: false };
+    } finally {
+      nativeStatusOpen = false;
+    }
+  }
+
+  // Asks the (just opened) web Status iframe to switch to Vibes; status.html ignores it if Vibes is already open.
+  function openWebVibesSoon() {
+    [500, 1400, 2800, 5000].forEach(function (ms) {
+      setTimeout(function () {
+        try {
+          var f = document.getElementById('statusIframe');
+          if (f && f.contentWindow) f.contentWindow.postMessage({ type: 'NECPRA_OPEN_VIBES' }, '*');
+        } catch (_) {}
+      }, ms);
+    });
+  }
+
+  function installNativeStatusRouting() {
+    if (!window.NecpraNative || !window.NecpraNative.openNativeStatus) return;
+    if (window.__necpraStatusRoutingInstalled) return;
+    if (typeof window.navigateToPage !== 'function') return;
+    window.__necpraStatusRoutingInstalled = true;
+
+    var origNavigate = window.navigateToPage;
+    window.navigateToPage = function (page, options) {
+      var self = this, args = arguments;
+      var deliberate = /^status$/.test(String(page || '')) && !(options && options.fromHistory) && nativeStatusFlag();
+      if (deliberate) {
+        openNativeStatusScreen({}).then(function (r) {
+          if (!r.opened) return origNavigate.apply(self, args);
+          if (r.openVibes) { origNavigate.apply(self, args); openWebVibesSoon(); }
+        });
+        return;
+      }
+      return origNavigate.apply(this, args);
+    };
+  }
+
+  installNativeStatusRouting();
+  if (document.readyState !== 'complete') window.addEventListener('load', installNativeStatusRouting, { once: true });
 
   // ---------------------------------------------------------------------------------------------
   // Who owns direct-message crypto: the SAME decision is mirrored natively (NecpraDmOwner) and in

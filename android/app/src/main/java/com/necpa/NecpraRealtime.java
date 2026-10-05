@@ -35,6 +35,11 @@ final class NecpraRealtime {
         void onConnectionChanged(boolean connected);
     }
 
+    /** Status screen: told (on the main thread) that something about statuses changed, so it can refresh. */
+    interface StatusListener {
+        void onStatusEvent(String name);
+    }
+
     private static volatile NecpraRealtime instance;
 
     static NecpraRealtime get(Context c) {
@@ -52,6 +57,7 @@ final class NecpraRealtime {
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ScheduledExecutorService worker = Executors.newSingleThreadScheduledExecutor();
     private final CopyOnWriteArrayList<Listener> listeners = new CopyOnWriteArrayList<>();
+    private final CopyOnWriteArrayList<StatusListener> statusListeners = new CopyOnWriteArrayList<>();
     private Socket socket;
     private int users;
     private int failures;
@@ -62,6 +68,12 @@ final class NecpraRealtime {
 
     void addListener(Listener l) { listeners.addIfAbsent(l); }
     void removeListener(Listener l) { listeners.remove(l); }
+    void addStatusListener(StatusListener l) { statusListeners.addIfAbsent(l); }
+    void removeStatusListener(StatusListener l) { statusListeners.remove(l); }
+
+    private void onStatusEvent(final String name) {
+        main.post(() -> { for (StatusListener l : statusListeners) l.onStatusEvent(name); });
+    }
     boolean isConnected() { return connected; }
 
     /** Call from onResume of every screen that wants live updates; pair with {@link #stop()} in onPause. */
@@ -115,6 +127,10 @@ final class NecpraRealtime {
             for (String ev : new String[]{"message:new", "message:read", "message:delivered", "message:reaction",
                     "message:edited", "message:deleted", "message:status"}) {
                 s.on(ev, a -> onMessageEvent(a));
+            }
+            for (String ev : new String[]{"status:new", "status:deleted", "status:expired", "status:viewed",
+                    "status:reaction", "status:poll:voted", "status:reply"}) {
+                s.on(ev, a -> onStatusEvent(ev));
             }
             s.on("typing:start", a -> onTyping(a, true));
             s.on("typing:stop", a -> onTyping(a, false));

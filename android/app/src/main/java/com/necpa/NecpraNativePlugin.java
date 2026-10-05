@@ -756,6 +756,44 @@ public class NecpraNativePlugin extends Plugin {
         call.resolve(out);
     }
 
+    // ---------------------------------------------------------------------
+    // Native Status (NecpraStatusActivity). Same gate as Messages on the web side: only routed here when native
+    // owns DMs, because reactions/replies send an encrypted private copy to the creator natively.
+    // ---------------------------------------------------------------------
+
+    @PluginMethod
+    public void nativeStatusAvailable(PluginCall call) {
+        JSObject out = new JSObject();
+        out.put("available", true);
+        call.resolve(out);
+    }
+
+    @PluginMethod
+    public void openNativeStatus(PluginCall call) {
+        try {
+            Intent intent = new Intent(getContext(), NecpraStatusActivity.class);
+            intent.putExtra(NecpraStatusActivity.EXTRA_SECTION, call.getString("section", "feed"));
+            long userId = call.getLong("userId", 0L);
+            if (userId > 0) intent.putExtra(NecpraStatusActivity.EXTRA_USER_ID, userId);
+            startActivityForResult(call, intent, "nativeStatusResult");
+        } catch (Exception e) {
+            call.reject("Native status could not be opened", e);
+        }
+    }
+
+    @ActivityCallback
+    private void nativeStatusResult(PluginCall call, ActivityResult result) {
+        JSObject out = new JSObject();
+        out.put("closed", true);
+        Intent d = result == null ? null : result.getData();
+        if (d != null) {
+            out.put("sessionExpired", d.getBooleanExtra(NecpraStatusActivity.RES_SESSION_EXPIRED, false));
+            out.put("statusChanged", d.getBooleanExtra(NecpraStatusActivity.RES_CHANGED, false));
+            out.put("openVibes", d.getBooleanExtra(NecpraStatusActivity.RES_OPEN_VIBES, false));   // Vibes stays in the web module
+        }
+        call.resolve(out);
+    }
+
     @PluginMethod
     public void openNativeFriends(PluginCall call) {
         try {

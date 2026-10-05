@@ -452,6 +452,7 @@ public final class NativeBackgroundSync {
         context.getSharedPreferences(BACKGROUND_PREFS, Context.MODE_PRIVATE).edit().clear().commit();
         context.getSharedPreferences(AUTH_PREFS, Context.MODE_PRIVATE).edit().clear().commit();
         NecpraFriendsActivity.wipeAvatarCache(context); // cached friend avatars are removed with the session
+        NecpraStatusActivity.wipeCaches(context);       // in-memory status images (the encrypted feed lives in the auth prefs cleared above)
         NecpraDmOwner.clear(context);                   // native no longer owns DMs once the session is gone
         NecpraE2EStore.clearAll(context);               // native identity key + ratchet sessions go with the session
         NecpraMessageRepository.reset(context);         // native chat database + send queue go with the session

@@ -1213,5 +1213,5 @@ function boot(){if(!document.body)return;const style=document.createElement('sty
 '@media(max-width:800px){#necpa-status-root .ns-vibe-comments{left:0;right:0;bottom:0;max-height:65dvh;border-radius:20px 20px 0 0;padding-bottom:env(safe-area-inset-bottom,0px)}}';document.head.appendChild(f)})();
 syncTheme();try{if(!(window.parent&&window.parent!==window))throw 0;const src=window.parent.document.documentElement;new MutationObserver(syncTheme).observe(src,{attributes:true,attributeFilter:['style','class','data-theme']})}catch(_){}mount()}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
-window.__NecpaProfessionalStatus={open,close,loadFeed,goBack:goBackOne,resetToList};
+window.__NecpaProfessionalStatus={open,close,loadFeed,goBack:goBackOne,resetToList,openVibes};
 })();

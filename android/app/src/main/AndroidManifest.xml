@@ -95,6 +95,14 @@
             android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
             android:windowSoftInputMode="adjustResize" />
 
+        <!-- Native Status (feed, story viewer, composer). Not exported: only MainActivity (via NecpraNativePlugin) can start it. -->
+        <activity
+            android:name=".NecpraStatusActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme.NoActionBar"
+            android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
+            android:windowSoftInputMode="adjustResize" />
+
         <!-- Native Settings screen. Not exported: only MainActivity via the native plugin can start it. -->
         <activity
             android:name=".Necpra3DWaterSortActivity"

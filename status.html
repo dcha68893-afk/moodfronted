@@ -84,6 +84,24 @@
       // the iframe is left blank.
     })();
   </script>
+  <script id="NATIVE_VIBES_HANDOFF">
+    // Android: the native Status screen's "Vibes" button opens this page and asks for Vibes (see native-init.js).
+    // Idempotent: the shell posts it a few times while this iframe is still booting.
+    window.addEventListener('message', function (event) {
+      var d = event && event.data;
+      if (!d || d.type !== 'NECPRA_OPEN_VIBES') return;
+      var tries = 0;
+      (function go() {
+        var root = document.querySelector('[data-vibes]');
+        var api = window.__NecpaProfessionalStatus;
+        if (root && api && typeof api.openVibes === 'function') {
+          if (!root.classList.contains('open')) api.openVibes();
+          return;
+        }
+        if (++tries < 50) setTimeout(go, 100);
+      })();
+    });
+  </script>
   <script id="STATUS_REALTIME_BRIDGE">
     window.addEventListener('message', function(event) {
       const d=event&&event.data;
