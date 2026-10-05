@@ -6933,17 +6933,33 @@ function _renderCategories() {
 
 function _renderCatContent(cat, container) {
     const catId = cat.id;
-    if (catId === 'digital' && typeof window.__renderDigitalServices === 'function') {
-        window.__renderDigitalServices(container);
-        return;
-    }
-
     // "All Products" bar
     let html = `
     <div class="jm-cat-all-bar" onclick="window._jmNav('products','${catId}')">
         <span>All Products</span>
         <span class="jm-cat-all-bar-arrow">›</span>
     </div>`;
+
+    // Digital: Airtime & Mobile Data are ADDED to the category, never a replacement for it. (They used to take over
+    // the whole screen, which hid every other digital subcategory.) Own listings stay below, untouched.
+    const _hasMobileServices = catId === 'digital' && typeof window.__renderDigitalServices === 'function';
+    if (_hasMobileServices) {
+        html += `
+        <div class="jm-cat-group">
+            <div class="jm-cat-group-header"><span>Mobile Services</span></div>
+            <div class="jm-cat-group-divider"></div>
+            <div class="jm-subcat-grid">
+                ${['Airtime', 'Mobile Data'].map(n => `
+                <div class="jm-subcat-item" data-mobile-service="${n === 'Airtime' ? 'airtime' : 'data'}">
+                    <div class="jm-subcat-img-wrap">
+                        <img class="jm-subcat-img" src="${_jmArtFor(n)}" alt="${n}" loading="lazy"
+                             onerror="this.onerror=null;this.src=window._jmArtFor(this.alt)">
+                    </div>
+                    <div class="jm-subcat-name">${n}</div>
+                </div>`).join('')}
+            </div>
+        </div>`;
+    }
 
     // Each named section with its subcategories
     cat.sections.forEach((section, sIdx) => {
@@ -6972,6 +6988,18 @@ function _renderCatContent(cat, container) {
 
     container.innerHTML = html;
     container.scrollTop = 0;
+
+    if (_hasMobileServices) {
+        container.querySelectorAll('[data-mobile-service]').forEach(el => {
+            el.addEventListener('click', () => {
+                window.__renderDigitalServices(container, {
+                    tab: el.dataset.mobileService,
+                    onBack: () => _renderCatContent(cat, container)
+                });
+                container.scrollTop = 0;
+            });
+        });
+    }
 }
 
 // ── PRODUCTS LIST PAGE ─────────────────────────────────────────────────────
