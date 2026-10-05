@@ -16,6 +16,7 @@ import android.media.MediaPlayer;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -29,6 +30,7 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -45,6 +47,9 @@ import androidx.activity.OnBackPressedCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.biometric.BiometricManager;
+import androidx.biometric.BiometricPrompt;
+import androidx.core.content.ContextCompat;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -96,6 +101,18 @@ public class NecpraStatusActivity extends AppCompatActivity implements NecpraRea
 
     static final String EXTRA_SECTION = "section";      // "feed" (default) | "compose"
     static final String EXTRA_USER_ID = "userId";       // open this person's statuses straight away
+    static final String EXTRA_STATUS_ID = "statusId";   // open exactly this status (notification tap)
+    private static final long UNLOCK_WINDOW_MS = 15 * 60 * 1000L; // must match NecpraFriendsActivity / NecpraNativePlugin
+
+    /** Intent used by notification taps: opens the native Status screen on one exact status. */
+    static Intent intentForStatus(Context ctx, long userId, String statusId) {
+        Intent i = new Intent(ctx, NecpraStatusActivity.class);
+        i.putExtra(EXTRA_SECTION, "feed");
+        if (userId > 0) i.putExtra(EXTRA_USER_ID, userId);
+        if (statusId != null && !statusId.isEmpty()) i.putExtra(EXTRA_STATUS_ID, statusId);
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        return i;
+    }
     static final String RES_SESSION_EXPIRED = "sessionExpired";
     static final String RES_OPEN_VIBES = "openVibes";
     static final String RES_CHANGED = "statusChanged";
@@ -168,7 +185,8 @@ public class NecpraStatusActivity extends AppCompatActivity implements NecpraRea
     private String meName = "";
     private String meAvatar = "";
     private long pendingOpenUser = 0L;
-    private boolean built, finishing, resumed, changed, discoverLoaded;
+    private String pendingStatusId = null;
+    private boolean built, finishing, resumed, changed, discoverLoaded, unlocking;
 
     private final Runnable poll = new Runnable() {
         @Override public void run() {
@@ -234,6 +252,9 @@ public class NecpraStatusActivity extends AppCompatActivity implements NecpraRea
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        // Statuses are private: never in screenshots / recents (same as Friends).
+        try { getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE); }
+        catch (Exception ignored) { }
         super.onCreate(savedInstanceState);
         t = new NecpraConversationsActivity.Theme(this);
         cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
@@ -255,22 +276,54 @@ public class NecpraStatusActivity extends AppCompatActivity implements NecpraRea
             @Override public void handleOnBackPressed() { onBack(); }
         });
 
+        captureTarget(getIntent());
+        // Nothing is built, loaded or fetched until the unlock succeeds, so a notification tap cannot bypass it.
+        ensureUnlocked(this::startContent);
+    }
+
+    /** Runs once, after a successful unlock. */
+    private void startContent() {
+        if (built || finishing) return;
+        root.setVisibility(View.VISIBLE);
         buildPage();
         built = true;
         loadCached();
         render();
-
         Intent in = getIntent();
-        if (in != null) {
-            pendingOpenUser = in.getLongExtra(EXTRA_USER_ID, 0L);
-            if ("compose".equals(in.getStringExtra(EXTRA_SECTION))) openComposer();
-        }
+        if (in != null && "compose".equals(in.getStringExtra(EXTRA_SECTION))) openComposer();
+        registerNet();
+        if (resumed) startLive();
+        pullAll();
+    }
+
+    private void captureTarget(Intent in) {
+        if (in == null) return;
+        pendingOpenUser = in.getLongExtra(EXTRA_USER_ID, 0L);
+        String sid = in.getStringExtra(EXTRA_STATUS_ID);
+        pendingStatusId = (sid == null || sid.trim().isEmpty()) ? null : sid.trim();
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (finishing) return;
+        captureTarget(intent);
+        if (!built) return;                 // still locked: startContent()/applyFeed() will consume it
+        if (!isUnlockedNow()) return;       // onResume re-locks first; the pending target survives
+        if (viewer != null) closeViewer();
+        if ("compose".equals(intent.getStringExtra(EXTRA_SECTION))) openComposer();
+        resolvePending(false);
         pullAll();
     }
 
     @Override
     protected void onStart() {
         super.onStart();
+        registerNet();
+    }
+
+    private void registerNet() {
         if (cm != null && netCallback == null && built) {
             netCallback = new ConnectivityManager.NetworkCallback() {
                 @Override public void onAvailable(Network network) { ui.post(NecpraStatusActivity.this::pullAll); }
@@ -292,6 +345,27 @@ public class NecpraStatusActivity extends AppCompatActivity implements NecpraRea
     protected void onResume() {
         super.onResume();
         resumed = true;
+        try {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+            if (Build.VERSION.SDK_INT >= 33) setRecentsScreenshotEnabled(false);
+        } catch (Throwable ignored) { }
+        if (!built || finishing) return;
+        // Re-lock: if the unlock window ran out while the app was in the background, ask again.
+        if (!isUnlockedNow()) {
+            root.setVisibility(View.INVISIBLE);
+            ensureUnlocked(() -> {
+                root.setVisibility(View.VISIBLE);
+                startLive();
+                resolvePending(false);
+                pullAll();
+            });
+            return;
+        }
+        startLive();
+        pullAll();
+    }
+
+    private void startLive() {
         if (!built || finishing) return;
         try {
             NecpraRealtime rt = NecpraRealtime.get(this);
@@ -299,9 +373,108 @@ public class NecpraStatusActivity extends AppCompatActivity implements NecpraRea
             rt.start();
         } catch (Throwable ignored) { }
         if (vVideo != null && viewer != null && !vHold) { try { vVideo.start(); } catch (Throwable ignored) { } }
-        pullAll();
         ui.removeCallbacks(poll);
         ui.postDelayed(poll, POLL_MS);
+    }
+
+    // ------------------------------------------------------------------ biometric gate (same rules as Friends)
+
+    private boolean isUnlockedNow() {
+        return System.currentTimeMillis() <= authPrefs().getLong("unlockedUntil", 0L);
+    }
+
+    private void extendUnlock() {
+        authPrefs().edit().putLong("unlockedUntil", System.currentTimeMillis() + UNLOCK_WINDOW_MS).commit();
+    }
+
+    @SuppressWarnings("deprecation")
+    private void ensureUnlocked(Runnable onOk) {
+        if (isUnlockedNow()) { onOk.run(); return; }
+        if (unlocking) return;
+        boolean api30 = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R;
+        int allowed = api30
+                ? (BiometricManager.Authenticators.BIOMETRIC_STRONG | BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+                : BiometricManager.Authenticators.BIOMETRIC_WEAK;
+        boolean can = BiometricManager.from(this).canAuthenticate(allowed) == BiometricManager.BIOMETRIC_SUCCESS;
+        if (!api30 && !can) {
+            android.app.KeyguardManager km = (android.app.KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
+            can = km != null && km.isDeviceSecure();
+        }
+        if (!can) {
+            // Same rule as the plugin: nothing to verify against -> don't lock the user out.
+            extendUnlock();
+            onOk.run();
+            return;
+        }
+        unlocking = true;
+        BiometricPrompt prompt = new BiometricPrompt(this, ContextCompat.getMainExecutor(this),
+                new BiometricPrompt.AuthenticationCallback() {
+                    @Override
+                    public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result) {
+                        unlocking = false;
+                        extendUnlock();
+                        onOk.run();
+                    }
+
+                    @Override
+                    public void onAuthenticationError(int errorCode, CharSequence errString) {
+                        unlocking = false;
+                        setResult(RESULT_CANCELED);
+                        finishing = true;
+                        finish();
+                    }
+                });
+        BiometricPrompt.PromptInfo.Builder b = new BiometricPrompt.PromptInfo.Builder()
+                .setTitle("Unlock Necpra")
+                .setSubtitle("Verify your identity to open statuses")
+                .setConfirmationRequired(false);
+        if (api30) b.setAllowedAuthenticators(allowed);
+        else b.setDeviceCredentialAllowed(true);
+        prompt.authenticate(b.build());
+    }
+
+    // ------------------------------------------------------------------ notification target
+
+    private Person findPersonWithStatus(String statusId) {
+        JSONArray[] lists = { friends, discover, mine };
+        for (JSONArray list : lists) {
+            for (Person p : people(list)) {
+                for (JSONObject st : p.items) {
+                    if (statusId.equals(String.valueOf(st.opt("id")))) return p;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** Opens the exact status (or the person) a notification pointed at. fresh = the feed was just loaded from the server. */
+    private void resolvePending(boolean fresh) {
+        if (!built || finishing) return;
+        if (pendingStatusId != null) {
+            String want = pendingStatusId;
+            Person hit = findPersonWithStatus(want);
+            if (hit != null) {
+                pendingStatusId = null;
+                pendingOpenUser = 0;
+                int idx = 0;
+                for (int i = 0; i < hit.items.size(); i++) {
+                    if (want.equals(String.valueOf(hit.items.get(i).opt("id")))) { idx = i; break; }
+                }
+                openViewer(new ArrayList<>(hit.items), idx);
+            } else if (fresh) {
+                pendingStatusId = null;
+                pendingOpenUser = 0;
+                Toast.makeText(this, "That status is no longer available", Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
+        if (pendingOpenUser > 0) {
+            long want = pendingOpenUser;
+            pendingOpenUser = 0;
+            for (Person p : people(friends)) {
+                if (p.userId == want) { openPerson(p); break; }
+            }
+        }
     }
 
     @Override
@@ -754,7 +927,14 @@ public class NecpraStatusActivity extends AppCompatActivity implements NecpraRea
                         showBanner(null);
                     });
                 } catch (OfflineException oe) {
-                    ui.post(() -> showBanner("Offline \u2014 showing saved updates"));
+                    ui.post(() -> {
+                        showBanner("Offline \u2014 showing saved updates");
+                        resolvePending(false);
+                        if (pendingStatusId != null) {
+                            pendingStatusId = null;
+                            Toast.makeText(this, "You're offline \u2014 can't load that status", Toast.LENGTH_LONG).show();
+                        }
+                    });
                 } catch (NativeBackgroundSync.SessionExpiredException se) {
                     ui.post(this::sessionExpired);
                 } catch (Throwable ignored) { }
@@ -788,13 +968,7 @@ public class NecpraStatusActivity extends AppCompatActivity implements NecpraRea
         }
         saveCache();
         render();
-        if (pendingOpenUser > 0) {
-            long want = pendingOpenUser;
-            pendingOpenUser = 0;
-            for (Person p : people(friends)) {
-                if (p.userId == want) { openPerson(p); break; }
-            }
-        }
+        resolvePending(true);
     }
 
     private void showBanner(String msg) {

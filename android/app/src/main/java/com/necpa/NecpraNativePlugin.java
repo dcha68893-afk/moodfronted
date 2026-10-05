@@ -795,6 +795,8 @@ public class NecpraNativePlugin extends Plugin {
             intent.putExtra(NecpraStatusActivity.EXTRA_SECTION, call.getString("section", "feed"));
             long userId = call.getLong("userId", 0L);
             if (userId > 0) intent.putExtra(NecpraStatusActivity.EXTRA_USER_ID, userId);
+            String statusId = call.getString("statusId");
+            if (statusId != null && !statusId.trim().isEmpty()) intent.putExtra(NecpraStatusActivity.EXTRA_STATUS_ID, statusId.trim());
             startActivityForResult(call, intent, "nativeStatusResult");
         } catch (Exception e) {
             call.reject("Native status could not be opened", e);

@@ -63,8 +63,13 @@ function openTarget(data){
   if(d.chatId)window.dispatchEvent(new CustomEvent('kyn:openChat',{detail:{chatId:d.chatId,scrollToMessageId:d.messageId||null}}));
   else if(d.groupId)window.dispatchEvent(new CustomEvent('kyn:openGroup',{detail:{groupId:d.groupId,scrollToMessageId:d.messageId||null}}));
   else if(d.statusId){
-   try{if(typeof window.navigateToPage==='function')window.navigateToPage('status');}catch(_){}
-   window.dispatchEvent(new CustomEvent('kyn:openStatus',{detail:{statusId:d.statusId}}));
+   const webStatus=()=>{
+    try{if(typeof window.navigateToPage==='function')window.navigateToPage('status');}catch(_){}
+    window.dispatchEvent(new CustomEvent('kyn:openStatus',{detail:{statusId:d.statusId}}));
+   };
+   // Native Status screen first (exact status); web module only as the fallback.
+   if(typeof window.__necpraOpenNativeStatus==='function')window.__necpraOpenNativeStatus(d.statusId,d.userId).then(ok=>{if(!ok)webStatus();},webStatus);
+   else webStatus();
   }
   else if(t.indexOf('friend')===0){
    try{if(typeof window.navigateToPage==='function')window.navigateToPage('friends');}catch(_){}
@@ -176,7 +181,7 @@ async function register(){
 }
 async function uploadToken(){
  const auth=getAuth(); if(!fcmToken||!auth)return;
- const ok=await api('/push/fcm-token','POST',{token:fcmToken,platform:'android',userAgent:navigator.userAgent+(Notify?' NecpraNativeNotify/2':'')},auth);
+ const ok=await api('/push/fcm-token','POST',{token:fcmToken,platform:'android',userAgent:navigator.userAgent+(Notify?' NecpraNativeNotify/3':'')},auth);
  if(ok){
   pendingUpload=false; uploadFails=0;
   localStorage.setItem(LS_TOKEN,fcmToken); localStorage.setItem(LS_AUTH,auth); localStorage.setItem(LS_SENT,String(Date.now()));
@@ -199,7 +204,7 @@ Push.addListener('registration',info=>{
 Push.addListener('registrationError',e=>console.warn('[NativePush] registration error',e));
 Push.addListener('pushNotificationReceived',n=>{
  // App is in the foreground: the OS draws nothing, so we show our own banner.
- try{banner({title:n?.title,body:n?.body,data:n?.data});}catch(e){console.warn('[NativePush] banner failed',e);}
+ try{banner({title:n?.title||n?.data?.title,body:n?.body||n?.data?.body,data:n?.data});}catch(e){console.warn('[NativePush] banner failed',e);}
 });
 Push.addListener('pushNotificationActionPerformed',a=>{openTarget(a?.notification?.data||{});});
 

@@ -1953,7 +1953,18 @@
                         /* Cached snapshots are untrusted presentation HTML. Strip executable/resource-bearing nodes again before assigning srcdoc so old cache entries cannot trigger sandbox script warnings or run stale module code. */
                         try {
                             var snapDoc = new DOMParser().parseFromString(html, 'text/html');
-                            snapDoc.querySelectorAll('script,noscript,iframe,object,embed,video,audio,canvas,form,input,button').forEach(function (n) { n.remove(); });
+                            snapDoc.querySelectorAll('script,noscript,iframe,object,embed,video,audio,canvas,form,input,button,meta[http-equiv],link[rel~="modulepreload"],link[rel~="preload"],link[rel~="prefetch"],base').forEach(function (n) { n.remove(); });
+                            /* Root cause of "Blocked script execution in 'about:srcdoc' ... 'allow-scripts' permission is not set":
+                               removing <script> was not enough - inline event-handler attributes (onclick=, onload=, onerror=...) and
+                               javascript: URLs are also script, and the sandboxed (script-less) frame reports each one as blocked. */
+                            snapDoc.querySelectorAll('*').forEach(function (n) {
+                                Array.prototype.slice.call(n.attributes).forEach(function (a) {
+                                    var nm = a.name.toLowerCase();
+                                    if (nm.indexOf('on') === 0) { n.removeAttribute(a.name); return; }
+                                    if ((nm === 'href' || nm === 'src' || nm === 'action' || nm === 'formaction' || nm === 'xlink:href' || nm === 'srcdoc') &&
+                                        /^\s*(javascript|vbscript):/i.test(a.value)) n.removeAttribute(a.name);
+                                });
+                            });
                             html = '<!DOCTYPE html>' + snapDoc.documentElement.outerHTML;
                         } catch (_) {}
                         o.className = 'kyn-snap';

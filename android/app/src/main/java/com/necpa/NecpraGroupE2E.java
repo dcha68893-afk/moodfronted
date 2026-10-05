@@ -302,6 +302,39 @@ public final class NecpraGroupE2E {
         return null;
     }
 
+    private static final class Cand {
+        final JSONObject entry; final boolean current;
+        Cand(JSONObject entry, boolean current) { this.entry = entry; this.current = current; }
+    }
+
+    /**
+     * Every key that could have signed a message from owner o in epoch e: the current one first, then the retired ones the
+     * server keeps when a member re-keys inside the same epoch (e.g. sent from web, then from native), then history.
+     */
+    private static List<Cand> keyEntries(JSONObject s, long e, long o) {
+        List<Cand> out = new ArrayList<>();
+        JSONArray cur = s.optJSONArray("senderKeys");
+        if (cur != null) for (int i = 0; i < cur.length(); i++) {
+            JSONObject x = cur.optJSONObject(i);
+            if (x != null && x.optLong("epoch") == e && x.optLong("ownerId") == o) out.add(new Cand(x, true));
+        }
+        JSONArray ret = s.optJSONArray("retiredKeys");
+        if (ret != null) for (int i = 0; i < ret.length(); i++) {
+            JSONObject x = ret.optJSONObject(i);
+            if (x != null && x.optLong("epoch") == e && x.optLong("ownerId") == o) out.add(new Cand(x, false));
+        }
+        JSONArray hist = s.optJSONArray("history");
+        if (hist != null) for (int h = 0; h < hist.length(); h++) {
+            JSONObject hh = hist.optJSONObject(h); if (hh == null) continue;
+            JSONArray ks = hh.optJSONArray("senderKeys"); if (ks == null) continue;
+            for (int i = 0; i < ks.length(); i++) {
+                JSONObject x = ks.optJSONObject(i);
+                if (x != null && x.optLong("epoch") == e && x.optLong("ownerId") == o) out.add(new Cand(x, false));
+            }
+        }
+        return out;
+    }
+
     private List<Long> liveMembers(long g) throws Exception {
         JSONObject r = api.get("/api/chats/" + g);
         JSONObject d = r == null ? null : r.optJSONObject("data");
@@ -336,7 +369,7 @@ public final class NecpraGroupE2E {
             } catch (Exception ex) { if (id == st.ownerId) selfFailure = ex.getMessage(); }
         }
         if (!selfOk) throw new IllegalStateException("Your own group sender key could not be prepared" + (selfFailure != null ? ": " + selfFailure : ""));
-        api.post("/api/group-messages/" + g + "/crypto/rotate", new JSONObject().put("epoch", e).put("distributions", ds));
+        api.post("/api/group-messages/" + g + "/crypto/rotate", new JSONObject().put("epoch", e).put("distributions", ds).put("keyFingerprint", fpOf(st.publicJwk)));
         states.put(slotName(g, e, st.ownerId, false, null), st);
         save(st);
         return st;
@@ -428,16 +461,23 @@ public final class NecpraGroupE2E {
             if (s0 != null && fp.equals(fpOf(s0.publicJwk))) { states.put(k0, s0); return s0; }
         }
         JSONObject s = fetchState(g);
-        JSONObject entry = keyEntry(s, e, o);
-        JSONObject dist = entry == null ? null : entry.optJSONObject("distribution");
-        if (dist == null) throw new KeyUnavailable("Sender key for this group message is not available");
-        JSONObject b = new JSONObject(new String(unb64(unwrapKey(dist.getString("ciphertext"), o)), StandardCharsets.UTF_8));
-        if (fp != null && !fp.isEmpty() && !fp.equals(fpOf(b.optJSONObject("publicJwk")))) throw new KeyUnavailable("Sender key for this group message is not available");
+        // Try the current key, then the retired ones, until the key's fingerprint matches the one the message was signed with.
+        JSONObject b = null; boolean isCurrent = false;
+        for (Cand c : keyEntries(s, e, o)) {
+            JSONObject dist = c.entry.optJSONObject("distribution");
+            if (dist == null) continue;
+            try {
+                JSONObject cand = new JSONObject(new String(unb64(unwrapKey(dist.getString("ciphertext"), o)), StandardCharsets.UTF_8));
+                if (fp != null && !fp.isEmpty() && !fp.equals(fpOf(cand.optJSONObject("publicJwk")))) continue;
+                b = cand; isCurrent = c.current; break;
+            } catch (Exception ignored) { /* this wrap is not readable on this device - try the next candidate */ }
+        }
+        if (b == null) throw new KeyUnavailable("Sender key for this group message is not available");
         st = new State();
         st.slot = key; st.rx = rx; st.groupId = g; st.epoch = e; st.ownerId = o;
         st.chain = unb64(b.getString("chain")); st.publicJwk = b.optJSONObject("publicJwk"); st.iteration = b.optInt("iteration", 0);
         states.put(key, st); save(st);
-        try { api.post("/api/group-messages/" + g + "/crypto/ack", new JSONObject().put("ownerId", o).put("epoch", e)); } catch (Exception ignored) { /* retried on a later sync */ }
+        if (isCurrent) { try { api.post("/api/group-messages/" + g + "/crypto/ack", new JSONObject().put("ownerId", o).put("epoch", e)); } catch (Exception ignored) { /* retried on a later sync */ } }
         return st;
     }
 

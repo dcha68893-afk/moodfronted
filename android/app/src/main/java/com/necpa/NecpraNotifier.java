@@ -86,6 +86,13 @@ final class NecpraNotifier {
         return "message".equals(type) || "group_message".equals(type);
     }
 
+    /** Status pushes: new status from a friend (type "status") and status like / comment / mention / answer. */
+    static boolean isStatusPush(Map<String, String> d) {
+        if (d == null) return false;
+        String type = d.get("type");
+        return type != null && type.startsWith("status");
+    }
+
     private static String nz(String s) { return s == null ? "" : s.trim(); }
 
     private static long parseLong(String s) {
@@ -278,6 +285,64 @@ final class NecpraNotifier {
 
         NotificationManagerCompat.from(ctx).notify(key, CHILD_ID, b.build());
         updateSummary(ctx);
+        return true;
+    }
+
+    static final int STATUS_ID = 2;
+    static final String STATUS_TAG_PREFIX = "necpra_status:";
+
+    /**
+     * Draws a Status notification natively (data-only push, app closed / background). Tapping it opens the native
+     * Status screen on the exact status when native owns DMs on this device (reactions/replies are encrypted natively);
+     * otherwise it falls back to the existing web deep link (necpra://status/<id>).
+     */
+    static boolean showStatus(Context ctx, Map<String, String> d, long sentTime, String fallbackTitle, String fallbackBody) {
+        ensureChannels(ctx);
+        if (!NotificationManagerCompat.from(ctx).areNotificationsEnabled()) return true;
+
+        String title = nz(d.get("title"));
+        if (title.isEmpty()) title = nz(fallbackTitle);
+        String body = nz(d.get("body"));
+        if (body.isEmpty()) body = nz(fallbackBody);
+        if (title.isEmpty()) title = "Status";
+        if (body.isEmpty()) body = "New status update";
+
+        String statusId = nz(d.get("statusId"));
+        long userId = parseLong(d.get("userId"));
+        String tag = STATUS_TAG_PREFIX + (statusId.isEmpty() ? "u" + userId : statusId);
+
+        int immutableFlag = Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0;
+        Intent open;
+        if (NecpraDmOwner.isOwner(ctx)) {
+            open = NecpraStatusActivity.intentForStatus(ctx, userId, statusId);
+        } else {
+            Uri link = Uri.parse("necpra://status/" + Uri.encode(statusId.isEmpty() ? "0" : statusId));
+            open = new Intent(ctx, MainActivity.class)
+                    .setAction(Intent.ACTION_VIEW).setData(link)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        }
+        PendingIntent contentPi = PendingIntent.getActivity(ctx, (tag + "#open").hashCode(), open,
+                PendingIntent.FLAG_UPDATE_CURRENT | immutableFlag);
+
+        NotificationCompat.Builder b = new NotificationCompat.Builder(ctx, CHANNEL_STATUS)
+                .setSmallIcon(R.drawable.ic_stat_necpra)
+                .setColor(ContextCompat.getColor(ctx, R.color.necpra_push_accent))
+                .setContentTitle(title)
+                .setContentText(body)
+                .setStyle(new NotificationCompat.BigTextStyle().bigText(body))
+                .setContentIntent(contentPi)
+                .setAutoCancel(true)
+                .setCategory(NotificationCompat.CATEGORY_SOCIAL)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setWhen(sentTime > 0 ? sentTime : System.currentTimeMillis())
+                .setShowWhen(true)
+                .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+                .setPublicVersion(publicVersion(ctx, CHANNEL_STATUS));
+        Bitmap avatar = loadAvatar(nz(d.get("imageUrl")));
+        if (avatar != null) b.setLargeIcon(avatar);
+        if (Build.VERSION.SDK_INT < 26) b.setDefaults(Notification.DEFAULT_ALL);
+
+        NotificationManagerCompat.from(ctx).notify(tag, STATUS_ID, b.build());
         return true;
     }
 

@@ -43,7 +43,7 @@ public class NecpraNotifyPlugin extends Plugin {
     @PluginMethod
     public void version(PluginCall call) {
         JSObject r = new JSObject();
-        r.put("version", 2);
+        r.put("version", 3);
         call.resolve(r);
     }
 

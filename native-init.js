@@ -101,6 +101,7 @@
         opts = opts || {};
         var args = { section: opts.section || 'feed' };
         if (opts.userId) args.userId = Number(opts.userId);
+        if (opts.statusId) args.statusId = String(opts.statusId);
         return native.openNativeStatus(args);
       },
       nativeFriendsAvailable: function () { return native.nativeFriendsAvailable(); },
@@ -594,6 +595,16 @@
     };
   }
 
+  // Notification taps: open the native Status screen on one exact status. Resolves true if native handled it,
+  // false if the caller must fall back to the web Status module.
+  window.__necpraOpenNativeStatus = async function (statusId, userId) {
+    try {
+      var r = await openNativeStatusScreen({ statusId: statusId, userId: userId });
+      if (r && r.opened && r.openVibes) { try { window.navigateToPage('status', { fromHistory: true }); openWebVibesSoon(); } catch (_) {} }
+      return !!(r && r.opened);
+    } catch (_) { return false; }
+  };
+
   installNativeStatusRouting();
   if (document.readyState !== 'complete') window.addEventListener('load', installNativeStatusRouting, { once: true });
 
@@ -897,9 +908,14 @@
           window.__necpraOpenNativeChat(gid).then(function (opened) { if (!opened) openWebGroup(); }, openWebGroup);
         } else openWebGroup();
       } else if (parts[0] === 'status' && parts[1]) {
-        window.dispatchEvent(new CustomEvent('kyn:openStatus', {
-          detail:{statusId:parts[1]}
-        }));
+        var sid = parts[1];
+        var openWebStatus = function () {
+          window.dispatchEvent(new CustomEvent('kyn:openStatus', { detail:{statusId:sid} }));
+        };
+        // Native Status first (exact status); the web module is only the fallback.
+        if (window.__necpraOpenNativeStatus) {
+          window.__necpraOpenNativeStatus(sid).then(function (opened) { if (!opened) openWebStatus(); }, openWebStatus);
+        } else openWebStatus();
       } else if (parts[0] === 'marketplace' && parts[1]) {
         window.dispatchEvent(new CustomEvent('kyn:openMarketplace', {
           detail:{itemId:parts[1]}

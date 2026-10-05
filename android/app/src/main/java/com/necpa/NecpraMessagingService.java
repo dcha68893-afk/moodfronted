@@ -13,8 +13,8 @@ import java.util.Map;
 /**
  * Receives every FCM push, in every app state (closed, background, foreground).
  *
- * Chat messages are turned into native MessagingStyle notifications here. Everything else
- * (friend requests, status, etc.) is handed to the Capacitor PushNotifications plugin exactly
+ * Chat messages and (closed/background) status updates are turned into native notifications here. Everything else
+ * (friend requests, etc.) is handed to the Capacitor PushNotifications plugin exactly
  * as its own MessagingService would have, so the existing JS listeners keep working.
  *
  * This service replaces Capacitor's MessagingService (removed in the manifest with tools:node="remove").
@@ -42,7 +42,24 @@ public class NecpraMessagingService extends FirebaseMessagingService {
             return;
         }
 
-        // Not a chat message: behave exactly like Capacitor's MessagingService.
+        // Status pushes arrive data-only on v3+ APKs. Foreground: let the web layer show its in-app banner (as before);
+        // closed / background: draw the notification natively so a tap opens the native Status screen.
+        if (NecpraNotifier.isStatusPush(data) && !NecpraNotifier.appForeground) {
+            String fbTitle = null, fbBody = null;
+            RemoteMessage.Notification n = message.getNotification();
+            if (n != null) { fbTitle = n.getTitle(); fbBody = n.getBody(); }
+            try {
+                NecpraNotifier.showStatus(getApplicationContext(), data, message.getSentTime(), fbTitle, fbBody);
+            } catch (Throwable t) {
+                Log.e(TAG, "status notification failed, using fallback", t);
+                NecpraNotifier.showFallback(getApplicationContext(),
+                        data.get("title") != null ? data.get("title") : fbTitle,
+                        data.get("body") != null ? data.get("body") : fbBody);
+            }
+            return;
+        }
+
+        // Not a chat/status push: behave exactly like Capacitor's MessagingService.
         PushNotificationsPlugin.sendRemoteMessage(message);
     }
 

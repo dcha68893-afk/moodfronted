@@ -1262,7 +1262,7 @@ public final class NecpraMessageRepository {
 
     boolean canEdit(NecpraDb.Msg m) {
         return m.mine && m.serverId > 0 && "text".equals(m.type) && m.status != ST_FAILED && System.currentTimeMillis() - m.sortTs < EDIT_WINDOW_MS
-                && !isGroup(m.chatId);   // group edits use PATCH, which Android's HttpURLConnection cannot send - not offered natively yet
+                && (!isGroup(m.chatId) || groupsOn());   // group edits go out as PUT /api/group-messages/message/:id (a PATCH alias on the server)
     }
 
     /** Encrypts the new text (same ratchet as a new message) and PUTs it. The local text changes only after the server accepted it. */
@@ -1277,7 +1277,10 @@ public final class NecpraMessageRepository {
         long peer = conv == null ? 0 : conv.peerId;
         Resp r;
         if (conv != null && "group".equals(conv.type)) {
-            throw new IOException("Editing group messages isn't available in the native screen yet");
+            if (!groupsOn()) throw new IOException("Group messages can't be edited from the native screen");
+            // Same sender key + chain as a new group message; the server accepts the PUT as an alias of its PATCH edit route.
+            String env = groupEngine().encrypt(m.chatId, clean);
+            r = request("PUT", "/api/group-messages/message/" + m.serverId, new JSONObject().put("content", env));
         } else {
             if (peer <= 0) throw new IOException("This chat can't be edited from the native screen");
             String env = NecpraE2EStore.engine(app).encrypt(clean, String.valueOf(peer));
