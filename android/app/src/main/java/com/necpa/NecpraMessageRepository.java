@@ -158,6 +158,71 @@ public final class NecpraMessageRepository {
 
     String lastProvisionError() { return NecpraE2EStore.lastError(app); }
 
+    // ------------------------------------------------------------------ groups (Sender Keys v2 - see NecpraGroupE2E)
+
+    /** True when native owns group chats on this device (flag on AND the identity key is on the device). */
+    boolean groupsOn() { return NecpraDmOwner.isGroupOwner(app); }
+
+    private final NecpraGroupE2E.Api groupApi = new NecpraGroupE2E.Api() {
+        @Override public JSONObject get(String path) throws Exception { return groupCall("GET", path, null); }
+        @Override public JSONObject post(String path, JSONObject body) throws Exception { return groupCall("POST", path, body); }
+    };
+
+    /** Same HTTP + single-refresh path as everything else; non-2xx becomes an ApiException so the engine can react to 409. */
+    private JSONObject groupCall(String method, String path, JSONObject body) throws Exception {
+        Resp r = request(method, path, body);
+        if (!r.ok()) throw new NecpraGroupE2E.ApiException(r.status, r.json == null ? null : r.json.optString("code", null), r.message());
+        return r.json == null ? new JSONObject() : r.json;
+    }
+
+    private NecpraGroupE2E groupEngine() throws Exception { return NecpraE2EStore.groupEngine(app, groupApi); }
+
+    private boolean isGroup(long chatId) { NecpraDb.Conv c = dao().conv(chatId); return c != null && "group".equals(c.type); }
+
+    /** list / sync answer {data:{messages:[...]}} (older builds answered a bare array). */
+    private static JSONArray groupRows(JSONObject json) {
+        if (json == null) return null;
+        JSONObject d = json.optJSONObject("data");
+        if (d != null) return d.optJSONArray("messages");
+        return json.optJSONArray("data");
+    }
+
+    private static String groupSenderName(JSONObject row) {
+        String n = str(row, "senderDisplayName");
+        if (n == null || n.isEmpty()) { String f = str(row, "firstName"), l = str(row, "lastName"); n = ((f == null ? "" : f) + " " + (l == null ? "" : l)).trim(); }
+        if (n.isEmpty()) n = str(row, "senderUsername");
+        return n == null || n.isEmpty() ? null : n;
+    }
+
+    private final ConcurrentHashMap<Long, Long> lastKeyTopUp = new ConcurrentHashMap<>();
+
+    /** Gives members who joined since our sender key was made a copy of it. Cheap no-op otherwise; at most once a minute per group. */
+    private void topUpGroupKeys(long chatId) {
+        long now = System.currentTimeMillis(); Long last = lastKeyTopUp.get(chatId);
+        if (last != null && now - last < 60_000L) return;
+        lastKeyTopUp.put(chatId, now);
+        try { groupEngine().distributeMissing(chatId); } catch (Exception ignored) { /* retried on a later sync */ }
+    }
+
+    /** Messages that arrived before the sender's key reached us are retried once the key is on the server. */
+    private void retryUndecrypted(long chatId) {
+        NecpraDb.ChatDao d = dao();
+        List<NecpraDb.Msg> stuck = d.undecrypted(chatId);
+        if (stuck.isEmpty()) return;
+        boolean changed = false;
+        for (NecpraDb.Msg m : stuck) {
+            String content = m.envelope == null ? null : open(m.envelope);
+            if (content == null) continue;                 // ciphertext is only kept for rows we still want to retry
+            try {
+                m.body = seal(groupEngine().decrypt(chatId, content));
+                m.cryptoState = CS_OK; m.lastError = null; m.envelope = null;
+                d.updateMsg(m); changed = true;
+            } catch (NecpraGroupE2E.KeyUnavailable ignored) { break;   // still not distributed: no point trying the rest
+            } catch (Exception ignored) { /* permanent for this device: leave it as it is */ }
+        }
+        if (changed) { refreshPreview(chatId); fireMessages(chatId); fireConversations(); }
+    }
+
     // ------------------------------------------------------------------ listeners
 
     void addListener(Listener l) { listeners.addIfAbsent(l); }
@@ -279,7 +344,8 @@ public final class NecpraMessageRepository {
         int warmed = 0;
         for (NecpraDb.Conv c : d.convs()) {
             if (warmed >= 15) break;
-            if (!"direct".equals(c.type) || c.peerId <= 0 || !ready()) continue;
+            if (!ready()) continue;
+            if ("group".equals(c.type) ? !groupsOn() : (!"direct".equals(c.type) || c.peerId <= 0)) continue;
             if (c.lastServerId > c.syncCursor) {
                 try { syncChat(c.chatId); warmed++; } catch (NativeBackgroundSync.SessionExpiredException e) { throw e; } catch (Exception ignored) { }
             }
@@ -386,12 +452,16 @@ public final class NecpraMessageRepository {
         if (d.count(chatId) > currentWindow) return true;
         long oldest = d.minServerId(chatId);
         if (oldest <= 0) return false;
+        final boolean group = isGroup(chatId);
+        if (group && !groupsOn()) return false;
         synchronized (lock(chatId)) {
-            Resp r = request("GET", "/api/messages/" + chatId + "?before=" + oldest + "&limit=" + PAGE, null);
+            Resp r = request("GET", group ? "/api/group-messages/" + chatId + "/messages?before=" + oldest + "&limit=" + PAGE
+                                          : "/api/messages/" + chatId + "?before=" + oldest + "&limit=" + PAGE, null);
             if (!r.ok()) throw new IOException(r.message());
-            JSONArray rows = r.json.optJSONArray("data");
+            JSONArray rows = group ? groupRows(r.json) : r.json.optJSONArray("data");
             if (rows != null && rows.length() > 0) ingest(chatId, rows, false);
-            return d.count(chatId) > currentWindow || r.json.optBoolean("hasMore", false);
+            boolean more = group ? (r.json.optJSONObject("data") != null && r.json.optJSONObject("data").optBoolean("hasMore", false)) : r.json.optBoolean("hasMore", false);
+            return d.count(chatId) > currentWindow || more;
         }
     }
 
@@ -399,6 +469,7 @@ public final class NecpraMessageRepository {
     void syncChat(long chatId) throws Exception {
         NecpraDb.ChatDao d = dao();
         NecpraDb.Conv conv = d.conv(chatId);
+        if (conv != null && "group".equals(conv.type)) { if (groupsOn()) syncGroup(chatId); return; }
         if (conv == null || !"direct".equals(conv.type)) return;
         synchronized (lock(chatId)) {
             long cursor = conv.syncCursor;
@@ -421,11 +492,40 @@ public final class NecpraMessageRepository {
         }
     }
 
+    /** Group counterpart of {@link #syncChat}: same cursor rules over /api/group-messages, then key housekeeping. */
+    private void syncGroup(long chatId) throws Exception {
+        NecpraDb.ChatDao d = dao();
+        NecpraDb.Conv conv = d.conv(chatId);
+        if (conv == null || !"group".equals(conv.type)) return;
+        synchronized (lock(chatId)) {
+            long cursor = conv.syncCursor;
+            if (cursor <= 0) {
+                Resp r = request("GET", "/api/group-messages/" + chatId + "/messages?limit=" + PAGE, null);
+                if (!r.ok()) throw new IOException(r.message());
+                JSONArray rows = groupRows(r.json);
+                if (rows != null) ingest(chatId, rows, true);
+            } else {
+                for (int guard = 0; guard < 20; guard++) {
+                    Resp r = request("GET", "/api/group-messages/" + chatId + "/sync?sinceId=" + cursor + "&limit=100", null);
+                    if (!r.ok()) throw new IOException(r.message());
+                    JSONArray rows = groupRows(r.json);
+                    if (rows == null || rows.length() == 0) break;
+                    long next = ingest(chatId, rows, true);
+                    if (rows.length() < 100 || next <= cursor) break;
+                    cursor = next;
+                }
+            }
+            retryUndecrypted(chatId);
+        }
+        topUpGroupKeys(chatId);
+    }
+
     /** Stores rows ascending by id; decrypts each NEW incoming row exactly once. Returns the highest id seen. */
     private long ingest(long chatId, JSONArray rows, boolean advanceCursor) throws Exception {
         NecpraDb.ChatDao d = dao();
         NecpraDb.Conv conv = d.conv(chatId);
         long peer = conv == null ? 0 : conv.peerId;
+        final boolean group = conv != null && "group".equals(conv.type);
         long me = me();
         List<JSONObject> list = new ArrayList<>();
         for (int i = 0; i < rows.length(); i++) { JSONObject o = rows.optJSONObject(i); if (o != null && o.optLong("id") > 0) list.add(o); }
@@ -447,6 +547,18 @@ public final class NecpraMessageRepository {
                 String content = str(row, "content");
                 String type = str(row, "type"); m.type = type == null ? "text" : type;
                 if (content == null) { m.cryptoState = CS_PLAIN; }
+                else if (group && NecpraGroupE2E.isEnvelope(content)) {
+                    try {
+                        m.body = seal(groupEngine().decrypt(chatId, content));
+                        m.cryptoState = CS_OK;
+                    } catch (NecpraGroupE2E.KeyUnavailable u) {
+                        m.cryptoState = CS_FAILED; m.lastError = "Waiting for the group key";
+                        m.envelope = seal(content);        // kept so retryUndecrypted can try again once the key arrives
+                    } catch (Exception e) {
+                        if (e instanceof IllegalStateException && String.valueOf(e.getMessage()).contains("not provisioned")) throw e;
+                        m.cryptoState = mine ? CS_OWN_UNAVAILABLE : CS_FAILED; m.lastError = "Could not decrypt on this device";
+                    }
+                }
                 else if (NecpraE2E.looksEncrypted(content)) {
                     if (mine) { m.cryptoState = CS_OWN_UNAVAILABLE; }
                     else {
@@ -463,10 +575,15 @@ public final class NecpraMessageRepository {
                 } else { m.body = seal(content); m.cryptoState = CS_PLAIN; }
             }
             if (m.serverId == 0) m.serverId = sid;
+            if (group && (m.senderName == null || m.senderName.isEmpty())) m.senderName = groupSenderName(row);
             long ts = parseIso(str(row, "createdAt")); if (ts == 0) ts = parseIso(str(row, "sentAt"));
             if (ts > 0) m.sortTs = ts; else if (m.sortTs == 0) m.sortTs = System.currentTimeMillis();
             if (isNew && !mine && System.currentTimeMillis() - m.sortTs < 48L * 3600_000L) delivered.add(sid);   // only fresh messages need a delivery ack
             m.replyToServerId = row.optLong("replyToId", 0);
+            if (group && m.replyToServerId == 0) {
+                JSONObject gm = row.optJSONObject("metadata"), rt = gm == null ? null : gm.optJSONObject("replyTo");
+                if (rt != null) m.replyToServerId = rt.optLong("id", 0);
+            }
             m.deleted = row.optBoolean("isDeleted", false);
             m.edited = row.optBoolean("isEdited", false);
             if (mine) {
@@ -504,9 +621,13 @@ public final class NecpraMessageRepository {
         fireMessages(chatId);
         fireConversations();
         final List<Long> toAck = delivered;
+        final long ackChat = chatId;
         if (!toAck.isEmpty()) io.execute(() -> {
             int n = 0;
-            for (long id : toAck) { if (n++ >= 30) break; try { request("POST", "/api/messages/" + id + "/delivered", new JSONObject()); } catch (Exception ignored) { } }
+            for (long id : toAck) {
+                if (n++ >= 30) break;
+                try { request("POST", group ? "/api/group-messages/" + ackChat + "/messages/" + id + "/delivered" : "/api/messages/" + id + "/delivered", new JSONObject()); } catch (Exception ignored) { }
+            }
         });
         return maxId;
     }
@@ -526,7 +647,16 @@ public final class NecpraMessageRepository {
         Map<String, String> byUser = new HashMap<>();
         for (JSONObject src : new JSONObject[]{col, meta == null ? null : meta.optJSONObject("reactions")}) {
             if (src == null) continue;
-            for (java.util.Iterator<String> it = src.keys(); it.hasNext(); ) { String k = it.next(); String v = str(src, k); if (v != null && !v.isEmpty()) byUser.put(k, v); }
+            for (java.util.Iterator<String> it = src.keys(); it.hasNext(); ) {
+                String k = it.next();
+                JSONArray ids = src.optJSONArray(k);
+                if (ids != null) {                           // group rows: {"emoji": [userId, ...]} (Message.addReaction)
+                    for (int i = 0; i < ids.length(); i++) { long uid = ids.optLong(i, 0); if (uid > 0) byUser.put(String.valueOf(uid), k); }
+                    continue;
+                }
+                String v = str(src, k);                      // direct rows: {"userId": "emoji"}
+                if (v != null && !v.isEmpty()) byUser.put(k, v);
+            }
         }
         List<NecpraDb.React> out = new ArrayList<>();
         for (Map.Entry<String, String> e : byUser.entrySet()) {
@@ -581,6 +711,13 @@ public final class NecpraMessageRepository {
         try {
             dao().clearUnread(chatId);
             fireConversations();
+            if (isGroup(chatId)) {                         // groups track reads per message
+                if (!groupsOn()) return;
+                JSONArray ids = new JSONArray();
+                for (NecpraDb.Msg m : dao().recentIncoming(chatId, 30)) ids.put(m.serverId);
+                if (ids.length() > 0) request("POST", "/api/group-messages/" + chatId + "/read", new JSONObject().put("messageIds", ids));
+                return;
+            }
             request("POST", "/api/messages/read", new JSONObject().put("chatId", chatId));
         } catch (NativeBackgroundSync.SessionExpiredException e) {
             fireNotice("Session expired", true);
@@ -603,8 +740,15 @@ public final class NecpraMessageRepository {
         long me = me();
         boolean had = false;
         for (NecpraDb.React r : d.reactsFor(Collections.singletonList(localId))) if (r.userId == me && emoji.equals(r.emoji)) had = true;
-        Resp r = had ? request("DELETE", "/api/messages/" + m.serverId + "/react", null)
-                     : request("POST", "/api/messages/" + m.serverId + "/react", new JSONObject().put("emoji", emoji));
+        Resp r;
+        if (isGroup(m.chatId)) {
+            String base = "/api/group-admin/" + m.chatId + "/messages/" + m.serverId + "/reaction";
+            r = had ? request("DELETE", base + "?reaction=" + java.net.URLEncoder.encode(emoji, "UTF-8"), null)
+                    : request("POST", base, new JSONObject().put("reaction", emoji));
+        } else {
+            r = had ? request("DELETE", "/api/messages/" + m.serverId + "/react", null)
+                    : request("POST", "/api/messages/" + m.serverId + "/react", new JSONObject().put("emoji", emoji));
+        }
         if (!r.ok()) throw new IOException(r.message());
         List<NecpraDb.React> all = new ArrayList<>();
         for (NecpraDb.React x : d.reactsFor(Collections.singletonList(localId))) if (x.userId != me) all.add(x);
@@ -735,6 +879,10 @@ public final class NecpraMessageRepository {
                 NecpraDb.Conv conv = d.conv(m.chatId);
                 long peer = conv == null ? 0 : conv.peerId;
                 try {
+                    if (conv != null && "group".equals(conv.type)) {
+                        if (sendGroupMessage(m)) { retryLater = true; break; }   // keep order: later messages wait behind this one
+                        continue;
+                    }
                     if (peer <= 0) { fail(m, "This chat can't be sent from the native screen"); continue; }
                     String mType = m.type == null || m.type.isEmpty() ? "text" : m.type;
                     boolean media = isMediaType(mType);
@@ -783,6 +931,9 @@ public final class NecpraMessageRepository {
                     retryLater = true; break;
                 } catch (AttachmentException e) {
                     fail(m, e.getMessage());
+                } catch (NecpraGroupE2E.ApiException e) {
+                    if (e.status == 408 || e.status == 425 || e.status == 429 || e.status >= 500) { m.attempts++; m.lastError = "Server busy, will retry"; d.updateMsg(m); retryLater = true; break; }
+                    fail(m, e.getMessage());
                 } catch (IllegalStateException e) {
                     String msg = e.getMessage() == null ? "Could not encrypt message" : e.getMessage();
                     if (msg.contains("not provisioned")) { fireNotice("Secure messaging isn't set up on this device yet", false); return true; }
@@ -794,6 +945,52 @@ public final class NecpraMessageRepository {
             if (retryLater) scheduleRetry();
             return !retryLater;
         }
+    }
+
+    /**
+     * Sends one queued group message: encrypt with this member's sender key (made + distributed on first use), then POST the
+     * envelope. The envelope is persisted before the POST so a retry resends the same ciphertext (one chain step per message).
+     * @return true when the send should be retried later (offline-ish server answer or an epoch change mid-flight).
+     */
+    private boolean sendGroupMessage(NecpraDb.Msg m) throws Exception {
+        NecpraDb.ChatDao d = dao();
+        if (!groupsOn()) { fail(m, "Group messages can't be sent from the native screen"); return false; }
+        String mType = m.type == null || m.type.isEmpty() ? "text" : m.type;
+        if (isMediaType(mType)) { fail(m, "Sending files to a group isn't available in the native screen yet"); return false; }
+        if (m.envelope == null) {
+            String plain = open(m.body);
+            if (plain == null) { fail(m, "Message text is no longer available"); return false; }
+            m.envelope = seal(groupEngine().encrypt(m.chatId, plain));
+            d.updateMsg(m);
+        }
+        JSONObject meta = new JSONObject().put("groupId", m.chatId);
+        if (m.replyToServerId > 0) meta.put("replyTo", new JSONObject().put("id", m.replyToServerId));
+        JSONObject body = new JSONObject().put("chatId", m.chatId).put("content", open(m.envelope)).put("type", mType)
+                .put("clientMessageId", m.clientMessageId).put("metadata", meta);
+        Resp r = request("POST", "/api/group-messages/" + m.chatId + "/messages", body);
+        if (r.ok()) {
+            JSONObject data = r.json == null ? null : r.json.optJSONObject("data");
+            JSONObject msg = data == null ? null : (data.optJSONObject("message") != null ? data.optJSONObject("message") : data);
+            m.serverId = msg == null ? 0 : msg.optLong("id");
+            long ts = msg == null ? 0 : parseIso(str(msg, "createdAt"));
+            if (ts > 0) m.sortTs = ts;
+            m.status = ST_SENT; m.envelope = null; m.lastError = null;
+            d.updateMsg(m);
+            refreshPreview(m.chatId);
+            fireMessages(m.chatId); fireConversations();
+            return false;
+        }
+        String code = r.json == null ? null : r.json.optString("code", null);
+        if (r.status == 409 && code != null && code.startsWith("GROUP_SENDER_KEY")) {
+            // Membership changed between encrypting and sending (new epoch): the old ciphertext is useless. Encrypt again next round.
+            m.attempts++;
+            if (m.attempts > 5) { fail(m, "The group's encryption keys are still updating. Try again."); return false; }
+            m.envelope = null; m.lastError = "Updating group keys"; d.updateMsg(m);
+            return true;
+        }
+        if (r.status == 408 || r.status == 425 || r.status == 429 || r.status >= 500) { m.attempts++; m.lastError = "Server busy, will retry"; d.updateMsg(m); return true; }
+        fail(m, r.message());
+        return false;
     }
 
     private void fail(NecpraDb.Msg m, String why) {
@@ -1064,7 +1261,8 @@ public final class NecpraMessageRepository {
     static final long EDIT_WINDOW_MS = 15L * 60 * 1000;   // server: PATCH/PUT /api/messages/:id
 
     boolean canEdit(NecpraDb.Msg m) {
-        return m.mine && m.serverId > 0 && "text".equals(m.type) && m.status != ST_FAILED && System.currentTimeMillis() - m.sortTs < EDIT_WINDOW_MS;
+        return m.mine && m.serverId > 0 && "text".equals(m.type) && m.status != ST_FAILED && System.currentTimeMillis() - m.sortTs < EDIT_WINDOW_MS
+                && !isGroup(m.chatId);   // group edits use PATCH, which Android's HttpURLConnection cannot send - not offered natively yet
     }
 
     /** Encrypts the new text (same ratchet as a new message) and PUTs it. The local text changes only after the server accepted it. */
@@ -1077,9 +1275,14 @@ public final class NecpraMessageRepository {
         if (m == null || !canEdit(m)) throw new IOException("This message can no longer be edited");
         NecpraDb.Conv conv = d.conv(m.chatId);
         long peer = conv == null ? 0 : conv.peerId;
-        if (peer <= 0) throw new IOException("This chat can't be edited from the native screen");
-        String env = NecpraE2EStore.engine(app).encrypt(clean, String.valueOf(peer));
-        Resp r = request("PUT", "/api/messages/" + m.serverId, new JSONObject().put("content", env));
+        Resp r;
+        if (conv != null && "group".equals(conv.type)) {
+            throw new IOException("Editing group messages isn't available in the native screen yet");
+        } else {
+            if (peer <= 0) throw new IOException("This chat can't be edited from the native screen");
+            String env = NecpraE2EStore.engine(app).encrypt(clean, String.valueOf(peer));
+            r = request("PUT", "/api/messages/" + m.serverId, new JSONObject().put("content", env));
+        }
         if (!r.ok()) throw new IOException(r.message());
         m.body = seal(clean); m.edited = true;
         d.updateMsg(m);
@@ -1093,7 +1296,7 @@ public final class NecpraMessageRepository {
         NecpraDb.Msg m = d.byLocal(localId);
         if (m == null) return;
         if (m.serverId > 0) {
-            Resp r = request("DELETE", "/api/messages/" + m.serverId + "?deleteForEveryone=" + (forEveryone && m.mine), null);
+            Resp r = request("DELETE", (isGroup(m.chatId) ? "/api/group-messages/message/" : "/api/messages/") + m.serverId + "?deleteForEveryone=" + (forEveryone && m.mine), null);
             if (!r.ok()) throw new IOException(r.message());
         } else {
             m.status = ST_FAILED;                    // never sent: make sure the queue can't send it after it was deleted
@@ -1124,11 +1327,13 @@ public final class NecpraMessageRepository {
     void refreshRecent(long chatId) throws Exception {
         NecpraDb.ChatDao d = dao();
         NecpraDb.Conv conv = d.conv(chatId);
-        if (conv == null || !"direct".equals(conv.type)) return;
+        final boolean group = conv != null && "group".equals(conv.type);
+        if (group && !groupsOn()) return;
+        if (!group && (conv == null || !"direct".equals(conv.type))) return;
         synchronized (lock(chatId)) {
-            Resp r = request("GET", "/api/messages/" + chatId + "?limit=" + PAGE, null);
+            Resp r = request("GET", group ? "/api/group-messages/" + chatId + "/messages?limit=" + PAGE : "/api/messages/" + chatId + "?limit=" + PAGE, null);
             if (!r.ok()) throw new IOException(r.message());
-            JSONArray rows = r.json == null ? null : r.json.optJSONArray("data");
+            JSONArray rows = group ? groupRows(r.json) : (r.json == null ? null : r.json.optJSONArray("data"));
             if (rows == null || rows.length() == 0) return;
             long me = me(), peer = conv.peerId;
             java.util.Set<Long> seen = new java.util.HashSet<>();
@@ -1156,7 +1361,10 @@ public final class NecpraMessageRepository {
                 boolean serverEdited = row.optBoolean("isEdited", false);
                 if (serverEdited && !m.edited) {
                     String content = str(row, "content");
-                    if (!m.mine && content != null && NecpraE2E.looksEncrypted(content)) {
+                    if (group && !m.mine && NecpraGroupE2E.isEnvelope(content)) {
+                        try { m.body = seal(groupEngine().decrypt(chatId, content)); m.cryptoState = CS_OK; }
+                        catch (Exception ignored) { /* keep the previous text */ }
+                    } else if (!m.mine && content != null && NecpraE2E.looksEncrypted(content)) {
                         try {
                             if (engine == null) engine = NecpraE2EStore.engine(app);
                             m.body = seal(engine.decrypt(content, String.valueOf(m.senderId), false));

@@ -54,6 +54,8 @@
       e2eStatus: function () { return native.e2eStatus(); },
       setDmOwner: function (enabled) { return native.setDmOwner({enabled: !!enabled}); },
       dmOwner: function () { return native.dmOwner(); },
+      setGroupOwner: function (enabled) { return native.setGroupOwner({enabled: !!enabled}); },
+      groupOwner: function () { return native.groupOwner(); },
       sendStatusInteraction: function (ownerId, interactionJson) {
         return native.sendStatusInteraction({ownerId: Number(ownerId), interaction: String(interactionJson)});
       },
@@ -82,6 +84,7 @@
         if (opts.peerId) args.peerId = Number(opts.peerId);
         if (opts.title) args.title = String(opts.title);
         if (opts.avatar) args.avatar = String(opts.avatar);
+        if (opts.filter) args.filter = String(opts.filter);
         return native.openNativeMessages(args);
       },
       nativeToolsAvailable: function () { return native.nativeToolsAvailable(); },
@@ -443,6 +446,10 @@
       if (result && result.groupId) {
         try { window.dispatchEvent(new CustomEvent('kyn:openGroup', { detail: { groupId: String(result.groupId) } })); } catch (_) {}
       }
+      if (result && result.openWebGroups) {            // "Manage" on the native Groups tab: create / members / settings are web for now
+        try { window.__necpraAllowWebGroups = true; if (typeof window.navigateToPage === 'function') window.navigateToPage('group'); } catch (_) {}
+        setTimeout(function () { window.__necpraAllowWebGroups = false; }, 1500);
+      }
       return true;
     } catch (err) {
       console.warn('[native-messages] could not open native screen:', err && err.message ? err.message : err);
@@ -477,6 +484,32 @@
 
   installNativeMessagesRouting();
   if (document.readyState !== 'complete') window.addEventListener('load', installNativeMessagesRouting, { once: true });
+
+  // The bottom-nav Groups button goes through navigateToPage('group'|'groups'). While native owns groups it opens the native
+  // Groups list instead; "Manage" there (and any native failure) falls back to the web group module, which stays fully intact.
+  function installNativeGroupsRouting() {
+    if (!window.NecpraNative || !window.NecpraNative.openNativeMessages) return;
+    if (window.__necpraGroupsRoutingInstalled) return;
+    if (typeof window.navigateToPage !== 'function') return;
+    window.__necpraGroupsRoutingInstalled = true;
+    var origNavigate = window.navigateToPage;
+    window.navigateToPage = function (page, options) {
+      var self = this, args = arguments;
+      var deliberate = /^groups?$/.test(String(page || '')) && window.__currentPage && !/^groups?$/.test(String(window.__currentPage))
+        && !(options && options.fromHistory) && !window.__necpraAllowWebGroups
+        && window.__necpraNativeOwnsGroups && window.__necpraNativeOwnsGroups();
+      if (deliberate) {
+        openNativeMessagesScreen({ filter: 'group' }).then(function (opened) {
+          if (!opened) return origNavigate.apply(self, args);
+        });
+        return;
+      }
+      return origNavigate.apply(this, args);
+    };
+  }
+
+  installNativeGroupsRouting();
+  if (document.readyState !== 'complete') window.addEventListener('load', installNativeGroupsRouting, { once: true });
 
   // ---------------------------------------------------------------------------------------------
   // Native Status routing (Android APK only). Same shape as Messages: ON by default, kill switch for a test device:
@@ -574,12 +607,33 @@
     try { return localStorage.getItem('necpra_native_dm_owner') === '1'; } catch (_) { return false; }
   };
 
+  // Groups follow the same rule with their own switch (kill switch: localStorage 'necpra_native_groups' = '0').
+  // Native owns groups only when it owns DMs (same identity key, same usability check). The WebView refuses to SEND in a
+  // group while this is on (js/groupMessaging.client.js), because a second sender key would orphan the first one.
+  var NATIVE_GROUPS_DEFAULT = true;
+  function nativeGroupsFlag() {
+    try {
+      var v = localStorage.getItem('necpra_native_groups');
+      if (v === '1') return true;
+      if (v === '0') return false;
+    } catch (_) {}
+    return NATIVE_GROUPS_DEFAULT;
+  }
+  window.__necpraNativeOwnsGroups = function () {
+    try { return localStorage.getItem('necpra_native_group_owner') === '1'; } catch (_) { return false; }
+  };
+
   async function syncDmOwner() {
     if (!window.NecpraNative || !window.NecpraNative.setDmOwner) return false;
     var on = false;
     try { on = nativeMessagesFlag() && (await nativeMessagesUsable()); } catch (_) { on = false; }
     try { localStorage.setItem('necpra_native_dm_owner', on ? '1' : '0'); } catch (_) {}
     try { await window.NecpraNative.setDmOwner(on); } catch (_) {}
+    // older APK without setGroupOwner: leave the WebView in charge of groups
+    var g = on && nativeGroupsFlag() && !!window.NecpraNative.setGroupOwner;
+    if (g) { try { await window.NecpraNative.setGroupOwner(true); } catch (_) { g = false; } }
+    else if (window.NecpraNative.setGroupOwner) { try { await window.NecpraNative.setGroupOwner(false); } catch (_) {} }
+    try { localStorage.setItem('necpra_native_group_owner', g ? '1' : '0'); } catch (_) {}
     return on;
   }
   window.__necpraSyncDmOwner = syncDmOwner;
@@ -835,9 +889,13 @@
           detail:{chatId:parts[1], scrollToMessageId:u.searchParams.get('messageId')}
         }));
       } else if (parts[0] === 'group' && parts[1]) {
-        window.dispatchEvent(new CustomEvent('kyn:openGroup', {
-          detail:{groupId:parts[1], scrollToMessageId:u.searchParams.get('messageId')}
-        }));
+        var gid = parts[1], gmid = u.searchParams.get('messageId');
+        var openWebGroup = function () {
+          window.dispatchEvent(new CustomEvent('kyn:openGroup', { detail:{groupId:gid, scrollToMessageId:gmid} }));
+        };
+        if (window.__necpraNativeOwnsGroups && window.__necpraNativeOwnsGroups() && window.__necpraOpenNativeChat) {
+          window.__necpraOpenNativeChat(gid).then(function (opened) { if (!opened) openWebGroup(); }, openWebGroup);
+        } else openWebGroup();
       } else if (parts[0] === 'status' && parts[1]) {
         window.dispatchEvent(new CustomEvent('kyn:openStatus', {
           detail:{statusId:parts[1]}

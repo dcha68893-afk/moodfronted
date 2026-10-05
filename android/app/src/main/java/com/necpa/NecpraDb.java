@@ -30,7 +30,7 @@ import java.util.List;
                 NecpraDb.Conv.class, NecpraDb.Msg.class, NecpraDb.Att.class,
                 NecpraDb.React.class, NecpraDb.Receipt.class, NecpraDb.Draft.class
         },
-        version = 2,
+        version = 3,
         exportSchema = false)
 public abstract class NecpraDb extends RoomDatabase {
 
@@ -76,6 +76,8 @@ public abstract class NecpraDb extends RoomDatabase {
         public boolean edited;
         public int attempts;
         public String lastError;
+        /** Group chats: display name of the sender (username / first+last name from the server row). Null for direct chats. */
+        public String senderName;
     }
 
     @Entity(tableName = "attachments", indices = {@Index("messageLocalId")})
@@ -145,6 +147,11 @@ public abstract class NecpraDb extends RoomDatabase {
         @Query("SELECT * FROM messages WHERE chatId = :chat AND deleted = 0 ORDER BY sortTs DESC, localId DESC LIMIT 1") Msg newest(long chat);
         @Query("SELECT * FROM messages WHERE mine = 1 AND status = 0 ORDER BY sortTs ASC, localId ASC") List<Msg> queued();
         @Query("SELECT COUNT(*) FROM messages WHERE mine = 1 AND status = 0") int queuedCount();
+        /** Incoming rows of a chat whose text could not be decrypted yet (group sender key not distributed to us at the time). */
+        @Query("SELECT * FROM messages WHERE chatId = :chat AND mine = 0 AND cryptoState = 2 AND deleted = 0 AND serverId > 0 ORDER BY serverId ASC LIMIT 60")
+        List<Msg> undecrypted(long chat);
+        @Query("SELECT * FROM messages WHERE chatId = :chat AND mine = 0 AND serverId > 0 AND deleted = 0 ORDER BY serverId DESC LIMIT :n")
+        List<Msg> recentIncoming(long chat, int n);
 
         // attachments / reactions / receipts
         @Insert void insertAtts(List<Att> a);
@@ -178,6 +185,13 @@ public abstract class NecpraDb extends RoomDatabase {
         }
     };
 
+    /** v2 -> v3: group chat bubbles show who wrote them. Keeps every stored message. */
+    static final androidx.room.migration.Migration MIGRATION_2_3 = new androidx.room.migration.Migration(2, 3) {
+        @Override public void migrate(@NonNull androidx.sqlite.db.SupportSQLiteDatabase db) {
+            db.execSQL("ALTER TABLE messages ADD COLUMN senderName TEXT");
+        }
+    };
+
     private static volatile NecpraDb inst;
 
     static NecpraDb get(Context c) {
@@ -186,7 +200,7 @@ public abstract class NecpraDb extends RoomDatabase {
         synchronized (NecpraDb.class) {
             if (inst == null) {
                 inst = Room.databaseBuilder(c.getApplicationContext(), NecpraDb.class, FILE)
-                        .addMigrations(MIGRATION_1_2)
+                        .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                         .fallbackToDestructiveMigration()
                         .build();
             }

@@ -30,5 +30,17 @@ final class NecpraDmOwner {
         catch (Throwable t) { return false; }
     }
 
+    // ---- groups: same rule, separate switch. Sender keys are per-device state: a re-key by the WebView replaces the server copy and
+    // would orphan native's key (and vice versa), so exactly one side may SEND in a group. localStorage['necpra_native_group_owner']
+    // mirrors this for js/groupMessaging.client.js.
+    static void setGroups(Context c, boolean on) { p(c).edit().putBoolean("groups", on).commit(); }
+
+    static boolean groupsEnabled(Context c) { return p(c).getBoolean("groups", false); }
+
+    static boolean isGroupOwner(Context c) {
+        try { return groupsEnabled(c) && NecpraE2EStore.provisionedUser(c) != null; }
+        catch (Throwable t) { return false; }
+    }
+
     static void clear(Context c) { p(c).edit().clear().commit(); }
 }

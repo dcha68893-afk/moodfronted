@@ -608,6 +608,23 @@ public class NecpraNativePlugin extends Plugin {
         call.resolve(out);
     }
 
+    /** Same decision for GROUP chats (sender keys are per-device state, so exactly one side may send). See NecpraDmOwner. */
+    @PluginMethod
+    public void setGroupOwner(PluginCall call) {
+        boolean on = Boolean.TRUE.equals(call.getBoolean("enabled", false));
+        NecpraDmOwner.setGroups(getContext(), on);
+        JSObject out = new JSObject();
+        out.put("owner", NecpraDmOwner.isGroupOwner(getContext()));
+        call.resolve(out);
+    }
+
+    @PluginMethod
+    public void groupOwner(PluginCall call) {
+        JSObject out = new JSObject();
+        out.put("owner", NecpraDmOwner.isGroupOwner(getContext()));
+        call.resolve(out);
+    }
+
     @PluginMethod
     public void dmOwner(PluginCall call) {
         JSObject out = new JSObject();
@@ -645,6 +662,8 @@ public class NecpraNativePlugin extends Plugin {
                 intent = NecpraChatActivity.intent(getContext(), chatId, peerId, call.getString("title", "Chat"), call.getString("avatar"));
             } else {
                 intent = new Intent(getContext(), NecpraConversationsActivity.class);
+                String filter = call.getString("filter");
+                if (filter != null) intent.putExtra(NecpraConversationsActivity.EXTRA_FILTER, filter);
             }
             startActivityForResult(call, intent, "nativeMessagesResult");
         } catch (Exception e) {
@@ -660,7 +679,8 @@ public class NecpraNativePlugin extends Plugin {
         if (d != null) {
             out.put("sessionExpired", d.getBooleanExtra(NecpraConversationsActivity.RES_SESSION_EXPIRED, false));
             long groupId = d.getLongExtra(NecpraConversationsActivity.RES_GROUP_ID, 0L);
-            if (groupId > 0) out.put("groupId", groupId);   // groups stay in the web module
+            if (groupId > 0) out.put("groupId", groupId);   // group manager (members/settings) and, when native doesn't own groups, the chat itself
+            if (d.getBooleanExtra(NecpraConversationsActivity.RES_OPEN_WEB_GROUPS, false)) out.put("openWebGroups", true);
         }
         call.resolve(out);
     }

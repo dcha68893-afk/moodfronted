@@ -106,7 +106,7 @@ final class NecpraRealtime {
     private void connect(final long gen) {
         synchronized (this) { if (users == 0 || gen != generation) return; }
         try {
-            if (!NecpraDmOwner.isOwner(app)) return;           // nothing native to keep live
+            if (!NecpraDmOwner.isOwner(app) && !NecpraDmOwner.isGroupOwner(app)) return;   // nothing native to keep live
             SharedPreferences auth = app.getSharedPreferences(NativeBackgroundSync.AUTH_PREFS, Context.MODE_PRIVATE);
             String token = NativeBackgroundSync.getDecrypted(auth, "accessToken");
             if (token == null || token.isEmpty() || failures > 0) token = NativeBackgroundSync.refreshSession(app);
@@ -126,6 +126,12 @@ final class NecpraRealtime {
 
             for (String ev : new String[]{"message:new", "message:read", "message:delivered", "message:reaction",
                     "message:edited", "message:deleted", "message:status"}) {
+                s.on(ev, a -> onMessageEvent(a));
+            }
+            // Groups: the server emits {groupId, message|messageId} to each member's room. Same rule as DMs - the event only says
+            // "group N changed"; the repository then runs its normal /group-messages sync, so there is one ingest/decrypt path.
+            for (String ev : new String[]{"group:message", "GROUP_MESSAGE", "group:message:updated", "group:message:deleted",
+                    "group:message:delivered", "GROUP_MESSAGE_REACTIONS_UPDATED"}) {
                 s.on(ev, a -> onMessageEvent(a));
             }
             for (String ev : new String[]{"status:new", "status:deleted", "status:expired", "status:viewed",
@@ -165,6 +171,7 @@ final class NecpraRealtime {
             if (a instanceof JSONObject) {
                 JSONObject o = (JSONObject) a;
                 long id = o.optLong("chatId", 0);
+                if (id <= 0) id = o.optLong("groupId", 0);
                 if (id <= 0) { JSONObject m = o.optJSONObject("message"); if (m != null) id = m.optLong("chatId", 0); }
                 if (id <= 0) { JSONObject m = o.optJSONObject("data"); if (m != null) id = m.optLong("chatId", 0); }
                 if (id > 0) return id;

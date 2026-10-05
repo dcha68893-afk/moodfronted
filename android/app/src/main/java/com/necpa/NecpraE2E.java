@@ -74,6 +74,11 @@ public final class NecpraE2E {
 
     public String keyId() { return identityKeyId; }
 
+    /** The account's ECDH identity (same key the DM engine uses): the group engine wraps sender keys with it. Never leaves the process. */
+    PrivateKey identityPrivateKey() { return identityPriv; }
+
+    String identityPublicSpki() { return identityPubSpkiB64; }
+
     // ------------------------------------------------------------------ identity backup (same format as e2e-identity-core.js wrapPrivate)
 
     /** Unwraps {salt,iv,ct} (PBKDF2-SHA256 310k -> AES-256-GCM) to the PKCS8 private key, base64. */

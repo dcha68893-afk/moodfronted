@@ -90,7 +90,7 @@ public class NecpraChatActivity extends AppCompatActivity implements NecpraMessa
     };
     private final Set<String> thumbLoading = new HashSet<>();
     private ImageView avatarImg; private TextView avatarLetter;
-    private boolean peerTyping, peerOnline;
+    private boolean peerTyping, peerOnline, isGroup;
     private long lastTypingEmit;
     private static final String SUB_BASE = "\uD83D\uDD12 End-to-end encrypted";
     private final Runnable poll = new Runnable() {
@@ -173,7 +173,10 @@ public class NecpraChatActivity extends AppCompatActivity implements NecpraMessa
         composer.setBackgroundColor(t.surface); composer.setPadding(dp(8), dp(8), dp(8), dp(8));
         attachBtn = new TextView(this);
         attachBtn.setText("+"); attachBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 28); attachBtn.setTextColor(t.accent); attachBtn.setGravity(Gravity.CENTER);
-        attachBtn.setContentDescription("Attach a file"); attachBtn.setOnClickListener(v -> { if (ready && chatId > 0) picker.launch("*/*"); });
+        attachBtn.setContentDescription("Attach a file"); attachBtn.setOnClickListener(v -> {
+            if (isGroup) { Toast.makeText(this, "Sending files to a group isn't available in the native screen yet", Toast.LENGTH_SHORT).show(); return; }
+            if (ready && chatId > 0) picker.launch("*/*");
+        });
         composer.addView(attachBtn, new LinearLayout.LayoutParams(dp(40), dp(42)));
         input = new EditText(this);
         input.setHint("Message"); input.setHintTextColor(t.subtext); input.setTextColor(t.text);
@@ -226,6 +229,7 @@ public class NecpraChatActivity extends AppCompatActivity implements NecpraMessa
 
     /** Opened from a notification / deep link with only a chat id: take name, avatar and peer from the local row. */
     private void adoptConversation(NecpraDb.Conv c) {
+        if ("group".equals(c.type)) { isGroup = true; refreshSub(); if (attachBtn != null) attachBtn.setAlpha(0.45f); if (adapter != null) adapter.notifyDataSetChanged(); }
         if (peerId <= 0 && c.peerId > 0) peerId = c.peerId;
         boolean generic = title == null || title.isEmpty() || "Chat".equals(title);
         if (generic && c.title != null && !c.title.isEmpty() && !"Chat".equals(c.title)) {
@@ -235,7 +239,7 @@ public class NecpraChatActivity extends AppCompatActivity implements NecpraMessa
         }
     }
 
-    private void refreshSub() { subView.setText(peerTyping ? "typing\u2026" : (peerOnline ? "online" : SUB_BASE)); }
+    private void refreshSub() { subView.setText(peerTyping ? "typing\u2026" : (isGroup ? "\uD83D\uDD12 End-to-end encrypted group" : (peerOnline ? "online" : SUB_BASE))); }
 
     // ---------------------------------------------------------------- realtime
 
@@ -453,6 +457,12 @@ public class NecpraChatActivity extends AppCompatActivity implements NecpraMessa
     }
 
     private void showChatMenu() {
+        if (isGroup) {                      // members, roles, invites and settings live in the web group manager for now
+            new AlertDialog.Builder(this).setItems(new String[]{"Members & settings"}, (d, which) -> {
+                Intent r = new Intent(); r.putExtra(NecpraConversationsActivity.RES_GROUP_ID, chatId); setResult(RESULT_OK, r); finish();
+            }).show();
+            return;
+        }
         if (peerId <= 0) return;
         new AlertDialog.Builder(this).setItems(new String[]{"Remove friend", "Block " + title}, (d, which) -> {
             final boolean block = which == 1;
@@ -637,6 +647,7 @@ public class NecpraChatActivity extends AppCompatActivity implements NecpraMessa
             }
 
             StringBuilder meta = new StringBuilder(NecpraConversationsActivity.timeLabel(m.sortTs));
+            if (isGroup && !m.mine && m.senderName != null && !m.senderName.isEmpty()) meta.insert(0, m.senderName + " \u00B7 ");
             if (m.edited) meta.append(" \u00B7 edited");
             if (m.mine) {
                 switch (m.status) {

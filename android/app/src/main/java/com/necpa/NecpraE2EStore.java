@@ -44,7 +44,7 @@ final class NecpraE2EStore {
     }
 
     static synchronized void clearAll(Context c) {
-        cached = null; cachedFor = null;
+        cached = null; cachedFor = null; cachedGroup = null; cachedGroupFor = null;
         prefs(c).edit().clear().commit();
         c.getApplicationContext().getSharedPreferences(DIAG_PREFS, Context.MODE_PRIVATE).edit().clear().commit();
     }
@@ -101,7 +101,7 @@ final class NecpraE2EStore {
         SharedPreferences p = prefs(c);
         p.edit().clear().commit();                      // never mix sessions of a previous identity
         NativeBackgroundSync.putEncrypted(p, K_IDENTITY, id.toString());
-        cached = null; cachedFor = null;
+        cached = null; cachedFor = null; cachedGroup = null; cachedGroupFor = null;
     }
 
     // ------------------------------------------------------------------ engine
@@ -116,6 +116,36 @@ final class NecpraE2EStore {
                 (peer, force) -> publicKeyFor(app, peer, force), new Sessions(app, userId));
         cached = e; cachedFor = userId;
         return e;
+    }
+
+    // ------------------------------------------------------------------ group sender keys (see NecpraGroupE2E)
+
+    private static volatile NecpraGroupE2E cachedGroup;
+    private static volatile String cachedGroupFor;
+
+    /**
+     * The group engine for the signed-in account. Same identity key and member-key directory as the DM engine; sender-key state is
+     * sealed with the Keystore key like the ratchet sessions and is wiped with the rest of this store on logout.
+     */
+    static synchronized NecpraGroupE2E groupEngine(Context c, NecpraGroupE2E.Api api) throws Exception {
+        String userId = provisionedUser(c);
+        if (userId == null) throw new IllegalStateException("Native E2E is not provisioned");
+        if (cachedGroup != null && userId.equals(cachedGroupFor)) return cachedGroup;
+        final Context app = c.getApplicationContext();
+        NecpraE2E dm = engine(c);
+        final String me = userId;
+        NecpraGroupE2E g = new NecpraGroupE2E(Long.parseLong(userId), dm.identityPrivateKey(), dm.identityPublicSpki(), api,
+                id -> publicKeyFor(app, String.valueOf(id), false).spkiB64,
+                new NecpraGroupE2E.Store() {
+                    @Override public String load(String slot) {
+                        try { return NativeBackgroundSync.getDecrypted(prefs(app), "gsk_" + me + "_" + slot); } catch (Exception e) { return null; }
+                    }
+                    @Override public void save(String slot, String json) {
+                        try { NativeBackgroundSync.putEncrypted(prefs(app), "gsk_" + me + "_" + slot, json); } catch (Exception e) { throw new RuntimeException(e); }
+                    }
+                });
+        cachedGroup = g; cachedGroupFor = userId;
+        return g;
     }
 
     // ------------------------------------------------------------------ session store (encrypted at rest)
