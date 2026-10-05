@@ -6931,35 +6931,46 @@ function _renderCategories() {
     _renderCatContent(activeCats[0], content);
 }
 
-function _renderCatContent(cat, container) {
+// FIX (Digital category: Airtime & Data hid every other digital feature):
+// this function used to early-return for catId==='digital' and hand the WHOLE
+// category panel to window.__renderDigitalServices(), which replaces the
+// container with the Airtime/Data/History shell. The Digital category's real
+// sections (Software & Apps, Books & Media: Software, Antivirus, Office
+// Software, E-Books, Music, Games) and its "All Products" bar were therefore
+// never rendered. Digital now renders its normal sections like every other
+// category, with an "Airtime & Data" entry at the top that opens the services
+// screen (with a back button) instead of replacing the category.
+function _renderCatContent(cat, container, opts) {
     const catId = cat.id;
+    const hasDigitalServices = catId === 'digital' && typeof window.__renderDigitalServices === 'function';
+
+    if (hasDigitalServices && opts && opts.view === 'services') {
+        container.innerHTML = '<button type="button" class="jm-digital-back" style="display:flex;align-items:center;gap:6px;border:0;background:none;padding:10px 12px 0;font-weight:800;font-size:13px;color:inherit;cursor:pointer">‹ Digital</button><div id="jmDigitalServicesHost"></div>';
+        container.querySelector('.jm-digital-back').onclick = () => _renderCatContent(cat, container);
+        window.__renderDigitalServices(container.querySelector('#jmDigitalServicesHost'), opts.servicesOpts);
+        container.scrollTop = 0;
+        return;
+    }
+
+    let html = '';
+    if (hasDigitalServices) {
+        html += `
+    <div class="jm-digital-services-entry" role="button" tabindex="0" data-jm-digital-services="1"
+         style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin:10px 12px 4px;padding:14px;border-radius:14px;background:linear-gradient(135deg,#0d47a1,#00a8e8);color:#fff;cursor:pointer">
+        <div>
+            <div style="font-weight:900;font-size:15px">📱 Airtime &amp; Data</div>
+            <div style="font-size:11px;opacity:.9;margin-top:2px">Top up airtime and buy data bundles with M-Pesa</div>
+        </div>
+        <span style="font-size:20px;font-weight:900">›</span>
+    </div>`;
+    }
+
     // "All Products" bar
-    let html = `
+    html += `
     <div class="jm-cat-all-bar" onclick="window._jmNav('products','${catId}')">
         <span>All Products</span>
         <span class="jm-cat-all-bar-arrow">›</span>
     </div>`;
-
-    // Digital: Airtime & Mobile Data are ADDED to the category, never a replacement for it. (They used to take over
-    // the whole screen, which hid every other digital subcategory.) Own listings stay below, untouched.
-    const _hasMobileServices = catId === 'digital' && typeof window.__renderDigitalServices === 'function';
-    if (_hasMobileServices) {
-        html += `
-        <div class="jm-cat-group">
-            <div class="jm-cat-group-header"><span>Mobile Services</span></div>
-            <div class="jm-cat-group-divider"></div>
-            <div class="jm-subcat-grid">
-                ${['Airtime', 'Mobile Data'].map(n => `
-                <div class="jm-subcat-item" data-mobile-service="${n === 'Airtime' ? 'airtime' : 'data'}">
-                    <div class="jm-subcat-img-wrap">
-                        <img class="jm-subcat-img" src="${_jmArtFor(n)}" alt="${n}" loading="lazy"
-                             onerror="this.onerror=null;this.src=window._jmArtFor(this.alt)">
-                    </div>
-                    <div class="jm-subcat-name">${n}</div>
-                </div>`).join('')}
-            </div>
-        </div>`;
-    }
 
     // Each named section with its subcategories
     cat.sections.forEach((section, sIdx) => {
@@ -6989,16 +7000,13 @@ function _renderCatContent(cat, container) {
     container.innerHTML = html;
     container.scrollTop = 0;
 
-    if (_hasMobileServices) {
-        container.querySelectorAll('[data-mobile-service]').forEach(el => {
-            el.addEventListener('click', () => {
-                window.__renderDigitalServices(container, {
-                    tab: el.dataset.mobileService,
-                    onBack: () => _renderCatContent(cat, container)
-                });
-                container.scrollTop = 0;
-            });
-        });
+    if (hasDigitalServices) {
+        const entry = container.querySelector('[data-jm-digital-services]');
+        if (entry) {
+            const open = () => _renderCatContent(cat, container, { view: 'services' });
+            entry.onclick = open;
+            entry.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
+        }
     }
 }
 

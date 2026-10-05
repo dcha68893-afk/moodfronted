@@ -288,6 +288,8 @@ public class NecpraToolsActivity extends AppCompatActivity {
             case "order": renderOrder(f); break;
             case "cats": renderCats(); break;
             case "subs": renderSubs(f); break;
+            case "dsvc": renderDigitalServices(); break;
+            case "dsvcpay": renderDsvcPay(f); break;
             case "products": renderProducts(f); break;
             case "detail": renderDetail(f); break;
             default: break;
@@ -349,6 +351,25 @@ public class NecpraToolsActivity extends AppCompatActivity {
             stack.add(new Frame("products", catId, null, c.optString("name", catId)));
             render();
             return;
+        }
+        // Digital category: Airtime & Data is its own native purchase flow. It is offered as an
+        // entry ABOVE the normal sub-categories (never instead of them).
+        if ("digital".equals(catId)) {
+            LinearLayout dsv = new LinearLayout(this);
+            dsv.setOrientation(LinearLayout.HORIZONTAL);
+            dsv.setGravity(Gravity.CENTER_VERTICAL);
+            dsv.setBackground(rounded(C_ORANGE, 12));
+            dsv.setPadding(dp(16), dp(14), dp(16), dp(14));
+            LinearLayout dsvTxt = new LinearLayout(this);
+            dsvTxt.setOrientation(LinearLayout.VERTICAL);
+            dsvTxt.addView(text("Airtime & Data", 16, Color.WHITE, true));
+            dsvTxt.addView(text("Top up airtime and buy data bundles with M-Pesa", 12, Color.WHITE, false));
+            dsv.addView(dsvTxt, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            dsv.addView(text("\u203A", 24, Color.WHITE, true));
+            dsv.setOnClickListener(v -> { stack.add(new Frame("dsvc", "digital", null, "Airtime & Data")); render(); });
+            LinearLayout.LayoutParams dsvLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            dsvLp.setMargins(dp(12), dp(12), dp(12), dp(4));
+            body.addView(dsv, dsvLp);
         }
         // "All" shortcut, like Jumia's "See all".
         TextView all = text("See all in " + c.optString("name", catId), 14, C_ORANGE, true);
@@ -2253,6 +2274,420 @@ public class NecpraToolsActivity extends AppCompatActivity {
         lp.topMargin = dp(10);
         b.setLayoutParams(lp);
         return b;
+    }
+
+
+    // ------------------------------------------------------------------ Digital services: Airtime & Data
+    // Native version of marketplace-digital-services.js. Same backend contract (/api/airtime/*):
+    // GET config, POST purchase (M-Pesa STK push to the entered number), GET transactions/:id (poll),
+    // GET history. Delivery is only reported as done after the server says status == success.
+
+    // id, label, validity text, unit, quantity, cost (KES), badge, API validity
+    private static final String[][] DSVC_DATA = {
+            {"saf-50mb-day", "50 MB", "24 hrs", "MB", "50", "10", "Starter", "Day"},
+            {"saf-100mb-day", "100 MB", "24 hrs", "MB", "100", "20", "Popular", "Day"},
+            {"saf-250mb-day", "250 MB", "24 hrs", "MB", "250", "50", "Best value", "Day"},
+            {"saf-500mb-day", "500 MB", "24 hrs", "MB", "500", "100", "Heavy use", "Day"},
+            {"saf-1gb-week", "1 GB", "7 days", "GB", "1", "205", "Weekly", "Week"}
+    };
+    private static final int[] DSVC_AIRTIME = {10, 20, 50, 100, 200, 500, 1000, 2000, 5000};
+
+    private String dsvcTab = "airtime";           // "airtime" | "data" | "history"
+    private JSONObject dsvcCfg;                   // GET /api/airtime/config payload
+    private String dsvcPhone = "";
+    private String dsvcAmount = "";
+    private int dsvcDataSel = -1;
+    private boolean dsvcBusy;
+    private final ArrayList<LinearLayout> dsvcChips = new ArrayList<>();
+    private final ArrayList<Integer> dsvcChipVals = new ArrayList<>();
+    private TextView dsvcPayLine;
+
+    private double dsvcMarkup() {
+        JSONObject a = dsvcCfg == null ? null : dsvcCfg.optJSONObject("airtime");
+        return a == null ? 0 : Math.max(0, a.optDouble("markupPercent", 0));
+    }
+
+    private double dsvcPrice(double face) { return Math.round(face * (1 + dsvcMarkup() / 100.0) * 100.0) / 100.0; }
+
+    private boolean dsvcEnabled(String key) {
+        JSONObject o = dsvcCfg == null ? null : dsvcCfg.optJSONObject(key);
+        return o != null && o.optBoolean("enabled", false);
+    }
+
+    /** Same rules as the backend (routes/airtime.js phone()/valid()). Returns +254... or null. */
+    private static String dsvcNormalizePhone(String raw) {
+        if (raw == null) return null;
+        String p = raw.replaceAll("[\\s-]", "");
+        if (p.matches("0[17]\\d{8}")) p = "+254" + p.substring(1);
+        else if (p.matches("254\\d{9}")) p = "+" + p;
+        return p.matches("\\+254[17]\\d{8}") ? p : null;
+    }
+
+    private void dsvcSwitchTab(String tab) {
+        dsvcTab = tab;
+        token++;
+        polling = false;
+        body.removeAllViews();
+        scroll.scrollTo(0, 0);
+        renderDigitalServices();
+    }
+
+    private void renderDigitalServices() {
+        // Tab row: Airtime | Data | History
+        LinearLayout tabs = new LinearLayout(this);
+        tabs.setOrientation(LinearLayout.HORIZONTAL);
+        tabs.setBackgroundColor(Color.WHITE);
+        final String[][] t = { {"airtime", "Airtime"}, {"data", "Data"}, {"history", "History"} };
+        for (String[] x : t) {
+            boolean on = x[0].equals(dsvcTab);
+            TextView tv = text(x[1], 14, on ? C_ORANGE : C_MUTED, true);
+            tv.setGravity(Gravity.CENTER);
+            tv.setPadding(0, dp(12), 0, dp(10));
+            tv.setBackground(underline(on));
+            tv.setOnClickListener(v -> dsvcSwitchTab(x[0]));
+            tabs.addView(tv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        }
+        body.addView(tabs);
+        body.addView(divider());
+
+        if ("history".equals(dsvcTab)) { renderDsvcHistory(); return; }
+
+        if (dsvcCfg == null) {
+            body.addView(emptyState("Loading\u2026"));
+            final int my = token;
+            io.execute(() -> {
+                try {
+                    final JSONObject cfg = payload(request("/api/airtime/config"));
+                    ui.post(() -> { if (my != token || closing) return; dsvcCfg = cfg; dsvcSwitchTab(dsvcTab); });
+                } catch (SessionExpired se) { ui.post(this::sessionExpired); }
+                catch (Throwable e) {
+                    ui.post(() -> {
+                        if (my != token || closing) return;
+                        body.removeAllViews();
+                        body.addView(tabs);
+                        body.addView(divider());
+                        body.addView(emptyState("Could not load Airtime & Data. Check your connection."));
+                        body.addView(button("Try again", Color.WHITE, C_ORANGE, v -> dsvcSwitchTab(dsvcTab)));
+                    });
+                }
+            });
+            return;
+        }
+        if ("data".equals(dsvcTab)) renderDsvcData(); else renderDsvcAirtime();
+    }
+
+    private LinearLayout dsvcBox() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setBackgroundColor(Color.WHITE);
+        box.setPadding(dp(16), dp(8), dp(16), dp(20));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(10);
+        body.addView(box, lp);
+        return box;
+    }
+
+    private EditText dsvcPhoneField(LinearLayout box) {
+        EditText ph = field(box, "Recipient phone number (also receives the M-Pesa prompt)", InputType.TYPE_CLASS_PHONE);
+        ph.setHint("07XX XXX XXX");
+        ph.setText(dsvcPhone);
+        ph.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence a, int b, int c, int d) {}
+            @Override public void onTextChanged(CharSequence a, int b, int c, int d) { dsvcPhone = a.toString(); }
+            @Override public void afterTextChanged(android.text.Editable e) {}
+        });
+        return ph;
+    }
+
+    private GradientDrawable dsvcChipBg(boolean sel) {
+        GradientDrawable g = rounded(sel ? Color.parseColor("#FFF7ED") : Color.WHITE, 10);
+        g.setStroke(dp(sel ? 2 : 1), sel ? C_ORANGE : C_LINE);
+        return g;
+    }
+
+    private void dsvcRestyleChips() {
+        int cur = -1;
+        try { cur = dsvcAmount.isEmpty() ? -1 : (int) Math.round(Double.parseDouble(dsvcAmount)); } catch (Exception ignored) {}
+        for (int i = 0; i < dsvcChips.size(); i++) dsvcChips.get(i).setBackground(dsvcChipBg(dsvcChipVals.get(i) == cur));
+    }
+
+    private void dsvcUpdatePayLine() {
+        if (dsvcPayLine == null) return;
+        double amt = 0;
+        try { amt = dsvcAmount.isEmpty() ? 0 : Double.parseDouble(dsvcAmount); } catch (Exception ignored) {}
+        dsvcPayLine.setText(amt > 0 ? "You pay " + money(dsvcPrice(amt)) : "");
+    }
+
+    private void renderDsvcAirtime() {
+        if (!dsvcEnabled("airtime")) {
+            body.addView(emptyState("Airtime is unavailable right now. The provider is not configured on the server yet."));
+            return;
+        }
+        final LinearLayout box = dsvcBox();
+        box.addView(text("Send airtime to a Kenyan number", 16, C_TEXT, true));
+        dsvcPhoneField(box);
+        box.addView(label("Choose airtime"));
+        dsvcChips.clear();
+        dsvcChipVals.clear();
+        LinearLayout rowL = null;
+        for (int i = 0; i < DSVC_AIRTIME.length; i++) {
+            final int amt = DSVC_AIRTIME[i];
+            if (i % 3 == 0) {
+                rowL = new LinearLayout(this);
+                rowL.setOrientation(LinearLayout.HORIZONTAL);
+                box.addView(rowL, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            }
+            LinearLayout chip = new LinearLayout(this);
+            chip.setOrientation(LinearLayout.VERTICAL);
+            chip.setGravity(Gravity.CENTER);
+            chip.setPadding(dp(6), dp(12), dp(6), dp(12));
+            chip.addView(text("KES " + amt, 15, C_TEXT, true));
+            double pay = dsvcPrice(amt);
+            if (pay != amt) chip.addView(text("Pay " + money(pay), 11, C_MUTED, false));
+            chip.setBackground(dsvcChipBg(false));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            lp.setMargins(dp(3), dp(3), dp(3), dp(3));
+            rowL.addView(chip, lp);
+            dsvcChips.add(chip);
+            dsvcChipVals.add(amt);
+            chip.setTag(amt);
+        }
+        box.addView(label("Custom amount (KES 10 \u2013 KES 10,000)"));
+        final EditText amtEt = new EditText(this);
+        amtEt.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        amtEt.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        amtEt.setTextColor(C_TEXT);
+        amtEt.setHint("e.g. 150");
+        amtEt.setText(dsvcAmount);
+        box.addView(amtEt, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        amtEt.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence a, int b, int c, int d) {}
+            @Override public void onTextChanged(CharSequence a, int b, int c, int d) {
+                dsvcAmount = a.toString().trim();
+                dsvcRestyleChips();
+                dsvcUpdatePayLine();
+            }
+            @Override public void afterTextChanged(android.text.Editable e) {}
+        });
+        for (final LinearLayout chip : dsvcChips) {
+            chip.setOnClickListener(v -> amtEt.setText(String.valueOf((Integer) chip.getTag())));
+        }
+        dsvcPayLine = text("", 14, C_ORANGE, true);
+        dsvcPayLine.setPadding(0, dp(10), 0, 0);
+        box.addView(dsvcPayLine);
+        double mk = dsvcMarkup();
+        if (mk > 0) box.addView(text("Marketplace markup: " + (mk == Math.floor(mk) ? String.valueOf((int) mk) : String.valueOf(mk)) + "%.", 12, C_MUTED, false));
+        box.addView(button("Continue with M-Pesa", C_ORANGE, Color.WHITE, v -> dsvcPurchase("airtime")));
+        dsvcRestyleChips();
+        dsvcUpdatePayLine();
+    }
+
+    private void renderDsvcData() {
+        final boolean on = dsvcEnabled("data");
+        final LinearLayout box = dsvcBox();
+        box.addView(text("Data bundles", 16, C_TEXT, true));
+        dsvcPhoneField(box);
+        box.addView(label("Available packages"));
+        final ArrayList<LinearLayout> rows = new ArrayList<>();
+        for (int i = 0; i < DSVC_DATA.length; i++) {
+            final int idx = i;
+            String[] d = DSVC_DATA[i];
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(14), dp(12), dp(14), dp(12));
+            LinearLayout left = new LinearLayout(this);
+            left.setOrientation(LinearLayout.VERTICAL);
+            left.addView(text(d[1] + "  \u00B7  " + d[6], 15, C_TEXT, true));
+            left.addView(text(d[2] + "  \u00B7  Safaricom", 12, C_MUTED, false));
+            row.addView(left, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            row.addView(text(money(dsvcPrice(Double.parseDouble(d[5]))), 14, C_ORANGE, true));
+            row.setBackground(dsvcChipBg(idx == dsvcDataSel));
+            row.setAlpha(on ? 1f : 0.5f);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.setMargins(0, dp(4), 0, dp(4));
+            box.addView(row, lp);
+            rows.add(row);
+            if (on) row.setOnClickListener(v -> {
+                dsvcDataSel = idx;
+                for (int k = 0; k < rows.size(); k++) rows.get(k).setBackground(dsvcChipBg(k == idx));
+            });
+        }
+        if (!on) {
+            box.addView(text("Data delivery is not enabled yet. The catalogue is shown, but purchases open once mobile data is activated on the provider account.", 12, C_MUTED, false));
+        } else {
+            box.addView(button("Continue with M-Pesa", C_ORANGE, Color.WHITE, v -> dsvcPurchase("data")));
+        }
+        box.addView(text("Delivery is confirmed only after the provider reports success.", 12, C_MUTED, false));
+    }
+
+    private void dsvcPurchase(final String type) {
+        if (dsvcBusy) return;
+        final String phone = dsvcNormalizePhone(dsvcPhone);
+        if (phone == null) { toast("Enter a valid Kenyan mobile number, e.g. 0712 345 678"); return; }
+        final JSONObject b = new JSONObject();
+        try {
+            b.put("serviceType", type);
+            b.put("phone", phone);
+            if ("airtime".equals(type)) {
+                double amt;
+                try { amt = Double.parseDouble(dsvcAmount); } catch (Exception e) { toast("Enter an airtime amount"); return; }
+                JSONObject a = dsvcCfg == null ? null : dsvcCfg.optJSONObject("airtime");
+                double min = a == null ? 10 : a.optDouble("min", 10), max = a == null ? 10000 : a.optDouble("max", 10000);
+                if (amt < min || amt > max) { toast("Airtime must be between KES " + (int) min + " and KES " + (int) max); return; }
+                b.put("amount", amt);
+            } else {
+                if (dsvcDataSel < 0 || dsvcDataSel >= DSVC_DATA.length) { toast("Choose a data package"); return; }
+                String[] d = DSVC_DATA[dsvcDataSel];
+                b.put("amount", Double.parseDouble(d[5]));
+                b.put("bundleName", "Safaricom " + d[1] + " " + d[2]);
+                b.put("quantity", Double.parseDouble(d[4]));
+                b.put("unit", d[3]);
+                b.put("validity", d[7]);
+            }
+            b.put("idempotencyKey", java.util.UUID.randomUUID().toString());
+        } catch (Exception e) { return; }
+        dsvcBusy = true;
+        toast("Starting M-Pesa\u2026");
+        io.execute(() -> {
+            try {
+                JSONObject d = payload(request("POST", "/api/airtime/purchase", b));
+                final JSONObject tx = d.optJSONObject("transaction");
+                final String msg = d.isNull("customerMessage") ? "" : d.optString("customerMessage", "");
+                ui.post(() -> {
+                    dsvcBusy = false;
+                    if (closing) return;
+                    if (tx == null || tx.optString("id").isEmpty()) { toast("Could not start the payment. Try again."); return; }
+                    Frame f = new Frame("dsvcpay", "digital", msg.isEmpty() ? "Enter your M-Pesa PIN on your phone." : msg, "M-Pesa payment");
+                    f.product = tx;
+                    stack.add(f);
+                    render();
+                });
+            } catch (SessionExpired se) { ui.post(() -> { dsvcBusy = false; sessionExpired(); }); }
+            catch (Throwable t) {
+                final String m = t.getMessage() == null || t.getMessage().isEmpty() ? "Unable to start payment." : t.getMessage();
+                ui.post(() -> { dsvcBusy = false; if (!closing) toast(m); });
+            }
+        });
+    }
+
+    private void renderDsvcPay(Frame f) {
+        final JSONObject tx = f.product;
+        final String txId = tx.optString("id");
+        final boolean isAirtime = "airtime".equals(tx.optString("serviceType"));
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setGravity(Gravity.CENTER_HORIZONTAL);
+        box.setBackgroundColor(Color.WHITE);
+        box.setPadding(dp(24), dp(48), dp(24), dp(32));
+        body.addView(box);
+        box.addView(text("Check your phone", 20, C_TEXT, true));
+        TextView sub = text(f.sub, 14, C_MUTED, false);
+        sub.setGravity(Gravity.CENTER);
+        sub.setPadding(0, dp(12), 0, dp(8));
+        box.addView(sub);
+        TextView ref = text("Reference: " + txId, 11, C_MUTED, false);
+        ref.setGravity(Gravity.CENTER);
+        box.addView(ref);
+        final TextView status = text("Waiting for payment\u2026", 14, C_ORANGE, true);
+        status.setPadding(0, dp(20), 0, dp(8));
+        box.addView(status);
+        box.addView(button("View history", Color.WHITE, C_ORANGE, v -> {
+            polling = false;
+            dsvcTab = "history";
+            if (stack.size() > 1) stack.remove(stack.size() - 1);
+            render();
+        }));
+        box.addView(button("Done", C_ORANGE, Color.WHITE, v -> goBack()));
+
+        polling = true;
+        final int my = token;
+        io.execute(() -> {
+            for (int attempt = 0; attempt < 40 && polling && my == token && !closing; attempt++) {
+                try { Thread.sleep(attempt == 0 ? 1500 : 3000); } catch (InterruptedException ie) { return; }
+                if (!polling || my != token || closing) return;
+                try {
+                    JSONObject d = payload(request("/api/airtime/transactions/" + URLEncoder.encode(txId, "UTF-8")));
+                    JSONObject t = d.optJSONObject("transaction");
+                    String st = t == null ? "" : t.optString("status", "");
+                    String reason = d.isNull("failureReason") ? "" : d.optString("failureReason", "");
+                    if ("success".equals(st)) {
+                        polling = false;
+                        final String done = isAirtime ? "Airtime delivered" : "Data bundle delivered";
+                        ui.post(() -> { if (my == token) { status.setTextColor(Color.parseColor("#087443")); status.setText("\u2713 " + done); } });
+                        return;
+                    }
+                    if ("failed".equals(st) || "refund_required".equals(st) || "refunded".equals(st) || "reversed".equals(st)) {
+                        polling = false;
+                        final String why = reason.isEmpty() ? st : reason;
+                        final boolean refund = "refund_required".equals(st);
+                        ui.post(() -> {
+                            if (my != token) return;
+                            status.setTextColor(Color.parseColor("#B42318"));
+                            status.setText("Payment/service failed: " + why + (refund ? "\nYour payment is flagged for a refund. Tap Help if it is not returned." : ""));
+                        });
+                        return;
+                    }
+                    final String line = "fulfilling".equals(st) ? "Payment confirmed \u2014 delivering now\u2026" : "Waiting for payment\u2026";
+                    ui.post(() -> { if (my == token) status.setText(line); });
+                } catch (SessionExpired se) { polling = false; ui.post(this::sessionExpired); return; }
+                catch (Throwable ignored) { /* a network blip just retries */ }
+            }
+            if (polling && my == token && !closing) {
+                polling = false;
+                ui.post(() -> { if (my == token) status.setText("Still waiting \u2014 check History for the final status."); });
+            }
+        });
+    }
+
+    private void renderDsvcHistory() {
+        body.addView(emptyState("Loading history\u2026"));
+        final int my = token;
+        io.execute(() -> {
+            try {
+                final JSONArray rows = payload(request("/api/airtime/history")).optJSONArray("transactions");
+                ui.post(() -> {
+                    if (my != token || closing) return;
+                    // keep the tab row (first 2 children), replace the rest
+                    while (body.getChildCount() > 2) body.removeViewAt(2);
+                    if (rows == null || rows.length() == 0) { body.addView(emptyState("No Airtime or Data purchases yet.")); return; }
+                    for (int i = 0; i < rows.length(); i++) {
+                        JSONObject t = rows.optJSONObject(i);
+                        if (t == null) continue;
+                        LinearLayout row = new LinearLayout(this);
+                        row.setOrientation(LinearLayout.HORIZONTAL);
+                        row.setGravity(Gravity.CENTER_VERTICAL);
+                        row.setBackgroundColor(Color.WHITE);
+                        row.setPadding(dp(16), dp(12), dp(16), dp(12));
+                        LinearLayout left = new LinearLayout(this);
+                        left.setOrientation(LinearLayout.VERTICAL);
+                        boolean air = "airtime".equals(t.optString("serviceType"));
+                        String bundle = t.isNull("bundleName") ? "" : t.optString("bundleName", "");
+                        left.addView(text(air ? "Airtime" : (bundle.isEmpty() ? "Mobile data" : bundle), 14, C_TEXT, true));
+                        left.addView(text(t.optString("recipientPhone", ""), 12, C_MUTED, false));
+                        row.addView(left, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                        LinearLayout right = new LinearLayout(this);
+                        right.setOrientation(LinearLayout.VERTICAL);
+                        right.setGravity(Gravity.END);
+                        right.addView(text(money(t.optDouble("sellPrice", 0)), 14, C_TEXT, true));
+                        String st = t.optString("status", "");
+                        int col = "success".equals(st) ? Color.parseColor("#087443")
+                                : ("failed".equals(st) || "refund_required".equals(st)) ? Color.parseColor("#B42318") : Color.parseColor("#A15C00");
+                        right.addView(text(st, 12, col, true));
+                        row.addView(right);
+                        body.addView(row);
+                        body.addView(divider());
+                    }
+                });
+            } catch (SessionExpired se) { ui.post(this::sessionExpired); }
+            catch (Throwable e) {
+                ui.post(() -> {
+                    if (my != token || closing) return;
+                    while (body.getChildCount() > 2) body.removeViewAt(2);
+                    body.addView(emptyState("Unable to load history."));
+                });
+            }
+        });
     }
 
     private void toast(String m) { Toast.makeText(this, m, Toast.LENGTH_SHORT).show(); }
