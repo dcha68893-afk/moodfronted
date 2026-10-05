@@ -6933,6 +6933,10 @@ function _renderCategories() {
 
 function _renderCatContent(cat, container) {
     const catId = cat.id;
+    if (catId === 'digital' && typeof window.__renderDigitalServices === 'function') {
+        window.__renderDigitalServices(container);
+        return;
+    }
 
     // "All Products" bar
     let html = `
