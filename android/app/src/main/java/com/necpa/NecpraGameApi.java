@@ -91,15 +91,20 @@ public final class NecpraGameApi {
         }
     }
 
-    /** Authenticated call with one transparent token refresh on 401. */
+    /** Authenticated call to an /api/games endpoint, with one transparent token refresh on 401. */
     public static JSONObject call(Context ctx, String method, String path, JSONObject body) throws Exception {
+        return callRoot(ctx, method, "/api/games" + path, body);
+    }
+
+    /** Same authenticated call for any backend path (e.g. "/api/friends?limit=100"), used by the arcade's friend picker. */
+    public static JSONObject callRoot(Context ctx, String method, String fullPath, JSONObject body) throws Exception {
         boolean retried = false;
         while (true) {
             String access = NativeBackgroundSync.getDecrypted(auth(ctx), "accessToken");
             if (access == null || access.isEmpty()) access = refresh(ctx);
             Result r;
             try {
-                r = exchange(NativeBackgroundSync.backendOrigin(ctx) + "/api/games" + path, method, access, body);
+                r = exchange(NativeBackgroundSync.backendOrigin(ctx) + fullPath, method, access, body);
             } catch (IOException ioe) {
                 throw new OfflineError(ioe);
             }

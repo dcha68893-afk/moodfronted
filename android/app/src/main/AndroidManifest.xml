@@ -104,13 +104,6 @@
             android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
             android:windowSoftInputMode="adjustResize" />
 
-        <!-- Native Settings screen. Not exported: only MainActivity via the native plugin can start it. -->
-        <activity
-            android:name=".Necpra3DWaterSortActivity"
-            android:exported="false"
-            android:screenOrientation="portrait"
-            android:theme="@style/AppTheme.NoActionBar" />
-
         <!-- Native 3D arcade: Water Sort, Daily Challenge and live water matches. Not exported: only the native plugin starts it. -->
         <activity
             android:name=".NecpraWaterActivity"
@@ -126,6 +119,38 @@
             android:enableOnBackInvokedCallback="true"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden" />
 
+        <!-- Native arcade hub (games list, daily challenge, Play Together) and the three board/word games. Not exported:
+             only the native plugin or the hub starts them. -->
+        <activity
+            android:name=".NecpraArcadeActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme.NoActionBar"
+            android:windowSoftInputMode="adjustResize"
+            android:enableOnBackInvokedCallback="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|uiMode" />
+
+        <activity
+            android:name=".NecpraTriviaActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme.NoActionBar"
+            android:enableOnBackInvokedCallback="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|uiMode" />
+
+        <activity
+            android:name=".NecpraWordActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme.NoActionBar"
+            android:enableOnBackInvokedCallback="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|uiMode" />
+
+        <activity
+            android:name=".NecpraChessActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme.NoActionBar"
+            android:enableOnBackInvokedCallback="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|uiMode" />
+
+        <!-- Native Settings screen. Not exported: only MainActivity via the native plugin can start it. -->
         <activity
             android:name=".NecpraSettingsActivity"
             android:exported="false"

@@ -1115,7 +1115,7 @@ public class NecpraNativePlugin extends Plugin {
     // web game when an older APK rejects it or the game is not in the list.
     // ---------------------------------------------------------------------
 
-    private static final String[] NATIVE_GAMES = {"water", "daily", "block"};
+    private static final String[] NATIVE_GAMES = {"water", "daily", "block", "trivia", "crossword", "chess", "arcade"};
 
     @PluginMethod
     public void nativeGamesAvailable(PluginCall call) {
@@ -1139,6 +1139,14 @@ public class NecpraNativePlugin extends Plugin {
             mode = NecpraWaterActivity.MODE_DAILY;
         } else if ("block".equals(game)) {
             cls = NecpraBlockActivity.class;
+        } else if ("trivia".equals(game)) {
+            cls = NecpraTriviaActivity.class;
+        } else if ("crossword".equals(game) || "word".equals(game) || "wordconnect".equals(game)) {
+            cls = NecpraWordActivity.class;
+        } else if ("chess".equals(game)) {
+            cls = NecpraChessActivity.class;
+        } else if ("arcade".equals(game) || "hub".equals(game)) {
+            cls = NecpraArcadeActivity.class;
         } else {
             call.reject("Unsupported native game");
             return;
