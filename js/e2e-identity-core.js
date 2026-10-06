@@ -163,6 +163,7 @@
     const pub = await exportPub(kp.publicKey);
     const priv = await exportPriv(kp.privateKey);
     const id = b64(global.crypto.getRandomValues(new Uint8Array(16)));
+    privateKey = kp.privateKey;
     const registered = await (async () => { publicKeyB64 = pub; keyId = id; return register(password); })();
     const blob = JSON.stringify({ encPrivKey: await wrapPrivate(priv, password), pubKey: pub, keyId: id, registered });
     if (storage) await storage.setItem(storeKey(), blob); else localStorage.setItem(storeKey(), blob);
