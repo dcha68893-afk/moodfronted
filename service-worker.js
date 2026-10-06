@@ -83,7 +83,7 @@ const SW_VERSION = '19.50.0';
 // v74: profile-photo fix (js/avatar-fix.js added, message.html + js/config.js changed). Bump forces every installed
 // PWA/Android app to drop old copies and show the 'Update ready - Refresh' banner.
 // v89: native-init.js (native Profile/Settings routing) is now network-first so an installed APK never runs a stale copy.
-const CACHE_NAME = 'necpra-static-v91';
+const CACHE_NAME = 'necpra-static-v92';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [

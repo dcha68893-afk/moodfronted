@@ -229,18 +229,19 @@ function __ngEnabled(){try{return localStorage.getItem('necpra_native_games')!==
 function __ngAdopt(r){try{if(!r)return;const SEENK='necpra.coins.serverSeen';
  if(r.serverSeen!=null&&r.serverSeen!=='-1'){const cur=Number(localStorage.getItem(SEENK));const nv=Number(r.serverSeen);if(isFinite(nv)&&nv>=0&&!(cur>=nv))localStorage.setItem(SEENK,String(nv))}
  if(r.levels&&r.levels.water>=1){const c=Number(localStorage.getItem('mood.water.level')||1);if(r.levels.water>c)localStorage.setItem('mood.water.level',String(r.levels.water))}
+ if(r.levels&&r.levels.trivia>=1){const c=Number(localStorage.getItem('mood.trivia.level')||1);if(r.levels.trivia>c)localStorage.setItem('mood.trivia.level',String(r.levels.trivia))}
  if(r.levels&&r.levels.block>=1){const c=Number(localStorage.getItem('mood.block.level')||1);if(r.levels.block>c)localStorage.setItem('mood.block.level',String(r.levels.block))}
  if(r.dirty&&typeof r.coins==='number'&&r.coins>=0){data.coins=r.coins;if(r.games>data.games)data.games=r.games;if(r.best>data.best)data.best=r.best;if(r.streak>data.streak)data.streak=r.streak;save();const P=__ngPlugin();if(P&&P.nativeGameAck)P.nativeGameAck().catch(function(){})}
  }catch(_){}}
 function __openNativeGame(x){return new Promise(function(res){const P=__ngPlugin();if(!P||!__ngEnabled()){res(false);return}
  P.nativeGamesAvailable().then(function(a){if(!(a&&a.available&&a.games&&a.games.indexOf(x)>=0)){res(false);return}
-  const lv=Math.max(1,Number(localStorage.getItem(x==='block'?'mood.block.level':'mood.water.level')||1));data.games++;save();
+  const lv=Math.max(1,Number(localStorage.getItem(x==='block'?'mood.block.level':x==='trivia'?'mood.trivia.level':'mood.water.level')||1));data.games++;save();
   let seen=null;try{seen=localStorage.getItem('necpra.coins.serverSeen')}catch(_){}
   return P.openNativeGame({game:x,level:lv,coins:data.coins,games:data.games,best:data.best,serverSeen:seen}).then(function(r){__ngAdopt(r);try{delete document.body.dataset.game;const b=document.getElementById('v4Mode');if(b)b.style.display='none'}catch(_){}updateHome();res(true)})
  }).catch(function(){res(false)})})}
 setTimeout(function(){const P=__ngPlugin();if(P&&P.nativeGameState&&__ngEnabled())P.nativeGameState().then(__ngAdopt).catch(function(){})},900);
 document.addEventListener('visibilitychange',function(){if(!document.hidden){const P=__ngPlugin();if(P&&P.nativeGameState&&__ngEnabled())P.nativeGameState().then(__ngAdopt).catch(function(){})}});
-function openGame(x){if((x==='water'||x==='daily'||x==='block')&&!window.__gameRoomMatch){__openNativeGame(x).then(function(ok){if(!ok)__openGameWeb(x)});return}__openGameWeb(x)}
+function openGame(x){if((x==='water'||x==='daily'||x==='block'||x==='trivia'||x==='crossword'||x==='chess')&&!window.__gameRoomMatch){__openNativeGame(x).then(function(ok){if(!ok)__openGameWeb(x)});return}__openGameWeb(x)}
 
 // FIX (CROSSWORD-PLACEHOLDER-STUCK): games-crossword-v4.js is injected into
 // this document asynchronously by game.html (added to the DOM only once the

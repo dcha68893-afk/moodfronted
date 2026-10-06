@@ -516,6 +516,19 @@
         // ── Private methods ────────────────────────────────────────────────────
 
         async _connectInternal() {
+            // QUIET-OFFLINE: do not open socket.io polling/websocket attempts while the browser is offline (each one is a
+            // red console error); reconnect once, as soon as the network comes back.
+            if (navigator.onLine === false) {
+                if (!this._waitingForOnline) {
+                    this._waitingForOnline = true;
+                    window.addEventListener('online', () => {
+                        this._waitingForOnline = false;
+                        this._reconnectAttempts = 0;
+                        this._connectInternal();
+                    }, { once: true });
+                }
+                return;
+            }
             // FIX: mutex guard — prevents concurrent connection races
             if (this._isConnecting) return;
             this._isConnecting = true;

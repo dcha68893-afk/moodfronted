@@ -116,6 +116,12 @@
         });
         return native.openNativeGame(args);
       },
+      openNativeArcade: function (opts) {
+        // The arcade hub (all native games + daily challenge + Play Together). Same wallet handover as openNativeGame.
+        opts = opts || {};
+        opts.game = 'arcade';
+        return window.NecpraNative.openNativeGame(opts);
+      },
       nativeGameState: function () { return native.nativeGameState(); },
       nativeGameAck: function () { return native.nativeGameAck(); },
       nativeFriendsAvailable: function () { return native.nativeFriendsAvailable(); },
@@ -621,6 +627,94 @@
 
   installNativeStatusRouting();
   if (document.readyState !== 'complete') window.addEventListener('load', installNativeStatusRouting, { once: true });
+
+  // ---------------------------------------------------------------------------------------------
+  // Native Arcade hub (Android APK only). The Games tab opens the native hub (every native game, the daily
+  // challenge, Play Together) the same way Status opens its native screen. The web arcade (game.html ->
+  // game-v3.html) stays as the fallback: older APK, hub not in nativeGamesAvailable().games, localStorage
+  // 'necpra_native_games' = '0' (kill switch), or a live web room match already on screen.
+  // ---------------------------------------------------------------------------------------------
+  var nativeArcadeOpen = false;
+
+  function nativeArcadeFlag() {
+    try { return localStorage.getItem('necpra_native_games') !== '0'; } catch (_) { return true; }
+  }
+
+  // game.html wraps game-v3.html in a nested iframe; both are same-origin, so its globals are reachable.
+  function arcadeWebWindow() {
+    try {
+      var outer = document.getElementById('gamesIframe');
+      var inner = outer && outer.contentWindow && outer.contentWindow.document.getElementById('games');
+      return inner && inner.contentWindow ? inner.contentWindow : null;
+    } catch (_) { return null; }
+  }
+
+  async function nativeArcadeUsable() {
+    if (!window.NecpraNative || !window.NecpraNative.openNativeArcade || !window.NecpraNative.nativeGamesAvailable) return false;
+    try {
+      var a = await window.NecpraNative.nativeGamesAvailable();
+      return !!(a && a.available && a.games && a.games.indexOf('arcade') >= 0);
+    } catch (_) { return false; }            // older APK without the arcade
+  }
+
+  // Resolves { opened }. opened=false means the caller should run the web arcade instead.
+  async function openNativeArcadeScreen() {
+    if (!nativeArcadeFlag() || nativeArcadeOpen) return { opened: false };
+    var web = arcadeWebWindow();
+    if (web && web.__gameRoomMatch) return { opened: false };      // never pull a player out of a live web match
+    if (!(await nativeArcadeUsable())) return { opened: false };
+    nativeArcadeOpen = true;
+    try {
+      // One wallet: hand over the web balance if the web arcade has ever saved one (absent = native keeps its own).
+      var args = { game: 'arcade' };
+      try {
+        var w = JSON.parse(localStorage.getItem('moodArcadeV3') || 'null');
+        if (w && typeof w.coins === 'number') {
+          args.coins = w.coins;
+          if (typeof w.games === 'number') args.games = w.games;
+          if (typeof w.best === 'number') args.best = w.best;
+        }
+        var seen = localStorage.getItem('necpra.coins.serverSeen');
+        if (seen !== null) args.serverSeen = seen;
+      } catch (_) {}
+      var result = await window.NecpraNative.openNativeArcade(args);
+      // Hand coins/levels earned natively to the web arcade if it is loaded; otherwise game-v3.html collects them
+      // itself (nativeGameState) the next time it starts or becomes visible.
+      try {
+        var w2 = arcadeWebWindow();
+        if (w2 && typeof w2.__ngAdopt === 'function') w2.__ngAdopt(result);
+      } catch (_) {}
+      return { opened: true };
+    } catch (err) {
+      console.warn('[native-arcade] could not open native hub:', err && err.message ? err.message : err);
+      return { opened: false };
+    } finally {
+      nativeArcadeOpen = false;
+    }
+  }
+
+  function installNativeArcadeRouting() {
+    if (!window.NecpraNative || !window.NecpraNative.openNativeArcade) return;
+    if (window.__necpraArcadeRoutingInstalled) return;
+    if (typeof window.navigateToPage !== 'function') return;
+    window.__necpraArcadeRoutingInstalled = true;
+
+    var origNavigate = window.navigateToPage;
+    window.navigateToPage = function (page, options) {
+      var self = this, args = arguments;
+      var deliberate = /^(games?)$/.test(String(page || '')) && !(options && options.fromHistory) && nativeArcadeFlag();
+      if (deliberate) {
+        openNativeArcadeScreen().then(function (r) {
+          if (!r.opened) return origNavigate.apply(self, args);
+        });
+        return;
+      }
+      return origNavigate.apply(this, args);
+    };
+  }
+
+  installNativeArcadeRouting();
+  if (document.readyState !== 'complete') window.addEventListener('load', installNativeArcadeRouting, { once: true });
 
   // ---------------------------------------------------------------------------------------------
   // Who owns direct-message crypto: the SAME decision is mirrored natively (NecpraDmOwner) and in

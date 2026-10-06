@@ -299,13 +299,31 @@
 
     _scheduleProbe(delay) {
       if (this._probeTimer) clearTimeout(this._probeTimer);
-      const interval = this._state.reconnecting
+      let interval = this._state.reconnecting
         ? DEFAULTS.probeFastIntervalMs
         : DEFAULTS.probeIntervalMs;
+      // QUIET-OFFLINE: back off while probes keep failing (5s/20s -> 40s -> 60s) instead of hammering a dead network
+      // every few seconds; every failed probe request is a red console error. A successful probe resets this.
+      const streak = this._failStreak || 0;
+      if (streak >= 3) interval = Math.min(60000, Math.max(interval, 20000) * Math.pow(2, Math.min(streak - 2, 2)));
       this._probeTimer = setTimeout(() => this._runProbe(), delay ?? interval);
     }
 
     async _runProbe() {
+      // QUIET-OFFLINE: no network requests while the browser says offline, or while the tab is in the background.
+      if (navigator.onLine === false) {
+        this._failStreak = (this._failStreak || 0) + 1;
+        this._packetLoss.record(false);
+        this._probeHistory.push({ ts: Date.now(), success: false, status: null });
+        if (this._probeHistory.length > 20) this._probeHistory.shift();
+        this._updateState(false, null);
+        this._scheduleProbe(30000);   // the 'online' event below re-probes immediately when the network returns
+        return;
+      }
+      if (document.visibilityState === 'hidden') {
+        this._scheduleProbe(60000);   // visibilitychange re-probes within 200ms when the tab returns
+        return;
+      }
       const start = performance.now();
       let success = false;
       let status = null;
@@ -347,6 +365,9 @@
 
       if (!success) {
         this._packetLoss.record(false);
+        this._failStreak = (this._failStreak || 0) + 1;
+      } else {
+        this._failStreak = 0;
       }
 
       this._probeHistory.push({ ts: Date.now(), success, status });
@@ -476,6 +497,7 @@
 
     _attachVisibility() {
       if (this._visibilityBound) return;
+      window.addEventListener('online', () => { this._failStreak = 0; this._scheduleProbe(300); });
       document.addEventListener('visibilitychange', () => {
         this._deviceBackgrounded = document.visibilityState === 'hidden';
         if (!this._deviceBackgrounded) {

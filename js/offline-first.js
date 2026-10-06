@@ -366,10 +366,15 @@
     if (j.data && Array.isArray(j.data)) return j.data;
     return [];
   }
+  var warmNetFails = 0;
   function warmGet(url, headers) {
+    // QUIET-OFFLINE: after 2 network-level failures in a row the connection is dead (not just one slow endpoint), so
+    // stop firing the remaining ~20 prewarm requests; they would each be another red console error.
+    if (warmNetFails >= 2) return Promise.resolve(null);
     return window.fetch(url, { method: 'GET', headers: headers, credentials: 'include' }).then(function (r) {
+      warmNetFails = 0;
       return r && r.ok ? r.json().catch(function () { return null; }) : null;
-    }).catch(function () { return null; });
+    }).catch(function () { warmNetFails++; return null; });
   }
   function prewarm(force) {
     if (prewarming || window !== window.top) return;
@@ -380,6 +385,7 @@
     try { last = Number(localStorage.getItem('moodchat_prewarm_at') || 0); } catch (_) {}
     if (!force && Date.now() - last < PREWARM_EVERY) return;
     prewarming = true;
+    warmNetFails = 0;
     try { localStorage.setItem('moodchat_prewarm_at', String(Date.now())); } catch (_) {}
     var base = apiBase();
     var headers = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' };

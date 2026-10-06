@@ -361,6 +361,16 @@
                 var rawUrl = typeof input === 'string' ? input : (input && input.url) || '';
                 var pathname = new URL(rawUrl, window.location.origin).pathname;
             } catch (_) {}
+            // QUIET-OFFLINE: when the browser itself says it is offline, a GET can only fail, and every failed
+            // request is printed in red in the console by the browser. Fail it here without touching the network
+            // (callers already handle a rejected fetch). Writes (POST/PUT/DELETE) still go through so the existing
+            // offline queues keep their normal behaviour.
+            try {
+                var m = String((init && init.method) || (input && input.method) || 'GET').toUpperCase();
+                if (navigator.onLine === false && (m === 'GET' || m === 'HEAD')) {
+                    return Promise.reject(new TypeError('Failed to fetch (offline)'));
+                }
+            } catch (_) {}
             return nativeFetch(window.__rewriteApiUrl(input), withAuth(input, init));
         };
     }
