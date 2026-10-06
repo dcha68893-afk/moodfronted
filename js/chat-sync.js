@@ -192,7 +192,7 @@
   // /api/messaging/... so it still 404s rather than silently hitting the
   // wrong resource.
   async function reportMessage(messageId, reason, details) {
-    return await _apiFetch('POST', `/api/messaging/messages/${messageId}/report`, { reason, details });
+    return await _apiFetch('POST', `/api/messages/${messageId}/report`, { reason, details });
   }
 
   // ── Pin message in chat ───────────────────────────────────────────────────

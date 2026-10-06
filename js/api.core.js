@@ -252,6 +252,8 @@ let clearAllNotifications;
 let getCallHistory;
 let startCall;
 let endCall;
+let sendMultiRecipientMessage;
+let getMultiRecipientDeliveryStatus;
 let getSettings;
 let updateSettings;
 let uploadFile;
@@ -5462,21 +5464,8 @@ SAIC.initialize();
         return 'Minimal';
     };
     
-    navigateToCall = function(callId) {
-        try {
-            const url = `/call.html?callId=${callId}`;
-            
-            if (root.location.pathname.includes('chat.html') || 
-                root.location.pathname.includes('message.html')) {
-                root.location.href = url;
-            } else {
-                root.open(url, '_blank');
-            }
-            
-            return { success: true, callId, url };
-        } catch (error) {
-            return { success: false, message: error.message };
-        }
+    navigateToCall = function() {
+        return { success:false, code:'CALLS_RETIRED', message:'Voice and video calls are not enabled in this Necpra build.' };
     };
     
     getUserFriends = async function() {
@@ -5830,15 +5819,15 @@ SAIC.initialize();
     // ============================================================================
     
     getCallHistory = async function() {
-        return get('/api/calls/history');
+        return { success:false, code:'CALLS_RETIRED', message:'Voice and video calls are not enabled in this Necpra build.' };
     };
     
-    startCall = async function(userId) {
-        return post('/api/calls/start', { userId });
+    startCall = async function() {
+        return { success:false, code:'CALLS_RETIRED', message:'Voice and video calls are not enabled in this Necpra build.' };
     };
     
-    endCall = async function(callId) {
-        return post(`/api/calls/${callId}/end`, {});
+    endCall = async function() {
+        return { success:false, code:'CALLS_RETIRED', message:'Voice and video calls are not enabled in this Necpra build.' };
     };
     
     simulateIncomingCall = function(callData) {
@@ -5856,6 +5845,16 @@ SAIC.initialize();
             message: 'Call simulation triggered',
             timestamp: new Date().toISOString()
         };
+    };
+    
+    // ============================================================================
+    // MULTI-RECIPIENT MESSAGE DELIVERY
+    // ============================================================================
+    sendMultiRecipientMessage = async function(recipients, content, type = 'text', batchId = null) {
+        return post('/api/messaging/broadcast', { recipients, content, type, batchId });
+    };
+    getMultiRecipientDeliveryStatus = async function(batchId) {
+        return get(`/api/messaging/broadcast/${encodeURIComponent(batchId)}/status`);
     };
     
     // ============================================================================
@@ -7634,6 +7633,8 @@ export {
     getCallHistory,
     startCall,
     endCall,
+    sendMultiRecipientMessage,
+    getMultiRecipientDeliveryStatus,
     getSettings,
     updateSettings,
     uploadFile,

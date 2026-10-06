@@ -90,7 +90,7 @@
     // Also pull from backend
     try {
       const [starredResp, pinnedResp] = await Promise.all([
-        fetch(`${_apiBase()}/api/messaging/messages/starred`, { headers: _headers(), credentials: 'include' }),
+        fetch(`${_apiBase()}/api/messages/starred`, { headers: _headers(), credentials: 'include' }),
         fetch(`${_apiBase()}/api/messaging/chats/pinned`, { headers: _headers(), credentials: 'include' }),
       ]);
       const starred = starredResp.ok ? (await starredResp.json()).data?.starred : [];

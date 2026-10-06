@@ -6,7 +6,7 @@
  *
  * Features:
  *  - Detects URLs in message input (300ms debounce)
- *  - Calls GET /api/messaging/preview?url=...
+ *  - Calls GET /api/link-preview?url=...
  *  - Renders a dismissible preview card above the send button
  *  - Attaches preview metadata to outgoing message payload
  *  - Renders received link-preview messages with card UI
