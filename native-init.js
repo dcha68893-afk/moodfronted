@@ -104,6 +104,20 @@
         if (opts.statusId) args.statusId = String(opts.statusId);
         return native.openNativeStatus(args);
       },
+      nativeGamesAvailable: function () { return native.nativeGamesAvailable(); },
+      openNativeGame: function (opts) {
+        opts = opts || {};
+        var args = { game: String(opts.game || 'water'), level: Math.max(1, Number(opts.level) || 1) };
+        if (opts.room) args.room = String(opts.room);
+        if (opts.subject) args.subject = String(opts.subject);
+        if (opts.serverSeen !== undefined && opts.serverSeen !== null) args.serverSeen = String(opts.serverSeen);
+        ['coins', 'games', 'best'].forEach(function (k) {
+          if (typeof opts[k] === 'number' && isFinite(opts[k])) args[k] = Math.floor(opts[k]);
+        });
+        return native.openNativeGame(args);
+      },
+      nativeGameState: function () { return native.nativeGameState(); },
+      nativeGameAck: function () { return native.nativeGameAck(); },
       nativeFriendsAvailable: function () { return native.nativeFriendsAvailable(); },
       openNativeFriends: function (section) { return native.openNativeFriends({section: section || 'friends'}); },
       nativeAuthAvailable: function () { return native.nativeAuthAvailable(); },

@@ -111,6 +111,21 @@
             android:screenOrientation="portrait"
             android:theme="@style/AppTheme.NoActionBar" />
 
+        <!-- Native 3D arcade: Water Sort, Daily Challenge and live water matches. Not exported: only the native plugin starts it. -->
+        <activity
+            android:name=".NecpraWaterActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme.NoActionBar"
+            android:enableOnBackInvokedCallback="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden" />
+
+        <activity
+            android:name=".NecpraBlockActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme.NoActionBar"
+            android:enableOnBackInvokedCallback="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden" />
+
         <activity
             android:name=".NecpraSettingsActivity"
             android:exported="false"

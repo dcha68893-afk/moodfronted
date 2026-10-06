@@ -1110,13 +1110,103 @@ public class NecpraNativePlugin extends Plugin {
         call.resolve(out);
     }
 
+    // ---------------------------------------------------------------------
+    // Native arcade (3D games). The web arcade probes nativeGamesAvailable() and falls back to the
+    // web game when an older APK rejects it or the game is not in the list.
+    // ---------------------------------------------------------------------
+
+    private static final String[] NATIVE_GAMES = {"water", "daily", "block"};
+
+    @PluginMethod
+    public void nativeGamesAvailable(PluginCall call) {
+        JSObject out = new JSObject();
+        out.put("available", true);
+        JSArray games = new JSArray();
+        for (String g : NATIVE_GAMES) games.put(g);
+        out.put("games", games);
+        call.resolve(out);
+    }
+
     @PluginMethod
     public void openNativeGame(PluginCall call) {
-        String game = call.getString("game", "water3d");
-        if (!"water3d".equalsIgnoreCase(game)) { call.reject("Unsupported native game"); return; }
-        Intent intent = new Intent(getContext(), Necpra3DWaterSortActivity.class);
-        intent.putExtra("level", Math.max(1, call.getInt("level", 1)));
-        getContext().startActivity(intent);
+        String game = String.valueOf(call.getString("game", "water")).toLowerCase(java.util.Locale.ROOT);
+        Class<?> cls;
+        String mode = null;
+        if ("water".equals(game) || "water3d".equals(game)) {
+            cls = NecpraWaterActivity.class;
+        } else if ("daily".equals(game)) {
+            cls = NecpraWaterActivity.class;
+            mode = NecpraWaterActivity.MODE_DAILY;
+        } else if ("block".equals(game)) {
+            cls = NecpraBlockActivity.class;
+        } else {
+            call.reject("Unsupported native game");
+            return;
+        }
+        try {
+            Intent intent = new Intent(getContext(), cls);
+            intent.putExtra(NecpraGameActivity.EXTRA_LEVEL, Math.max(1, call.getInt("level", 1)));
+            if (mode != null) intent.putExtra(NecpraGameActivity.EXTRA_MODE, mode);
+            String room = call.getString("room");
+            if (room != null && !room.trim().isEmpty()) intent.putExtra(NecpraGameActivity.EXTRA_ROOM, room.trim());
+            String subject = call.getString("subject");
+            if (subject != null) intent.putExtra(NecpraGameActivity.EXTRA_SUBJECT, subject);
+            // The web wallet is handed over so there is one balance; absent values leave the native one alone.
+            String seen = call.getString("serverSeen");
+            if (seen != null) intent.putExtra(NecpraGameActivity.EXTRA_SEEN, seen);
+            if (call.hasOption("coins")) intent.putExtra(NecpraGameActivity.EXTRA_COINS, (int) call.getInt("coins", -1));
+            if (call.hasOption("games")) intent.putExtra(NecpraGameActivity.EXTRA_GAMES, (int) call.getInt("games", -1));
+            if (call.hasOption("best")) intent.putExtra(NecpraGameActivity.EXTRA_BEST, (int) call.getInt("best", -1));
+            startActivityForResult(call, intent, "nativeGameResult");
+        } catch (Exception e) {
+            call.reject("Native game could not be opened", e);
+        }
+    }
+
+    @ActivityCallback
+    private void nativeGameResult(PluginCall call, ActivityResult result) {
+        JSObject out = new JSObject();
+        out.put("closed", true);
+        Intent d = result == null ? null : result.getData();
+        if (d != null) {
+            out.put("coins", d.getIntExtra(NecpraGameActivity.RES_COINS, -1));
+            out.put("games", d.getIntExtra(NecpraGameActivity.RES_GAMES, 0));
+            out.put("best", d.getIntExtra(NecpraGameActivity.RES_BEST, 0));
+            out.put("streak", d.getIntExtra(NecpraGameActivity.RES_STREAK, 0));
+            out.put("dirty", d.getBooleanExtra(NecpraGameActivity.RES_DIRTY, false));
+            String seen = d.getStringExtra(NecpraGameActivity.RES_SEEN);
+            if (seen != null) out.put("serverSeen", seen);
+            String levels = d.getStringExtra(NecpraGameActivity.RES_LEVELS);
+            if (levels != null) {
+                try {
+                    out.put("levels", new JSObject(levels));
+                } catch (Exception ignored) { }
+            }
+        }
+        call.resolve(out);
+    }
+
+    /** Wallet changes made natively that the web layer has not collected yet (e.g. the app was closed mid-game). */
+    @PluginMethod
+    public void nativeGameState(PluginCall call) {
+        NecpraGameStore store = new NecpraGameStore(getContext());
+        JSObject out = new JSObject();
+        out.put("coins", store.coins());
+        out.put("dirty", store.dirty());
+        org.json.JSONObject snap = store.snapshot();
+        out.put("games", snap.optInt("games"));
+        out.put("best", snap.optInt("best"));
+        out.put("streak", snap.optInt("streak"));
+        out.put("serverSeen", String.valueOf(store.serverSeen()));
+        try {
+            out.put("levels", new JSObject(store.levelsJson().toString()));
+        } catch (Exception ignored) { }
+        call.resolve(out);
+    }
+
+    @PluginMethod
+    public void nativeGameAck(PluginCall call) {
+        new NecpraGameStore(getContext()).markClean();
         call.resolve();
     }
 }

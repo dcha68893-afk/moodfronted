@@ -220,7 +220,27 @@ setTimeout(syncServerCoins,1500);document.addEventListener('visibilitychange',()
 // there.
 function notifyGamesPanel(open){try{parent.postMessage({type:open?'GAMES_PANEL_OPENED':'GAMES_PANEL_CLOSED'},'*')}catch(e){}}
 function home(){show('home');if(__gameHist){__gameHist=false;try{history.back()}catch(e){}}try{clearInterval(timer);clearTimeout(triviaAdvance)}catch(e){};try{clearInterval(window.__dailyTimer)}catch(e){};window.__dailyTimer=null;$('prog')?.style.setProperty('width','0%');$('answers')?.replaceChildren();if($('q'))$('q').textContent='';$('triviaSubjects')?.classList.remove('show');updateHome();notifyGamesPanel(false)}
-var __gameHist=false;function openGame(x){if(!__gameHist){try{history.pushState({arcade:1},'');__gameHist=true}catch(e){}}data.games++;save();notifyGamesPanel(true);if(x==='water'&&window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform()&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NecpraNative&&window.Capacitor.Plugins.NecpraNative.openNativeGame){window.Capacitor.Plugins.NecpraNative.openNativeGame({game:'water3d',level:Math.max(1,Number(level)||1)}).catch(function(){show(x);initWater()});return;}show(x);x==='water'?initWater():x==='daily'?initDaily():x==='block'?initBlock():x==='trivia'?openTriviaChooser():x==='crossword'?openCrossword():x==='chess'&&window.__MOOD_CHESS_OPEN__?.()}
+var __gameHist=false;function __openGameWeb(x){if(!__gameHist){try{history.pushState({arcade:1},'');__gameHist=true}catch(e){}}data.games++;save();notifyGamesPanel(true);show(x);x==='water'?initWater():x==='daily'?initDaily():x==='block'?initBlock():x==='trivia'?openTriviaChooser():x==='crossword'?openCrossword():x==='chess'&&window.__MOOD_CHESS_OPEN__?.()}
+/* ---- Native 3D arcade (Android APK). Falls back to the web game whenever the APK is older, the game is not native, a live room is
+   active, or localStorage necpra_native_games is '0' (kill switch). The iframe has no Capacitor of its own, so the plugin wrapper
+   is looked up through the parent frames (same origin). ---- */
+function __ngPlugin(){try{var w=window;for(var i=0;i<6&&w;i++){if(w.NecpraNative&&w.NecpraNative.openNativeGame&&w.NecpraNative.nativeGamesAvailable)return w.NecpraNative;if(w===w.parent)break;w=w.parent}}catch(_){}return null}
+function __ngEnabled(){try{return localStorage.getItem('necpra_native_games')!=='0'}catch(_){return true}}
+function __ngAdopt(r){try{if(!r)return;const SEENK='necpra.coins.serverSeen';
+ if(r.serverSeen!=null&&r.serverSeen!=='-1'){const cur=Number(localStorage.getItem(SEENK));const nv=Number(r.serverSeen);if(isFinite(nv)&&nv>=0&&!(cur>=nv))localStorage.setItem(SEENK,String(nv))}
+ if(r.levels&&r.levels.water>=1){const c=Number(localStorage.getItem('mood.water.level')||1);if(r.levels.water>c)localStorage.setItem('mood.water.level',String(r.levels.water))}
+ if(r.levels&&r.levels.block>=1){const c=Number(localStorage.getItem('mood.block.level')||1);if(r.levels.block>c)localStorage.setItem('mood.block.level',String(r.levels.block))}
+ if(r.dirty&&typeof r.coins==='number'&&r.coins>=0){data.coins=r.coins;if(r.games>data.games)data.games=r.games;if(r.best>data.best)data.best=r.best;if(r.streak>data.streak)data.streak=r.streak;save();const P=__ngPlugin();if(P&&P.nativeGameAck)P.nativeGameAck().catch(function(){})}
+ }catch(_){}}
+function __openNativeGame(x){return new Promise(function(res){const P=__ngPlugin();if(!P||!__ngEnabled()){res(false);return}
+ P.nativeGamesAvailable().then(function(a){if(!(a&&a.available&&a.games&&a.games.indexOf(x)>=0)){res(false);return}
+  const lv=Math.max(1,Number(localStorage.getItem(x==='block'?'mood.block.level':'mood.water.level')||1));data.games++;save();
+  let seen=null;try{seen=localStorage.getItem('necpra.coins.serverSeen')}catch(_){}
+  return P.openNativeGame({game:x,level:lv,coins:data.coins,games:data.games,best:data.best,serverSeen:seen}).then(function(r){__ngAdopt(r);try{delete document.body.dataset.game;const b=document.getElementById('v4Mode');if(b)b.style.display='none'}catch(_){}updateHome();res(true)})
+ }).catch(function(){res(false)})})}
+setTimeout(function(){const P=__ngPlugin();if(P&&P.nativeGameState&&__ngEnabled())P.nativeGameState().then(__ngAdopt).catch(function(){})},900);
+document.addEventListener('visibilitychange',function(){if(!document.hidden){const P=__ngPlugin();if(P&&P.nativeGameState&&__ngEnabled())P.nativeGameState().then(__ngAdopt).catch(function(){})}});
+function openGame(x){if((x==='water'||x==='daily'||x==='block')&&!window.__gameRoomMatch){__openNativeGame(x).then(function(ok){if(!ok)__openGameWeb(x)});return}__openGameWeb(x)}
 
 // FIX (CROSSWORD-PLACEHOLDER-STUCK): games-crossword-v4.js is injected into
 // this document asynchronously by game.html (added to the DOM only once the
