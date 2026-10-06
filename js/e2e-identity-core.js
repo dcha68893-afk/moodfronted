@@ -87,11 +87,21 @@
     return b64(await subtle.decrypt({ name: 'AES-GCM', iv: unb64(o.iv) }, wrapKey, unb64(o.ct)));
   }
 
-  async function register() {
+  async function register(passwordForBackup) {
     if (!publicKeyB64 || !keyId) return false;
     try {
       const deviceId = await global.KynectaE2EStore?.getOrCreateDeviceId?.() || 'primary';
-      const r = await request('/api/encryption/keys', { method: 'POST', body: JSON.stringify({ publicKey: publicKeyB64, keyId, deviceId }) });
+      let encryptedPrivateKey = null;
+      // Back up the canonical identity used by message-e2e-core. The server
+      // only receives an AES-GCM/PBKDF2-wrapped private key, never plaintext
+      // key material, so a recovered device can restore the same DM identity.
+      if (passwordForBackup && privateKey) {
+        try { encryptedPrivateKey = await wrapPrivate(await exportPriv(privateKey), passwordForBackup); } catch (_) {}
+      }
+      const r = await request('/api/encryption/keys', {
+        method: 'POST',
+        body: JSON.stringify({ publicKey: publicKeyB64, keyId, deviceId, encryptedPrivateKey })
+      });
       return !!r.ok;
     } catch (_) { return false; }
   }
@@ -145,7 +155,7 @@
       privateKey = await importPriv(pkcs8);
       publicKeyB64 = o.pubKey;
       keyId = o.keyId;
-      if (await register()) { enabled = true; readyResolve(true); try { document.dispatchEvent(new CustomEvent('kyn:e2eUnlocked')); } catch (_) {} }
+      if (await register(password)) { enabled = true; readyResolve(true); try { document.dispatchEvent(new CustomEvent('kyn:e2eUnlocked')); } catch (_) {} }
       else if (o.registered !== false) { enabled = true; readyResolve(true); try { document.dispatchEvent(new CustomEvent('kyn:e2eUnlocked')); } catch (_) {} }
       return enabled;
     }
@@ -153,7 +163,8 @@
     const pub = await exportPub(kp.publicKey);
     const priv = await exportPriv(kp.privateKey);
     const id = b64(global.crypto.getRandomValues(new Uint8Array(16)));
-    const registered = await (async () => { publicKeyB64 = pub; keyId = id; return register(); })();
+    privateKey = kp.privateKey;
+    const registered = await (async () => { publicKeyB64 = pub; keyId = id; return register(password); })();
     const blob = JSON.stringify({ encPrivKey: await wrapPrivate(priv, password), pubKey: pub, keyId: id, registered });
     if (storage) await storage.setItem(storeKey(), blob); else localStorage.setItem(storeKey(), blob);
     privateKey = kp.privateKey;

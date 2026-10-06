@@ -251,15 +251,33 @@
   // identity per user, not per device) but matters more now because state
   // is involved at all. Flagged for a proper per-device follow-up.
   function ratchetStorageKey(peerId) { return `kyn_ratchet_v3_${me()}_${peerId}`; }
-  function loadRatchetSession(peerId) {
-    try { const raw = localStorage.getItem(ratchetStorageKey(peerId)); return raw ? JSON.parse(raw) : null; }
-    catch (_) { return null; }
+  // Persist ratchet state in the existing durable E2E store. Keep the old
+  // localStorage value as a migration fallback so existing sessions are not
+  // discarded when this version ships.
+  async function loadRatchetSession(peerId) {
+    const key = ratchetStorageKey(peerId);
+    try {
+      const raw = await global.KynectaE2EStore?.get?.(key);
+      if (raw) return JSON.parse(raw);
+    } catch (_) {}
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      try { await global.KynectaE2EStore?.set?.(key, raw); } catch (_) {}
+      return parsed;
+    } catch (_) { return null; }
   }
-  function saveRatchetSession(peerId, session) {
-    try { localStorage.setItem(ratchetStorageKey(peerId), JSON.stringify(session)); } catch (_) {}
+  async function saveRatchetSession(peerId, session) {
+    const key = ratchetStorageKey(peerId);
+    const raw = JSON.stringify(session);
+    try { if (global.KynectaE2EStore?.set) { await global.KynectaE2EStore.set(key, raw); return; } } catch (_) {}
+    try { localStorage.setItem(key, raw); } catch (_) {}
   }
-  function clearRatchetSession(peerId) {
-    try { localStorage.removeItem(ratchetStorageKey(peerId)); } catch (_) {}
+  async function clearRatchetSession(peerId) {
+    const key = ratchetStorageKey(peerId);
+    try { await global.KynectaE2EStore?.del?.(key); } catch (_) {}
+    try { localStorage.removeItem(key); } catch (_) {}
   }
 
   // ROOT-CAUSE FIX (RATCHET-STATE-RACE — "Unable to decrypt this message"
@@ -395,7 +413,7 @@
     if (!recipientUserId) throw new Error('Recipient is required for secure messaging');
     return withRatchetLock(recipientUserId, async () => {
       const R = global.KynectaRatchet;
-      let session = loadRatchetSession(recipientUserId);
+      let session = await loadRatchetSession(recipientUserId);
       // Always resolve the recipient's CURRENT key (cached for a few minutes, see e2e-identity-core.js).
       // If they re-installed / moved device / rotated while this device was away, the old sending
       // session is encrypted to a key they no longer hold: every message until it is rebuilt would
@@ -417,7 +435,7 @@
       } // offline: use what we have
       if (session && session.peerKeyId && currentPeer.keyId && String(session.peerKeyId) !== String(currentPeer.keyId)) {
         _diagLog('V3_PEER_KEY_CHANGED_RESET', { recipientUserId, old: session.peerKeyId, current: currentPeer.keyId });
-        clearRatchetSession(recipientUserId);
+        await clearRatchetSession(recipientUserId);
         session = null;
       }
       if (!session) {
@@ -431,7 +449,7 @@
       session.peerKeyCheckedAt = Date.now();
       if (currentPeer && currentPeer.keyId) session.peerKeyId = currentPeer.keyId;
       const { session: nextSession, envelope } = await R.ratchetEncrypt(session, String(plaintext));
-      saveRatchetSession(recipientUserId, nextSession);
+      await saveRatchetSession(recipientUserId, nextSession);
       // Self-describing envelope (outside the authenticated header, so wire-compatible with old
       // clients): the sender's public key + ids. The receiver can start a session from the key that
       // was really used instead of depending on a registry lookup / stale cache.
@@ -525,7 +543,7 @@
     const identity = await ensureIdentity();
     return withRatchetLock(peerUserId, async () => {
       const R = global.KynectaRatchet;
-      let session = loadRatchetSession(peerUserId);
+      let session = await loadRatchetSession(peerUserId);
       const hadSession = !!session;
       const headerDh = envelope?.hdr?.dh || null;
       _diagLog('V3_SESSION_STATE', {
@@ -539,7 +557,7 @@
       }
       try {
         const { session: nextSession, plaintext } = await R.ratchetDecrypt(session, envelope);
-        saveRatchetSession(peerUserId, nextSession);
+        await saveRatchetSession(peerUserId, nextSession);
         _diagLog('V3_DECRYPT_SUCCESS', { msgId: msgIdForLog, peerUserId, repaired: false });
         return plaintext;
       } catch (firstErr) {
@@ -575,7 +593,7 @@
           try {
             const freshSession = await _initReceiverSessionFromHeader(identity, peerUserId, envelope, /* forceRefresh */ true);
             const { session: nextSession, plaintext } = await R.ratchetDecrypt(freshSession, envelope);
-            saveRatchetSession(peerUserId, nextSession);
+            await saveRatchetSession(peerUserId, nextSession);
             _diagLog('V3_FIRST_CONTACT_KEY_REFRESH_SUCCEEDED', { msgId: msgIdForLog, peerUserId });
             return plaintext;
           } catch (refreshErr) {
@@ -600,7 +618,7 @@
             try {
               const freshSession = await _initReceiverSessionFromHeader(identity, peerUserId, envelope, forceRefresh);
               const { session: nextSession, plaintext } = await R.ratchetDecrypt(freshSession, envelope);
-              saveRatchetSession(peerUserId, nextSession);
+              await saveRatchetSession(peerUserId, nextSession);
               _diagLog('V3_PEER_SESSION_RESET_SUCCEEDED', { msgId: msgIdForLog, peerUserId, forceRefresh });
               return plaintext;
             } catch (resetErr) {
@@ -615,10 +633,10 @@
 
         _diagLog('V3_SESSION_REPAIR_ATTEMPT', { msgId: msgIdForLog, peerUserId, reason: info.reason });
         try {
-          clearRatchetSession(peerUserId);
+          await clearRatchetSession(peerUserId);
           const freshSession = await _initReceiverSessionFromHeader(identity, peerUserId, envelope);
           const { session: nextSession, plaintext } = await R.ratchetDecrypt(freshSession, envelope);
-          saveRatchetSession(peerUserId, nextSession);
+          await saveRatchetSession(peerUserId, nextSession);
           _diagLog('V3_SESSION_REPAIR_SUCCEEDED', { msgId: msgIdForLog, peerUserId });
           return plaintext;
         } catch (repairErr) {
