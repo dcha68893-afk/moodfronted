@@ -9,7 +9,23 @@ if(!Push){
  return;
 }
 
-const Notify=window.Capacitor?.Plugins?.NecpraNotify||null;   // native notification layer (grouping, reply, open-chat suppression)
+// Native notification layer (grouping, reply, open-chat suppression).
+// FIX: this used to be resolved ONCE at script load. If the plugin proxy was not on Capacitor.Plugins yet, Notify stayed
+// null for the whole session, the token was uploaded WITHOUT the NecpraNativeNotify marker, and the server then sent
+// plain notification-block pushes (no grouping, no inline reply, no heads-up styling). It is now re-resolved on demand.
+function resolveNotify(){
+ try{
+  const C=window.Capacitor; if(!C)return null;
+  if(C.Plugins&&C.Plugins.NecpraNotify)return C.Plugins.NecpraNotify;
+  const listed=typeof C.isPluginAvailable==='function'&&C.isPluginAvailable('NecpraNotify');
+  const inHeaders=Array.isArray(C.PluginHeaders)&&C.PluginHeaders.some(h=>h&&h.name==='NecpraNotify');
+  if((listed||inHeaders)&&typeof C.registerPlugin==='function')return C.registerPlugin('NecpraNotify');
+ }catch(_){}
+ return null;
+}
+let Notify=resolveNotify();
+let notifyLoopsStarted=false;
+let uploadedThisSession=false;   // re-send the token once per app start so the server's device record always has the marker
 const LS_TOKEN='necpra_fcm_token', LS_AUTH='necpra_fcm_auth', LS_SENT='necpra_fcm_sent_at';
 const RESEND_MS=6*60*60*1000; // keep the server's lastSeenAt fresh (it ignores tokens unseen for 90 days)
 let fcmToken=localStorage.getItem(LS_TOKEN)||'';
@@ -181,9 +197,9 @@ async function register(){
 }
 async function uploadToken(){
  const auth=getAuth(); if(!fcmToken||!auth)return;
- const ok=await api('/push/fcm-token','POST',{token:fcmToken,platform:'android',userAgent:navigator.userAgent+(Notify?' NecpraNativeNotify/3':'')},auth);
+ const ok=await api('/push/fcm-token','POST',{token:fcmToken,platform:'android',userAgent:navigator.userAgent+((Notify||(Notify=resolveNotify()))?' NecpraNativeNotify/3':'')},auth);
  if(ok){
-  pendingUpload=false; uploadFails=0;
+  pendingUpload=false; uploadFails=0; uploadedThisSession=true;
   localStorage.setItem(LS_TOKEN,fcmToken); localStorage.setItem(LS_AUTH,auth); localStorage.setItem(LS_SENT,String(Date.now()));
   console.log('[NativePush] FCM token registered with server');
  }else{
@@ -210,6 +226,7 @@ Push.addListener('pushNotificationActionPerformed',a=>{openTarget(a?.notificatio
 
 /* ---------- keep everything in sync ---------- */
 async function sync(){
+ if(!Notify){Notify=resolveNotify();if(Notify)startNotifyLoops();}
  const auth=getAuth();
  if(!auth){
   // logged out: unlink this device so the previous user stops receiving pushes here
@@ -223,6 +240,7 @@ async function sync(){
  sawAuthThisSession=true;
  if(auth!==registeredForAuth){await register();return;}
  if(pendingUpload&&uploadFails<8){await uploadToken();return;}
+ if(fcmToken&&!uploadedThisSession&&uploadFails<8){await uploadToken();return;}
  const last=Number(localStorage.getItem(LS_SENT)||0);
  if(fcmToken&&Date.now()-last>RESEND_MS)await uploadToken();
 }
@@ -299,10 +317,12 @@ async function pullReplies(attempt){
  if(retry&&attempt<20)setTimeout(()=>pullReplies(attempt+1),1500);
 }
 window.addEventListener('necpra:native-notification-reply',()=>setTimeout(()=>pullReplies(0),400));
-if(Notify){
+function startNotifyLoops(){
+ if(notifyLoopsStarted||!Notify)return; notifyLoopsStarted=true;
  setInterval(()=>{reconcileConversation();syncPrivacy();},1500);
  window.addEventListener('message',()=>setTimeout(reconcileConversation,50));
  setTimeout(()=>pullReplies(0),3000);
 }
+startNotifyLoops();
 window.necpraNativePush={register,sync,getToken:()=>fcmToken};
 })();

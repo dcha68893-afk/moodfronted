@@ -159,7 +159,8 @@ final class NecpraRealtime {
 
     private void retryLater(final long gen) {
         synchronized (this) { if (users == 0 || gen != generation) return; }
-        long delay = Math.min(30_000L, 2_000L << Math.min(failures, 4));
+        // First retry after a clean drop is quick (messages were arriving a moment ago); back off only on repeated failures.
+        long delay = failures == 0 ? 500L : Math.min(30_000L, 2_000L << Math.min(failures, 4));
         worker.schedule(() -> connect(gen), delay, TimeUnit.MILLISECONDS);
     }
 

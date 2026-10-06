@@ -1,7 +1,32 @@
 (function(){
 'use strict';
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-const api=async(method,path,body)=>{if(typeof window._ecomApiCall==='function')return window._ecomApiCall(method,path,body);const token=window.__kynToken||window.__accessToken||window.__PARENT_SESSION__?.token||localStorage.getItem('authToken')||localStorage.getItem('token')||localStorage.getItem('necpa_token')||localStorage.getItem('accessToken')||'';const base=(window.API_BASE_URL||window.__kynAPI?.baseUrl||window.__getApiBase?.()||'').replace(/\/api\/?$/,'').replace(/\/$/,'');const r=await fetch(base+'/api'+path,{method,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},...(body?{body:JSON.stringify(body)}:{})});let d={};try{d=await r.json();}catch(_){}if(!r.ok)throw new Error(d.message||d.error||'Request failed');return d;};
+const readToken=()=>{
+  try{const a=window.getAuthSession&&window.getAuthSession();if(a&&a.token)return a.token;}catch(_){}
+  try{const raw=localStorage.getItem('kynecta_auth');if(raw){const a=JSON.parse(raw);if(a&&typeof a.token==='string'&&a.token)return a.token;}}catch(_){}
+  return window.__kynToken||window.__accessToken||window.__PARENT_SESSION__?.token||localStorage.getItem('authToken')||localStorage.getItem('token')||localStorage.getItem('necpa_token')||localStorage.getItem('accessToken')||'';
+};
+const directApi=async(method,path,body)=>{
+  const token=readToken();
+  const base=(window.API_BASE_URL||window.__kynAPI?.baseUrl||window.__getApiBase?.()||'').replace(/\/api\/?$/,'').replace(/\/$/,'');
+  const r=await fetch(base+'/api'+path,{method,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},...(body?{body:JSON.stringify(body)}:{})});
+  let d={};try{d=await r.json();}catch(_){}
+  if(!r.ok)throw new Error(d.message||d.error||'Request failed ('+r.status+')');
+  return d;
+};
+// FIX: _ecomApiCall can resolve null or a {error:true,...} object instead of throwing. Callers then read
+// r.data.* and crashed (or showed nothing). Any such result is now treated as a failure and retried once
+// through a direct authenticated fetch, so the tabs either show data or a clear error - never a blank panel.
+const api=async(method,path,body)=>{
+  if(typeof window._ecomApiCall==='function'){
+    try{
+      const r=await window._ecomApiCall(method,path,body);
+      const bad=r==null||r.error===true||r.ok===false||r.success===false;
+      if(!bad)return r;
+    }catch(_){}
+  }
+  return directApi(method,path,body);
+};
 const css=()=>{if(document.getElementById('digitalServicesCss'))return;const s=document.createElement('style');s.id='digitalServicesCss';s.textContent='.dsvc{padding:12px;max-width:760px;margin:0 auto;box-sizing:border-box}.dsvc *{box-sizing:border-box}.dsvc-hero{position:relative;overflow:hidden;border-radius:22px;padding:20px;margin-bottom:14px;background:linear-gradient(135deg,#0d47a1,#1565c0 48%,#00a8e8);color:#fff}.dsvc-kicker{font-size:11px;font-weight:900;letter-spacing:.12em;text-transform:uppercase;opacity:.85}.dsvc-title{font-size:24px;font-weight:900;margin:4px 0}.dsvc-sub{font-size:12px;line-height:1.5;opacity:.92}.dsvc-nav{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:14px}.dsvc-nav button{border:1px solid #e5e7eb;background:#fff;border-radius:13px;padding:10px 5px;font-weight:900;font-size:11px;color:#344054}.dsvc-nav button.active{background:#0d47a1;color:#fff;border-color:#0d47a1}.dsvc-card{background:#fff;border:1px solid #e8eaee;border-radius:18px;padding:14px;margin-bottom:11px;box-shadow:0 3px 14px rgba(16,24,40,.05)}.dsvc-section-title{font-size:18px;font-weight:900;margin:0 0 4px}.dsvc-section-sub{font-size:11px;color:#667085;line-height:1.45}.dsvc-label{display:block;font-size:12px;font-weight:800;color:#344054;margin:12px 0 5px}.dsvc-input{width:100%;padding:13px;border:1px solid #d9dee7;border-radius:12px;background:#fff;font:inherit}.dsvc-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}.dsvc-product{position:relative;border:1px solid #dfe3e8;border-radius:14px;background:#fff;padding:12px;text-align:left;min-height:78px}.dsvc-product strong{display:block;font-size:16px}.dsvc-product small{display:block;color:#667085;margin-top:3px}.dsvc-product b{display:block;margin-top:7px;font-size:13px}.dsvc-product.sel{border:2px solid #0d47a1;background:#eef6ff;padding:11px}.dsvc-badge{position:absolute;right:7px;top:7px;font-size:8px;font-weight:900;text-transform:uppercase;background:#e8f1ff;color:#0d47a1;border-radius:8px;padding:3px 5px}.dsvc-btn{width:100%;border:0;border-radius:13px;background:#0d47a1;color:#fff;padding:14px;font-weight:900;font-size:14px;margin-top:12px}.dsvc-btn:disabled{opacity:.5}.dsvc-note{font-size:11px;color:#667085;line-height:1.45;margin-top:8px}.dsvc-alert{border-radius:13px;padding:11px;background:#fff7e6;color:#8a4b00;font-size:11px;line-height:1.45;margin-top:10px}.dsvc-soon{opacity:.62}.dsvc-status{text-align:center;padding:26px 10px}.dsvc-spin{font-size:28px;margin-bottom:8px}.dsvc-success{color:#087443;font-weight:900}.dsvc-fail{color:#b42318;font-weight:900}.dsvc-pending{color:#a15c00;font-weight:900}.dsvc-hrow{display:flex;justify-content:space-between;gap:10px;padding:12px 0;border-bottom:1px solid #edf0f3;font-size:12px}.dsvc-hrow:last-child{border-bottom:0}.dsvc-source{font-size:10px;color:#98a2b3;text-align:center;margin:12px 0}@media(max-width:480px){.dsvc-grid{grid-template-columns:repeat(2,1fr)}.dsvc-nav{grid-template-columns:repeat(2,1fr)}}';document.head.appendChild(s)};
 let cfg=null,tab='home';
 const DATA_CATALOG=[
@@ -13,25 +38,53 @@ const DATA_CATALOG=[
 ];
 const AIRTIME_AMOUNTS=[10,20,50,100,200,500,1000,2000,5000];
 let selectedAirtime=null,selectedData=null;
+// FIX: loadConfig() was called by renderBody() but never defined anywhere, so every tab (Overview, Airtime,
+// Data, History) threw a ReferenceError and rendered nothing. Failures are NOT cached so "Try again" works.
+async function loadConfig(force){
+  if(cfg&&!force)return cfg;
+  const r=await api('GET','/airtime/config');
+  const c=(r&&r.data)||r||{};
+  cfg=c;
+  return cfg;
+}
 const markupPercent=()=>Math.max(0,Number(cfg?.airtime?.markupPercent||0));
 const customerPrice=n=>Math.round(Number(n)*(1+markupPercent()/100)*100)/100;
 const priceLabel=n=>customerPrice(n)===Number(n)?'KES '+Number(n).toFixed(2):'Pay KES '+customerPrice(n).toFixed(2);
 function shell(container,opts){
-  opts=opts||{};if(opts.tab==='airtime'||opts.tab==='data'||opts.tab==='history')tab=opts.tab;css();
+  opts=opts||{};tab=(opts.tab==='airtime'||opts.tab==='data'||opts.tab==='history')?opts.tab:'home';css();
   container.innerHTML='<div class="dsvc"><div class="dsvc-hero"><div class="dsvc-kicker">Necpra Marketplace</div><div class="dsvc-title">Digital Services</div><div class="dsvc-sub">Choose a product, enter the recipient and pay securely with M-Pesa.</div></div><div class="dsvc-nav"><button data-tab="home">Overview</button><button data-tab="airtime">Airtime</button><button data-tab="data">Data</button><button data-tab="history">History</button></div><div id="dsvcBody"></div></div>';
   container.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{tab=b.dataset.tab;renderBody(container)});renderBody(container);
 }
+let _renderSeq=0;
+function markActive(container){container.querySelectorAll('.dsvc-nav [data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));}
 async function renderBody(container){
-  const body=container.querySelector('#dsvcBody');if(!body)return;const c=await loadConfig();
+  const seq=++_renderSeq;markActive(container);
+  const body=container.querySelector('#dsvcBody');if(!body)return;
   if(tab==='history')return historyView(container);
+  body.innerHTML='<div class="dsvc-card dsvc-status"><div class="dsvc-spin">⏳</div>Loading…</div>';
+  let c;
+  try{c=await loadConfig();}
+  catch(e){
+    if(seq!==_renderSeq)return;
+    body.innerHTML='<div class="dsvc-card dsvc-status"><b>Could not load Digital Services.</b><div class="dsvc-note">'+esc(e&&e.message||'Check your connection and try again.')+'</div><button class="dsvc-btn" id="dsvcRetry">Try again</button></div>';
+    const r=body.querySelector('#dsvcRetry');if(r)r.onclick=()=>renderBody(container);
+    return;
+  }
+  if(seq!==_renderSeq)return;
+  try{
   if(tab==='home'){
     body.innerHTML='<div class="dsvc-card"><div class="dsvc-section-title">Buy digital products</div><div class="dsvc-section-sub">A bundle-store experience like the catalogue style you requested.</div><div class="dsvc-grid"><button class="dsvc-product" data-go="airtime"><strong>📱 Airtime</strong><small>KES 10 to KES 10,000</small><b>Buy now →</b></button><button class="dsvc-product" data-go="data"><strong>📶 Data bundles</strong><small>Kenya provider catalogue</small><b>Browse →</b></button><button class="dsvc-product dsvc-soon" disabled><strong>💬 SMS</strong><small>Bundle provider not connected</small><b>Coming soon</b></button><button class="dsvc-product dsvc-soon" disabled><strong>☎️ Minutes</strong><small>Bundle provider not connected</small><b>Coming soon</b></button></div></div>'
       +(c.airtime?.enabled?'<div class="dsvc-card"><b>✓ Airtime ready</b><div class="dsvc-note">Africa\'s Talking production airtime is configured.</div></div>':'<div class="dsvc-alert">Airtime is not configured on the backend yet.</div>')
       +(c.data?.enabled?'<div class="dsvc-card"><b>✓ Data ready</b><div class="dsvc-note">Provider data delivery is enabled.</div></div>':'<div class="dsvc-alert"><b>Data catalogue ready, delivery locked.</b><br>Africa\'s Talking mobile data must be activated before customers can pay for bundles.</div>');
     body.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{tab=b.dataset.go;renderBody(container)});return;
   }
-  if(tab==='airtime')return airtimeView(container,c);
-  if(tab==='data')return dataView(container,c);
+  if(tab==='airtime')return await airtimeView(container,c);
+  if(tab==='data')return await dataView(container,c);
+  }catch(e){
+    console.error('[DigitalServices] render failed',e);
+    body.innerHTML='<div class="dsvc-card dsvc-status"><b>Something went wrong.</b><div class="dsvc-note">'+esc(e&&e.message||'')+'</div><button class="dsvc-btn" id="dsvcRetry">Try again</button></div>';
+    const r=body.querySelector('#dsvcRetry');if(r)r.onclick=()=>{cfg=null;renderBody(container);};
+  }
 }
 function phoneField(){return '<label class="dsvc-label">Recipient phone number</label><input id="dsvcPhone" class="dsvc-input" inputmode="tel" autocomplete="tel" placeholder="07XX XXX XXX">';}
 async function airtimeView(container,c){
@@ -50,7 +103,7 @@ async function dataView(container,c){
   body.querySelectorAll('[data-data-id]').forEach(b=>b.onclick=()=>{selectedData=DATA_CATALOG.find(x=>x.id===b.dataset.dataId)||null;body.querySelectorAll('[data-data-id]').forEach(x=>x.classList.toggle('sel',x===b))});
   body.querySelector('#dsvcBuy').onclick=()=>{if(!selectedData)return;purchase(container,{serviceType:'data',amount:selectedData.cost,phone:body.querySelector('#dsvcPhone').value,bundleName:'Safaricom '+selectedData.label+' '+selectedData.validity,quantity:selectedData.quantity,unit:selectedData.unit,validity:selectedData.validity==='7 days'?'Week':'Day'});};
 }async function purchase(container,p){const body=container.querySelector('#dsvcBody'),btn=body.querySelector('#dsvcBuy'),msg=body.querySelector('#dsvcMsg');if(!p.amount||p.amount<=0||!p.phone){if(msg)msg.textContent='Enter the recipient number and amount.';return}btn.disabled=true;btn.textContent='Starting M-Pesa…';try{const r=await api('POST','/airtime/purchase',{...p,idempotencyKey:crypto.randomUUID()});const tx=r.data.transaction;body.innerHTML='<div class="dsvc-card dsvc-status"><div class="dsvc-spin">📲</div><b>M-Pesa prompt sent</b><p class="dsvc-note">'+esc(r.data.customerMessage||'Enter your M-Pesa PIN on your phone.')+'</p><p class="dsvc-note">Transaction: '+esc(tx.id)+'</p><div id="dsvcPoll">Waiting for payment…</div></div>';poll(container,tx.id);}catch(e){btn.disabled=false;btn.textContent='Buy with M-Pesa';if(msg)msg.textContent=e.message||'Unable to start payment.'}}
-async function poll(container,id){let tries=0;const tick=async()=>{tries++;try{const r=await api('GET','/airtime/transactions/'+encodeURIComponent(id));const t=r.data.transaction;const el=container.querySelector('#dsvcPoll');if(['success'].includes(t.status)){el.innerHTML='<span class="dsvc-success">✓ '+(t.serviceType==='airtime'?'Airtime delivered':'Data order completed')+'</span>';return}if(['failed','refund_required','refunded','reversed'].includes(t.status)){el.innerHTML='<span class="dsvc-fail">Payment/service failed: '+esc(r.data.failureReason||t.status)+'</span>';return}el.textContent=t.status==='fulfilling'?'Payment confirmed — delivering now…':'Waiting for payment…';}catch(_){}if(tries<40)setTimeout(tick,3000)};tick()}
+async function poll(container,id){let tries=0;const tick=async()=>{tries++;try{const r=await api('GET','/airtime/transactions/'+encodeURIComponent(id));const t=r.data.transaction;const el=container.querySelector('#dsvcPoll');if(['success'].includes(t.status)){el.innerHTML='<span class="dsvc-success">✓ '+(t.serviceType==='airtime'?'Airtime delivered':'Data order completed')+'</span>';return}if(['failed','refund_required','refunded','reversed'].includes(t.status)){el.innerHTML='<span class="dsvc-fail">Payment/service failed: '+esc(t.failureReason||r.data.failureReason||t.status)+'</span>';return}el.textContent=t.status==='fulfilling'?'Payment confirmed — delivering now…':'Waiting for payment…';}catch(_){}if(tries<40)setTimeout(tick,3000)};tick()}
 async function historyView(container){const body=container.querySelector('#dsvcBody');body.innerHTML='<div class="dsvc-card dsvc-status">Loading history…</div>';try{const r=await api('GET','/airtime/history'),rows=r.data?.transactions||[];body.innerHTML='<div class="dsvc-card dsvc-history"><h3>Digital service history</h3>'+(rows.length?rows.map(t=>'<div class="dsvc-hrow"><div><b>'+esc(t.serviceType==='airtime'?'Airtime':'Mobile Data')+'</b><br><span>'+esc(t.recipientPhone)+'</span></div><div style="text-align:right"><b>KES '+esc(t.sellPrice)+'</b><br><span class="'+(t.status==='success'?'dsvc-success':['failed','refund_required'].includes(t.status)?'dsvc-fail':'dsvc-pending')+'">'+esc(t.status)+'</span></div></div>').join(''):'No digital-service purchases yet.')+'</div>';}catch(e){body.innerHTML='<div class="dsvc-card">Unable to load history.</div>'}}
 window.__renderDigitalServices=shell;
 })();

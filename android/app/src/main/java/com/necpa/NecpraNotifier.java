@@ -80,6 +80,23 @@ final class NecpraNotifier {
 
     static String key(String kind, String id) { return kind + ":" + id; }
 
+    private static final java.util.concurrent.ExecutorService PREVIEW_POOL = java.util.concurrent.Executors.newCachedThreadPool();
+
+    /**
+     * FIX (late / missing banners): pushPreview() does a network catch-up + decrypt. It ran inline, so a slow or hung request
+     * delayed the notification by up to the connect timeout (or past the time FCM gives the service). The notification now
+     * waits at most {@code ms}; the catch-up keeps running in the background so the message is still ingested exactly once.
+     */
+    private static String[] previewWithTimeout(final Context ctx, final long chatId, final long messageId, long ms) {
+        try {
+            java.util.concurrent.Future<String[]> f = PREVIEW_POOL.submit(
+                    () -> NecpraMessageRepository.get(ctx).pushPreview(chatId, messageId));
+            return f.get(ms, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (Throwable t) {
+            return null;   // generic server preview is used
+        }
+    }
+
     static boolean isChatMessage(Map<String, String> d) {
         if (d == null) return false;
         String type = d.get("type");
@@ -153,7 +170,7 @@ final class NecpraNotifier {
         final boolean nativeDm = !group && NecpraDmOwner.isOwner(ctx);
         final long nativeChatId = nativeDm ? parseLong(id) : 0;
         if (nativeDm && nativeChatId > 0) {
-            String[] pv = NecpraMessageRepository.get(ctx).pushPreview(nativeChatId, parseLong(d.get("messageId")));
+            String[] pv = previewWithTimeout(ctx, nativeChatId, parseLong(d.get("messageId")), 3500);
             if (pv != null) {
                 if (pv[1] != null && !pv[1].isEmpty()) body = pv[1];
                 if (pv[0] != null && !pv[0].isEmpty() && !"Chat".equals(pv[0])) title = pv[0];

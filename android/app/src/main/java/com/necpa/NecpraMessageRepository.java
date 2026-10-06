@@ -276,7 +276,11 @@ public final class NecpraMessageRepository {
                 }
                 status = h.getResponseCode();
                 text = NativeBackgroundSync.readText(status >= 200 && status < 400 ? h.getInputStream() : h.getErrorStream());
-            } finally { if (h != null) h.disconnect(); }
+            } finally {
+                // FIX (slow send/receive): h.disconnect() CLOSED the socket after every call, so each send and each
+                // /sync paid a brand-new TCP + TLS handshake (3-4 round trips; seconds on mobile data). The body is already
+                // fully read and closed by readText(), so the connection goes back to the keep-alive pool and is reused.
+            }
             if (status == 401) {
                 if (retried) throw new NativeBackgroundSync.SessionExpiredException("Unauthorized after refresh");
                 retried = true; NativeBackgroundSync.refreshSession(app); continue;

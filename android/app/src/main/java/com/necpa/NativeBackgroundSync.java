@@ -107,12 +107,28 @@ public final class NativeBackgroundSync {
     }
 
     static void putEncrypted(SharedPreferences prefs, String key, String value) throws Exception {
+        DECRYPT_CACHE.clear();
         if (value == null) prefs.edit().remove(key).commit();
         else prefs.edit().putString(key, encrypt(value)).commit();
     }
 
+    // FIX (slow sends): every HTTP request decrypted the access token through the Android Keystore (AES-GCM), which costs
+    // tens of ms on many phones (more on MIUI). Memoise by CIPHERTEXT: a rotated/changed token has a different packed
+    // value so it can never return a stale token, and putEncrypted() clears the cache on any write.
+    private static final java.util.concurrent.ConcurrentHashMap<String, String> DECRYPT_CACHE =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
     static String getDecrypted(SharedPreferences prefs, String key) throws Exception {
-        return decrypt(prefs.getString(key, null));
+        String packed = prefs.getString(key, null);
+        if (packed == null) return null;
+        String hit = DECRYPT_CACHE.get(packed);
+        if (hit != null) return hit;
+        String plain = decrypt(packed);
+        if (plain != null) {
+            if (DECRYPT_CACHE.size() > 32) DECRYPT_CACHE.clear();
+            DECRYPT_CACHE.put(packed, plain);
+        }
+        return plain;
     }
 
     // ------------------------------------------------------------------
