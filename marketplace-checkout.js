@@ -573,6 +573,10 @@ function _renderPaymentStep() {
             <input class="co-coupon-input" id="coCouponInput" placeholder="ENTER COUPON CODE" value="${_esc(_state.couponCode)}" />
             <button class="co-coupon-btn" onclick="window._jmApplyCoupon()">Apply</button>
         </div>
+        <div style="margin-top:8px">
+            <button type="button" style="border:0;background:transparent;color:#2563eb;font-size:12px;font-weight:700;padding:4px 0;cursor:pointer" onclick="window._jmShowCoupons()">View available coupons</button>
+            <div id="coAvailableCoupons" style="display:none;margin-top:7px"></div>
+        </div>
         ${disc>0?`<div style="background:#f0fdf4;border-radius:8px;padding:8px 12px;margin-top:8px;font-size:12px;color:#166534">🎉 Coupon applied! You saved ${_fmt(disc)}</div>`:''}
     </div>`;
 
@@ -612,6 +616,18 @@ window._jmSelectPayment = function(id) {
 window._jmMpesaPhone = function(v) {
     _state.mpesaPhone = v;
     localStorage.setItem('mpesa_phone', v);
+};
+window._jmShowCoupons = async function() {
+    const box=document.getElementById('coAvailableCoupons');
+    if(!box)return;
+    if(box.style.display==='block'){box.style.display='none';return;}
+    box.style.display='block';
+    box.innerHTML='<div style="font-size:12px;color:#6b7280;padding:8px 0">Loading available coupons…</div>';
+    const r=await _api('GET','/marketplace/coupons');
+    const coupons=r?.data?.coupons||r?.coupons||[];
+    if(!coupons.length){box.innerHTML='<div style="font-size:12px;color:#6b7280;padding:8px 0">No public coupons are currently available.</div>';return;}
+    box.innerHTML=coupons.map(c=>'<button type="button" style="display:flex;width:100%;justify-content:space-between;gap:10px;border:1px solid #e5e7eb;background:#fff;border-radius:9px;padding:9px 10px;margin:5px 0;text-align:left;cursor:pointer" data-coupon="'+_esc(c.code)+'"><span><strong>'+_esc(c.code)+'</strong><br><small style="color:#6b7280">'+_esc(c.description||'Coupon available')+'</small></span><span style="font-weight:800;color:#22c55e">Use</span></button>').join('');
+    box.querySelectorAll('[data-coupon]').forEach(b=>b.addEventListener('click',()=>{const input=document.getElementById('coCouponInput');if(input)input.value=b.getAttribute('data-coupon');window._jmApplyCoupon();}));
 };
 window._jmApplyCoupon = async function() {
     const code = document.getElementById('coCouponInput')?.value?.trim();
