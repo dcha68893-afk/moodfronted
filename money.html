@@ -47,7 +47,7 @@ window.payLaterNow=async function(orderId){const phone=window.prompt('Enter the 
 async function load(){try{const d=await api('/money/overview');document.getElementById('balance').textContent=money(d.overview?.trackedAmount||0);const circles=d.circles||[];document.getElementById('circleList').innerHTML=circles.length?circles.map(c=>`<div class="row"><div style="min-width:0;flex:1"><div class="row-title">${esc(c.name)}</div><div class="row-sub">${esc(c.purpose||'')} · ${money(c.collectedAmount)} / ${money(c.targetAmount)}</div></div><button class="primary" style="padding:8px 10px;font-size:12px" onclick="contribute('${c.id}')">Contribute</button></div>`).join(''):'<div class="empty">No circles yet. Create your first one.</div>';const acts=d.activity||[];document.getElementById('activityList').innerHTML=acts.length?acts.map(a=>`<div class="row"><div><div class="row-title">${esc(a.title)}</div><div class="row-sub">${esc(a.subtitle||'')}</div></div><b>${money(a.amount)}</b></div>`).join(''):'<div class="empty">No money activity yet.</div>'}catch(e){document.getElementById('circleList').innerHTML='<div class="empty">Money service is unavailable. Please try again.</div>';document.getElementById('activityList').innerHTML='<div class="empty">'+esc(e.message)+'</div>'}}
 function esc(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 document.getElementById('modal').addEventListener('click',e=>{if(e.target.id==='modal')closeModal()});
-load();
+load().then(()=>loadPayLater()).catch(()=>{});
 })();
 </script>
 </body></html>
