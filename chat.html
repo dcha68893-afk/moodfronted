@@ -277,6 +277,37 @@
             background: var(--kyn-header-action-bg-hover);
         }
 
+        .header-action-btn {
+            position: relative;
+            overflow: hidden;
+            transform: translateZ(0);
+            transition: transform .18s ease, box-shadow .18s ease, background .18s ease, border-color .18s ease;
+        }
+        .header-action-btn::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            border-radius: inherit;
+            background: radial-gradient(circle at center, rgba(37,99,235,.16), transparent 62%);
+            opacity: 0;
+            transform: scale(.55);
+            transition: opacity .22s ease, transform .22s ease;
+            pointer-events: none;
+        }
+        .header-action-btn:hover { transform: translateY(-2px) scale(1.03); box-shadow: 0 8px 18px rgba(15,23,42,.12); }
+        .header-action-btn:hover::after { opacity: 1; transform: scale(1); }
+        .header-action-btn:active { transform: scale(.94); }
+        .header-nav-action i { transition: transform .2s ease; }
+        .header-nav-action:hover i { transform: rotate(-4deg) scale(1.08); }
+        @keyframes necpraHeaderActionIn {
+            from { opacity: 0; transform: translateY(-5px) scale(.94); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .header-actions:not(.hidden) .header-action-btn { animation: necpraHeaderActionIn .22s ease both; }
+        .header-actions:not(.hidden) .header-action-btn:nth-child(2) { animation-delay: .035s; }
+        .header-actions:not(.hidden) .header-action-btn:nth-child(3) { animation-delay: .07s; }
+        .header-actions:not(.hidden) .header-action-btn:nth-child(4) { animation-delay: .105s; }
+
         .header-action-btn i {
             font-size: 16px;
         }
@@ -2697,8 +2728,8 @@
             messages: [
                 { btnId: 'multiSendToggleBtn', icon: 'fa-broadcast-tower', title: 'Multi-send' },
                 { btnId: 'newChatBtn', icon: 'fa-edit', title: 'New chat' },
-                { navigatePage: 'group', icon: 'fa-users', title: 'Groups' },
-                { navigatePage: 'friends', icon: 'fa-user-friends', title: 'Friends' }
+                { navigatePage: 'group', icon: 'fa-users', title: 'Groups', navAction: true },
+                { navigatePage: 'friends', icon: 'fa-user-friends', title: 'Friends', navAction: true }
             ],
             // FRIENDS-HEADER-CLEANUP: the New-chat / Friend-request-bell /
             // Add-friend buttons this used to proxy-click into friend.html no
@@ -2712,14 +2743,24 @@
                 { btnId: 'createGroupBtn', icon: 'fa-users', title: 'Create group' }
             ],
             groups: [
+                { navigateBack: true, icon: 'fa-arrow-left', title: 'Back', navAction: true },
                 { btnId: 'createGroupBtn', icon: 'fa-users', title: 'Create group' }
             ],
-            status: [],
-            settings: [
-                { btnId: 'backToAppBtn', icon: 'fa-arrow-left', title: 'Back to app' }
+            status: [
+                { navigateBack: true, icon: 'fa-arrow-left', title: 'Back', navAction: true }
             ],
-            tools: [],
-            games: []
+            settings: [
+                { navigateBack: true, icon: 'fa-arrow-left', title: 'Back', navAction: true }
+            ],
+            tools: [
+                { navigateBack: true, icon: 'fa-arrow-left', title: 'Back', navAction: true }
+            ],
+            games: [
+                { navigateBack: true, icon: 'fa-arrow-left', title: 'Back', navAction: true }
+            ],
+            money: [
+                { navigateBack: true, icon: 'fa-arrow-left', title: 'Back', navAction: true }
+            ]
         };
 
         function triggerIframeHeaderAction(page, btnId) {
@@ -2736,6 +2777,33 @@
             }
         }
 
+        function navigateBackOneStep() {
+            if (window.__navHistory && window.__navHistory.length) {
+                const previous = window.__navHistory.pop();
+                navigateToPage(previous, { fromHistory: true });
+            } else {
+                navigateToPage('messages', { fromHistory: true });
+            }
+        }
+
+        function renderHeaderActionButtons(container, actions, page) {
+            (actions || []).forEach(action => {
+                if (!action || (!action.btnId && !action.navigatePage && !action.navigateBack)) return;
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.className = 'header-action-btn' + (action.navAction ? ' header-nav-action' : '');
+                b.title = action.title || '';
+                b.setAttribute('aria-label', action.title || action.btnId || 'Back');
+                b.innerHTML = `<i class="fas ${action.icon || ''}"></i>`;
+                b.addEventListener('click', () => {
+                    if (action.navigateBack) return navigateBackOneStep();
+                    if (action.navigatePage) return navigateToPage(action.navigatePage);
+                    triggerIframeHeaderAction(page, action.btnId);
+                });
+                container.appendChild(b);
+            });
+        }
+
         function updateHeaderActions(page) {
             const headerActionsEl = document.getElementById('headerActions');
             const toolsNavEl      = document.getElementById('toolsHeaderNav');
@@ -2743,21 +2811,21 @@
             if (!headerActionsEl) return;
 
             if (page === 'tools') {
-                // Show tools tabs, hide generic actions
                 if (toolsNavEl) toolsNavEl.classList.remove('hidden');
                 if (friendsNavEl) friendsNavEl.classList.add('hidden');
                 headerActionsEl.innerHTML = '';
-                headerActionsEl.classList.add('hidden');
+                headerActionsEl.classList.remove('hidden');
+                renderHeaderActionButtons(headerActionsEl, headerActionConfigByPage.tools, page);
                 return;
             }
             // Hide tools nav for every other page
             if (toolsNavEl) toolsNavEl.classList.add('hidden');
 
             if (page === 'friends') {
-                // Show friends tabs, hide generic actions (friends has none)
                 if (friendsNavEl) friendsNavEl.classList.remove('hidden');
                 headerActionsEl.innerHTML = '';
-                headerActionsEl.classList.add('hidden');
+                headerActionsEl.classList.remove('hidden');
+                renderHeaderActionButtons(headerActionsEl, headerActionConfigByPage.friends, page);
                 return;
             }
             // Hide friends nav for every other page (including games)
@@ -2765,7 +2833,8 @@
             // Games page — no header actions needed
             if (page === 'games') {
                 headerActionsEl.innerHTML = '';
-                headerActionsEl.classList.add('hidden');
+                headerActionsEl.classList.remove('hidden');
+                renderHeaderActionButtons(headerActionsEl, headerActionConfigByPage.games, page);
                 return;
             }
 
@@ -2779,20 +2848,7 @@
             }
 
             headerActionsEl.classList.remove('hidden');
-            actions.forEach(action => {
-                if (!action || (!action.btnId && !action.navigatePage)) return;
-                const b = document.createElement('button');
-                b.type = 'button';
-                b.className = 'header-action-btn';
-                b.title = action.title || '';
-                b.setAttribute('aria-label', action.title || action.btnId);
-                b.innerHTML = `<i class="fas ${action.icon || ''}"></i>`;
-                b.addEventListener('click', () => {
-                    if (action.navigatePage) return navigateToPage(action.navigatePage);
-                    triggerIframeHeaderAction(page, action.btnId);
-                });
-                headerActionsEl.appendChild(b);
-            });
+            renderHeaderActionButtons(headerActionsEl, actions, page);
         }
 
         // ======================================================================
