@@ -538,7 +538,11 @@ async function deliverOptimistic(cid,groupId,plain){
     // S.current.participants happened to hold from when the panel was
     // opened — see refreshCurrentGroupMembers() above for why that goes
     // stale and causes GROUP_SENDER_KEY_INCOMPLETE on every send.
-    await refreshCurrentGroupMembers(groupId);
+    /* FIX (GROUP-SEND-4-ROUND-TRIPS): this awaited GET /chats/:id, then encryptForGroup() fetched the SAME member list again
+       (and the crypto state) before the POST - four sequential requests per message. ensureSenderKey() already reads the live
+       member list from the server and only falls back to the list passed here when that request fails, so the refresh below is
+       only for the on-screen member list and no longer blocks the send. */
+    refreshCurrentGroupMembers(groupId);
     const encrypted=await window.KynectaGroupE2E.encryptForGroup(groupId,plain,groupMemberIds(groupObjectFor(groupId)));
     const r=await apiRetry('/group-messages/'+encodeURIComponent(groupId)+'/messages',{method:'POST',body:JSON.stringify({chatId:groupId,content:encrypted,type:'text',clientMessageId:cid,metadata:{groupId}})});
     const serverMessage=r?.data?.message||r?.data;
@@ -611,7 +615,7 @@ async function sendGroupPayload(plain,type='text',metadata=null){
   if(!S.current?.id)throw new Error('No group is open');const text=String(plain||'').trim();if(type==='text'&&!text)throw new Error('Message cannot be empty');
   if(!(await ensureE2EReady())||!window.KynectaGroupE2E?.encryptForGroup)throw new Error(e2eNotReadyMessage());
   const gid=Number(S.current.id),cid=makeGroupClientId();
-  await refreshCurrentGroupMembers(gid);
+  refreshCurrentGroupMembers(gid);   /* not awaited: see deliverOptimistic - encryptForGroup reads the live member list itself */
   /* FIX (UPLOAD-FAILED-INVALID-GROUP-CIPHERTEXT-ENVELOPE): this used to be `text ? encrypt(...) : ''`. An attachment sent
      without a caption has empty text, so content:'' was POSTed and groupMessagingService.insertMessage() rejects anything
      that is not a KYN-GROUP-V2 envelope ("Invalid group ciphertext envelope"). Direct chat never hit this because its

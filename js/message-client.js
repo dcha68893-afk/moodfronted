@@ -436,6 +436,20 @@
             persistMessage(chatId, bucket.get(message.id));
             return;
         }
+        const _isPh = (v) => v == null || v === '🔒 Encrypted message' || v === '🔒 Unable to decrypt this message' || v === 'Decrypting…';
+        // FIX (REPLAY-ON-EVERY-RELOAD): loadConversations() hands this function the raw server copy of each chat's last message on
+        // every list load (app start, resume, back online). After a reload the in-memory caches are empty, so that already-consumed
+        // message was run through the Double Ratchet AGAIN - a one-time key can only be used once, so the attempt failed and the good
+        // plaintext was replaced by an error placeholder (and the failed attempt could even roll the session back). If this exact
+        // ciphertext already has resolved plaintext in the message bucket (restored from the local cache), use it and stop here.
+        {
+            const _b = state.messagesByConversation.get(chatId);
+            const _known = _b && _b.get(message.id);
+            if (_known && !_isPh(_known.displayContent) && (_known.content === undefined || _known.content === ciphertext)) {
+                syncLastMessageDisplay(chatId, message.id, _known.displayContent, false);
+                return;
+            }
+        }
         const cached = decryptResults.get(key);
         if (cached && cached.ciphertext === ciphertext) {
             const bucket = getOrCreateConversationBucket(chatId);
@@ -465,6 +479,7 @@
                 const queued=typeof window.KynectaE2E.isMessageQueued==='function'&&window.KynectaE2E.isMessageQueued(message);
                 if(failed){
                     const bucket=getOrCreateConversationBucket(chatId),current=bucket.get(message.id)||message;
+                    if(!_isPh(current.displayContent)&&(current.content===undefined||current.content===ciphertext)){return;}   // keep the plaintext we already hold
                     bucket.set(message.id,Object.assign({},current,{displayContent:fallback}));
                     syncLastMessageDisplay(chatId,message.id,fallback,false);notify('message:decrypted',{chatId,messageId:message.id});return;
                 }
@@ -952,7 +967,7 @@
     // is a separate, larger piece of work not done here — flagging this
     // explicitly rather than implying attachments are covered when they
     // are not.
-    async function sendMessage({ chatId, receiverId, content, type = 'text', replyToId = null, attachment = null }) {
+    async function sendMessage({ chatId, receiverId, content, type = 'text', replyToId = null, attachment = null, otherUser = null }) {
         const clientMessageId = generateClientMessageId();
         const optimisticId = `optimistic:${clientMessageId}`;
         const optimisticMessage = {
@@ -967,8 +982,14 @@
         notify('message:added', { chatId: optimisticMessage.chatId, message: optimisticMessage });
 
         if (receiverId) {
+            // FIX (MULTI-SEND ROWS NAMELESS): a brand-new chat used to be created with otherUser = {id} only, so the list
+            // showed a blank "Conversation" with a default avatar until a server refresh. Callers that already know the
+            // person (multi-send picker, forward) pass otherUser {username, avatar}; only non-empty values are copied.
+            const known = {};
+            if (otherUser && otherUser.username) known.username = otherUser.username;
+            if (otherUser && otherUser.avatar) known.avatar = otherUser.avatar;
             upsertConversationMeta(optimisticMessage.chatId, {
-                otherUser: Object.assign({}, state.conversations.get(optimisticMessage.chatId)?.otherUser, { id: receiverId }),
+                otherUser: Object.assign({}, known, state.conversations.get(optimisticMessage.chatId)?.otherUser, { id: receiverId }),
             });
         }
 
@@ -2161,7 +2182,10 @@
                         keepDisplay !== undefined ? { displayContent: keepDisplay } : {}
                     ) : null,
                 });
-                if (lastRaw) decryptForDisplay(c.id, { id: lastRaw.id, chatId: c.id, content: lastRaw.content, type: lastRaw.type, senderId: lastRaw.senderId, createdAt: lastRaw.createdAt });
+                if (lastRaw) decryptForDisplay(c.id, Object.assign(
+                    { id: lastRaw.id, chatId: c.id, content: lastRaw.content, type: lastRaw.type, senderId: lastRaw.senderId, createdAt: lastRaw.createdAt },
+                    keepDisplay !== undefined ? { displayContent: keepDisplay } : {}
+                ));
             });
         } catch (err) {
             console.error(`[MessageModule] Failed to load conversation list (attempt ${attempt + 1}):`, err.message);

@@ -2082,6 +2082,7 @@
     // selected recipient — no second/competing send pipeline. ──
     let broadcastMode = false;
     let broadcastSelectedIds = new Set();
+    let broadcastInfo = new Map();   // userId -> {username, avatar}, read from the picker row when it is ticked
 
     function updateBroadcastComposeBar() {
       const bar = document.getElementById('broadcastComposeBar');
@@ -2100,6 +2101,7 @@
       forwardingMessage = null;
       broadcastMode = true;
       broadcastSelectedIds = new Set();
+      broadcastInfo = new Map();
       newChatModal.classList.remove('hidden');
       newChatSearchInput.value = '';
       newChatSearchInput.classList.add('hidden');
@@ -2113,6 +2115,7 @@
     function closeMultiSendPicker() {
       broadcastMode = false;
       broadcastSelectedIds = new Set();
+      broadcastInfo = new Map();
       updateBroadcastComposeBar();
     }
 
@@ -2135,14 +2138,21 @@
       // corrupts delivery to the others; failures are collected and
       // reported together at the end instead of silently dropped.
       const results = await Promise.allSettled(
-        targets.map(userId => window.MessageModule.sendMessage({ receiverId: userId, content }))
+        targets.map(userId => window.MessageModule.sendMessage({ receiverId: userId, content, otherUser: broadcastInfo.get(userId) || null }))
       );
-      const failures = results.filter(r => r.status === 'rejected').length;
+      // FIX (MULTI-SEND FAILURES NEVER REPORTED): sendMessage() does not throw — it RESOLVES {success:false, error}
+      // (blocked, key not ready, offline...). Counting only rejected promises meant failures were always 0 and the
+      // "sent to X of Y" alert could never appear. A resolved result only counts as sent when success is true.
+      const failed = results
+        .map((r, i) => ({ r, id: targets[i] }))
+        .filter(x => x.r.status === 'rejected' || !(x.r.value && x.r.value.success));
+      const failures = failed.length;
       sendBtn.textContent = originalLabel;
       newChatModal.classList.add('hidden');
       closeMultiSendPicker();
       if (failures > 0) {
-        alert(`Sent to ${targets.length - failures} of ${targets.length} people. ${failures} failed — check those chats and retry if needed.`);
+        const firstWhy = (() => { const x = failed[0]; const v = x && x.r.value; return (v && v.error) || (x && x.r.reason && x.r.reason.message) || ''; })();
+        alert(`Sent to ${targets.length - failures} of ${targets.length} people. ${failures} failed — check those chats and retry if needed.` + (firstWhy ? `\n\nReason: ${firstWhy}` : ''));
       }
     }
 
@@ -2343,7 +2353,8 @@
             const cb = el.querySelector('.broadcast-checkbox');
             if (e.target !== cb) cb.checked = !cb.checked;
             const id = Number(el.dataset.userId);
-            if (cb.checked) broadcastSelectedIds.add(id); else broadcastSelectedIds.delete(id);
+            if (cb.checked) { broadcastSelectedIds.add(id); broadcastInfo.set(id, { username: el.dataset.userName || '', avatar: el.dataset.userAvatar || '' }); }
+            else broadcastSelectedIds.delete(id);
             updateBroadcastComposeBar();
           });
         });

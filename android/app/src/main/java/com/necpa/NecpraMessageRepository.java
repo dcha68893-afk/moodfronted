@@ -255,6 +255,9 @@ public final class NecpraMessageRepository {
         String message() { String m = json == null ? null : json.optString("message", null); return m == null || m.isEmpty() ? "HTTP " + status : m; }
     }
 
+    /** Authenticated call (same session + single-refresh path) for native screens that manage groups. */
+    Resp api(String method, String path, JSONObject body) throws Exception { return request(method, path, body); }
+
     private Resp request(String method, String path, JSONObject body) throws Exception {
         boolean retried = false;
         while (true) {
@@ -681,6 +684,7 @@ public final class NecpraMessageRepository {
             // The web client (message-client.js sendMessage) sends ONE attachment as metadata.attachment — the key this
             // method used to miss, which is why files/images from web users never showed up natively.
             NecpraDb.Att a = meta == null ? null : attFrom(localId, type, meta.optJSONObject("attachment"));
+            if (a == null && meta != null) a = attFrom(localId, type, meta.optJSONObject("media"));   // group composer: metadata.media
             if (a == null) a = attFrom(localId, type, meta);
             if (a == null && plain != null && plain.trim().startsWith("{")) { try { a = attFrom(localId, type, new JSONObject(plain)); } catch (Exception ignored) { } }
             if (a == null) { String c = str(row, "content"); if (c != null && c.startsWith("https://")) { JSONObject o = new JSONObject(); try { o.put("url", c); } catch (Exception ignored) { } a = attFrom(localId, type, o); } }
@@ -960,14 +964,21 @@ public final class NecpraMessageRepository {
         NecpraDb.ChatDao d = dao();
         if (!groupsOn()) { fail(m, "Group messages can't be sent from the native screen"); return false; }
         String mType = m.type == null || m.type.isEmpty() ? "text" : m.type;
-        if (isMediaType(mType)) { fail(m, "Sending files to a group isn't available in the native screen yet"); return false; }
+        final boolean media = isMediaType(mType);
+        // File first (its URL is stored on the row, so a retry never re-uploads). Same plain upload the web group composer does.
+        final JSONObject att = media ? uploadPending(m, 0L) : null;
         if (m.envelope == null) {
             String plain = open(m.body);
-            if (plain == null) { fail(m, "Message text is no longer available"); return false; }
-            m.envelope = seal(groupEngine().encrypt(m.chatId, plain));
+            if (plain == null && !media) { fail(m, "Message text is no longer available"); return false; }
+            // The server requires every group message to carry a ciphertext envelope; a media message without a caption encrypts "".
+            m.envelope = seal(groupEngine().encrypt(m.chatId, plain == null ? "" : plain));
             d.updateMsg(m);
         }
         JSONObject meta = new JSONObject().put("groupId", m.chatId);
+        if (att != null) {                      // wire shape of the web group composer: metadata.media = {url, mimeType, size, type, name}
+            meta.put("media", new JSONObject().put("url", att.optString("url")).put("mimeType", att.optString("mimeType"))
+                    .put("size", att.optLong("size")).put("type", mType).put("name", att.optString("originalName", "file")));
+        }
         if (m.replyToServerId > 0) meta.put("replyTo", new JSONObject().put("id", m.replyToServerId));
         JSONObject body = new JSONObject().put("chatId", m.chatId).put("content", open(m.envelope)).put("type", mType)
                 .put("clientMessageId", m.clientMessageId).put("metadata", meta);

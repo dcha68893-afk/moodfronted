@@ -61,6 +61,15 @@ public class NecpraConversationsActivity extends AppCompatActivity implements Ne
                 long gid = d == null ? 0L : d.getLongExtra(RES_GROUP_ID, 0L);
                 if (gid > 0) { Intent r = new Intent(); r.putExtra(RES_GROUP_ID, gid); r.putExtra(RES_SESSION_EXPIRED, this.expired); setResult(RESULT_OK, r); finish(); }
             });
+    /** Native "New group": on success the new chat opens straight away. */
+    private final androidx.activity.result.ActivityResultLauncher<Intent> createLauncher = registerForActivityResult(
+            new androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult(), res -> {
+                Intent d = res == null ? null : res.getData();
+                if (d != null && d.getBooleanExtra(NecpraGroupActivity.RES_SESSION_EXPIRED, false)) { expired = true; finishWithResult(); return; }
+                long id = d == null ? 0L : d.getLongExtra(NecpraGroupActivity.RES_CREATED_CHAT, 0L);
+                reload();
+                if (id > 0) chatLauncher.launch(NecpraChatActivity.intent(this, id, 0L, d.getStringExtra(NecpraGroupActivity.RES_CREATED_TITLE), null));
+            });
     private static final long POLL_MS = 10_000L;
 
     // ---------------------------------------------------------------- shared look (also used by NecpraChatActivity)
@@ -188,7 +197,13 @@ public class NecpraConversationsActivity extends AppCompatActivity implements Ne
             TextView manage = new TextView(this); manage.setText("Manage"); manage.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14); manage.setTypeface(Typeface.DEFAULT_BOLD);
             manage.setTextColor(t.accent); manage.setPadding(dp(this, 8), dp(this, 8), dp(this, 8), dp(this, 8));
             manage.setContentDescription("Create or manage groups");
-            manage.setOnClickListener(v -> { Intent r = new Intent(); r.putExtra(RES_OPEN_WEB_GROUPS, true); r.putExtra(RES_SESSION_EXPIRED, expired); setResult(RESULT_OK, r); finish(); });
+            manage.setText("New group");
+            manage.setContentDescription("Create a group");
+            manage.setOnClickListener(v -> {
+                if (repo.groupsOn()) { createLauncher.launch(NecpraGroupActivity.createIntent(this)); return; }
+                Intent r = new Intent(); r.putExtra(RES_OPEN_WEB_GROUPS, true); r.putExtra(RES_SESSION_EXPIRED, expired); setResult(RESULT_OK, r); finish();
+            });
+
             header.addView(manage);
         } else header.addView(lock);
         root.addView(header, new LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -266,7 +281,7 @@ public class NecpraConversationsActivity extends AppCompatActivity implements Ne
             for (NecpraDb.Conv c : all) if (!groupsOnly || "group".equals(c.type)) rows.add(c);
             runOnUiThread(() -> {
                 adapter.set(rows);
-                empty.setText(rows.isEmpty() ? (groupsOnly ? "No groups yet.\nTap Manage to create one." : "No conversations yet.\nStart one from Friends.") : "");
+                empty.setText(rows.isEmpty() ? (groupsOnly ? "No groups yet.\nTap New group to create one." : "No conversations yet.\nStart one from Friends.") : "");
                 empty.setVisibility(rows.isEmpty() ? View.VISIBLE : View.GONE);
             });
         });

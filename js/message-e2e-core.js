@@ -264,14 +264,19 @@
       const raw = localStorage.getItem(key);
       if (!raw) return null;
       const parsed = JSON.parse(raw);
-      try { await global.KynectaE2EStore?.set?.(key, raw); } catch (_) {}
+      // FIX (STALE-SESSION-RESURRECTION): after migrating into the durable store the old localStorage copy MUST be
+      // removed. It used to stay forever, frozen at its pre-migration chain position; any later moment the store read
+      // came back empty (store not ready yet, account switch, wipe) this stale copy was loaded and re-saved over the real state.
+      let migrated = false;
+      try { if (global.KynectaE2EStore?.set) { await global.KynectaE2EStore.set(key, raw); migrated = true; } } catch (_) {}
+      if (migrated) { try { localStorage.removeItem(key); } catch (_) {} }
       return parsed;
     } catch (_) { return null; }
   }
   async function saveRatchetSession(peerId, session) {
     const key = ratchetStorageKey(peerId);
     const raw = JSON.stringify(session);
-    try { if (global.KynectaE2EStore?.set) { await global.KynectaE2EStore.set(key, raw); return; } } catch (_) {}
+    try { if (global.KynectaE2EStore?.set) { await global.KynectaE2EStore.set(key, raw); try { localStorage.removeItem(key); } catch (_) {} return; } } catch (_) {}
     try { localStorage.setItem(key, raw); } catch (_) {}
   }
   async function clearRatchetSession(peerId) {
@@ -525,6 +530,26 @@
     'Receiving chain is unavailable',
   ]);
 
+  // FIX (REPLAY-ROLLS-BACK-SESSION): remember which peer ratchet chains (their DH public keys) this session has already
+  // processed. A duplicate delivery of an already-consumed message used to fail on the healthy session and then be
+  // "recovered" by the peer-session-reset branch below (a fresh session built from that old header decrypts it fine, since
+  // the first chain is always re-derivable) -- and that rolled-back session was SAVED over the healthy one, losing the
+  // current sending ratchet key, so every later genuine message from that person failed permanently.
+  function _trackChains(prevDHr, prevSeen, headerDh, next) {
+    const seen = new Set(Array.isArray(prevSeen) ? prevSeen : []);
+    if (prevDHr) seen.add(prevDHr);
+    if (headerDh) seen.add(headerDh);
+    if (next && next.DHr) seen.add(next.DHr);
+    if (next) next.seenDH = Array.from(seen).slice(-32);
+    return next;
+  }
+  function _isReplay(session, envelope) {
+    const headerDh = envelope?.hdr?.dh, n = envelope?.hdr?.n;
+    if (!session || !headerDh || !Number.isInteger(n)) return false;
+    if (session.skipped && session.skipped[`${headerDh}:${n}`]) return false;          // a stored skipped key will open it
+    if (headerDh === session.DHr) return n < Number(session.Nr || 0);                   // same chain, position already consumed
+    return Array.isArray(session.seenDH) && session.seenDH.includes(headerDh);          // an older chain we already moved past
+  }
   async function decryptEnvelopeV3(envelope, peerUserId, isOwnMessage, msgIdForLog) {
     _diagLog('V3_DECRYPT_START', { msgId: msgIdForLog, peerUserId, isOwnMessage });
     if (isOwnMessage) {
@@ -552,12 +577,20 @@
         sessionHasReceivingChain: hadSession ? !!session.CKr : false,
         headerDhMatchesSessionDHr: hadSession ? (session.DHr === headerDh) : null,
       });
+      if (hadSession && _isReplay(session, envelope)) {
+        // Never touch the session: this message's one-time key was already used (or its chain is already behind us).
+        _diagLog('V3_DECRYPT_REPLAY_BLOCKED', { msgId: msgIdForLog, peerUserId, n: envelope?.hdr?.n, Nr: session.Nr });
+        const replay = new Error('Duplicate delivery: this message was already decrypted on this device');
+        replay.code = 'E2E_REPLAY';
+        throw replay;
+      }
       if (!session) {
         session = await _initReceiverSessionFromHeader(identity, peerUserId, envelope);
       }
+      const prevDHr = session.DHr, prevSeen = session.seenDH;
       try {
         const { session: nextSession, plaintext } = await R.ratchetDecrypt(session, envelope);
-        await saveRatchetSession(peerUserId, nextSession);
+        await saveRatchetSession(peerUserId, _trackChains(prevDHr, prevSeen, headerDh, nextSession));
         _diagLog('V3_DECRYPT_SUCCESS', { msgId: msgIdForLog, peerUserId, repaired: false });
         return plaintext;
       } catch (firstErr) {
@@ -593,7 +626,7 @@
           try {
             const freshSession = await _initReceiverSessionFromHeader(identity, peerUserId, envelope, /* forceRefresh */ true);
             const { session: nextSession, plaintext } = await R.ratchetDecrypt(freshSession, envelope);
-            await saveRatchetSession(peerUserId, nextSession);
+            await saveRatchetSession(peerUserId, _trackChains(null, null, headerDh, nextSession));
             _diagLog('V3_FIRST_CONTACT_KEY_REFRESH_SUCCEEDED', { msgId: msgIdForLog, peerUserId });
             return plaintext;
           } catch (refreshErr) {
@@ -618,7 +651,7 @@
             try {
               const freshSession = await _initReceiverSessionFromHeader(identity, peerUserId, envelope, forceRefresh);
               const { session: nextSession, plaintext } = await R.ratchetDecrypt(freshSession, envelope);
-              await saveRatchetSession(peerUserId, nextSession);
+              await saveRatchetSession(peerUserId, _trackChains(null, null, headerDh, nextSession));
               _diagLog('V3_PEER_SESSION_RESET_SUCCEEDED', { msgId: msgIdForLog, peerUserId, forceRefresh });
               return plaintext;
             } catch (resetErr) {
@@ -636,7 +669,7 @@
           await clearRatchetSession(peerUserId);
           const freshSession = await _initReceiverSessionFromHeader(identity, peerUserId, envelope);
           const { session: nextSession, plaintext } = await R.ratchetDecrypt(freshSession, envelope);
-          await saveRatchetSession(peerUserId, nextSession);
+          await saveRatchetSession(peerUserId, _trackChains(null, null, headerDh, nextSession));
           _diagLog('V3_SESSION_REPAIR_SUCCEEDED', { msgId: msgIdForLog, peerUserId });
           return plaintext;
         } catch (repairErr) {
@@ -779,6 +812,10 @@
         return plaintext;
       } catch (err) {
         v3Err = err;
+        if (err && err.code === 'E2E_REPLAY') {
+          console.log(`[MessageE2E] Message ${msgIdForLog ?? '(unknown id)'}: ⏭ duplicate delivery of an already-decrypted message - session left untouched`);
+          throw err;
+        }
         _diagLog('V3_DECRYPT_UNRECOVERABLE', { msgId: msgIdForLog, chatId, peerUserId, ..._errInfo(err) });
       }
       // FIX (ALWAYS-ATTEMPT-V2-FALLBACK, requested behavior): this used to
@@ -810,7 +847,15 @@
         const v3Reason = v3Err?.message || String(v3Err || 'unknown error');
         const v2Reason = v2Err?.message || String(v2Err || 'unknown error');
         _diagLog('V2_FALLBACK_ALSO_FAILED', { msgId: msgIdForLog, chatId, peerUserId, v3Reason, v2Reason });
-        console.log(`[MessageE2E] Message ${msgIdForLog ?? '(unknown id)'}: ❌ FAILED — V3: ${v3Reason} | V2 fallback: ${v2Reason}`);
+        // The envelope names the recipient key the SENDER encrypted to (rkid). If it is not the key this device holds, the
+        // message was sent to a different device/key (re-login elsewhere, cleared storage, a second device) and can never
+        // open here - say so explicitly instead of a bare "OperationError".
+        let keyNote = 'recipient-key: unknown';
+        try {
+          const mine = I()?.keyId;
+          if (env.rkid && mine) keyNote = String(env.rkid) === String(mine) ? 'recipient-key: matches this device' : `recipient-key: MISMATCH (sender used ${env.rkid}, this device holds ${mine})`;
+        } catch (_) {}
+        console.log(`[MessageE2E] Message ${msgIdForLog ?? '(unknown id)'}: ❌ FAILED — V3: ${v3Reason} | V2 fallback: ${v2Reason} | ${keyNote}`);
         const combined = new Error(`Double Ratchet (v3) decrypt failed: ${v3Reason} — legacy (v2) fallback also failed: ${v2Reason}`);
         combined.v3Reason = v3Reason;
         combined.v2Reason = v2Reason;

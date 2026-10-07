@@ -80,6 +80,14 @@
             android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
             android:windowSoftInputMode="adjustResize" />
 
+        <!-- Native group manager (create group, members, roles, rename, leave). Not exported. -->
+        <activity
+            android:name=".NecpraGroupActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme.NoActionBar"
+            android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
+            android:windowSoftInputMode="adjustResize" />
+
         <activity
             android:name=".NecpraChatActivity"
             android:exported="false"

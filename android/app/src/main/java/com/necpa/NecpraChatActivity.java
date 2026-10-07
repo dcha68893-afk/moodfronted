@@ -64,6 +64,12 @@ public class NecpraChatActivity extends AppCompatActivity implements NecpraMessa
         return new Intent(c, NecpraChatActivity.class).putExtra(X_CHAT, chatId).putExtra(X_PEER, peerId).putExtra(X_TITLE, title).putExtra(X_AVATAR, avatar);
     }
 
+    /** Result of the native group manager: leaving the group closes this chat too. */
+    private final androidx.activity.result.ActivityResultLauncher<Intent> groupInfoLauncher = registerForActivityResult(
+            new androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult(), res -> {
+                if (res != null && res.getResultCode() == RESULT_FIRST_USER) finish();
+            });
+
     private NecpraMessageRepository repo;
     private NecpraConversationsActivity.Theme t;
     private long chatId, peerId;
@@ -174,7 +180,6 @@ public class NecpraChatActivity extends AppCompatActivity implements NecpraMessa
         attachBtn = new TextView(this);
         attachBtn.setText("+"); attachBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 28); attachBtn.setTextColor(t.accent); attachBtn.setGravity(Gravity.CENTER);
         attachBtn.setContentDescription("Attach a file"); attachBtn.setOnClickListener(v -> {
-            if (isGroup) { Toast.makeText(this, "Sending files to a group isn't available in the native screen yet", Toast.LENGTH_SHORT).show(); return; }
             if (ready && chatId > 0) picker.launch("*/*");
         });
         composer.addView(attachBtn, new LinearLayout.LayoutParams(dp(40), dp(42)));
@@ -229,7 +234,7 @@ public class NecpraChatActivity extends AppCompatActivity implements NecpraMessa
 
     /** Opened from a notification / deep link with only a chat id: take name, avatar and peer from the local row. */
     private void adoptConversation(NecpraDb.Conv c) {
-        if ("group".equals(c.type)) { isGroup = true; refreshSub(); if (attachBtn != null) attachBtn.setAlpha(0.45f); if (adapter != null) adapter.notifyDataSetChanged(); }
+        if ("group".equals(c.type)) { isGroup = true; refreshSub(); if (adapter != null) adapter.notifyDataSetChanged(); }
         if (peerId <= 0 && c.peerId > 0) peerId = c.peerId;
         boolean generic = title == null || title.isEmpty() || "Chat".equals(title);
         if (generic && c.title != null && !c.title.isEmpty() && !"Chat".equals(c.title)) {
@@ -457,8 +462,9 @@ public class NecpraChatActivity extends AppCompatActivity implements NecpraMessa
     }
 
     private void showChatMenu() {
-        if (isGroup) {                      // members, roles, invites and settings live in the web group manager for now
-            new AlertDialog.Builder(this).setItems(new String[]{"Members & settings"}, (d, which) -> {
+        if (isGroup) {                      // native member manager first; the web manager stays available for invite links / join requests / policies
+            new AlertDialog.Builder(this).setItems(new String[]{"Members & group info", "More settings (web)"}, (d, which) -> {
+                if (which == 0 && repo.groupsOn()) { groupInfoLauncher.launch(NecpraGroupActivity.infoIntent(this, chatId, title)); return; }
                 Intent r = new Intent(); r.putExtra(NecpraConversationsActivity.RES_GROUP_ID, chatId); setResult(RESULT_OK, r); finish();
             }).show();
             return;

@@ -93,8 +93,15 @@
         fetch(`${_apiBase()}/api/messages/starred`, { headers: _headers(), credentials: 'include' }),
         fetch(`${_apiBase()}/api/messaging/chats/pinned`, { headers: _headers(), credentials: 'include' }),
       ]);
-      const starred = starredResp.ok ? (await starredResp.json()).data?.starred : [];
-      const pinned  = pinnedResp.ok  ? (await pinnedResp.json()).data?.pinned  : [];
+      // Both routes return { success, data: [...] } (array directly). Older builds
+      // wrapped it as data.starred / data.pinned, so accept either shape.
+      const _list = async (r, key) => {
+        if (!r || !r.ok) return [];
+        const d = (await r.json())?.data;
+        return Array.isArray(d) ? d : (Array.isArray(d?.[key]) ? d[key] : []);
+      };
+      const starred = await _list(starredResp, 'starred');
+      const pinned  = await _list(pinnedResp, 'pinned');
       return { messages, chats, starred, pinned, exportedAt: new Date().toISOString(), version: 2 };
     } catch (_) {
       return { messages, chats, starred: [], pinned: [], exportedAt: new Date().toISOString(), version: 2 };
