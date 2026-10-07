@@ -5102,6 +5102,7 @@ window.addEventListener('tools:active', function() {
                 <select id="mp-payment">
                     <option value="mpesa">M-Pesa</option>
                     <option value="cash">Cash on Delivery</option>
+                    <option value="paylater">Pay Later — pay before dispatch</option>
                     <option value="bank">Bank Transfer</option>
                     <option value="other">Other</option>
                 </select>
