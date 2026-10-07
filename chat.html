@@ -559,6 +559,7 @@
            in light mode, so give it its own explicit, theme-independent color
            like its siblings. */
         .center-menu-friends i { color: #f472b6; }
+        .center-menu-money i { color: #22c55e; }
         #centerMenuOverlay {
             display: none;
             position: fixed;
@@ -1617,6 +1618,7 @@
         <button class="nav-icon" data-page="group"><i class="fas fa-users"></i></button>
         <button class="nav-icon" data-page="friends"><i class="fas fa-user-friends"></i></button>
         <button class="nav-icon" data-page="games"><i class="fas fa-gamepad"></i></button>
+        <button class="nav-icon" data-page="money"><i class="fas fa-wallet"></i></button>
         <button class="nav-icon" data-page="settings"><i class="fas fa-cog"></i></button>
         <button class="nav-icon" data-page="tools"><i class="fas fa-tools"></i></button>
         <div class="mt-auto mb-4 relative">
@@ -1673,6 +1675,10 @@
         <div class="center-menu-item center-menu-friends" onclick="closeCenterMenu(); navigateToPage('friends');">
             <i class="fas fa-user-friends"></i>
             <span>Friends</span>
+        </div>
+        <div class="center-menu-item center-menu-money" onclick="closeCenterMenu(); navigateToPage('money');">
+            <i class="fas fa-wallet"></i>
+            <span>Money</span>
         </div>
     </div>
 
@@ -1735,6 +1741,9 @@
     <div id="toolsContent" class="iframe-container hidden">
         <iframe id="toolsIframe" class="content-iframe" data-src="Tools.html" data-module="tools" loading="eager"></iframe>
     </div>
+    <div id="moneyContent" class="iframe-container hidden">
+        <iframe id="moneyIframe" class="content-iframe" data-src="money.html" data-module="money" loading="eager"></iframe>
+    </div>
     <script>
     // WARM ALL MODULES:
     // Messages stays visible first, while every other module is booted in a
@@ -1745,7 +1754,7 @@
             status:'statusIframe', group:'groupIframe', groups:'groupIframe',
             friends:'friendsIframe', friend:'friendsIframe',
             settings:'settingsIframe', tools:'toolsIframe', marketplace:'toolsIframe',
-            games:'gamesIframe', game:'gamesIframe'
+            money:'moneyIframe', games:'gamesIframe', game:'gamesIframe'
         };
 
         function load(id) {
@@ -1764,7 +1773,7 @@
         //    TIME, each freeing the slot on load (4s cap) so a slow module cannot stall the rest;
         //  - tapping a tab loads that module IMMEDIATELY and pauses the queue until it has
         //    loaded (6s cap), so the module the user is waiting for gets the full bandwidth.
-        var QUEUE = ['statusIframe','groupIframe','friendsIframe','settingsIframe','toolsIframe','gamesIframe'];
+        var QUEUE = ['statusIframe','groupIframe','friendsIframe','settingsIframe','toolsIframe','moneyIframe','gamesIframe'];
         var SLOTS = 1, running = 0, queueOn = false, urgent = 0;
 
         function pump() {
