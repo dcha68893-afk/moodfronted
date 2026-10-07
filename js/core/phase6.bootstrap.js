@@ -252,6 +252,15 @@
         } catch(_) {}
       }
 
+      // FIX (E2E-BYPASS-OFFLINE-REPLAY): never replay a message over REST unless its content is already an E2E envelope.
+      // This fallback used to POST whatever was queued (possibly plaintext). Throwing keeps it in the queue / marks it failed.
+      {
+        const _c = String(msg.content == null ? '' : msg.content).trim();
+        let _enc = !_c;                      // attachment-only messages carry no text
+        if (_c && _c.charCodeAt(0) === 123) { try { const o = JSON.parse(_c); _enc = !!o && Number.isInteger(o.v) && typeof o.iv === 'string' && typeof o.ct === 'string'; } catch (_) {} }
+        if (!_enc) throw new Error('Refusing to send an unencrypted message (end-to-end encryption required)');
+      }
+
       // 3. Fall back to REST API (same as normal send) — most reliable
       const apiBase = window.__getApiBase?.() || 'https://noxopa.onrender.com/api';
       const token = localStorage.getItem('authToken') || localStorage.getItem('token') || '';

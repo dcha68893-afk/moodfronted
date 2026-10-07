@@ -24,7 +24,7 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.50.0';
+const SW_VERSION = '19.51.0';
 // FIX: bumped so activate() drops every existing cache immediately on this
 // deploy — anyone with a stale pre-rebuild group.html (or the old, now-
 // deleted group-core-*/group-os-* files, or the misspelled necpra-* icons
@@ -83,7 +83,7 @@ const SW_VERSION = '19.50.0';
 // v74: profile-photo fix (js/avatar-fix.js added, message.html + js/config.js changed). Bump forces every installed
 // PWA/Android app to drop old copies and show the 'Update ready - Refresh' banner.
 // v89: native-init.js (native Profile/Settings routing) is now network-first so an installed APK never runs a stale copy.
-const CACHE_NAME = 'necpra-static-v92';
+const CACHE_NAME = 'necpra-static-v93';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -318,6 +318,7 @@ self.addEventListener('fetch',event=>{
 self.addEventListener('message',event=>{
   const d=event.data;if(!d||!d.type)return;
   if(d.type==='SKIP_WAITING')self.skipWaiting();
+  if(d.type==='KYN_NOTIFICATION_REPLY_ACK'&&self.__kynReplyAcks){const f=self.__kynReplyAcks.get(d.rid);if(f)f(d.ok!==false);}
   // A foreground client can ask the active worker which version is actually
   // controlling it. This lets the UI recover an update notification even when
   // activation happened before the page's normal load handler was attached.
@@ -346,7 +347,28 @@ self.addEventListener('push',event=>{
   const options={body:data.senderName?data.senderName+': '+safe:safe,icon:data.icon||'/icons/necpra-192.png',badge:data.badge||'/icons/necpra-192.png',tag,renotify:true,data:Object.assign({url:data.url||'/chat.html',chatId},data.data||{}),silent:data.silent===true,requireInteraction:data.requireInteraction||false,vibrate:Array.isArray(data.vibrate)?data.vibrate:(data.vibrate===false?[]:[200,100,200]),actions:[{action:'reply',title:'Reply',type:'text',placeholder:'Type a message…'},{action:'mark_read',title:'Mark as read'}]};
   event.waitUntil((async()=>{if(data.type==='message'||data.type==='new_message'){try{const chat=chatId,map=self.__kynActiveChatByClient,cs=await self.clients.matchAll({type:'window',includeUncontrolled:true});if(chat&&cs.some(c=>c.focused&&map&&map.get(c.id)===chat))return;}catch(_){} }return self.registration.showNotification(title,options);})());
 });
+
+/* Deliver a notification quick-reply to an open app window (which owns the E2E keys). Resolves true once a window confirms it sent it. */
+self.__kynReplyAcks=self.__kynReplyAcks||new Map();
+async function kynDeliverNotificationReply(nd,text){
+  const origin=self.location.origin;
+  const findApp=async()=>{const cs=await self.clients.matchAll({type:'window',includeUncontrolled:true});return cs.find(c=>c.url.indexOf(origin)===0&&/chat\.html|\/$/.test(c.url.split('?')[0]))||cs.find(c=>c.url.indexOf(origin)===0)||null;};
+  const rid='r'+Date.now()+Math.random().toString(36).slice(2,8);
+  if(!(await findApp())&&self.clients.openWindow){try{await self.clients.openWindow(nd.url||'/chat.html');}catch(_){}}
+  for(let i=0;i<30;i++){
+    const app=await findApp();
+    if(app){
+      const acked=new Promise(res=>{self.__kynReplyAcks.set(rid,res);setTimeout(()=>res(null),1000);});
+      try{app.postMessage({type:'KYN_NOTIFICATION_REPLY',rid,chatId:nd.chatId||'',groupId:nd.groupId||'',text});}catch(_){}
+      const ok=await acked;
+      if(ok===true){self.__kynReplyAcks.delete(rid);return true;}
+      if(ok===false){self.__kynReplyAcks.delete(rid);return false;}
+    }
+    await new Promise(r=>setTimeout(r,1000));
+  }
+  self.__kynReplyAcks.delete(rid);return false;
+}
 self.addEventListener('notificationclick',event=>{event.notification.close();const nd=event.notification.data||{};const url=nd.url||'/chat.html';
-  event.waitUntil((async()=>{if(event.action==='reply'){const text=String(event.reply||'').trim();if(text){const headers={'Content-Type':'application/json'};if(nd.token)headers.Authorization=/^Bearer /i.test(nd.token)?nd.token:'Bearer '+nd.token;const r=await fetch('/api/messages',{method:'POST',headers,body:JSON.stringify({chatId:nd.chatId,content:text,type:'text'})}).catch(()=>null);if(r&&r.ok)return;}}
+  event.waitUntil((async()=>{if(event.action==='reply'){const text=String(event.reply||'').trim();if(text){/* FIX (E2E-BYPASS-QUICK-REPLY): this used to POST the typed reply to /api/messages as PLAINTEXT. A service worker has no access to the E2E identity/ratchet keys, so it can never encrypt. Hand the text to an open app window instead, which sends it through the one canonical encrypted path (MessageModule.sendMessage). If the app is closed, open it and deliver once it is up. If it cannot be delivered, say so - never fall back to plaintext. */const sent=await kynDeliverNotificationReply(nd,text);if(sent)return;try{await self.registration.showNotification('Reply not sent',{body:'Open the app to send your reply securely.',tag:'kyn-reply-failed',icon:'/icons/necpra-192.png',data:{url:nd.url||'/chat.html',chatId:nd.chatId||''}});}catch(_){}return;}}
     if(event.action==='mark_read'&&nd.chatId){await fetch('/api/messages/read',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chatId:nd.chatId})}).catch(()=>{});return;}
     const cs=await self.clients.matchAll({type:'window',includeUncontrolled:true});const origin=self.location.origin;const app=cs.find(c=>c.url.indexOf(origin)===0&&/chat\.html|\/$/.test(c.url.split('?')[0]))||cs.find(c=>c.url.indexOf(origin)===0);if(app){try{await app.focus()}catch(_){}try{app.postMessage({type:'KYN_NOTIFICATION_CLICK',data:nd,url})}catch(_){}return;}return self.clients.openWindow?self.clients.openWindow(url):null;})());});

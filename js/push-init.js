@@ -189,6 +189,35 @@
       if (groupId) window.dispatchEvent(new CustomEvent('kyn:openGroup', { detail: { groupId, scrollToMessageId: msgId } }));
       else if (chatId) window.dispatchEvent(new CustomEvent('kyn:openChat', { detail: { chatId, scrollToMessageId: msgId } }));
     });
+
+    // FIX (E2E-BYPASS-QUICK-REPLY): a reply typed into a notification used to be POSTed by the service worker as plaintext.
+    // The SW cannot encrypt (no identity/ratchet keys), so it now hands the text to this window, which sends it through the one
+    // canonical encrypted pipeline (MessageModule.sendMessage -> encryptForChat), exactly like native-push.js's sendReply().
+    // Protocol: reply with ok:true once sent, ok:false on a definite failure, and say NOTHING while the messaging module / chat list /
+    // E2E keys are still loading (cold start) so the SW simply re-posts a second later. Deduplicated by rid.
+    const _replyState = new Map(); // rid -> 'sending' | 'done'
+    navigator.serviceWorker.addEventListener('message', async (e) => {
+      const d = e && e.data;
+      if (!d || d.type !== 'KYN_NOTIFICATION_REPLY' || !d.rid) return;
+      const ack = (ok) => { try { (e.source || navigator.serviceWorker.controller).postMessage({ type: 'KYN_NOTIFICATION_REPLY_ACK', rid: d.rid, ok }); } catch (_) {} };
+      const st = _replyState.get(d.rid);
+      if (st === 'done') return ack(true);
+      if (st === 'sending') return;
+      const text = String(d.text || '').trim();
+      if (!text) return ack(false);
+      if (d.groupId && !d.chatId) return ack(false); // group replies must go through the group E2E composer, never from a notification
+      const fr = document.getElementById('messagesIframe');
+      const w = fr && fr.contentWindow, MM = w && w.MessageModule;
+      if (!MM || typeof MM.sendMessage !== 'function') return;                                   // not loaded yet: SW will retry
+      if (!w.KynectaE2E || typeof w.KynectaE2E.encryptForChat !== 'function') return;             // E2E not unlocked yet: SW will retry
+      try { if (!MM.getConversations().some(c => String(c.chatId) === String(d.chatId))) return; } catch (_) { return; } // chat list not loaded yet
+      _replyState.set(d.rid, 'sending');
+      try {
+        const res = await MM.sendMessage({ chatId: /^\d+$/.test(String(d.chatId)) ? Number(d.chatId) : d.chatId, content: text, type: 'text' });
+        if (res && res.success === false) { _replyState.delete(d.rid); return ack(false); }
+        _replyState.set(d.rid, 'done'); ack(true);
+      } catch (err) { _replyState.delete(d.rid); console.warn('[PushInit] notification reply failed', err && err.message || err); ack(false); }
+    });
   }
 
   // Handle notification clicks

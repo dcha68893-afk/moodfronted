@@ -122,6 +122,14 @@ const MeshEngine = (() => {
     }
 
     // ── Send message ───────────────────────────────────────────────────────
+    function _isE2EEnvelope(c) {
+        if (typeof c !== 'string') return false;
+        const t = c.trim();
+        if (t.charCodeAt(0) !== 123) return false;
+        try { const o = JSON.parse(t); return !!o && Number.isInteger(o.v) && typeof o.iv === 'string' && typeof o.ct === 'string'; }
+        catch (_) { return false; }
+    }
+
     async function sendMessage(opts) {
         // opts: { to, toDeviceId, content, type, chatId, messageId, priority }
         const {
@@ -133,7 +141,10 @@ const MeshEngine = (() => {
         const myId     = MeshTransport.getDeviceId();
 
         // If internet available, still try internet first (hybrid)
-        if (navigator.onLine && window.wsService?.isConnected?.()) {
+        // FIX (E2E-BYPASS-MESH-INTERNET): this branch emitted `content` to the server exactly as given. Only an
+        // already-encrypted 1:1/group envelope may ever leave the device over the internet; anything else stays on
+        // the mesh path below (which has its own transport encryption) instead of being sent as plaintext.
+        if (_isE2EEnvelope(content) && navigator.onLine && window.wsService?.isConnected?.()) {
             try {
                 window.wsService.emit('message:new', { to, chatId, content, type, messageId });
                 _updateDeliveryUI(messageId || packetId, 'delivered');
@@ -316,7 +327,7 @@ const MeshEngine = (() => {
     function _onInternetRestored() {
         // Flush offline queue to server
         _offlineQueue.forEach(msg => {
-            try { window.wsService?.emit('message:new', msg); } catch(_) {}
+            try { if (_isE2EEnvelope(msg && msg.content)) window.wsService?.emit('message:new', msg); } catch(_) {}
         });
         _offlineQueue = [];
         // Re-request conversations to fill missed messages
