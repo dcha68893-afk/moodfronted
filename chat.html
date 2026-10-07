@@ -2780,7 +2780,7 @@
 
             headerActionsEl.classList.remove('hidden');
             actions.forEach(action => {
-                if (!action || !action.btnId) return;
+                if (!action || (!action.btnId && !action.navigatePage)) return;
                 const b = document.createElement('button');
                 b.type = 'button';
                 b.className = 'header-action-btn';
