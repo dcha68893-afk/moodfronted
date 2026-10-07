@@ -278,7 +278,8 @@ const PAY_OPTIONS = [
     { id:'mpesa', name:'M-Pesa',          icon:'📱', desc:'Lipa na M-Pesa STK Push' },
     { id:'card',  name:'Card Payment',    icon:'💳', desc:'Visa / Mastercard (coming soon)', disabled:true },
     { id:'cod',   name:'Cash on Delivery',icon:'💵', desc:'Pay when you receive your order' },
-    { id:'wallet',name:'Wallet Balance',  icon:'👛', desc:'Wallet system coming soon', disabled:true },
+    { id:'wallet',name:'Wallet Balance',  icon:'👛', desc:'Pay from your NECPRA wallet', disabled:true },
+    { id:'paylater',name:'Pay Later', icon:'🗓️', desc:'Reserve the order now and pay before dispatch' },
 ];
 
 // ─── Get cart items ────────────────────────────────────────────────────────────
@@ -591,6 +592,8 @@ function _renderPayDetails(phone) {
         return `<div style="background:#fef9c3;border-radius:10px;padding:12px 14px;font-size:13px;color:#713f12">
             💵 You'll pay in cash when your order is delivered. Make sure to have exact change ready.
         </div>`;
+    } else if (_state.paymentMethod === 'paylater') {
+        return '<div style="background:#eff6ff;border-radius:10px;padding:12px 14px;font-size:13px;color:#1d4ed8">🗓️ Your order will be reserved as <strong>Pay Later</strong>. You can complete M-Pesa payment from NECPRA Money before the seller dispatches it.</div>';
     } else if (_state.paymentMethod === 'wallet') {
         const balance = window.currentUser?.walletBalance || 0;
         const total = Math.max(0, _state.subtotal + _state.deliveryFee - _state.couponDiscount);
