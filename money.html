@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Money | Necpra</title>
+<link rel="stylesheet" href="/css/vendor/font-awesome.min.css">
+<style>
+:root{--bg:var(--kyn-bg-root,#fff);--card:var(--kyn-bg-card,#fff);--text:var(--kyn-text-primary,#111b21);--muted:var(--kyn-text-secondary,#667781);--border:var(--kyn-border,#e9edef);--accent:var(--kyn-accent-primary,#22c55e);--blue:#2563eb;--danger:#ef4444}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+.money{max-width:900px;margin:0 auto;padding:18px 16px 110px}.hero{padding:20px;border-radius:24px;background:linear-gradient(135deg,#0f172a,#1e293b);color:#fff;box-shadow:0 14px 36px rgba(15,23,42,.18);margin-bottom:16px}.hero h1{margin:0 0 6px;font-size:25px}.hero p{margin:0;color:#cbd5e1;font-size:13px}.hero .balance{font-size:30px;font-weight:800;margin-top:18px}.hero .caption{font-size:12px;color:#94a3b8}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.card{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:16px;box-shadow:0 5px 18px rgba(15,23,42,.05)}button{font:inherit}.action{width:100%;text-align:left;border:1px solid var(--border);background:var(--card);color:var(--text);border-radius:18px;padding:16px;cursor:pointer;min-height:116px}.action i{font-size:22px;color:var(--accent);margin-bottom:12px}.action b{display:block;font-size:15px}.action span{display:block;color:var(--muted);font-size:12px;margin-top:5px;line-height:1.45}.section{margin-top:18px}.section h2{font-size:16px;margin:0 0 10px}.row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 0;border-bottom:1px solid var(--border)}.row:last-child{border-bottom:0}.row-title{font-weight:700;font-size:14px}.row-sub{font-size:12px;color:var(--muted);margin-top:3px}.pill{font-size:11px;padding:5px 9px;border-radius:999px;background:rgba(34,197,94,.12);color:var(--accent);font-weight:700}.empty{padding:24px;text-align:center;color:var(--muted);font-size:13px}.modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:flex-end;justify-content:center;z-index:100}.modal.open{display:flex}.sheet{width:min(620px,100%);background:var(--card);color:var(--text);border-radius:24px 24px 0 0;padding:18px;max-height:90vh;overflow:auto}.sheet h3{margin:0 0 14px}.input{width:100%;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--bg);color:var(--text);margin:6px 0 12px}.primary{border:0;border-radius:12px;background:var(--accent);color:#fff;padding:12px 16px;font-weight:800;cursor:pointer}.secondary{border:1px solid var(--border);border-radius:12px;background:transparent;color:var(--text);padding:11px 16px;cursor:pointer}.actions{display:flex;gap:8px;justify-content:flex-end}.notice{padding:11px 13px;border-radius:12px;background:rgba(37,99,235,.08);color:var(--blue);font-size:12px;margin-bottom:12px}
+@media(max-width:600px){.grid{grid-template-columns:1fr 1fr}.money{padding:12px 12px 96px}.hero{padding:17px}.action{min-height:108px;padding:13px}}
+</style>
+</head>
+<body>
+<main class="money">
+<section class="hero"><h1>NECPRA Money</h1><p>Collect together, pay for someone, save toward a goal and manage purchase plans.</p><div class="balance" id="balance">KSh 0</div><div class="caption">Tracked activities</div></section>
+<div class="grid">
+<button class="action" onclick="openCreateCircle()"><i class="fas fa-users"></i><b>Money Circles</b><span>Chamas, family funds, trips, events and group collections.</span></button>
+<button class="action" onclick="openPayRequest()"><i class="fas fa-hand-holding-heart"></i><b>Pay for Someone</b><span>Create a request for a family member, friend, school or bill.</span></button>
+<button class="action" onclick="showSection('plans')"><i class="fas fa-calendar-check"></i><b>Pay Later</b><span>Keep deposits and installment plans from supported sellers in one place.</span></button>
+<button class="action" onclick="showSection('activity')"><i class="fas fa-receipt"></i><b>Activity</b><span>See contributions, requests and payment records.</span></button>
+</div>
+<section class="section" id="circles"><h2>My Money Circles</h2><div class="card" id="circleList"><div class="empty">Loading circles…</div></div></section>
+<section class="section" id="plans"><h2>Pay Later</h2><div class="card"><div class="empty">Installment plans will appear here when a Marketplace seller offers Pay Later.</div></div></section>
+<section class="section" id="activity"><h2>Recent Activity</h2><div class="card" id="activityList"><div class="empty">Loading activity…</div></div></section>
+</main>
+<div class="modal" id="modal"><div class="sheet"><h3 id="modalTitle">Money</h3><div id="modalBody"></div></div></div>
+<script>
+(function(){
+'use strict';
+const token=()=>window.__kynToken||window.__accessToken||localStorage.getItem('authToken')||localStorage.getItem('token')||localStorage.getItem('accessToken')||'';
+const apiBase=()=>((window.__getApiBase&&window.__getApiBase())||window.__kynAPI?.baseUrl||window.API_BASE_URL||'').replace(/\/$/,'');
+async function api(path,opt={}){const b=apiBase();if(!b)throw Error('API is not configured');const r=await fetch(b+path,{...opt,headers:{'Content-Type':'application/json',...(token()?{Authorization:'Bearer '+token()}:{}),...(opt.headers||{})}});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.message||d.error||('Request failed '+r.status));return d}
+const money=n=>'KSh '+Number(n||0).toLocaleString('en-KE',{maximumFractionDigits:2});
+function modal(title,body){document.getElementById('modalTitle').textContent=title;document.getElementById('modalBody').innerHTML=body;document.getElementById('modal').classList.add('open')}
+window.openCreateCircle=()=>modal('Create Money Circle',`<div class="notice">Use this for a chama, family contribution, trip, event, emergency fund or project.</div><label>Name</label><input class="input" id="mcName" placeholder="e.g. 2027 Coast Trip"><label>Purpose</label><input class="input" id="mcPurpose" placeholder="What are you collecting for?"><label>Target amount (KSh)</label><input class="input" id="mcTarget" type="number" min="1" placeholder="60000"><div class="actions"><button class="secondary" onclick="closeModal()">Cancel</button><button class="primary" onclick="createCircle()">Create</button></div>`);
+window.openPayRequest=()=>modal('Pay for Someone',`<div class="notice">The recipient does not need to manage your payment. Keep the purpose and amount visible so both sides have a clear record.</div><label>Recipient phone</label><input class="input" id="prPhone" inputmode="tel" placeholder="07XX XXX XXX"><label>Amount (KSh)</label><input class="input" id="prAmount" type="number" min="1" placeholder="300"><label>Purpose</label><input class="input" id="prPurpose" placeholder="e.g. Mum electricity"><div class="actions"><button class="secondary" onclick="closeModal()">Cancel</button><button class="primary" onclick="createRequest()">Create request</button></div>`);
+window.closeModal=()=>document.getElementById('modal').classList.remove('open');
+window.showSection=id=>document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'});
+window.createCircle=async()=>{try{const d=await api('/money/circles',{method:'POST',body:JSON.stringify({name:document.getElementById('mcName').value.trim(),purpose:document.getElementById('mcPurpose').value.trim(),targetAmount:Number(document.getElementById('mcTarget').value||0)})});closeModal();load();}catch(e){alert(e.message)}};
+window.createRequest=async()=>{try{await api('/money/requests',{method:'POST',body:JSON.stringify({recipientPhone:document.getElementById('prPhone').value.trim(),amount:Number(document.getElementById('prAmount').value||0),purpose:document.getElementById('prPurpose').value.trim()})});closeModal();load();}catch(e){alert(e.message)}};
+async function load(){try{const d=await api('/money/overview');document.getElementById('balance').textContent=money(d.overview?.trackedAmount||0);const circles=d.circles||[];document.getElementById('circleList').innerHTML=circles.length?circles.map(c=>`<div class="row"><div><div class="row-title">${esc(c.name)}</div><div class="row-sub">${esc(c.purpose||'')} · ${money(c.collectedAmount)} / ${money(c.targetAmount)}</div></div><span class="pill">${esc(c.status||'active')}</span></div>`).join(''):'<div class="empty">No circles yet. Create your first one.</div>';const acts=d.activity||[];document.getElementById('activityList').innerHTML=acts.length?acts.map(a=>`<div class="row"><div><div class="row-title">${esc(a.title)}</div><div class="row-sub">${esc(a.subtitle||'')}</div></div><b>${money(a.amount)}</b></div>`).join(''):'<div class="empty">No money activity yet.</div>'}catch(e){document.getElementById('circleList').innerHTML='<div class="empty">Money service is unavailable. Please try again.</div>';document.getElementById('activityList').innerHTML='<div class="empty">'+esc(e.message)+'</div>'}}
+function esc(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+document.getElementById('modal').addEventListener('click',e=>{if(e.target.id==='modal')closeModal()});
+load();
+})();
+</script>
+</body></html>
