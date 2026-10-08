@@ -418,9 +418,11 @@ window._renderWalletPage = async function() {
         <div style="font-size:12px;opacity:.75;margin-bottom:4px">${loyaltyPoints.toLocaleString()} loyalty points · <span style="text-transform:capitalize">${loyaltyTier}</span> member</div>
         <div class="adv-wallet-actions">
             <button class="adv-wallet-btn" onclick="window._advTopUp()">＋ Top Up</button>
+            <button class="adv-wallet-btn" onclick="window._advWalletTransfer()">↗ Send</button>
+            <button class="adv-wallet-btn" onclick="window._advWalletWithdraw()">↙ Withdraw</button>
             <button class="adv-wallet-btn" onclick="window._jmNav?.('loyalty')">🏆 Rewards</button>
-            <button class="adv-wallet-btn" onclick="window._advWalletShare()">📤 Share</button>
         </div>
+        <div style="font-size:11px;opacity:.7;margin-top:8px">Send to another NECPRA user or withdraw to M-Pesa. Transfers and withdrawals are confirmed server-side.</div>
     </div>
     <div class="adv-wallet-tx">
         <div class="adv-wallet-tx-title">Transaction History</div>
@@ -507,6 +509,64 @@ window._advTopUp = function() {
             }
         }, 3000);
     };
+};
+
+
+function _advWalletModal({title,description,fields,submitText,onSubmit}) {
+    document.getElementById('advWalletActionOverlay')?.remove();
+    const ov=document.createElement('div');
+    ov.id='advWalletActionOverlay';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100001;display:flex;align-items:flex-end;justify-content:center';
+    ov.onclick=e=>{if(e.target===ov)ov.remove();};
+    ov.innerHTML='<div style="background:#fff;width:100%;max-width:440px;border-radius:20px 20px 0 0;padding:20px 18px 24px;box-sizing:border-box">'+
+      '<div style="font-weight:800;font-size:18px;margin-bottom:5px">'+_esc(title)+'</div>'+
+      '<div style="font-size:12px;color:#6b7280;margin-bottom:14px">'+_esc(description||'')+'</div>'+
+      fields.map(f=>'<label style="font-size:12px;font-weight:700;color:#374151">'+_esc(f.label)+'</label><input id="'+f.id+'" type="'+(f.type||'text')+'" inputmode="'+(f.inputmode||'text')+'" placeholder="'+_esc(f.placeholder||'')+'" style="width:100%;box-sizing:border-box;margin:4px 0 12px;padding:12px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:16px;font-weight:600">').join('')+
+      '<button id="advWalletActionGo" type="button" style="width:100%;background:#f57224;color:#fff;border:none;border-radius:12px;padding:14px;font-size:15px;font-weight:800;cursor:pointer">'+_esc(submitText)+'</button>'+
+      '<div id="advWalletActionMsg" style="font-size:12px;margin-top:10px;text-align:center;color:#6b7280"></div></div>';
+    document.body.appendChild(ov);
+    const msg=t=>{const e=ov.querySelector('#advWalletActionMsg');if(e)e.textContent=t;};
+    ov.querySelector('#advWalletActionGo').onclick=async function(){
+      const btn=this;btn.disabled=true;btn.textContent='Processing…';msg('');
+      try{const values={};fields.forEach(f=>values[f.name||f.id]=ov.querySelector('#'+f.id)?.value?.trim()||'');
+        const result=await onSubmit(values);
+        if(result?.success===false||result?._error){btn.disabled=false;btn.textContent=submitText;msg(result?.message||'Request failed.');return;}
+        ov.remove();window._renderWalletPage?.();_toast(result?.message||'Wallet action completed.','success','💳');
+      }catch(e){btn.disabled=false;btn.textContent=submitText;msg(e?.message||'Request failed.');}
+    };
+};
+
+window._advWalletTransfer=function(){
+    _advWalletModal({
+      title:'Send money',description:'Send KES directly to another NECPRA user.',
+      fields:[
+        {id:'advWtRecipient',name:'recipient',label:'Recipient username, email, or phone',placeholder:'@username or email'},
+        {id:'advWtAmount',name:'amount',label:'Amount (KES)',type:'number',inputmode:'numeric',placeholder:'e.g. 500'},
+        {id:'advWtNote',name:'note',label:'Note (optional)',placeholder:'What is this for?'}
+      ],
+      submitText:'Send money',
+      onSubmit:async v=>{
+        const amount=Number(v.amount);if(!Number.isFinite(amount)||amount<10||amount>150000)return {success:false,message:'Enter an amount between KES 10 and KES 150,000.'};
+        if(!v.recipient)return {success:false,message:'Enter the recipient.'};
+        return await _api('POST','/marketplace/wallet/transfer',{recipient:v.recipient,amount,note:v.note});
+      }
+    });
+};
+
+window._advWalletWithdraw=function(){
+    _advWalletModal({
+      title:'Withdraw to M-Pesa',description:'Money is reserved from your wallet until Safaricom confirms the payout.',
+      fields:[
+        {id:'advWwAmount',name:'amount',label:'Amount (KES)',type:'number',inputmode:'numeric',placeholder:'e.g. 500'},
+        {id:'advWwPhone',name:'phone',label:'M-Pesa phone number',type:'tel',inputmode:'tel',placeholder:'0712 345 678'}
+      ],
+      submitText:'Withdraw',
+      onSubmit:async v=>{
+        const amount=Number(v.amount);if(!Number.isFinite(amount)||amount<10||amount>150000)return {success:false,message:'Enter an amount between KES 10 and KES 150,000.'};
+        if(!v.phone)return {success:false,message:'Enter your M-Pesa number.'};
+        return await _api('POST','/marketplace/wallet/withdraw',{amount,phone:v.phone});
+      }
+    });
 };
 
 window._advWalletShare = function() {
