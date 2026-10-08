@@ -30,15 +30,18 @@
     return j;
   }
 
-  var state = { tab: 'nearby', data: { nearby: [], friends: [], public: [] }, manage: [], q: '', loaded: false };
+  var state = { tab: 'nearby', data: { nearby: [], friends: [], public: [] }, manage: [], q: '', loaded: false, error: '', seq: 0, pos: undefined };
   var TABS = [['nearby', 'Nearby'], ['friends', "Friends' groups"], ['public', 'Public'], ['manage', 'My groups']];
   var modal, body;
 
   function position() {
+    /* FIX: location was re-requested (up to 6s) on every search keystroke, so searching felt dead.
+       It is now asked once and remembered for this session. */
+    if (state.pos !== undefined) return Promise.resolve(state.pos);
     return new Promise(function (resolve) {
-      if (!navigator.geolocation) return resolve(null);
-      navigator.geolocation.getCurrentPosition(function (p) { resolve({ lat: p.coords.latitude, lng: p.coords.longitude }); },
-        function () { resolve(null); }, { enableHighAccuracy: false, timeout: 6000, maximumAge: 600000 });
+      if (!navigator.geolocation) { state.pos = null; return resolve(null); }
+      navigator.geolocation.getCurrentPosition(function (p) { state.pos = { lat: p.coords.latitude, lng: p.coords.longitude }; resolve(state.pos); },
+        function () { state.pos = null; resolve(null); }, { enableHighAccuracy: false, timeout: 6000, maximumAge: 600000 });
     });
   }
 
@@ -54,7 +57,7 @@
     modal.querySelector('#discoverClose').onclick = close;
     modal.addEventListener('click', function (e) { if (e.target === modal) close(); });
     var t; modal.querySelector('#discoverSearch').oninput = function (e) {
-      state.q = e.target.value.trim(); clearTimeout(t); t = setTimeout(function () { load(true); }, 350);
+      state.q = e.target.value.trim(); clearTimeout(t); t = setTimeout(function () { load(true); }, 300);
     };
     tabs();
   }
@@ -79,6 +82,8 @@
     if (state.tab === 'manage') return renderManage();
     var rows = state.data[state.tab] || [];
     if (!rows.length) {
+      if (state.error) { body.innerHTML = '<div class="empty">' + esc(state.error) + '<br><button type="button" class="smallbtn" id="discoverRetry" style="margin-top:8px">Try again</button></div>'; var rb = body.querySelector('#discoverRetry'); if (rb) rb.onclick = function () { load(true); }; return; }
+      if (state.loaded && state.q) { body.innerHTML = '<div class="empty">No groups match &ldquo;' + esc(state.q) + '&rdquo;.</div>'; return; }
       var hint = state.tab === 'nearby' ? 'No groups nearby yet. Allow location access to see public groups around you.' :
         state.tab === 'friends' ? "No groups from your friends to suggest right now." : 'No public groups to show yet.';
       body.innerHTML = '<div class="empty">' + (state.loaded ? hint : 'Loading&hellip;') + '</div>'; return;
@@ -88,7 +93,7 @@
         '<div style="opacity:.7;font-size:12px">' + sub(g) + '</div>' + (g.description ? '<div style="opacity:.8;font-size:12px;margin-top:2px;overflow:hidden;max-height:32px">' + esc(g.description) + '</div>' : '') + '</div>' +
         '<button type="button" class="smallbtn" data-join="' + g.id + '">Join</button></div>';
     }).join('');
-    body.querySelectorAll('[data-join]').forEach(function (b) { b.onclick = function () { join(Number(b.getAttribute('data-join')), b); }; });
+    body.querySelectorAll('[data-join]').forEach(function (b) { b.onclick = function () { join(b.getAttribute('data-join'), b); }; });
   }
   async function join(id, btn) {
     btn.disabled = true; btn.textContent = '...';
@@ -103,14 +108,28 @@
   }
   async function load(force) {
     build();
-    var pos = state.tab === 'nearby' || force ? await position() : null;
+    var my = ++state.seq;               /* FIX: a slow older response could overwrite the newest search */
+    state.error = '';
+    var pos = await position();
     var qs = '?limit=30' + (state.q ? '&q=' + encodeURIComponent(state.q) : '') + (pos ? '&lat=' + pos.lat + '&lng=' + pos.lng : '');
-    try { var j = await api('/group-suggestions' + qs); state.data = Object.assign({ nearby: [], friends: [], public: [] }, j.data || {}); } catch (_) { /* keep what is already shown */ }
+    try {
+      var j = await api('/group-suggestions' + qs);
+      if (my !== state.seq) return;
+      var d = j && j.data;
+      if (Array.isArray(d)) d = { nearby: [], friends: [], public: d };   /* tolerate old array-shaped responses */
+      state.data = Object.assign({ nearby: [], friends: [], public: [] }, d || {});
+    } catch (e) {
+      if (my !== state.seq) return;
+      state.error = (navigator.onLine === false || /failed to fetch|network|load failed/i.test(String(e && e.message)))
+        ? 'You are offline. Connect to search for groups.' : (e && e.message) || 'Could not load groups.';
+      /* keep previous results visible instead of wiping them */
+      if (state.data[state.tab] && state.data[state.tab].length) state.error = '';
+    }
     state.loaded = true; if (state.tab !== 'manage') render();
   }
   async function loadManage() {
     body.innerHTML = '<div class="empty">Loading&hellip;</div>';
-    try { var j = await api('/group-suggestions/manage'); state.manage = j.data || []; } catch (_) {}
+    try { var j = await api('/group-suggestions/manage'); state.manage = Array.isArray(j.data) ? j.data : []; } catch (e) { state.manage = []; body.innerHTML = '<div class="empty">' + esc(e.message || 'Could not load your groups.') + '</div>'; return; }
     renderManage();
   }
   function renderManage() {

@@ -497,6 +497,16 @@
             color: white;
         }
 
+
+        /* Named sidebar icons: label appears beside the icon on hover/focus (the rail is only 60px wide). */
+        .nav-icon[data-label]:hover::after, .nav-icon[data-label]:focus-visible::after {
+            content: attr(data-label);
+            position: absolute; left: 56px; top: 50%; transform: translateY(-50%);
+            background: #111827; color: #fff; font-size: 12px; font-weight: 600;
+            padding: 5px 9px; border-radius: 8px; white-space: nowrap; pointer-events: none;
+            box-shadow: 0 4px 14px rgba(0,0,0,.35); z-index: 200;
+        }
+
         .nav-icon.active {
             background: #7c3aed;
             color: white;
@@ -1688,14 +1698,14 @@
 
     <!-- Permanent Sidebar (Desktop) -->
     <div id="permanentSidebar">
-        <button class="nav-icon active" data-page="messages"><i class="fas fa-comments"></i></button>
-        <button class="nav-icon" data-page="status"><i class="fas fa-circle"></i></button>
-        <button class="nav-icon" data-page="group"><i class="fas fa-users"></i></button>
-        <button class="nav-icon" data-page="friends"><i class="fas fa-user-friends"></i></button>
-        <button class="nav-icon" data-page="games"><i class="fas fa-gamepad"></i></button>
-        <button class="nav-icon" data-page="money"><i class="fas fa-wallet"></i></button>
-        <button class="nav-icon" data-page="settings"><i class="fas fa-cog"></i></button>
-        <button class="nav-icon" data-page="tools"><i class="fas fa-tools"></i></button>
+        <button class="nav-icon active" data-page="messages" title="Chats" aria-label="Chats" data-label="Chats"><i class="fas fa-comments"></i></button>
+        <button class="nav-icon" data-page="status" title="Status" aria-label="Status" data-label="Status"><i class="fas fa-circle"></i></button>
+        <button class="nav-icon" data-page="group" title="Groups" aria-label="Groups" data-label="Groups"><i class="fas fa-users"></i></button>
+        <button class="nav-icon" data-page="friends" title="Friends" aria-label="Friends" data-label="Friends"><i class="fas fa-user-friends"></i></button>
+        <button class="nav-icon" data-page="games" title="Games" aria-label="Games" data-label="Games"><i class="fas fa-gamepad"></i></button>
+        <button class="nav-icon" data-page="money" title="Money" aria-label="Money" data-label="Money"><i class="fas fa-wallet"></i></button>
+        <button class="nav-icon" data-page="settings" title="Settings" aria-label="Settings" data-label="Settings"><i class="fas fa-cog"></i></button>
+        <button class="nav-icon" data-page="tools" title="Tools" aria-label="Tools" data-label="Tools"><i class="fas fa-tools"></i></button>
         <div class="mt-auto mb-4 relative">
             <div class="kynecta-status-dot status-connected" style="position: absolute; bottom: 2px; right: 2px;"></div>
         </div>
