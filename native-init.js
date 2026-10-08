@@ -110,6 +110,11 @@
         var args = { game: String(opts.game || 'water'), level: Math.max(1, Number(opts.level) || 1) };
         if (opts.room) args.room = String(opts.room);
         if (opts.subject) args.subject = String(opts.subject);
+        // Hand over the theme saved in the app so the native game screens follow it (not the phone's dark mode).
+        var savedTheme = opts.theme || (function () {
+          try { return document.documentElement.getAttribute('data-theme'); } catch (_) { return null; }
+        })();
+        if (savedTheme === 'dark' || savedTheme === 'light') args.theme = savedTheme;
         if (opts.serverSeen !== undefined && opts.serverSeen !== null) args.serverSeen = String(opts.serverSeen);
         ['coins', 'games', 'best'].forEach(function (k) {
           if (typeof opts[k] === 'number' && isFinite(opts[k])) args[k] = Math.floor(opts[k]);

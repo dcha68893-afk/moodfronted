@@ -98,6 +98,7 @@ function render(){
   localStorage.removeItem('mood.wc.found.'+st.idx);
  }
  st.path=[];
+ if(st.hintsFor!==st.idx+':'+st.lap){st.hintsFor=st.idx+':'+st.lap;st.hintsUsed=0}
  sec.innerHTML = '<div class="wc-wrap">'+
   '<div class="wc-top">'+
    '<button class="icon" id="wcBack">\u2039</button>'+
@@ -124,11 +125,6 @@ function render(){
   '<div class="row"><button class="primary" id="wcWordsClose">Close</button></div>'+
  '</div></div>'+
  '<div id="wcWordsCostOverlay" class="overlay"><div class="modal"><div class="big">\ud83d\udcd6</div><h2>Open word list</h2><p>You used your 2 free opens today.<br>Opening it again costs <b>50 coins</b>.</p><div class="row"><button id="wcWordsCostNo">Cancel</button><button class="primary" id="wcWordsCostYes">Pay 50 coins</button></div></div></div>'+
- '<div id="wcCompleteOverlay" class="overlay"><div class="modal">'+
-  '<div class="big">\ud83c\udf89</div><h2>Level Complete!</h2>'+
-  '<p id="wcCompleteText"></p>'+
-  '<div class="row"><button class="primary" id="wcNextBtn">Next Level</button></div>'+
- '</div></div>'+
  '<div id="wcToast" class="toast"></div>';
 
  document.getElementById('wcBack').onclick=()=>{ if(typeof window.home==='function')window.home(); };
@@ -140,7 +136,6 @@ function render(){
  document.getElementById('wcWordsClose').onclick=()=>document.getElementById('wcWordsOverlay').classList.remove('show');
  document.getElementById('wcHintBtn').onclick=useHint;
  document.getElementById('wcShuffleBtn').onclick=shuffleWheel;
- document.getElementById('wcNextBtn').onclick=()=>{ if(st.idx+1>=WC_LEVELS.length)st.lap++; st.idx=(st.idx+1)%WC_LEVELS.length; saveProgress(); render(); };
 
  renderBoard();
  renderWheel();
@@ -293,7 +288,7 @@ function useHint(){
  if(!remaining.length){toast('All words already found!');return;}
  remaining.sort((a,b)=>a.length-b.length);
  const w=remaining[0];
- st.hints--; saveProgress();
+ st.hints--; st.hintsUsed=(st.hintsUsed||0)+1; saveProgress();
  const cur=document.getElementById('wcCurrent');
  if(cur){cur.innerHTML='<span class="wc-hint-prefix">FORM&nbsp;</span><b>'+w+'</b>';clearTimeout(cur._hintTimer);cur._hintTimer=setTimeout(()=>{if(!st.path.length)cur.innerHTML='&nbsp;'},3000)}
  toast('HINT: form "'+w+'"');beep(680,.08);
@@ -327,22 +322,36 @@ function burstAt(word){
 }
 
 function levelComplete(){
- // FIX (CROSSWORD-HINTS-NEVER-REPLENISH): the "No hints left — earn more by
- // completing levels" message (see hint() below) was a broken promise —
- // nothing anywhere in this file ever added a hint back, so once a player
- // used their starting 3, hints were gone forever, permanently. Capped at 5
- // so it stays a helpful nudge rather than making hints unlimited.
+ // FIX (CROSSWORD-HINTS-NEVER-REPLENISH): hints are earned back by completing levels (capped at 5).
  st.hints=Math.min(5,st.hints+1);
- // Small escalating reward for playing past lap 1, on top of the fix above.
+ // Small escalating reward for playing past lap 1.
  const bonus=250+st.lap*50;
  coins(bonus);
+ const room=window.__gameRoomMatch;
+ const doneIdx=st.idx,doneLap=st.lap,doneLevel=wcEndlessLevel(),used=st.hintsUsed||0,words=st.found.size;
+ // Advance on COMPLETION (not on the Next click) so Quit from the card still resumes at the next level;
+ // Replay puts the completed level back. Live rooms never move saved solo progress.
+ if(!room){
+  if(st.idx+1>=WC_LEVELS.length)st.lap++;
+  st.idx=(st.idx+1)%WC_LEVELS.length;
+ }
  saveProgress();
- document.getElementById('wcCompleteText').textContent='You found every word in this puzzle. +'+bonus+' bonus coins, +1 hint.';
- if(window.__gameRoomComplete)window.__gameRoomComplete(st.found.size*10+bonus,{timeMs:window.__gameRoomMatch?.state?.matchStartedAt?Math.max(0,Date.now()-new Date(window.__gameRoomMatch.state.matchStartedAt).getTime()):0,answered:st.found.size,correct:st.found.size});
- document.getElementById('wcCompleteOverlay').classList.add('show');
+ if(window.__gameRoomComplete)window.__gameRoomComplete(words*10+bonus,{timeMs:room?.state?.matchStartedAt?Math.max(0,Date.now()-new Date(room.state.matchStartedAt).getTime()):0,answered:words,correct:words});
  try{
-  if(window.data){ window.data.best=Math.max(window.data.best||0, st.found.size); window.data.streak=(window.data.streak||0)+1; if(typeof window.save==='function')window.save(); }
+  if(window.data){ window.data.best=Math.max(window.data.best||0, words); window.data.streak=(window.data.streak||0)+1; if(typeof window.save==='function')window.save(); }
  }catch(e){}
+ const ratio=used===0?1:used===1?.9:used===2?.8:used===3?.65:.5;
+ const card={level:doneLevel,ratio,stars:ratio>=.9?3:ratio>=.65?2:1,
+  rows:[['Words found',String(words)],['Hints used',String(used)],['Bonus','+'+bonus+' coins, +1 hint']],
+  onNext:()=>render(),
+  onReplay:()=>{
+   if(!room){st.idx=doneIdx;st.lap=doneLap;saveProgress();}
+   localStorage.removeItem('mood.wc.found.'+doneIdx);
+   st.hintsFor=null;
+   render();
+  }};
+ if(typeof window.necpraLevelDone==='function')window.necpraLevelDone(card);
+ else render();
 }
 
 // ---- Wheel drag / swipe-to-connect input ----

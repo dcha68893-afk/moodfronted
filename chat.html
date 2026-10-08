@@ -2814,27 +2814,16 @@
                 { btnId: 'createGroupBtn', icon: 'fa-users', title: 'Create group' }
             ],
             groups: [
-                { navigateBack: true, icon: 'fa-arrow-left', title: 'Back', navAction: true },
                 { btnId: 'createGroupBtn', icon: 'fa-users', title: 'Create group' }
             ],
-            status: [
-                { navigateBack: true, icon: 'fa-arrow-left', title: 'Back', navAction: true }
-            ],
-            settings: [
-                { navigateBack: true, icon: 'fa-arrow-left', title: 'Back', navAction: true }
-            ],
-            tools: [
-                { navigateBack: true, icon: 'fa-arrow-left', title: 'Back', navAction: true }
-            ],
-            games: [
-                { navigateBack: true, icon: 'fa-arrow-left', title: 'Back', navAction: true }
-            ],
-            admin: [
-                { navigateBack: true, icon: 'fa-arrow-left', title: 'Back', navAction: true }
-            ],
-            money: [
-                { navigateBack: true, icon: 'fa-arrow-left', title: 'Back', navAction: true }
-            ]
+            // Module-level top arrows removed: mobile uses the device back button; the desktop
+            // arrow appears only for an open sub-panel (see syncPanelBackArrow).
+            status: [],
+            settings: [],
+            tools: [],
+            games: [],
+            admin: [],
+            money: []
         };
 
         function triggerIframeHeaderAction(page, btnId) {
@@ -2878,7 +2867,7 @@
             });
         }
 
-        function updateHeaderActions(page) {
+        function _updateHeaderActionsBase(page) {
             const headerActionsEl = document.getElementById('headerActions');
             const toolsNavEl      = document.getElementById('toolsHeaderNav');
             const friendsNavEl    = document.getElementById('friendsHeaderNav');
@@ -2924,6 +2913,53 @@
             headerActionsEl.classList.remove('hidden');
             renderHeaderActionButtons(headerActionsEl, actions, page);
         }
+
+
+        // ======================================================================
+        // PANEL BACK ARROW — the module-level top arrow was removed. Mobile uses
+        // the device back button. On desktop the arrow appears ONLY while the
+        // visible module has a sub-panel open (tracked via SCREEN_STATE_CHANGED
+        // -> window.__childLocalPanel), and closes that panel when clicked.
+        // ======================================================================
+        function updateHeaderActions(page) {
+            _updateHeaderActionsBase(page);
+            syncPanelBackArrow(page);
+        }
+
+        function syncPanelBackArrow(page) {
+            const el = document.getElementById('headerActions');
+            if (!el) return;
+            const current = page || window.__currentPage;
+            const existing = document.getElementById('headerPanelBackBtn');
+            const iframe = document.querySelector('.content-iframe[data-module="' + current + '"]');
+            const panel = iframe && window.__childLocalPanel && window.__childLocalPanel[iframe.id];
+            const wanted = !!panel && current !== 'messages' && window.innerWidth > 768;
+            if (!wanted) {
+                if (existing) existing.remove();
+                if (!el.children.length) el.classList.add('hidden');
+                return;
+            }
+            if (existing) return;
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.id = 'headerPanelBackBtn';
+            b.className = 'header-action-btn header-nav-action';
+            b.title = 'Back';
+            b.setAttribute('aria-label', 'Back');
+            b.innerHTML = '<i class="fas fa-arrow-left"></i>';
+            b.addEventListener('click', () => {
+                const f = document.querySelector('.content-iframe[data-module="' + (window.__currentPage || current) + '"]');
+                const open = f && window.__childLocalPanel && window.__childLocalPanel[f.id];
+                if (f && open) {
+                    try { f.contentWindow.postMessage({ type: 'CLOSE_LOCAL_PANEL', panel: open }, '*'); } catch (_) {}
+                    delete window.__childLocalPanel[f.id];
+                }
+                syncPanelBackArrow(window.__currentPage);
+            });
+            el.insertBefore(b, el.firstChild);
+            el.classList.remove('hidden');
+        }
+        window.addEventListener('resize', () => syncPanelBackArrow(window.__currentPage));
 
         // ======================================================================
         // THEME — now fully delegated to js/theme.engine.js (window.ThemeManager).
@@ -3687,6 +3723,7 @@
             if (!sourceIframe) return;
             if (_d.restore) window.__childLocalPanel[sourceIframe.id] = _d.restore;
             else delete window.__childLocalPanel[sourceIframe.id];
+            try { syncPanelBackArrow(window.__currentPage); } catch (_) {}
         });
 
         window.addEventListener('popstate', (event) => {
