@@ -87,9 +87,9 @@ public class NecpraWaterActivity extends NecpraGameActivity {
             levelNo = store.level("water");
             // Come back to the exact level that was being played (a replay of an earlier level included).
             int playing = levelNo;
-            String saved = store.resume("water");
-            if (saved != null) {
-                NecpraWaterEngine d = NecpraWaterEngine.deserialize(saved);
+            String resumeBlob = store.resume("water");
+            if (resumeBlob != null) {
+                NecpraWaterEngine d = NecpraWaterEngine.deserialize(resumeBlob);
                 if (d != null && !d.isSolved() && d.hasMove() && d.level() >= 1 && d.level() <= levelNo) playing = d.level();
             }
             startLevel(playing, true);
