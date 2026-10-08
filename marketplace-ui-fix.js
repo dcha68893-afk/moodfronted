@@ -297,10 +297,7 @@ const _sellerAdminNavChain = window._jmNavMore;
 const _chainHandledKeys = new Set([
     'seller-dashboard','my-listings','seller-inventory','seller-analytics',
     'seller-payouts','seller-shipping','seller-returns','seller-verification',
-    'seller-subscription','admin-approval','admin-dashboard','admin-products',
-    'admin-sellers','admin-buyers','admin-orders','admin-analytics',
-    'admin-payouts','admin-coupons','admin-reviews','admin-support',
-    'admin-settings','wallet','loyalty','referral',
+    'seller-subscription','wallet','loyalty','referral',
 ]);
 
 function _reinstallNavMore() {

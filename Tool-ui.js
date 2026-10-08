@@ -5518,7 +5518,7 @@ function _navDirect(page, subpage, _pushHistory) {
     _state.page = page;
     // FIX (2026-07-22): Seller Dashboard / Admin / Advanced sub-pages force
     // themselves visible with an inline style.cssText (display:flex !important
-    // — see marketplace-seller.js, marketplace-admin.js, marketplace-advanced.js).
+    // — see marketplace-seller.js, marketplace-advanced.js).
     // An inline style always beats the stylesheet's .jm-page{display:none} rule,
     // no matter what class is removed. Previously only the 'active' class was
     // cleared here, so leaving a seller/admin sub-page via a header icon
@@ -5585,19 +5585,7 @@ function _navDirect(page, subpage, _pushHistory) {
         case 'seller-returns':
         case 'seller-verification':
         case 'seller-subscription':
-        case 'admin-approval':
-        case 'admin-dashboard':
-        case 'admin-products':
-        case 'admin-sellers':
-        case 'admin-buyers':
-        case 'admin-orders':
-        case 'admin-analytics':
-        case 'admin-payouts':
-        case 'admin-coupons':
-        case 'admin-reviews':
-        case 'admin-support':
-        case 'admin-settings':
-            // These are handled by marketplace-seller.js _jmNavMore override
+            // Seller pages are handled by marketplace-seller.js _jmNavMore override
             // which creates pages inside #sidebar via _getOrCreatePage
             break;
     }
@@ -7367,7 +7355,6 @@ function _renderAccount() {
     // logging in as the .env-configured admin correctly got role='admin' in
     // the JWT/user object, but this panel never checked it and stayed
     // hidden. Restore the role check as the source of truth.
-    const isAdmin = (user.role === 'admin');
 
     container.innerHTML = `
     <!-- Profile hero with chat + WhatsApp buttons -->
@@ -7461,25 +7448,7 @@ function _renderAccount() {
         </div>
     </div>
 
-    <!-- Admin Section (only admin/moderator sees this) -->
-    ${isAdmin ? `
-    <div style="padding:12px 16px 0">
-        <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:#9ca3af;margin-bottom:8px">⚙️ Admin Panel</div>
-        <div style="background:linear-gradient(135deg,#111,#1f2937);border-radius:14px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,.2)">
-            <button onclick="window._jmNavMore('admin-dashboard')" style="width:100%;display:flex;align-items:center;gap:12px;padding:16px;border:none;background:transparent;cursor:pointer;text-align:left">
-                <div style="width:40px;height:40px;border-radius:10px;background:rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:20px">⚙️</div>
-                <div style="flex:1;min-width:0"><div style="font-weight:800;font-size:14px;color:#fff">Admin Command Center</div><div style="font-size:12px;color:rgba(255,255,255,.6);margin-top:2px">Manage the entire marketplace</div></div>
-                <i class="fas fa-chevron-right" style="color:rgba(255,255,255,.3)"></i>
-            </button>
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid rgba(255,255,255,.08)">
-                ${[['admin-products','fa-box','Products'],['admin-sellers','fa-store','Sellers'],['admin-orders','fa-receipt','Orders'],['admin-analytics','fa-chart-pie','Analytics']].map(([p,ic,lb])=>`
-                <button onclick="window._jmNavMore('${p}')" style="background:transparent;border:none;padding:12px 6px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;border-right:1px solid rgba(255,255,255,.08)">
-                    <i class="fas ${ic}" style="color:#9ca3af;font-size:16px"></i>
-                    <span style="color:#d1d5db;font-size:9px;font-weight:600">${lb}</span>
-                </button>`).join('')}
-            </div>
-        </div>
-    </div>` : ''}
+    <!-- Admin tools moved to the Admin module (shield icon in the app header, admins only) -->
 
     <!-- Logout -->
     <div style="padding:16px 16px 24px">

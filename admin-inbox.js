@@ -1,6 +1,6 @@
 /* admin-inbox.js - problem-reports inbox for admins, available inside every module.
  * Loaded by report-problem.js (which every module page already includes).
- * - Shows a small shield button ONLY to admins (the server decides: GET /api/admin/problem-reports is 403 for everyone else).
+ * - (No floating button any more — the Admin module's header icon is the single entry point.) Was: shield button ONLY to admins (the server decides: GET /api/admin/problem-reports is 403 for everyone else).
  * - Inbox is grouped by module (Chat, Groups, Friends, Status, Market, Games, Settings...) with per-module counts,
  *   status + category filters, and the actions the backend supports: warn / suspend / remove / dismiss / respond.
  * - Uses class "overlay open" so the hardware back button (back-nav.js) closes it like any other panel.
@@ -144,9 +144,9 @@
   }
   async function probe() {
     if (!token()) return;
-    if (cachedAdmin()) { addButton(); return; }
-    try { await call('/problem-reports?limit=1'); setAdmin(true); addButton(); }
-    catch (e) { if (e && e.status === 403) setAdmin(false); }
+    // The reports inbox now lives in the Admin module (header shield icon). The old floating
+    // shield button in every module is gone; window.openAdminInbox stays available for callers.
+    return;
   }
   window.openAdminInbox = open;
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', probe); else probe();

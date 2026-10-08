@@ -83,7 +83,7 @@ const SW_VERSION = '19.51.0';
 // v74: profile-photo fix (js/avatar-fix.js added, message.html + js/config.js changed). Bump forces every installed
 // PWA/Android app to drop old copies and show the 'Update ready - Refresh' banner.
 // v89: native-init.js (native Profile/Settings routing) is now network-first so an installed APK never runs a stale copy.
-const CACHE_NAME = 'necpra-static-v94';
+const CACHE_NAME = 'necpra-static-v95';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -164,7 +164,7 @@ const NETWORK_FIRST_PATTERNS = [
   // fix was deployed, regardless of how many times the page was reloaded — the
   // same failure mode already fixed for the friend module and group-os files above.
   /\/Tools\.html/i,/\/Tool\.css/i,/\/marketplace-ui-fix\.js/i,/\/marketplace-ecommerce\.js/i,
-  /\/marketplace-admin\.js/i,/\/marketplace-seller\.js/i,/\/marketplace-checkout\.js/i,
+  /\/admin-module\.js/i,/\/admin\.html/i,/\/admin-inbox\.js/i,/\/marketplace-seller\.js/i,/\/marketplace-checkout\.js/i,
   /\/marketplace-advanced\.js/i,
   // v69 — see the dated comment near the top of this file. game.html itself is a
   // navigation request (goes through navigation()'s already-network-first path

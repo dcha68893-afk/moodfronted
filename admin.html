@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<title>Admin | Necpra</title>
+<!-- Same bootstrap every other module iframe uses (see money.html / Tools.html) -->
+<script src="/session-restore.js"></script>
+<script src="/app-protect.js"></script>
+<script src="/js/theme.engine.js"></script>
+<script src="/js/runtime-config.js"></script>
+<script src="/js/config.js"></script>
+<link rel="stylesheet" href="/css/vendor/font-awesome.min.css">
+<script src="/js/settings-broadcast-listener.js" defer></script>
+<style>
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;margin:0;background:#f3f4f6;color:#111;
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  body{display:flex;flex-direction:column;overflow:hidden}
+
+  /* Quick-nav strip: every admin feature is one tap away from any screen */
+  #admNavStrip{display:none;flex:0 0 auto;gap:8px;align-items:center;overflow-x:auto;overflow-y:hidden;
+    padding:10px 12px;background:#fff;border-bottom:1px solid #e5e7eb;
+    -webkit-overflow-scrolling:touch;scrollbar-width:none}
+  #admNavStrip::-webkit-scrollbar{display:none}
+  .adm-chip{flex:0 0 auto;border:1px solid #e5e7eb;background:#f9fafb;color:#374151;border-radius:999px;
+    padding:7px 13px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap}
+  .adm-chip.on{background:#111827;border-color:#111827;color:#fff}
+  .adm-chip:active{transform:scale(.97)}
+  .adm-chip-refresh{padding:7px 12px}
+
+  #admRoot{flex:1 1 auto;min-height:0;position:relative;overflow:hidden;background:#f3f4f6}
+  .adm-view>.adm-page{flex:1;min-height:0}
+  /* admin screens scroll inside .adm-body; keep room for the phone's bottom bar */
+  .adm-body{padding-bottom:calc(80px + env(safe-area-inset-bottom,0px))!important}
+  /* the shell's own header already shows the title, keep the in-page one compact */
+  .adm-header{padding:10px 14px!important}
+  button:focus-visible{outline:2px solid #3b82f6;outline-offset:2px}
+</style>
+</head>
+<body>
+  <div id="admNavStrip" role="navigation" aria-label="Admin sections"></div>
+  <div id="admRoot"></div>
+
+  <script src="/admin-module.js"></script>
+  <script>
+    // Start only after the admin module script has defined its router.
+    (function () {
+      function go() { if (window.__admBoot) window.__admBoot(); }
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', go, { once: true });
+      else go();
+    })();
+  </script>
+</body>
+</html>

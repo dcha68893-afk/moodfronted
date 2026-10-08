@@ -3907,24 +3907,16 @@
 <script src="/marketplace-advanced.js"></script>
 <!-- ═══ Seller Module ═════════════════════════════════════════════════════════════════
   Seller Dashboard · My Listings · Physical Product Tab · Inventory · Analytics
-  Payouts · Shipping · Returns · KYC Verification · Subscriptions · Admin Approval
-  Product Approval Workflow (pending_review → approved/rejected)
+  Payouts · Shipping · Returns · KYC Verification · Subscriptions
+  (Admin tools now live in the separate Admin module — admin.html)
   Must load AFTER marketplace-advanced.js.
 ════════════════════════════════════════════════════════════════════════ -->
 <script src="/marketplace-seller.js"></script>
-<!-- ═══ Admin Command Center ══════════════════════════════════════════════════════════
-  Full marketplace administration: Products · Sellers · Buyers · Orders · Returns
-  Payouts · Coupons · Flash Sales · Reviews · Analytics · Support · Notifications
-  Settings · Audit Log. Role-gated: admin/moderator only.
-  Must load AFTER marketplace-seller.js.
-════════════════════════════════════════════════════════════════════════ -->
-<script src="/marketplace-admin.js"></script>
 <!-- ═══ UI Visibility Fix — MUST BE LAST ════════════════════════════════════════════
   Fixes all iframe-context visibility issues:
   • More sheet (⋮) rebuilt as fixed overlay with inline styles
   • Bottom nav rebuilt as sticky footer inside sidebar
   • More menu completely rebuilt with all sections visible
-  • Admin panel entry always visible (floating button + menu entry)
   • Seller tools section prominent in More menu
   LOAD ORDER: must come after all other marketplace scripts.
 ════════════════════════════════════════════════════════════════════════ -->

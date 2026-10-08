@@ -1,0 +1,1387 @@
+/**
+ * admin-module.js — ADMIN MODULE (standalone)
+ * ══════════════════════════════════════════════════════════
+ * Loaded by admin.html, which chat.html hosts as its own module iframe
+ * (opened from the shield icon in the global header — admins only).
+ *
+ * This replaces marketplace-admin.js, which ran INSIDE the Tool module and
+ * depended on the Tool module's navigation (_jmNavMore / .jm-page / #sidebar).
+ * That coupling is why several admin screens (e.g. "Module Admin") never opened.
+ *
+ * Role comes from the same shell protocol as every other module
+ * (SESSION_DATA / AUTH_READY / USER_ROLE_UPDATE). UI gating only — the server
+ * enforces admin on every /api/admin and /api/marketplace/admin route.
+ * ══════════════════════════════════════════════════════════
+ */
+
+(function _AdminModule() {
+'use strict';
+'use strict';
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
+// FIX (admin panel has no styling): none of the .adm-* classes used throughout
+// this file (including .adm-back, the header's back/cancel button) had any
+// matching CSS anywhere in the app. Every admin screen rendered as bare,
+// unstyled HTML, which is why the back arrow was effectively invisible and
+// the whole section looked unbuilt. Injecting the stylesheet once here keeps
+// the fix self-contained (no other file needs to change to pick it up).
+(function _injectAdminStyles() {
+    if (document.getElementById('adm-admin-styles')) return;
+    const css = `
+    .adm-page{background:#f8f9fb;height:100%;font-family:inherit}
+    .adm-header{display:flex;align-items:center;gap:10px;padding:14px 16px;background:#111827;color:#fff;position:sticky;top:0;z-index:5}
+    .adm-back{flex-shrink:0;width:34px;height:34px;border-radius:50%;border:none;background:rgba(255,255,255,.12);color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1}
+    .adm-back:hover{background:rgba(255,255,255,.22)}
+    .adm-title{flex:1;min-width:0;font-size:15px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .adm-badge-live{flex-shrink:0;background:#22c55e;color:#fff;font-size:10px;font-weight:800;letter-spacing:.04em;padding:3px 8px;border-radius:20px}
+    .adm-body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
+    .adm-no-access{padding:60px 24px;text-align:center}
+    .adm-btn{border:none;border-radius:8px;padding:8px 14px;font-size:12.5px;font-weight:700;cursor:pointer;background:#e5e7eb;color:#111827}
+    .adm-btn-full{width:100%;padding:12px}
+    .adm-btn-primary{background:#3b82f6;color:#fff}
+    .adm-btn-secondary{background:#e5e7eb;color:#111827}
+    .adm-btn-success{background:#22c55e;color:#fff}
+    .adm-btn-danger{background:#ef4444;color:#fff}
+    .adm-btn-warning{background:#f59e0b;color:#fff}
+    .adm-nav{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:14px}
+    .adm-nav-item{display:flex;flex-direction:column;align-items:center;gap:6px;background:#fff;border:1px solid #eef0f3;border-radius:14px;padding:14px 8px;cursor:pointer;position:relative}
+    .adm-nav-item:active{background:#f3f4f6}
+    .adm-nav-icon{font-size:22px}
+    .adm-nav-label{font-size:11.5px;font-weight:600;color:#374151;text-align:center}
+    .adm-nav-badge{position:absolute;top:6px;right:8px;background:#ef4444;color:#fff;font-size:10px;font-weight:800;border-radius:10px;padding:1px 6px}
+    .adm-kpi-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding:14px}
+    .adm-kpi{background:#fff;border:1px solid #eef0f3;border-radius:14px;padding:14px}
+    .adm-kpi-label{font-size:11px;color:#6b7280;font-weight:600}
+    .adm-kpi-val{font-size:19px;font-weight:800;color:#111827;margin-top:4px}
+    .adm-kpi-sub{font-size:11px;color:#9ca3af;margin-top:2px}
+    .adm-section{margin:14px;background:#fff;border:1px solid #eef0f3;border-radius:14px;padding:14px}
+    .adm-section-title{font-size:13px;font-weight:800;color:#111827;margin-bottom:10px}
+    .adm-search-bar{padding:12px}
+    .adm-search-input{width:100%;box-sizing:border-box;border:1px solid #e5e7eb;border-radius:10px;padding:10px 12px;font-size:13.5px}
+    .adm-filter-btn{border:1px solid #e5e7eb;background:#fff;color:#374151;border-radius:20px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;margin-right:6px}
+    .adm-filter-btn.active,.adm-filter-btn:active{background:#111827;color:#fff;border-color:#111827}
+    .adm-row{display:flex;align-items:center;gap:10px;padding:12px;background:#fff;border:1px solid #eef0f3;border-radius:12px;margin-bottom:8px}
+    .adm-row-placeholder{flex-shrink:0;width:38px;height:38px;border-radius:10px;background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:18px}
+    .adm-row-title{font-size:13.5px;font-weight:700;color:#111827;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .adm-row-sub{font-size:11.5px;color:#6b7280;margin-top:2px}
+    .adm-row-price{font-size:13px;font-weight:800;color:#111827}
+    .adm-badge{display:inline-block;font-size:10px;font-weight:800;padding:2px 8px;border-radius:20px;margin-top:4px}
+    .adm-badge.green{background:#dcfce7;color:#15803d}
+    .adm-badge.yellow{background:#fef9c3;color:#a16207}
+    .adm-badge.red{background:#fee2e2;color:#b91c1c}
+    .adm-badge.blue{background:#dbeafe;color:#1d4ed8}
+    .adm-badge.purple{background:#f3e8ff;color:#7e22ce}
+    .adm-badge.gray{background:#f3f4f6;color:#4b5563}
+    .adm-product-card{background:#fff;border:1px solid #eef0f3;border-radius:14px;overflow:hidden;margin:0 12px 10px}
+    .adm-product-card-img{width:100%;height:140px;object-fit:cover;background:#f3f4f6}
+    .adm-product-card-body{padding:10px 12px}
+    .adm-product-card-title{font-size:13.5px;font-weight:700;color:#111827}
+    .adm-product-card-meta{font-size:11.5px;color:#6b7280;margin-top:2px}
+    .adm-product-card-actions{display:flex;gap:8px;padding:0 12px 12px}
+    .adm-payout-row{display:flex;justify-content:space-between;align-items:center;padding:12px;background:#fff;border:1px solid #eef0f3;border-radius:12px;margin-bottom:8px}
+    .adm-settings-row{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #f1f2f4}
+    .adm-settings-label{font-size:13px;font-weight:600;color:#111827}
+    .adm-settings-val{font-size:12.5px;color:#6b7280}
+    .adm-bar{height:8px;border-radius:4px;background:#e5e7eb;overflow:hidden}
+    .adm-chart{display:flex;align-items:flex-end;gap:4px;height:120px;padding:10px 0}
+    .adm-chart-labels{display:flex;justify-content:space-between}
+    .adm-chart-label{font-size:9.5px;color:#9ca3af}
+    .adm-modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:99999;padding:20px}
+    .adm-modal-title{font-size:15px;font-weight:800;margin-bottom:12px}
+    `;
+    const style = document.createElement('style');
+    style.id = 'adm-admin-styles';
+    style.textContent = css;
+    document.head.appendChild(style);
+})();
+
+// ─── Utilities ────────────────────────────────────────────────────────────────
+const _esc  = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const _fmt  = n  => 'KES ' + parseFloat(n||0).toLocaleString('en-KE',{minimumFractionDigits:0,maximumFractionDigits:0});
+const _date = d  => d ? new Date(d).toLocaleDateString('en-KE',{day:'numeric',month:'short',year:'numeric'}) : '—';
+const _time = d  => d ? new Date(d).toLocaleString('en-KE',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : '—';
+const _ls   = { save:(k,v)=>{ try{localStorage.setItem(k,JSON.stringify(v))}catch(_){} }, load:(k,d=null)=>{ try{const r=localStorage.getItem(k);return r?JSON.parse(r):d}catch(_){return d} } };
+
+function _toast(msg, type='info', icon='ℹ️') {
+    if (typeof window._jmToast === 'function') { window._jmToast(msg,type,icon); return; }
+    const colors={success:'#22c55e',error:'#ef4444',warning:'#f59e0b',info:'#3b82f6'};
+    let box=document.getElementById('adminToastBox');
+    if(!box){box=document.createElement('div');box.id='adminToastBox';box.style.cssText='position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:999999;display:flex;flex-direction:column;gap:8px;pointer-events:none;width:min(380px,90vw)';document.body.appendChild(box);}
+    const t=document.createElement('div');t.style.cssText=`background:${colors[type]||colors.info};color:#fff;padding:12px 18px;border-radius:12px;font-size:14px;font-weight:500;box-shadow:0 8px 24px rgba(0,0,0,.2);display:flex;align-items:center;gap:10px`;t.innerHTML=`<span>${icon}</span><span>${msg}</span>`;box.appendChild(t);setTimeout(()=>t.remove(),3500);
+}
+
+async function _api(method, endpoint, body=null) {
+    try {
+        const token = _token();
+        const base = _apiOrigin();
+        const res=await fetch(base + '/api' + endpoint,{method:method.toUpperCase(),headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})}, ...(body&&method!=='GET'?{body:JSON.stringify(body)}:{})});
+        if(!res.ok){const e=await res.json().catch(()=>({message:'Error '+res.status}));return{_error:e.message||'Error',_status:res.status};}
+        return await res.json();
+    } catch(e){return {_error: e.message||'Network error', _offline: true};}
+}
+
+
+// ─── Session + role (same protocol every other module uses) ───────────────────
+// chat.html (the shell) pushes SESSION_DATA / AUTH_READY / PARENT_READY and
+// USER_ROLE_UPDATE into this iframe. Role comes ONLY from that protocol (and the
+// shell's in-memory session) — it is never read from localStorage. This is UI
+// gating only: every /admin API route is enforced again by the server.
+const S = { token: '', user: null, role: '', isAdmin: null, sessionAt: 0 };
+
+function _applyUser(u) {
+    if (!u || typeof u !== 'object') return;
+    S.user = Object.assign({}, S.user || {}, u);
+    if (u.role) S.role = u.role;
+    if (u.isAdmin === true) S.isAdmin = true;
+}
+function _applySession(s) {
+    if (!s || typeof s !== 'object') return;
+    if (s.token) S.token = s.token;
+    if (s.user) _applyUser(s.user);
+    S.sessionAt = Date.now();
+}
+function _readParentSession() {
+    try {
+        const p = window.parent;
+        if (!p || p === window) return;
+        _applySession(p.__PARENT_SESSION__ || p.AUTH_SESSION);
+        if (p.__cachedUserRole) S.role = S.role || p.__cachedUserRole;
+        if (!S.token) S.token = p.__kynToken || p.__accessToken || '';
+    } catch (_) { /* cross-origin parent: wait for postMessage */ }
+}
+function _token() {
+    _readParentSession();
+    if (S.token) return S.token;
+    const t = window.__kynToken || window.__accessToken || '';
+    if (t) return t;
+    try {
+        const a = JSON.parse(localStorage.getItem('kynecta_auth') || 'null');
+        if (a && a.token) return a.token;
+    } catch (_) {}
+    return localStorage.getItem('authToken') || localStorage.getItem('accessToken') ||
+           localStorage.getItem('token') || localStorage.getItem('necpa_token') || '';
+}
+function _apiOrigin() {
+    const pick = [
+        () => window.__getApiOrigin && window.__getApiOrigin(),
+        () => window.__kynAPI && window.__kynAPI.baseUrl,
+        () => window.__getApiBase && window.__getApiBase(),
+        () => window.API_BASE_URL,
+        () => window.parent.__getApiOrigin && window.parent.__getApiOrigin(),
+        () => window.parent.__getApiBase && window.parent.__getApiBase(),
+        () => window.parent.API_BASE_URL
+    ];
+    for (const f of pick) {
+        try { const v = f(); if (v) return String(v).replace(/\/api\/?$/, '').replace(/\/$/, ''); } catch (_) {}
+    }
+    return window.location.origin;
+}
+
+function _isAdmin() {
+    _readParentSession();
+    // USER_ROLE_UPDATE is authoritative (server-verified by the shell) — it can also say "no".
+    if (S.isAdmin === false) return false;
+    if (S.isAdmin === true) return true;
+    const u = S.user || window.currentUser || window.__kynUser || {};
+    const role = S.role || u.role || window.__cachedUserRole || '';
+    return role === 'admin' || role === 'moderator' || u.isAdmin === true;
+}
+
+window.addEventListener('message', function (e) {
+    const d = e.data;
+    if (!d || typeof d !== 'object') return;
+    if (e.origin !== window.location.origin && e.source !== window.parent) return;
+    switch (d.type) {
+        case 'SESSION_DATA':
+        case 'AUTH_READY':
+        case 'PARENT_READY': {
+            const p = d.payload || {};
+            _applySession(p.session && p.session.token ? p.session : p);
+            if (p.user) _applyUser(p.user);
+            _onSessionChange();
+            break;
+        }
+        case 'USER_ROLE_UPDATE': {
+            const role = d.role || 'user';
+            S.role = role;
+            S.isAdmin = d.isAdmin === true || role === 'admin' || role === 'moderator';
+            _onSessionChange();
+            break;
+        }
+        case 'CLOSE_LOCAL_PANEL':
+            window.__admBack && window.__admBack();
+            break;
+    }
+});
+
+// ─── Inject CSS ───────────────────────────────────────────────────────────────
+(function _css() {
+    if (document.getElementById('adminModuleCSS')) return;
+    const s = document.createElement('style'); s.id = 'adminModuleCSS';
+    s.textContent = `
+    @keyframes adm-in{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes adm-pulse{0%,100%{opacity:1}50%{opacity:.5}}
+
+    .adm-page{animation:adm-in .3s ease}
+    .adm-header{background:#111;color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:10;flex-shrink:0}
+    .adm-back{width:34px;height:34px;border-radius:50%;border:none;background:rgba(255,255,255,.12);cursor:pointer;font-size:14px;color:#fff}
+    .adm-title{font-weight:800;font-size:15px;flex:1}
+    .adm-badge-live{background:#22c55e;border-radius:4px;padding:2px 7px;font-size:10px;font-weight:800;letter-spacing:.5px}
+    .adm-body{flex:1;overflow-y:auto;padding:0 0 80px;background:#f3f4f6}
+
+    /* KPI cards */
+    .adm-kpi-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px 16px}
+    .adm-kpi{background:#fff;border-radius:14px;padding:14px 16px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+    .adm-kpi.accent{background:linear-gradient(135deg,#111,#374151);color:#fff}
+    .adm-kpi-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#9ca3af;margin-bottom:4px}
+    .adm-kpi.accent .adm-kpi-label{color:rgba(255,255,255,.65)}
+    .adm-kpi-val{font-size:22px;font-weight:900;color:#111;letter-spacing:-.5px}
+    .adm-kpi.accent .adm-kpi-val{color:#fff}
+    .adm-kpi-sub{font-size:11px;color:#6b7280;margin-top:3px}
+    .adm-kpi.accent .adm-kpi-sub{color:rgba(255,255,255,.6)}
+
+    /* Section card */
+    .adm-section{background:#fff;border-radius:16px;margin:0 12px 12px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+    .adm-section-title{font-weight:800;font-size:14px;color:#111;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between}
+
+    /* Status badges */
+    .adm-badge{display:inline-flex;align-items:center;gap:3px;border-radius:20px;padding:3px 9px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;white-space:nowrap}
+    .adm-badge.green{background:#d1fae5;color:#065f46}
+    .adm-badge.red{background:#fee2e2;color:#991b1b}
+    .adm-badge.yellow{background:#fef3c7;color:#92400e}
+    .adm-badge.blue{background:#dbeafe;color:#1e40af}
+    .adm-badge.gray{background:#f3f4f6;color:#6b7280}
+    .adm-badge.purple{background:#ede9fe;color:#5b21b6}
+    .adm-badge.live{background:#22c55e;color:#fff;animation:adm-pulse 2s infinite}
+
+    /* Row */
+    .adm-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #f9fafb}
+    .adm-row:last-child{border-bottom:none}
+    .adm-row-img{width:48px;height:48px;border-radius:8px;object-fit:cover;background:#f3f4f6;flex-shrink:0}
+    .adm-row-placeholder{width:48px;height:48px;border-radius:8px;background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+    .adm-row-title{font-size:13px;font-weight:700;color:#111;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .adm-row-sub{font-size:11px;color:#6b7280;margin-top:2px}
+    .adm-row-price{font-size:14px;font-weight:800;color:#f57224;flex-shrink:0;text-align:right}
+
+    /* Buttons */
+    .adm-btn{border:none;border-radius:8px;padding:7px 14px;font-weight:700;font-size:12px;cursor:pointer;transition:all .15s;white-space:nowrap}
+    .adm-btn-primary{background:#111;color:#fff}
+    .adm-btn-primary:hover{background:#374151}
+    .adm-btn-success{background:#d1fae5;color:#065f46}
+    .adm-btn-danger{background:#fee2e2;color:#ef4444}
+    .adm-btn-warning{background:#fef3c7;color:#92400e}
+    .adm-btn-secondary{background:#f3f4f6;color:#374151}
+    .adm-btn-full{width:100%;padding:12px;font-size:14px;border-radius:12px;display:block;text-align:center;margin-top:8px}
+
+    /* Chart bars */
+    .adm-chart{height:130px;background:#f9fafb;border-radius:10px;display:flex;align-items:flex-end;gap:3px;padding:12px 8px 6px;overflow:hidden;margin-top:8px}
+    .adm-bar{flex:1;border-radius:3px 3px 0 0;background:linear-gradient(180deg,#374151,#111);min-height:3px;transition:height .6s ease;cursor:pointer;position:relative}
+    .adm-bar:hover::after{content:attr(data-v);position:absolute;top:-22px;left:50%;transform:translateX(-50%);background:#111;color:#fff;font-size:9px;padding:2px 5px;border-radius:3px;white-space:nowrap}
+    .adm-chart-labels{display:flex;gap:3px;padding:0 8px;margin-top:3px}
+    .adm-chart-label{flex:1;text-align:center;font-size:8px;color:#9ca3af;overflow:hidden}
+
+    /* Table */
+    .adm-table-wrap{overflow-x:auto;margin-top:8px}
+    .adm-table{width:100%;border-collapse:collapse;font-size:12px;min-width:400px}
+    .adm-table th{text-align:left;padding:8px 10px;font-size:10px;font-weight:800;text-transform:uppercase;color:#9ca3af;border-bottom:2px solid #f3f4f6;background:#fafafa;white-space:nowrap}
+    .adm-table td{padding:10px;border-bottom:1px solid #f9fafb;vertical-align:middle}
+    .adm-table tr:hover td{background:#fafafa}
+
+    /* Search / filter bar */
+    .adm-search-bar{display:flex;gap:8px;padding:10px 12px;background:#fff;border-bottom:1px solid #f3f4f6;flex-shrink:0;position:sticky;top:50px;z-index:9}
+    .adm-search-input{flex:1;border:1.5px solid #e5e7eb;border-radius:10px;padding:9px 14px;font-size:13px;outline:none}
+    .adm-search-input:focus{border-color:#111}
+    .adm-filter-btn{background:#f3f4f6;border:none;border-radius:10px;padding:9px 14px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;color:#374151}
+    .adm-filter-btn.active{background:#111;color:#fff}
+
+    /* Modal overlay */
+    .adm-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99000;display:flex;align-items:flex-end;justify-content:center}
+    .adm-modal{background:#fff;width:100%;max-width:480px;border-radius:20px 20px 0 0;padding:20px;max-height:85vh;overflow-y:auto}
+    .adm-modal-title{font-weight:800;font-size:16px;margin-bottom:14px}
+    .adm-modal input,.adm-modal textarea,.adm-modal select{width:100%;border:1.5px solid #e5e7eb;border-radius:10px;padding:10px 14px;font-size:14px;box-sizing:border-box;margin-bottom:10px;outline:none}
+    .adm-modal input:focus,.adm-modal textarea:focus,.adm-modal select:focus{border-color:#111}
+    .adm-modal textarea{resize:none;height:80px}
+
+    /* Nav menu */
+    .adm-nav{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:12px}
+    .adm-nav-item{background:#fff;border-radius:12px;padding:12px 8px;text-align:center;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.06);border:none;transition:all .2s}
+    .adm-nav-item:hover{background:#111;color:#fff}
+    .adm-nav-item:hover .adm-nav-icon{background:rgba(255,255,255,.15)}
+    .adm-nav-icon{font-size:20px;margin-bottom:4px;display:block}
+    .adm-nav-label{font-size:11px;font-weight:700;color:inherit}
+    .adm-nav-badge{background:#ef4444;color:#fff;border-radius:20px;padding:1px 6px;font-size:9px;font-weight:900;display:inline-block;margin-left:4px}
+
+    /* Quick action product card (approval) */
+    .adm-product-card{background:#fff;border-radius:14px;margin-bottom:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+    .adm-product-card-img{width:100%;height:150px;object-fit:cover;background:#f3f4f6}
+    .adm-product-card-body{padding:12px 16px}
+    .adm-product-card-title{font-weight:800;font-size:14px;margin-bottom:3px}
+    .adm-product-card-meta{font-size:12px;color:#6b7280;margin-bottom:10px}
+    .adm-product-card-actions{display:flex;gap:8px}
+
+    /* Payout row */
+    .adm-payout-row{background:#f9fafb;border-radius:10px;padding:12px;margin-bottom:8px}
+
+    /* Settings form */
+    .adm-settings-row{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #f9fafb}
+    .adm-settings-label{font-size:13px;font-weight:700;color:#111}
+    .adm-settings-sub{font-size:11px;color:#9ca3af;margin-top:2px}
+    .adm-settings-val{font-size:14px;font-weight:800;color:#374151;text-align:right}
+
+    /* No-access screen */
+    .adm-no-access{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;text-align:center}
+    `;
+    document.head.appendChild(s);
+})();
+
+
+// ─── Page shell helpers ───────────────────────────────────────────────────────
+function _pageShell(titleText, content) {
+    return `<div class="adm-page" style="display:flex;flex-direction:column;height:100%">
+        <div class="adm-header">
+            <button class="adm-back" aria-label="Back" onclick="window.__admBack()">←</button>
+            <div class="adm-title">⚙️ ${titleText}</div>
+            <span class="adm-badge-live">ADMIN</span>
+        </div>
+        <div class="adm-body">${content}</div>
+    </div>`;
+}
+
+function _noAccess() {
+    return `<div class="adm-no-access">
+        <div style="font-size:48px;margin-bottom:16px">🔒</div>
+        <div style="font-size:18px;font-weight:800;color:#111;margin-bottom:8px">Admin Access Required</div>
+        <div style="font-size:13px;color:#6b7280;margin-bottom:20px">You need an admin or moderator account to use this area.</div>
+        <button class="adm-btn adm-btn-primary adm-btn-full" onclick="window.__admExit()">Back to chat</button>
+    </div>`;
+}
+
+// ─── Feature map (single source of truth for the dashboard + quick-nav strip) ──
+const ADMIN_GROUPS = [
+    { title: 'Moderation', items: [
+        ['admin-modules',  '🧩', 'Reports by Module'],
+        ['admin-products', '📦', 'Products',  'products'],
+        ['admin-reviews',  '⭐', 'Reviews'],
+        ['admin-tickets',  '🎧', 'Support'],
+    ]},
+    { title: 'People', items: [
+        ['admin-sellers',  '🏪', 'Sellers'],
+        ['admin-buyers',   '👥', 'Buyers'],
+    ]},
+    { title: 'Commerce', items: [
+        ['admin-orders',   '🛍️', 'Orders',  'orders'],
+        ['admin-returns',  '↩️', 'Returns'],
+        ['admin-payouts',  '💰', 'Payouts'],
+    ]},
+    { title: 'Promotions', items: [
+        ['admin-coupons',  '🎟️', 'Coupons'],
+        ['admin-flash',    '⚡', 'Flash Sales'],
+        ['admin-notify',   '🔔', 'Notify Users'],
+    ]},
+    { title: 'Insights & System', items: [
+        ['admin-analytics','📈', 'Analytics'],
+        ['admin-settings', '⚙️', 'Settings'],
+        ['admin-audit',    '📋', 'Audit Log'],
+    ]},
+];
+
+function _groupsHtml(badges) {
+    badges = badges || {};
+    return ADMIN_GROUPS.map(g => `
+    <div class="adm-section">
+        <div class="adm-section-title">${g.title}</div>
+        <div class="adm-nav" style="padding:0">
+            ${g.items.map(([page, icon, label, bkey]) => {
+                const n = bkey ? (badges[bkey] || 0) : 0;
+                return `<button class="adm-nav-item" onclick="window.__admNav('${page}')">
+                    <span class="adm-nav-icon">${icon}</span>
+                    <span class="adm-nav-label">${label}${n > 0 ? `<span class="adm-nav-badge">${n}</span>` : ''}</span>
+                </button>`;
+            }).join('')}
+        </div>
+    </div>`).join('');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 1. ADMIN DASHBOARD
+// ══════════════════════════════════════════════════════════════════════════════
+async function renderAdminDashboard(container) {
+    if (!_isAdmin()) { container.innerHTML = _pageShell('Admin Panel', _noAccess()); return; }
+    container.innerHTML = _pageShell('Command Center', `<div style="padding:20px;text-align:center">⏳ Loading…</div>`);
+
+    const r = await _api('GET', '/marketplace/admin/stats/full');
+    const d = r?.data || { revenue:{today:0,week:0,month:0,total:0,by_day:[]}, users:{total:0,sellers:0,buyers:0}, products:{total:0,pending:0}, orders:{total:0,today:0,pending:0,breakdown:{}} };
+
+    const byDay = d.revenue?.by_day || [];
+    const maxR  = byDay.length ? Math.max(...byDay.map(x=>x.revenue||0), 1) : 1;
+
+    container.innerHTML = _pageShell('Command Center', `
+    <!-- KPI Grid -->
+    <div class="adm-kpi-grid">
+        <div class="adm-kpi accent">
+            <div class="adm-kpi-label">Total Revenue</div>
+            <div class="adm-kpi-val">${_fmt(d.revenue?.total||0)}</div>
+            <div class="adm-kpi-sub">Platform fees: ${_fmt((d.revenue?.total||0)*0.1)}</div>
+        </div>
+        <div class="adm-kpi accent">
+            <div class="adm-kpi-label">Today's Revenue</div>
+            <div class="adm-kpi-val">${_fmt(d.revenue?.today||0)}</div>
+            <div class="adm-kpi-sub">${d.orders?.today||0} orders today</div>
+        </div>
+        <div class="adm-kpi">
+            <div class="adm-kpi-label">Total Users</div>
+            <div class="adm-kpi-val">${(d.users?.total||0).toLocaleString()}</div>
+            <div class="adm-kpi-sub">${d.users?.buyers||0} buyers · ${d.users?.sellers||0} sellers</div>
+        </div>
+        <div class="adm-kpi">
+            <div class="adm-kpi-label">Pending Products</div>
+            <div class="adm-kpi-val" style="color:${(d.products?.pending||0)>0?'#f59e0b':'#22c55e'}">${d.products?.pending||0}</div>
+            <div class="adm-kpi-sub">Awaiting your review</div>
+        </div>
+        <div class="adm-kpi">
+            <div class="adm-kpi-label">Monthly Revenue</div>
+            <div class="adm-kpi-val">${_fmt(d.revenue?.month||0)}</div>
+            <div class="adm-kpi-sub">Last 30 days</div>
+        </div>
+        <div class="adm-kpi">
+            <div class="adm-kpi-label">Pending Orders</div>
+            <div class="adm-kpi-val" style="color:${(d.orders?.pending||0)>0?'#f59e0b':'#22c55e'}">${d.orders?.pending||0}</div>
+            <div class="adm-kpi-sub">${d.orders?.total||0} total orders</div>
+        </div>
+    </div>
+
+    <!-- Revenue chart -->
+    <div class="adm-section">
+        <div class="adm-section-title">Revenue — Last 7 Days</div>
+        <div class="adm-chart">
+            ${byDay.map(x=>`<div class="adm-bar" style="height:${maxR>0?Math.max(4,Math.round((x.revenue/maxR)*100)):4}%" data-v="${_fmt(x.revenue)}"></div>`).join('')}
+        </div>
+        <div class="adm-chart-labels">${byDay.map(x=>`<div class="adm-chart-label">${x.day||x.date?.slice(5)||''}</div>`).join('')}</div>
+    </div>
+
+    ${_groupsHtml({products:d.products?.pending||0, orders:d.orders?.pending||0})}
+
+    <!-- Order breakdown -->
+    <div class="adm-section">
+        <div class="adm-section-title">Order Status Breakdown</div>
+        ${Object.entries(d.orders?.breakdown||{}).map(([s,c])=>{
+            const colors={pending:'yellow',confirmed:'blue',shipped:'purple',delivered:'green',cancelled:'red',refunded:'gray'};
+            return `<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f9fafb">
+                <span class="adm-badge ${colors[s]||'gray'}">${s}</span>
+                <div style="flex:1;background:#f3f4f6;border-radius:4px;height:6px;overflow:hidden"><div style="height:100%;background:#374151;width:${d.orders.total>0?Math.round((c/d.orders.total)*100):0}%;border-radius:4px"></div></div>
+                <span style="font-size:13px;font-weight:800;color:#111;min-width:30px;text-align:right">${c}</span>
+            </div>`;
+        }).join('') || '<div style="color:#9ca3af;font-size:13px;text-align:center;padding:12px">No order data</div>'}
+    </div>
+    `);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 2. PRODUCT MODERATION
+// ══════════════════════════════════════════════════════════════════════════════
+async function renderAdminProducts(container) {
+    if (!_isAdmin()) { container.innerHTML = _pageShell('Products', _noAccess()); return; }
+    container.innerHTML = _pageShell('Product Management', `<div style="padding:20px;text-align:center">⏳</div>`);
+
+    // FIX (DELETE/APPROVE/SUSPEND/REJECT KNOCK YOU BACK TO THE "PENDING" TAB):
+    // `filter` used to be a variable local to this render call, always
+    // initialized to 'pending', and every action handler below refreshed by
+    // calling window.__admNav('admin-products') — which re-invokes this
+    // whole function fresh, resetting filter to 'pending' every time. So
+    // deleting/approving/suspending/rejecting an item while looking at the
+    // Approved (or Rejected/Suspended) tab silently dumped you back onto
+    // Pending — which, combined with the admin/products filtering bug (see
+    // marketplace.controller.js's adminGetProducts), made it look like
+    // nothing had happened when you switched back to the tab you were on.
+    // Persisting the current filter on `window` and having the action
+    // handlers call window._admProductsLoad(currentFilter) directly (no
+    // navigation, no reset) keeps you on the tab you were actually looking
+    // at.
+    let filter = window.__admProductsFilter || 'pending';
+    async function load(f) {
+        filter = f;
+        window.__admProductsFilter = f;
+        const r = await _api('GET', `/marketplace/admin/products?approval_status=${f}&limit=30`);
+        const products = r?.data?.products || [];
+        const total = r?.data?.total || 0;
+
+        const statusMap = {pending:'yellow',approved:'green',rejected:'red',suspended:'gray'};
+        // FIX (Product Management showing raw JS as page text): the filter
+        // buttons used to embed load.toString() -- the ENTIRE function's
+        // source code, backticks and all -- directly inside onclick="...".
+        // The function body's own double quotes closed the onclick
+        // attribute immediately, so everything after that point in the
+        // function's source spilled out as literal, visible page content.
+        // Exposing `load` as a real global and calling it by reference is
+        // the correct way to make it reachable from an inline handler.
+        window._admProductsLoad = load;
+        container.innerHTML = _pageShell('Product Management', `
+        <div class="adm-search-bar">
+            ${['pending','approved','rejected','suspended'].map(s=>`<button class="adm-filter-btn ${filter===s?'active':''}" onclick="window._admProductsLoad('${s}')">${s.charAt(0).toUpperCase()+s.slice(1)}</button>`).join('')}
+        </div>
+        <div style="padding:10px 12px;font-size:12px;color:#6b7280">${total} products</div>
+        <div style="padding:0 12px">
+        ${products.length ? products.map(p => {
+            const img = p.image || (Array.isArray(p.images)?p.images[0]:'') || '';
+            return `<div class="adm-product-card">
+                ${img?`<img class="adm-product-card-img" src="${_esc(img)}" loading="lazy">`:`<div class="adm-product-card-img" style="display:flex;align-items:center;justify-content:center;font-size:40px">📦</div>`}
+                <div class="adm-product-card-body">
+                    <div class="adm-product-card-title">${_esc(p.title||'Untitled')}</div>
+                    <div class="adm-product-card-meta">
+                        ${_fmt(p.price)} · ${_esc(p.category||'')} · Submitted ${_date(p.submitted_at||p.created_at)}
+                        ${p.brand?` · <b>${_esc(p.brand)}</b>`:''}
+                    </div>
+                    ${p.description?`<div style="font-size:12px;color:#374151;line-height:1.5;margin-bottom:10px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${_esc(p.description)}</div>`:''}
+                    ${(p.metadata?.materials||[]).length?`<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px">${(p.metadata.materials).map(m=>`<span style="background:#f3f4f6;border-radius:12px;padding:2px 8px;font-size:10px;font-weight:600">${_esc(m)}</span>`).join('')}</div>`:''}
+                    <div class="adm-product-card-actions">
+                        ${filter==='pending'?`
+                        <button class="adm-btn adm-btn-success" onclick="window._admApprove('${p.id}')">✅ Approve</button>
+                        <button class="adm-btn adm-btn-danger" onclick="window._admRejectModal('${p.id}','${_esc(p.title||'')}')">❌ Reject</button>
+                        `:''}
+                        ${filter==='approved'?`<button class="adm-btn adm-btn-warning" onclick="window._admSuspendProduct('${p.id}')">⏸️ Suspend</button>`:''}
+                        ${filter==='suspended'?`<button class="adm-btn adm-btn-success" onclick="window._admApprove('${p.id}')">▶️ Restore</button>`:''}
+                        <button class="adm-btn adm-btn-danger" onclick="window._admDeleteProduct('${p.id}')">🗑️</button>
+                    </div>
+                </div>
+            </div>`;
+        }).join('') : `<div style="padding:40px;text-align:center;color:#9ca3af"><div style="font-size:40px;margin-bottom:10px">✅</div>No ${filter} products</div>`}
+        </div>`);
+    }
+    load('pending');
+}
+
+function _refreshAdminProducts() {
+    // Refresh the list in place, on whatever tab the admin is actually
+    // looking at, instead of window.__admNav('admin-products') — which
+    // re-renders the whole page fresh and always lands back on "Pending"
+    // (see the FIX comment on `filter` in renderAdminProducts above).
+    if (typeof window._admProductsLoad === 'function') {
+        window._admProductsLoad(window.__admProductsFilter || 'pending');
+    } else {
+        window.__admNav('admin-products'); // page not currently open — fall back
+    }
+}
+window._admApprove = async (id) => {
+    const r = await _api('POST', `/marketplace/admin/products/${id}/approve`);
+    if (r&&!r._error) { _toast('Product approved and live!','success','✅'); _refreshAdminProducts(); }
+    else _toast(r?._error||'Failed','error','❌');
+};
+window._admSuspendProduct = async (id) => {
+    if (!confirm('Suspend this product?')) return;
+    await _api('POST', `/marketplace/admin/products/${id}/suspend`);
+    _toast('Product suspended','info','⏸️'); _refreshAdminProducts();
+};
+window._admDeleteProduct = async (id) => {
+    if (!confirm('Permanently remove this product?')) return;
+    await _api('DELETE', `/marketplace/admin/products/${id}`);
+    _toast('Product removed','info','🗑️'); _refreshAdminProducts();
+};
+window._admRejectModal = function(id, title) {
+    document.getElementById('admRejectModal')?.remove();
+    const ov = document.createElement('div'); ov.id='admRejectModal'; ov.className='adm-modal-overlay';
+    ov.innerHTML = `<div class="adm-modal">
+        <div class="adm-modal-title">❌ Reject: ${_esc(title)}</div>
+        <div style="font-size:13px;color:#6b7280;margin-bottom:10px">Give the seller a clear reason so they can improve their listing:</div>
+        <textarea id="admRejectReason" placeholder="e.g., Images are blurry. Please upload clear product photos with good lighting and white background."></textarea>
+        <div style="display:flex;gap:8px;margin-top:6px">
+            <button class="adm-btn adm-btn-danger adm-btn-full" onclick="window._admReject('${id}')">Confirm Rejection</button>
+            <button class="adm-btn adm-btn-secondary adm-btn-full" onclick="document.getElementById('admRejectModal')?.remove()">Cancel</button>
+        </div>
+    </div>`;
+    document.body.appendChild(ov);
+};
+window._admReject = async (id) => {
+    const reason = document.getElementById('admRejectReason')?.value?.trim() || 'Does not meet marketplace standards';
+    document.getElementById('admRejectModal')?.remove();
+    const r = await _api('POST', `/marketplace/admin/products/${id}/reject`, { reason });
+    if (r&&!r._error) { _toast('Product rejected. Seller notified.','info','❌'); _refreshAdminProducts(); }
+    else _toast(r?._error||'Failed','error','❌');
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 3. SELLER MANAGEMENT
+// ══════════════════════════════════════════════════════════════════════════════
+async function renderAdminSellers(container) {
+    if (!_isAdmin()) { container.innerHTML = _pageShell('Sellers', _noAccess()); return; }
+    const r = await _api('GET', '/marketplace/admin/sellers?limit=50');
+    const sellers = r?.data?.sellers || [];
+
+    container.innerHTML = _pageShell('Seller Management', `
+    <div class="adm-search-bar">
+        <input class="adm-search-input" placeholder="Search sellers…" oninput="window._admSearchSellers(this.value)">
+    </div>
+    <div style="padding:8px 12px;font-size:12px;color:#6b7280">${r?.data?.total||sellers.length} sellers</div>
+    <div id="admSellersList" style="padding:0 12px">
+    ${sellers.map(s => `<div class="adm-row">
+        <div class="adm-row-placeholder">🏪</div>
+        <div style="flex:1;min-width:0">
+            <div class="adm-row-title">${_esc(s.name||s.email||'Seller')}</div>
+            <div class="adm-row-sub">${_esc(s.email||'')} · Joined ${_date(s.joined)}</div>
+            <span class="adm-badge ${s.kyc_status==='approved'?'green':s.kyc_status==='pending'?'yellow':'gray'}">${s.kyc_status||'unverified'}</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
+            ${s.kyc_status!=='approved'?`<button class="adm-btn adm-btn-success" onclick="window._admVerifySeller('${s.id}',true)">Verify</button>`:''}
+            <button class="adm-btn adm-btn-danger" onclick="window._admBanSeller('${s.id}')">Ban</button>
+        </div>
+    </div>`).join('') || '<div style="padding:30px;text-align:center;color:#9ca3af">No sellers found</div>'}
+    </div>`);
+}
+
+window._admVerifySeller = async (id, approved) => {
+    const reason = approved ? '' : (prompt('Rejection reason:') || '');
+    const r = await _api('POST', `/marketplace/admin/sellers/${id}/verify`, { approved, reason });
+    if (r&&!r._error) { _toast(approved?'Seller verified!':'Seller rejected','success',approved?'✅':'❌'); window.__admNav('admin-sellers'); }
+};
+window._admBanSeller = async (id) => {
+    if (!confirm('Ban this seller? Their products will be suspended.')) return;
+    await _api('POST', `/marketplace/admin/sellers/${id}/ban`);
+    _toast('Seller banned','info','🚫'); window.__admNav('admin-sellers');
+};
+window._admSearchSellers = async (q) => {
+    clearTimeout(window._admSellerSearchTimer);
+    window._admSellerSearchTimer = setTimeout(async () => {
+        const r = await _api('GET', `/marketplace/admin/sellers?q=${encodeURIComponent(q)}&limit=30`);
+        const sellers = r?.data?.sellers || [];
+        const list = document.getElementById('admSellersList');
+        if (list) list.innerHTML = sellers.map(s=>`<div class="adm-row"><div class="adm-row-placeholder">🏪</div><div style="flex:1;min-width:0"><div class="adm-row-title">${_esc(s.name||s.email)}</div><div class="adm-row-sub">${_esc(s.email)} · ${_date(s.joined)}</div><span class="adm-badge ${s.kyc_status==='approved'?'green':'yellow'}">${s.kyc_status||'unverified'}</span></div><button class="adm-btn adm-btn-danger" onclick="window._admBanSeller('${s.id}')">Ban</button></div>`).join('') || '<div style="padding:20px;text-align:center;color:#9ca3af">No results</div>';
+    }, 400);
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 4. BUYER MANAGEMENT
+// ══════════════════════════════════════════════════════════════════════════════
+async function renderAdminBuyers(container) {
+    if (!_isAdmin()) { container.innerHTML = _pageShell('Buyers', _noAccess()); return; }
+    const r = await _api('GET', '/marketplace/admin/buyers?limit=50');
+    const buyers = r?.data?.buyers || [];
+
+    container.innerHTML = _pageShell('Buyer Management', `
+    <div class="adm-search-bar">
+        <input class="adm-search-input" placeholder="Search buyers…" oninput="window._admSearchBuyers(this.value)">
+    </div>
+    <div id="admBuyersList" style="padding:0 12px;margin-top:8px">
+    ${buyers.map(b => `<div class="adm-row">
+        <div class="adm-row-placeholder">👤</div>
+        <div style="flex:1;min-width:0">
+            <div class="adm-row-title">${_esc(b.name||b.email)}</div>
+            <div class="adm-row-sub">${b.total_orders} orders · ${_fmt(b.total_spent)} spent · <span style="text-transform:capitalize">${b.loyalty_tier}</span></div>
+            <div class="adm-row-sub">Wallet: ${_fmt(b.wallet_balance)} · ${b.loyalty_points} pts</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
+            <button class="adm-btn adm-btn-success" onclick="window._admCreditBuyer('${b.id}')">💳 Credit</button>
+            <button class="adm-btn adm-btn-danger" onclick="window._admSuspendBuyer('${b.id}')">Suspend</button>
+        </div>
+    </div>`).join('') || '<div style="padding:30px;text-align:center;color:#9ca3af">No buyers found</div>'}
+    </div>`);
+}
+
+window._admSearchBuyers = async (q) => {
+    clearTimeout(window._admBuyerTimer);
+    window._admBuyerTimer = setTimeout(async () => {
+        const r = await _api('GET', `/marketplace/admin/buyers?q=${encodeURIComponent(q)}&limit=30`);
+        const buyers = r?.data?.buyers || [];
+        const list = document.getElementById('admBuyersList');
+        if (list) list.innerHTML = buyers.map(b=>`<div class="adm-row"><div class="adm-row-placeholder">👤</div><div style="flex:1;min-width:0"><div class="adm-row-title">${_esc(b.name||b.email)}</div><div class="adm-row-sub">${b.total_orders} orders · ${_fmt(b.total_spent)}</div></div><button class="adm-btn adm-btn-success" onclick="window._admCreditBuyer('${b.id}')">💳</button></div>`).join('') || '<div style="padding:20px;text-align:center;color:#9ca3af">No results</div>';
+    }, 400);
+};
+window._admSuspendBuyer = async (id) => {
+    if (!confirm('Suspend this buyer account?')) return;
+    await _api('POST', `/marketplace/admin/buyers/${id}/suspend`);
+    _toast('Buyer suspended','info','🚫'); window.__admNav('admin-buyers');
+};
+window._admCreditBuyer = async (id) => {
+    const amount = prompt('Credit wallet amount (KES):');
+    if (!amount || isNaN(amount)) return;
+    const reason = prompt('Reason (optional):') || 'Admin credit';
+    const r = await _api('POST', `/marketplace/admin/buyers/${id}/credit-wallet`, { amount:parseFloat(amount), reason });
+    if (r&&!r._error) _toast(`KES ${amount} credited to wallet!`,'success','💳');
+    else _toast(r?._error||'Failed','error','❌');
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 5. ORDER MANAGEMENT
+// ══════════════════════════════════════════════════════════════════════════════
+async function renderAdminOrders(container) {
+    if (!_isAdmin()) { container.innerHTML = _pageShell('Orders', _noAccess()); return; }
+    const r = await _api('GET', '/marketplace/admin/orders?limit=50');
+    const orders = r?.data?.orders || [];
+
+    const statusColor = {pending:'yellow',confirmed:'blue',shipped:'purple',delivered:'green',cancelled:'red',refunded:'gray',out_for_delivery:'purple'};
+    container.innerHTML = _pageShell('Order Management', `
+    <div class="adm-search-bar">
+        ${['all','pending','shipped','delivered','cancelled'].map(s=>`<button class="adm-filter-btn" onclick="window._admLoadOrders('${s}')">${s}</button>`).join('')}
+    </div>
+    <div id="admOrdersList" style="padding:0 12px;margin-top:8px">
+    ${orders.map(o => {
+        const items = o.metadata?.items || o.items || [];
+        return `<div style="background:#f9fafb;border-radius:12px;padding:12px;margin-bottom:8px">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+                <div>
+                    <div style="font-size:13px;font-weight:800">#${String(o.id||'').slice(-9)}</div>
+                    <div style="font-size:11px;color:#6b7280;margin-top:2px">${_time(o.createdAt||o.created_at)}</div>
+                </div>
+                <div style="text-align:right">
+                    <div style="font-size:14px;font-weight:900;color:#f57224">${_fmt(o.totalPrice||o.total_price||0)}</div>
+                    <span class="adm-badge ${statusColor[o.status]||'gray'}">${o.status}</span>
+                </div>
+            </div>
+            <div style="font-size:12px;color:#374151;margin-bottom:8px">${items.length} item${items.length!==1?'s':''} · Pay: ${o.paymentMethod||o.payment_method||'—'}</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <button class="adm-btn adm-btn-secondary" onclick="window._admOverrideOrder('${o.id}')">⚙️ Override Status</button>
+                ${o.status==='pending'?`<button class="adm-btn adm-btn-danger" onclick="window._admCancelOrder('${o.id}')">Cancel</button>`:''}
+            </div>
+        </div>`;
+    }).join('') || '<div style="padding:30px;text-align:center;color:#9ca3af">No orders found</div>'}
+    </div>`);
+}
+
+window._admLoadOrders = async (status) => {
+    const endpoint = status==='all'?'/marketplace/admin/orders?limit=50':`/marketplace/admin/orders?status=${status}&limit=50`;
+    const r = await _api('GET', endpoint);
+    const orders = r?.data?.orders || [];
+    const list = document.getElementById('admOrdersList');
+    if (!list) return;
+    const statusColor = {pending:'yellow',confirmed:'blue',shipped:'purple',delivered:'green',cancelled:'red',refunded:'gray'};
+    list.innerHTML = orders.map(o=>`<div style="background:#f9fafb;border-radius:12px;padding:12px;margin-bottom:8px"><div style="display:flex;justify-content:space-between"><div style="font-size:13px;font-weight:800">#${String(o.id||'').slice(-9)}</div><div><span style="font-size:14px;font-weight:900;color:#f57224">${_fmt(o.totalPrice||0)}</span><span class="adm-badge ${statusColor[o.status]||'gray'}" style="margin-left:8px">${o.status}</span></div></div><div style="margin-top:8px;display:flex;gap:6px"><button class="adm-btn adm-btn-secondary" onclick="window._admOverrideOrder('${o.id}')">Override</button></div></div>`).join('') || '<div style="padding:20px;text-align:center;color:#9ca3af">No orders</div>';
+};
+window._admOverrideOrder = async (id) => {
+    const status = prompt('New status (pending/confirmed/shipped/out_for_delivery/delivered/cancelled/refunded):');
+    if (!status) return;
+    const note = prompt('Admin note (optional):') || '';
+    const r = await _api('PUT', `/marketplace/admin/orders/${id}/status`, { status, note });
+    if (r&&!r._error) { _toast(`Order status → ${status}`,'success','✅'); window.__admNav('admin-orders'); }
+    else _toast(r?._error||'Failed','error','❌');
+};
+window._admCancelOrder = async (id) => {
+    if (!confirm('Cancel this order?')) return;
+    await _api('PUT', `/marketplace/admin/orders/${id}/status`, { status:'cancelled', note:'Admin cancelled' });
+    _toast('Order cancelled','info','❌'); window.__admNav('admin-orders');
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 6. RETURNS & REFUNDS
+// ══════════════════════════════════════════════════════════════════════════════
+async function renderAdminReturns(container) {
+    if (!_isAdmin()) { container.innerHTML = _pageShell('Returns', _noAccess()); return; }
+    const r = await _api('GET', '/marketplace/admin/returns');
+    const returns = r?.data?.returns || [];
+
+    container.innerHTML = _pageShell('Returns & Refunds', `
+    <div style="padding:12px">
+    ${returns.length ? returns.map(ret=>`<div style="background:#fff;border-radius:12px;padding:14px;margin-bottom:10px;box-shadow:0 2px 8px rgba(0,0,0,.06)">
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+            <div style="font-size:13px;font-weight:800">Order #${String(ret.order_id||'').slice(-8)}</div>
+            <span class="adm-badge ${ret.status==='pending'?'yellow':ret.status==='refunded'?'green':'red'}">${ret.status}</span>
+        </div>
+        <div style="font-size:12px;color:#374151;margin-bottom:4px"><b>Reason:</b> ${_esc(ret.reason||'—')}</div>
+        <div style="font-size:12px;color:#6b7280;margin-bottom:10px">Amount: ${_fmt(ret.total)} · ${_date(ret.requested_at)}</div>
+        ${ret.status==='pending'?`<div style="display:flex;gap:8px">
+            <button class="adm-btn adm-btn-success" onclick="window._admApproveRefund('${ret.order_id}')">✅ Approve Refund</button>
+            <button class="adm-btn adm-btn-danger" onclick="window._admRejectRefund('${ret.order_id}')">❌ Reject</button>
+        </div>`:''}
+    </div>`).join('') : '<div style="padding:40px;text-align:center;color:#9ca3af"><div style="font-size:40px;margin-bottom:10px">✅</div>No return requests</div>'}
+    </div>`);
+}
+
+window._admApproveRefund = async (id) => {
+    const r = await _api('POST', `/marketplace/admin/returns/${id}/process`, { approve:true });
+    if (r&&!r._error) { _toast('Refund approved — buyer wallet credited','success','✅'); window.__admNav('admin-returns'); }
+    else _toast(r?._error||'Failed','error','❌');
+};
+window._admRejectRefund = async (id) => {
+    const reason = prompt('Reason for rejection:') || '';
+    const r = await _api('POST', `/marketplace/admin/returns/${id}/process`, { approve:false, reason });
+    if (r&&!r._error) { _toast('Refund rejected','info','❌'); window.__admNav('admin-returns'); }
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 7. PAYOUT MANAGEMENT
+// ══════════════════════════════════════════════════════════════════════════════
+async function renderAdminPayouts(container) {
+    if (!_isAdmin()) { container.innerHTML = _pageShell('Payouts', _noAccess()); return; }
+    const r = await _api('GET', '/marketplace/admin/payouts');
+    const payouts = r?.data?.payouts || [];
+    const pending = payouts.filter(p=>p.status==='pending');
+
+    container.innerHTML = _pageShell('Payout Management', `
+    <div style="background:linear-gradient(135deg,#111,#374151);color:#fff;margin:12px;border-radius:14px;padding:16px">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;opacity:.7;margin-bottom:4px">Pending Payouts</div>
+        <div style="font-size:28px;font-weight:900">${pending.length} requests</div>
+        <div style="font-size:13px;opacity:.8;margin-top:2px">Total: ${_fmt(pending.reduce((s,p)=>s+(p.amount||0),0))}</div>
+    </div>
+    <div style="padding:0 12px">
+    ${payouts.map(p=>`<div class="adm-payout-row">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+            <div>
+                <div style="font-size:13px;font-weight:800">${_esc(p.seller_name||'Seller')}</div>
+                <div style="font-size:11px;color:#6b7280">${_esc(p.method?.toUpperCase()||'MPESA')} · ${_date(p.requested_at)}</div>
+            </div>
+            <div style="text-align:right">
+                <div style="font-size:15px;font-weight:900;color:#f57224">${_fmt(p.amount||0)}</div>
+                <span class="adm-badge ${p.status==='completed'?'green':p.status==='rejected'?'red':'yellow'}">${p.status}</span>
+            </div>
+        </div>
+        ${p.status==='pending'?`<div style="display:flex;gap:8px;margin-top:8px">
+            <button class="adm-btn adm-btn-success" onclick="window._admPayoutApprove('${p.seller_id}','${p.id}')">✅ Release</button>
+            <button class="adm-btn adm-btn-danger" onclick="window._admPayoutReject('${p.seller_id}','${p.id}')">❌ Reject</button>
+        </div>`:''}
+    </div>`).join('') || '<div style="padding:30px;text-align:center;color:#9ca3af">No payout requests</div>'}
+    </div>`);
+}
+
+window._admPayoutApprove = async (sellerId, payoutId) => {
+    const r = await _api('POST', '/marketplace/admin/payouts/process', { seller_id:sellerId, payout_id:payoutId, approve:true });
+    if (r&&!r._error) { _toast('Payout released!','success','💸'); window.__admNav('admin-payouts'); }
+    else _toast(r?._error||'Failed','error','❌');
+};
+window._admPayoutReject = async (sellerId, payoutId) => {
+    const note = prompt('Reason for rejection:') || '';
+    const r = await _api('POST', '/marketplace/admin/payouts/process', { seller_id:sellerId, payout_id:payoutId, approve:false, note });
+    if (r&&!r._error) { _toast('Payout rejected','info','❌'); window.__admNav('admin-payouts'); }
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 8. COUPON MANAGEMENT
+// ══════════════════════════════════════════════════════════════════════════════
+async function renderAdminCoupons(container) {
+    if (!_isAdmin()) { container.innerHTML = _pageShell('Coupons', _noAccess()); return; }
+    const r = await _api('GET', '/marketplace/admin/coupons');
+    const coupons = r?.data?.coupons || [];
+    const typeColors={percent:'#3b82f6',fixed:'#8b5cf6',free_shipping:'#22c55e',cashback:'#f59e0b'};
+
+    container.innerHTML = _pageShell('Coupon Management', `
+    <div style="padding:12px">
+        <button class="adm-btn adm-btn-primary adm-btn-full" onclick="window._admCreateCouponModal()">+ Create Coupon</button>
+    </div>
+    <div style="padding:0 12px">
+    ${coupons.map(c=>`<div style="background:#fff;border-radius:14px;margin-bottom:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.06);display:flex">
+        <div style="width:8px;background:${typeColors[c.type]||'#9ca3af'};flex-shrink:0"></div>
+        <div style="flex:1;padding:12px 14px">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start">
+                <div>
+                    <div style="font-size:16px;font-weight:900;letter-spacing:1px">${_esc(c.code||'')}</div>
+                    <div style="font-size:12px;color:#6b7280;margin-top:2px">${_esc(c.description||'')}</div>
+                    <div style="font-size:11px;color:#9ca3af;margin-top:4px">Min: ${_fmt(c.minOrderAmt||0)} · Used: ${c.usageCount||0}/${c.usageLimit||'∞'}</div>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+                    <span class="adm-badge ${c.isActive?'green':'gray'}">${c.isActive?'Active':'Inactive'}</span>
+                    <div style="display:flex;gap:4px;margin-top:4px">
+                        <button class="adm-btn adm-btn-warning" style="padding:4px 8px;font-size:10px" onclick="window._admToggleCoupon('${c.id||c.code}')">Toggle</button>
+                        <button class="adm-btn adm-btn-danger" style="padding:4px 8px;font-size:10px" onclick="window._admDeleteCoupon('${c.id||c.code}')">Del</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>`).join('') || '<div style="padding:30px;text-align:center;color:#9ca3af">No coupons yet</div>'}
+    </div>`);
+}
+
+window._admCreateCouponModal = function() {
+    document.getElementById('admCouponModal')?.remove();
+    const ov = document.createElement('div'); ov.id='admCouponModal'; ov.className='adm-modal-overlay';
+    ov.innerHTML = `<div class="adm-modal">
+        <div class="adm-modal-title">🎟️ Create Coupon</div>
+        <input id="admCCode" placeholder="Code (e.g., SAVE10) *" style="text-transform:uppercase">
+        <select id="admCType"><option value="percent">Percentage (%)</option><option value="fixed">Fixed Amount (KES)</option><option value="free_shipping">Free Shipping</option><option value="cashback">Cashback</option></select>
+        <input id="admCValue" type="number" placeholder="Value (e.g., 10 for 10%)" min="0">
+        <input id="admCMinOrder" type="number" placeholder="Min order (KES)" min="0">
+        <input id="admCLimit" type="number" placeholder="Usage limit (leave blank = unlimited)">
+        <input id="admCExpiry" type="date" placeholder="Expiry date">
+        <input id="admCDesc" placeholder="Description (optional)">
+        <div style="display:flex;gap:8px;margin-top:6px">
+            <button class="adm-btn adm-btn-primary adm-btn-full" onclick="window._admSaveCoupon()">Create Coupon</button>
+            <button class="adm-btn adm-btn-secondary adm-btn-full" onclick="document.getElementById('admCouponModal')?.remove()">Cancel</button>
+        </div>
+    </div>`;
+    document.body.appendChild(ov);
+};
+window._admSaveCoupon = async () => {
+    const code = document.getElementById('admCCode')?.value?.trim().toUpperCase();
+    const type = document.getElementById('admCType')?.value;
+    const value = parseFloat(document.getElementById('admCValue')?.value||0);
+    if (!code || !value) { _toast('Code and value required','error','⚠️'); return; }
+    const r = await _api('POST', '/marketplace/admin/coupons', { code, type, value, min_order_amt:parseFloat(document.getElementById('admCMinOrder')?.value||0), usage_limit:parseInt(document.getElementById('admCLimit')?.value||9999), expires_at:document.getElementById('admCExpiry')?.value||null, description:document.getElementById('admCDesc')?.value?.trim()||'' });
+    document.getElementById('admCouponModal')?.remove();
+    if (r&&!r._error) { _toast('Coupon created!','success','🎟️'); window.__admNav('admin-coupons'); }
+    else _toast(r?._error||'Failed','error','❌');
+};
+window._admToggleCoupon = async (id) => { await _api('PATCH',`/marketplace/admin/coupons/${id}/toggle`); window.__admNav('admin-coupons'); };
+window._admDeleteCoupon = async (id) => { if (!confirm('Delete coupon?')) return; await _api('DELETE',`/marketplace/admin/coupons/${id}`); window.__admNav('admin-coupons'); };
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 9. FLASH SALE CONTROL
+// ══════════════════════════════════════════════════════════════════════════════
+async function renderAdminFlash(container) {
+    if (!_isAdmin()) { container.innerHTML = _pageShell('Flash Sales', _noAccess()); return; }
+    const r = await _api('GET', '/marketplace/admin/flash-sales');
+    const sales = r?.data?.flash_sales || [];
+    container.innerHTML = _pageShell('Flash Sale Control', `
+    <div style="padding:12px">
+        <button class="adm-btn adm-btn-primary adm-btn-full" onclick="window._admCreateFlashModal()">+ Create Flash Sale</button>
+    </div>
+    <div style="padding:0 12px">
+    ${sales.map(p=>`<div style="background:#fff;border-radius:12px;padding:14px;margin-bottom:10px;box-shadow:0 2px 8px rgba(0,0,0,.06)">
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">
+            ${p.image?`<img src="${_esc(p.image)}" style="width:48px;height:48px;border-radius:8px;object-fit:cover">`:`<div style="width:48px;height:48px;border-radius:8px;background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:20px">📦</div>`}
+            <div style="flex:1;min-width:0">
+                <div style="font-size:13px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(p.title||'')}</div>
+                <div style="font-size:12px;color:#6b7280">${_fmt(p.flash_price)} <span style="text-decoration:line-through;color:#9ca3af">${_fmt(p.price)}</span></div>
+                <div style="font-size:11px;color:#9ca3af">Ends: ${_time(p.flash_ends_at)}</div>
+            </div>
+            <span class="adm-badge ${p.active?'live':'gray'}">${p.active?'LIVE':'Ended'}</span>
+        </div>
+        ${p.active?`<button class="adm-btn adm-btn-danger" onclick="window._admEndFlashSale('${p.id}')">⏹ End Sale</button>`:''}
+    </div>`).join('') || '<div style="padding:30px;text-align:center;color:#9ca3af">No flash sales</div>'}
+    </div>`);
+}
+
+window._admCreateFlashModal = function() {
+    document.getElementById('admFlashModal')?.remove();
+    const ov = document.createElement('div'); ov.id='admFlashModal'; ov.className='adm-modal-overlay';
+    ov.innerHTML = `<div class="adm-modal">
+        <div class="adm-modal-title">⚡ Create Flash Sale</div>
+        <input id="admFProduct" placeholder="Product ID *">
+        <input id="admFPrice" type="number" placeholder="Flash sale price (KES) *" min="0">
+        <input id="admFEnds" type="datetime-local" placeholder="Ends at *">
+        <input id="admFStock" type="number" placeholder="Flash stock limit (optional)">
+        <div style="display:flex;gap:8px;margin-top:6px">
+            <button class="adm-btn adm-btn-primary adm-btn-full" onclick="window._admSaveFlash()">Launch Sale</button>
+            <button class="adm-btn adm-btn-secondary adm-btn-full" onclick="document.getElementById('admFlashModal')?.remove()">Cancel</button>
+        </div>
+    </div>`;
+    document.body.appendChild(ov);
+};
+window._admSaveFlash = async () => {
+    const pid=document.getElementById('admFProduct')?.value?.trim(), price=document.getElementById('admFPrice')?.value, ends=document.getElementById('admFEnds')?.value;
+    if (!pid||!price||!ends){_toast('Fill required fields','error','⚠️');return;}
+    const r=await _api('POST','/marketplace/admin/flash-sales',{product_id:pid,flash_price:parseFloat(price),ends_at:new Date(ends).toISOString(),flash_stock:parseInt(document.getElementById('admFStock')?.value||0)||null});
+    document.getElementById('admFlashModal')?.remove();
+    if(r&&!r._error){_toast('Flash sale launched! ⚡','success','⚡');window.__admNav('admin-flash');}
+    else _toast(r?._error||'Failed','error','❌');
+};
+window._admEndFlashSale=async(id)=>{if(!confirm('End this flash sale?'))return;await _api('DELETE',`/marketplace/admin/flash-sales/${id}`);_toast('Flash sale ended','info','⏹');window.__admNav('admin-flash');};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 10–15. REMAINING ADMIN PAGES (Reviews, Analytics, Tickets, Notify, Settings, Audit)
+// ══════════════════════════════════════════════════════════════════════════════
+async function renderAdminReviews(container) {
+    if(!_isAdmin()){container.innerHTML=_pageShell('Reviews',_noAccess());return;}
+    const r=await _api('GET','/marketplace/admin/reviews?limit=30');
+    const reviews=r?.data?.reviews||[];
+    container.innerHTML=_pageShell('Review Moderation',`<div style="padding:12px">
+    ${reviews.map(rv=>`<div style="background:#fff;border-radius:12px;padding:14px;margin-bottom:8px;box-shadow:0 2px 8px rgba(0,0,0,.06)">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+            <div><div style="font-size:12px;font-weight:700">${'⭐'.repeat(Math.min(5,rv.rating||0))}</div><div style="font-size:11px;color:#6b7280;margin-top:2px">${_date(rv.createdAt||rv.created_at)}</div></div>
+            <div style="display:flex;gap:4px">
+                <button class="adm-btn adm-btn-warning" style="padding:4px 8px;font-size:10px" onclick="window._admHideReview('${rv.id}')">Hide</button>
+                <button class="adm-btn adm-btn-danger" style="padding:4px 8px;font-size:10px" onclick="window._admDelReview('${rv.id}')">Del</button>
+            </div>
+        </div>
+        <div style="font-size:13px;color:#374151">${_esc(rv.comment||rv.text||'—')}</div>
+    </div>`).join('')||'<div style="padding:30px;text-align:center;color:#9ca3af">No reviews</div>'}
+    </div>`);
+}
+window._admHideReview=async(id)=>{await _api('POST',`/marketplace/admin/reviews/${id}/hide`);_toast('Review hidden','info','👁');window.__admNav('admin-reviews');};
+window._admDelReview=async(id)=>{if(!confirm('Delete review?'))return;await _api('DELETE',`/marketplace/admin/reviews/${id}`);_toast('Review deleted','info','🗑️');window.__admNav('admin-reviews');};
+
+async function renderAdminAnalytics(container) {
+    if(!_isAdmin()){container.innerHTML=_pageShell('Analytics',_noAccess());return;}
+    const r=await _api('GET','/marketplace/admin/analytics?period=30d');
+    if(r?._error){container.innerHTML=_pageShell('Analytics Center',`<div style="margin:12px;background:#fee2e2;border-radius:10px;padding:14px;font-size:13px;color:#991b1b">⚠️ ${_esc(r._error)}</div>`);return;}
+    const d=r?.data||{revenue_by_day:[],top_products:[],top_categories:[],total_revenue:0,total_orders:0,new_users:0};
+    const revDays=(d.revenue_by_day||[]);
+    const maxR=revDays.length ? Math.max(...revDays.map(x=>x.revenue||0), 1) : 1;
+    container.innerHTML=_pageShell('Analytics Center',`
+    <div class="adm-kpi-grid">
+        <div class="adm-kpi accent"><div class="adm-kpi-label">30-Day Revenue</div><div class="adm-kpi-val">${_fmt(d.total_revenue||0)}</div></div>
+        <div class="adm-kpi accent"><div class="adm-kpi-label">Orders</div><div class="adm-kpi-val">${d.total_orders||0}</div></div>
+        <div class="adm-kpi"><div class="adm-kpi-label">New Users</div><div class="adm-kpi-val">${d.new_users||0}</div></div>
+        <div class="adm-kpi"><div class="adm-kpi-label">Platform Fee (10%)</div><div class="adm-kpi-val">${_fmt((d.total_revenue||0)*0.1)}</div></div>
+    </div>
+    <div class="adm-section">
+        <div class="adm-section-title">Revenue — 30 Days</div>
+        <div class="adm-chart">${revDays.slice(-14).map(x=>`<div class="adm-bar" style="height:${maxR>0?Math.max(3,Math.round((x.revenue/maxR)*100)):3}%" data-v="${_fmt(x.revenue)}"></div>`).join('')}</div>
+        <div class="adm-chart-labels">${revDays.slice(-14).map(x=>`<div class="adm-chart-label">${x.date?.slice(5)||''}</div>`).join('')}</div>
+    </div>
+    <div class="adm-section">
+        <div class="adm-section-title">Top Products</div>
+        ${(d.top_products||[]).map((p,i)=>`<div class="adm-row"><div style="width:24px;font-weight:900;color:#374151;text-align:center">#${i+1}</div><div style="flex:1;min-width:0"><div class="adm-row-title">${_esc(p.title||'')}</div><div class="adm-row-sub">${p.views||0} views · ${p.sold||0} sold · ${_esc(p.category||'')}</div></div><div class="adm-row-price">${_fmt(p.revenue||0)}</div></div>`).join('')||'<div style="text-align:center;color:#9ca3af;font-size:13px;padding:12px">No data</div>'}
+    </div>
+    <div class="adm-section">
+        <div class="adm-section-title">Top Categories</div>
+        ${(d.top_categories||[]).map((c,i)=>`<div class="adm-row"><div style="width:24px;font-weight:900;text-align:center">#${i+1}</div><div style="flex:1;font-size:13px;font-weight:700;text-transform:capitalize">${_esc(c.category||'')}</div><div style="font-weight:800">${c.count} products</div></div>`).join('')||'<div style="text-align:center;color:#9ca3af;font-size:13px;padding:12px">No data</div>'}
+    </div>`);
+}
+
+async function renderAdminTickets(container) {
+    if(!_isAdmin()){container.innerHTML=_pageShell('Support',_noAccess());return;}
+    const r=await _api('GET','/marketplace/admin/tickets');
+    const tickets=r?.data?.tickets||[];
+    container.innerHTML=_pageShell('Support Tickets',`<div style="padding:12px">
+    ${tickets.map(t=>`<div style="background:#fff;border-radius:12px;padding:14px;margin-bottom:8px;box-shadow:0 2px 8px rgba(0,0,0,.06)">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+            <div style="font-size:13px;font-weight:800">${_esc(t.subject||'—')}</div>
+            <span class="adm-badge ${t.status==='open'?'yellow':t.status==='resolved'?'green':'gray'}">${t.status}</span>
+        </div>
+        <div style="font-size:12px;color:#374151;margin-bottom:6px">${_esc(t.message||'—')}</div>
+        <div style="font-size:11px;color:#9ca3af;margin-bottom:8px">${_date(t.created_at)}</div>
+        ${t.status==='open'?`<button class="adm-btn adm-btn-success" onclick="window._admResolveTicket('${t.id}')">✅ Resolve</button>`:''}
+    </div>`).join('')||'<div style="padding:30px;text-align:center;color:#9ca3af">No tickets</div>'}
+    </div>`);
+}
+window._admResolveTicket=async(id)=>{const res=prompt('Resolution note:');await _api('POST',`/marketplace/admin/tickets/${id}/resolve`,{resolution:res||'Resolved by admin'});_toast('Ticket resolved','success','✅');window.__admNav('admin-tickets');};
+
+async function renderAdminNotify(container) {
+    if(!_isAdmin()){container.innerHTML=_pageShell('Notifications',_noAccess());return;}
+    container.innerHTML=_pageShell('Send Notification',`<div style="padding:16px">
+    <div class="adm-section">
+        <div class="adm-section-title">Broadcast Notification</div>
+        <div style="margin-bottom:10px"><div style="font-size:12px;font-weight:700;margin-bottom:4px">Title *</div><input id="admNTitle" style="width:100%;border:1.5px solid #e5e7eb;border-radius:10px;padding:10px;font-size:14px;box-sizing:border-box;outline:none" placeholder="e.g., Flash Sale Starting Now!"></div>
+        <div style="margin-bottom:10px"><div style="font-size:12px;font-weight:700;margin-bottom:4px">Message *</div><textarea id="admNMsg" style="width:100%;border:1.5px solid #e5e7eb;border-radius:10px;padding:10px;font-size:14px;box-sizing:border-box;outline:none;height:80px;resize:none" placeholder="Your message…"></textarea></div>
+        <div style="margin-bottom:10px"><div style="font-size:12px;font-weight:700;margin-bottom:4px">Type</div><select id="admNType" style="width:100%;border:1.5px solid #e5e7eb;border-radius:10px;padding:10px;font-size:14px;box-sizing:border-box;outline:none"><option value="announcement">📢 Announcement</option><option value="promotion">🏷️ Promotion</option><option value="flash_sale">⚡ Flash Sale</option><option value="maintenance">🔧 Maintenance</option></select></div>
+        <div style="margin-bottom:14px"><div style="font-size:12px;font-weight:700;margin-bottom:4px">Target</div><select id="admNTarget" style="width:100%;border:1.5px solid #e5e7eb;border-radius:10px;padding:10px;font-size:14px;box-sizing:border-box;outline:none"><option value="all">Everyone</option><option value="buyers">Buyers only</option><option value="sellers">Sellers only</option></select></div>
+        <button class="adm-btn adm-btn-primary adm-btn-full" onclick="window._admSendNotif()">🔔 Send Notification</button>
+    </div>
+    </div>`);
+}
+window._admSendNotif=async()=>{
+    const title=document.getElementById('admNTitle')?.value?.trim(),msg=document.getElementById('admNMsg')?.value?.trim();
+    if(!title||!msg){_toast('Title and message required','error','⚠️');return;}
+    const r=await _api('POST','/marketplace/admin/notifications/send',{title,message:msg,type:document.getElementById('admNType')?.value,target:document.getElementById('admNTarget')?.value});
+    if(r&&!r._error){_toast('Notification sent!','success','🔔');}else _toast(r?._error||'Failed','error','❌');
+};
+
+async function renderAdminSettings(container) {
+    if(!_isAdmin()){container.innerHTML=_pageShell('Settings',_noAccess());return;}
+    const r=await _api('GET','/marketplace/admin/settings');
+    const s=r?.data?.settings||{};
+    container.innerHTML=_pageShell('Platform Settings',`<div style="padding:0 12px">
+    <div class="adm-section">
+        <div class="adm-section-title">Marketplace Config</div>
+        ${[
+            ['Platform Name',s.platform_name||'Knecta Market'],
+            ['Commission (%)',s.commission_pct||10],
+            ['Min Payout (KES)',s.min_payout_kes||100],
+            ['Default Currency',s.default_currency||'KES'],
+            ['Referral Bonus (KES)',s.referral_bonus_kes||100],
+            ['Loyalty pts per KES',s.loyalty_points_per_kes||1],
+            ['KES per point',s.loyalty_kes_per_point||0.5],
+            ['Require product approval',s.require_product_approval?'Yes':'No'],
+        ].map(([k,v])=>`<div class="adm-settings-row"><div><div class="adm-settings-label">${k}</div></div><div class="adm-settings-val">${_esc(String(v))}</div></div>`).join('')}
+    </div>
+    <div class="adm-section">
+        <div class="adm-section-title">Update Commission Rate</div>
+        <input id="admSComm" type="number" min="0" max="50" step="0.5" value="${s.commission_pct||10}" style="width:100%;border:1.5px solid #e5e7eb;border-radius:10px;padding:10px;font-size:14px;box-sizing:border-box;margin-bottom:10px">
+        <button class="adm-btn adm-btn-primary adm-btn-full" onclick="window._admSaveSettings()">Save Settings</button>
+    </div>
+    </div>`);
+}
+window._admSaveSettings=async()=>{
+    const comm=parseFloat(document.getElementById('admSComm')?.value||10);
+    const r=await _api('PUT','/marketplace/admin/settings',{commission_pct:comm});
+    if(r&&!r._error){_toast('Settings saved!','success','✅');}else _toast(r?._error||'Failed','error','❌');
+};
+
+async function renderAdminAudit(container) {
+    if(!_isAdmin()){container.innerHTML=_pageShell('Audit Log',_noAccess());return;}
+    const r=await _api('GET','/marketplace/admin/audit-log');
+    const logs=r?.data?.logs||[];
+    container.innerHTML=_pageShell('Audit Log',`<div style="padding:12px">
+    ${logs.length?logs.map(l=>`<div style="background:#fff;border-radius:10px;padding:12px;margin-bottom:6px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+            <div style="font-size:12px;font-weight:800;color:#111">${_esc(l.action||'—')}</div>
+            <div style="font-size:11px;color:#9ca3af">${_time(l.timestamp)}</div>
+        </div>
+        <div style="font-size:11px;color:#6b7280">Admin ID: ${_esc(String(l.admin_id||'—'))}</div>
+    </div>`).join(''):'<div style="padding:30px;text-align:center;color:#9ca3af">No audit entries yet</div>'}
+    </div>`);
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// 16. MODULE ADMIN — one place for every module's admin work
+//     (replaces the old per-module shield "admin box" / admin-inbox.js)
+//     Data: /api/admin/problem-reports (tagged with the module it was filed
+//     from) and /api/admin/reports (reported chat messages).
+// ═════════════════════════════════════════════════════════════════════
+const ADM_MODULES = [
+    { key:'Chat',     icon:'💬', label:'Messages',  hint:'Reported chats, harassment, scams, spam' },
+    { key:'Friends',  icon:'👥', label:'Friends',   hint:'Fake accounts, abusive requests' },
+    { key:'Groups',   icon:'🫂', label:'Groups',    hint:'Group abuse, spam, bad members' },
+    { key:'Status',   icon:'🟣', label:'Status',    hint:'Inappropriate or harmful status posts' },
+    { key:'Games',    icon:'🎮', label:'Games',     hint:'Cheating, bugs, abuse in games' },
+    { key:'Settings', icon:'⚙️', label:'Settings',  hint:'Account / privacy / 2FA problems' },
+    { key:'Market',   icon:'🛒', label:'Marketplace', hint:'Scams, payment issues, bad listings' },
+    { key:'App',      icon:'📱', label:'General App', hint:'Anything not tied to one module' },
+];
+const ADM_CATS = ['scam','harassment','bias','hate_speech','spam','inappropriate_content','fake_account','payment_issue','bug','error','other'];
+window.__admMod = window.__admMod || { module:'', status:'pending', category:'' };
+
+async function _admFetchReports(status, category) {
+    const q = '?limit=300' + (status?`&status=${encodeURIComponent(status)}`:'') + (category?`&category=${encodeURIComponent(category)}`:'');
+    const r = await _api('GET', '/admin/problem-reports' + q);
+    return r?._error ? { error:r._error, rows:[] } : { rows:r?.data||[] };
+}
+
+// --- Evidence rendering (reported message + files the reporter attached) -------------
+function _admSafeUrl(u) { try { const x = new URL(String(u||''), location.href); return /^https?:$/.test(x.protocol) ? x.href : ''; } catch (_) { return ''; } }
+function _admFileTile(f) {
+    const url = _admSafeUrl(f && f.url); if (!url) return '';
+    const mime = String(f.mimeType||''), kind = f.type || '';
+    const u = _esc(url);
+    if (kind === 'image' || mime.startsWith('image/')) return `<a href="${u}" target="_blank" rel="noopener noreferrer"><img src="${u}" referrerpolicy="no-referrer" loading="lazy" alt="${_esc(f.name||'image')}" style="max-width:120px;max-height:120px;border-radius:8px;object-fit:cover;border:1px solid #e5e7eb"></a>`;
+    if (kind === 'video' || mime.startsWith('video/')) return `<video src="${u}" controls preload="metadata" style="max-width:220px;border-radius:8px"></video>`;
+    if (kind === 'audio' || mime.startsWith('audio/')) return `<audio src="${u}" controls preload="none"></audio>`;
+    return `<a class="adm-btn adm-btn-secondary" href="${u}" target="_blank" rel="noopener noreferrer">📄 ${_esc(f.name||'File')}</a>`;
+}
+function _admEvidence(r) {
+    const ref = r.messageRef, atts = Array.isArray(r.attachments) ? r.attachments : [];
+    let h = '';
+    if (ref && ref.messageId) {
+        h += `<div style="margin-top:8px;border-left:4px solid #f97316;background:#fff7ed;border-radius:8px;padding:8px 10px">
+            <div style="font-size:11px;font-weight:800;color:#9a3412">Reported message #${_esc(ref.messageId)} · ${_esc(ref.type||'message')} · from @${_esc(ref.senderName||ref.senderId||'?')}${ref.sentAt?' · '+_time(ref.sentAt):''}
+                <span class="adm-badge ${ref.verified?'green':'yellow'}">${ref.verified?'verified in chat':'unverified'}</span></div>
+            ${ref.text ? `<div style="font-size:13px;margin-top:4px;white-space:pre-wrap;word-break:break-word">${_esc(ref.text)}</div>` : '<div style="font-size:12px;color:#9ca3af;margin-top:4px">No text copy attached</div>'}
+            ${(ref.media||[]).length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${ref.media.map(_admFileTile).join('')}</div>` : ''}
+            <div style="font-size:10px;color:#9a3412;margin-top:4px">Text and media are the reporter's copy (chats are end-to-end encrypted). Sender, chat and time are checked against the server.</div>
+        </div>`;
+    }
+    if (atts.length) h += `<div style="margin-top:8px"><div style="font-size:11px;font-weight:800;color:#374151;margin-bottom:4px">Attached by reporter (${atts.length})</div><div style="display:flex;gap:6px;flex-wrap:wrap">${atts.map(_admFileTile).join('')}</div></div>`;
+    return h;
+}
+
+async function renderAdminModules(container) {
+    if (!_isAdmin()) { container.innerHTML = _pageShell('Module Admin', _noAccess()); return; }
+    container.innerHTML = _pageShell('Module Admin', `<div style="padding:20px;text-align:center">⏳</div>`);
+    const { rows, error } = await _admFetchReports('pending', '');
+    const counts = {}; rows.forEach(r => { const m = r.module || 'App'; counts[m] = (counts[m]||0) + 1; });
+    const known = new Set(ADM_MODULES.map(m => m.key));
+    const extra = Object.keys(counts).filter(k => !known.has(k)).map(k => ({ key:k, icon:'📂', label:k, hint:'Other reports' }));
+    container.innerHTML = _pageShell('Module Admin', `
+        ${error ? `<div style="margin:12px;background:#fef3c7;border-radius:12px;padding:12px;font-size:13px;color:#92400e">Could not load reports: ${_esc(error)}</div>` : ''}
+        <div class="adm-section">
+            <div class="adm-section-title">All modules</div>
+            <button class="adm-btn adm-btn-primary adm-btn-full" onclick="window._admOpenModule('')">📥 Open full reports inbox (${rows.length} pending)</button>
+        </div>
+        <div class="adm-section">
+            <div class="adm-section-title">Moderate by module</div>
+            <div class="adm-nav">
+                ${[...ADM_MODULES, ...extra].map(m => `
+                <button class="adm-nav-item" onclick="window._admOpenModule('${_esc(m.key)}')">
+                    <span class="adm-nav-icon">${m.icon}</span>
+                    <span class="adm-nav-label">${_esc(m.label)}${counts[m.key]>0?`<span class="adm-nav-badge">${counts[m.key]}</span>`:''}</span>
+                </button>`).join('')}
+            </div>
+        </div>`);
+}
+window._admOpenModule = (key) => { window.__admMod = { module:key, status:'pending', category:'' }; window.__admNav('admin-module'); };
+
+async function renderAdminModule(container) {
+    if (!_isAdmin()) { container.innerHTML = _pageShell('Module Admin', _noAccess()); return; }
+    const st = window.__admMod;
+    const meta = ADM_MODULES.find(m => m.key === st.module);
+    const title = st.module ? `${meta?.label || st.module} Admin` : 'All Reports';
+    container.innerHTML = _pageShell(title, `<div style="padding:20px;text-align:center">⏳</div>`, 'admin-modules');
+    const { rows: all, error } = await _admFetchReports(st.status, st.category);
+    const rows = all.filter(r => !st.module || (r.module || 'App') === st.module);
+    // Chat module also gets the reported-messages queue.
+    let msgReports = [];
+    if (st.module === 'Chat' || !st.module) {
+        const mr = await _api('GET', '/admin/reports' + (st.status ? `?status=${encodeURIComponent(st.status)}` : ''));
+        msgReports = mr?._error ? [] : (mr?.data || []);
+    }
+    window.__admModRows = rows;
+    container.innerHTML = _pageShell(title, `
+        ${meta ? `<div style="padding:10px 14px 0;font-size:12px;color:#6b7280">${_esc(meta.hint)}</div>` : ''}
+        <div class="adm-filter-row" style="padding:10px 12px 0;display:flex;gap:6px;flex-wrap:wrap">
+            ${['pending','reviewed','actioned','dismissed'].map(s => `<button class="adm-filter-btn ${st.status===s?'active':''}" onclick="window._admModFilter('status','${s}')">${s}</button>`).join('')}
+            <select class="adm-search-input" style="max-width:170px" onchange="window._admModFilter('category',this.value)">
+                <option value="">All categories</option>
+                ${ADM_CATS.map(c => `<option value="${c}" ${st.category===c?'selected':''}>${c.replace(/_/g,' ')}</option>`).join('')}
+            </select>
+        </div>
+        ${error ? `<div style="margin:12px;background:#fee2e2;border-radius:12px;padding:12px;font-size:13px;color:#991b1b">${_esc(error)}</div>` : ''}
+        <div style="padding:12px">
+        ${rows.length ? rows.map(r => {
+            const canAct = r.status === 'pending' || r.status === 'reviewed';
+            return `<div class="adm-row" style="display:block;margin-bottom:10px">
+                <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
+                    <b style="font-size:13px">${_esc(String(r.category||'').replace(/_/g,' '))}</b>
+                    <span class="adm-badge gray">${_esc(r.module||'App')}</span>
+                    <span class="adm-badge ${r.status==='pending'?'yellow':r.status==='actioned'?'green':'gray'}">${_esc(r.status)}</span>
+                </div>
+                <div style="font-size:11px;color:#6b7280;margin-bottom:6px">From @${_esc(r.reporterName||r.reporterId)}${r.targetUserId?` · About @${_esc(r.targetName||r.targetUserId)}`:''} · ${_time(r.createdAt)}</div>
+                <div style="font-size:13px;color:#111;white-space:pre-wrap;word-break:break-word">${_esc(r.details)}</div>
+                ${_admEvidence(r)}
+                ${r.actionTaken ? `<div style="font-size:11px;color:#6b7280;margin-top:6px">Action: ${_esc(r.actionTaken)}${r.adminNote?` — ${_esc(r.adminNote)}`:''}</div>` : ''}
+                ${canAct ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
+                    ${r.targetUserId ? `<button class="adm-btn adm-btn-warning" onclick="window._admReportAct(${Number(r.id)},'warn')">⚠️ Warn</button>
+                    <button class="adm-btn adm-btn-danger" onclick="window._admReportAct(${Number(r.id)},'suspend')">⏸️ Suspend</button>
+                    <button class="adm-btn adm-btn-danger" onclick="window._admReportAct(${Number(r.id)},'remove')">🗑️ Remove</button>` : ''}
+                    ${r.messageRef&&r.messageRef.verified ? `<button class="adm-btn adm-btn-danger" onclick="window._admReportAct(${Number(r.id)},'remove_message')">🗑️ Remove message</button>` : ''}
+                    <button class="adm-btn adm-btn-secondary" onclick="window._admReportAct(${Number(r.id)},'respond')">💬 Reply</button>
+                    <button class="adm-btn adm-btn-secondary" onclick="window._admReportAct(${Number(r.id)},'dismiss')">Dismiss</button>
+                </div>` : ''}
+            </div>`;
+        }).join('') : '<div style="padding:30px;text-align:center;color:#9ca3af">No reports here</div>'}
+        </div>
+        ${msgReports.length ? `<div class="adm-section"><div class="adm-section-title">Reported messages (${msgReports.length})</div>
+            ${msgReports.map(m => `<div class="adm-row" style="display:block;margin-bottom:8px">
+                <div style="font-size:12px;font-weight:800">${_esc(m.reason||'reported')} <span class="adm-badge gray">${_esc(m.status||'')}</span></div>
+                <div style="font-size:12px;color:#6b7280;margin:4px 0">Message #${_esc(String(m.messageId||''))}${m.messageType?' ('+_esc(m.messageType)+')':''}${m.messageDeleted?' · deleted':''} · chat ${_esc(String(m.chatId||''))}${m.senderName?' · from @'+_esc(m.senderName):''}${m.reporterName?' · reported by @'+_esc(m.reporterName):''} · ${_time(m.createdAt)}</div>
+                ${m.details ? `<div style="font-size:13px">${_esc(m.details)}</div>` : ''}
+                ${m.status==='pending'||m.status==='reviewed' ? `<div style="display:flex;gap:6px;margin-top:8px">
+                    <button class="adm-btn adm-btn-success" onclick="window._admMsgReportSet(${Number(m.id)},'actioned')">Actioned</button>
+                    <button class="adm-btn adm-btn-secondary" onclick="window._admMsgReportSet(${Number(m.id)},'dismissed')">Dismiss</button></div>` : ''}
+            </div>`).join('')}</div>` : ''}`, 'admin-modules');
+}
+window._admModFilter = (k, v) => { window.__admMod[k] = v; window.__admNav('admin-module'); };
+window._admReportAct = async (id, action) => {
+    let note = '';
+    if (action === 'respond') { note = prompt('Reply to the reporter:', '') || ''; if (!note.trim()) return; }
+    else if (action === 'warn') { note = prompt('Warning message (optional):', '') || ''; }
+    else if (action === 'remove_message') { if (!confirm('Remove this message for everyone in the chat?')) return; }
+    else if (action === 'suspend' || action === 'remove') {
+        if (!confirm(action === 'remove' ? 'Remove this account and its marketplace listings?' : 'Suspend this account?')) return;
+        note = prompt('Reason (shown to the user, optional):', '') || '';
+    }
+    const r = await _api('PATCH', '/admin/problem-reports/' + id, { action, message: note });
+    if (r && !r._error) { _toast('Done', 'success', '✅'); window.__admNav('admin-module'); }
+    else _toast(r?._error || 'Could not apply that action', 'error', '❌');
+};
+window._admMsgReportSet = async (id, status) => {
+    const r = await _api('PATCH', '/admin/reports/' + id, { status });
+    if (r && !r._error) { _toast('Updated', 'success', '✅'); window.__admNav('admin-module'); }
+    else _toast(r?._error || 'Could not update', 'error', '❌');
+};
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ROUTER — standalone admin module (no dependency on the Tool module)
+// ══════════════════════════════════════════════════════════════════════════════
+const HOME = 'admin-dashboard';
+const ADMIN_ROUTES = {
+    'admin-dashboard':  renderAdminDashboard,
+    'admin-products':   renderAdminProducts,
+    'admin-approval':   renderAdminProducts,
+    'admin-sellers':    renderAdminSellers,
+    'admin-buyers':     renderAdminBuyers,
+    'admin-orders':     renderAdminOrders,
+    'admin-returns':    renderAdminReturns,
+    'admin-payouts':    renderAdminPayouts,
+    'admin-coupons':    renderAdminCoupons,
+    'admin-flash':      renderAdminFlash,
+    'admin-reviews':    renderAdminReviews,
+    'admin-analytics':  renderAdminAnalytics,
+    'admin-tickets':    renderAdminTickets,
+    'admin-support':    renderAdminTickets,
+    'admin-notify':     renderAdminNotify,
+    'admin-settings':   renderAdminSettings,
+    'admin-audit':      renderAdminAudit,
+    'admin-modules':    renderAdminModules,
+    'admin-module':     renderAdminModule,
+};
+const BACK_OF = { 'admin-module': 'admin-modules' };
+const STRIP_ACTIVE = { 'admin-module': 'admin-modules', 'admin-approval': 'admin-products', 'admin-support': 'admin-tickets' };
+
+let _cur = HOME, _navSeq = 0, _booted = false, _lastAdmin = null;
+
+function _reportLocalPanel() {
+    // Lets the shell's hardware-back close a sub-screen instead of leaving the module.
+    try {
+        window.parent.postMessage({ type: 'SCREEN_STATE_CHANGED', restore: _cur === HOME ? null : 'admin-screen',
+            module: 'admin', source: 'admin', timestamp: Date.now() }, '*');
+    } catch (_) {}
+}
+
+function _renderStrip() {
+    const strip = document.getElementById('admNavStrip');
+    if (!strip) return;
+    if (!_isAdmin()) { strip.style.display = 'none'; strip.innerHTML = ''; return; }
+    const active = STRIP_ACTIVE[_cur] || _cur;
+    const items = [[HOME, '🏠', 'Dashboard']].concat(ADMIN_GROUPS.flatMap(g => g.items));
+    strip.style.display = 'flex';
+    strip.innerHTML = items.map(([page, icon, label]) =>
+        `<button class="adm-chip${page === active ? ' on' : ''}" data-p="${page}" onclick="window.__admNav('${page}')">${icon} ${label}</button>`
+    ).join('') + `<button class="adm-chip adm-chip-refresh" title="Refresh" aria-label="Refresh" onclick="window.__admNav(window.__admCurrent())">⟳</button>`;
+    const on = strip.querySelector('.adm-chip.on');
+    if (on && on.scrollIntoView) { try { on.scrollIntoView({ inline: 'center', block: 'nearest' }); } catch (_) {} }
+}
+
+window.__admCurrent = () => _cur;
+
+window.__admNav = function (page) {
+    if (!ADMIN_ROUTES[page]) page = HOME;
+    const root = document.getElementById('admRoot');
+    if (!root) return;
+    _cur = page;
+    const seq = ++_navSeq;
+    // Each navigation renders into its own fresh container, so a slow request from a
+    // previous screen can never paint over the screen the admin is looking at now.
+    const el = document.createElement('div');
+    el.className = 'adm-view';
+    el.style.cssText = 'height:100%;display:flex;flex-direction:column;background:#f3f4f6';
+    root.replaceChildren(el);
+    _renderStrip();
+    _reportLocalPanel();
+
+    if (!_isAdmin()) { el.innerHTML = _pageShell('Admin Panel', _noAccess()); return; }
+
+    el.innerHTML = `<div style="flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;color:#9ca3af"><div style="font-size:32px">⏳</div><div style="font-size:14px;font-weight:600">Loading…</div></div>`;
+    Promise.resolve(ADMIN_ROUTES[page](el)).catch(err => {
+        console.error('[Admin]', page, err);
+        if (seq !== _navSeq) return;
+        el.innerHTML = _pageShell(page, `
+            <div style="margin:16px;background:#fee2e2;border-radius:14px;padding:18px;text-align:center">
+                <div style="font-size:32px;margin-bottom:10px">⚠️</div>
+                <div style="font-weight:800;font-size:15px;color:#991b1b;margin-bottom:6px">Something went wrong</div>
+                <div style="font-size:13px;color:#b91c1c;margin-bottom:14px">${_esc(err?.message||'Unknown error')}</div>
+                <button class="adm-btn adm-btn-primary" onclick="window.__admNav('${page}')">🔄 Retry</button>
+            </div>`);
+    });
+};
+
+window.__admBack = function () {
+    if (_cur === HOME) { window.__admExit(); return; }
+    window.__admNav(BACK_OF[_cur] || HOME);
+};
+
+window.__admExit = function () {
+    try { window.parent.postMessage({ type: 'NAVIGATE_BACK', source: 'admin', module: 'admin' }, '*'); } catch (_) {}
+};
+
+function _onSessionChange() {
+    if (!_booted) return;
+    const now = _isAdmin();
+    if (now !== _lastAdmin) { _lastAdmin = now; window.__admNav(_cur); }
+}
+
+// ─── Boot: handshake with the shell, wait for the role, then open the dashboard ──
+function _handshake() {
+    try {
+        window.parent.postMessage({ type: 'CHILD_READY', module: 'admin', source: 'admin', timestamp: Date.now() }, '*');
+        window.parent.postMessage({ type: 'REQUEST_SESSION', module: 'admin', source: 'admin', timestamp: Date.now() }, '*');
+    } catch (_) {}
+}
+
+window.__admBoot = async function () {
+    const root = document.getElementById('admRoot');
+    if (root) root.innerHTML = `<div style="height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;color:#9ca3af;background:#f3f4f6"><div style="font-size:32px">🛡️</div><div style="font-size:14px;font-weight:600">Verifying admin access…</div></div>`;
+    _handshake();
+    const t0 = Date.now();
+    let retried = 0;
+    while (Date.now() - t0 < 4000 && !_isAdmin() && S.isAdmin !== false) {
+        await new Promise(r => setTimeout(r, 150));
+        if (Date.now() - t0 > 1200 * (retried + 1) && retried < 3) { retried++; _handshake(); }
+    }
+    if (!_isAdmin() && S.isAdmin !== false && _token()) {
+        // No role arrived over the protocol: let the SERVER decide (403 = not an admin).
+        const r = await _api('GET', '/admin/problem-reports?limit=1');
+        if (r && !r._error) S.isAdmin = true;
+    }
+    _booted = true;
+    _lastAdmin = _isAdmin();
+    window.__admNav(HOME);
+};
+
+console.log('[admin-module.js] ✅ Admin module ready');
+})();

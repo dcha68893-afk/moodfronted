@@ -885,45 +885,7 @@ async function renderSubscription(container) {
 }
 window._upgradePlan=async plan=>{const r=await _api('POST','/marketplace/seller/subscription/upgrade',{plan});if(r&&!r._error){_toast(`Upgraded to ${plan}! 🎉`,'success','📋');window._jmNavMore('seller-subscription');}else _toast(r?._error||'Failed','error','❌');};
 
-// ══════════════════════════════════════════════════════════════════════════════
-// 10. ADMIN APPROVAL PANEL
-// ══════════════════════════════════════════════════════════════════════════════
-async function renderAdminApproval(container) {
-    _page(container,'✅ Product Approval',_loading('Pending Products'));
-    try {
-        const r=await _api('GET','/marketplace/admin/products/pending');
-        const products=r?.data?.products||[];
-        const body=container.querySelector('div>div:last-child');if(!body)return;
-        body.innerHTML=`
-        <div style="background:#fef3c7;padding:10px 16px;font-size:12px;color:#92400e;font-weight:600">${products.length} product${products.length!==1?'s':''} waiting for your review</div>
-        ${r?._error?_err(r._error):''}
-        <div style="padding:12px 16px">
-        ${products.length?products.map(p=>{
-            const img=(window._getListingImage?window._getListingImage(p):'')||p.image||(Array.isArray(p.images)?p.images[0]:'')||'';
-            return `<div style="background:#fff;border-radius:14px;margin-bottom:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.06)">
-                ${img?`<img src="${_esc(img)}" style="width:100%;height:160px;object-fit:cover;background:#f3f4f6">`:'<div style="width:100%;height:120px;background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:48px">📦</div>'}
-                <div style="padding:14px">
-                    <div style="font-weight:800;font-size:15px;margin-bottom:3px">${_esc(p.title||'Untitled')}</div>
-                    <div style="font-size:12px;color:#6b7280;margin-bottom:6px">${_fmt(p.price)} · ${_esc(p.category||'')} · ${_date(p.submitted_at||p.created_at)}</div>
-                    ${p.description?`<div style="font-size:12px;color:#374151;line-height:1.5;margin-bottom:10px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${_esc(p.description)}</div>`:''}
-                    <div style="display:flex;gap:8px"><button onclick="window._admApprove('${p.id}')" style="flex:1;background:#d1fae5;color:#065f46;border:none;border-radius:10px;padding:10px;font-weight:800;font-size:13px;cursor:pointer">✅ Approve</button><button onclick="window._admRejectModal('${p.id}','${_esc((p.title||'').replace(/'/g,"\\'"))}')" style="flex:1;background:#fee2e2;color:#ef4444;border:none;border-radius:10px;padding:10px;font-weight:800;font-size:13px;cursor:pointer">❌ Reject</button></div>
-                </div>
-            </div>`;
-        }).join(''):_empty('✅','All caught up!','No products pending review right now. Check back later.')}
-        </div>`;
-    } catch(ex) {
-        const b=container.querySelector('div>div:last-child');
-        if(b) b.innerHTML=_err(ex.message)+`<div style="padding:0 16px">${_empty('✅','Could not load queue','Retry to try again.','Retry',`window._jmNavMore('admin-approval')`)}</div>`;
-    }
-}
-window._admApprove=async id=>{const r=await _api('POST',`/marketplace/admin/products/${id}/approve`);if(r&&!r._error){_toast('Product approved and live! 🎉','success','✅');window._jmNavMore('admin-approval');}else _toast(r?._error||'Failed','error','❌');};
-window._admRejectModal=function(id,title){
-    document.getElementById('admRM')?.remove();
-    const ov=document.createElement('div');ov.id='admRM';ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99000;display:flex;align-items:flex-end;justify-content:center';
-    ov.innerHTML=`<div style="background:#fff;width:100%;max-width:480px;border-radius:20px 20px 0 0;padding:20px"><div style="font-weight:800;font-size:16px;margin-bottom:10px">❌ Reject: ${_esc(title)}</div><div style="font-size:13px;color:#6b7280;margin-bottom:10px">Give the seller a clear reason:</div><textarea id="admRR" style="width:100%;border:1.5px solid #e5e7eb;border-radius:10px;padding:12px;font-size:14px;box-sizing:border-box;resize:none;height:90px;outline:none" placeholder="e.g. Images are blurry. Please upload clear, well-lit product photos."></textarea><div style="display:flex;gap:8px;margin-top:10px"><button onclick="window._admReject('${id}')" style="flex:1;background:#fee2e2;color:#ef4444;border:none;border-radius:10px;padding:12px;font-weight:800;font-size:14px;cursor:pointer">Confirm Reject</button><button onclick="document.getElementById('admRM').remove()" style="flex:1;background:#f3f4f6;color:#374151;border:none;border-radius:10px;padding:12px;font-weight:800;font-size:14px;cursor:pointer">Cancel</button></div></div>`;
-    document.body.appendChild(ov);
-};
-window._admReject=async id=>{const reason=document.getElementById('admRR')?.value?.trim()||'Does not meet marketplace standards';document.getElementById('admRM')?.remove();const r=await _api('POST',`/marketplace/admin/products/${id}/reject`,{reason});if(r&&!r._error){_toast('Product rejected. Seller notified.','info','❌');window._jmNavMore('admin-approval');}else _toast(r?._error||'Failed','error','❌');};
+// (Admin approval moved to the separate Admin module — admin.html / admin-module.js)
 
 // ── Routing ───────────────────────────────────────────────────────────────────
 const ROUTES = {
@@ -936,7 +898,6 @@ const ROUTES = {
     'seller-returns':      renderReturns,
     'seller-verification': renderVerification,
     'seller-subscription': renderSubscription,
-    'admin-approval':      renderAdminApproval,
 };
 
 const _prev = window._jmNavMore;

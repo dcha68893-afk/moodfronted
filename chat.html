@@ -237,6 +237,35 @@
             box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.12);
         }
         
+        /* ADMIN MODULE ICON — lives in the global header, visible to admins only.
+           Hidden by default; body.is-admin is set by window.__necpraSyncAdmin() from the
+           same server-verified role the session protocol already carries. */
+        #headerAdminBtn {
+            display: none;
+            flex: 0 0 auto;
+            align-items: center;
+            justify-content: center;
+            width: 36px;
+            height: 36px;
+            margin: 0 8px 0 10px;
+            padding: 0;
+            border-radius: 12px;
+            border: 1px solid rgba(79, 70, 229, 0.35);
+            background: rgba(79, 70, 229, 0.10);
+            color: #4f46e5;
+            font-size: 15px;
+            cursor: pointer;
+            transition: transform .15s, background .15s, color .15s;
+        }
+        body.is-admin #headerAdminBtn { display: inline-flex; }
+        #headerAdminBtn:hover { background: rgba(79, 70, 229, 0.18); }
+        #headerAdminBtn:active { transform: scale(.94); }
+        #headerAdminBtn:focus-visible { outline: 2px solid #4f46e5; outline-offset: 2px; }
+        body.admin-page-active #headerAdminBtn { background: #4f46e5; color: #fff; border-color: #4f46e5; }
+        [data-theme="dark"] #headerAdminBtn { color: #a5b4fc; border-color: rgba(165,180,252,.4); background: rgba(99,102,241,.18); }
+        [data-theme="dark"] body.admin-page-active #headerAdminBtn,
+        body.admin-page-active[data-theme="dark"] #headerAdminBtn { background: #6366f1; color: #fff; }
+
         /* Header module icons/actions (single source of truth in parent) */
         .header-actions {
             display: flex;
@@ -1615,6 +1644,12 @@
             </button>
         </div>
 
+        <!-- ADMIN MODULE ICON: shown only when the signed-in user is an admin/moderator -->
+        <button id="headerAdminBtn" type="button" title="Admin" aria-label="Open Admin module"
+                onclick="if (window.__necpraIsAdmin) navigateToPage('admin')">
+            <i class="fas fa-shield-alt"></i>
+        </button>
+
         <div id="profileTrigger" class="profile-trigger" title="Profile & Settings" aria-label="Profile">
             <img id="headerAvatar" class="profile-avatar-sm" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%237c3aed'%3E%3Cpath d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/%3E%3C/svg%3E" alt="avatar">
         </div>
@@ -1760,6 +1795,10 @@
     <div id="toolsContent" class="iframe-container hidden">
         <iframe id="toolsIframe" class="content-iframe" data-src="Tools.html" data-module="tools" loading="eager"></iframe>
     </div>
+    <!-- ADMIN MODULE: separate module (admin.html). Loaded on demand, only for admins. -->
+    <div id="adminContent" class="iframe-container hidden">
+        <iframe id="adminIframe" class="content-iframe" data-src="admin.html" data-module="admin"></iframe>
+    </div>
     <div id="moneyContent" class="iframe-container hidden">
         <iframe id="moneyIframe" class="content-iframe" data-src="money.html" data-module="money" loading="eager"></iframe>
     </div>
@@ -1773,7 +1812,8 @@
             status:'statusIframe', group:'groupIframe', groups:'groupIframe',
             friends:'friendsIframe', friend:'friendsIframe',
             settings:'settingsIframe', tools:'toolsIframe', marketplace:'toolsIframe',
-            money:'moneyIframe', games:'gamesIframe', game:'gamesIframe'
+            money:'moneyIframe', games:'gamesIframe', game:'gamesIframe',
+            admin:'adminIframe'   // on-demand only (not in QUEUE): non-admins never load it
         };
 
         function load(id) {
@@ -2139,6 +2179,7 @@
             'tool':      'toolsIframe',
             'marketplace':'toolsIframe',
             'money':     'moneyIframe',
+            'admin':     'adminIframe',
             'games':     'gamesIframe',
             'game':      'gamesIframe',
         };
@@ -2707,7 +2748,27 @@
             settings: { icon: 'fa-cog', title: 'Settings', subtitle: 'Profile, privacy, and preferences for the whole app.' },
             tools:    { icon: 'fa-tools', title: 'Tools', subtitle: 'Utilities and marketplace actions for power users.' },
             money:    { icon: 'fa-wallet', title: 'Money', subtitle: 'Circles, payment requests and purchase plans.' },
-            games:    { icon: 'fa-gamepad', title: 'Games', subtitle: 'Play pool and more — unlimited stages, real physics.' }
+            games:    { icon: 'fa-gamepad', title: 'Games', subtitle: 'Play pool and more — unlimited stages, real physics.' },
+            admin:    { icon: 'fa-shield-alt', title: 'Admin', subtitle: 'Moderation, marketplace and platform controls.' }
+        };
+
+        // ADMIN ICON / ROLE SYNC — called with the same user object the session protocol already
+        // carries to every module (role / isAdmin). `verified` is true only for the server-verified
+        // /api/profile result; unverified, non-admin data never gets pushed into the admin module.
+        window.__necpraIsAdmin = false;
+        window.__necpraSyncAdmin = function (user, verified) {
+            const u = user || {};
+            const isAdmin = u.isAdmin === true || u.role === 'admin' || u.role === 'moderator';
+            window.__necpraIsAdmin = isAdmin;
+            if (document.body) document.body.classList.toggle('is-admin', isAdmin);
+            if (!isAdmin) {
+                if (document.body) document.body.classList.remove('admin-page-active');
+                if (window.__currentPage === 'admin') navigateToPage('messages');
+            }
+            const f = document.getElementById('adminIframe');
+            if (f && f.getAttribute('src') && f.contentWindow && (isAdmin || verified)) {
+                try { f.contentWindow.postMessage({ type: 'USER_ROLE_UPDATE', role: u.role || (isAdmin ? 'admin' : 'user'), isAdmin }, '*'); } catch (_) {}
+            }
         };
 
         function updateHeaderContext(page) {
@@ -2756,6 +2817,9 @@
                 { navigateBack: true, icon: 'fa-arrow-left', title: 'Back', navAction: true }
             ],
             games: [
+                { navigateBack: true, icon: 'fa-arrow-left', title: 'Back', navAction: true }
+            ],
+            admin: [
                 { navigateBack: true, icon: 'fa-arrow-left', title: 'Back', navAction: true }
             ],
             money: [
@@ -3066,6 +3130,9 @@
 
         function navigateToPage(page, options = {}) {
             _chatLog('[Navigation] navigateToPage called with:', page, options);
+            // ADMIN MODULE is admin-only: the header icon is hidden for everyone else, and this
+            // guard stops any other path (history, deep link, stale click) from opening it.
+            if (page === 'admin' && !window.__necpraIsAdmin) { console.warn('[Navigation] admin module requires an admin account'); return; }
             if ((page === 'tools' || page === 'tool' || page === 'marketplace') && window.__loadToolsIframe) window.__loadToolsIframe();
             if (window.__kynSnap && window.__currentPage && window.__currentPage !== page) window.__kynSnap.leave(window.__currentPage);
             if (window.__loadModuleIframe) window.__loadModuleIframe(page);
@@ -3101,6 +3168,7 @@
             }
             updateHeaderContext(page);
             updateHeaderActions(page);
+            document.body.classList.toggle('admin-page-active', page === 'admin');
             
             _chatLog('[Navigation] Hiding all iframe containers...');
             document.querySelectorAll('.iframe-container').forEach(c => {
@@ -4763,11 +4831,13 @@
                     }
                     // FIX 3: Hydrate role from backend if not already known
                     if (!cachedUser.role && cachedToken) { _fetchAndCacheUserRole(cachedToken); }
+                    window.__necpraSyncAdmin && window.__necpraSyncAdmin(cachedUser, false);
                     requestFriendsFromFriendIframe();
                 } else {
                     cachedToken = null;
                     cachedUserId = null;
                     cachedUser = null;
+                    window.__necpraSyncAdmin && window.__necpraSyncAdmin(null, false);
                 }
             }
 
@@ -4808,6 +4878,8 @@
                         if (toolsFrame?.contentWindow) {
                             toolsFrame.contentWindow.postMessage({ type: 'USER_ROLE_UPDATE', role, isAdmin }, '*');
                         }
+                        // Admin icon in the header + the admin module (same protocol, server-verified)
+                        window.__necpraSyncAdmin && window.__necpraSyncAdmin({ role, isAdmin }, true);
                     }
                 } catch(e) {
                     console.warn('[chat.html] Profile role fetch failed:', e.message);
