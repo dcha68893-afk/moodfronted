@@ -2,57 +2,241 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Money | Necpra</title><script src="/js/runtime-config.js"></script><script src="/js/config.js"></script>
-<link rel="stylesheet" href="/css/vendor/font-awesome.min.css">
+<title>Money | Necpra</title><script src="/js/theme.engine.js"></script><script src="/js/runtime-config.js"></script><script src="/js/config.js"></script>
+<link rel="stylesheet" href="/css/vendor/font-awesome.min.css"><link rel="stylesheet" href="/theme.colors.css"><script src="/js/settings-broadcast-listener.js" defer></script>
 <style>
-:root{--bg:var(--kyn-bg-root,#fff);--card:var(--kyn-bg-card,#fff);--text:var(--kyn-text-primary,#111b21);--muted:var(--kyn-text-secondary,#667781);--border:var(--kyn-border,#e9edef);--accent:var(--kyn-accent-primary,#22c55e);--blue:#2563eb;--danger:#ef4444}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
-.money{max-width:900px;margin:0 auto;padding:18px 16px 110px}.hero{padding:20px;border-radius:24px;background:linear-gradient(135deg,#0f172a,#1e293b);color:#fff;box-shadow:0 14px 36px rgba(15,23,42,.18);margin-bottom:16px}.hero h1{margin:0 0 6px;font-size:25px}.hero p{margin:0;color:#cbd5e1;font-size:13px}.hero .balance{font-size:30px;font-weight:800;margin-top:18px}.hero .caption{font-size:12px;color:#94a3b8}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.card{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:16px;box-shadow:0 5px 18px rgba(15,23,42,.05)}button{font:inherit}.action{width:100%;text-align:left;border:1px solid var(--border);background:var(--card);color:var(--text);border-radius:18px;padding:16px;cursor:pointer;min-height:116px}.action i{font-size:22px;color:var(--accent);margin-bottom:12px}.action b{display:block;font-size:15px}.action span{display:block;color:var(--muted);font-size:12px;margin-top:5px;line-height:1.45}.section{margin-top:18px}.section h2{font-size:16px;margin:0 0 10px}.row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 0;border-bottom:1px solid var(--border)}.row:last-child{border-bottom:0}.row-title{font-weight:700;font-size:14px}.row-sub{font-size:12px;color:var(--muted);margin-top:3px}.pill{font-size:11px;padding:5px 9px;border-radius:999px;background:rgba(34,197,94,.12);color:var(--accent);font-weight:700}.empty{padding:24px;text-align:center;color:var(--muted);font-size:13px}.modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:flex-end;justify-content:center;z-index:100}.modal.open{display:flex}.sheet{width:min(620px,100%);background:var(--card);color:var(--text);border-radius:24px 24px 0 0;padding:18px;max-height:90vh;overflow:auto}.sheet h3{margin:0 0 14px}.input{width:100%;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--bg);color:var(--text);margin:6px 0 12px}.primary{border:0;border-radius:12px;background:var(--accent);color:#fff;padding:12px 16px;font-weight:800;cursor:pointer}.secondary{border:1px solid var(--border);border-radius:12px;background:transparent;color:var(--text);padding:11px 16px;cursor:pointer}.actions{display:flex;gap:8px;justify-content:flex-end}.notice{padding:11px 13px;border-radius:12px;background:rgba(37,99,235,.08);color:var(--blue);font-size:12px;margin-bottom:12px}
-@media(max-width:600px){.grid{grid-template-columns:1fr 1fr}.money{padding:12px 12px 96px}.hero{padding:17px}.action{min-height:108px;padding:13px}}
+:root{--bg:var(--kyn-bg-root,#fff);--card:var(--kyn-bg-card,#fff);--surface:var(--kyn-bg-input,#f0f2f5);--text:var(--kyn-text-primary,#111b21);--muted:var(--kyn-text-secondary,#667781);--line:var(--kyn-border,#e9edef);--accent:#16a34a;--blue:#2563eb;--danger:#ef4444;--warn:#f59e0b}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.money{max-width:760px;margin:0 auto;padding:0 14px calc(90px + env(safe-area-inset-bottom,0px))}
+.hero{margin:12px 0;padding:20px 18px 16px;border-radius:22px;color:#fff;background:linear-gradient(135deg,#0f766e 0%,#16a34a 55%,#2563eb 120%);box-shadow:0 10px 30px rgba(22,163,74,.25);position:relative;overflow:hidden}
+.hero:after{content:"";position:absolute;right:-40px;top:-40px;width:150px;height:150px;border-radius:50%;background:rgba(255,255,255,.12)}
+.hero .top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.hero h1{margin:0;font-size:15px;font-weight:700;opacity:.95;letter-spacing:.2px}
+.hero .refresh{border:0;background:rgba(255,255,255,.2);color:#fff;width:34px;height:34px;border-radius:50%;cursor:pointer;font-size:14px;z-index:1}
+.hero .refresh.spin i{animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+.balance{font-size:34px;font-weight:800;margin:10px 0 2px;letter-spacing:-.5px}
+.caption{font-size:12px;opacity:.9}
+.pills{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+.pill{background:rgba(255,255,255,.18);border-radius:999px;padding:6px 12px;font-size:12px;font-weight:600;display:flex;gap:6px;align-items:center}
+.pill b{font-size:13px}
+.notice{padding:11px 13px;border-radius:12px;background:rgba(37,99,235,.10);color:var(--text);font-size:12px;margin:0 0 12px;line-height:1.5;border:1px solid rgba(37,99,235,.25)}
+.notice.warn{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.35)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+.action{display:flex;flex-direction:column;align-items:flex-start;gap:4px;text-align:left;background:var(--card);border:1px solid var(--line);color:var(--text);border-radius:16px;padding:14px;cursor:pointer;font:inherit;transition:transform .12s,box-shadow .12s}
+.action:active{transform:scale(.97)}.action:hover{box-shadow:0 6px 18px rgba(0,0,0,.08)}
+.action i,.row .ico i,.circle .ico i{color:#fff!important}.action i{width:38px;height:38px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:16px;color:#fff;margin-bottom:6px}
+.action b{font-size:14px}.action span{font-size:11.5px;color:var(--muted);line-height:1.35}
+.tabs{display:flex;gap:6px;background:var(--surface);padding:4px;border-radius:14px;margin-bottom:12px;position:sticky;top:0;z-index:5}
+.tab{flex:1;white-space:nowrap;border:0;background:transparent;color:var(--muted);padding:9px 4px;border-radius:11px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;position:relative}
+.tab.on{background:var(--card);color:var(--text);box-shadow:0 2px 8px rgba(0,0,0,.1)}
+.tab .dot{display:inline-block;margin-left:5px;min-width:16px;height:16px;border-radius:8px;background:var(--danger);color:#fff!important;font-size:10px;line-height:16px;text-align:center;padding:0 4px;vertical-align:middle}
+.seg{display:flex;gap:6px;margin-bottom:10px}.seg button{border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:999px;padding:6px 14px;font:inherit;font-size:12px;font-weight:700;cursor:pointer}.seg button.on{background:var(--text);color:var(--bg);border-color:var(--text)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:6px 14px;margin-bottom:10px}
+.row{display:flex;gap:12px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}.row:last-child{border-bottom:0}
+.row .ico{width:40px;height:40px;border-radius:12px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;color:#fff;font-size:15px}
+.row .mid{min-width:0;flex:1}.row-title{font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.row-sub{font-size:12px;color:var(--muted);margin-top:2px}
+.amt{font-weight:800;font-size:14px;white-space:nowrap}
+.circle{padding:14px 0;border-bottom:1px solid var(--line)}.circle:last-child{border-bottom:0}
+.circle .head{display:flex;align-items:center;gap:10px}.circle .ico{width:40px;height:40px;border-radius:12px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;color:#fff}
+.bar{height:8px;background:var(--surface);border-radius:6px;overflow:hidden;margin:10px 0 6px}.bar>i{display:block;height:100%;background:linear-gradient(90deg,#16a34a,#22c55e);border-radius:6px;transition:width .5s}
+.meta{display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
+.btns{display:flex;gap:8px;margin-top:10px}
+.chip{display:inline-block;padding:2px 9px;border-radius:999px;font-size:10.5px;font-weight:800;text-transform:capitalize;background:var(--surface);color:var(--muted)}
+.chip.paid,.chip.ok{background:rgba(34,197,94,.15);color:#16a34a}.chip.requested,.chip.pending{background:rgba(245,158,11,.16);color:#b45309}.chip.cancelled,.chip.expired,.chip.failed{background:rgba(239,68,68,.14);color:#dc2626}.chip.owner{background:rgba(37,99,235,.14);color:#2563eb}
+button.primary,button.secondary,button.danger{font:inherit;font-weight:700;font-size:13px;border-radius:12px;padding:10px 14px;cursor:pointer;border:0}
+button.primary{background:var(--accent);color:#fff}button.secondary{background:var(--surface);color:var(--text)}button.danger{background:rgba(239,68,68,.14);color:#dc2626}
+button.small{padding:7px 11px;font-size:12px;border-radius:10px}button[disabled]{opacity:.6;cursor:wait}
+button:focus-visible,.action:focus-visible,.tab:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.empty{padding:26px 10px;text-align:center;color:var(--muted);font-size:13px;line-height:1.5}.empty i{display:block;font-size:30px;margin-bottom:8px;opacity:.5}
+.skel{height:56px;border-radius:12px;margin:10px 0;background:linear-gradient(90deg,var(--surface) 25%,var(--line) 50%,var(--surface) 75%);background-size:200% 100%;animation:sh 1.2s infinite}@keyframes sh{to{background-position:-200% 0}}
+.modal{position:fixed;inset:0;background:var(--kyn-bg-overlay,rgba(0,0,0,.5));display:none;align-items:flex-end;justify-content:center;z-index:200}.modal.open{display:flex}
+.sheet{width:100%;max-width:560px;max-height:92vh;overflow:auto;background:var(--card);color:var(--text);border-radius:22px 22px 0 0;padding:8px 18px calc(20px + env(safe-area-inset-bottom,0px));animation:up .22s ease}@keyframes up{from{transform:translateY(30px);opacity:0}}
+.grab{width:42px;height:4px;border-radius:2px;background:var(--line);margin:6px auto 12px}
+.sheet h3{margin:0 0 12px;font-size:17px}
+label{display:block;font-size:12px;font-weight:700;color:var(--muted);margin:12px 0 5px}
+.input,select.input{width:100%;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--text);font:inherit;font-size:14px}.input:focus{outline:2px solid var(--blue);border-color:transparent}
+.actions{display:flex;gap:10px;margin-top:16px}.actions>*{flex:1}
+.toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#111827;color:#fff;padding:11px 16px;border-radius:12px;font-size:13px;z-index:300;max-width:90vw;box-shadow:0 8px 24px rgba(0,0,0,.3)}.toast.err{background:#b91c1c}
+.sum{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:6px 0 4px}.sum div{background:var(--surface);border-radius:12px;padding:10px;text-align:center}.sum b{display:block;font-size:14px}.sum span{font-size:11px;color:var(--muted)}
+h4{margin:16px 0 4px;font-size:13px}
 </style>
 </head>
 <body>
 <main class="money">
-<section class="hero"><h1>NECPRA Money</h1><p>Collect together, pay for someone, save toward a goal and manage purchase plans.</p><div class="balance" id="balance">KSh 0</div><div class="caption">Tracked activities</div></section>
-<div class="notice" style="background:rgba(245,158,11,.10);color:#92400e;border:1px solid rgba(245,158,11,.25)"><b>Safety first:</b> A money request is not proof that someone is owed money. Check the requester identity and purpose independently. NECPRA will never ask for your M-Pesa PIN, password or one-time code.</div><div class="grid">
-<button class="action" id="moneyActionCircle" type="button"><i class="fas fa-users"></i><b>Money Circles</b><span>Chamas, family funds, trips, events and group collections.</span></button>
-<button class="action" id="moneyActionRequest" type="button"><i class="fas fa-hand-holding-heart"></i><b>Pay for Someone</b><span>Create a request for a family member, friend, school or bill.</span></button>
-<button class="action" id="moneyActionPlans" type="button"><i class="fas fa-calendar-check"></i><b>Pay Later</b><span>Keep deposits and installment plans from supported sellers in one place.</span></button>
-<button class="action" id="moneyActionActivity" type="button"><i class="fas fa-receipt"></i><b>Activity</b><span>See contributions, requests and payment records.</span></button>
+<section class="hero">
+  <div class="top"><h1><i class="fas fa-wallet"></i>&nbsp; NECPRA Money</h1><button class="refresh" id="refreshBtn" type="button" aria-label="Refresh"><i class="fas fa-rotate"></i></button></div>
+  <div class="balance" id="balance">KSh 0</div>
+  <div class="caption">Total collected across your Money Circles</div>
+  <div class="pills"><div class="pill"><i class="fas fa-users"></i><b id="pCircles">0</b> circles</div><div class="pill"><i class="fas fa-inbox"></i><b id="pIncoming">0</b> to pay</div><div class="pill"><i class="fas fa-paper-plane"></i><b id="pOutgoing">0</b> awaiting</div></div>
+</section>
+<div class="notice warn"><b>Safety first:</b> A money request is not proof that someone is owed money. Verify the requester independently. NECPRA will never ask for your M-Pesa PIN, password or one-time code.</div>
+<div class="grid">
+  <button class="action" data-act="newCircle" type="button"><i class="fas fa-users" style="background:#16a34a"></i><b>Money Circles</b><span>Chamas, family funds, trips and events.</span></button>
+  <button class="action" data-act="newRequest" type="button"><i class="fas fa-hand-holding-heart" style="background:#2563eb"></i><b>Pay for Someone</b><span>Request money for family, friends or bills.</span></button>
+  <button class="action" data-act="goto:paylater" type="button"><i class="fas fa-calendar-check" style="background:#f59e0b"></i><b>Pay Later</b><span>Reserved marketplace orders to settle.</span></button>
+  <button class="action" data-act="goto:activity" type="button"><i class="fas fa-receipt" style="background:#7c3aed"></i><b>Activity</b><span>Contributions, requests and records.</span></button>
 </div>
-<section class="section" id="circles"><h2>My Money Circles</h2><div class="card" id="circleList"><div class="empty">Loading circles…</div></div></section>
-<section class="section" id="plans"><h2>Pay Later</h2><div class="card" id="payLaterList"><div class="empty">Loading payment plans…</div></div></section>
-<section class="section" id="activity"><h2>Recent Activity</h2><div class="card" id="activityList"><div class="empty">Loading activity…</div></div></section>
+<div class="tabs" role="tablist">
+  <button class="tab on" data-tab="circles" type="button">Circles</button>
+  <button class="tab" data-tab="requests" type="button">Requests<span class="dot" id="reqDot" style="display:none">0</span></button>
+  <button class="tab" data-tab="paylater" type="button">Pay Later</button>
+  <button class="tab" data-tab="activity" type="button">Activity</button>
+</div>
+<section id="pane"></section>
 </main>
-<div class="modal" id="modal"><div class="sheet"><h3 id="modalTitle">Money</h3><div id="modalBody"></div></div></div>
+<div class="modal" id="modal"><div class="sheet"><div class="grab"></div><h3 id="modalTitle">Money</h3><div id="modalBody"></div></div></div>
 <script>
 (function(){
 'use strict';
-const token=()=>window.__kynToken||window.__accessToken||localStorage.getItem('authToken')||localStorage.getItem('token')||localStorage.getItem('accessToken')||window.parent?.__kynToken||window.parent?.__accessToken||'';
-const apiBase=()=>((window.__getApiBase&&window.__getApiBase())||window.__kynAPI?.baseUrl||window.API_BASE_URL||window.parent?.__getApiBase?.()||window.parent?.API_BASE_URL||'').replace(/\/$/,'');
-async function api(path,opt={}){const b=apiBase();if(!b)throw Error('API is not configured');const r=await fetch(b+path,{...opt,headers:{'Content-Type':'application/json',...(token()?{Authorization:'Bearer '+token()}:{}),...(opt.headers||{})}});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.message||d.error||('Request failed '+r.status));return d}
-const money=n=>'KSh '+Number(n||0).toLocaleString('en-KE',{maximumFractionDigits:2});
-function modal(title,body){document.getElementById('modalTitle').textContent=title;document.getElementById('modalBody').innerHTML=body;document.getElementById('modal').classList.add('open')}
-document.getElementById('moneyActionCircle')?.addEventListener('click',()=>window.openCreateCircle());
-document.getElementById('moneyActionRequest')?.addEventListener('click',()=>window.openPayRequest());
-document.getElementById('moneyActionPlans')?.addEventListener('click',()=>window.showSection('plans'));
-document.getElementById('moneyActionActivity')?.addEventListener('click',()=>window.showSection('activity'));
-window.openCreateCircle=()=>modal('Create Money Circle',`<div class="notice">Use this for a chama, family contribution, trip, event, emergency fund or project.</div><label>Name</label><input class="input" id="mcName" placeholder="e.g. 2027 Coast Trip"><label>Purpose</label><input class="input" id="mcPurpose" placeholder="What are you collecting for?"><label>Target amount (KSh)</label><input class="input" id="mcTarget" type="number" min="1" placeholder="60000"><div class="actions"><button class="secondary" onclick="closeModal()">Cancel</button><button class="primary" onclick="createCircle()">Create</button></div>`);
-window.openPayRequest=()=>modal('Pay for Someone',`<div class="notice">Only create a request for a person or service you genuinely intend to pay. The request is tied to your signed-in NECPRA account and expires after 24 hours.</div><div class="notice" style="background:rgba(245,158,11,.10);color:#92400e">Never send an M-Pesa PIN, OTP or password to a requester. Before paying, verify the recipient through a trusted channel.</div><label>Recipient phone</label><input class="input" id="prPhone" inputmode="tel" placeholder="07XX XXX XXX"><label>Amount (KSh)</label><input class="input" id="prAmount" type="number" min="1" placeholder="300"><label>Purpose</label><input class="input" id="prPurpose" placeholder="e.g. Mum electricity"><div class="actions"><button class="secondary" onclick="closeModal()">Cancel</button><button class="primary" onclick="createRequest()">Create request</button></div>`);
-window.closeModal=()=>document.getElementById('modal').classList.remove('open');
-window.showSection=id=>{const el=document.getElementById(id);if(!el)return;el.scrollIntoView({behavior:'smooth',block:'start'});if(id==='activity')loadActivity();if(id==='plans')loadPayLater();};
-window.contribute=async function(id){modal('Contribute with M-Pesa','<div class="notice">You will receive an M-Pesa STK prompt. The contribution is only counted after Safaricom confirms the payment.</div><label>Amount (KSh)</label><input class="input" id="conAmount" type="number" min="1" placeholder="1000"><label>Your M-Pesa phone</label><input class="input" id="conPhone" inputmode="tel" placeholder="07XX XXX XXX"><div class="actions"><button class="secondary" onclick="closeModal()">Cancel</button><button class="primary" onclick="startContribution(\''+id+'\')">Pay with M-Pesa</button></div>');};
-window.startContribution=async function(id){try{const amount=Number(document.getElementById('conAmount').value||0),phone=document.getElementById('conPhone').value.trim();if(!amount||!phone)throw Error('Enter amount and M-Pesa phone');const a=await api('/money/circles/'+encodeURIComponent(id)+'/contributions',{method:'POST',body:JSON.stringify({amount})});const cid=a.contribution&&a.contribution.id;if(!cid)throw Error('Contribution could not be created');await api('/money/circles/'+encodeURIComponent(id)+'/contributions/'+encodeURIComponent(cid)+'/pay',{method:'POST',body:JSON.stringify({phone})});closeModal();alert('M-Pesa prompt sent. Waiting for Safaricom confirmation.');load();}catch(e){alert(e.message)}};
-window.createCircle=async()=>{try{const name=document.getElementById('mcName').value.trim(),purpose=document.getElementById('mcPurpose').value.trim(),targetAmount=Number(document.getElementById('mcTarget').value||0);if(!name)throw Error('Enter a circle name');if(!Number.isFinite(targetAmount)||targetAmount<0)throw Error('Enter a valid target amount');const d=await api('/money/circles',{method:'POST',body:JSON.stringify({name,purpose,targetAmount})});if(!d.circle)throw Error('Money Circle could not be created');closeModal();load();}catch(e){alert(e.message||'Money Circle could not be created')}};
-async function getMoneyStepUp(){let step=sessionStorage.getItem('necpra_money_step_up');if(step)return step;const password=window.prompt('For your security, enter your NECPRA account password:');if(!password)return null;let r;try{r=await api('/money/security/step-up',{method:'POST',body:JSON.stringify({password})});}catch(e){if(e.message&&/authenticator code|6-digit|OTP/i.test(e.message)){const otp=window.prompt('Enter the current 6-digit authenticator code:');if(!otp)return null;r=await api('/money/security/step-up',{method:'POST',body:JSON.stringify({password,otp})});}else throw e;}const step=r.stepUpToken;if(!step)throw Error('Security verification failed');sessionStorage.setItem('necpra_money_step_up',step);return step;}
-window.createRequest=async()=>{try{const step=await getMoneyStepUp();if(!step)return;await api('/money/requests',{method:'POST',headers:{'Idempotency-Key':(crypto.randomUUID?crypto.randomUUID():String(Date.now())+'-'+Math.random()),'X-Money-Step-Up':step},body:JSON.stringify({recipientPhone:document.getElementById('prPhone').value.trim(),amount:Number(document.getElementById('prAmount').value||0),purpose:document.getElementById('prPurpose').value.trim()})});closeModal();load();}catch(e){sessionStorage.removeItem('necpra_money_step_up');alert(e.message)}};
-async function loadActivity(){try{const d=await api('/money/overview');const acts=d.activity||[];document.getElementById('activityList').innerHTML=acts.length?acts.map(a=>'<div class="row"><div><div class="row-title">'+esc(a.title)+'</div><div class="row-sub">'+esc(a.subtitle||'')+'</div></div><b>'+money(a.amount)+'</b></div>').join(''):'<div class="empty">No money activity yet.</div>'}catch(e){document.getElementById('activityList').innerHTML='<div class="empty">'+esc(e.message)+'</div>'}}
-async function loadPayLater(){const box=document.getElementById('payLaterList');if(!box)return;box.innerHTML='<div class="empty">Loading payment plans…</div>';try{const d=await api('/marketplace/orders?limit=50');const orders=d.orders||d.data?.orders||[];const pending=orders.filter(o=>String(o.payment_method||o.paymentMethod||'').toLowerCase()==='paylater'&&String(o.status||'').toLowerCase()!=='paid');box.innerHTML=pending.length?pending.map(o=>'<div class="row"><div style="min-width:0;flex:1"><div class="row-title">Order #'+esc(String(o.id).slice(-8))+'</div><div class="row-sub">Reserved · '+money(o.total_price||o.totalPrice||o.total)+' · Pay before dispatch</div></div><button class="primary" style="padding:8px 10px;font-size:12px" onclick="payLaterNow(\''+esc(String(o.id))+'\')">Pay now</button></div>').join(''):'<div class="empty">No Pay Later orders yet. Choose Pay Later during Marketplace checkout to reserve an order and pay it from here.</div>'}catch(e){box.innerHTML='<div class="empty">'+esc(e.message)+'</div>'}}
-window.payLaterNow=async function(orderId){const phone=window.prompt('Enter the M-Pesa number to pay this order');if(!phone)return;try{const r=await api('/marketplace/payment/mpesa',{method:'POST',body:JSON.stringify({phone,order_id:orderId,order_ids:[orderId],description:'NECPRA Pay Later order'})});const id=r.checkoutRequestId||r.data?.checkoutRequestId||r.CheckoutRequestID||r.data?.CheckoutRequestID;if(!id)throw Error(r.message||'M-Pesa prompt could not be started');alert('M-Pesa prompt sent. Complete the payment on your phone.');setTimeout(loadPayLater,3500)}catch(e){alert(e.message)}}
-async function load(){try{const d=await api('/money/overview');document.getElementById('balance').textContent=money(d.overview?.trackedAmount||0);const circles=d.circles||[];document.getElementById('circleList').innerHTML=circles.length?circles.map(c=>`<div class="row"><div style="min-width:0;flex:1"><div class="row-title">${esc(c.name)}</div><div class="row-sub">${esc(c.purpose||'')} · ${money(c.collectedAmount)} / ${money(c.targetAmount)}</div></div><button class="primary" style="padding:8px 10px;font-size:12px" onclick="contribute('${c.id}')">Contribute</button></div>`).join(''):'<div class="empty">No circles yet. Create your first one.</div>';const acts=d.activity||[];document.getElementById('activityList').innerHTML=acts.length?acts.map(a=>`<div class="row"><div><div class="row-title">${esc(a.title)}</div><div class="row-sub">${esc(a.subtitle||'')}</div></div><b>${money(a.amount)}</b></div>`).join(''):'<div class="empty">No money activity yet.</div>'}catch(e){document.getElementById('circleList').innerHTML='<div class="empty">Money service is unavailable. Please try again.</div>';document.getElementById('activityList').innerHTML='<div class="empty">'+esc(e.message)+'</div>'}}
-function esc(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-document.getElementById('modal').addEventListener('click',e=>{if(e.target.id==='modal')closeModal()});
-load().then(()=>loadPayLater()).catch(()=>{});
+var $=function(id){return document.getElementById(id)};
+function token(){return window.__kynToken||window.__accessToken||localStorage.getItem('authToken')||localStorage.getItem('token')||localStorage.getItem('accessToken')||(window.parent&&(window.parent.__kynToken||window.parent.__accessToken))||''}
+function apiBase(){return((window.__getApiBase&&window.__getApiBase())||(window.__kynAPI&&window.__kynAPI.baseUrl)||window.API_BASE_URL||(window.parent&&window.parent.__getApiBase&&window.parent.__getApiBase())||(window.parent&&window.parent.API_BASE_URL)||'').replace(/\/$/,'')}
+async function api(path,opt){opt=opt||{};var b=apiBase();if(!b)throw Error('API is not configured');
+  var r=await fetch(b+path,Object.assign({},opt,{headers:Object.assign({'Content-Type':'application/json'},token()?{Authorization:'Bearer '+token()}:{},opt.headers||{})}));
+  var d=await r.json().catch(function(){return{}});if(!r.ok)throw Error(d.message||d.error||('Request failed ('+r.status+')'));return d}
+function money(n){return 'KSh '+Number(n||0).toLocaleString('en-KE',{maximumFractionDigits:2})}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function ago(d){if(!d)return'';var s=(Date.now()-new Date(d))/1000;if(s<60)return'just now';if(s<3600)return Math.floor(s/60)+' min ago';if(s<86400)return Math.floor(s/3600)+' h ago';if(s<604800)return Math.floor(s/86400)+' d ago';return new Date(d).toLocaleDateString('en-KE',{day:'numeric',month:'short'})}
+function left(d){if(!d)return'';var s=(new Date(d)-Date.now())/1000;if(s<=0)return'expired';if(s<3600)return Math.ceil(s/60)+' min left';return Math.ceil(s/3600)+' h left'}
+function toast(m,err){var t=document.createElement('div');t.className='toast'+(err?' err':'');t.textContent=m;document.body.appendChild(t);setTimeout(function(){t.remove()},3800)}
+function modal(title,body){$('modalTitle').textContent=title;$('modalBody').innerHTML=body;$('modal').classList.add('open')}
+function closeModal(){$('modal').classList.remove('open')}
+function busy(btn,on,txt){if(!btn)return;btn.disabled=on;if(on){btn.dataset.t=btn.textContent;btn.textContent=txt||'Please wait…'}else if(btn.dataset.t){btn.textContent=btn.dataset.t}}
+function chip(s){return '<span class="chip '+esc(s)+'">'+esc(s)+'</span>'}
+var lastPhone=function(){try{return localStorage.getItem('necpra_money_phone')||''}catch(_){return''}};
+var savePhone=function(p){try{localStorage.setItem('necpra_money_phone',p)}catch(_){}};
+
+var S={tab:'circles',reqSeg:'in',overview:null,circles:[],incoming:[],outgoing:[],orders:null,loading:true,err:''};
+try{S.tab=sessionStorage.getItem('necpra_money_tab')||'circles'}catch(_){}
+
+/* ---------- in-app prompt (window.prompt is blocked/unreliable in installed apps & WebViews) ---------- */
+function ask(title,label,type,hint){return new Promise(function(res){
+  modal(title,(hint?'<div class="notice">'+hint+'</div>':'')+'<label>'+esc(label)+'</label><input class="input" id="askVal" type="'+(type||'text')+'" autocomplete="off"><div class="actions"><button class="secondary" id="askNo" type="button">Cancel</button><button class="primary" id="askOk" type="button">Continue</button></div>');
+  var i=$('askVal');setTimeout(function(){i.focus()},60);
+  function done(v){$('askOk').onclick=$('askNo').onclick=null;res(v)}
+  $('askOk').onclick=function(){var v=i.value.trim();if(!v){toast('Please fill this in',true);return}done(v)};
+  $('askNo').onclick=function(){closeModal();done(null)};
+  i.onkeydown=function(e){if(e.key==='Enter')$('askOk').click()}})}
+
+async function stepUp(){var cached=sessionStorage.getItem('necpra_money_step_up');if(cached)return cached;
+  var password=await ask('Confirm it is you','Account password','password','For your security, enter your NECPRA password to continue.');if(!password)return null;
+  var r;try{r=await api('/money/security/step-up',{method:'POST',body:JSON.stringify({password:password})})}
+  catch(e){if(/authenticator code|6-digit|OTP/i.test(e.message||'')){var otp=await ask('Two-step verification','6-digit authenticator code','text');if(!otp)return null;r=await api('/money/security/step-up',{method:'POST',body:JSON.stringify({password:password,otp:otp})})}else throw e}
+  if(!r.stepUpToken)throw Error('Security verification failed');sessionStorage.setItem('necpra_money_step_up',r.stepUpToken);return r.stepUpToken}
+
+/* ---------- data ---------- */
+async function load(manual){
+  var rb=$('refreshBtn');if(manual)rb.classList.add('spin');S.loading=!S.overview;render();
+  try{
+    var r=await Promise.all([api('/money/overview'),api('/money/requests/incoming').catch(function(){return{requests:[]}}),api('/money/requests').catch(function(){return{requests:[]}})]);
+    S.overview=r[0];S.circles=r[0].circles||[];S.incoming=r[1].requests||[];S.outgoing=r[2].requests||[];S.err='';
+  }catch(e){S.err=e.message||'Money service is unavailable'}
+  S.loading=false;rb.classList.remove('spin');header();render();
+}
+async function loadOrders(){S.orders=null;render();
+  try{var d=await api('/marketplace/orders?limit=50');var orders=d.orders||(d.data&&d.data.orders)||[];
+    S.orders=orders.filter(function(o){return String(o.payment_method||o.paymentMethod||'').toLowerCase()==='paylater'&&String(o.status||'').toLowerCase()!=='paid'})}
+  catch(e){S.orders=[];S.ordersErr=e.message}
+  render()}
+function header(){var o=(S.overview&&S.overview.overview)||{};
+  $('balance').textContent=money(o.trackedAmount||0);$('pCircles').textContent=o.circleCount!=null?o.circleCount:S.circles.length;
+  var inc=S.incoming.filter(function(r){return r.status==='requested'}).length;$('pIncoming').textContent=o.pendingIncoming!=null?o.pendingIncoming:inc;
+  $('pOutgoing').textContent=o.pendingOutgoing!=null?o.pendingOutgoing:S.outgoing.filter(function(r){return r.status==='requested'}).length;
+  var dot=$('reqDot'),n=Number($('pIncoming').textContent)||0;dot.style.display=n?'inline-block':'none';dot.textContent=n}
+
+/* ---------- rendering ---------- */
+function skeleton(){return '<div class="card"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>'}
+function errBox(){return '<div class="card"><div class="empty"><i class="fas fa-triangle-exclamation"></i>'+esc(S.err)+'<div style="margin-top:12px"><button class="primary small" data-act="retry" type="button">Try again</button></div></div></div>'}
+function render(){
+  document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('on',t.dataset.tab===S.tab)});
+  var p=$('pane');if(S.loading){p.innerHTML=skeleton();return}if(S.err&&!S.overview){p.innerHTML=errBox();return}
+  if(S.tab==='circles')p.innerHTML=viewCircles();else if(S.tab==='requests')p.innerHTML=viewRequests();
+  else if(S.tab==='paylater')p.innerHTML=viewPayLater();else p.innerHTML=viewActivity()}
+function viewCircles(){
+  if(!S.circles.length)return '<div class="card"><div class="empty"><i class="fas fa-users"></i>No circles yet.<br>Start a chama, family fund or trip pot and invite people to contribute.<div style="margin-top:12px"><button class="primary" data-act="newCircle" type="button">Create your first circle</button></div></div></div>';
+  return '<div class="card">'+S.circles.map(function(c){var t=Number(c.targetAmount||0),got=Number(c.collectedAmount||0),pct=t>0?Math.min(100,Math.round(got/t*100)):0;
+    return '<div class="circle"><div class="head"><div class="ico" style="background:#16a34a"><i class="fas fa-users"></i></div><div class="mid" style="min-width:0;flex:1"><div class="row-title">'+esc(c.name)+' '+(c.isOwner?'<span class="chip owner">Owner</span>':'')+'</div><div class="row-sub">'+esc(c.purpose||'Money Circle')+'</div></div></div>'
+    +(t>0?'<div class="bar"><i style="width:'+pct+'%"></i></div><div class="meta"><span>'+money(got)+' collected</span><span>'+pct+'% of '+money(t)+'</span></div>':'<div class="meta" style="margin-top:8px"><span>'+money(got)+' collected</span><span>No target set</span></div>')
+    +'<div class="btns"><button class="primary small" data-act="contribute" data-id="'+esc(c.id)+'" type="button">Contribute</button><button class="secondary small" data-act="circle" data-id="'+esc(c.id)+'" type="button">Details</button></div></div>'}).join('')+'</div>'}
+function viewRequests(){
+  var seg='<div class="seg"><button data-act="seg:in" class="'+(S.reqSeg==='in'?'on':'')+'" type="button">Received ('+S.incoming.length+')</button><button data-act="seg:out" class="'+(S.reqSeg==='out'?'on':'')+'" type="button">Sent ('+S.outgoing.length+')</button></div>';
+  var list=S.reqSeg==='in'?S.incoming:S.outgoing;
+  if(!list.length)return seg+'<div class="card"><div class="empty"><i class="fas fa-'+(S.reqSeg==='in'?'inbox':'paper-plane')+'"></i>'+(S.reqSeg==='in'?'No payment requests for you.':'You have not sent any requests.')+(S.reqSeg==='out'?'<div style="margin-top:12px"><button class="primary" data-act="newRequest" type="button">Pay for someone</button></div>':'')+'</div></div>';
+  return seg+'<div class="card">'+list.map(function(r){var who=S.reqSeg==='in'?((r.requester&&(r.requester.displayName||r.requester.username))||'Someone'):(r.recipientPhone||'Recipient');
+    var live=r.status==='requested';
+    return '<div class="row"><div class="ico" style="background:'+(S.reqSeg==='in'?'#2563eb':'#7c3aed')+'"><i class="fas fa-'+(S.reqSeg==='in'?'hand-holding-dollar':'paper-plane')+'"></i></div><div class="mid"><div class="row-title">'+esc(r.purpose||'Payment request')+'</div><div class="row-sub">'+(S.reqSeg==='in'?'From ':'To ')+esc(who)+' · '+chip(r.status)+(live?' · '+esc(left(r.expiresAt)):' · '+esc(ago(r.createdAt)))+'</div></div><div style="text-align:right"><div class="amt">'+money(r.amount)+'</div>'
+    +(live&&S.reqSeg==='in'?'<button class="primary small" style="margin-top:6px" data-act="payReq" data-id="'+esc(r.id)+'" type="button">Pay</button>':'')
+    +(live&&S.reqSeg==='out'?'<button class="danger small" style="margin-top:6px" data-act="cancelReq" data-id="'+esc(r.id)+'" type="button">Cancel</button>':'')+'</div></div>'}).join('')+'</div>'}
+function viewPayLater(){
+  if(S.orders===null)return skeleton();
+  if(!S.orders.length)return '<div class="card"><div class="empty"><i class="fas fa-calendar-check"></i>'+(S.ordersErr?esc(S.ordersErr):'No Pay Later orders yet.<br>Choose Pay Later at Marketplace checkout to reserve an order and settle it here.')+'</div></div>';
+  return '<div class="card">'+S.orders.map(function(o){var tot=o.total_price||o.totalPrice||o.total;
+    return '<div class="row"><div class="ico" style="background:#f59e0b"><i class="fas fa-bag-shopping"></i></div><div class="mid"><div class="row-title">Order #'+esc(String(o.id).slice(-8))+'</div><div class="row-sub">Reserved · pay before dispatch</div></div><div style="text-align:right"><div class="amt">'+money(tot)+'</div><button class="primary small" style="margin-top:6px" data-act="payOrder" data-id="'+esc(o.id)+'" type="button">Pay now</button></div></div>'}).join('')+'</div>'}
+function viewActivity(){var a=(S.overview&&S.overview.activity)||[];
+  if(!a.length)return '<div class="card"><div class="empty"><i class="fas fa-receipt"></i>No money activity yet.</div></div>';
+  return '<div class="card">'+a.map(function(x){var c=x.kind==='contribution';
+    return '<div class="row"><div class="ico" style="background:'+(c?'#16a34a':'#2563eb')+'"><i class="fas fa-'+(c?'coins':'hand-holding-heart')+'"></i></div><div class="mid"><div class="row-title">'+esc(x.title)+'</div><div class="row-sub">'+esc(x.subtitle||'')+' · '+esc(ago(x.createdAt))+'</div></div><div class="amt">'+money(x.amount)+'</div></div>'}).join('')+'</div>'}
+
+/* ---------- actions ---------- */
+function newCircle(){modal('Create Money Circle','<div class="notice">Use this for a chama, family contribution, trip, event, emergency fund or project.</div><label>Name</label><input class="input" id="mcName" placeholder="e.g. 2027 Coast Trip" maxlength="120"><label>Purpose</label><input class="input" id="mcPurpose" placeholder="What are you collecting for?"><label>Type</label><select class="input" id="mcType"><option value="chama">Chama</option><option value="family">Family</option><option value="trip">Trip</option><option value="event">Event</option><option value="emergency">Emergency fund</option><option value="project">Project</option><option value="purchase">Purchase</option><option value="other">Other</option></select><label>Target amount (KSh)</label><input class="input" id="mcTarget" type="number" inputmode="decimal" min="1" placeholder="60000"><div class="actions"><button class="secondary" data-act="close" type="button">Cancel</button><button class="primary" id="mcGo" type="button">Create</button></div>');
+  $('mcGo').onclick=async function(){var b=this;try{var name=$('mcName').value.trim(),purpose=$('mcPurpose').value.trim(),target=Number($('mcTarget').value||0);
+    if(!name)throw Error('Enter a circle name');if(!isFinite(target)||target<0)throw Error('Enter a valid target amount');
+    busy(b,true,'Creating…');var d=await api('/money/circles',{method:'POST',body:JSON.stringify({name:name,purpose:purpose,targetAmount:target,type:$('mcType').value})});
+    if(!d.circle)throw Error('Money Circle could not be created');closeModal();toast('Circle created');S.tab='circles';await load()}catch(e){busy(b,false);toast(e.message,true)}}}
+function newRequest(){modal('Pay for Someone','<div class="notice warn">Only create requests for people you know. Never share your PIN, OTP or password with anyone.</div><label>Recipient phone</label><input class="input" id="prPhone" inputmode="tel" placeholder="07XX XXX XXX"><label>Amount (KSh, max 50,000)</label><input class="input" id="prAmount" type="number" inputmode="decimal" min="1" max="50000" placeholder="300"><label>Purpose</label><input class="input" id="prPurpose" placeholder="e.g. Mum electricity" maxlength="255"><div class="actions"><button class="secondary" data-act="close" type="button">Cancel</button><button class="primary" id="prGo" type="button">Create request</button></div>');
+  $('prGo').onclick=async function(){var b=this;try{var phone=$('prPhone').value.trim(),amount=Number($('prAmount').value||0),purpose=$('prPurpose').value.trim();
+    if(!phone)throw Error('Enter the recipient phone');if(!(amount>0))throw Error('Enter a valid amount');if(!purpose)throw Error('Enter a purpose');
+    var step=await stepUp();if(!step)return;busy(b,true,'Creating…');
+    await api('/money/requests',{method:'POST',headers:{'Idempotency-Key':(crypto.randomUUID?crypto.randomUUID():String(Date.now())+'-'+Math.random()),'X-Money-Step-Up':step},body:JSON.stringify({recipientPhone:phone,amount:amount,purpose:purpose})});
+    closeModal();toast('Request created');S.tab='requests';S.reqSeg='out';await load()}catch(e){sessionStorage.removeItem('necpra_money_step_up');busy(b,false);toast(e.message,true)}}}
+function mpesaForm(title,note,amountField,goLabel,onGo){
+  modal(title,'<div class="notice">'+note+'</div>'+(amountField?'<label>Amount (KSh)</label><input class="input" id="mfAmount" type="number" inputmode="decimal" min="1" placeholder="1000">':'')+'<label>Your M-Pesa phone</label><input class="input" id="mfPhone" inputmode="tel" placeholder="07XX XXX XXX" value="'+esc(lastPhone())+'"><div class="actions"><button class="secondary" data-act="close" type="button">Cancel</button><button class="primary" id="mfGo" type="button">'+esc(goLabel)+'</button></div>');
+  $('mfGo').onclick=async function(){var b=this;try{var phone=$('mfPhone').value.trim(),amount=amountField?Number($('mfAmount').value||0):0;
+    if(!phone)throw Error('Enter your M-Pesa phone');if(amountField&&!(amount>0))throw Error('Enter a valid amount');
+    busy(b,true,'Sending prompt…');await onGo(phone,amount);savePhone(phone);closeModal();toast('M-Pesa prompt sent. Check your phone.');pollSoon()}catch(e){busy(b,false);toast(e.message,true)}}}
+function contribute(id){mpesaForm('Contribute with M-Pesa','You will receive an M-Pesa prompt. The contribution counts only after Safaricom confirms the payment.',true,'Pay with M-Pesa',async function(phone,amount){
+  var a=await api('/money/circles/'+encodeURIComponent(id)+'/contributions',{method:'POST',body:JSON.stringify({amount:amount})});var cid=a.contribution&&a.contribution.id;if(!cid)throw Error('Contribution could not be created');
+  await api('/money/circles/'+encodeURIComponent(id)+'/contributions/'+encodeURIComponent(cid)+'/pay',{method:'POST',body:JSON.stringify({phone:phone})})})}
+function payReq(id){var r=S.incoming.find(function(x){return String(x.id)===String(id)});if(!r)return;
+  mpesaForm('Pay '+money(r.amount),'<b>'+esc(r.purpose||'Payment request')+'</b><br>From '+esc((r.requester&&(r.requester.displayName||r.requester.username))||'Someone')+'. Pay only if you know this person and agree with the purpose.',false,'Pay '+money(r.amount),async function(phone){
+    await api('/money/requests/'+encodeURIComponent(id)+'/pay',{method:'POST',body:JSON.stringify({phone:phone})})})}
+function payOrder(id){mpesaForm('Pay your Pay Later order','You will receive an M-Pesa prompt for the full order amount.',false,'Pay with M-Pesa',async function(phone){
+  var r=await api('/marketplace/payment/mpesa',{method:'POST',body:JSON.stringify({phone:phone,order_id:id,order_ids:[id],description:'NECPRA Pay Later order'})});
+  var cid=r.checkoutRequestId||(r.data&&r.data.checkoutRequestId)||r.CheckoutRequestID||(r.data&&r.data.CheckoutRequestID);if(!cid)throw Error(r.message||'M-Pesa prompt could not be started')})}
+async function cancelReq(id){if(!confirm('Cancel this payment request?'))return;try{await api('/money/requests/'+encodeURIComponent(id)+'/cancel',{method:'POST'});toast('Request cancelled');load()}catch(e){toast(e.message,true)}}
+async function circleDetail(id){modal('Circle','<div class="skel"></div><div class="skel"></div>');
+  try{var d=await api('/money/circles/'+encodeURIComponent(id));var c=d.circle,t=Number(c.targetAmount||0),got=Number(c.collectedAmount||0),pct=t>0?Math.min(100,Math.round(got/t*100)):0;
+    var paid=(d.contributions||[]).filter(function(x){return x.status==='paid'});
+    $('modalTitle').textContent=c.name;
+    $('modalBody').innerHTML='<div class="row-sub" style="margin-bottom:8px">'+esc(c.purpose||'')+'</div>'+(t>0?'<div class="bar"><i style="width:'+pct+'%"></i></div>':'')
+     +'<div class="sum"><div><b>'+money(got)+'</b><span>Collected</span></div><div><b>'+(t>0?money(t):'—')+'</b><span>Target</span></div><div><b>'+(d.members||[]).length+'</b><span>Members</span></div></div>'
+     +'<h4>Members</h4><div>'+(d.members||[]).map(function(m){return '<div class="row" style="padding:8px 0"><div class="ico" style="width:32px;height:32px;background:#64748b;border-radius:50%;font-size:12px">'+esc((m.name||'?').charAt(0).toUpperCase())+'</div><div class="mid"><div class="row-title">'+esc(m.name)+'</div></div>'+(m.role==='owner'?'<span class="chip owner">Owner</span>':'')+'</div>'}).join('')+'</div>'
+     +(d.isOwner?'<h4>Add a member</h4><div style="display:flex;gap:8px"><input class="input" id="amWho" placeholder="Phone (07…) or @username"><button class="primary" id="amGo" type="button">Add</button></div>':'')
+     +'<h4>Recent contributions</h4><div>'+(paid.length?paid.slice(0,12).map(function(x){return '<div class="row" style="padding:8px 0"><div class="mid"><div class="row-title">'+esc(x.contributorName)+'</div><div class="row-sub">'+esc(ago(x.createdAt))+'</div></div><div class="amt">'+money(x.amount)+'</div></div>'}).join(''):'<div class="empty" style="padding:12px">No confirmed contributions yet.</div>')+'</div>'
+     +'<div class="actions"><button class="secondary" data-act="close" type="button">Close</button><button class="primary" data-act="contribute" data-id="'+esc(c.id)+'" type="button">Contribute</button></div>';
+    var go=$('amGo');if(go)go.onclick=async function(){var v=$('amWho').value.trim();if(!v)return toast('Enter a phone number or username',true);var body=/^[@a-zA-Z]/.test(v)?{username:v}:{phone:v};busy(go,true,'Adding…');
+      try{var r=await api('/money/circles/'+encodeURIComponent(id)+'/members',{method:'POST',body:JSON.stringify(body)});toast(r.created===false?'Already a member':'Member added');circleDetail(id);load()}catch(e){busy(go,false);toast(e.message,true)}};
+  }catch(e){$('modalBody').innerHTML='<div class="empty">'+esc(e.message)+'</div><div class="actions"><button class="secondary" data-act="close" type="button">Close</button></div>'}}
+var pollTimer=null;function pollSoon(){var n=0;clearInterval(pollTimer);pollTimer=setInterval(function(){n++;load();if(n>=4)clearInterval(pollTimer)},6000)}
+
+/* ---------- events (one delegated handler: nothing depends on inline onclick) ---------- */
+document.addEventListener('click',function(e){
+  var t=e.target.closest('[data-tab],[data-act]');if(!t){if(e.target.id==='modal')closeModal();return}
+  if(t.dataset.tab){S.tab=t.dataset.tab;try{sessionStorage.setItem('necpra_money_tab',S.tab)}catch(_){}if(S.tab==='paylater'&&S.orders===null)loadOrders();render();return}
+  var a=t.dataset.act,id=t.dataset.id;
+  if(a==='newCircle')newCircle();else if(a==='newRequest')newRequest();else if(a==='close')closeModal();
+  else if(a==='retry')load(true);else if(a==='contribute')contribute(id);else if(a==='circle')circleDetail(id);
+  else if(a==='payReq')payReq(id);else if(a==='payOrder')payOrder(id);else if(a==='cancelReq')cancelReq(id);
+  else if(a&&a.indexOf('seg:')===0){S.reqSeg=a.slice(4);render()}
+  else if(a&&a.indexOf('goto:')===0){S.tab=a.slice(5);try{sessionStorage.setItem('necpra_money_tab',S.tab)}catch(_){}if(S.tab==='paylater'&&S.orders===null)loadOrders();render();var tb=document.querySelector('.tabs');if(tb)tb.scrollIntoView({behavior:'smooth',block:'start'})}
+});
+$('refreshBtn').addEventListener('click',function(){S.orders=null;load(true);if(S.tab==='paylater')loadOrders()});
+document.addEventListener('keydown',function(e){if(e.key==='Escape')closeModal()});
+// back button inside this module: close an open sheet first (hardware back is handled by the shell)
+window.__moneyCloseTopLayer=function(){if($('modal').classList.contains('open')){closeModal();return true}return false};
+if(S.tab==='paylater')loadOrders();
+load();
 })();
 </script>
 </body></html>

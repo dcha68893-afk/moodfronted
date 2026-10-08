@@ -145,9 +145,7 @@ html, body {
 }
 
 /* ── 3. Typography ────────────────────────────────────────── */
-h1, h2, h3, h4, h5, h6 {
-  color: var(--kyn-text-primary) !important;
-}
+/* heading colour rule removed: it forced a theme colour onto headings that sit on coloured banners (white-on-dark in light mode became dark-on-dark). Headings now inherit from their container. */
 
 p, span, div, li, td, th, label, small {
   color: inherit;
@@ -162,7 +160,7 @@ a:hover {
 }
 
 /* ── 4. Panels, Cards & Containers ───────────────────────── */
-.panel,
+:where(.panel,
 .card,
 .sidebar,
 .app-sidebar,
@@ -209,15 +207,15 @@ a:hover {
 .mfa-modal-card,
 .premium-feature-card,
 .quick-call-card,
-.stat-card {
+.stat-card){
   background: var(--kyn-bg-panel) !important;
   border-color: var(--kyn-border) !important;
-  color: var(--kyn-text-primary) !important;
+  color: var(--kyn-text-primary);
 }
 
 /* ── 5. Headers & Toolbars ────────────────────────────────── */
 /* FIX (header patchwork/sparking): [class*="header"], [class*="topbar"]
-   and [class*="top-bar"] matched ANY element whose class merely contains
+:where(and [class*="top-bar"] matched ANY element whose class merely contains
    that substring, including inner pieces like .header-context,
    .header-module-badge, .header-module-copy and .header-actions that sit
    inside the real header bar. Forcing a flat, opaque var(--kyn-bg-header)
@@ -233,10 +231,10 @@ header,
 .toolbar,
 .app-header,
 .chat-header,
-.module-header {
+.module-header){
   background: var(--kyn-bg-header) !important;
   border-color: var(--kyn-border) !important;
-  color: var(--kyn-text-primary) !important;
+  color: var(--kyn-text-primary);
 }
 
 /* ── 6. Inputs & Forms ────────────────────────────────────── */
@@ -313,11 +311,11 @@ button {
 }
 
 /* Icon buttons */
-.icon-btn,
+:where(.icon-btn,
 .action-btn,
 [class*="icon-btn"],
-[class*="action-btn"] {
-  color: var(--kyn-text-secondary) !important;
+[class*="action-btn"]){
+  color: var(--kyn-text-secondary);
   background: transparent;
 }
 
@@ -358,16 +356,16 @@ a i,
 }
 
 /* ── 9. Lists & Contacts ──────────────────────────────────── */
-.list-item,
+:where(.list-item,
 .contact-item,
 .chat-item,
 .friend-item,
 .call-item,
 [class*="list-item"],
 [class*="contact-item"],
-[class*="chat-item"] {
+[class*="chat-item"]){
   background: transparent !important;
-  color: var(--kyn-text-primary) !important;
+  color: var(--kyn-text-primary);
   border-color: var(--kyn-border) !important;
 }
 
@@ -388,7 +386,7 @@ a i,
 }
 
 /* Secondary text within items */
-.list-item .subtitle,
+:where(.list-item .subtitle,
 .list-item .meta,
 .list-item small,
 .contact-item .subtitle,
@@ -396,21 +394,21 @@ a i,
 .chat-item .timestamp,
 [class*="subtitle"],
 [class*="last-message"],
-[class*="timestamp"] {
-  color: var(--kyn-text-secondary) !important;
+[class*="timestamp"]){
+  color: var(--kyn-text-secondary);
 }
 
 /* ── 10. Modals & Overlays ────────────────────────────────── */
-.modal,
+:where(.modal,
 .dialog,
 .popup,
 .sheet,
 .bottom-sheet,
 [class*="modal"],
 [class*="dialog"],
-[class*="popup"] {
+[class*="popup"]){
   background: var(--kyn-bg-modal) !important;
-  color: var(--kyn-text-primary) !important;
+  color: var(--kyn-text-primary);
   border-color: var(--kyn-border) !important;
 }
 
@@ -422,14 +420,14 @@ a i,
   background: var(--kyn-bg-overlay) !important;
 }
 
-.modal-header,
+:where(.modal-header,
 .dialog-header,
 .sheet-header,
 [class*="modal-header"],
-[class*="sheet-header"] {
+[class*="sheet-header"]){
   background: var(--kyn-bg-panel) !important;
   border-color: var(--kyn-border) !important;
-  color: var(--kyn-text-primary) !important;
+  color: var(--kyn-text-primary);
 }
 
 /* ── 11. Scrollbars ───────────────────────────────────────── */
@@ -462,15 +460,15 @@ hr,
 }
 
 /* ── 13. Badges & Tags ────────────────────────────────────── */
-.badge,
+:where(.badge,
 .tag,
 .chip,
 .pill,
 [class*="badge"],
 [class*="tag"],
-[class*="chip"] {
-  background: var(--kyn-bg-active) !important;
-  color: var(--kyn-text-primary) !important;
+[class*="chip"]){
+  background: var(--kyn-bg-active);
+  color: var(--kyn-text-primary);
 }
 
 .badge-success  { background: var(--kyn-accent-primary)   !important; color: #fff !important; }
@@ -479,24 +477,24 @@ hr,
 .badge-warning  { background: var(--kyn-accent-warning)   !important; color: #fff !important; }
 
 /* ── 14. Dropdowns & Menus ────────────────────────────────── */
-.dropdown,
+:where(.dropdown,
 .dropdown-menu,
 .context-menu,
 .popup-menu,
 [class*="dropdown"],
 [class*="context-menu"],
-[class*="popup-menu"] {
+[class*="popup-menu"]){
   background: var(--kyn-bg-panel) !important;
   border: 1px solid var(--kyn-border) !important;
-  color: var(--kyn-text-primary) !important;
+  color: var(--kyn-text-primary);
   box-shadow: var(--kyn-shadow-md) !important;
 }
 
-.dropdown-item,
+:where(.dropdown-item,
 .menu-item,
 [class*="dropdown-item"],
-[class*="menu-item"] {
-  color: var(--kyn-text-primary) !important;
+[class*="menu-item"]){
+  color: var(--kyn-text-primary);
   background: transparent !important;
 }
 
@@ -510,14 +508,14 @@ table {
   border-color: var(--kyn-border) !important;
 }
 
-th {
+:where(th){
   background: var(--kyn-bg-panel) !important;
-  color: var(--kyn-text-secondary) !important;
+  color: var(--kyn-text-secondary);
   border-color: var(--kyn-border) !important;
 }
 
-td {
-  color: var(--kyn-text-primary) !important;
+:where(td){
+  color: var(--kyn-text-primary);
   border-color: var(--kyn-border) !important;
 }
 
@@ -526,14 +524,14 @@ tr:hover td {
 }
 
 /* ── 16. Calls Module ─────────────────────────────────────── */
-.call-screen,
+:where(.call-screen,
 .video-screen,
 .call-container,
 .video-container,
 [class*="call-screen"],
-[class*="video-screen"] {
+[class*="video-screen"]){
   background: var(--kyn-bg-chat) !important;
-  color: var(--kyn-text-primary) !important;
+  color: var(--kyn-text-primary);
 }
 
 .call-controls,
@@ -543,28 +541,28 @@ tr:hover td {
 }
 
 /* ── 17. Settings Module ──────────────────────────────────── */
-.settings-section,
+:where(.settings-section,
 .settings-group,
 .settings-row,
 [class*="settings-section"],
 [class*="settings-group"],
-[class*="settings-row"] {
+[class*="settings-row"]){
   background: var(--kyn-bg-panel) !important;
   border-color: var(--kyn-border) !important;
-  color: var(--kyn-text-primary) !important;
+  color: var(--kyn-text-primary);
 }
 
 /* Settings label */
-.settings-label,
+:where(.settings-label,
 .setting-label,
-[class*="settings-label"] {
-  color: var(--kyn-text-primary) !important;
+[class*="settings-label"]){
+  color: var(--kyn-text-primary);
 }
 
-.settings-description,
+:where(.settings-description,
 .setting-description,
-[class*="settings-desc"] {
-  color: var(--kyn-text-secondary) !important;
+[class*="settings-desc"]){
+  color: var(--kyn-text-secondary);
 }
 
 /* Toggles */
@@ -581,44 +579,44 @@ input[type="checkbox"]:checked + .toggle {
 }
 
 /* ── 18. Status / Stories Module ──────────────────────────── */
-.status-item,
+:where(.status-item,
 .story-item,
 [class*="status-item"],
-[class*="story-item"] {
+[class*="story-item"]){
   background: var(--kyn-bg-panel) !important;
-  color: var(--kyn-text-primary) !important;
+  color: var(--kyn-text-primary);
 }
 
 /* ── 19. Friends Module ───────────────────────────────────── */
-.friend-card,
+:where(.friend-card,
 .user-card,
 .profile-card-small,
 [class*="friend-card"],
-[class*="user-card"] {
+[class*="user-card"]){
   background: var(--kyn-bg-panel) !important;
   border-color: var(--kyn-border) !important;
-  color: var(--kyn-text-primary) !important;
+  color: var(--kyn-text-primary);
 }
 
 /* ── 20. Groups Module ────────────────────────────────────── */
-.group-card,
+:where(.group-card,
 .group-item,
 [class*="group-card"],
-[class*="group-item"] {
+[class*="group-item"]){
   background: var(--kyn-bg-panel) !important;
   border-color: var(--kyn-border) !important;
-  color: var(--kyn-text-primary) !important;
+  color: var(--kyn-text-primary);
 }
 
 /* ── 21. Tools / Marketplace Module ──────────────────────── */
-.tool-card,
+:where(.tool-card,
 .listing-card,
 .marketplace-item,
 [class*="tool-card"],
-[class*="listing-card"] {
+[class*="listing-card"]){
   background: var(--kyn-bg-panel) !important;
   border-color: var(--kyn-border) !important;
-  color: var(--kyn-text-primary) !important;
+  color: var(--kyn-text-primary);
 }
 
 /* ── 22. Empty States & Placeholders ─────────────────────── */
@@ -650,15 +648,15 @@ input[type="checkbox"]:checked + .toggle {
 }
 
 /* ── 24. Notifications ────────────────────────────────────── */
-.notification,
+:where(.notification,
 .toast,
 .alert,
 .snackbar,
 [class*="notification"],
 [class*="toast"],
-[class*="alert"] {
+[class*="alert"]){
   background: var(--kyn-bg-panel) !important;
-  color: var(--kyn-text-primary) !important;
+  color: var(--kyn-text-primary);
   border-left: 3px solid var(--kyn-accent-primary) !important;
   box-shadow: var(--kyn-shadow-md) !important;
 }
@@ -738,30 +736,30 @@ input[type="checkbox"]:checked + .toggle {
 #loadingScreen {
   background: var(--kyn-bg-root) !important;
 }
-#loadingScreen h2 {
-  color: var(--kyn-text-primary) !important;
+:where(#loadingScreen h2){
+  color: var(--kyn-text-primary);
 }
-#loadingScreen p {
-  color: var(--kyn-text-secondary) !important;
+:where(#loadingScreen p){
+  color: var(--kyn-text-secondary);
 }
 
 /*
-  FIX B — Profile card white background
+:where(FIX B — Profile card white background
   Problem: .profile-card has `background: white` in base CSS.
   The [class*="card"] rule above catches it, but adding an
   explicit rule prevents any specificity race.
 */
-.profile-card {
+.profile-card){
   background: var(--kyn-bg-panel) !important;
-  color: var(--kyn-text-primary) !important;
+  color: var(--kyn-text-primary);
 }
 
-.profile-username {
-  color: var(--kyn-text-primary) !important;
+:where(.profile-username){
+  color: var(--kyn-text-primary);
 }
 
-.profile-bio {
-  color: var(--kyn-text-secondary) !important;
+:where(.profile-bio){
+  color: var(--kyn-text-secondary);
 }
 
 /*
@@ -769,10 +767,10 @@ input[type="checkbox"]:checked + .toggle {
   Problem: .profile-edit-sheet { background: #fff } and
   .profile-edit-header { background: #fff } in base CSS.
   .profile-edit-header h3 { color: #0f172a } — dark on white.
-*/
-.profile-edit-sheet {
+:where(*/
+.profile-edit-sheet){
   background: var(--kyn-bg-panel) !important;
-  color: var(--kyn-text-primary) !important;
+  color: var(--kyn-text-primary);
 }
 
 .profile-edit-header {
@@ -780,21 +778,21 @@ input[type="checkbox"]:checked + .toggle {
   border-color: var(--kyn-border) !important;
 }
 
-.profile-edit-header h3 {
-  color: var(--kyn-text-primary) !important;
+:where(.profile-edit-header h3){
+  color: var(--kyn-text-primary);
 }
 
-.profile-edit-close {
+:where(.profile-edit-close){
   background: var(--kyn-border) !important;
-  color: var(--kyn-text-secondary) !important;
+  color: var(--kyn-text-secondary);
 }
 
-.profile-edit-avatar-hint {
-  color: var(--kyn-text-secondary) !important;
+:where(.profile-edit-avatar-hint){
+  color: var(--kyn-text-secondary);
 }
 
-.profile-edit-field label {
-  color: var(--kyn-text-secondary) !important;
+:where(.profile-edit-field label){
+  color: var(--kyn-text-secondary);
 }
 
 .profile-edit-field input,
@@ -831,52 +829,52 @@ input[type="checkbox"]:checked + .toggle {
 /*
   FIX F — Call banner generic buttons
   Problem: .call-banner-actions button { background: white }
-  with button text inheriting var(--kyn-text-primary) = #e5e7eb
+:where(with button text inheriting var(--kyn-text-primary) = #e5e7eb
   → near-invisible light grey text on white.
   Only override the plain (non-accept/non-decline) buttons.
   The .accept-call and .decline-call variants already have
   explicit background/color and must NOT be changed.
 */
-.call-banner-actions button:not(.accept-call):not(.decline-call) {
+.call-banner-actions button:not(.accept-call):not(.decline-call)){
   background: var(--kyn-bg-panel) !important;
-  color: var(--kyn-text-primary) !important;
+  color: var(--kyn-text-primary);
   border: 1px solid var(--kyn-border) !important;
 }
 
 /*
   FIX G — Profile name in header
   Problem: .profile-name-sm { color: #1f2937 } (dark) against
-  the now-dark header background → invisible.
+:where(the now-dark header background → invisible.
 */
-.profile-name-sm {
-  color: var(--kyn-text-primary) !important;
+.profile-name-sm){
+  color: var(--kyn-text-primary);
 }
 
 /*
   FIX H — Header module title / subtitle
   Problem: .header-module-title { color: #0f172a } and
   .header-module-subtitle { color: #64748b } both set in base
-  CSS against a light header that is now dark.
+:where(CSS against a light header that is now dark.
 */
-.header-module-title {
-  color: var(--kyn-text-primary) !important;
+.header-module-title){
+  color: var(--kyn-text-primary);
 }
 
-.header-module-subtitle {
-  color: var(--kyn-text-secondary) !important;
+:where(.header-module-subtitle){
+  color: var(--kyn-text-secondary);
 }
 
 /*
   FIX I — Header action buttons
   Problem: .header-action-btn { background: rgba(255,255,255,0.70);
   color: #0f172a } → dark text on a semi-transparent white button
-  sitting in a dark header. Contrast is acceptable on light bg but
+:where(sitting in a dark header. Contrast is acceptable on light bg but
   broken on dark bg.
 */
-.header-action-btn {
+.header-action-btn){
   background: rgba(255, 255, 255, 0.08) !important;
   border-color: rgba(255, 255, 255, 0.12) !important;
-  color: var(--kyn-text-primary) !important;
+  color: var(--kyn-text-primary);
 }
 
 .header-action-btn:hover {
@@ -887,12 +885,12 @@ input[type="checkbox"]:checked + .toggle {
 /*
   FIX J — Settings link button in profile modal
   Problem: .settings-link-btn { background: #1f2937; color: white }
-  This is actually fine on dark theme but the [class*="card"] rule
+:where(This is actually fine on dark theme but the [class*="card"] rule
   previously reset it to panel colour. Restore explicit contrast.
 */
-.settings-link-btn {
+.settings-link-btn){
   background: var(--kyn-border) !important;
-  color: var(--kyn-text-primary) !important;
+  color: var(--kyn-text-primary);
 }
 
 /*
@@ -914,39 +912,39 @@ input[type="checkbox"]:checked + .toggle {
 }
 
 /*
-  FIX L — Status/Story creation screen
+:where(FIX L — Status/Story creation screen
   Problem: .status-creation-content in chat.css was hardcoded white,
   showing a bright white screen in the middle of an otherwise dark app
   when creating a status update.
 */
-.status-creation-content {
+.status-creation-content){
   background: var(--kyn-bg-root) !important;
-  color: var(--kyn-text-primary) !important;
+  color: var(--kyn-text-primary);
 }
 
 /*
-  FIX M — Marketplace/Tools cards and buttons (.jm-* classes)
+:where(FIX M — Marketplace/Tools cards and buttons (.jm-* classes)
   Problem: Tool.css's marketplace card/category/follow-button surfaces
   don't match any of the generic [class*="card"]/[class*="btn"] catch-alls
   above (jm-cat-group, jm-cat-item, jm-follow-btn, jm-wa-btn), so they stayed
   hardcoded white against a dark app shell.
 */
 .jm-cat-group,
-.jm-cat-item.active {
+.jm-cat-item.active){
   background: var(--kyn-bg-panel) !important;
-  color: var(--kyn-text-primary) !important;
+  color: var(--kyn-text-primary);
 }
 
 /* FIX M continued — the header text/see-all button inside .jm-cat-group and the
-   category type bar were still hardcoded to dark text via Tool.css/Tools.html,
+:where(category type bar were still hardcoded to dark text via Tool.css/Tools.html,
    which went invisible once .jm-cat-group's background switched to the dark
    panel color above. Route them through the same theme variables. */
 .jm-cat-group-header,
 .jm-cat-group-header span,
 .jm-subcat-name,
 .jm-cat-type-bar,
-.jm-cat-type-btn {
-  color: var(--kyn-text-primary) !important;
+.jm-cat-type-btn){
+  color: var(--kyn-text-primary);
   background: transparent !important;
 }
 .jm-cat-type-btn {
@@ -962,10 +960,10 @@ input[type="checkbox"]:checked + .toggle {
   color: #f57224 !important;
 }
 
-.jm-follow-btn.following,
-.jm-wa-btn {
+:where(.jm-follow-btn.following,
+.jm-wa-btn){
   background: var(--kyn-bg-panel) !important;
-  color: var(--kyn-text-primary) !important;
+  color: var(--kyn-text-primary);
   border: 1px solid var(--kyn-border) !important;
 }
 /* ============================================================

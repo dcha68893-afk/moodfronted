@@ -3011,19 +3011,12 @@
                 return true;
             }
 
-            // FIX (BACK-STACK-EXACT-RESTORE, Tools module): Tools' sub-tabs
-            // (home/categories/cart/wishlist/account) are parent-driven via
-            // toolsNavTo()/TOOLS_NAV, not a local panel back-nav.js already
-            // knows how to close — so pressing back while on any tab other
-            // than 'home' fell straight through to the generic cross-module
-            // step below and jumped to a whole different module, skipping
-            // "return to the Tools home tab first" the same one-step-at-a-
-            // time behavior every other module already gets.
-            if (window.__currentPage === 'tools' && window.__toolsCurrentPage && window.__toolsCurrentPage !== 'home') {
-                toolsNavTo('home');
-                logProcessStatus('back-navigation', true, 'returned-tools-home');
-                return true;
-            }
+            // Tools module: in-module sub-pages are stepped back by the module's own
+            // stack (reported via SCREEN_STATE_CHANGED -> __childLocalPanel, handled at the
+            // top of this function). Once that stack is empty, hardware back leaves Tools
+            // for the EXACT screen the user came from (__navHistory), or Messages if there
+            // is none. It must NOT jump to "Tools Home" first - that trapped the user in
+            // the module and never returned them to where they were.
 
             if (window.__currentPage !== 'messages') {
                 // PHASE15 FIX: Pop from history stack for correct back navigation

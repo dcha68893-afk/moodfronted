@@ -265,3 +265,10 @@ function shade(hex, amount){
   installThemeGuard(function(){paintNow(state.theme,state.fontSize,state.accentColor,state.iconScale,document);});
   global.ThemeManager=ThemeManager;global.ThemeEngine=ThemeManager;
 })(window);
+
+/* Contrast guard loader: repairs icons/text that become unreadable after a theme switch in ANY module. */
+(function(){try{
+  if(window.__kynContrastGuard||window.__kynContrastGuardLoading)return;window.__kynContrastGuardLoading=true;
+  var cs=document.currentScript,src=cs&&cs.src?cs.src.replace(/theme\.engine\.js(\?.*)?$/,'theme-contrast-guard.js'):'/js/theme-contrast-guard.js';
+  var s=document.createElement('script');s.src=src;s.defer=true;(document.head||document.documentElement).appendChild(s);
+}catch(_){}})();

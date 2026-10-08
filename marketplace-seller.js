@@ -321,6 +321,9 @@ window._physPublish=async()=>{
     if(price<=0){_toast('Set a valid price','error','⚠️');return null;}
     if(!desc){_toast('Description required','error','⚠️');return null;}
     if(!cat){_toast('Select a category','error','⚠️');return null;}
+    // A listing with no sub-category can never appear when a buyer drills Category > Sub-category,
+    // so it is required (this is what made some listings "disappear" from category browsing).
+    if(!sub){_toast('Select a sub-category so buyers can find your product','error','⚠️');return null;}
     if(!_phys.images.length){_toast('Add at least one image','error','📸');return null;}
     const btn=document.getElementById('publishListingBtn');
     // Button stays disabled for the ENTIRE pipeline below — validation,

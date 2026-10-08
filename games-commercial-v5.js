@@ -1,7 +1,7 @@
 /* Mood Arcade V5: shared progression, themes, challenges and safe UX layer. */
 (function(){'use strict';if(window.__MOOD_ARCADE_V5__)return;window.__MOOD_ARCADE_V5__=1;
 const KEY='mood.arcade.v5';const themes=['#8b5cf6','#38bdf8','#22c55e','#f59e0b','#ec4899','#14b8a6']; const MULTI_GAMES=new Set(['trivia','crossword']); /* accent hues only -- backgrounds come from the app theme */
-let data;try{data=JSON.parse(localStorage.getItem(KEY)||'null')}catch(e){} data=data||{levels:{water:1,block:1,trivia:1,crossword:1},best:{water:0,block:0,trivia:0,crossword:0},streak:0,games:0,challenges:0};
+let data;try{data=JSON.parse(localStorage.getItem(KEY)||'null')}catch(e){} data=data||{levels:{block:1,trivia:1,crossword:1},best:{block:0,trivia:0,crossword:0},streak:0,games:0,challenges:0};
 function save(){try{localStorage.setItem(KEY,JSON.stringify(data))}catch(e){}}
 function game(){return document.body.dataset.game||''}function level(g=game()){return Math.max(1,data.levels[g]||1)}
 function applyTheme(g=game()){const c=themes[Math.min(themes.length-1,Math.floor((level(g)-1)/2))];document.documentElement.style.setProperty('--g-accent',c);document.body.dataset.arcadeLevel=level(g)}
@@ -10,7 +10,7 @@ function complete(g,score=0){data.games++;data.best[g]=Math.max(data.best[g]||0,
 function challenge(){const g=game(),s=data.best[g]||0,dataText=`Mood ${g} challenge — beat ${s} points on level ${level(g)}!`;data.challenges++;save();if(navigator.share)navigator.share({title:'Mood Challenge',text:dataText}).catch(()=>{});else if(navigator.clipboard)navigator.clipboard.writeText(dataText).then(()=>alert('Challenge copied!')).catch(()=>{});else alert(dataText)}
 let room=null,roomPoll=null;
 async function roomApi(path,options){const opts=Object.assign({credentials:'include',headers:{'Content-Type':'application/json'}},options||{});const token=localStorage.getItem('accessToken')||localStorage.getItem('token')||sessionStorage.getItem('accessToken')||sessionStorage.getItem('token');if(token&&!opts.headers.Authorization)opts.headers.Authorization='Bearer '+token;const r=await fetch('/api/games/rooms'+path,opts);let j={};try{j=await r.json()}catch(_){}if(!r.ok){const detail=j.error||j.message||('HTTP '+r.status);throw new Error('Game room: '+detail)}return j}
-function roomGame(){return game()||document.querySelector('.screen.active')?.id||'water'}
+function roomGame(){return game()||document.querySelector('.screen.active')?.id||'block'}
 function roomLink(code){return location.origin+location.pathname+'?gameRoom='+encodeURIComponent(code)}
 function roomText(r){if(!r)return 'No game room yet';if(r.status==='waiting')return 'Waiting for the other player…';if(r.status==='ready')return 'Opponent joined. Both players are ready — the same match is about to start.';if(r.status==='playing')return MULTI_GAMES.has(r.gameType)?'MATCH LIVE • Finish your level. Score and time appear in the final standings.':'MATCH LIVE • One attempt each. Scores are compared after both finish.';if(r.status==='finished')return r.winnerId?'Match complete — winner awarded coins.':'Match complete — draw.';return 'Room closed.'}
 function roomModal(){
@@ -68,8 +68,8 @@ function renderLiveMatch(){
 document.addEventListener('click',e=>{if(e.target&&e.target.id==='gmChange'&&typeof window.home==='function')window.home()});
 window.__gameRoomState=roomState;window.__gameRoomComplete=roomComplete;
 /* ---- Switch game inside a live room (same code, same two players) ---- */
-const ROOM_GAME_LIST=['water','block','trivia','crossword','chess'];
-const GAME_LABEL={water:'Water Sort',block:'Block Puzzle',trivia:'Trivia Master',crossword:'Word Connect',chess:'Chess'};
+const ROOM_GAME_LIST=['block','trivia','crossword','chess'];
+const GAME_LABEL={block:'Block Puzzle',trivia:'Trivia Master',crossword:'Word Connect',chess:'Chess'};
 function shouldConfirmSwitch(g){return !!(room&&room.code&&['ready','playing','finished'].includes(room.status)&&(room.players||[]).length>=2&&g&&g!==room.gameType&&ROOM_GAME_LIST.includes(g))}
 function openGameNoPrompt(g){window.__roomLaunching=1;try{window.openGame(g)}finally{window.__roomLaunching=0}}
 async function changeRoomGame(g){
@@ -129,7 +129,7 @@ body[data-game]{perspective:1500px}
 body[data-game] .screen.active{transform-style:preserve-3d}
 body[data-game] .screen.active .top{transform:translateZ(38px);box-shadow:0 14px 34px #0007;backdrop-filter:blur(18px) saturate(1.12)}
 body[data-game] .screen.active .card,body[data-game] .screen.active .question,body[data-game] .screen.active .board,body[data-game] .screen.active .wc-board,body[data-game] .screen.active .wc-wheelwrap{transform-style:preserve-3d;box-shadow:0 28px 55px #0009,inset 0 1px #fff3}
-#water .canvas{transform:translateZ(22px) rotateX(4deg);filter:drop-shadow(0 28px 34px #0009)}
+
 #block .board{transform:translateZ(26px) rotateX(7deg);box-shadow:0 30px 46px #0009,inset 0 2px #fff4}
 #block .cell{box-shadow:inset 0 2px #fff5,inset 0 -7px 10px #0006,0 5px 9px #0006}
 #block .cell.filled{transform:translateZ(7px)}
@@ -140,7 +140,7 @@ body[data-game] .screen.active .card,body[data-game] .screen.active .question,bo
 #chess .ch-board,#chess .board{transform:translateZ(24px) rotateX(4deg);transform-style:preserve-3d;box-shadow:0 30px 46px #0009}
 body[data-game] .action,body[data-game] .life,body[data-game] .answer,body[data-game] .wc-letter{transition:transform .16s,filter .16s,box-shadow .16s}
 body[data-game] .action:hover,body[data-game] .life:hover,body[data-game] .answer:hover,body[data-game] .wc-letter:hover{transform:translateY(-3px) translateZ(12px);filter:brightness(1.08)}
-@media(prefers-reduced-motion:reduce){#water .canvas,#block .board,#trivia .question,#crossword .wc-board,#crossword .wc-wheelwrap,#chess .ch-board,#chess .board{transform:none!important}}
+@media(prefers-reduced-motion:reduce){#block .board,#trivia .question,#crossword .wc-board,#crossword .wc-wheelwrap,#chess .ch-board,#chess .board{transform:none!important}}
 `;
 document.addEventListener('click',function(e){var b=e.target&&e.target.closest&&e.target.closest('button,[role="button"],.card');if(!b)return;var r=b.getBoundingClientRect();burst(r.left+r.width/2,r.top+r.height/2,5);sound(b.classList.contains('primary')?620:360,.035)},{passive:true});
 document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!document.getElementById('necpraGameMenu'))menu()});

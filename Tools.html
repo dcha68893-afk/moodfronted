@@ -94,6 +94,7 @@
     <!-- FIX (nav-icon visibility audit): see status.html for the full note —
          this page was also missing theme.colors.css's icon-visibility rules. -->
     <link rel="stylesheet" href="theme.colors.css">
+    <link rel="stylesheet" href="tool-theme-fix.css">
 
     <!-- Only minimal inline styles for dynamic elements that can't be in external CSS -->
     <style>
@@ -1416,9 +1417,6 @@
 
             <!-- ── TOP HEADER (Jumia style) ──────────────────────────────── -->
             <div class="jm-header" id="jmHeader">
-                <button class="jm-back-btn" id="jmBackBtn" onclick="window._jmBack ? window._jmBack() : window._jmNav('home')" style="display:none">
-                    <i class="fas fa-arrow-left"></i>
-                </button>
                 <div class="jm-search-wrap" id="jmSearchWrap">
                     <i class="fas fa-search jm-search-icon"></i>
                     <input type="text" class="jm-search-input" id="jmSearchInput" placeholder="Search on Knecta Market…" autocomplete="off">

@@ -3209,6 +3209,7 @@ async function publishListingFromModal() {
 
             const svcCategory = document.getElementById('serviceCategory')?.value || 'services';
             const svcSubcategory = document.getElementById('serviceSubcategory')?.value || '';
+            if (!svcSubcategory) { showNotification('Select a sub-category so buyers can find your service', 'error'); return; }
 
             let svcImageUrl;
             try {
@@ -7046,7 +7047,7 @@ function _renderProductsPage(subpage) {
 
     const [catId, subcat, brand] = (subpage||'').split(':');
     if (!catId) _jmRemoveCatToolbar();
-    if (title) title.innerHTML = `← ${brand || subcat || catId || 'Products'}`;
+    if (title) title.innerHTML = `← ${(brand && brand !== '*' && brand !== '__none__') ? brand : (subcat || catId || 'Products')}`;
 
     const ecom = window.EcomMarketplace;
     if (!ecom) { _renderGrid(container, []); return; }
@@ -7093,9 +7094,19 @@ function _renderProductsPage(subpage) {
                     return target.length > 3 && hay.includes(target);
                 });
             }
+            // ROOT-CAUSE FIX (listings made by sellers "not found" under Physical > Phones >
+            // Smartphones): the brand/model picker's "All <sub-category>" tile navigated to the
+            // SAME sub-page with no brand, which re-rendered the picker again - so "All" never
+            // reached the product grid, and a listing whose brand was left blank (or typed
+            // differently from the others) was unreachable behind the picker. '*' now means
+            // "show everything in this sub-category" and '__none__' shows unbranded listings.
             if (brand) {
-                const bTarget = brand.trim().toLowerCase();
-                list = list.filter(p => (p.brand || '').trim().toLowerCase() === bTarget);
+                if (brand === '__none__') {
+                    list = list.filter(p => !(p.brand || '').trim());
+                } else if (brand !== '*') {
+                    const bTarget = brand.trim().toLowerCase();
+                    list = list.filter(p => (p.brand || '').trim().toLowerCase() === bTarget);
+                }
                 _jmCatToolbar(container, catId, subcat, brand, list)();
                 return;
             }
@@ -7106,7 +7117,7 @@ function _renderProductsPage(subpage) {
             )).sort((a, b) => a.localeCompare(b));
             if (!subcat || !brands.length) { _jmCatToolbar(container, catId, subcat, brand, list)(); return; }
             _jmRemoveCatToolbar();
-            _renderBrandPicker(container, catId, subcat, brands, list.length);
+            _renderBrandPicker(container, catId, subcat, brands, list.length, list.filter(p => !(p.brand || '').trim()).length);
         })
         .catch(() => { _renderGrid(container, []); });
 }
@@ -7158,7 +7169,7 @@ function _jmCatToolbar(container, catId, subcat, brand, list) {
 }
 function _jmRemoveCatToolbar() { const b = document.getElementById('jmCatToolbar'); if (b) b.remove(); }
 
-function _renderBrandPicker(container, catId, subcat, brands, totalCount) {
+function _renderBrandPicker(container, catId, subcat, brands, totalCount, noBrandCount) {
     const esc = (typeof _esc === 'function') ? _esc : (s => String(s||''));
     container.innerHTML = `
         <div style="grid-column:1/-1">
@@ -7171,6 +7182,9 @@ function _renderBrandPicker(container, catId, subcat, brands, totalCount) {
                 <div class="jm-subcat-item" data-brand="${esc(b)}" style="cursor:pointer">
                     <div class="jm-subcat-name" style="font-weight:700">${esc(b)}</div>
                 </div>`).join('')}
+                ${noBrandCount ? `<div class="jm-subcat-item" data-brand="__none__" style="cursor:pointer">
+                    <div class="jm-subcat-name" style="font-weight:700">Other / No brand (${noBrandCount})</div>
+                </div>` : ''}
             </div>
         </div>`;
     const goto = (brandSeg) => {
@@ -7183,7 +7197,7 @@ function _renderBrandPicker(container, catId, subcat, brands, totalCount) {
         }
         _renderProductsPage(subpage);
     };
-    container.querySelector('[data-brand-all]')?.addEventListener('click', () => goto(''));
+    container.querySelector('[data-brand-all]')?.addEventListener('click', () => goto('*'));
     container.querySelectorAll('[data-brand]').forEach(el => {
         el.addEventListener('click', () => goto(el.dataset.brand));
     });
