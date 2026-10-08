@@ -37,7 +37,42 @@
 .layout.is-mobile{display:block;position:relative}.layout.is-mobile .sidebar,.layout.is-mobile .panel{position:absolute;inset:0;width:100%;height:100%}.layout.is-mobile .panel{display:none}.layout.is-mobile.chat-open .sidebar{display:none}.layout.is-mobile.chat-open .panel{display:flex}.layout.is-mobile .messages{padding:10px}.layout.is-mobile .bubble{max-width:88%}
 .layout.is-mobile.chat-open .mobile-back{display:block}
 html[data-show-timestamps="false"] .bubble-time{display:none}
-</style></head><body><div id="layout" class="layout"><aside class="sidebar"><div class="side-head"><span>Groups</span><button id="createGroupBtn" class="smallbtn" type="button">＋</button></div><div class="toolbar"><input id="search" class="search" placeholder="Search groups…"><button id="refresh" class="refresh" type="button">↻</button></div><div id="groups" class="groups"><div class="empty">Loading groups…</div></div></aside><section class="panel"><div class="actions" id="panelActions"><button id="searchToggle" class="smallbtn" type="button" title="Search this group" disabled>🔍</button><button id="pinnedToggle" class="smallbtn" type="button" title="Pinned messages" disabled>📌</button><button id="mediaToggle" class="smallbtn" type="button" title="Files & media" disabled>📎</button></div><div id="searchBar" class="subbar hidden"><input id="searchInput" placeholder="Search messages in this group…"><button id="searchClose" class="smallbtn" type="button">×</button><div id="searchResults"></div></div><div id="pinnedBar" class="subbar hidden"></div><div id="mediaBar" class="subbar hidden"></div><div id="messages" class="messages"><div class="empty">Select a group to start chatting.</div></div><div class="composer"><div id="mentionSuggest" class="mention-suggest"></div><textarea id="input" rows="1" placeholder="Message the group…" disabled></textarea><button id="send" class="send" type="button" disabled>➤</button></div></section></div><div id="create" class="modal hidden"><div class="card"><div class="head"><b>Create group</b><button id="createClose" class="smallbtn" type="button">×</button></div><form id="createForm"><div class="section"><input id="gname" required maxlength="100" placeholder="Group name"><textarea id="gdesc" maxlength="1000" placeholder="Description"></textarea></div><div class="section"><b>Add members</b> <small id="selCount" style="opacity:.7"></small><input id="friendSearch" class="search" placeholder="Search friends…" style="margin:8px 0;width:100%"><div id="friends"></div></div><div class="section" style="text-align:right"><button type="submit" class="smallbtn">Create group</button></div></form></div></div><div id="membersModal" class="modal hidden"><div class="card"><div class="head"><b id="membersTitle">Group members</b><button id="membersClose" class="smallbtn" type="button">×</button></div><div id="membersList" class="section"></div></div></div><div id="settingsModal" class="modal hidden"><div class="card"><div class="head"><b>Group settings</b><button id="settingsClose" class="smallbtn" type="button">×</button></div><div class="section" id="settingsBody"></div><div class="section" style="text-align:right"><button id="settingsSave" class="smallbtn" type="button">Save</button></div></div></div><div id="purposeModal" class="modal hidden"><div class="card"><div class="head"><b>Group purpose</b><button id="purposeClose" class="smallbtn" type="button">×</button></div><div class="section"><textarea id="purposeInput" maxlength="1000" placeholder="What's this group for?"></textarea></div><div class="section" style="text-align:right"><button id="purposeSave" class="smallbtn" type="button">Save</button></div></div></div><div id="groupMediaViewer" class="modal hidden"><button type="button" class="gmv-close" id="gmvClose">×</button><div class="gmv-body" id="gmvBody"></div></div><script>
+
+/* Create-group: member picker */
+.fr-chips{display:flex;gap:8px;overflow-x:auto;padding:4px 0 10px}.fr-chips:empty{display:none}
+.fr-chip{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;width:56px;font-size:11px;cursor:pointer;position:relative}
+.fr-chip .fr-av{width:44px;height:44px}.fr-chip i{position:absolute;top:-2px;right:2px;width:16px;height:16px;border-radius:50%;background:var(--muted);color:var(--bg);font-style:normal;font-size:11px;line-height:16px;text-align:center}
+.fr-chip span.nm{max-width:56px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:3px}
+#friends{max-height:46vh;overflow:auto;border:1px solid var(--border);border-radius:14px;padding:2px 10px}
+.fr-letter{font-size:11px;font-weight:800;color:var(--muted);padding:8px 0 2px;letter-spacing:.5px}
+.fr-row{display:flex;align-items:center;gap:12px;padding:8px 0;cursor:pointer;border-bottom:1px solid var(--border)}.fr-row:last-child{border-bottom:0}
+.fr-av{width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#0084ff,#0055cc);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;flex:0 0 auto}
+.fr-row input{position:absolute;opacity:0;pointer-events:none}.fr-row .fr-box{width:24px;height:24px;border-radius:50%;border:2px solid var(--border);flex:0 0 auto;display:flex;align-items:center;justify-content:center;color:transparent;font-size:14px;font-weight:900}
+.fr-row input:checked~.fr-box{background:#16a34a;border-color:#16a34a;color:#fff}
+.fr-row input:checked~.fr-box:after{content:"\2713"}
+#createForm{display:flex;flex-direction:column}
+.create-foot{position:sticky;bottom:0;background:var(--surface);padding:12px 16px;border-top:1px solid var(--border);display:flex;gap:10px;align-items:center}
+.create-foot .cf-note{flex:1;font-size:12px;color:var(--muted)}.create-foot button{padding:11px 18px;border:0;border-radius:12px;background:#16a34a;color:#fff;font-weight:800}
+.create-foot button[disabled]{opacity:.5}
+/* Group info screen (WhatsApp style) */
+#infoScreen{position:fixed;inset:0;z-index:60;background:var(--bg);color:var(--text);display:flex;flex-direction:column}
+#infoScreen .ib{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--border);background:var(--surface);font-weight:800}
+#infoScreen .ib button{border:0;background:var(--surface2);color:inherit;width:36px;height:36px;border-radius:50%;font-size:17px}
+#infoScreen .iscroll{flex:1;overflow:auto;padding-bottom:30px}
+#infoScreen .ihero{display:flex;flex-direction:column;align-items:center;padding:22px 16px 14px;background:var(--surface);border-bottom:8px solid var(--bg)}
+#infoScreen .ihero .big{width:96px;height:96px;border-radius:50%;background:linear-gradient(135deg,#0084ff,#0055cc);color:#fff;display:flex;align-items:center;justify-content:center;font-size:34px;font-weight:800}
+#infoScreen .ihero h2{margin:12px 0 2px;font-size:22px;text-align:center}#infoScreen .ihero small{color:var(--muted)}
+#infoScreen .isec{background:var(--surface);border-bottom:8px solid var(--bg);padding:6px 16px}
+#infoScreen .isec h4{margin:10px 0 4px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+#infoScreen .irow{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--border);cursor:pointer}#infoScreen .irow:last-child{border-bottom:0}
+#infoScreen .irow .ic{width:34px;text-align:center;font-size:18px}#infoScreen .irow .tx{flex:1;min-width:0}#infoScreen .irow .tx small{display:block;color:var(--muted);font-size:12px;margin-top:2px}
+#infoScreen .irow.danger{color:#ef4444;font-weight:700}
+#infoScreen .mrow{display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--border)}#infoScreen .mrow:last-child{border-bottom:0}
+#infoScreen .tag{font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:999px;border:1px solid #16a34a;color:#16a34a;white-space:nowrap}
+#infoScreen .macts{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}#infoScreen .macts button{padding:5px 9px;font-size:11.5px;border:1px solid var(--border);border-radius:9px;background:var(--surface2);color:inherit}
+#infoScreen .perm{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px}#infoScreen .perm:last-child{border-bottom:0}
+#infoScreen .perm b{color:var(--muted)}
+</style></head><body><div id="layout" class="layout"><aside class="sidebar"><div class="side-head"><span>Groups</span><button id="createGroupBtn" class="smallbtn" type="button">＋</button></div><div class="toolbar"><input id="search" class="search" placeholder="Search groups…"><button id="refresh" class="refresh" type="button">↻</button></div><div id="groups" class="groups"><div class="empty">Loading groups…</div></div></aside><section class="panel"><div class="actions" id="panelActions"><button id="searchToggle" class="smallbtn" type="button" title="Search this group" disabled>🔍</button><button id="pinnedToggle" class="smallbtn" type="button" title="Pinned messages" disabled>📌</button><button id="mediaToggle" class="smallbtn" type="button" title="Files & media" disabled>📎</button></div><div id="searchBar" class="subbar hidden"><input id="searchInput" placeholder="Search messages in this group…"><button id="searchClose" class="smallbtn" type="button">×</button><div id="searchResults"></div></div><div id="pinnedBar" class="subbar hidden"></div><div id="mediaBar" class="subbar hidden"></div><div id="messages" class="messages"><div class="empty">Select a group to start chatting.</div></div><div class="composer"><div id="mentionSuggest" class="mention-suggest"></div><textarea id="input" rows="1" placeholder="Message the group…" disabled></textarea><button id="send" class="send" type="button" disabled>➤</button></div></section></div><div id="create" class="modal hidden"><div class="card"><div class="head"><b>Create group</b><button id="createClose" class="smallbtn" type="button">×</button></div><form id="createForm"><div class="section"><input id="gname" required maxlength="100" placeholder="Group name"><textarea id="gdesc" maxlength="1000" placeholder="Description"></textarea></div><div class="section"><div style="display:flex;justify-content:space-between;align-items:baseline"><b>Add members</b> <small id="selCount" style="opacity:.8;font-weight:700"></small></div><div id="selChips" class="fr-chips"></div><input id="friendSearch" class="search" placeholder="Search friends…" style="margin:8px 0;width:100%"><div id="friends"></div></div><div class="create-foot"><span class="cf-note" id="cfNote">Select at least one friend</span><button type="submit" id="createSubmit" disabled>Create group</button></div></form></div></div><div id="membersModal" class="modal hidden"><div class="card"><div class="head"><b id="membersTitle">Group members</b><button id="membersClose" class="smallbtn" type="button">×</button></div><div id="membersList" class="section"></div></div></div><div id="settingsModal" class="modal hidden"><div class="card"><div class="head"><b>Group settings</b><button id="settingsClose" class="smallbtn" type="button">×</button></div><div class="section" id="settingsBody"></div><div class="section" style="text-align:right"><button id="settingsSave" class="smallbtn" type="button">Save</button></div></div></div><div id="purposeModal" class="modal hidden"><div class="card"><div class="head"><b>Group purpose</b><button id="purposeClose" class="smallbtn" type="button">×</button></div><div class="section"><textarea id="purposeInput" maxlength="1000" placeholder="What's this group for?"></textarea></div><div class="section" style="text-align:right"><button id="purposeSave" class="smallbtn" type="button">Save</button></div></div></div><div id="groupMediaViewer" class="modal hidden"><button type="button" class="gmv-close" id="gmvClose">×</button><div class="gmv-body" id="gmvBody"></div></div><script>
 /* FIX (groupMemberIds is not defined): the copy inside the main closure below is the
    canonical one. This global twin guarantees the bare identifier always resolves, even if
    a stale/cached build or another script calls groupMemberIds() from outside that closure. */
@@ -629,11 +664,20 @@ async function sendGroupPayload(plain,type='text',metadata=null){
 }
 window.__NECPRA_GROUP_SEND=sendGroupPayload;
 
-async function loadFriends(){try{const r=await api('/friends?status=accepted');const rows=r?.data?.friends||r?.friends||r?.data||[];S.friends=Array.isArray(rows)?rows.map(x=>x.friend||x.user||x):[];const box=$('friends');box.replaceChildren();for(const f of S.friends){const id=f.id||f.userId;if(String(id)===uid())continue;const row=document.createElement('label');row.className='member';row.innerHTML=`<input type="checkbox" value="${esc(id)}"><div class="who"><b>${esc(f.displayName||f.name||f.username||'User')}</b><small>@${esc(f.username||'user')}</small></div>`;box.append(row)}if(!box.children.length)box.innerHTML='<div class="empty">No friends available. Add friends first, then create a group.</div>';updateSelCount()}catch(e){$('friends').innerHTML='<div class="empty">No friends available.</div>'}}
-function updateSelCount(){const n=document.querySelectorAll('#friends input:checked').length;const el=$('selCount');if(el)el.textContent=n?('· '+n+' selected'):''}
+function frName(f){return f.displayName||f.name||[f.firstName,f.lastName].filter(Boolean).join(' ')||f.username||'User'}
+function frInit(n){return esc(String(n||'?').trim().charAt(0).toUpperCase()||'?')}
+async function loadFriends(){try{const r=await api('/friends?status=accepted');const rows=r?.data?.friends||r?.friends||r?.data||[];S.friends=Array.isArray(rows)?rows.map(x=>x.friend||x.user||x):[];const box=$('friends');box.replaceChildren();
+ const list=S.friends.filter(f=>String(f.id||f.userId)!==uid()).sort((a,b)=>frName(a).localeCompare(frName(b),undefined,{sensitivity:'base'}));let last='';
+ for(const f of list){const id=f.id||f.userId,nm=frName(f),L=(nm.trim().charAt(0)||'#').toUpperCase();
+  if(L!==last){last=L;const h=document.createElement('div');h.className='fr-letter';h.textContent=L;box.append(h)}
+  const row=document.createElement('label');row.className='fr-row';row.dataset.name=nm;row.innerHTML=`<span class="fr-av">${frInit(nm)}</span><div class="who"><b>${esc(nm)}</b><small>@${esc(f.username||'user')}</small></div><input type="checkbox" value="${esc(id)}"><span class="fr-box"></span>`;box.append(row)}
+ if(!list.length)box.innerHTML='<div class="empty">No friends available. Add friends first, then create a group.</div>';updateSelCount()}catch(e){$('friends').innerHTML='<div class="empty">No friends available.</div>'}}
+function updateSelCount(){const sel=[...document.querySelectorAll('#friends input:checked')];const n=sel.length;const el=$('selCount');if(el)el.textContent=n?(n+' selected'):'';
+ const chips=$('selChips');if(chips){chips.replaceChildren();sel.forEach(inp=>{const row=inp.closest('.fr-row'),nm=row?row.dataset.name:'';const c=document.createElement('div');c.className='fr-chip';c.innerHTML=`<span class="fr-av">${frInit(nm)}</span><i>×</i><span class="nm">${esc(nm.split(' ')[0])}</span>`;c.onclick=()=>{inp.checked=false;updateSelCount()};chips.append(c)})}
+ const sb=$('createSubmit');if(sb)sb.disabled=!n;const note=$('cfNote');if(note)note.textContent=n?(n+' member'+(n===1?'':'s')+' will be added'):'Select at least one friend'}
 document.addEventListener('change',e=>{if(e.target&&e.target.closest&&e.target.closest('#friends'))updateSelCount()});
-document.addEventListener('input',e=>{if(e.target&&e.target.id==='friendSearch'){const q=e.target.value.trim().toLowerCase();document.querySelectorAll('#friends .member').forEach(r=>{r.style.display=!q||r.textContent.toLowerCase().includes(q)?'':'none'})}});
-function showCreate(){loadFriends();$('create').classList.remove('hidden')}function hideCreate(){$('create').classList.add('hidden')}
+document.addEventListener('input',e=>{if(e.target&&e.target.id==='friendSearch'){const q=e.target.value.trim().toLowerCase();document.querySelectorAll('#friends .fr-row').forEach(r=>{r.style.display=!q||r.textContent.toLowerCase().includes(q)?'':'none'});document.querySelectorAll('#friends .fr-letter').forEach(h=>{let n=h.nextElementSibling,any=false;while(n&&!n.classList.contains('fr-letter')){if(n.style.display!=='none')any=true;n=n.nextElementSibling}h.style.display=any?'':'none'})}});
+function showCreate(){loadFriends();const fs=$('friendSearch');if(fs)fs.value='';$('create').classList.remove('hidden')}function hideCreate(){$('create').classList.add('hidden')}
 async function createGroup(e){e.preventDefault();const ids=[...document.querySelectorAll('#friends input:checked')].map(x=>Number(x.value)).filter(Number.isInteger);if(!ids.length)return alert('Select at least one member.');try{const r=await api('/chats',{method:'POST',body:JSON.stringify({type:'group',name:$('gname').value.trim(),description:$('gdesc').value.trim(),participantIds:ids})});const g=unwrap(r?.data?.chat||r?.data);hideCreate();$('createForm').reset();await loadGroups();if(g?.id)openGroup(g.id)}catch(e){alert(e.message)}}
 
 // ── Members / Info modal — wired to the parent header's Members/Info menu
@@ -643,7 +687,7 @@ function memberIdOf(p){const u=p.user||p;return String(u.id||p.userId||'')}
 function groupOwnerId(g){return String(g.createdBy??g.ownerId??g.owner?.id??'')}
 function amGroupManager(g){const me=uid();if(!me)return false;if(groupOwnerId(g)===me)return true;const list=Array.isArray(g.participants)?g.participants:[];const mine=list.find(p=>memberIdOf(p)===me);return !!mine&&['admin','owner'].includes(String(mine.role||'').toLowerCase())}
 async function fetchFriendList(){const r=await api('/friends?status=accepted');const rows=r?.data?.friends||r?.friends||r?.data||[];return Array.isArray(rows)?rows.map(x=>x.friend||x.user||x):[]}
-async function reloadMembers(){const g=S.current;if(!g)return;try{await refreshCurrentGroupMembers(g.id)}catch(_){}showMembers()}
+async function reloadMembers(){const g=S.current;if(!g)return;try{await refreshCurrentGroupMembers(g.id)}catch(_){}if(infoOpen())showInfo();else showMembers()}
 async function removeGroupMember(memberId,label){const g=S.current;if(!g)return;if(!confirm('Remove '+label+' from this group?'))return;try{await api('/group-admin/'+encodeURIComponent(g.id)+'/members/'+encodeURIComponent(memberId),{method:'DELETE'});await reloadMembers()}catch(e){alert(e.message||'Could not remove member.')}}
 async function toggleAddMembers(){const g=S.current;const box=$('addMembersBox');if(!g||!box)return;if(!box.classList.contains('hidden')){box.classList.add('hidden');return}
  box.classList.remove('hidden');box.innerHTML='<div class="empty">Loading friends…</div>';
@@ -663,6 +707,51 @@ function showMembers(){const g=S.current;if(!g)return;$('membersTitle').textCont
   if(manager&&memberId&&memberId!==me&&memberId!==owner){const roleBtn=document.createElement('button');roleBtn.type='button';roleBtn.className='smallbtn';roleBtn.textContent=isAdmin?'Demote':'Make admin';roleBtn.style.marginLeft='6px';roleBtn.onclick=async()=>{try{await api('/group-admin/'+encodeURIComponent(g.id)+'/members/'+encodeURIComponent(memberId)+'/role',{method:'PATCH',body:JSON.stringify({role:isAdmin?'member':'admin'})});await reloadMembers()}catch(e){alert(e.message||'Could not update administrator role.')}};row.append(roleBtn);const del=document.createElement('button');del.type='button';del.className='smallbtn';del.textContent='Remove';del.style.marginLeft=(memberId&&memberId!==me)?'6px':'auto';del.onclick=()=>removeGroupMember(memberId,name);row.append(del)}
   box.append(row)}}
  $('membersModal').classList.remove('hidden')}
+// ── WhatsApp-style full-screen Group info (opened from the header three-dots menu) ──
+function parentHga(action){try{const b=window.parent&&window.parent.document.querySelector('#hdrGroupMenu [data-hga="'+action+'"]');if(b){b.click();return true}}catch(_){}return false}
+function infoOpen(){const el=$('infoScreen');return !!el&&!el.classList.contains('hidden')}
+function hideInfo(){const el=$('infoScreen');if(el)el.classList.add('hidden')}
+function showInfo(){const g=S.current;if(!g)return;
+ let el=$('infoScreen');if(!el){el=document.createElement('div');el.id='infoScreen';document.body.append(el)}el.classList.remove('hidden');
+ const list=Array.isArray(g.participants)?g.participants:[];const manager=amGroupManager(g),owner=groupOwnerId(g),me=uid(),isOwner=owner===me;
+ const gname=g.name||g.groupName||'Group',s=g.settings||{};
+ const initials=gname.split(/\s+/).map(w=>w[0]||'').join('').toUpperCase().slice(0,2)||'G';
+ const rows=list.map(p=>{const u=p.user||p;const id=memberIdOf(p);const name=u.displayName||[u.firstName,u.lastName].filter(Boolean).join(' ')||u.username||'Member';const isAdmin=id===owner||['admin','owner'].includes(String(p.role||'').toLowerCase());return{id,name,username:u.username||'member',isAdmin,isOwn:id===owner,isMe:id===me}});
+ const byName=(a,b)=>(a.isMe?-1:b.isMe?1:0)||a.name.localeCompare(b.name,undefined,{sensitivity:'base'});
+ const admins=rows.filter(r=>r.isAdmin).sort((a,b)=>(b.isOwn-a.isOwn)||byName(a,b)),members=rows.filter(r=>!r.isAdmin).sort(byName);
+ const canAdd=manager||s.allowMemberInvites!==false;
+ const yn=v=>v?'On':'Off';
+ const permRows=SETTINGS_TOGGLES.map(([k,l])=>{const on=k==='discoverable'?s[k]===true:s[k]!==false;return `<div class="perm"><span>${esc(l)}</span><b>${yn(on)}</b></div>`}).join('')+`<div class="perm"><span>Slow mode</span><b>${Number(s.slowMode||0)?Number(s.slowMode)+'s':'Off'}</b></div>`;
+ const mrow=r=>`<div class="mrow" data-mid="${esc(r.id)}"><div class="fr-av">${frInit(r.name)}</div><div class="tx" style="flex:1;min-width:0"><b>${esc(r.name)}${r.isMe?' <small style="color:var(--muted);font-weight:400">(You)</small>':''}</b><small style="display:block;color:var(--muted);font-size:12px">@${esc(r.username)}</small>${(!r.isMe&&r.id)?`<div class="macts">${manager&&!r.isOwn?`<button type="button" data-a="role">${r.isAdmin?'Dismiss as admin':'Make group admin'}</button><button type="button" data-a="remove">Remove</button>`:''}<button type="button" data-a="report">Report</button></div>`:''}</div>${r.isOwn?'<span class="tag">Group owner</span>':(r.isAdmin?'<span class="tag">Group admin</span>':'')}</div>`;
+ el.innerHTML=`<div class="ib"><button type="button" id="infoBack" aria-label="Back">←</button><span>Group info</span></div><div class="iscroll">
+  <div class="ihero"><div class="big">${esc(initials)}</div><h2>${esc(gname)}</h2><small>Group · ${rows.length||Number(g.participantCount||0)} member${(rows.length||Number(g.participantCount||0))===1?'':'s'}</small></div>
+  <div class="isec"><h4>Description</h4><div class="irow" id="infoDesc" style="cursor:${isOwner?'pointer':'default'}"><div class="tx">${g.description?esc(g.description):'<span style="color:var(--muted)">No description'+(isOwner?' · tap to add':'')+'</span>'}</div>${isOwner?'<span class="ic">✎</span>':''}</div></div>
+  <div class="isec"><h4>Group</h4>
+   <div class="irow" id="infoSearch"><span class="ic">🔍</span><div class="tx">Search messages</div></div>
+   <div class="irow" id="infoMedia"><span class="ic">📎</span><div class="tx">Media, links and files</div></div>
+   <div class="irow" id="infoPinned"><span class="ic">📌</span><div class="tx">Pinned messages</div></div></div>
+  <div class="isec"><h4>Group settings</h4>${permRows}${manager?'<div class="irow" id="infoSettings" style="margin-top:6px"><span class="ic">⚙️</span><div class="tx">Edit group settings<small>Who can add members, send media, edit or delete, slow mode…</small></div></div>':'<div class="row-sub" style="font-size:12px;color:var(--muted);padding:6px 0">Only group admins can change these settings.</div>'}</div>
+  <div class="isec"><h4>${rows.length} participant${rows.length===1?'':'s'}</h4>
+   ${canAdd?'<div class="irow" id="infoAdd"><span class="ic" style="color:#16a34a">＋</span><div class="tx"><b>Add members</b></div></div><div id="addMembersBox" class="hidden" style="margin-bottom:10px"></div>':''}
+   ${admins.length?`<h4>Admins · ${admins.length}</h4>`+admins.map(mrow).join(''):''}
+   ${members.length?`<h4>Members · ${members.length}</h4>`+members.map(mrow).join(''):''}
+   ${!rows.length?'<div class="empty">Members will appear here.</div>':''}</div>
+  <div class="isec"><div class="irow danger" id="infoLeave"><span class="ic">⎋</span><div class="tx">Exit group</div></div>${isOwner?'<div class="irow danger" id="infoDelete"><span class="ic">🗑</span><div class="tx">Delete group</div></div>':''}</div></div>`;
+ $('infoBack').onclick=hideInfo;
+ const on=(id,fn)=>{const n=$(id);if(n)n.onclick=fn};
+ on('infoDesc',()=>{if(isOwner)showPurpose()});
+ on('infoSettings',()=>showSettings());
+ on('infoAdd',toggleAddMembers);
+ on('infoSearch',()=>{hideInfo();$('searchToggle')?.click()});
+ on('infoMedia',()=>{hideInfo();$('mediaToggle')?.click()});
+ on('infoPinned',()=>{hideInfo();$('pinnedToggle')?.click()});
+ on('infoLeave',()=>{hideInfo();parentHga('leave')});
+ on('infoDelete',()=>{hideInfo();parentHga('delete')});
+ el.querySelectorAll('.mrow').forEach(row=>{const id=row.dataset.mid,r=rows.find(x=>x.id===id);row.querySelectorAll('[data-a]').forEach(b=>{b.onclick=async()=>{const a=b.dataset.a;
+  if(a==='remove')return removeGroupMember(id,r.name);
+  if(a==='report')return reportGroupMember(id,r.name);
+  if(a==='role'){try{await api('/group-admin/'+encodeURIComponent(g.id)+'/members/'+encodeURIComponent(id)+'/role',{method:'PATCH',body:JSON.stringify({role:r.isAdmin?'member':'admin'})});await reloadMembers()}catch(e){alert(e.message||'Could not update administrator role.')}}}})})}
+
 const GROUP_REPORT_REASONS=['spam','harassment','hate_speech','violence','sexual_content','misinformation','other'];
 async function reportGroupMember(memberId,label){const g=S.current;if(!g)return;const reason=prompt('Report '+label+' to the group admins. Reason ('+GROUP_REPORT_REASONS.join(', ')+'):','spam');if(reason===null)return;const r=reason.trim();if(!GROUP_REPORT_REASONS.includes(r)){alert('Please enter one of: '+GROUP_REPORT_REASONS.join(', '));return}try{await api('/group-platform/'+encodeURIComponent(g.id)+'/report',{method:'POST',body:JSON.stringify({userId:Number(memberId),reason:r})});alert('Report sent to the group admins. Thank you for helping keep Necpra safe.')}catch(e){alert(e.message||'Could not submit report.')}}
 function hideMembers(){$('membersModal').classList.add('hidden')}
@@ -682,10 +771,10 @@ function showSettings(){const g=S.current;if(!g)return;const s=g.settings||{};co
   const slow=document.createElement('div');slow.className='member';slow.innerHTML=`<div class="who"><b>Slow mode (seconds between messages, 0 = off)</b><input type="number" id="settingSlowMode" min="0" max="3600" value="${Number(s.slowMode||0)}" style="width:100%;margin-top:6px;padding:8px;border:1px solid var(--border);border-radius:9px;background:var(--surface2);color:inherit"></div>`;box.append(slow);
   $('settingsModal').classList.remove('hidden')}
 function hideSettings(){$('settingsModal').classList.add('hidden')}
-async function saveSettings(){const g=S.current;if(!g?.id)return;const settings={};for(const[key]of SETTINGS_TOGGLES){const cb=document.querySelector(`#settingsBody input[data-setting="${key}"]`);settings[key]=!!cb?.checked}const slowEl=$('settingSlowMode');settings.slowMode=Math.max(0,Number(slowEl?.value||0)||0);try{const r=await api(`/group-admin/${encodeURIComponent(g.id)}/settings`,{method:'PATCH',body:JSON.stringify({settings})});g.settings=r?.data?.settings||settings;hideSettings()}catch(e){alert(e.message||'Could not update group settings')}}
+async function saveSettings(){const g=S.current;if(!g?.id)return;const settings={};for(const[key]of SETTINGS_TOGGLES){const cb=document.querySelector(`#settingsBody input[data-setting="${key}"]`);settings[key]=!!cb?.checked}const slowEl=$('settingSlowMode');settings.slowMode=Math.max(0,Number(slowEl?.value||0)||0);try{const r=await api(`/group-admin/${encodeURIComponent(g.id)}/settings`,{method:'PATCH',body:JSON.stringify({settings})});g.settings=r?.data?.settings||settings;hideSettings();if(infoOpen())showInfo()}catch(e){alert(e.message||'Could not update group settings')}}
 function showPurpose(){const g=S.current;if(!g)return;$('purposeInput').value=g.description||'';$('purposeModal').classList.remove('hidden')}
 function hidePurpose(){$('purposeModal').classList.add('hidden')}
-async function savePurpose(){const g=S.current;if(!g?.id)return;const description=$('purposeInput').value.trim();try{const r=await api(`/chats/${encodeURIComponent(g.id)}`,{method:'PATCH',body:JSON.stringify({description})});g.description=r?.data?.chat?.description??description;hidePurpose()}catch(e){alert(e.message||'Could not update group purpose')}}
+async function savePurpose(){const g=S.current;if(!g?.id)return;const description=$('purposeInput').value.trim();try{const r=await api(`/chats/${encodeURIComponent(g.id)}`,{method:'PATCH',body:JSON.stringify({description})});g.description=r?.data?.chat?.description??description;hidePurpose();if(infoOpen())showInfo()}catch(e){alert(e.message||'Could not update group purpose')}}
 $('settingsClose')?.addEventListener('click',hideSettings);
 $('settingsSave')?.addEventListener('click',saveSettings);
 $('purposeClose')?.addEventListener('click',hidePurpose);
@@ -822,7 +911,7 @@ window.addEventListener('message',e=>{
   if(d.type==='MODULE_FOCUSED'){try{if(S.current&&window.KynGroupUnread){window.KynGroupUnread.setOpen(S.current.id);markRead(S.current.id)}}catch(_){}}
   if(d.type==='PARENT_REFRESH_GROUPS'){loadGroups();return}
   if(d.type==='OPEN_GROUP_BY_ID'){const gid=d.payload&&d.payload.groupId;if(!gid)return;if(S.groups.length)openGroup(gid);else loadGroups().then(()=>openGroup(gid));return}
-  if(d.type==='PARENT_GROUP_ACTION'){const action=d.payload&&d.payload.action;if(action==='members'||action==='info')showMembers();else if(action==='settings')showSettings();else if(action==='purpose')showPurpose();return}
+  if(d.type==='PARENT_GROUP_ACTION'){const action=d.payload&&d.payload.action;if(action==='members'||action==='info')showInfo();else if(action==='settings')showSettings();else if(action==='purpose')showPurpose();return}
 });
 window.__GROUP_LOAD_GROUPS=loadGroups;window.__GROUP_REFRESH_MESSAGES=loadMessages;loadUnread();loadGroups();
 })();

@@ -795,6 +795,15 @@
             pointer-events: none;
         }
 
+
+        /* Money reminder ticker: sits just above the bottom nav, text scrolls straight (right to left) until the contribution is paid */
+        #moneyTicker{display:none;position:fixed;left:0;right:0;bottom:calc(60px + env(safe-area-inset-bottom,0px));height:30px;z-index:999;background:#b45309;color:#fff;overflow:hidden;align-items:center;cursor:pointer;font-size:13px;font-weight:600;box-shadow:0 -2px 10px rgba(0,0,0,.25)}
+        #moneyTicker.show{display:flex}
+        #moneyTicker .mt-track{display:inline-block;white-space:nowrap;padding-left:100%;animation:moneyTickerMove 18s linear infinite}
+        #moneyTicker:active .mt-track{animation-play-state:paused}
+        @keyframes moneyTickerMove{from{transform:translateX(0)}to{transform:translateX(-100%)}}
+        body.chat-panel-active #moneyTicker,body.group-panel-active #moneyTicker,body.status-panel-active #moneyTicker,body.games-panel-active #moneyTicker{display:none!important}
+        @media (min-width:769px){#moneyTicker{display:none!important}}
         .mobile-nav-bar {
             display: none;
             position: fixed;
@@ -1578,10 +1587,10 @@
             <div style="position:relative;">
                 <button class="hgm-btn" id="hdrGroupMore" title="More options"><i class="fas fa-ellipsis-v"></i></button>
                 <div id="hdrGroupMenu" style="display:none;position:fixed;min-width:175px;background:var(--surface-color);border:1px solid var(--border-color);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:9999;overflow:hidden;padding:4px 0;">
+                    <button class="hgm-item" data-hga="info"><i class="fas fa-info-circle"></i> Group info</button>
                     <button class="hgm-item" data-hga="members"><i class="fas fa-users"></i> Members</button>
                     <button class="hgm-item" data-hga="settings"><i class="fas fa-cog"></i> Settings</button>
                     <button class="hgm-item" data-hga="purpose"><i class="fas fa-tag"></i> Purpose</button>
-                    <button class="hgm-item" data-hga="info"><i class="fas fa-info-circle"></i> Group Info</button>
                     <hr style="border:none;border-top:1px solid var(--border-color);margin:4px 0;">
                     <button class="hgm-item" data-hga="leave" style="color:#f59e0b;"><i class="fas fa-sign-out-alt"></i> Leave Group</button>
                     <button class="hgm-item hgm-danger" data-hga="delete"><i class="fas fa-trash"></i> Delete Group</button>
@@ -1728,6 +1737,7 @@
         </button>
     </div>
     
+    <div id="moneyTicker" role="status" aria-live="polite" title="Open Money"><span class="mt-track" id="moneyTickerText"></span></div>
     <!-- Center Action Popup Menu -->
     <div id="centerMenuOverlay" onclick="closeCenterMenu()"></div>
     <div id="centerActionMenu">
@@ -7614,10 +7624,9 @@ function wireButtons() {
         });
     }
     /* Avatar → group info sub-panel */
+    /* The group icon is no longer a tap target: Group info is opened from the three-dots menu. */
     var av = document.getElementById('hdrGroupAvatar');
-    if (av && !av._ghw) { av._ghw = true;
-        av.addEventListener('click', function () { postToGroup('PARENT_GROUP_ACTION', { action: 'info' }); });
-    }
+    if (av) { av.style.cursor = 'default'; av.style.pointerEvents = 'none'; }
 }
 
 /* ── Listen for messages from group iframe ──────────────────── */
@@ -8080,5 +8089,27 @@ window.__groupHdrHide = hideGroupHeader;
 })();
 </script>
 <script src="/native-init.js"></script>
+
+<script>
+/* Money reminder ticker (bottom of app). The server also sends a push/in-app notification once;
+   this strip keeps showing, with moving text, until the member has paid what is due. */
+(function(){
+  var el=document.getElementById('moneyTicker'),tx=document.getElementById('moneyTickerText');if(!el||!tx)return;
+  function tok(){try{return localStorage.getItem('authToken')||localStorage.getItem('token')||localStorage.getItem('accessToken')||(window.Session&&window.Session.getToken&&window.Session.getToken())||''}catch(_){return''}}
+  function base(){return String((window.__getApiBase&&window.__getApiBase())||window.API_BASE_URL||'').replace(/\/$/,'')}
+  function fmt(n){return 'KSh '+Number(n||0).toLocaleString('en-KE')}
+  function line(d){var amt=d.amount>0?fmt(d.amount):'your contribution';
+    var when=d.daysLeft>1?'due in '+d.daysLeft+' days':d.daysLeft===1?'due tomorrow':d.daysLeft===0?'due TODAY':'overdue by '+Math.abs(d.daysLeft)+(d.daysLeft===-1?' day':' days');
+    return 'Reminder: please pay '+amt+' to "'+d.name+'" - '+when+'.'}
+  async function check(){var t=tok(),b=base();if(!t||!b){el.classList.remove('show');return}
+    try{var r=await fetch(b+'/money/overview',{headers:{Authorization:'Bearer '+t}});if(!r.ok)return;var j=await r.json(),dues=(j.dues||(j.data&&j.data.dues)||[]);
+      if(!dues.length){el.classList.remove('show');return}
+      tx.textContent=dues.map(line).join('      \u2022      ');el.classList.add('show')}catch(_){}}
+  el.addEventListener('click',function(){try{navigateToPage('money')}catch(_){}});
+  setTimeout(check,4000);setInterval(check,5*60*1000);
+  document.addEventListener('visibilitychange',function(){if(!document.hidden)check()});
+  window.addEventListener('message',function(e){if(e&&e.data&&(e.data.type==='MONEY_CHANGED'||e.data==='MONEY_CHANGED'))check()});
+})();
+</script>
 </body>
 </html>

@@ -1922,6 +1922,10 @@
             overflow: hidden;
         }
         .landing-phone-screen.active { opacity: 1; transform: translateY(0); pointer-events: auto; }
+        /* Real app screenshots (assets/landing/<screen>.png|jpg|webp). When one loads it covers the drawn placeholder for that screen. */
+        .landing-phone-screen .lp-shot { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: top center; border-radius: 16px; z-index: 2; display: none; background: #fff; }
+        .landing-phone-screen.has-shot { padding: 0; }
+        .landing-phone-screen.has-shot .lp-shot { display: block; }
 
         /* -- chat mini-screen -- */
         .lp-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
@@ -2415,6 +2419,7 @@
                                 <span class="landing-phone-tab" data-screen="accommodation" title="Accommodation"><i class="fas fa-bed"></i></span>
                                 <span class="landing-phone-tab" data-screen="market" title="Marketplace"><i class="fas fa-store"></i></span>
                                 <span class="landing-phone-tab" data-screen="community" title="Communities"><i class="fas fa-users"></i></span>
+                                <span class="landing-phone-tab" data-screen="wallet" title="Wallet"><i class="fas fa-wallet"></i></span>
                                 <span class="landing-phone-tab" data-screen="status" title="Status"><i class="fas fa-circle-play"></i></span>
                             </div>
                             <div class="landing-phone-screens">
@@ -2452,6 +2457,10 @@
                                     <div class="lp-avatar-cluster"><span class="lp-avatar-chip a"></span><span class="lp-avatar-chip b"></span><span class="lp-avatar-chip c"></span></div>
                                     <div class="lp-bubble other lp-slide-in">Welcome to the group 👋</div>
                                     
+                                </div>
+                                <div class="landing-phone-screen" data-screen="wallet">
+                                    <div class="lp-fr-head"><i class="fas fa-wallet"></i><span>NECPRA Money</span></div>
+                                    <div class="lp-ac-card"><div class="lp-ac-photo"><i class="fas fa-wallet"></i></div><div class="lp-ac-title">Chamas, contributions &amp; M-Pesa</div><div class="lp-ac-btn">Contribute</div></div>
                                 </div>
                                 <div class="landing-phone-screen" data-screen="status">
                                     <div class="lp-status-row">
@@ -5461,6 +5470,30 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
         // second, competing GSI render pass from the landing screen itself.
         if (googleBtn) googleBtn.addEventListener('click', function () { goToForm('login'); });
 
+        // ---- landing phone: show REAL screenshots of each module when present (assets/landing/<screen>.png/.jpg/.webp).
+        // Falls back to the drawn placeholder for any screen whose image is missing, so nothing breaks before the images are added.
+        (function () {
+            var exts = ['png', 'jpg', 'webp'];
+            // Probe with fetch first: other scripts on this page swap any failed <img> for a generic "No Image"
+            // placeholder, which would otherwise look like a successful load and hide the drawn fallback.
+            function probe(scr, key, i) {
+                if (i >= exts.length) return;
+                var url = '/assets/landing/' + key + '.' + exts[i];
+                fetch(url, { method: 'GET', cache: 'force-cache' }).then(function (r) {
+                    var ct = r.headers.get('content-type') || '';
+                    if (!r.ok || ct.indexOf('image') !== 0) throw 0;
+                    var img = new Image();
+                    img.className = 'lp-shot'; img.alt = ''; img.decoding = 'async';
+                    img.onload = function () { scr.classList.add('has-shot'); };
+                    img.src = url;
+                    scr.appendChild(img);
+                }).catch(function () { probe(scr, key, i + 1); });
+            }
+            document.querySelectorAll('.landing-phone-screen').forEach(function (scr) {
+                if (scr.dataset.screen) probe(scr, scr.dataset.screen, 0);
+            });
+        })();
+
         // ---- hero phone mockup: auto-cycle Chat -> Friends -> Accommodation -> Marketplace
         // -> Communities -> Status, repeating. Runs identically on mobile and
         // desktop (same DOM/JS, no viewport branching) so the hero always
@@ -5475,8 +5508,8 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
         // for the hero to communicate the product. So the interval now always
         // runs; only the CSS transition/animation gets suppressed.
         (function () {
-            var order = ['chat', 'friends', 'accommodation', 'market', 'community', 'status'];
-            var labels = { chat: 'Chat', friends: 'Friends', accommodation: 'Accommodation', market: 'Marketplace', community: 'Communities', status: 'Status' };
+            var order = ['chat', 'friends', 'accommodation', 'market', 'community', 'wallet', 'status'];
+            var labels = { chat: 'Chat', friends: 'Friends', accommodation: 'Accommodation', market: 'Marketplace', community: 'Communities', wallet: 'Wallet', status: 'Status' };
             var tabs = document.querySelectorAll('.landing-phone-tab');
             var screens = document.querySelectorAll('.landing-phone-screen');
             var caption = document.getElementById('landingMockupCaption');
