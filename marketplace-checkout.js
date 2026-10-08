@@ -251,9 +251,14 @@ const _state = {
     step: 1,       // 1=address 2=delivery 3=payment 4=confirm
     address: null,
     addresses: [],
-    deliveryZone: 'kenya',
-    deliveryFee: 300,
-    deliveryEta: '1-3 days',
+    // Transport is priced by the SERVER from the buyer's destination (county + town).
+    deliveryOption: 'standard',
+    deliveryFee: 0,
+    deliveryEta: '',
+    shippingQuote: null,      // { county, town, options:[{id,name,fee,eta,desc}] }
+    quoteLoading: false,
+    quoteError: '',
+    walletBalance: null,
     paymentMethod: 'mpesa',
     mpesaPhone: '',
     couponCode: '',
@@ -266,19 +271,17 @@ const _state = {
     loading: false,
 };
 
-const DELIVERY_OPTIONS = [
-    { id:'express', name:'Express Delivery',  icon:'⚡', fee:250, eta:'30-60 min',  desc:'Nairobi only' },
-    { id:'nairobi', name:'Nairobi CBD',        icon:'🏙️', fee:50,  eta:'1-2 hours', desc:'CBD area' },
-    { id:'suburbs', name:'Nairobi Suburbs',   icon:'🏘️', fee:150, eta:'2-4 hours', desc:'Westlands, Karen etc' },
-    { id:'kenya',   name:'Rest of Kenya',     icon:'🚚', fee:300, eta:'1-3 days',  desc:'All counties' },
-    { id:'pickup',  name:'Self Pickup',       icon:'🏪', fee:0,   eta:'Anytime',   desc:'Come to our depot' },
-];
+const KENYA_COUNTIES = ['Baringo','Bomet','Bungoma','Busia','Elgeyo-Marakwet','Embu','Garissa','Homa Bay','Isiolo','Kajiado','Kakamega','Kericho','Kiambu','Kilifi','Kirinyaga','Kisii','Kisumu','Kitui','Kwale','Laikipia','Lamu','Machakos','Makueni','Mandera','Marsabit','Meru','Migori','Mombasa',"Murang'a",'Nairobi','Nakuru','Nandi','Narok','Nyamira','Nyandarua','Nyeri','Samburu','Siaya','Taita-Taveta','Tana River','Tharaka-Nithi','Trans Nzoia','Turkana','Uasin Gishu','Vihiga','Wajir','West Pokot'];
+const DELIVERY_ICONS = { standard:'🚚', express:'⚡', pickup:'🏪' };
+function _selectedShipping() {
+    return (_state.shippingQuote?.options || []).find(o => o.id === _state.deliveryOption) || null;
+}
 
 const PAY_OPTIONS = [
     { id:'mpesa', name:'M-Pesa',          icon:'📱', desc:'Lipa na M-Pesa STK Push' },
     { id:'card',  name:'Card Payment',    icon:'💳', desc:'Visa / Mastercard (coming soon)', disabled:true },
     { id:'cod',   name:'Cash on Delivery',icon:'💵', desc:'Pay when you receive your order' },
-    { id:'wallet',name:'Wallet Balance',  icon:'👛', desc:'Pay from your NECPRA wallet', disabled:true },
+    { id:'wallet',name:'Wallet Balance',  icon:'👛', desc:'Pay from your NECPRA wallet' },
     { id:'paylater',name:'Pay Later', icon:'🗓️', desc:'Reserve the order now and pay before dispatch' },
 ];
 
@@ -310,6 +313,7 @@ function openCheckout() {
     _state.address   = _state.addresses.find(a=>a.is_default) || _state.addresses[0] || null;
     _state.couponCode    = '';
     _state.couponDiscount = 0;
+    _state.shippingQuote = null; _state.quoteError = ''; _state.walletBalance = null; _state.deliveryFee = 0; _state.deliveryEta = '';
 
     if (!_state.cartItems.length) {
         _toast('Your cart is empty', 'warning', '🛒');
@@ -410,7 +414,7 @@ function _renderAddressStep() {
             <div class="co-addr-card ${_state.address?.id===a.id?'selected':''}" onclick="window._jmSelectAddr('${a.id}')">
                 ${a.is_default?`<span class="co-addr-card-badge">Default</span>`:''}
                 <div class="co-addr-card-name">${_esc(a.name)}</div>
-                <div class="co-addr-card-detail">${_esc(a.address)}, ${_esc(a.city)}${a.region?', '+_esc(a.region):''}${a.phone?'<br>📞 '+_esc(a.phone):''}</div>
+                <div class="co-addr-card-detail">${_esc(a.address)}, ${_esc(a.city)}${(a.county||a.region)?', '+_esc(a.county||a.region)+' County':''}${a.phone?'<br>📞 '+_esc(a.phone):''}${a.county?'':'<br><span style="color:#dc2626;font-weight:700">⚠ Select a county (tap to edit)</span>'}</div>
             </div>`).join('') : '') + `
         </div>
         <button class="co-add-addr-btn" onclick="window._jmAddNewAddr()">
@@ -418,13 +422,16 @@ function _renderAddressStep() {
         </button>
     </div>`;
 
-    footer.innerHTML = `<button class="co-btn" id="coAddrNextBtn" onclick="window._jmCheckoutNext()" ${!_state.address?'disabled':''}>
+    footer.innerHTML = `<button class="co-btn" id="coAddrNextBtn" onclick="window._jmCheckoutNext()" ${!_state.address?.county?'disabled':''}>
         Continue to Delivery
     </button>`;
 }
 
 window._jmSelectAddr = function(id) {
-    _state.address = _state.addresses.find(a=>a.id===id);
+    const a = _state.addresses.find(x=>x.id===id);
+    _state.address = a;
+    _state.shippingQuote = null; _state.quoteError = '';   // destination changed -> price must be re-quoted
+    if (a && !a.county) { _toast('Choose the delivery county for this address','warning','📍'); _showAddressForm(a); return; }
     _renderAddressStep();
 };
 
@@ -451,8 +458,9 @@ function _showAddressForm(existing) {
             <div class="co-input-group"><div class="co-input-label">Phone Number</div><input class="co-input" id="addrPhone" placeholder="0712 345 678" value="${_esc(existing?.phone||'')}" /></div>
             <div class="co-input-group"><div class="co-input-label">Address / Street *</div><input class="co-input" id="addrStreet" placeholder="e.g. 123 Kimathi Street, Apt 4B" value="${_esc(existing?.address||'')}" /></div>
             <div class="co-input-row">
-                <div class="co-input-group"><div class="co-input-label">City *</div><input class="co-input" id="addrCity" placeholder="Nairobi" value="${_esc(existing?.city||'')}" /></div>
-                <div class="co-input-group"><div class="co-input-label">Region</div><input class="co-input" id="addrRegion" placeholder="Nairobi County" value="${_esc(existing?.region||'')}" /></div>
+                <div class="co-input-group"><div class="co-input-label">County *</div>
+                    <select class="co-input" id="addrCounty"><option value="">Select county…</option>${KENYA_COUNTIES.map(c=>`<option value="${_esc(c)}" ${(existing?.county||existing?.region||'').replace(/\s*county$/i,'')===c?'selected':''}>${_esc(c)}</option>`).join('')}</select></div>
+                <div class="co-input-group"><div class="co-input-label">Town / Area *</div><input class="co-input" id="addrCity" placeholder="e.g. Westlands, Nairobi CBD" value="${_esc(existing?.city||'')}" /></div>
             </div>
             <div class="co-input-group" style="display:flex;align-items:center;gap:8px;margin-top:4px">
                 <input type="checkbox" id="addrDefault" ${(!existing||existing.is_default)?'checked':''} style="width:16px;height:16px;accent-color:#f57224"/>
@@ -472,14 +480,14 @@ window._jmSaveAddr = async function(existingId) {
     const phone = document.getElementById('addrPhone')?.value?.trim();
     const street= document.getElementById('addrStreet')?.value?.trim();
     const city  = document.getElementById('addrCity')?.value?.trim();
-    const region= document.getElementById('addrRegion')?.value?.trim();
+    const county= document.getElementById('addrCounty')?.value?.trim();
     const isDef = document.getElementById('addrDefault')?.checked;
 
-    if (!name || !street || !city) { _toast('Please fill required fields','error','⚠️'); return; }
+    if (!name || !street || !city || !county) { _toast('Please fill all required fields, including the county','error','⚠️'); return; }
 
     const addr = {
         id:         existingId || ('addr_'+Date.now()),
-        name, phone: phone||'', address: street, city, region: region||'', country:'Kenya',
+        name, phone: phone||'', address: street, city, county, region: county, country:'Kenya',
         is_default: isDef,
     };
 
@@ -489,7 +497,8 @@ window._jmSaveAddr = async function(existingId) {
     if (idx>=0) _state.addresses[idx]=addr;
     else _state.addresses.push(addr);
 
-    if (!_state.address || isDef) _state.address = addr;
+    if (!_state.address || isDef || (_state.address && _state.address.id===addr.id)) _state.address = addr;
+    _state.shippingQuote = null;
     _ls.save('jm_addrs_v1',_state.addresses);
 
     // Sync to server (non-blocking)
@@ -502,37 +511,68 @@ window._jmSaveAddr = async function(existingId) {
     _toast('Address saved','success','✅');
 };
 
-// ── Step 2: Delivery ─────────────────────────────────────────────────────────
+// ── Step 2: Delivery (priced from the destination chosen in step 1) ─────────
+async function _loadShippingQuote() {
+    const a = _state.address;
+    _state.quoteLoading = true; _state.quoteError = '';
+    _renderDeliveryStep();
+    const r = await _api('POST','/marketplace/shipping/quote',{ county: a?.county, town: a?.city });
+    _state.quoteLoading = false;
+    if (!r || r._error || r.success === false || !r.data?.options) {
+        _state.shippingQuote = null;
+        _state.quoteError = r?.message || 'Could not calculate transport for this destination.';
+    } else {
+        _state.shippingQuote = r.data;
+        const keep = r.data.options.find(o => o.id === _state.deliveryOption) || r.data.options[0];
+        _state.deliveryOption = keep.id; _state.deliveryFee = keep.fee; _state.deliveryEta = keep.eta;
+    }
+    _renderDeliveryStep();
+}
+
 function _renderDeliveryStep() {
     const body = document.getElementById('coModalBody');
     const footer = document.getElementById('coModalFooter');
     if (!body) return;
+    const a = _state.address || {};
 
-    body.innerHTML = `<div class="co-section">
-        <div class="co-label">Choose Delivery Method</div>
-        ${DELIVERY_OPTIONS.map(opt=>`
-        <div class="co-delivery-option ${_state.deliveryZone===opt.id?'selected':''}" onclick="window._jmSelectDelivery('${opt.id}',${opt.fee},'${opt.eta}')">
-            <span class="co-delivery-icon">${opt.icon}</span>
-            <div style="flex:1">
-                <div class="co-delivery-name">${opt.name}</div>
-                <div class="co-delivery-eta">${opt.eta} · ${opt.desc}</div>
-            </div>
-            <div class="co-delivery-fee">${opt.fee===0?'FREE':_fmt(opt.fee)}</div>
-        </div>`).join('')}
-        <div style="background:#f0fdf4;border-radius:10px;padding:12px 14px;font-size:12px;color:#166534;margin-top:8px">
-            🛡️ All orders are insured and tracked. You'll receive SMS + push notifications.
-        </div>
+    if (!_state.shippingQuote && !_state.quoteLoading && !_state.quoteError) { _loadShippingQuote(); return; }
+
+    const dest = `<div style="background:#f9fafb;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:12px">
+        📍 Delivering to <strong>${_esc(a.city||'')}${a.county?', '+_esc(a.county)+' County':''}</strong>
+        <a href="#" onclick="event.preventDefault();window._jmGoStep(1)" style="float:right;color:#f57224;font-weight:700;text-decoration:none">Change</a>
     </div>`;
 
-    footer.innerHTML = `<button class="co-btn" onclick="window._jmCheckoutNext()">
-        Continue to Payment
-    </button>`;
+    let list = '';
+    if (_state.quoteLoading) list = '<div style="text-align:center;padding:24px;color:#6b7280">Calculating transport cost…</div>';
+    else if (_state.quoteError) list = `<div style="background:#fef2f2;color:#dc2626;border-radius:10px;padding:12px 14px;font-size:13px">${_esc(_state.quoteError)}
+        <div style="margin-top:8px"><button class="co-btn co-btn-outline" onclick="window._jmRetryQuote()">Try again</button></div></div>`;
+    else list = (_state.shippingQuote.options||[]).map(opt=>`
+        <div class="co-delivery-option ${_state.deliveryOption===opt.id?'selected':''}" onclick="window._jmSelectDelivery('${opt.id}')">
+            <span class="co-delivery-icon">${DELIVERY_ICONS[opt.id]||'📦'}</span>
+            <div style="flex:1">
+                <div class="co-delivery-name">${_esc(opt.name)}</div>
+                <div class="co-delivery-eta">${_esc(opt.eta)} · ${_esc(opt.desc||'')}</div>
+            </div>
+            <div class="co-delivery-fee">${opt.fee===0?'FREE':_fmt(opt.fee)}</div>
+        </div>`).join('');
+
+    body.innerHTML = `<div class="co-section">
+        <div class="co-label">Delivery Options</div>
+        ${dest}${list}
+        <div style="background:#f0fdf4;border-radius:10px;padding:12px 14px;font-size:12px;color:#166534;margin-top:8px">
+            🛡️ Transport cost is calculated from your delivery destination. All orders are tracked.
+        </div>
+    </div>`;
+    footer.innerHTML = `<button class="co-btn" onclick="window._jmCheckoutNext()" ${_selectedShipping()?'':'disabled'}>Continue to Payment</button>`;
 }
 
-window._jmSelectDelivery = function(id, fee, eta) {
-    _state.deliveryZone = id;
-    _state.deliveryFee = fee;
-    _state.deliveryEta = eta;
+window._jmRetryQuote = function() { _state.quoteError=''; _state.shippingQuote=null; _loadShippingQuote(); };
+window._jmGoStep = function(n) { _state.step = n; _renderStep(); };
+
+window._jmSelectDelivery = function(id) {
+    const opt = (_state.shippingQuote?.options||[]).find(o=>o.id===id);
+    if (!opt) return;
+    _state.deliveryOption = opt.id; _state.deliveryFee = opt.fee; _state.deliveryEta = opt.eta;
     _renderDeliveryStep();
 };
 
@@ -599,11 +639,15 @@ function _renderPayDetails(phone) {
     } else if (_state.paymentMethod === 'paylater') {
         return '<div style="background:#eff6ff;border-radius:10px;padding:12px 14px;font-size:13px;color:#1d4ed8">🗓️ Your order will be reserved as <strong>Pay Later</strong>. You can complete M-Pesa payment from NECPRA Money before the seller dispatches it.</div>';
     } else if (_state.paymentMethod === 'wallet') {
-        const balance = window.currentUser?.walletBalance || 0;
+        if (_state.walletBalance === null) {
+            _api('GET','/marketplace/wallet').then(r => { _state.walletBalance = parseFloat(r?.data?.balance || 0); _renderPaymentStep(); });
+            return `<div style="font-size:13px;color:#6b7280">👛 Checking wallet balance…</div>`;
+        }
+        const balance = _state.walletBalance;
         const total = Math.max(0, _state.subtotal + _state.deliveryFee - _state.couponDiscount);
         const ok = balance >= total;
         return `<div style="background:${ok?'#f0fdf4':'#fef2f2'};border-radius:10px;padding:12px 14px;font-size:13px;color:${ok?'#166534':'#dc2626'}">
-            👛 Wallet balance: <strong>${_fmt(balance)}</strong>${!ok?`<br>⚠️ Insufficient balance. Need ${_fmt(total-balance)} more.`:''}
+            👛 Wallet balance: <strong>${_fmt(balance)}</strong>${!ok?`<br>⚠️ Insufficient balance. Add ${_fmt(total-balance)} to your wallet (Wallet → Top Up) or pick another payment method.`:''}
         </div>`;
     }
     return '';
@@ -611,6 +655,7 @@ function _renderPayDetails(phone) {
 
 window._jmSelectPayment = function(id) {
     _state.paymentMethod = id;
+    if (id === 'wallet') _state.walletBalance = null;     // always re-read the real balance
     _renderPaymentStep();
 };
 window._jmMpesaPhone = function(v) {
@@ -659,7 +704,8 @@ function _renderConfirmStep() {
     const del   = _state.deliveryFee;
     const disc  = _state.couponDiscount;
     const total = Math.max(0, sub + del - disc);
-    const dopt  = DELIVERY_OPTIONS.find(o=>o.id===_state.deliveryZone) || DELIVERY_OPTIONS[3];
+    const sel   = _selectedShipping() || { id:'standard', name:'Delivery', eta:_state.deliveryEta };
+    const dopt  = { icon: DELIVERY_ICONS[sel.id]||'📦', name: sel.name, eta: sel.eta };
     const popt  = PAY_OPTIONS.find(o=>o.id===_state.paymentMethod) || PAY_OPTIONS[0];
     const addr  = _state.address;
 
@@ -683,7 +729,7 @@ function _renderConfirmStep() {
         <div class="co-label">Delivery Details</div>
         <div style="font-size:13px;color:#374151;line-height:1.6">
             <strong>${_esc(addr?.name||'')}</strong><br>
-            ${_esc(addr?.address||'')}${addr?.city?', '+_esc(addr.city):''}<br>
+            ${_esc(addr?.address||'')}${addr?.city?', '+_esc(addr.city):''}${addr?.county?', '+_esc(addr.county)+' County':''}<br>
             ${addr?.phone?'📞 '+_esc(addr.phone):''}
         </div>
         <div style="margin-top:10px;background:#f9fafb;border-radius:10px;padding:10px 12px;font-size:13px">
@@ -713,8 +759,14 @@ function _renderConfirmStep() {
 window._jmCheckoutNext = function() {
     if (_state.step === 1) {
         if (!_state.address) { _toast('Please select a delivery address','warning','📍'); return; }
+        if (!_state.address.county) { _toast('Choose the delivery county so we can calculate transport','warning','📍'); return; }
     }
+    if (_state.step === 2 && !_selectedShipping()) { _toast('Choose a delivery option','warning','🚚'); return; }
     if (_state.step === 3) {
+        if (_state.paymentMethod==='wallet') {
+            const need = Math.max(0, _state.subtotal + _state.deliveryFee - _state.couponDiscount);
+            if (_state.walletBalance === null || _state.walletBalance < need) { _toast('Your wallet balance is not enough for this order','warning','👛'); return; }
+        }
         if (_state.paymentMethod==='mpesa' && !_state.mpesaPhone) {
             _toast('Please enter your M-Pesa phone number','warning','📱'); return;
         }
@@ -749,7 +801,7 @@ window._jmPlaceOrder = async function() {
     const orderPayload = {
         items,
         delivery_address: _state.address,
-        delivery_zone:    _state.deliveryZone,
+        delivery_option:  _state.deliveryOption,
         payment_method:   _state.paymentMethod,
         coupon_code:      _state.couponCode || undefined,
         notes:            '',
@@ -794,12 +846,38 @@ window._jmPlaceOrder = async function() {
     if (typeof window._updateCartBadge === 'function') window._updateCartBadge();
     if (typeof window._jmUpdateCartBadge === 'function') window._jmUpdateCartBadge();
 
+    // FIX-FREE-ORDER: the server confirms zero-total orders itself (status 'paid',
+    // is_free true). Never open the M-Pesa/wallet/card step for them — that is what
+    // produced "Order has no payable amount".
+    const _orderTotal = parseFloat(order.total ?? order.total_price ?? order.totalPrice ?? NaN);
+    if (order.is_free === true || (Number.isFinite(_orderTotal) && _orderTotal <= 0)) {
+        _toast('No payment needed — your order is confirmed.', 'success', '✅');
+        _finishOrder({ ...order, status: 'paid', payment_method: 'free', total_price: 0 });
+        return;
+    }
+
     if (_state.paymentMethod === 'mpesa') {
         _doMpesaPayment(order);
+    } else if (_state.paymentMethod === 'wallet') {
+        await _doWalletPayment(order);
     } else {
         _finishOrder(order);
     }
 };
+
+// Wallet: the SERVER works out the amount from the order(s) and debits the wallet atomically.
+async function _doWalletPayment(order) {
+    const orderIds = Array.isArray(order.orders) && order.orders.length ? order.orders : [order.id];
+    const r = await _api('POST','/marketplace/payment/wallet',{ order_id: order.id, order_ids: orderIds });
+    if (!r || r._error || r.success === false) {
+        _toast(r?.message || 'Wallet payment failed. Your order is saved as unpaid — you can pay it later.','error','❌');
+        _finishOrder({ ...order, status:'pending' });
+        return;
+    }
+    _state.walletBalance = typeof r.data?.balance === 'number' ? r.data.balance : null;
+    _toast('Paid from your wallet','success','👛');
+    _finishOrder({ ...order, status:'paid', payment_method:'wallet' });
+}
 
 async function _doMpesaPayment(order) {
     _closeModal();
@@ -831,6 +909,12 @@ async function _doMpesaPayment(order) {
 
     // Backend returns { checkoutRequestId, status }. Older shapes are still accepted.
     const d = r?.data || r || {};
+    // FIX-FREE-ORDER: server settled a zero-total order, so there is no STK push to wait for.
+    if (!r?._error && (d.free === true || d.status === 'paid') && !d.checkoutRequestId && !d.CheckoutRequestID) {
+        document.getElementById('coMpesaWaiting')?.remove();
+        _finishOrder({ ...order, status: 'paid', payment_method: 'free', total_price: 0 });
+        return;
+    }
     _state.mpesaRequestId = d.checkoutRequestId || d.CheckoutRequestID || d.checkout_request_id || null;
 
     if (!_state.mpesaRequestId || r?._error || r?.success === false) {
@@ -931,8 +1015,8 @@ function _finishOrder(order) {
 function _showOrderSuccess(order) {
     document.getElementById('coSuccessScreen')?.remove();
     const items = order.items || order.metadata?.items || [];
-    const total = parseFloat(order.total_price || order.totalPrice || 0);
-    const payIcons = { mpesa:'📱', cod:'💵', wallet:'👛', card:'💳' };
+    const total = parseFloat(order.total_price ?? order.totalPrice ?? order.total ?? 0) || 0;
+    const payIcons = { mpesa:'📱', cod:'💵', wallet:'👛', card:'💳', free:'🎁' };
 
     const el = document.createElement('div');
     el.id = 'coSuccessScreen';

@@ -425,30 +425,88 @@ window._renderWalletPage = async function() {
     <div class="adv-wallet-tx">
         <div class="adv-wallet-tx-title">Transaction History</div>
         ${transactions.length ? transactions.slice(0,20).map(tx => {
-            const isCredit = ['topup','cashback','refund','referral','reward'].includes(tx.type);
+            const isCredit = tx.direction ? tx.direction === 'credit' : ['topup','cashback','refund','referral','reward'].includes(tx.type);
             const icons = { topup:'💳', cashback:'💰', refund:'↩️', referral:'🎁', reward:'⭐', order:'🛍️', payment:'💸' };
             const names = { topup:'Top Up', cashback:'Cashback', refund:'Refund', referral:'Referral Bonus', reward:'Reward', order:'Purchase', payment:'Payment' };
+            const st = tx.status || 'completed';
+            const stChip = st === 'pending' ? '<span style="background:#fef3c7;color:#b45309;border-radius:999px;padding:1px 8px;font-size:10px;font-weight:700;margin-left:6px">Pending</span>'
+                         : st === 'failed'  ? '<span style="background:#fee2e2;color:#dc2626;border-radius:999px;padding:1px 8px;font-size:10px;font-weight:700;margin-left:6px">Failed</span>' : '';
+            const amtColor = st === 'completed' ? (isCredit ? '#22c55e' : '#ef4444') : '#9ca3af';
+            const when = tx.created_at ? new Date(tx.created_at).toLocaleString('en-KE',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : 'Recently';
             return `<div class="adv-wallet-tx-row">
                 <div class="adv-wallet-tx-icon" style="background:${isCredit?'#f0fdf4':'#fef2f2'}">${icons[tx.type]||'💳'}</div>
                 <div style="flex:1;min-width:0">
-                    <div style="font-size:13px;font-weight:600;color:#111">${names[tx.type]||tx.type}</div>
-                    <div style="font-size:11px;color:#9ca3af">${tx.created_at ? new Date(tx.created_at).toLocaleDateString('en-KE',{day:'numeric',month:'short',year:'numeric'}) : 'Recently'}</div>
+                    <div style="font-size:13px;font-weight:600;color:#111">${tx.title || names[tx.type] || tx.type}${stChip}</div>
+                    <div style="font-size:11px;color:#9ca3af">${when}${tx.reference ? ' · ' + String(tx.reference).slice(-10) : ''}</div>
                 </div>
-                <div class="adv-wallet-tx-amount" style="color:${isCredit?'#22c55e':'#ef4444'}">${isCredit?'+':'-'}${_fmt(tx.amount)}</div>
+                <div style="text-align:right">
+                    <div class="adv-wallet-tx-amount" style="margin-left:0;color:${amtColor}">${isCredit?'+':'-'}${_fmt(tx.amount)}</div>
+                    ${tx.balance_after != null && st === 'completed' ? `<div style="font-size:10px;color:#9ca3af">Bal ${_fmt(tx.balance_after)}</div>` : ''}
+                </div>
             </div>`;
         }).join('') : `<div style="padding:30px;text-align:center;color:#9ca3af;font-size:13px">No transactions yet</div>`}
     </div>`;
 };
 
 window._advTopUp = function() {
-    const amount = prompt('Enter top-up amount (KES):');
-    if (!amount || isNaN(amount) || parseFloat(amount) <= 0) return;
-    _api('POST', '/marketplace/wallet/top-up', { amount: parseFloat(amount), payment_method: 'mpesa' }).then(r => {
-        if (r?.data?.new_balance !== undefined) {
-            _toast(`Wallet topped up! Balance: ${_fmt(r.data.new_balance)}`, 'success', '💳');
-            window._renderWalletPage?.();
-        } else { _toast('Top-up failed. Try again.', 'error', '❌'); }
-    });
+    document.getElementById('advTopUpOverlay')?.remove();
+    const savedPhone = (localStorage.getItem('mpesa_phone') || '').replace(/[^\d+ ]/g,'');
+    const ov = document.createElement('div');
+    ov.id = 'advTopUpOverlay';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100000;display:flex;align-items:flex-end;justify-content:center';
+    ov.onclick = e => { if (e.target === ov) ov.remove(); };
+    ov.innerHTML = `<div style="background:#fff;width:100%;max-width:440px;border-radius:20px 20px 0 0;padding:20px 18px 24px;box-sizing:border-box">
+        <div style="font-weight:800;font-size:17px;margin-bottom:4px">Top up wallet</div>
+        <div style="font-size:12px;color:#6b7280;margin-bottom:14px">You'll get an M-Pesa prompt. Your balance updates once payment is confirmed.</div>
+        <label style="font-size:12px;font-weight:700;color:#374151">Amount (KES)</label>
+        <input id="advTuAmt" type="number" inputmode="numeric" min="10" max="150000" placeholder="e.g. 500" style="width:100%;box-sizing:border-box;margin:4px 0 6px;padding:12px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:16px;font-weight:700">
+        <div style="display:flex;gap:6px;margin-bottom:12px">${[100,500,1000,2000].map(v=>`<button type="button" data-v="${v}" style="flex:1;padding:8px 0;border:1.5px solid #e5e7eb;background:#fff;border-radius:8px;font-weight:700;font-size:12px;cursor:pointer">${v}</button>`).join('')}</div>
+        <label style="font-size:12px;font-weight:700;color:#374151">M-Pesa phone number</label>
+        <input id="advTuPhone" type="tel" value="${savedPhone}" placeholder="0712 345 678" style="width:100%;box-sizing:border-box;margin:4px 0 14px;padding:12px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:16px;font-weight:600">
+        <button id="advTuGo" type="button" style="width:100%;background:#f57224;color:#fff;border:none;border-radius:12px;padding:14px;font-size:15px;font-weight:800;cursor:pointer">Send M-Pesa prompt</button>
+        <div id="advTuMsg" style="font-size:12px;margin-top:10px;text-align:center;color:#6b7280"></div>
+    </div>`;
+    document.body.appendChild(ov);
+    ov.querySelectorAll('button[data-v]').forEach(b => b.onclick = () => { ov.querySelector('#advTuAmt').value = b.dataset.v; });
+    const msg = t => { ov.querySelector('#advTuMsg').textContent = t; };
+    ov.querySelector('#advTuGo').onclick = async function() {
+        const btn = this;
+        const amount = parseFloat(ov.querySelector('#advTuAmt').value);
+        const phone = ov.querySelector('#advTuPhone').value.trim();
+        if (!amount || amount < 10 || amount > 150000) { msg('Enter an amount between KES 10 and KES 150,000.'); return; }
+        if (!phone) { msg('Enter your M-Pesa phone number.'); return; }
+        btn.disabled = true; btn.textContent = 'Sending…'; msg('');
+        const r = await _api('POST', '/marketplace/wallet/top-up', { amount, phone });
+        const ref = r?.data?.checkout_request_id;
+        if (!ref || r?._error || r?.success === false) {
+            btn.disabled = false; btn.textContent = 'Send M-Pesa prompt';
+            msg(r?.message || 'Could not start the top-up. Please try again.');
+            return;
+        }
+        localStorage.setItem('mpesa_phone', phone);
+        btn.textContent = 'Waiting for payment…'; msg('Check your phone and enter your M-Pesa PIN.');
+        // The balance is credited only by Safaricom's confirmation callback, so poll for the result.
+        let tries = 0;
+        const timer = setInterval(async () => {
+            tries++;
+            const s = await _api('GET', '/marketplace/wallet/topup/' + encodeURIComponent(ref));
+            const st = s?.data?.status;
+            if (st === 'completed') {
+                clearInterval(timer); ov.remove();
+                _toast(`Wallet topped up! Balance: ${_fmt(s.data.balance)}`, 'success', '💳');
+                window._renderWalletPage?.();
+            } else if (st === 'failed') {
+                clearInterval(timer);
+                btn.disabled = false; btn.textContent = 'Send M-Pesa prompt';
+                msg(s.data.reason || 'Payment was not completed.');
+                window._renderWalletPage?.();
+            } else if (tries >= 30) {
+                clearInterval(timer); ov.remove();
+                _toast('Still waiting for M-Pesa. Your balance will update automatically once it is confirmed.', 'info', '⏳');
+                window._renderWalletPage?.();
+            }
+        }, 3000);
+    };
 };
 
 window._advWalletShare = function() {
