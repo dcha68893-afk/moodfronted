@@ -68,6 +68,8 @@ public class MainActivity extends BridgeActivity implements ModifiedMainActivity
     public void onStart() {
         super.onStart();
         NecpraNotifier.appForeground = true;
+        // Make sure the server knows this device's FCM token even if the web layer has not registered it.
+        NecpraPushRegistrar.sync(getApplicationContext(), false);
     }
 
     @Override

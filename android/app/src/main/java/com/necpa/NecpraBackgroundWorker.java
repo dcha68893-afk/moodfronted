@@ -27,6 +27,7 @@ public final class NecpraBackgroundWorker extends Worker {
         Context context = getApplicationContext();
         context.getSharedPreferences(NativeBackgroundSync.BACKGROUND_PREFS, Context.MODE_PRIVATE)
                 .edit().putLong("lastRunAt", System.currentTimeMillis()).apply();
+        try { NecpraPushRegistrar.syncNow(context, false); } catch (Throwable ignored) {}
         try {
             // Plugin instances are activity-bound, so background work uses the
             // shared native helper rather than the Capacitor bridge.

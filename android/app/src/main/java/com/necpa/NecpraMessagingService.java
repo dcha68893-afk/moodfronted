@@ -66,6 +66,8 @@ public class NecpraMessagingService extends FirebaseMessagingService {
     @Override
     public void onNewToken(@NonNull String token) {
         super.onNewToken(token);
+        // Upload natively first: works even when the WebView (and js/native-push.js) is not running.
+        NecpraPushRegistrar.onNewToken(getApplicationContext(), token);
         PushNotificationsPlugin.onNewToken(token);
     }
 }
