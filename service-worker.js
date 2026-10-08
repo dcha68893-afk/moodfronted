@@ -83,7 +83,7 @@ const SW_VERSION = '19.51.0';
 // v74: profile-photo fix (js/avatar-fix.js added, message.html + js/config.js changed). Bump forces every installed
 // PWA/Android app to drop old copies and show the 'Update ready - Refresh' banner.
 // v89: native-init.js (native Profile/Settings routing) is now network-first so an installed APK never runs a stale copy.
-const CACHE_NAME = 'necpra-static-v95';
+const CACHE_NAME = 'necpra-static-v96';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -171,7 +171,7 @@ const NETWORK_FIRST_PATTERNS = [
   // regardless), but the actual gameplay scripts are plain .js requests and were
   // falling through to the 7-day cache-first default without these.
   /\/game\.html/i,/\/game-v3\.html/i,/\/games-crossword-v4\.js/i,
-  /\/games-v4-enhancements\.js/i,/\/games-commercial-v5\.js/i,/\/games-chess-v1\.js/i
+  /\/games-v4-enhancements\.js/i,/\/games-commercial-v5\.js/i,/\/games-chess-v1\.js/i,/\/games-chess-3d\.js/i
 ];
 
 const BYPASS_PATTERNS = [

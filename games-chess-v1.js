@@ -203,7 +203,8 @@ function undo(){
 function go(v){if(thinking)return;view=Math.max(0,Math.min(hist.length,v));selected=-1;targets=[];render()}
 
 /* ───────────── Rendering ───────────── */
-const CSS='#chess .ch-scroll{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;align-items:center;padding-bottom:10px}#chess .ch-board{margin:4px auto}'
+const CSS='.ch-board.ch3d{position:relative;overflow:visible;border:0;background:transparent;box-shadow:none;transform:none!important}.ch-board.ch3d .ch-sq{visibility:hidden;pointer-events:none}'
++'#chess .ch-scroll{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;align-items:center;padding-bottom:10px}#chess .ch-board{margin:4px auto}'
 +'.ch-sq{border:0;padding:0;font-family:"Segoe UI Symbol","Noto Sans Symbols 2","Apple Symbols",system-ui,sans-serif;-webkit-tap-highlight-color:transparent}.ch-sq.pw{color:#fff;text-shadow:0 0 2px #000,0 0 3px #000,0 1px 4px #000a}.ch-sq.pb{color:#151515;text-shadow:0 0 1px #fff6}'
 +'.ch-sq.chk{background:radial-gradient(circle,#ff4d4dcc 0,#ff4d4d55 60%,transparent 75%),var(--sqbg)}.ch-sq.light{--sqbg:#e8edf2}.ch-sq.dark{--sqbg:#587086}.ch-sq.legal.cap:after{width:88%;height:88%;background:transparent;border:4px solid #1f2937aa}'
 +'.ch-lb{position:absolute;font-size:9px;font-style:normal;font-weight:900;line-height:1;opacity:.75;pointer-events:none;color:#31475c}.ch-lb.lf{right:3px;bottom:2px}.ch-lb.lr{left:3px;top:2px}.ch-sq.dark .ch-lb{color:#e8edf2}'
@@ -217,11 +218,11 @@ function build(){
  const sec=$('chess');if(!sec||$('chShell'))return;css();
  sec.innerHTML='<div class="ch-top" id="chShell"><button class="icon" id="chBack" aria-label="Back">‹</button><div><b>Game Master Chess</b><small id="chSub">CHESS</small></div><span id="chessClock">00:00</span></div>'
  +'<div class="ch-scroll"><div class="ch-meta" style="width:min(94vw,560px);box-sizing:border-box"><span id="chessStatus"></span><span id="chWho"></span></div><div class="ch-cap" id="chCapTop"></div><div class="ch-board" id="chessBoard"></div><div class="ch-cap" id="chCapBot"></div>'
- +'<div class="ch-moves" id="chMoves"></div><div class="ch-bar"><button id="chFirst" aria-label="First move">«</button><button id="chPrev" aria-label="Previous move">‹</button><button id="chNext" aria-label="Next move">›</button><button id="chLast" aria-label="Latest move">»</button><button id="chUndo">↶ Undo</button><button id="chFlip">⇅ Flip</button><button id="chNew">New</button><button id="chResign" class="danger">Resign</button></div></div>'
+ +'<div class="ch-moves" id="chMoves"></div><div class="ch-bar"><button id="chFirst" aria-label="First move">«</button><button id="chPrev" aria-label="Previous move">‹</button><button id="chNext" aria-label="Next move">›</button><button id="chLast" aria-label="Latest move">»</button><button id="chUndo">↶ Undo</button><button id="chFlip">⇅ Flip</button><button id="ch3dBtn">3D</button><button id="chNew">New</button><button id="chResign" class="danger">Resign</button></div></div>'
  +'<div class="ch-ov" id="chOv"></div>';
  $('chBack').onclick=()=>window.home&&window.home();
  $('chFirst').onclick=()=>go(0);$('chPrev').onclick=()=>go(view-1);$('chNext').onclick=()=>go(view+1);$('chLast').onclick=()=>go(hist.length);
- $('chUndo').onclick=undo;$('chFlip').onclick=()=>{flipped=!flipped;render()};$('chNew').onclick=showMenu;
+ $('chUndo').onclick=undo;$('chFlip').onclick=()=>{flipped=!flipped;render()};$('ch3dBtn').onclick=()=>{let on=true;try{on=localStorage.getItem('necpra_chess_3d')!=='0';localStorage.setItem('necpra_chess_3d',on?'0':'1')}catch(_){}render()};$('chNew').onclick=showMenu;
  $('chResign').onclick=()=>{if(over||thinking)return;const room=roomOf();
   if(mode==='room'){publish(cur(),{result:'resign:'+role});finish({kind:'resign',winner:opp(role)})}
   else finish({kind:'resign',winner:mode==='cpu'?opp(myColor):opp(cur().turn)})}}
@@ -247,6 +248,13 @@ function statusText(s){
  if(mode==='room')return(s.turn===role?'Your move':"Opponent's move")+chk;
  if(mode==='cpu')return(s.turn===myColor?'Your move':'Computer to move')+chk;
  return cname(s.turn)+' to move'+chk}
+/* 3D view: loads three.js + games-chess-3d.js on first use; falls back to the 2D board if WebGL is unavailable. */
+function want3d(){try{return localStorage.getItem('necpra_chess_3d')!=='0'}catch(_){return true}}
+let l3d=0;
+function load3d(){if(l3d)return;l3d=1;const add=(src,cb)=>{const e=document.createElement('script');e.src=src;e.onload=cb;e.onerror=()=>{l3d=2};document.body.appendChild(e)};add('/js/vendor/three.min.js?v=147',()=>add('/games-chess-3d.js?v=1',()=>{if(window.NecpraChess3D)render()}))}
+function apply3d(b,s,lm,ksq){let ok=false;
+ if(want3d()){if(window.NecpraChess3D){try{ok=window.NecpraChess3D.sync(b,{board:s.b,flipped,selected,targets:targets.map(m=>({t:m.t,cap:m.cap!=='.'})),last:lm?{f:lm.f,t:lm.t}:null,check:ksq,onTap:tap})}catch(_){ok=false}}else load3d()}
+ b.classList.toggle('ch3d',!!ok);const t=$('ch3dBtn');if(t)t.textContent=ok?'2D':'3D'}
 function render(){
  build();const s=shown();
  $('chSub').textContent=mode==='room'?'LIVE MATCH':mode==='cpu'?('VS COMPUTER · '+level.toUpperCase()):'PASS & PLAY';
@@ -266,6 +274,7 @@ function render(){
   if((k&7)===0){const e=document.createElement('i');e.className='ch-lb lr';e.textContent=8-r;sq.appendChild(e)}
   if((k>>3)===7){const e=document.createElement('i');e.className='ch-lb lf';e.textContent=FILES[c];sq.appendChild(e)}
   sq.onclick=()=>tap(i);b.appendChild(sq)}
+ apply3d(b,s,lm,ksq);
  const mv=$('chMoves');mv.innerHTML=movesHtml();mv.querySelectorAll('button').forEach(x=>x.onclick=()=>go(Number(x.dataset.i)));if(atLive())mv.scrollTop=mv.scrollHeight;
  const solo=mode!=='room';
  $('chFirst').disabled=$('chPrev').disabled=view===0||thinking;$('chNext').disabled=$('chLast').disabled=atLive()||thinking;
