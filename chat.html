@@ -337,8 +337,37 @@
         .header-actions:not(.hidden) .header-action-btn:nth-child(3) { animation-delay: .07s; }
         .header-actions:not(.hidden) .header-action-btn:nth-child(4) { animation-delay: .105s; }
 
+        .header-action-btn {
+            width: auto;
+            min-width: 44px;
+            height: 36px;
+            padding: 0 10px;
+            gap: 7px;
+            white-space: nowrap;
+        }
+
         .header-action-btn i {
             font-size: 16px;
+            flex: 0 0 auto;
+        }
+
+        .header-action-label {
+            font-size: 11px;
+            font-weight: 700;
+            line-height: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        @media (max-width: 560px) {
+            .header-action-btn {
+                min-width: 40px;
+                padding: 0 8px;
+                gap: 5px;
+            }
+            .header-action-label {
+                font-size: 10px;
+            }
         }
 
         .profile-avatar-sm {
@@ -2775,19 +2804,31 @@
         // ADMIN ICON / ROLE SYNC — called with the same user object the session protocol already
         // carries to every module (role / isAdmin). `verified` is true only for the server-verified
         // /api/profile result; unverified, non-admin data never gets pushed into the admin module.
-        window.__necpraIsAdmin = false;
+        // Admin role is tri-state: null = not verified yet, true/false = server-verified.
+        // Do not close an already-open Admin module while /api/profile is still resolving.
+        window.__necpraIsAdmin = null;
         window.__necpraSyncAdmin = function (user, verified) {
             const u = user || {};
             const isAdmin = u.isAdmin === true || u.role === 'admin' || u.role === 'moderator';
-            window.__necpraIsAdmin = isAdmin;
-            if (document.body) document.body.classList.toggle('is-admin', isAdmin);
-            if (!isAdmin) {
-                if (document.body) document.body.classList.remove('admin-page-active');
-                if (window.__currentPage === 'admin') navigateToPage('messages');
+            const isVerified = verified === true;
+            if (isVerified) window.__necpraIsAdmin = isAdmin;
+            if (document.body) {
+                document.body.classList.toggle('is-admin', isAdmin || (window.__currentPage === 'admin' && !isVerified));
+                document.body.classList.toggle('admin-page-active', window.__currentPage === 'admin');
+            }
+            // Only a server-verified non-admin result may redirect away from Admin.
+            if (isVerified && !isAdmin && window.__currentPage === 'admin') {
+                navigateToPage('messages');
             }
             const f = document.getElementById('adminIframe');
-            if (f && f.getAttribute('src') && f.contentWindow && (isAdmin || verified)) {
-                try { f.contentWindow.postMessage({ type: 'USER_ROLE_UPDATE', role: u.role || (isAdmin ? 'admin' : 'user'), isAdmin }, '*'); } catch (_) {}
+            if (f && f.getAttribute('src') && f.contentWindow && isVerified) {
+                try {
+                    f.contentWindow.postMessage({
+                        type: 'USER_ROLE_UPDATE',
+                        role: u.role || (isAdmin ? 'admin' : 'user'),
+                        isAdmin
+                    }, '*');
+                } catch (_) {}
             }
         };
 
@@ -2867,7 +2908,7 @@
                 b.className = 'header-action-btn' + (action.navAction ? ' header-nav-action' : '');
                 b.title = action.title || '';
                 b.setAttribute('aria-label', action.title || action.btnId || 'Back');
-                b.innerHTML = `<i class="fas ${action.icon || ''}"></i>`;
+                b.innerHTML = `<i class="fas ${action.icon || ''}" aria-hidden="true"></i><span class="header-action-label">${String(action.title || action.btnId || 'Action')}</span>`;
                 b.addEventListener('click', () => {
                     if (action.navigateBack) return navigateBackOneStep();
                     if (action.navigatePage) return navigateToPage(action.navigatePage);

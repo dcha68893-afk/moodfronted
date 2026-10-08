@@ -1151,18 +1151,17 @@ window._renderVouchers = function() { window._renderCouponsPage?.() || _origRend
 const _origNavMore = window._jmNavMore;
 window._jmNavMore = function(page) {
     const pageMap = {
-        'wallet':   { pageId:'jmPageWallet',   render: window._renderWalletPage },
-        'loyalty':  { pageId:'jmPageLoyalty',  render: window._renderLoyaltyPage },
-        'referral': { pageId:'jmPageReferral', render: window._renderReferralPage },
+        'wallet':   { pageId:'jmPageWallet',   contentId:'jmWalletContent',   render: window._renderWalletPage },
+        'loyalty':  { pageId:'jmPageLoyalty',  contentId:'jmLoyaltyContent',  render: window._renderLoyaltyPage },
+        'referral': { pageId:'jmPageReferral', contentId:'jmReferralContent', render: window._renderReferralPage },
     };
     if (pageMap[page]) {
-        const { pageId, render } = pageMap[page];
+        const { pageId, contentId, render } = pageMap[page];
         let el = document.getElementById(pageId);
         if (!el) {
             el = document.createElement('div');
             el.id = pageId; el.className = 'jm-page';
-            const contentId = pageId.replace('jmPage','jm').replace(/([A-Z])/g,m=>''+m).toLowerCase() + 'Content';
-            el.innerHTML = `<div class="jm-page-title">${page.charAt(0).toUpperCase()+page.slice(1)}</div><div id="${contentId.replace('jm','jm')}"></div>`;
+            el.innerHTML = `<div class="jm-page-title">${page.charAt(0).toUpperCase()+page.slice(1)}</div><div id="${contentId}"></div>`;
             document.querySelector('.jm-pages-container, .jm-pages, #jmPages, .jm-app')?.appendChild(el);
         }
         document.querySelectorAll('.jm-page').forEach(p=>p.classList.remove('active'));
