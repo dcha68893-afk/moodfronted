@@ -10,6 +10,17 @@
     if(a&&a.user&&t&&!/[?&](reason|logout|force)=/.test(location.search)&&window.top===window.self){
         document.documentElement.style.visibility="hidden";
         location.replace("chat.html");
+    }
+    /* ANDROID APP RESUME FIX: the native app keeps tokens in the native secure store and never
+       writes kynecta_auth into the WebView, so the check above can never match there. When the OS
+       reloads the WebView after the app was in the background, the landing page (screen B) used to
+       paint before the native session was restored. A device that has authenticated before (marker
+       is removed on logout / invalid session) goes straight to chat.html, whose own loading screen
+       (screen A) is the only thing shown while the session is restored or the server wakes up. */
+    var native=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
+    if(!a&&native&&localStorage.getItem("kynecta_ever_authenticated")==="1"&&!/[?&](reason|logout|force)=/.test(location.search)&&window.top===window.self){
+        document.documentElement.style.visibility="hidden";
+        location.replace("chat.html");
     }}catch(_){}})();
     </script>
 <script src="/session-restore.js"></script><script src="/app-protect.js"></script>

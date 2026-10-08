@@ -923,6 +923,50 @@
         });
     }
 
+    function isNativeApp() {
+        try { return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()); }
+        catch (_) { return false; }
+    }
+
+    function waitForNativeSession() {
+        if (runtimeState.waitingForNative) return;
+        runtimeState.waitingForNative = true;
+        let settled = false;
+
+        const adopt = function (snap) {
+            if (settled || !snap || !snap.accessToken) return;
+            settled = true;
+            runtimeState.bootstrapped = false;
+            runtimeState.waitingForNative = false;
+            bootstrap();
+        };
+
+        window.addEventListener('necpra:native-auth-ready', function (e) { adopt(e && e.detail); }, { once: true });
+        if (window.__NECPRA_NATIVE_AUTH_SNAPSHOT__) adopt(window.__NECPRA_NATIVE_AUTH_SNAPSHOT__);
+
+        // Ask the native layer directly as the deciding authority. No session answer => real logout.
+        // Any error / timeout (server waking up, plugin not ready yet) => keep waiting, never log out.
+        let tries = 0;
+        const ask = async function () {
+            if (settled) return;
+            tries++;
+            try {
+                const nat = window.NecpraNative;
+                if (nat && nat.authGetSession) {
+                    const s = await nat.authGetSession();
+                    if (s && s.hasSession === false) {
+                        settled = true;
+                        runtimeState.waitingForNative = false;
+                        schedulePostRenderLogout('missing-session');
+                        return;
+                    }
+                }
+            } catch (_) {}
+            if (!settled && tries < 40) setTimeout(ask, 1500);
+        };
+        setTimeout(ask, 800);
+    }
+
     function bootstrap() {
         if (runtimeState.bootstrapped) return;
         runtimeState.bootstrapped = true;
@@ -946,6 +990,17 @@
                     window.KynectaSync.syncAll().catch(function () {});
                 }
             });
+            return;
+        }
+
+        // ANDROID APP RESUME FIX: on the native app the session is restored asynchronously from the
+        // native secure store (native-init.js -> necpra:native-auth-ready), so "no session yet" at boot
+        // is NOT proof the user is logged out. Previously this branch logged out and redirected to
+        // index.html (landing/login flash) whenever the WebView reloaded after the app was backgrounded.
+        // Wait for the native session (long enough for a cold server / biometric prompt); only a native
+        // answer of "no session" may log the user out.
+        if (isApplicationPage() && isNativeApp() && localStorage.getItem(EVER_AUTHENTICATED_KEY) === '1') {
+            waitForNativeSession();
             return;
         }
 
