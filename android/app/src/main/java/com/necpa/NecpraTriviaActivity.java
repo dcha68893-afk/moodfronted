@@ -33,7 +33,7 @@ public class NecpraTriviaActivity extends NecpraGameActivity {
     private LinearLayout content, answersBox;
     private TextView tvLevel, tvScore, tvStreak, tvCount, tvQuestion, tvHint, tvOpp, tvTimer;
     private TextView[] answerBtns = new TextView[4];
-    private TextView btn50, btnSkip, btnHint;
+    private TextView btn50, btnSkip, btnHint, btnRestart;
     private View progressFill, timerFill;
     private FrameLayout progressTrack, timerTrack;
 
@@ -96,8 +96,10 @@ public class NecpraTriviaActivity extends NecpraGameActivity {
         subject = isSubject(s) ? s : store.triviaSubject();
         String r = store.resume("trivia");
         NecpraTriviaEngine d = r == null ? null : NecpraTriviaEngine.deserialize(r);
-        if (d != null && !d.finished() && d.level() == levelNo) {
+        // Resume the exact level that was being played (a replay of an earlier level included).
+        if (d != null && !d.finished() && d.level() >= 1 && d.level() <= levelNo) {
             eng = d;
+            levelNo = d.level();
             subject = d.subject();
             showQuestion();
         } else {
@@ -198,7 +200,8 @@ public class NecpraTriviaActivity extends NecpraGameActivity {
         btn50 = toolButton("½\n50:50", new Runnable() { @Override public void run() { useFifty(); } });
         btnSkip = toolButton("⏭\nSkip", new Runnable() { @Override public void run() { useSkip(); } });
         btnHint = toolButton("💡\nHint", new Runnable() { @Override public void run() { useHint(); } });
-        TextView[] bs = {btn50, btnSkip, btnHint};
+        btnRestart = toolButton("⟳\nRestart", new Runnable() { @Override public void run() { askRestart(); } });
+        TextView[] bs = {btn50, btnSkip, btnHint, btnRestart};
         for (int i = 0; i < bs.length; i++) {
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(56), 1f);
             if (i > 0) lp.leftMargin = dp(8);
@@ -263,6 +266,17 @@ public class NecpraTriviaActivity extends NecpraGameActivity {
                 finish();
             }
         }));
+    }
+
+    /** Start the same level over with fresh questions (solo only). */
+    private void askRestart() {
+        if (roomMode || eng == null || eng.finished()) return;
+        confirm("Start this level over?", "Your answers and score for this level are lost.", "Restart", "Keep playing", true, new Runnable() {
+            @Override public void run() {
+                main.removeCallbacks(ticker);
+                startLevel();
+            }
+        });
     }
 
     private int secondsFor() {
@@ -441,14 +455,21 @@ public class NecpraTriviaActivity extends NecpraGameActivity {
         earn(eng.finishCoins(), "Level complete");
         sfx.play(NecpraSfx.WIN);
         final int done = levelNo;
-        resultCard("Level " + done + " complete", correct + " of " + total + " correct", stars,
-                new String[][]{{"Score", score + " pts"}, {"Coins", "🪙 " + score}, {"Best streak", "×" + eng.streak()}},
+        double ratio = total == 0 ? 0 : (double) correct / total;
+        levelResult(done, ratio, stars,
+                new String[][]{{"Correct", correct + " of " + total}, {"Score", score + " pts"}, {"Coins", "🪙 " + score},
+                        {"Best streak", "×" + eng.streak()}},
                 "Next level", new Runnable() {
                     @Override public void run() {
                         levelNo = done + 1;
                         showSubjectPicker();
                     }
-                }, "Leave", new Runnable() {
+                }, new Runnable() {
+                    @Override public void run() {
+                        levelNo = done;
+                        showSubjectPicker();
+                    }
+                }, new Runnable() {
                     @Override public void run() { finish(); }
                 });
     }

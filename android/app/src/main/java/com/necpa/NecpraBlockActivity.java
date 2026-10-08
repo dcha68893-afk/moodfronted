@@ -85,7 +85,11 @@ public class NecpraBlockActivity extends NecpraGameActivity {
             String r = store.resume("block");
             if (r != null) {
                 NecpraBlockEngine d = NecpraBlockEngine.deserialize(r, store.difficulty());
-                if (d != null && !d.isOver() && !d.isLevelComplete() && d.level() == levelNo) e = d;
+                // A replayed (already unlocked) level resumes as that level, not as the highest one.
+                if (d != null && !d.isOver() && !d.isLevelComplete() && d.level() >= 1 && d.level() <= levelNo) {
+                    e = d;
+                    levelNo = d.level();
+                }
             }
             if (e == null) e = new NecpraBlockEngine(levelNo, store.difficulty(), System.nanoTime());
             install(e, true);
@@ -321,14 +325,24 @@ public class NecpraBlockActivity extends NecpraGameActivity {
                 store.setLevel("block", Math.max(store.level("block"), level + 1));
                 earn(LEVEL_REWARD, null);
                 final int next = level + 1;
-                resultCard("Level " + level + " complete!", "Next target: " + String.format(java.util.Locale.US, "%,d", NecpraBlockEngine.targetFor(next)) + " points",
-                        3, new String[][]{{"Score", String.format(java.util.Locale.US, "%,d", score)}, {"Coins", "🪙 +" + LEVEL_REWARD}},
+                // 1.0x the target is a plain pass; 2x or more is a perfect score.
+                double over = score / (double) Math.max(1, NecpraBlockEngine.targetFor(level));
+                double ratio = Math.min(1.0, 0.5 + (over - 1.0) * 0.5);
+                levelResult(level, ratio, 3,
+                        new String[][]{{"Score", String.format(java.util.Locale.US, "%,d", score)},
+                                {"Next target", String.format(java.util.Locale.US, "%,d", NecpraBlockEngine.targetFor(next))},
+                                {"Coins", "🪙 +" + LEVEL_REWARD}},
                         "Next level", new Runnable() {
                             @Override public void run() {
                                 levelNo = next;
                                 install(new NecpraBlockEngine(next, store.difficulty(), System.nanoTime()), true);
                             }
-                        }, "Menu", new Runnable() { @Override public void run() { finish(); } });
+                        }, new Runnable() {
+                            @Override public void run() {
+                                levelNo = level;
+                                install(new NecpraBlockEngine(level, store.difficulty(), System.nanoTime()), true);
+                            }
+                        }, new Runnable() { @Override public void run() { finish(); } });
             }
         });
     }

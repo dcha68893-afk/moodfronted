@@ -45,6 +45,9 @@ public class NecpraArcadeActivity extends NecpraGameActivity {
 
     @Override protected String gameTitle() { return "Arcade"; }
 
+    /** The hub is the module home: no back arrow here (the phone back gesture leaves it). */
+    @Override protected boolean showBackArrow() { return false; }
+
     // ------------------------------------------------------------------ build
 
     @Override

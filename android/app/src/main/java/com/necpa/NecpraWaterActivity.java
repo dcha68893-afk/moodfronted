@@ -85,7 +85,14 @@ public class NecpraWaterActivity extends NecpraGameActivity {
             int want = getIntent().getIntExtra(EXTRA_LEVEL, 0);
             if (want > 0) store.adoptLevel("water", want);
             levelNo = store.level("water");
-            startLevel(levelNo, true);
+            // Come back to the exact level that was being played (a replay of an earlier level included).
+            int playing = levelNo;
+            String saved = store.resume("water");
+            if (saved != null) {
+                NecpraWaterEngine d = NecpraWaterEngine.deserialize(saved);
+                if (d != null && !d.isSolved() && d.hasMove() && d.level() >= 1 && d.level() <= levelNo) playing = d.level();
+            }
+            startLevel(playing, true);
         }
         pullServerCoins();
     }
@@ -455,10 +462,14 @@ public class NecpraWaterActivity extends NecpraGameActivity {
         store.setLevel("water", Math.max(store.level("water"), levelNo + 1));
         earn(coins, null);
         final int next = levelNo + 1;
-        resultCard("Level " + levelNo + " complete!", null, stars,
+        final int played = levelNo;
+        // Three stars is a pass at par; well under par is a perfect score.
+        double ratio = stars >= 3 ? (moves * 4 <= NecpraWaterEngine.parFor(played) * 3 ? 1.0 : 0.9) : (stars == 2 ? 0.7 : 0.5);
+        levelResult(played, ratio, stars,
                 new String[][]{{"Moves", String.valueOf(moves)}, {"Score", String.valueOf(score)}, {"Coins", "🪙 +" + coins}},
                 "Next level", new Runnable() { @Override public void run() { startLevel(next, false); } },
-                "Menu", new Runnable() { @Override public void run() { finish(); } });
+                new Runnable() { @Override public void run() { startLevel(played, false); } },
+                new Runnable() { @Override public void run() { finish(); } });
     }
 
     private void showRoomResult() {

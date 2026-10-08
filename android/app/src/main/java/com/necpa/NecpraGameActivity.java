@@ -46,6 +46,8 @@ public abstract class NecpraGameActivity extends Activity {
     public static final String EXTRA_BEST = "webBest";
     public static final String EXTRA_STREAK = "webStreak";
     public static final String EXTRA_SEEN = "webServerSeen";
+    /** "dark" or "light": the theme the user saved in the app (web layer hands it over on every launch). */
+    public static final String EXTRA_THEME = "theme";
 
     public static final String RES_COINS = "coins";
     public static final String RES_GAMES = "games";
@@ -89,7 +91,7 @@ public abstract class NecpraGameActivity extends Activity {
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
-        night = (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+        night = resolveNight();
         cBg = night ? Color.parseColor("#0B1220") : Color.parseColor("#F3F4F6");
         cCard = night ? Color.parseColor("#151E2E") : Color.WHITE;
         cText = night ? Color.parseColor("#F3F4F6") : Color.parseColor("#111827");
@@ -161,6 +163,28 @@ public abstract class NecpraGameActivity extends Activity {
         onBuild(b);
         updateCoins(false);
     }
+
+    /**
+     * Follows the theme saved in the app, not the phone's dark mode. The web layer passes the resolved theme with
+     * every launch; it is remembered here so games opened from the native hub (which carry no extra) match too.
+     * With nothing saved yet the system setting is the fallback.
+     */
+    private boolean resolveNight() {
+        android.content.SharedPreferences sp = getSharedPreferences("necpra_native_games_ui", MODE_PRIVATE);
+        Intent in = getIntent();
+        String t = in == null ? null : in.getStringExtra(EXTRA_THEME);
+        if ("dark".equals(t) || "light".equals(t)) {
+            sp.edit().putString("theme", t).apply();
+        } else {
+            t = sp.getString("theme", null);
+        }
+        if ("dark".equals(t)) return true;
+        if ("light".equals(t)) return false;
+        return (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+    }
+
+    /** The module home (the arcade hub) has no back arrow: the phone's back gesture already leaves it. */
+    protected boolean showBackArrow() { return true; }
 
     /** Called whenever the system bars / cutouts change. */
     protected void onInsets(int top, int bottom, int left, int right) { }
@@ -424,20 +448,22 @@ public abstract class NecpraGameActivity extends Activity {
         LinearLayout bar = row();
         bar.setPadding(dp(10), dp(6), dp(10), dp(6));
 
-        TextView back = chip("‹", 22);
-        back.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                sfx.play(NecpraSfx.TAP);
-                handleBack();
-            }
-        });
-        back.setContentDescription("Back");
-        bar.addView(back, new LinearLayout.LayoutParams(dp(42), dp(42)));
+        if (showBackArrow()) {
+            TextView back = chip("‹", 22);
+            back.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    sfx.play(NecpraSfx.TAP);
+                    handleBack();
+                }
+            });
+            back.setContentDescription("Back");
+            bar.addView(back, new LinearLayout.LayoutParams(dp(42), dp(42)));
+        }
 
         titleView = text(gameTitle(), 17, cText, true);
         titleView.setSingleLine(true);
         titleView.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        titleView.setPadding(dp(12), 0, dp(8), 0);
+        titleView.setPadding(showBackArrow() ? dp(12) : dp(6), 0, dp(8), 0);
         bar.addView(titleView, new LinearLayout.LayoutParams(0, -2, 1f));
 
         soundView = chip(store.sound() ? "🔊" : "🔇", 16);
@@ -686,9 +712,33 @@ public abstract class NecpraGameActivity extends Activity {
         }));
     }
 
+    /** Praise for a finished level from 0..1+ (1 = flawless). Same wording in every game. */
+    protected static String praise(double ratio) {
+        if (ratio >= 1.0) return "Perfect score!";
+        if (ratio >= 0.9) return "Amazing!";
+        if (ratio >= 0.8) return "Excellent!";
+        if (ratio >= 0.6) return "Very good!";
+        return "Good!";
+    }
+
+    /**
+     * The one level-complete card every level game uses: praise, stars, the numbers, then Next level, Replay this
+     * level and Quit. {@code onReplay} must restart the SAME level; {@code onQuit} leaves the game.
+     */
+    protected Modal levelResult(int level, double ratio, int stars, String[][] rows, String nextLabel, Runnable onNext,
+                                Runnable onReplay, Runnable onQuit) {
+        return resultCard(praise(ratio), "Level " + level + " complete", stars, rows, nextLabel, onNext,
+                "Replay level " + level, onReplay, "Quit", onQuit);
+    }
+
     /** Level / match result card with animated stars. */
     protected Modal resultCard(String title, String subtitle, int stars, String[][] rows, String primary, final Runnable onPrimary,
                                String secondary, final Runnable onSecondary) {
+        return resultCard(title, subtitle, stars, rows, primary, onPrimary, secondary, onSecondary, null, null);
+    }
+
+    protected Modal resultCard(String title, String subtitle, int stars, String[][] rows, String primary, final Runnable onPrimary,
+                               String secondary, final Runnable onSecondary, String tertiary, final Runnable onTertiary) {
         LinearLayout c = column();
         c.setGravity(Gravity.CENTER_HORIZONTAL);
         if (stars >= 0) {
@@ -744,6 +794,15 @@ public abstract class NecpraGameActivity extends Activity {
                 @Override public void run() {
                     m.dismiss();
                     if (onSecondary != null) onSecondary.run();
+                }
+            }), new LinearLayout.LayoutParams(-1, -2));
+        }
+        if (tertiary != null) {
+            c.addView(space(8));
+            c.addView(button(tertiary, SECONDARY, new Runnable() {
+                @Override public void run() {
+                    m.dismiss();
+                    if (onTertiary != null) onTertiary.run();
                 }
             }), new LinearLayout.LayoutParams(-1, -2));
         }

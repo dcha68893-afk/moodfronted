@@ -31,13 +31,14 @@ import java.util.Map;
 public class NecpraWordActivity extends NecpraGameActivity {
     private NecpraWordEngine eng;
     private boolean roomMode, roomStarted, submittedRoom, finishedLevel;
+    private int hintsAtStart;
     private String roomCode;
     private NecpraRoomSession room;
     private long matchStartMs;
 
     private LinearLayout content;
     private TextView tvLevel, tvFound, tvHints, tvPreview, tvOpp, tvInfo;
-    private TextView btnHint, btnList, btnShuffle;
+    private TextView btnHint, btnList, btnShuffle, btnRestart;
     private BoardView boardView;
     private WheelView wheelView;
 
@@ -58,6 +59,7 @@ public class NecpraWordActivity extends NecpraGameActivity {
             tvInfo.setText("Joining match…");
             btnHint.setVisibility(View.GONE);
             btnList.setVisibility(View.GONE);
+            btnRestart.setVisibility(View.GONE);
             tvHints.setVisibility(View.GONE);
             wheelView.setLocked(true);
             room = new NecpraRoomSession(this, roomCode, new NecpraRoomSession.Listener() {
@@ -81,7 +83,8 @@ public class NecpraWordActivity extends NecpraGameActivity {
         int level = store.level("crossword");
         String r = store.resume("crossword");
         NecpraWordEngine d = r == null ? null : NecpraWordEngine.deserialize(r);
-        if (d != null && d.endlessLevel() == level && !d.isComplete()) eng = d;
+        // Resume the exact puzzle that was being played (a replay of an earlier level included).
+        if (d != null && d.endlessLevel() >= 1 && d.endlessLevel() <= level && !d.isComplete()) eng = d;
         else eng = new NecpraWordEngine(level, store.wordHints());
         install();
         pullServerCoins();
@@ -148,7 +151,8 @@ public class NecpraWordActivity extends NecpraGameActivity {
         });
         btnHint = toolButton("💡\nHint", new Runnable() { @Override public void run() { useHint(); } });
         btnList = toolButton("📋\nWord list", new Runnable() { @Override public void run() { openWordList(); } });
-        TextView[] bs = {btnShuffle, btnHint, btnList};
+        btnRestart = toolButton("⟳\nRestart", new Runnable() { @Override public void run() { askRestart(); } });
+        TextView[] bs = {btnShuffle, btnHint, btnList, btnRestart};
         for (int i = 0; i < bs.length; i++) {
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(54), 1f);
             if (i > 0) lp.leftMargin = dp(8);
@@ -162,8 +166,22 @@ public class NecpraWordActivity extends NecpraGameActivity {
         content.setPadding(dp(14) + left, top + dp(58), dp(14) + right, bottom + dp(12));
     }
 
+    /** Start the same puzzle over (solo only; a live match can't be restarted). */
+    private void askRestart() {
+        if (roomMode || eng == null || finishedLevel) return;
+        confirm("Start this level over?", "The words you found in this level are cleared.", "Restart", "Keep playing", true, new Runnable() {
+            @Override public void run() {
+                store.saveResume("crossword", null);
+                eng = new NecpraWordEngine(eng.endlessLevel(), store.wordHints());
+                install();
+                saveNow();
+            }
+        });
+    }
+
     private void install() {
         finishedLevel = false;
+        hintsAtStart = eng == null ? 0 : eng.hints();
         wheelView.setLocked(false);
         refresh();
     }
@@ -292,6 +310,9 @@ public class NecpraWordActivity extends NecpraGameActivity {
             return;
         }
         final int done = eng.endlessLevel();
+        // No hints used is a perfect score; every hint spent lowers the praise a step.
+        int hintsUsed = Math.max(0, hintsAtStart - eng.hints());
+        double ratio = hintsUsed == 0 ? 1.0 : hintsUsed == 1 ? 0.9 : hintsUsed == 2 ? 0.8 : hintsUsed == 3 ? 0.65 : 0.5;
         eng.grantCompleteRewards();
         store.setWordHints(eng.hints());
         store.saveResume("crossword", null);
@@ -299,15 +320,21 @@ public class NecpraWordActivity extends NecpraGameActivity {
         store.setLevel("crossword", Math.max(store.level("crossword"), done + 1));
         store.setStars("crossword", done, 3);
         earn(bonus, null);
-        resultCard("Puzzle solved!", "You found every word. +1 hint.", 3,
-                new String[][]{{"Words", found + " / " + eng.totalWords()}, {"Bonus", "🪙 " + bonus}},
-                "Next puzzle", new Runnable() {
+        levelResult(done, ratio, 3,
+                new String[][]{{"Words", found + " / " + eng.totalWords()}, {"Bonus", "🪙 " + bonus}, {"Hints", "+1 (💡 " + eng.hints() + ")"}},
+                "Next level", new Runnable() {
                     @Override public void run() {
                         eng.next();
                         install();
                         saveNow();
                     }
-                }, "Leave", new Runnable() {
+                }, new Runnable() {
+                    @Override public void run() {
+                        eng = new NecpraWordEngine(done, store.wordHints());
+                        install();
+                        saveNow();
+                    }
+                }, new Runnable() {
                     @Override public void run() { finish(); }
                 });
     }

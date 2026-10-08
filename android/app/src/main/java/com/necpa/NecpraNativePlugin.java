@@ -1159,6 +1159,9 @@ public class NecpraNativePlugin extends Plugin {
             if (room != null && !room.trim().isEmpty()) intent.putExtra(NecpraGameActivity.EXTRA_ROOM, room.trim());
             String subject = call.getString("subject");
             if (subject != null) intent.putExtra(NecpraGameActivity.EXTRA_SUBJECT, subject);
+            // The theme the user saved in the app, so native game screens match it instead of the phone's dark mode.
+            String theme = call.getString("theme");
+            if ("dark".equals(theme) || "light".equals(theme)) intent.putExtra(NecpraGameActivity.EXTRA_THEME, theme);
             // The web wallet is handed over so there is one balance; absent values leave the native one alone.
             String seen = call.getString("serverSeen");
             if (seen != null) intent.putExtra(NecpraGameActivity.EXTRA_SEEN, seen);

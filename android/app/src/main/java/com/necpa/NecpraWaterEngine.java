@@ -148,8 +148,11 @@ public final class NecpraWaterEngine {
         return true;
     }
 
+    /** Move count that earns three stars on a level. */
+    public static int parFor(int level) { return Math.max(8, 8 + level * 2); }
+
     public int stars() {
-        int par = Math.max(8, 8 + level * 2);
+        int par = parFor(level);
         return moves <= par ? 3 : (moves <= (int) Math.ceil(par * 1.5) ? 2 : 1);
     }
 
