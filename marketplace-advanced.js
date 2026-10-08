@@ -1166,6 +1166,8 @@ window._jmNavMore = function(page) {
         }
         document.querySelectorAll('.jm-page').forEach(p=>p.classList.remove('active'));
         el.classList.add('active');
+        // Close the More sheet before switching to the requested page so the selected page is visible.
+        try { window._jmHideMore?.(); } catch (_) {}
         render?.();
         return;
     }
