@@ -24,7 +24,7 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.51.0';
+const SW_VERSION = '19.52.0';
 // FIX: bumped so activate() drops every existing cache immediately on this
 // deploy — anyone with a stale pre-rebuild group.html (or the old, now-
 // deleted group-core-*/group-os-* files, or the misspelled necpra-* icons
@@ -83,7 +83,7 @@ const SW_VERSION = '19.51.0';
 // v74: profile-photo fix (js/avatar-fix.js added, message.html + js/config.js changed). Bump forces every installed
 // PWA/Android app to drop old copies and show the 'Update ready - Refresh' banner.
 // v89: native-init.js (native Profile/Settings routing) is now network-first so an installed APK never runs a stale copy.
-const CACHE_NAME = 'necpra-static-v97';
+const CACHE_NAME = 'necpra-static-v98';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [

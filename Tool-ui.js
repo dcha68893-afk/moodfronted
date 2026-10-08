@@ -5858,7 +5858,27 @@ window._jmClearRecent = _clearRecent;
 // re-run renderMarketplaceList() — so the grid updates itself in place
 // once fresh data arrives, with no visible flash of the old list first.
 let _lastHomeRefresh = 0;
+function _renderHomeCats() {
+    const host = document.getElementById('jmHomeCats');
+    const sec = document.getElementById('jmHomeCatsSection');
+    if (!host || !sec) return;
+    const cats = (window._JM_CATS || []);
+    if (!cats.length) { sec.style.display = 'none'; return; }
+    if (host.dataset.n === String(cats.length) && host.children.length) { sec.style.display = ''; return; }
+    host.dataset.n = String(cats.length);
+    sec.style.display = '';
+    host.innerHTML = cats.map(c => `
+        <div class="jm-home-cat" data-cat="${_esc(c.id)}" style="flex:0 0 auto;width:76px;text-align:center;cursor:pointer">
+            <div style="width:60px;height:60px;margin:0 auto 5px;border-radius:50%;background:#fff3e6;display:flex;align-items:center;justify-content:center;font-size:28px;border:1px solid #fde0c2">${c.icon || '🛍️'}</div>
+            <div style="font-size:11px;line-height:1.2;font-weight:600;color:var(--text-primary,#222);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${_esc(c.name)}</div>
+        </div>`).join('');
+    host.querySelectorAll('.jm-home-cat').forEach(el => {
+        el.addEventListener('click', () => window._jmNav('products', el.dataset.cat));
+    });
+}
+
 function _renderHome() {
+    try { _renderHomeCats(); } catch (e) { console.warn('[Market] home categories failed:', e); }
     // Featured row
     const ecom = window.EcomMarketplace;
     if (ecom) {

@@ -1450,6 +1450,15 @@
                     <span class="jm-flash-timer" id="jmFlashTimer">00:00:00</span>
                 </div>
 
+                <!-- Shop by category (Jumia-style quick tiles, filled from window._JM_CATS) -->
+                <div class="jm-section" id="jmHomeCatsSection" style="display:none">
+                    <div class="jm-section-header">
+                        <span>Shop by Category</span>
+                        <button class="jm-see-all" onclick="window._jmNav('categories')">See All</button>
+                    </div>
+                    <div id="jmHomeCats" style="display:flex;gap:10px;overflow-x:auto;padding:4px 12px 10px;scrollbar-width:none;-webkit-overflow-scrolling:touch"></div>
+                </div>
+
                 <!-- Horizontal product scroll: Featured -->
                 <div class="jm-section" id="jmFeaturedSection" style="display:none">
                     <div class="jm-section-header">

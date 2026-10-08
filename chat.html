@@ -1694,7 +1694,7 @@
 
         <!-- ADMIN MODULE ICON: shown only when the signed-in user is an admin/moderator -->
         <button id="headerAdminBtn" type="button" title="Admin" aria-label="Open Admin module"
-                onclick="if (window.__necpraIsAdmin) navigateToPage('admin')">
+                onclick="if (window.__necpraIsAdmin === true || (window.__necpraIsAdmin === null && document.body.classList.contains('is-admin'))) navigateToPage('admin')">
             <i class="fas fa-shield-alt"></i>
         </button>
 
@@ -3229,7 +3229,7 @@
             _chatLog('[Navigation] navigateToPage called with:', page, options);
             // ADMIN MODULE is admin-only: the header icon is hidden for everyone else, and this
             // guard stops any other path (history, deep link, stale click) from opening it.
-            if (page === 'admin' && !window.__necpraIsAdmin) { console.warn('[Navigation] admin module requires an admin account'); return; }
+            if (page === 'admin' && !(window.__necpraIsAdmin === true || (window.__necpraIsAdmin === null && document.body.classList.contains('is-admin')))) { console.warn('[Navigation] admin module requires an admin account'); return; }
             if ((page === 'tools' || page === 'tool' || page === 'marketplace') && window.__loadToolsIframe) window.__loadToolsIframe();
             if (window.__kynSnap && window.__currentPage && window.__currentPage !== page) window.__kynSnap.leave(window.__currentPage);
             if (window.__loadModuleIframe) window.__loadModuleIframe(page);
