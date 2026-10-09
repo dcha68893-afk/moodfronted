@@ -56,6 +56,47 @@ final class NecpraPushRegistrar {
         sync(context, true);
     }
 
+    /**
+     * Logout: tell the server to drop this device's token for the signed-out account, and forget what was uploaded so the
+     * next login (any account) always re-uploads. The access token is read synchronously because the caller wipes the
+     * session right after; the HTTP call itself runs on the background pool. Best effort - the server also re-points the
+     * token to whoever registers it next (upsert by token).
+     */
+    static void unlink(final Context context) {
+        final Context app = context.getApplicationContext();
+        String access = null;
+        try {
+            SharedPreferences auth = app.getSharedPreferences(NativeBackgroundSync.AUTH_PREFS, Context.MODE_PRIVATE);
+            access = NativeBackgroundSync.getDecrypted(auth, "accessToken");
+        } catch (Throwable ignored) {}
+        SharedPreferences sp = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        final String token = sp.getString("uploadedToken", sp.getString("token", ""));
+        sp.edit().remove("uploadedToken").remove("uploadedAt").apply();
+        if (access == null || access.isEmpty() || token == null || token.isEmpty()) return;
+        final String bearer = access;
+        try {
+            POOL.execute(() -> {
+                java.net.HttpURLConnection c = null;
+                try {
+                    String url = NativeBackgroundSync.backendOrigin(app) + "/api/push/fcm-token?token="
+                            + java.net.URLEncoder.encode(token, "UTF-8");
+                    c = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+                    c.setRequestMethod("DELETE");
+                    c.setConnectTimeout(10000);
+                    c.setReadTimeout(10000);
+                    c.setRequestProperty("Authorization", "Bearer " + bearer);
+                    Log.i(TAG, "FCM token unlink HTTP " + c.getResponseCode());
+                } catch (Throwable t) {
+                    Log.w(TAG, "token unlink failed: " + t.getMessage());
+                } finally {
+                    if (c != null) c.disconnect();
+                }
+            });
+        } catch (Throwable t) {
+            Log.w(TAG, "could not schedule token unlink", t);
+        }
+    }
+
     /** Blocking variant for callers already on a background thread (the WorkManager worker). */
     static void syncNow(Context context, boolean force) {
         try {

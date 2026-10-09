@@ -60,7 +60,7 @@ function _mktToken() {
 // and dispatch the same 'auth:session:ended' event the socket manager already
 // listens for (see app.realtime.socket.js) so a truly-dead session stops the
 // realtime reconnect loop too instead of hammering it forever.
-async function _api(method, endpoint, body=null, _isRetry=false) {
+async function _api(method, endpoint, body=null, _isRetry=false, _extraHeaders=null) {
     try {
         const token = _mktToken();
         // FIX (Audit #19 - one source of truth for API config): this used to fall back to a
@@ -76,7 +76,7 @@ async function _api(method, endpoint, body=null, _isRetry=false) {
             console.error('[marketplace-advanced] API base URL is not configured (window.API_BASE_URL missing).');
             return { ok:false, success:false, error:true, errorCode:'CONFIG_ERROR', message:'App is not configured correctly. Please reload the page.', retryable:false };
         }
-        const res = await fetch(base+'/api'+endpoint, { method:method.toUpperCase(), headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})}, ...(body&&method!=='GET'?{body:JSON.stringify(body)}:{}) });
+        const res = await fetch(base+'/api'+endpoint, { method:method.toUpperCase(), headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{}),...(_extraHeaders||{})}, ...(body&&method!=='GET'?{body:JSON.stringify(body)}:{}) });
         // FIX (Audit #18 - silent error handling): this used to `return null` on any non-2xx
         // response, discarding the server's actual error message (e.g. "Insufficient wallet
         // balance", "Out of stock") and making a failed payment/order call indistinguishable
@@ -96,7 +96,7 @@ async function _api(method, endpoint, body=null, _isRetry=false) {
                     }
                     if (refreshResult && refreshResult.success) {
                         console.log('[marketplace-advanced] Token refreshed, retrying request');
-                        return _api(method, endpoint, body, true);
+                        return _api(method, endpoint, body, true, _extraHeaders);
                     }
                     if (refreshResult && refreshResult.requiresReauth) {
                         console.error('[marketplace-advanced] Token refresh failed - requires reauthentication');
@@ -560,6 +560,50 @@ function _advWalletModal({title,description,fields,submitText,onSubmit}) {
     };
 };
 
+/* Money-moving wallet calls (/api/wallet/transfer, /api/wallet/withdraw) require a fresh-password step-up token in
+   X-Money-Step-Up (same flow as money.html: POST /money/security/step-up, +authenticator code when 2FA is on). The old
+   /marketplace/wallet/transfer|withdraw routes had no handler behind them, so Send and Withdraw could never work. */
+function _advAsk(title, label, type) {
+    return new Promise(resolve => {
+        document.getElementById('advAskOverlay')?.remove();
+        const ov = document.createElement('div'); ov.id = 'advAskOverlay';
+        ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100002;display:flex;align-items:center;justify-content:center;padding:20px';
+        ov.innerHTML = '<div style="background:#fff;width:100%;max-width:360px;border-radius:16px;padding:20px;box-sizing:border-box"><div style="font-weight:800;font-size:16px;margin-bottom:10px">'+_esc(title)+'</div><input id="advAskInput" type="'+(type||'text')+'" autocomplete="'+(type==='password'?'current-password':'one-time-code')+'" placeholder="'+_esc(label)+'" style="width:100%;box-sizing:border-box;padding:12px;border:1px solid #d1d5db;border-radius:10px;font-size:15px;margin-bottom:12px"><div style="display:flex;gap:10px"><button id="advAskNo" type="button" style="flex:1;padding:12px;border:0;border-radius:10px;background:#f3f4f6;font-weight:700">Cancel</button><button id="advAskYes" type="button" style="flex:1;padding:12px;border:0;border-radius:10px;background:#f57224;color:#fff;font-weight:800">Continue</button></div></div>';
+        document.body.appendChild(ov);
+        const done = v => { ov.remove(); resolve(v); };
+        ov.querySelector('#advAskNo').onclick = () => done(null);
+        ov.querySelector('#advAskYes').onclick = () => done(ov.querySelector('#advAskInput').value.trim() || null);
+        setTimeout(() => ov.querySelector('#advAskInput')?.focus(), 50);
+    });
+}
+async function _advStepUp() {
+    const cached = sessionStorage.getItem('necpra_money_step_up');
+    if (cached) return cached;
+    const password = await _advAsk('Confirm it is you', 'Account password', 'password');
+    if (!password) return null;
+    let r = await _api('POST', '/money/security/step-up', { password });
+    if (r && r.error && /authenticator code|6-digit|OTP/i.test(r.message || '')) {
+        const otp = await _advAsk('Two-step verification', '6-digit authenticator code', 'text');
+        if (!otp) return null;
+        r = await _api('POST', '/money/security/step-up', { password, otp });
+    }
+    if (!r || r.error || !r.stepUpToken) return { _error: true, message: (r && r.message) || 'Security verification failed' };
+    sessionStorage.setItem('necpra_money_step_up', r.stepUpToken);
+    return r.stepUpToken;
+}
+async function _advMoneyCall(path, body) {
+    const key = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + '-' + Math.random();
+    for (let attempt = 0; attempt < 2; attempt++) {
+        const step = await _advStepUp();
+        if (!step) return { success: false, message: 'Verification cancelled.' };
+        if (step._error) return { success: false, message: step.message };
+        const r = await _api('POST', path, body, false, { 'X-Money-Step-Up': step, 'Idempotency-Key': key });
+        if (r && r.status === 401) { sessionStorage.removeItem('necpra_money_step_up'); continue; }   // expired step-up: ask again once
+        return r;
+    }
+    return { success: false, message: 'Verification expired. Please try again.' };
+}
+
 window._advWalletTransfer=function(){
     _advWalletModal({
       title:'Send money',description:'Send KES directly to another NECPRA user.',
@@ -572,7 +616,7 @@ window._advWalletTransfer=function(){
       onSubmit:async v=>{
         const amount=Number(v.amount);if(!Number.isFinite(amount)||amount<10||amount>150000)return {success:false,message:'Enter an amount between KES 10 and KES 150,000.'};
         if(!v.recipient)return {success:false,message:'Enter the recipient.'};
-        return await _api('POST','/marketplace/wallet/transfer',{recipient:v.recipient,amount,note:v.note});
+        return await _advMoneyCall('/wallet/transfer',{recipient:v.recipient,amount,note:v.note});
       }
     });
 };
@@ -588,7 +632,7 @@ window._advWalletWithdraw=function(){
       onSubmit:async v=>{
         const amount=Number(v.amount);if(!Number.isFinite(amount)||amount<10||amount>150000)return {success:false,message:'Enter an amount between KES 10 and KES 150,000.'};
         if(!v.phone)return {success:false,message:'Enter your M-Pesa number.'};
-        return await _api('POST','/marketplace/wallet/withdraw',{amount,phone:v.phone});
+        return await _advMoneyCall('/wallet/withdraw',{amount,phone:v.phone});
       }
     });
 };
@@ -1186,7 +1230,12 @@ window._jmNavMore = function(page) {
             el = document.createElement('div');
             el.id = pageId; el.className = 'jm-page';
             el.innerHTML = `<div class="jm-page-title">${page.charAt(0).toUpperCase()+page.slice(1)}</div><div id="${contentId}"></div>`;
-            document.querySelector('.jm-pages-container, .jm-pages, #jmPages, .jm-app')?.appendChild(el);
+            // FIX (wallet / rewards / referral never visible): none of '.jm-pages-container, .jm-pages, #jmPages, .jm-app' exists in
+            // Tools.html, so the page was created but never attached and the Wallet screen stayed backend-only. Tools.html now
+            // pre-declares these pages; this fallback attaches next to the other pages (same spot marketplace-seller.js uses).
+            const _host = document.querySelector('.jm-pages-container, .jm-pages, #jmPages, .jm-app');
+            if (_host) _host.appendChild(el);
+            else { const sb = document.getElementById('sidebar') || document.body, nav = document.getElementById('jmBottomNav'); (nav && nav.parentNode === sb) ? sb.insertBefore(el, nav) : sb.appendChild(el); }
         }
         document.querySelectorAll('.jm-page').forEach(p=>p.classList.remove('active'));
         el.classList.add('active');

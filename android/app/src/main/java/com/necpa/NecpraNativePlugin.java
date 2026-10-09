@@ -163,6 +163,11 @@ public class NecpraNativePlugin extends Plugin {
                     .remove("refreshRejectedAt");
             if (apiOrigin != null) e.putString("apiOrigin", apiOrigin);
             e.commit();
+            // FIX (no push after a fresh login): MainActivity.onStart() ran BEFORE this session existed (native login
+            // returns here afterwards), so the native token upload exited early with "no session" and the device stayed
+            // unlinked until the next cold start / 15-minute worker. Link it the moment the session is stored; force=true
+            // also re-points a token that was last uploaded for a DIFFERENT account on this phone.
+            NecpraPushRegistrar.sync(getContext(), true);
             call.resolve();
         } catch (Exception e) {
             call.reject("Native session storage failed", e);
@@ -306,6 +311,9 @@ public class NecpraNativePlugin extends Plugin {
     public void authClearSession(PluginCall call) {
         // Tokens + user + apiOrigin, plus the encrypted offline snapshot and
         // background status, so nothing about the previous account survives.
+        // FIX: unlink this phone's FCM token from the account being signed out (access token is captured BEFORE the wipe),
+        // otherwise the server keeps pushing the previous user's messages to this device after logout.
+        NecpraPushRegistrar.unlink(getContext());
         NativeBackgroundSync.clearAll(getContext());
         call.resolve();
     }

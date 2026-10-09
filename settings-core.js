@@ -6407,7 +6407,17 @@ async function handleLogout() {
     try {
         // Server-side revoke is best-effort: being offline (or a failed call) must never
         // leave the user unable to log out of this device.
-        try { await authorizedRequest('/api/auth/logout', { method: 'POST' }); }
+        // FIX (logout was not real): this call sent no body, so the server only blacklisted the access token and this
+        // device's REFRESH token stayed valid - anyone holding it could mint new sessions after "logout". Send it (plus this
+        // phone's FCM token so push stops too). Read from the same persisted auth record the app already uses; best-effort.
+        let _logoutBody = {};
+        try {
+            const _a = JSON.parse(localStorage.getItem('kynecta_auth') || 'null');
+            if (_a && typeof _a.refreshToken === 'string' && _a.refreshToken) _logoutBody.refreshToken = _a.refreshToken;
+            const _f = localStorage.getItem('necpra_fcm_token');
+            if (_f) _logoutBody.fcmToken = _f;
+        } catch (_) {}
+        try { await authorizedRequest('/api/auth/logout', { method: 'POST', body: _logoutBody }); }
         catch (revokeError) { console.warn('[settings-core] Server logout failed, clearing local session anyway:', revokeError && revokeError.message); }
         
         await MessageTransport.send('SESSION_INVALIDATED', {});

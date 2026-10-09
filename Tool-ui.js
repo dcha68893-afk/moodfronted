@@ -7393,7 +7393,7 @@ function _renderAccount() {
         <!-- Stats row -->
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">
             <div style="background:rgba(255,255,255,.15);border-radius:10px;padding:10px;text-align:center;cursor:pointer" onclick="window._jmNavMore('wallet')">
-                <div style="font-size:14px;font-weight:900">${_fmt(wallet)}</div>
+                <div style="font-size:14px;font-weight:900">••••</div>
                 <div style="font-size:10px;color:rgba(255,255,255,.7);margin-top:2px">Wallet</div>
             </div>
             <div style="background:rgba(255,255,255,.15);border-radius:10px;padding:10px;text-align:center;cursor:pointer" onclick="window._jmNav('orders')">
