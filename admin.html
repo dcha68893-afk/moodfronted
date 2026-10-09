@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="color-scheme" content="light">
+<!-- FIX: was content="light", which told the browser this page is light-only (white form controls / scrollbars in dark theme). -->
+<meta name="color-scheme" content="light dark">
 <title>Admin | Necpra</title>
 <!-- Same bootstrap every other module iframe uses (see money.html / Tools.html) -->
 <script src="/session-restore.js"></script>
@@ -12,31 +13,143 @@
 <script src="/js/runtime-config.js"></script>
 <script src="/js/config.js"></script><script src="/js/offline-gate.js"></script>
 <link rel="stylesheet" href="/css/vendor/font-awesome.min.css">
+<!-- FIX: every other module loads the shared palette (--kyn-* variables for light AND dark). admin.html never did. -->
+<link rel="stylesheet" href="/theme.colors.css">
 <script src="/js/settings-broadcast-listener.js" defer></script>
 <style>
+  /* ── Theme tokens: everything below reads the saved Settings theme through the shared --kyn-* palette. ── */
+  :root{
+    --adm-page:  var(--kyn-bg-header, #f0f2f5);
+    --adm-card:  var(--kyn-bg-card,   #ffffff);
+    --adm-soft:  var(--kyn-bg-active, rgba(0,0,0,.06));
+    --adm-text:  var(--kyn-text-primary,   #111b21);
+    --adm-muted: var(--kyn-text-secondary, #667781);
+    --adm-faint: var(--kyn-text-muted,     #8696a0);
+    --adm-line:  var(--kyn-border, #e5e7eb);
+    --adm-accent:var(--kyn-accent-secondary, #2563eb);
+  }
+  html[data-theme="dark"], html.theme-dark { color-scheme: dark; }
+  html[data-theme="light"], html.theme-light { color-scheme: light; }
+
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-  html,body{height:100%;margin:0;background:#f3f4f6;color:#111;
+  html,body{height:100%;margin:0;background:var(--adm-page);color:var(--adm-text);
     font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
   body{display:flex;flex-direction:column;overflow:hidden}
 
   /* Quick-nav strip: every admin feature is one tap away from any screen */
   #admNavStrip{display:none;flex:0 0 auto;gap:8px;align-items:center;overflow-x:auto;overflow-y:hidden;
-    padding:10px 12px;background:#fff;border-bottom:1px solid #e5e7eb;
+    padding:10px 12px;background:var(--adm-card);border-bottom:1px solid var(--adm-line);
     -webkit-overflow-scrolling:touch;scrollbar-width:none}
   #admNavStrip::-webkit-scrollbar{display:none}
-  .adm-chip{flex:0 0 auto;border:1px solid #e5e7eb;background:#f9fafb;color:#374151;border-radius:999px;
+  .adm-chip{flex:0 0 auto;border:1px solid var(--adm-line);background:var(--adm-soft);color:var(--adm-text);border-radius:999px;
     padding:7px 13px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap}
-  .adm-chip.on{background:#111827;border-color:#111827;color:#fff}
+  .adm-chip.on{background:var(--adm-accent);border-color:var(--adm-accent);color:#fff}
   .adm-chip:active{transform:scale(.97)}
   .adm-chip-refresh{padding:7px 12px}
 
-  #admRoot{flex:1 1 auto;min-height:0;position:relative;overflow:hidden;background:#f3f4f6}
+  #admRoot{flex:1 1 auto;min-height:0;position:relative;overflow:hidden;background:var(--adm-page)}
   .adm-view>.adm-page{flex:1;min-height:0}
   /* admin screens scroll inside .adm-body; keep room for the phone's bottom bar */
   .adm-body{padding-bottom:calc(80px + env(safe-area-inset-bottom,0px))!important}
   /* the shell's own header already shows the title, keep the in-page one compact */
   .adm-header{padding:10px 14px!important}
   button:focus-visible{outline:2px solid #3b82f6;outline-offset:2px}
+
+  /* ══════════════════════════════════════════════════════════════════════════════
+     THEME OVERRIDES FOR admin-module.js
+     ROOT CAUSE: admin-module.js injects TWO full stylesheets at runtime (#adm-admin-styles and #adminModuleCSS) that
+     define the same .adm-* classes with hard-coded LIGHT colours (#fff, #f3f4f6, #111, #6b7280 ...), plus ~100 inline
+     style="background:#fff" / "color:#6b7280" attributes. They are appended to <head> AFTER this file, so they always
+     painted over the saved theme. The rules below out-rank them ("html body" prefix = higher specificity, and
+     !important for the inline attributes) and map every one of those colours to the theme tokens above.
+     ══════════════════════════════════════════════════════════════════════════════ */
+  html body .adm-page,
+  html body .adm-body{background:var(--adm-page);color:var(--adm-text)}
+  html body .adm-kpi,
+  html body .adm-section,
+  html body .adm-product-card,
+  html body .adm-nav-item,
+  html body .adm-modal,
+  html body .adm-search-bar,
+  html body .adm-payout-row,
+  html body .adm-row{background:var(--adm-card);color:var(--adm-text);border-color:var(--adm-line)}
+  html body .adm-kpi.accent{background:linear-gradient(135deg,#111827,#374151);color:#fff}
+  html body .adm-nav-item:hover{background:var(--adm-accent);color:#fff}
+  html body .adm-nav-item:active{background:var(--adm-soft)}
+  html body .adm-nav-label,
+  html body .adm-title-text{color:var(--adm-text)}
+  html body .adm-nav-item:hover .adm-nav-label{color:#fff}
+  html body .adm-kpi-val,
+  html body .adm-section-title,
+  html body .adm-row-title,
+  html body .adm-row-price.adm-neutral,
+  html body .adm-product-card-title,
+  html body .adm-settings-label,
+  html body .adm-modal-title{color:var(--adm-text)}
+  html body .adm-kpi.accent .adm-kpi-val{color:#fff}
+  html body .adm-kpi-label,
+  html body .adm-kpi-sub,
+  html body .adm-row-sub,
+  html body .adm-product-card-meta,
+  html body .adm-settings-val,
+  html body .adm-settings-sub,
+  html body .adm-chart-label{color:var(--adm-muted)}
+  html body .adm-kpi.accent .adm-kpi-label{color:rgba(255,255,255,.65)}
+  html body .adm-kpi.accent .adm-kpi-sub{color:rgba(255,255,255,.6)}
+  html body .adm-row,
+  html body .adm-settings-row{border-bottom-color:var(--adm-line)}
+  html body .adm-row-img,
+  html body .adm-row-placeholder,
+  html body .adm-product-card-img,
+  html body .adm-chart,
+  html body .adm-bar{background-color:var(--adm-soft)}
+  html body .adm-bar{background-image:linear-gradient(180deg,var(--adm-accent),#1d4ed8)}
+  html body .adm-payout-row{background:var(--adm-soft)}
+  html body .adm-table th{background:var(--adm-soft);color:var(--adm-muted);border-bottom-color:var(--adm-line)}
+  html body .adm-table td{border-bottom-color:var(--adm-line);color:var(--adm-text)}
+  html body .adm-table tr:hover td{background:var(--kyn-bg-hover, rgba(0,0,0,.04))}
+  html body .adm-btn,
+  html body .adm-btn-secondary,
+  html body .adm-filter-btn{background:var(--adm-soft);color:var(--adm-text)}
+  html body .adm-btn-primary{background:var(--adm-accent);color:#fff}
+  html body .adm-btn-success{background:#16a34a;color:#fff}
+  html body .adm-btn-danger{background:#dc2626;color:#fff}
+  html body .adm-btn-warning{background:#d97706;color:#fff}
+  html body .adm-filter-btn.active{background:var(--adm-accent);color:#fff;border-color:var(--adm-accent)}
+  html body .adm-search-input,
+  html body .adm-modal input,
+  html body .adm-modal textarea,
+  html body .adm-modal select,
+  html body input.adm-input,
+  html body select.adm-input,
+  html body textarea.adm-input{background:var(--kyn-bg-input,var(--adm-card));color:var(--adm-text);border-color:var(--adm-line)}
+  html body .adm-search-input::placeholder,
+  html body .adm-modal input::placeholder,
+  html body .adm-modal textarea::placeholder{color:var(--kyn-text-placeholder,var(--adm-faint))}
+  html body .adm-search-input:focus,
+  html body .adm-modal input:focus,
+  html body .adm-modal textarea:focus,
+  html body .adm-modal select:focus{border-color:var(--adm-accent)}
+  html body .adm-modal-overlay{background:var(--kyn-bg-overlay, rgba(0,0,0,.55))}
+  html body .adm-badge.gray{background:var(--adm-soft);color:var(--adm-muted)}
+
+  /* Inline style="..." colours produced by template strings in admin-module.js */
+  html body [style*="background:#fff;"],
+  html body [style*="background:#ffffff"],
+  html body [style*="background: #fff"]{background:var(--adm-card)!important}
+  html body [style*="background:#f3f4f6"],
+  html body [style*="background:#f9fafb"],
+  html body [style*="background:#fafafa"]{background:var(--adm-soft)!important}
+  html body [style*="background:#fff7ed"]{background:var(--adm-soft)!important}
+  html body [style*="color:#111;"],
+  html body [style*="color:#111\""],
+  html body [style*="color:#111827"],
+  html body [style*="color:#374151"]{color:var(--adm-text)!important}
+  html body [style*="color:#6b7280"],
+  html body [style*="color:#9ca3af"]{color:var(--adm-muted)!important}
+  html body [style*="border:1.5px solid #e5e7eb"],
+  html body [style*="border:1px solid #e5e7eb"]{border-color:var(--adm-line)!important}
+  html body [style*="border-bottom:1px solid #f9fafb"]{border-bottom-color:var(--adm-line)!important}
 </style>
 </head>
 <body>
