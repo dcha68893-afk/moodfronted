@@ -60,7 +60,7 @@ function _mktToken() {
 // and dispatch the same 'auth:session:ended' event the socket manager already
 // listens for (see app.realtime.socket.js) so a truly-dead session stops the
 // realtime reconnect loop too instead of hammering it forever.
-async function _api(method, endpoint, body=null, _isRetry=false, extraHeaders=null) {
+async function _api(method, endpoint, body=null, _isRetry=false) {
     try {
         const token = _mktToken();
         // FIX (Audit #19 - one source of truth for API config): this used to fall back to a
@@ -76,7 +76,7 @@ async function _api(method, endpoint, body=null, _isRetry=false, extraHeaders=nu
             console.error('[marketplace-advanced] API base URL is not configured (window.API_BASE_URL missing).');
             return { ok:false, success:false, error:true, errorCode:'CONFIG_ERROR', message:'App is not configured correctly. Please reload the page.', retryable:false };
         }
-        const res = await fetch(base+'/api'+endpoint, { method:method.toUpperCase(), headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{}),...(extraHeaders||{})}, ...(body&&method!=='GET'?{body:JSON.stringify(body)}:{}) });
+        const res = await fetch(base+'/api'+endpoint, { method:method.toUpperCase(), headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})}, ...(body&&method!=='GET'?{body:JSON.stringify(body)}:{}) });
         // FIX (Audit #18 - silent error handling): this used to `return null` on any non-2xx
         // response, discarding the server's actual error message (e.g. "Insufficient wallet
         // balance", "Out of stock") and making a failed payment/order call indistinguishable
@@ -96,7 +96,7 @@ async function _api(method, endpoint, body=null, _isRetry=false, extraHeaders=nu
                     }
                     if (refreshResult && refreshResult.success) {
                         console.log('[marketplace-advanced] Token refreshed, retrying request');
-                        return _api(method, endpoint, body, true, extraHeaders);
+                        return _api(method, endpoint, body, true);
                     }
                     if (refreshResult && refreshResult.requiresReauth) {
                         console.error('[marketplace-advanced] Token refresh failed - requires reauthentication');
@@ -400,96 +400,79 @@ const FlashSaleEngine = {
 // ══════════════════════════════════════════════════════════════════════════════
 // 2. WALLET PAGE
 // ══════════════════════════════════════════════════════════════════════════════
-// Sensitive amounts stay out of the DOM until the user taps the eye (same pattern as banking / M-Pesa apps).
-// Values live in this closure map, never in the markup; the page re-hides itself when the app goes to background.
-let _walletShown = false;
-const _walletSecrets = {};
-const _MASK = '••••';
-function _walletSecret(key, text) { _walletSecrets[key] = text; return `<span class="adv-secret" data-k="${key}">${_walletShown ? _esc(text) : _MASK}</span>`; }
-function _walletApplyMask() {
-    document.querySelectorAll('.adv-secret').forEach(el => { el.textContent = _walletShown ? (_walletSecrets[el.dataset.k] ?? _MASK) : _MASK; });
-    const eye = document.getElementById('advWalletEye');
-    if (eye) { eye.setAttribute('aria-pressed', _walletShown ? 'true' : 'false'); eye.setAttribute('aria-label', _walletShown ? 'Hide balance' : 'Show balance'); eye.innerHTML = _walletShown ? '<i class="fa-solid fa-eye-slash"></i>' : '<i class="fa-solid fa-eye"></i>'; }
-}
-window._advToggleWalletSecrets = function() { _walletShown = !_walletShown; _walletApplyMask(); };
-document.addEventListener('visibilitychange', () => { if (document.hidden && _walletShown) { _walletShown = false; _walletApplyMask(); } });
-
 window._renderWalletPage = async function() {
     const container = document.getElementById('jmWalletContent') || document.getElementById('jmAccountContent');
     if (!container) return;
     container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;padding:40px;font-size:24px">⏳</div>`;
-    Object.keys(_walletSecrets).forEach(k => delete _walletSecrets[k]);
 
-    const [r, sum, led, wd] = await Promise.all([
-        _api('GET', '/marketplace/wallet'), _api('GET', '/wallet/summary'),
-        _api('GET', '/wallet/ledger?limit=30'), _api('GET', '/wallet/withdrawals?limit=10'),
-    ]);
-    const base = r?.data || {};
-    const { loyaltyTier='bronze', loyaltyPoints=0 } = base;
-    const balance = sum?.data?.balance ?? base.balance ?? 0;
-    const reserved = sum?.data?.reserved || 0;
-    const ledger = led?.data?.items;
-    const withdrawals = wd?.data?.items || [];
-    // Prefer the full ledger (transfers, withdrawals, reversals); fall back to the marketplace list if unavailable.
-    const transactions = Array.isArray(ledger) ? ledger.map(l => ({
-        id: l.id, direction: l.type, type: l.kind || (l.type === 'credit' ? 'credit' : 'payment'), status: l.status,
-        title: l.description || null, amount: l.amount, balance_after: l.balanceAfter, reference: l.reference, created_at: l.createdAt,
-    })) : (base.transactions || []);
+    window._advBalanceVisible = false;
+    const r = await _api('GET', '/marketplace/wallet');
+    const { balance=0, currency='KES', transactions=[], loyaltyTier='bronze', loyaltyPoints=0 } = r?.data || {};
 
-    const color = ({ bronze:'#cd7f32', silver:'#9ca3af', gold:'#f59e0b', platinum:'#8b5cf6' })[loyaltyTier] || '#cd7f32';
-    const icons = { topup:'💳', cashback:'💰', refund:'↩️', referral:'🎁', reward:'⭐', order:'🛍️', order_payment:'🛍️', payment:'💸', transfer_out:'↗️', transfer_in:'↙️', withdrawal:'🏧', withdrawal_reversal:'↩️' };
-    const names = { topup:'Top Up', cashback:'Cashback', refund:'Refund', referral:'Referral Bonus', reward:'Reward', order:'Purchase', order_payment:'Order payment', payment:'Payment', transfer_out:'Money sent', transfer_in:'Money received', withdrawal:'Withdrawal', withdrawal_reversal:'Withdrawal refunded' };
-    const chip = (bg, fg, t) => `<span style="background:${bg};color:${fg};border-radius:999px;padding:1px 8px;font-size:10px;font-weight:700;margin-left:6px">${t}</span>`;
-    const wdChip = st => st === 'completed' ? chip('#dcfce7','#15803d','Paid') : st === 'failed' ? chip('#fee2e2','#dc2626','Failed · refunded') : chip('#fef3c7','#b45309','Processing');
+    const tierColors = { bronze:'#cd7f32', silver:'#9ca3af', gold:'#f59e0b', platinum:'#8b5cf6' };
+    const color = tierColors[loyaltyTier] || '#cd7f32';
 
     container.innerHTML = `
     <div class="adv-wallet-card">
-        <div style="display:flex;align-items:center;justify-content:space-between">
-            <div class="adv-wallet-label">Available Balance</div>
-            <button id="advWalletEye" type="button" onclick="window._advToggleWalletSecrets()" style="background:rgba(255,255,255,.15);border:none;color:#fff;width:34px;height:34px;border-radius:50%;cursor:pointer;font-size:15px" aria-label="Show balance"><i class="fa-solid fa-eye"></i></button>
-        </div>
-        <div class="adv-wallet-balance">${_walletSecret('bal', _fmt(balance))}</div>
-        ${reserved > 0 ? `<div style="font-size:12px;opacity:.85;margin-bottom:4px">${_walletSecret('res', _fmt(reserved))} reserved for pending withdrawals</div>` : ''}
-        <div style="font-size:12px;opacity:.75;margin-bottom:4px">${loyaltyPoints.toLocaleString()} loyalty points · <span style="text-transform:capitalize">${_esc(loyaltyTier)}</span> member</div>
+        <div class="adv-wallet-label">Available Balance</div>
+        <div class="adv-wallet-balance" id="advWalletBalance" role="button" tabindex="0" aria-label="Tap to show or hide balance" onclick="window._advToggleBalance()" style="cursor:pointer;display:flex;align-items:center;gap:10px"><span id="advWalletBalanceText" data-v="${_fmt(balance)}">••••••</span><span id="advWalletEye" style="font-size:18px;opacity:.8">👁</span></div>
+        <div style="font-size:12px;opacity:.75;margin-bottom:4px">${loyaltyPoints.toLocaleString()} loyalty points · <span style="text-transform:capitalize">${loyaltyTier}</span> member</div>
         <div class="adv-wallet-actions">
             <button class="adv-wallet-btn" onclick="window._advTopUp()">＋ Top Up</button>
             <button class="adv-wallet-btn" onclick="window._advWalletTransfer()">↗ Send</button>
             <button class="adv-wallet-btn" onclick="window._advWalletWithdraw()">↙ Withdraw</button>
             <button class="adv-wallet-btn" onclick="window._jmNav?.('loyalty')">🏆 Rewards</button>
         </div>
-        <div style="font-size:11px;opacity:.7;margin-top:8px">Tap the eye to show or hide your balance. Sending and withdrawing ask for your password.</div>
+        <div style="font-size:11px;opacity:.7;margin-top:8px">Send to another NECPRA user or withdraw to M-Pesa. Transfers and withdrawals are confirmed server-side.</div>
     </div>
-    ${withdrawals.length ? `<div class="adv-wallet-tx">
-        <div class="adv-wallet-tx-title">Withdrawals</div>
-        ${withdrawals.map(w => `<div class="adv-wallet-tx-row">
-            <div class="adv-wallet-tx-icon" style="background:#fff7ed">🏧</div>
-            <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;color:#111">To M-Pesa ••• ${_esc(w.phoneLast4)}${wdChip(w.status)}</div>
-            <div style="font-size:11px;color:#9ca3af">${new Date(w.createdAt).toLocaleString('en-KE',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}${w.receipt ? ' · ' + _esc(w.receipt) : ''}${w.status === 'failed' && w.failureReason ? ' · ' + _esc(String(w.failureReason).slice(0,60)) : ''}</div></div>
-            <div class="adv-wallet-tx-amount" style="margin-left:0">${_walletSecret('w' + w.id, _fmt(w.amount))}</div></div>`).join('')}
-    </div>` : ''}
     <div class="adv-wallet-tx">
         <div class="adv-wallet-tx-title">Transaction History</div>
-        ${transactions.length ? transactions.slice(0,30).map((tx, i) => {
+        ${transactions.length ? transactions.slice(0,20).map(tx => {
             const isCredit = tx.direction ? tx.direction === 'credit' : ['topup','cashback','refund','referral','reward'].includes(tx.type);
+            const icons = { topup:'💳', cashback:'💰', refund:'↩️', referral:'🎁', reward:'⭐', order:'🛍️', payment:'💸' };
+            const names = { topup:'Top Up', cashback:'Cashback', refund:'Refund', referral:'Referral Bonus', reward:'Reward', order:'Purchase', payment:'Payment' };
             const st = tx.status || 'completed';
-            const stChip = st === 'pending' ? chip('#fef3c7','#b45309','Pending') : st === 'failed' ? chip('#fee2e2','#dc2626','Failed') : st === 'reversed' ? chip('#e5e7eb','#374151','Reversed') : '';
+            const stChip = st === 'pending' ? '<span style="background:#fef3c7;color:#b45309;border-radius:999px;padding:1px 8px;font-size:10px;font-weight:700;margin-left:6px">Pending</span>'
+                         : st === 'failed'  ? '<span style="background:#fee2e2;color:#dc2626;border-radius:999px;padding:1px 8px;font-size:10px;font-weight:700;margin-left:6px">Failed</span>' : '';
             const amtColor = st === 'completed' ? (isCredit ? '#22c55e' : '#ef4444') : '#9ca3af';
             const when = tx.created_at ? new Date(tx.created_at).toLocaleString('en-KE',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : 'Recently';
             return `<div class="adv-wallet-tx-row">
                 <div class="adv-wallet-tx-icon" style="background:${isCredit?'#f0fdf4':'#fef2f2'}">${icons[tx.type]||'💳'}</div>
                 <div style="flex:1;min-width:0">
-                    <div style="font-size:13px;font-weight:600;color:#111">${_esc(tx.title || names[tx.type] || tx.type)}${stChip}</div>
-                    <div style="font-size:11px;color:#9ca3af">${when}${tx.reference ? ' · ' + _esc(String(tx.reference).slice(-10)) : ''}</div>
+                    <div style="font-size:13px;font-weight:600;color:#111">${tx.title || names[tx.type] || tx.type}${stChip}</div>
+                    <div style="font-size:11px;color:#9ca3af">${when}${tx.reference ? ' · ' + String(tx.reference).slice(-10) : ''}</div>
                 </div>
                 <div style="text-align:right">
-                    <div class="adv-wallet-tx-amount" style="margin-left:0;color:${amtColor}">${isCredit?'+':'-'}${_walletSecret('a' + i, _fmt(tx.amount))}</div>
-                    ${tx.balance_after != null && st === 'completed' ? `<div style="font-size:10px;color:#9ca3af">Bal ${_walletSecret('b' + i, _fmt(tx.balance_after))}</div>` : ''}
+                    <div class="adv-wallet-tx-amount" style="margin-left:0;color:${amtColor}">${isCredit?'+':'-'}${_fmt(tx.amount)}</div>
+                    ${tx.balance_after != null && st === 'completed' ? `<div class="adv-mask" data-v="Bal ${_fmt(tx.balance_after)}" style="font-size:10px;color:#9ca3af">${window._advBalanceVisible ? 'Bal ' + _fmt(tx.balance_after) : 'Bal ••••'}</div>` : ''}
                 </div>
             </div>`;
         }).join('') : `<div style="padding:30px;text-align:center;color:#9ca3af;font-size:13px">No transactions yet</div>`}
     </div>`;
-    _walletApplyMask();
 };
+
+// Wallet privacy: balance is hidden by default and revealed only on tap (like banking apps).
+// Auto-hides again when the app is backgrounded or the wallet is re-rendered.
+window._advBalanceVisible = false;
+window._advApplyBalanceMask = function() {
+    const t = document.getElementById('advWalletBalanceText');
+    if (t) t.textContent = window._advBalanceVisible ? t.getAttribute('data-v') : '••••••';
+    const eye = document.getElementById('advWalletEye');
+    if (eye) eye.textContent = window._advBalanceVisible ? '🙈' : '👁';
+    document.querySelectorAll('.adv-mask').forEach(function(el){
+        el.textContent = window._advBalanceVisible ? el.getAttribute('data-v') : 'Bal ••••';
+    });
+};
+window._advToggleBalance = function() {
+    window._advBalanceVisible = !window._advBalanceVisible;
+    window._advApplyBalanceMask();
+};
+document.addEventListener('visibilitychange', function() {
+    if (document.hidden && window._advBalanceVisible) {
+        window._advBalanceVisible = false;
+        window._advApplyBalanceMask();
+    }
+});
 
 window._advTopUp = function() {
     document.getElementById('advTopUpOverlay')?.remove();
@@ -571,66 +554,41 @@ function _advWalletModal({title,description,fields,submitText,onSubmit}) {
       const btn=this;btn.disabled=true;btn.textContent='Processing…';msg('');
       try{const values={};fields.forEach(f=>values[f.name||f.id]=ov.querySelector('#'+f.id)?.value?.trim()||'');
         const result=await onSubmit(values);
-        if(result?.success===false||result?._error){btn.disabled=false;btn.textContent=submitText;msg(result?.message||'Request failed.');const pw=ov.querySelector('#advWsPassword');if(pw)pw.value='';return;}
+        if(result?.success===false||result?._error){btn.disabled=false;btn.textContent=submitText;msg(result?.message||'Request failed.');return;}
         ov.remove();window._renderWalletPage?.();_toast(result?.message||'Wallet action completed.','success','💳');
       }catch(e){btn.disabled=false;btn.textContent=submitText;msg(e?.message||'Request failed.');}
     };
 };
 
-// Money-moving calls need a fresh password (+ authenticator code if enabled) — same step-up the Money module uses.
-async function _advStepUp(password, otp) {
-    const r = await _api('POST', '/money/security/step-up', { password, otp: otp || undefined });
-    if (r?.stepUpToken) return { token: r.stepUpToken };
-    return { error: r?.message || 'Could not verify your password.' };
-}
-const _advIdem = () => (window.crypto?.randomUUID ? crypto.randomUUID() : 'i' + Date.now() + Math.random().toString(36).slice(2));
-const _securityFields = [
-    {id:'advWsPassword',name:'password',label:'Your account password',type:'password',inputmode:'text',placeholder:'Required to confirm'},
-    {id:'advWsOtp',name:'otp',label:'Authenticator code (only if you use one)',type:'text',inputmode:'numeric',placeholder:'6-digit code'}
-];
-
 window._advWalletTransfer=function(){
-    const idem = _advIdem();   // one key per opened dialog: a double-tap or retry can never send twice
     _advWalletModal({
-      title:'Send money',description:'Send KES directly to another NECPRA user. Money arrives instantly.',
+      title:'Send money',description:'Send KES directly to another NECPRA user.',
       fields:[
-        {id:'advWtRecipient',name:'recipient',label:'Recipient username, email, or phone',placeholder:'@username, email or phone'},
+        {id:'advWtRecipient',name:'recipient',label:'Recipient username, email, or phone',placeholder:'@username or email'},
         {id:'advWtAmount',name:'amount',label:'Amount (KES)',type:'number',inputmode:'numeric',placeholder:'e.g. 500'},
-        {id:'advWtNote',name:'note',label:'Note (optional)',placeholder:'What is this for?'},
-        ..._securityFields
+        {id:'advWtNote',name:'note',label:'Note (optional)',placeholder:'What is this for?'}
       ],
       submitText:'Send money',
       onSubmit:async v=>{
-        const amount=Number(v.amount);if(!Number.isFinite(amount)||amount<1||amount>150000)return {success:false,message:'Enter an amount between KES 1 and KES 150,000.'};
+        const amount=Number(v.amount);if(!Number.isFinite(amount)||amount<10||amount>150000)return {success:false,message:'Enter an amount between KES 10 and KES 150,000.'};
         if(!v.recipient)return {success:false,message:'Enter the recipient.'};
-        if(!v.password)return {success:false,message:'Enter your account password to confirm.'};
-        const who=await _api('GET','/wallet/lookup?q='+encodeURIComponent(v.recipient));
-        if(who?.success===false||!who?.data?.username)return {success:false,message:who?.message||'Recipient not found.'};
-        if(!window.confirm('Send '+_fmt(amount)+' to '+who.data.username+'?'))return {success:false,message:'Cancelled.'};
-        const su=await _advStepUp(v.password,v.otp);if(su.error)return {success:false,message:su.error};
-        const r=await _api('POST','/wallet/transfer',{recipient:v.recipient,amount,note:v.note,idempotencyKey:idem},false,{'X-Money-Step-Up':su.token});
-        if(r?.success!==false&&r?.data)r.message='Sent '+_fmt(amount)+' to '+who.data.username;
-        return r;
+        return await _api('POST','/marketplace/wallet/transfer',{recipient:v.recipient,amount,note:v.note});
       }
     });
 };
 
 window._advWalletWithdraw=function(){
-    const idem = _advIdem();
     _advWalletModal({
-      title:'Withdraw to M-Pesa',description:'The amount is reserved from your wallet right away. If M-Pesa fails, it is returned automatically.',
+      title:'Withdraw to M-Pesa',description:'Money is reserved from your wallet until Safaricom confirms the payout.',
       fields:[
         {id:'advWwAmount',name:'amount',label:'Amount (KES)',type:'number',inputmode:'numeric',placeholder:'e.g. 500'},
-        {id:'advWwPhone',name:'phone',label:'M-Pesa phone number',type:'tel',inputmode:'tel',placeholder:'0712 345 678'},
-        ..._securityFields
+        {id:'advWwPhone',name:'phone',label:'M-Pesa phone number',type:'tel',inputmode:'tel',placeholder:'0712 345 678'}
       ],
       submitText:'Withdraw',
       onSubmit:async v=>{
         const amount=Number(v.amount);if(!Number.isFinite(amount)||amount<10||amount>150000)return {success:false,message:'Enter an amount between KES 10 and KES 150,000.'};
         if(!v.phone)return {success:false,message:'Enter your M-Pesa number.'};
-        if(!v.password)return {success:false,message:'Enter your account password to confirm.'};
-        const su=await _advStepUp(v.password,v.otp);if(su.error)return {success:false,message:su.error};
-        return await _api('POST','/wallet/withdraw',{amount,phone:v.phone,idempotencyKey:idem},false,{'X-Money-Step-Up':su.token});
+        return await _api('POST','/marketplace/wallet/withdraw',{amount,phone:v.phone});
       }
     });
 };
@@ -1232,8 +1190,6 @@ window._jmNavMore = function(page) {
         }
         document.querySelectorAll('.jm-page').forEach(p=>p.classList.remove('active'));
         el.classList.add('active');
-        // Close the More sheet before switching to the requested page so the selected page is visible.
-        try { window._jmHideMore?.(); } catch (_) {}
         render?.();
         return;
     }

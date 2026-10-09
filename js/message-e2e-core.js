@@ -250,7 +250,15 @@
   // diverge. That pre-dates this fix (the old v2 scheme also only had one
   // identity per user, not per device) but matters more now because state
   // is involved at all. Flagged for a proper per-device follow-up.
-  function ratchetStorageKey(peerId) { return `kyn_ratchet_v3_${me()}_${peerId}`; }
+  // FIX (first message after reload/relogin can use a different, empty ratchet slot): me() reads the account id from the identity
+  // layer, which can still be null for a moment right after a reload/relogin. The key then became "kyn_ratchet_v3_null_<peer>", so a
+  // send/decrypt in that window loaded NO session, built a brand-new one and saved it under the wrong slot - while later calls (id now
+  // known) used the real, older session. Never derive a slot from an unknown account: fail (the send/decrypt retry queues try again).
+  function ratchetStorageKey(peerId) {
+    const owner = me();
+    if (!owner) throw new Error('E2E account not ready');
+    return `kyn_ratchet_v3_${owner}_${peerId}`;
+  }
   // Persist ratchet state in the existing durable E2E store. Keep the old
   // localStorage value as a migration fallback so existing sessions are not
   // discarded when this version ships.
