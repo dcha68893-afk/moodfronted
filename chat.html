@@ -1203,12 +1203,44 @@
                 flex-shrink: 0 !important;
                 gap: 6px !important;
             }
+            /* FIX (header icons showed no text on phones): this rule forced every header button to a 34x34 square, which
+               clipped the .header-action-label text so only the icon was visible (desktop kept the label).
+               Buttons now size to their content on mobile and stack icon over label, like the bottom tabs. */
             .header-action-btn {
                 display: inline-flex !important;
-                width: 34px !important;
-                height: 34px !important;
+                flex-direction: column !important;
+                align-items: center !important;
+                justify-content: center !important;
+                width: auto !important;
+                min-width: 44px !important;
+                max-width: 76px !important;
+                height: 44px !important;
+                padding: 3px 6px !important;
+                gap: 2px !important;
                 flex-shrink: 0 !important;
             }
+            .header-action-btn i {
+                font-size: 15px !important;
+                width: auto !important;
+                height: auto !important;
+            }
+            .header-action-btn .header-action-label {
+                display: block !important;
+                max-width: 100%;
+                font-size: 9px !important;
+                font-weight: 600 !important;
+                line-height: 1.1 !important;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .header-actions {
+                gap: 4px !important;
+                max-width: 70vw;
+                overflow-x: auto;
+                scrollbar-width: none;
+            }
+            .header-actions::-webkit-scrollbar { display: none; }
 
             /* FIX: Admin icon/FAB always on top in mobile */
             #admFab {

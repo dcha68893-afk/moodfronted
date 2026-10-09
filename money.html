@@ -102,7 +102,7 @@ function token(){return window.__kynToken||window.__accessToken||localStorage.ge
 function apiBase(){return((window.__getApiBase&&window.__getApiBase())||(window.__kynAPI&&window.__kynAPI.baseUrl)||window.API_BASE_URL||(window.parent&&window.parent.__getApiBase&&window.parent.__getApiBase())||(window.parent&&window.parent.API_BASE_URL)||'').replace(/\/$/,'')}
 async function api(path,opt){opt=opt||{};var b=apiBase();if(!b)throw Error('API is not configured');
   var r=await fetch(b+path,Object.assign({},opt,{headers:Object.assign({'Content-Type':'application/json'},token()?{Authorization:'Bearer '+token()}:{},opt.headers||{})}));
-  var d=await r.json().catch(function(){return{}});if(!r.ok)throw Error(d.message||d.error||('Request failed ('+r.status+')'));return d}
+  var d=await r.json().catch(function(){return{}});if(!r.ok){var er=Error(d.message||d.error||('Request failed ('+r.status+')'));er.status=r.status;er.errorCode=d.errorCode||d.code||'';throw er}return d}
 function money(n){return 'KSh '+Number(n||0).toLocaleString('en-KE',{maximumFractionDigits:2})}
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function ago(d){if(!d)return'';var s=(Date.now()-new Date(d))/1000;if(s<60)return'just now';if(s<3600)return Math.floor(s/60)+' min ago';if(s<86400)return Math.floor(s/3600)+' h ago';if(s<604800)return Math.floor(s/86400)+' d ago';return new Date(d).toLocaleDateString('en-KE',{day:'numeric',month:'short'})}
@@ -127,7 +127,8 @@ function ask(title,label,type,hint){return new Promise(function(res){
   $('askNo').onclick=function(){closeModal();done(null)};
   i.onkeydown=function(e){if(e.key==='Enter')$('askOk').click()}})}
 
-async function stepUp(){var cached=sessionStorage.getItem('necpra_money_step_up');if(cached)return cached;
+function stepUpFresh(t){try{var p=JSON.parse(atob(String(t).split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));return !p.exp||p.exp*1000>Date.now()+30000}catch(_){return false}}
+async function stepUp(force){var cached=force?null:sessionStorage.getItem('necpra_money_step_up');if(cached&&!stepUpFresh(cached)){sessionStorage.removeItem('necpra_money_step_up');cached=null}if(cached)return cached;
   var password=await ask('Confirm it is you','Account password','password','For your security, enter your NECPRA password to continue.');if(!password)return null;
   var r;try{r=await api('/money/security/step-up',{method:'POST',body:JSON.stringify({password:password})})}
   catch(e){if(/authenticator code|6-digit|OTP/i.test(e.message||'')){var otp=await ask('Two-step verification','6-digit authenticator code','text');if(!otp)return null;r=await api('/money/security/step-up',{method:'POST',body:JSON.stringify({password:password,otp:otp})})}else throw e}
@@ -196,7 +197,10 @@ function newRequest(){modal('Pay for Someone','<div class="notice warn">Only cre
   $('prGo').onclick=async function(){var b=this;try{var phone=$('prPhone').value.trim(),amount=Number($('prAmount').value||0),purpose=$('prPurpose').value.trim();
     if(!phone)throw Error('Enter the recipient phone');if(!(amount>0))throw Error('Enter a valid amount');if(!purpose)throw Error('Enter a purpose');
     var step=await stepUp();if(!step)return;busy(b,true,'Creating…');
-    await api('/money/requests',{method:'POST',headers:{'Idempotency-Key':(crypto.randomUUID?crypto.randomUUID():String(Date.now())+'-'+Math.random()),'X-Money-Step-Up':step},body:JSON.stringify({recipientPhone:phone,amount:amount,purpose:purpose})});
+    var idem=(crypto.randomUUID?crypto.randomUUID():String(Date.now())+'-'+Math.random());
+    var send=function(st){return api('/money/requests',{method:'POST',headers:{'Idempotency-Key':idem,'X-Money-Step-Up':st},body:JSON.stringify({recipientPhone:phone,amount:amount,purpose:purpose})})};
+    try{await send(step)}
+    catch(e1){if(e1&&e1.errorCode==='MONEY_STEP_UP_REQUIRED'){sessionStorage.removeItem('necpra_money_step_up');busy(b,false);var step2=await stepUp(true);if(!step2)return;busy(b,true,'Creating…');await send(step2)}else throw e1}
     closeModal();toast('Request created');S.tab='requests';S.reqSeg='out';await load()}catch(e){sessionStorage.removeItem('necpra_money_step_up');busy(b,false);toast(e.message,true)}}}
 function mpesaForm(title,note,amountField,goLabel,onGo,fixedAmt){
   modal(title,'<div class="notice">'+note+'</div>'+(amountField?'<label>Amount (KSh)</label><input class="input" id="mfAmount" type="number" inputmode="decimal" min="1" '+(fixedAmt?'value="'+esc(fixedAmt)+'" readonly style="opacity:.8"':'placeholder="1000"')+'>':'')+'<label>Your M-Pesa phone</label><input class="input" id="mfPhone" inputmode="tel" placeholder="07XX XXX XXX" value="'+esc(lastPhone())+'"><div class="actions"><button class="secondary" data-act="close" type="button">Cancel</button><button class="primary" id="mfGo" type="button">'+esc(goLabel)+'</button></div>');
