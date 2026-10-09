@@ -162,12 +162,20 @@ function finish(r){
  if(res==='win')buzz([30,40,80]);else buzz(30);
  render();showResult()}
 
+let hintsLeft=3;
+function chToast(t){try{window.toast&&window.toast(t)}catch(_){}}
+function pgnFallback(t){try{const a=document.createElement('textarea');a.value=t;a.style.cssText='position:fixed;opacity:0;top:0;left:0';document.body.appendChild(a);a.select();document.execCommand('copy');a.remove()}catch(_){}}
+function pgnText(){const mv=hist.map(h=>h.san);let body='';for(let i=0;i<mv.length;i++){if(i%2===0)body+=(i/2+1)+'. ';body+=mv[i]+' '}
+ const r=String(resultText||''),res=/draw/i.test(r)?'1/2-1/2':/white wins/i.test(r)?'1-0':/black wins/i.test(r)?'0-1':'*';
+ const d=new Date(),dt=d.getFullYear()+'.'+String(d.getMonth()+1).padStart(2,'0')+'.'+String(d.getDate()).padStart(2,'0');
+ const w=mode==='cpu'?(myColor==='w'?'You':'Computer'):'White',b=mode==='cpu'?(myColor==='b'?'You':'Computer'):'Black';
+ return '[Event "Necpra Game Master Chess"]\n[Date "'+dt+'"]\n[White "'+w+'"]\n[Black "'+b+'"]\n[Result "'+res+'"]\n\n'+body.trim()+(body?' ':'')+res}
 /* ───────────── Moves ───────────── */
 function commit(m,fromRemote){
  if(mode!=='room'&&view<hist.length){hist.length=view;if(over){over=false;hideOverlay();startClock()}}
  const s=shown(),ms=legal(s),t=san(s,m,ms),n=make(s,m);
  hist.push({s:n,m,san:t});view=hist.length;selected=-1;targets=[];
- beep(m.cap!=='.'?420:560,.05);
+ beep(m.cap!=='.'?420:560,.05);if(/[+#]$/.test(t)){beep(900,.09);buzz([18,30,18])}else if(/^O-O/.test(t)){beep(640,.07);buzz(15)}else buzz(m.cap!=='.'?14:8);
  if(mode==='room'&&!fromRemote)publish(n);
  const r=assess(n);
  if(r.over){finish(r.kind==='mate'?r:r);return}
@@ -218,11 +226,19 @@ function build(){
  const sec=$('chess');if(!sec||$('chShell'))return;css();
  sec.innerHTML='<div class="ch-top" id="chShell"><button class="icon" id="chBack" aria-label="Back">‹</button><div><b>Game Master Chess</b><small id="chSub">CHESS</small></div><span id="chessClock">00:00</span></div>'
  +'<div class="ch-scroll"><div class="ch-meta" style="width:min(94vw,560px);box-sizing:border-box"><span id="chessStatus"></span><span id="chWho"></span></div><div class="ch-cap" id="chCapTop"></div><div class="ch-board" id="chessBoard"></div><div class="ch-cap" id="chCapBot"></div>'
- +'<div class="ch-moves" id="chMoves"></div><div class="ch-bar"><button id="chFirst" aria-label="First move">«</button><button id="chPrev" aria-label="Previous move">‹</button><button id="chNext" aria-label="Next move">›</button><button id="chLast" aria-label="Latest move">»</button><button id="chUndo">↶ Undo</button><button id="chFlip">⇅ Flip</button><button id="ch3dBtn">3D</button><button id="chNew">New</button><button id="chResign" class="danger">Resign</button></div></div>'
+ +'<div class="ch-moves" id="chMoves"></div><div class="ch-bar"><button id="chFirst" aria-label="First move">«</button><button id="chPrev" aria-label="Previous move">‹</button><button id="chNext" aria-label="Next move">›</button><button id="chLast" aria-label="Latest move">»</button><button id="chUndo">↶ Undo</button><button id="chFlip">⇅ Flip</button><button id="chHint">💡 Hint</button><button id="chPgn">PGN</button><button id="ch3dBtn">3D</button><button id="chNew">New</button><button id="chResign" class="danger">Resign</button></div></div>'
  +'<div class="ch-ov" id="chOv"></div>';
  $('chBack').onclick=()=>window.home&&window.home();
  $('chFirst').onclick=()=>go(0);$('chPrev').onclick=()=>go(view-1);$('chNext').onclick=()=>go(view+1);$('chLast').onclick=()=>go(hist.length);
  $('chUndo').onclick=undo;$('chFlip').onclick=()=>{flipped=!flipped;render()};$('ch3dBtn').onclick=()=>{let on=true;try{on=localStorage.getItem('necpra_chess_3d')!=='0';localStorage.setItem('necpra_chess_3d',on?'0':'1')}catch(_){}render()};$('chNew').onclick=showMenu;
+/* PLAY STORE PARITY (Chess.com / Lichess): a limited-use best-move Hint (not offered in live rooms) and PGN export so a game can be reviewed in any chess app. */
+$('chHint').onclick=()=>{if(over||thinking||promoMs)return;const s=shown();if(mode==='room'||!interactive(s))return;if(hintsLeft<=0){chToast('No hints left this game');return}
+ let mv=null;try{mv=pickMove(s,'hard')}catch(e){console.error('[chess] hint error',e)}
+ if(!mv){chToast('No hint available');return}
+ hintsLeft--;selected=mv.f;targets=legal(s).filter(m=>m.f===mv.f&&m.t===mv.t);render();chToast('Hint: '+san(s,mv,legal(s))+'  ('+hintsLeft+' left)')};
+$('chPgn').onclick=()=>{const t=pgnText();const done=()=>chToast(hist.length?'PGN copied':'No moves yet');
+ try{if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(done,()=>{pgnFallback(t);done()});return}}catch(_){}
+ pgnFallback(t);done()};
  $('chResign').onclick=()=>{if(over||thinking)return;const room=roomOf();
   if(mode==='room'){publish(cur(),{result:'resign:'+role});finish({kind:'resign',winner:opp(role)})}
   else finish({kind:'resign',winner:mode==='cpu'?opp(myColor):opp(cur().turn)})}}
@@ -279,7 +295,7 @@ function render(){
  const solo=mode!=='room';
  $('chFirst').disabled=$('chPrev').disabled=view===0||thinking;$('chNext').disabled=$('chLast').disabled=atLive()||thinking;
  $('chUndo').disabled=!solo||!hist.length;$('chUndo').style.display=solo?'':'none';$('chNew').style.display=solo?'':'none';
- $('chResign').disabled=over}
+ $('chHint').style.display=mode==='room'?'none':'';$('chHint').disabled=over||thinking;$('chPgn').disabled=!hist.length;$('chResign').disabled=over}
 function ov(html){const o=$('chOv');if(!o)return;o.innerHTML=html;o.classList.add('show');return o}
 function hideOverlay(){const o=$('chOv');if(o){o.classList.remove('show');o.innerHTML=''}}
 function showPromo(){
@@ -305,7 +321,7 @@ function showMenu(){
 function startSolo(m,lv,c){
  try{localStorage.removeItem(SAVE_KEY)}catch(_){}
  aiTok++;thinking=false;promoMs=null;mode=m;level=lv;myColor=m==='cpu'?c:'w';role=myColor;
- base=newState();hist=[];view=0;over=false;resultText='';selected=-1;targets=[];flipped=m==='cpu'&&myColor==='b';startAt=Date.now();startClock();
+ hintsLeft=3;base=newState();hist=[];view=0;over=false;resultText='';selected=-1;targets=[];flipped=m==='cpu'&&myColor==='b';startAt=Date.now();startClock();
  hideOverlay();render();if(m==='cpu'&&myColor==='b')thinkSoon()}
 
 /* ───────────── Live room play ───────────── */
