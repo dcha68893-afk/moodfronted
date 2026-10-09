@@ -61,8 +61,6 @@ final class NecpraNotifier {
     // importance forever. Fresh channel ids (HIGH) fix existing installs; the old ones are removed in ensureChannels().
     static final String CHANNEL_STATUS = "status_updates_v2";
     static final String CHANNEL_GENERAL = "general_v2";
-    private static final String LEGACY_CHANNEL_STATUS = "status_updates";
-    private static final String LEGACY_CHANNEL_GENERAL = "general";
 
     static final String ACTION_REPLY = "com.necpa.action.REPLY";
     static final String ACTION_MARK_READ = "com.necpa.action.MARK_READ";
@@ -132,16 +130,9 @@ final class NecpraNotifier {
         mk(nm, CHANNEL_GROUPS, "Group messages", "Group conversations", NotificationManager.IMPORTANCE_HIGH);
         mk(nm, CHANNEL_STATUS, "Status updates", "Friend status updates", NotificationManager.IMPORTANCE_HIGH);
         mk(nm, CHANNEL_GENERAL, "Activity", "Friend requests, reactions and other activity", NotificationManager.IMPORTANCE_HIGH);
-        // Remove the old low-importance duplicates only if the user never customised them (otherwise leave them alone).
-        try {
-            for (String legacy : new String[] { LEGACY_CHANNEL_STATUS, LEGACY_CHANNEL_GENERAL }) {
-                NotificationChannel old = nm.getNotificationChannel(legacy);
-                if (old != null && old.getImportance() < NotificationManager.IMPORTANCE_HIGH
-                        && (Build.VERSION.SDK_INT < 29 || old.getUserLockedFields() == 0)) {
-                    nm.deleteNotificationChannel(legacy);
-                }
-            }
-        } catch (Throwable ignored) {}
+        // The active channels use fresh v2 IDs above. Do not delete legacy channels here:
+        // NotificationChannel.getUserLockedFields() is a hidden @SystemApi and is not available
+        // to ordinary app code at compile time. Keeping old channels also preserves user settings.
     }
 
     private static final String PERM_PREFS = "necpra_notif_perm";
