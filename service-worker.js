@@ -93,7 +93,7 @@ const CORE_STATIC_ASSETS = [
   '/js/app.core.bootstrap.js','/js/app.core.session.js','/js/app.core.ui.js','/js/app.ui.auth.js',
   '/js/app.cache.js','/js/app.cache.unified.js','/js/authStorage.js','/js/app.offline.queue.js','/js/auth.session.manager.js',
   '/js/app.runtime.authority.js','/js/auth.account.limit.js','/js/google-auth.js','/js/app.offline.bootstrap.js',
-  '/app-protect.js','/session-restore.js','/report-problem.js','/js/runtime-config.js','/js/config.js','/js/offline-first.js','/js/theme.engine.js','/js/theme-contrast-guard.js','/js/settings-broadcast-listener.js','/js/necpa-session-resilience.js','/js/services.friend.js'
+  '/app-protect.js','/session-restore.js','/report-problem.js','/js/runtime-config.js','/js/config.js','/js/offline-gate.js','/js/header-labels.js','/js/offline-first.js','/js/theme.engine.js','/js/theme-contrast-guard.js','/js/settings-broadcast-listener.js','/js/necpa-session-resilience.js','/js/services.friend.js'
 ];
 
 const NETWORK_FIRST_PATTERNS = [

@@ -647,7 +647,7 @@ function _renderPayDetails(phone) {
         const total = Math.max(0, _state.subtotal + _state.deliveryFee - _state.couponDiscount);
         const ok = balance >= total;
         return `<div style="background:${ok?'#f0fdf4':'#fef2f2'};border-radius:10px;padding:12px 14px;font-size:13px;color:${ok?'#166534':'#dc2626'}">
-            👛 Wallet balance: <strong>${_fmt(balance)}</strong>${!ok?`<br>⚠️ Insufficient balance. Add ${_fmt(total-balance)} to your wallet (Wallet → Top Up) or pick another payment method.`:''}
+            👛 Wallet balance: <strong id="mcWalletBal" style="cursor:pointer" onclick="this.textContent=this.dataset.s==='1'?'KES ••••':'${_fmt(balance)}';this.dataset.s=this.dataset.s==='1'?'0':'1'">KES ••••</strong> <span style="font-size:11px;color:#9ca3af">(tap to show)</span>${!ok?`<br>⚠️ Insufficient balance. Add ${_fmt(total-balance)} to your wallet (Wallet → Top Up) or pick another payment method.`:''}
         </div>`;
     }
     return '';

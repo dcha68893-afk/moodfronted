@@ -55,8 +55,14 @@ final class NecpraNotifier {
 
     static final String CHANNEL_MESSAGES = "messages";
     static final String CHANNEL_GROUPS = "group_messages";
-    static final String CHANNEL_STATUS = "status_updates";
-    static final String CHANNEL_GENERAL = "general";
+    // FIX (no heads-up pop-up for status / activity): these channels used to be created with IMPORTANCE_DEFAULT, which
+    // makes Android show them only in the shade - never as the banner at the top of the screen. A channel's importance can
+    // never be raised after creation, so devices that already have the old "status_updates"/"general" channels keep the low
+    // importance forever. Fresh channel ids (HIGH) fix existing installs; the old ones are removed in ensureChannels().
+    static final String CHANNEL_STATUS = "status_updates_v2";
+    static final String CHANNEL_GENERAL = "general_v2";
+    private static final String LEGACY_CHANNEL_STATUS = "status_updates";
+    private static final String LEGACY_CHANNEL_GENERAL = "general";
 
     static final String ACTION_REPLY = "com.necpa.action.REPLY";
     static final String ACTION_MARK_READ = "com.necpa.action.MARK_READ";
@@ -124,8 +130,44 @@ final class NecpraNotifier {
         if (nm == null) return;
         mk(nm, CHANNEL_MESSAGES, "Messages", "Direct messages", NotificationManager.IMPORTANCE_HIGH);
         mk(nm, CHANNEL_GROUPS, "Group messages", "Group conversations", NotificationManager.IMPORTANCE_HIGH);
-        mk(nm, CHANNEL_STATUS, "Status updates", "Friend status updates", NotificationManager.IMPORTANCE_DEFAULT);
-        mk(nm, CHANNEL_GENERAL, "Activity", "Friend requests, reactions and other activity", NotificationManager.IMPORTANCE_DEFAULT);
+        mk(nm, CHANNEL_STATUS, "Status updates", "Friend status updates", NotificationManager.IMPORTANCE_HIGH);
+        mk(nm, CHANNEL_GENERAL, "Activity", "Friend requests, reactions and other activity", NotificationManager.IMPORTANCE_HIGH);
+        // Remove the old low-importance duplicates only if the user never customised them (otherwise leave them alone).
+        try {
+            for (String legacy : new String[] { LEGACY_CHANNEL_STATUS, LEGACY_CHANNEL_GENERAL }) {
+                NotificationChannel old = nm.getNotificationChannel(legacy);
+                if (old != null && old.getImportance() < NotificationManager.IMPORTANCE_HIGH
+                        && (Build.VERSION.SDK_INT < 29 || old.getUserLockedFields() == 0)) {
+                    nm.deleteNotificationChannel(legacy);
+                }
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    private static final String PERM_PREFS = "necpra_notif_perm";
+
+    /**
+     * FIX (no notifications at all while the app is outside): on Android 13+ POST_NOTIFICATIONS must be granted at runtime.
+     * The only place that asked was the WebView (js/native-push.js), which never runs when the user lives in the native
+     * screens or the WebView was killed - so the permission stayed ungranted and areNotificationsEnabled() made every push
+     * return silently below. Ask natively on app start. Asks at most 3 times, at most once a day; after that the Settings
+     * flow in js/native-push.js takes over.
+     */
+    static void requestPostNotificationsIfNeeded(android.app.Activity activity) {
+        try {
+            if (Build.VERSION.SDK_INT < 33 || activity == null) return;
+            if (ContextCompat.checkSelfPermission(activity, android.Manifest.permission.POST_NOTIFICATIONS)
+                    == android.content.pm.PackageManager.PERMISSION_GRANTED) return;
+            SharedPreferences sp = activity.getSharedPreferences(PERM_PREFS, Context.MODE_PRIVATE);
+            int asked = sp.getInt("asked", 0);
+            long last = sp.getLong("lastAsk", 0L);
+            if (asked >= 3 || System.currentTimeMillis() - last < 24L * 60 * 60 * 1000) return;
+            sp.edit().putInt("asked", asked + 1).putLong("lastAsk", System.currentTimeMillis()).apply();
+            androidx.core.app.ActivityCompat.requestPermissions(activity,
+                    new String[] { android.Manifest.permission.POST_NOTIFICATIONS }, 7421);
+        } catch (Throwable t) {
+            Log.w(TAG, "could not request notification permission", t);
+        }
     }
 
     private static void mk(NotificationManager nm, String id, String name, String desc, int importance) {

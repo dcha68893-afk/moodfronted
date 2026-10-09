@@ -8,7 +8,7 @@
      hardcodes the backend origin here — see chat.html for the full
      explanation of why a literal in this spot breaks under the build. -->
 <script src="/js/runtime-config.js"></script>
-<script src="/js/config.js"></script><script src="/js/offline-first.js"></script>
+<script src="/js/config.js"></script><script src="/js/offline-gate.js"></script><script src="/js/offline-first.js"></script>
 <!-- FAST CACHE START: message-local-db.js is self-contained (IndexedDB + localStorage only),
      so it loads right after config.js and the cached chat list is requested NOW, in
      parallel with the ~17 heavy scripts below, instead of after them. message-client.js
@@ -2945,5 +2945,5 @@
        handleAppBackNavigation() and back-nav.js's _visibleGenericModal()
        for the other half of this fix. -->
   <script src="back-nav.js"></script>
-<script src="report-problem.js" defer></script></body>
+<script src="report-problem.js" defer></script><script src="/js/header-labels.js" defer></script></body>
 </html>

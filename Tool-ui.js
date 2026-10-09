@@ -7452,7 +7452,7 @@ function _renderAccount() {
                 ['orders',       'fa-box',            '#3b82f6', 'My Orders',        'Track all purchases',       '_jmNav'],
                 ['wishlist',     'fa-heart',          '#ef4444', 'Wishlist',          'Saved items',               '_jmNav'],
                 ['loyalty',      'fa-trophy',         '#f59e0b', 'Loyalty Points',   pts+' pts earned',           '_jmNavMore'],
-                ['wallet',       'fa-wallet',         '#22c55e', 'Wallet',           _fmt(wallet)+' balance',     '_jmNavMore'],
+                ['wallet',       'fa-wallet',         '#22c55e', 'Wallet',           'KES •••• · open to view',   '_jmNavMore'],
                 ['referral',     'fa-gift',           '#ec4899', 'Refer & Earn',     'KES 100 per referral',      '_jmNavMore'],
                 ['addresses',    'fa-map-marker-alt', '#8b5cf6', 'Address Book',     'Delivery addresses',        '_jmNavMore'],
                 ['vouchers',     'fa-ticket-alt',     '#f97316', 'Vouchers',         'Discount codes',            '_jmNavMore'],

@@ -19,7 +19,7 @@
          from configuration, not from literals the build step has to
          rewrite, and it's ready before anything on this page needs it. -->
     <script src="/js/runtime-config.js"></script>
-    <script src="/js/config.js"></script><script src="/js/offline-first.js"></script><script src="/js/social-offline-cache.js"></script>
+    <script src="/js/config.js"></script><script src="/js/offline-gate.js"></script><script src="/js/offline-first.js"></script><script src="/js/social-offline-cache.js"></script>
     <script>window.API_BASE_URL = window.__getApiOrigin();</script>
     <script src="/js/theme.engine.js"></script>
     <script src="/js/panel-state-bridge.js"></script>
@@ -2002,7 +2002,7 @@
             messages: ['messagesIframe', 'messagesContent'], status: ['statusIframe', 'statusContent'],
             group: ['groupIframe', 'groupContent'], friends: ['friendsIframe', 'friendsContent'],
             settings: ['settingsIframe', 'settingsContent'], tools: ['toolsIframe', 'toolsContent'],
-            games: ['gamesIframe', 'gamesContent']
+            money: ['moneyIframe', 'moneyContent'], games: ['gamesIframe', 'gamesContent']
         };
         var last = {}, overlays = {};
 
@@ -2049,6 +2049,41 @@
             } catch (_) {}
         }
 
+        // FIX (empty "booting" screen): the cover used to be removed 250ms after the iframe's `load` event. `load` only means the
+        // HTML arrived - the module then waits for auth/handshake/API data before it renders anything, so for seconds the user
+        // saw a blank iframe. The cover now stays until the module has really painted content (or a failsafe expires).
+        function ready(f) {
+            try {
+                if (!f || f.__kynLoaded !== true) return false;
+                var d = f.contentDocument;
+                if (!d || !d.body || d.readyState === 'loading') return false;
+                return (d.body.innerText || '').trim().length >= 80 || d.body.getElementsByTagName('*').length > 60;
+            } catch (_) { return true; }   // cross-origin frame: cannot inspect, do not block
+        }
+        function waitReady(m) {
+            var f = document.getElementById(MODS[m][0]), t0 = Date.now();
+            var iv = setInterval(function () {
+                var o = overlays[m];
+                if (!o) { clearInterval(iv); return; }
+                if (o === true) { if (Date.now() - t0 > 15000) clearInterval(iv); return; }
+                if (ready(f) || Date.now() - t0 > 15000) { clearInterval(iv); setTimeout(function () { removeOverlay(m); }, 120); }
+            }, 150);
+        }
+        // No saved screen yet (first launch / cleared cache): show neutral placeholder rows instead of a blank frame.
+        function skeleton(m, box, f) {
+            if (m === 'games') return;   // canvas games paint no text; a placeholder would just linger
+            var o = document.createElement('div');
+            o.className = 'kyn-snap kyn-skel'; o.setAttribute('aria-hidden', 'true');
+            o.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;z-index:5;pointer-events:none;background:Canvas;padding:16px;box-sizing:border-box;overflow:hidden;';
+            var rows = '';
+            for (var i = 0; i < 9; i++) rows += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:18px"><div style="width:46px;height:46px;border-radius:50%;background:rgba(127,127,127,.16);flex:none"></div><div style="flex:1"><div style="height:11px;width:' + (45 + (i * 7) % 40) + '%;border-radius:6px;background:rgba(127,127,127,.16);margin-bottom:9px"></div><div style="height:9px;width:' + (65 - (i * 5) % 30) + '%;border-radius:6px;background:rgba(127,127,127,.10)"></div></div></div>';
+            o.innerHTML = rows;
+            box.appendChild(o);
+            overlays[m] = o;
+            waitReady(m);
+            setTimeout(function () { removeOverlay(m); }, 8000);
+        }
+
         function removeOverlay(m) {
             var o = overlays[m]; if (!o) return;
             delete overlays[m];
@@ -2059,13 +2094,14 @@
             try {
                 if (!m || !MODS[m] || overlays[m]) return;
                 var f = document.getElementById(MODS[m][0]), box = document.getElementById(MODS[m][1]);
-                if (!f || !box || f.__kynLoaded === true) return;
-                var k = key(m); if (!k) return;
+                if (!f || !box || ready(f)) return;
+                var k = key(m); if (!k) { overlays[m] = true; skeleton(m, box, f); return; }
                 overlays[m] = true;   // reserve so repeated calls don't stack
                 open().then(function (c) { return c.match(k); })
                     .then(function (r) { return r ? r.text() : null; })
                     .then(function (html) {
-                        if (!html || f.__kynLoaded === true || overlays[m] !== true) { if (overlays[m] === true) delete overlays[m]; return; }
+                        if (overlays[m] !== true || ready(f)) { if (overlays[m] === true) delete overlays[m]; return; }
+                        if (!html) { skeleton(m, box, f); return; }
                         var o = document.createElement('iframe');
                         /* Cached snapshots are untrusted presentation HTML. Strip executable/resource-bearing nodes again before assigning srcdoc so old cache entries cannot trigger sandbox script warnings or run stale module code. */
                         try {
@@ -2091,6 +2127,7 @@
                         o.srcdoc = html;
                         box.appendChild(o);
                         overlays[m] = o;
+                        waitReady(m);
                         setTimeout(function () { removeOverlay(m); }, 15000);   // failsafe: never leave it up
                     }).catch(function () { if (overlays[m] === true) delete overlays[m]; });
             } catch (_) {}
@@ -2108,7 +2145,7 @@
             f.addEventListener('load', function () {
                 if (!f.getAttribute('src')) return;
                 f.__kynLoaded = true;
-                setTimeout(function () { removeOverlay(m); }, 250);
+                if (overlays[m] && overlays[m] !== true) waitReady(m);
                 setTimeout(function () { capture(m); }, 3000);
             });
         });

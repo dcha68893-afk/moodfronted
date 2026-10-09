@@ -45,6 +45,18 @@
                 <data android:scheme="necpra" />
             </intent-filter>
 
+            <!-- FIX (installed app opens the browser first): only the custom necpra:// scheme was declared, so every
+                 https://necpra.co.ke link (shared links, search results, emails, "open in app") went to the browser, and
+                 MainActivity.dispatchDeepLink() for https links could never be reached. Verified App Links make Android
+                 open the installed app directly. Needs https://necpra.co.ke/.well-known/assetlinks.json (see that file). -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="necpra.co.ke" />
+                <data android:scheme="https" android:host="www.necpra.co.ke" />
+            </intent-filter>
+
         </activity>
 
         <!-- Native Profile / Settings screen. Not exported: only MainActivity (via NecpraNativePlugin)

@@ -256,27 +256,38 @@
   // discarded when this version ships.
   async function loadRatchetSession(peerId) {
     const key = ratchetStorageKey(peerId);
+    const store = global.KynectaE2EStore;
+    // FIX (FIRST MESSAGE FAILS TO DECRYPT AFTER RELOAD/RELOGIN): store.get() swallowed every IndexedDB error and returned
+    // null, which this function (and its caller) read as "no session with this peer" -> a brand-new receiver session was
+    // built from the incoming header and later saved over the real one, so the message could not be decrypted. A store
+    // that cannot be read is now an ERROR (the decrypt retry queue tries again), not an empty result.
+    let storeFailed = false;
     try {
-      const raw = await global.KynectaE2EStore?.get?.(key);
+      const raw = store ? await (store.getStrict ? store.getStrict(key) : store.get(key)) : null;
       if (raw) return JSON.parse(raw);
-    } catch (_) {}
+    } catch (_) { storeFailed = true; }
+    let rawLocal = null;
+    try { rawLocal = localStorage.getItem(key); } catch (_) {}
+    if (!rawLocal) {
+      if (storeFailed) throw new Error('E2E storage not ready');
+      return null;
+    }
+    let parsed;
+    try { parsed = JSON.parse(rawLocal); } catch (_) { return null; }
+    // Migrate the localStorage copy into the durable store, and delete the copy ONLY if the write really succeeded.
+    // (set() reports failure by returning false, never by throwing - the old code deleted the only copy anyway.)
     try {
-      const raw = localStorage.getItem(key);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
-      // FIX (STALE-SESSION-RESURRECTION): after migrating into the durable store the old localStorage copy MUST be
-      // removed. It used to stay forever, frozen at its pre-migration chain position; any later moment the store read
-      // came back empty (store not ready yet, account switch, wipe) this stale copy was loaded and re-saved over the real state.
-      let migrated = false;
-      try { if (global.KynectaE2EStore?.set) { await global.KynectaE2EStore.set(key, raw); migrated = true; } } catch (_) {}
-      if (migrated) { try { localStorage.removeItem(key); } catch (_) {} }
-      return parsed;
-    } catch (_) { return null; }
+      if (store && store.set && (await store.set(key, rawLocal)) === true) { try { localStorage.removeItem(key); } catch (_) {} }
+    } catch (_) {}
+    return parsed;
   }
   async function saveRatchetSession(peerId, session) {
     const key = ratchetStorageKey(peerId);
     const raw = JSON.stringify(session);
-    try { if (global.KynectaE2EStore?.set) { await global.KynectaE2EStore.set(key, raw); try { localStorage.removeItem(key); } catch (_) {} return; } } catch (_) {}
+    let stored = false;
+    try { stored = !!(global.KynectaE2EStore?.set && (await global.KynectaE2EStore.set(key, raw)) === true); } catch (_) {}
+    if (stored) { try { localStorage.removeItem(key); } catch (_) {} return; }
+    // Durable store unavailable: keep the state in localStorage so it is not lost (it is migrated on the next load).
     try { localStorage.setItem(key, raw); } catch (_) {}
   }
   async function clearRatchetSession(peerId) {

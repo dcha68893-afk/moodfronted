@@ -238,6 +238,7 @@ public class NecpraConversationsActivity extends AppCompatActivity implements Ne
 
     @Override protected void onResume() {
         super.onResume();
+        NecpraNotifier.requestPostNotificationsIfNeeded(this);
         resumed = true;
         repo.addListener(this);
         NecpraRealtime.get(this).start();            // live list: new messages / receipts trigger the normal catch-up

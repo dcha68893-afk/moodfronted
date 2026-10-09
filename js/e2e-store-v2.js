@@ -40,43 +40,70 @@
   const MIGRATION_FLAG = 'kyn_e2e_store_v2_migrated';
 
   let _dbPromise = null;
+  // FIX (RATCHET-STATE-LOST-AFTER-RELOAD): a failed or later-closed IndexedDB connection used to be cached in _dbPromise
+  // forever. Every get() then returned null ("no session") and every set() returned false for the rest of the page's
+  // life, so ratchet sessions silently failed to load/save. The connection is now dropped on failure / close /
+  // version-change and re-opened on the next call, and each operation retries once on a fresh connection.
+  function resetDb() { _dbPromise = null; }
   function openDb() {
     if (_dbPromise) return _dbPromise;
     _dbPromise = new Promise((resolve, reject) => {
       if (!('indexedDB' in window)) { reject(new Error('IndexedDB unavailable')); return; }
-      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      let req;
+      try { req = indexedDB.open(DB_NAME, DB_VERSION); } catch (e) { reject(e); return; }
       req.onupgradeneeded = () => {
         const db = req.result;
         if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
         if (!db.objectStoreNames.contains(ARCHIVE_STORE)) db.createObjectStore(ARCHIVE_STORE, { autoIncrement: true });
       };
-      req.onsuccess = () => resolve(req.result);
+      req.onsuccess = () => {
+        const db = req.result;
+        db.onclose = resetDb;
+        db.onversionchange = () => { try { db.close(); } catch (_) {} resetDb(); };
+        resolve(db);
+      };
       req.onerror = () => reject(req.error);
+      req.onblocked = () => reject(new Error('IndexedDB open blocked'));
     });
+    _dbPromise.catch(resetDb);
     return _dbPromise;
+  }
+  // Run `fn(db)`; on any failure reset the connection and try once more before giving up.
+  async function withDb(fn) {
+    try { return await fn(await openDb()); }
+    catch (_) { resetDb(); return await fn(await openDb()); }
   }
 
   async function idbGet(key) {
     try {
-      const db = await openDb();
-      return await new Promise((resolve, reject) => {
+      return await withDb(db => new Promise((resolve, reject) => {
         const tx = db.transaction(STORE, 'readonly');
         const r = tx.objectStore(STORE).get(key);
         r.onsuccess = () => resolve(r.result != null ? r.result : null);
         r.onerror = () => reject(r.error);
-      });
+      }));
     } catch (_) { return null; }
+  }
+  // Like idbGet but distinguishes "no such key" (null) from "store unreadable" (throws), so callers never mistake a
+  // transient storage failure for "this peer has no session" and rebuild (and overwrite) a healthy ratchet.
+  async function idbGetStrict(key) {
+    return await withDb(db => new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readonly');
+      const r = tx.objectStore(STORE).get(key);
+      r.onsuccess = () => resolve(r.result != null ? r.result : null);
+      r.onerror = () => reject(r.error);
+    }));
   }
 
   async function idbSet(key, value) {
     try {
-      const db = await openDb();
-      return await new Promise((resolve, reject) => {
+      return await withDb(db => new Promise((resolve, reject) => {
         const tx = db.transaction(STORE, 'readwrite');
         tx.objectStore(STORE).put(value, key);
         tx.oncomplete = () => resolve(true);
         tx.onerror = () => reject(tx.error);
-      });
+        tx.onabort = () => reject(tx.error || new Error('IndexedDB write aborted'));
+      }));
     } catch (_) { return false; }
   }
 
@@ -118,6 +145,7 @@
 
   // ── Public KV API (async — the drop-in replacement for localStorage) ──────
   async function get(key) { return idbGet(key); }
+  async function getStrict(key) { return idbGetStrict(key); }
   async function set(key, value) { return idbSet(key, value); }
   async function del(key) { return idbDelete(key); }
   async function keys() { return idbAllKeys(); }
@@ -262,7 +290,7 @@
   }
 
   window.KynectaE2EStore = {
-    get, set, del, keys,
+    get, getStrict, set, del, keys,
     archiveBeforeOverwrite, recoverArchived,
     migrateFromLocalStorageOnce,
     exportBackup, downloadBackup, importBackup,

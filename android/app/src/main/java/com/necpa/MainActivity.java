@@ -68,6 +68,7 @@ public class MainActivity extends BridgeActivity implements ModifiedMainActivity
     public void onStart() {
         super.onStart();
         NecpraNotifier.appForeground = true;
+        NecpraNotifier.requestPostNotificationsIfNeeded(this);
         // Make sure the server knows this device's FCM token even if the web layer has not registered it.
         NecpraPushRegistrar.sync(getApplicationContext(), false);
     }
@@ -157,7 +158,7 @@ public class MainActivity extends BridgeActivity implements ModifiedMainActivity
         // https only (plain http was accepted here but is not declared in the manifest).
         boolean allowed = "necpra".equalsIgnoreCase(uri.getScheme()) ||
                 ("https".equalsIgnoreCase(uri.getScheme()) &&
-                        "necpra.co.ke".equalsIgnoreCase(uri.getHost()));
+                        ("necpra.co.ke".equalsIgnoreCase(uri.getHost()) || "www.necpra.co.ke".equalsIgnoreCase(uri.getHost())));
         if (!allowed) return;
 
         // Consume it so re-delivery of this intent can't replay the link.
