@@ -134,12 +134,16 @@ async function stepUp(force){var cached=force?null:sessionStorage.getItem('necpr
   catch(e){if(/authenticator code|6-digit|OTP/i.test(e.message||'')){var otp=await ask('Two-step verification','6-digit authenticator code','text');if(!otp)return null;r=await api('/money/security/step-up',{method:'POST',body:JSON.stringify({password:password,otp:otp})})}else throw e}
   if(!r.stepUpToken)throw Error('Security verification failed');sessionStorage.setItem('necpra_money_step_up',r.stepUpToken);return r.stepUpToken}
 
+/* ---------- instant paint: show last-known wallet data immediately, refresh in background ---------- */
+function cacheKey(){try{var t=token();if(!t)return null;var p=JSON.parse(atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));var id=p.id||p.userId||p.sub||p.uid;return id?'necpra.money.cache.v1.'+id:null}catch(_){return null}}
+function cacheSave(){try{var k=cacheKey();if(!k||!S.overview)return;localStorage.setItem(k,JSON.stringify({o:S.overview,i:S.incoming,u:S.outgoing,t:Date.now()}))}catch(_){}}
+function cacheHydrate(){try{var k=cacheKey();if(!k)return false;var c=JSON.parse(localStorage.getItem(k)||'null');if(!c||!c.o)return false;S.overview=c.o;S.circles=c.o.circles||[];S.incoming=c.i||[];S.outgoing=c.u||[];S.loading=false;return true}catch(_){return false}}
 /* ---------- data ---------- */
 async function load(manual){
   var rb=$('refreshBtn');if(manual)rb.classList.add('spin');S.loading=!S.overview;render();
   try{
     var r=await Promise.all([api('/money/overview'),api('/money/requests/incoming').catch(function(){return{requests:[]}}),api('/money/requests').catch(function(){return{requests:[]}})]);
-    S.overview=r[0];S.circles=r[0].circles||[];S.incoming=r[1].requests||[];S.outgoing=r[2].requests||[];S.err='';
+    S.overview=r[0];S.circles=r[0].circles||[];S.incoming=r[1].requests||[];S.outgoing=r[2].requests||[];S.err='';cacheSave();
   }catch(e){S.err=e.message||'Money service is unavailable'}
   S.loading=false;rb.classList.remove('spin');header();render();try{window.parent.postMessage({type:'MONEY_CHANGED'},'*')}catch(_){}
 }
@@ -311,8 +315,6 @@ $('refreshBtn').addEventListener('click',function(){S.orders=null;load(true);if(
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeModal()});
 // back button inside this module: close an open sheet first (hardware back is handled by the shell)
 window.__moneyCloseTopLayer=function(){if($('modal').classList.contains('open')){closeModal();return true}if($('panel').classList.contains('open')){if(P.view==='settings'){P.view='main';drawPanel()}else closePanel();return true}return false};
-if(S.tab==='paylater')loadOrders();
-load();
-})();
+if(S.tab==='paylater')loadOrders(); if(cacheHydrate()){try{header()}catch(_){}render()} load(); })();
 </script>
 <script src="/js/header-labels.js" defer></script></body></html>

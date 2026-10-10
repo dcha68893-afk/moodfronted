@@ -162,7 +162,7 @@ function finish(r){
  if(res==='win')buzz([30,40,80]);else buzz(30);
  render();showResult()}
 
-let hintsLeft=3;
+let hintsLeft=3,puzIdx=0,puzDaily=false;
 function chToast(t){try{window.toast&&window.toast(t)}catch(_){}}
 function pgnFallback(t){try{const a=document.createElement('textarea');a.value=t;a.style.cssText='position:fixed;opacity:0;top:0;left:0';document.body.appendChild(a);a.select();document.execCommand('copy');a.remove()}catch(_){}}
 function pgnText(){const mv=hist.map(h=>h.san);let body='';for(let i=0;i<mv.length;i++){if(i%2===0)body+=(i/2+1)+'. ';body+=mv[i]+' '}
@@ -174,9 +174,11 @@ function pgnText(){const mv=hist.map(h=>h.san);let body='';for(let i=0;i<mv.leng
 function commit(m,fromRemote){
  if(mode!=='room'&&view<hist.length){hist.length=view;if(over){over=false;hideOverlay();startClock()}}
  const s=shown(),ms=legal(s),t=san(s,m,ms),n=make(s,m);
+ if(mode==='puzzle'){const pr=assess(n);if(pr.kind!=='mate'){selected=-1;targets=[];render();buzz(40);chToast('Not checkmate - try again');return}}
  hist.push({s:n,m,san:t});view=hist.length;selected=-1;targets=[];
  beep(m.cap!=='.'?420:560,.05);if(/[+#]$/.test(t)){beep(900,.09);buzz([18,30,18])}else if(/^O-O/.test(t)){beep(640,.07);buzz(15)}else buzz(m.cap!=='.'?14:8);
  if(mode==='room'&&!fromRemote)publish(n);
+ if(mode==='puzzle'){over=true;resultText='Puzzle solved!';clearInterval(clock);clock=null;buzz([30,40,80]);render();showPuzzleDone();return}
  const r=assess(n);
  if(r.over){finish(r.kind==='mate'?r:r);return}
  render();
@@ -261,6 +263,7 @@ function statusText(s){
  if(thinking)return'Computer is thinking…';
  if(!atLive())return'Reviewing move '+view+(mode==='room'?'':' — play a move to branch');
  const chk=inCheck(s.b,s.turn)?' — Check!':'';
+ if(mode==='puzzle')return'Puzzle: '+cname(s.turn)+' to move, mate in 1';
  if(mode==='room')return(s.turn===role?'Your move':"Opponent's move")+chk;
  if(mode==='cpu')return(s.turn===myColor?'Your move':'Computer to move')+chk;
  return cname(s.turn)+' to move'+chk}
@@ -308,14 +311,35 @@ function showResult(){
  const g=id=>o.querySelector('#'+id);
  if(g('chAgain'))g('chAgain').onclick=()=>startSolo(mode,level,myColor);if(g('chReview'))g('chReview').onclick=()=>{hideOverlay();go(hist.length)};if(g('chMenu'))g('chMenu').onclick=showMenu;
  g('chExit').onclick=()=>{hideOverlay();window.home&&window.home()}}
+/* PUZZLES (Chess.com / Lichess parity): mate-in-1 positions, each checked offline with chess.js. Any mating move solves it. */
+const PUZZLES=[["......k./.....ppp/......../......../......../......../.....PPP/R.....K.","w"],["r.bqkb.r/pppp.ppp/..n..n../....p..Q/..B.P.../......../PPPP.PPP/RNB.K.NR","w"],["rnbqkbnr/pppp.ppp/......../....p.../......P./.....P../PPPPP..P/RNBQKBNR","b"],["......rk/......pp/......../......N./......../......../......../......K.","w"],[".......k/......../.....KQ./......../......../......../......../........","w"],["k......./......../.K....../......../......../......../......../.......R","w"],[".......k/.....Kp./......../......../......../......../......../......R.","w"],["......k./.....ppp/......../......../......../......../.Q...PPP/......K.","w"],["....k.../......../....K.../......../......../......../......../R.......","w"],[".......k/......../......K./......../......../......../......../.R......","w"],["...k..../R......./...K..../......../......../......../......../........","w"],["k......./..Q...../.K....../......../......../......../......../........","w"],["r.bqkbnr/pppp.ppp/..n...../....p..Q/..B.P.../......../PPPP.PPP/RNB.K.NR","w"],["......k./......../......K./......../......../......../......../.......Q","w"],[".......k/......../......K./......../......../......../Q......./........","w"],[".k....../ppp...../......../......../......../......../......../.K.R....","w"],["r.....k./.....ppp/......../......../......../......../.....PPP/R.....K.","w"],["..k...../......../..K...../......../......../......../......../.......R","w"],["k.K...../......../......../......../......../......../......../.R......","w"]];
+const puzDay=()=>new Date().toLocaleDateString('en-CA');
+function puzSolved(){try{return JSON.parse(localStorage.getItem('mood.chess.puz.solved')||'[]')}catch(_){return[]}}
+function puzCoins(n){try{if(window.data){window.data.coins=(Number(window.data.coins)||0)+n;window.save&&window.save()}}catch(_){}}
+function startPuzzle(idx,isDaily){
+ aiTok++;thinking=false;promoMs=null;idx=((idx%PUZZLES.length)+PUZZLES.length)%PUZZLES.length;
+ const pz=PUZZLES[idx],b=parse(pz[0]);if(!b){chToast('Puzzle unavailable');return}
+ mode='puzzle';level='puzzle';puzIdx=idx;puzDaily=!!isDaily;myColor=pz[1];role=myColor;hintsLeft=1;
+ base={b,turn:pz[1],rights:{wK:false,wQ:false,bK:false,bQ:false},ep:-1,half:0,ply:0};
+ hist=[];view=0;over=false;resultText='';selected=-1;targets=[];flipped=pz[1]==='b';startAt=Date.now();startClock();started=true;
+ hideOverlay();render()}
+function showPuzzleDone(){
+ const solved=puzSolved(),first=!solved.includes(puzIdx);let bonus=0;
+ if(first){solved.push(puzIdx);try{localStorage.setItem('mood.chess.puz.solved',JSON.stringify(solved))}catch(_){}bonus+=10}
+ if(puzDaily){let d='';try{d=localStorage.getItem('mood.chess.puz.daily')||''}catch(_){}if(d!==puzDay()){try{localStorage.setItem('mood.chess.puz.daily',puzDay())}catch(_){}bonus+=20}}
+ if(bonus)puzCoins(bonus);
+ const o=ov('<div class="ch-ovc"><h2>Puzzle solved!</h2><p>Checkmate in 1'+(bonus?' \u2022 +'+bonus+' coins':'')+'</p><p>'+solved.length+' of '+PUZZLES.length+' puzzles solved</p><button class="ch-big" id="chPzNext">Next puzzle</button><button class="ch-big alt" id="chMenu">Menu</button></div>');
+ o.querySelector('#chPzNext').onclick=()=>startPuzzle(puzIdx+1,false);o.querySelector('#chMenu').onclick=showMenu}
 function showMenu(){
  aiTok++;thinking=false;
  const o=ov('<div class="ch-ovc"><h2>Game Master Chess</h2><p>Full rules: castling, en passant, promotion, draws</p><div class="ch-seg" id="chSide"><button data-c="w">♔ White</button><button data-c="b">♚ Black</button><button data-c="r">Random</button></div>'
- +'<button class="ch-big" data-lv="easy">Computer · Easy</button><button class="ch-big" data-lv="medium">Computer · Medium</button><button class="ch-big" data-lv="hard">Computer · Hard</button><button class="ch-big alt" data-lv="pass">Pass &amp; Play (2 players)</button>'
+ +'<button class="ch-big" data-lv="easy">Computer · Easy</button><button class="ch-big" data-lv="medium">Computer · Medium</button><button class="ch-big" data-lv="hard">Computer · Hard</button><button class="ch-big alt" data-lv="pass">Pass &amp; Play (2 players)</button><button class="ch-big alt" id="chPuzDay">Puzzle of the day (+20)</button><button class="ch-big alt" id="chPuz">Mate-in-1 puzzles</button>'
  +'<p>To play a friend online, use the Play Together button.</p>'+(started&&hist.length&&!over?'<button class="ch-big alt" id="chResume">Resume game</button>':'')+'<button class="ch-big alt" id="chExit2">Back to arcade</button></div>');
  const mark=()=>o.querySelectorAll('#chSide button').forEach(x=>x.classList.toggle('on',x.dataset.c===sidePick));mark();
  o.querySelectorAll('#chSide button').forEach(x=>x.onclick=()=>{sidePick=x.dataset.c;mark()});
  o.querySelectorAll('[data-lv]').forEach(x=>x.onclick=()=>{const lv=x.dataset.lv,c=sidePick==='r'?(Math.random()<.5?'w':'b'):sidePick;startSolo(lv==='pass'?'pass':'cpu',lv==='pass'?level:lv,c)});
+ o.querySelector('#chPuz').onclick=()=>{const sv=puzSolved();let i=0;while(i<PUZZLES.length&&sv.includes(i))i++;startPuzzle(i>=PUZZLES.length?0:i,false)};
+ o.querySelector('#chPuzDay').onclick=()=>{const t=puzDay();let h=0;for(const c of t)h=(h*31+c.charCodeAt(0))>>>0;startPuzzle(h%PUZZLES.length,true)};
  const rs=o.querySelector('#chResume');if(rs)rs.onclick=()=>{hideOverlay();if(mode==='cpu'&&cur().turn!==myColor&&!over)thinkSoon()};
  o.querySelector('#chExit2').onclick=()=>{hideOverlay();window.home&&window.home()}}
 function startSolo(m,lv,c){
@@ -336,7 +360,7 @@ function onRoomUpdate(){
 /* ───────────── Save & resume (solo games only; live rooms are server-driven) ───────────── */
 const SAVE_KEY='necpra.resume.v1.chess';
 function saveSolo(){try{
- if(mode==='room'||roomOf()||!started)return;
+ if(mode==='room'||mode==='puzzle'||roomOf()||!started)return;
  if(over||!hist.length){if(over)localStorage.removeItem(SAVE_KEY);return}
  localStorage.setItem(SAVE_KEY,JSON.stringify({mode,level,myColor,flipped,base:encode(base),hist:hist.map(h=>({p:encode(h.s),m:h.m,san:h.san}))}))}catch(_){}}
 function restoreSolo(){try{

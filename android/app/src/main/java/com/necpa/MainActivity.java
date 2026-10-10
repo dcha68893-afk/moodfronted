@@ -73,6 +73,51 @@ public class MainActivity extends BridgeActivity implements ModifiedMainActivity
         NecpraPushRegistrar.sync(getApplicationContext(), false);
     }
 
+    /**
+     * One-time prompt: many Android phones (Tecno, Infinix, itel, Xiaomi, Samsung, Oppo) freeze a swiped-away app and
+     * block its pushes. Opens the system battery settings so the user can set Necpra to "Unrestricted".
+     * Shown once ever, and only after notifications are allowed.
+     */
+    private void maybeShowBatteryDialog() {
+        try {
+            if (isFinishing()) return;
+            if (!androidx.core.app.NotificationManagerCompat.from(this).areNotificationsEnabled()) return;
+            final android.content.SharedPreferences sp = getSharedPreferences("necpra_battery_prompt", Context.MODE_PRIVATE);
+            if (sp.getBoolean("shown", false)) return;
+            try {
+                android.os.PowerManager pm = (android.os.PowerManager) getSystemService(Context.POWER_SERVICE);
+                if (pm != null && android.os.Build.VERSION.SDK_INT >= 23 && pm.isIgnoringBatteryOptimizations(getPackageName())) {
+                    sp.edit().putBoolean("shown", true).apply();
+                    return;
+                }
+            } catch (Throwable ignored) {}
+            sp.edit().putBoolean("shown", true).apply();   // mark first so a re-created activity never shows it twice
+            new androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle("Get messages when the app is closed")
+                    .setMessage("Your phone may pause Necpra in the background and block notifications. "
+                            + "Open battery settings and set Necpra to \"Unrestricted\" so you never miss a message.")
+                    .setPositiveButton("Open settings", (d, w) -> openBatterySettings())
+                    .setNegativeButton("Not now", null)
+                    .show();
+        } catch (Throwable t) {
+            Log.w("NecpraBattery", "Could not show battery dialog", t);
+        }
+    }
+
+    private void openBatterySettings() {
+        try {
+            startActivity(new Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+            return;
+        } catch (Throwable ignored) {}
+        try {
+            Intent i = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+            i.setData(Uri.parse("package:" + getPackageName()));
+            startActivity(i);
+        } catch (Throwable t) {
+            Log.w("NecpraBattery", "Could not open battery settings", t);
+        }
+    }
+
     @Override
     public void onStop() {
         NecpraNotifier.appForeground = false;
@@ -203,6 +248,8 @@ public class MainActivity extends BridgeActivity implements ModifiedMainActivity
         try {
             if (android.os.Build.VERSION.SDK_INT >= 33) setRecentsScreenshotEnabled(false);
         } catch (Throwable ignored) {}
+        // onResume (not onStart) so it runs again right after the notification-permission dialog closes.
+        maybeShowBatteryDialog();
     }
 
     @Override

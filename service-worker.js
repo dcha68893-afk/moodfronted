@@ -83,7 +83,7 @@ const SW_VERSION = '19.52.0';
 // v74: profile-photo fix (js/avatar-fix.js added, message.html + js/config.js changed). Bump forces every installed
 // PWA/Android app to drop old copies and show the 'Update ready - Refresh' banner.
 // v89: native-init.js (native Profile/Settings routing) is now network-first so an installed APK never runs a stale copy.
-const CACHE_NAME = 'necpra-static-v99';
+const CACHE_NAME = 'necpra-static-v100';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -94,6 +94,9 @@ const CORE_STATIC_ASSETS = [
   '/js/app.cache.js','/js/app.cache.unified.js','/js/authStorage.js','/js/app.offline.queue.js','/js/auth.session.manager.js',
   '/js/app.runtime.authority.js','/js/auth.account.limit.js','/js/google-auth.js','/js/app.offline.bootstrap.js',
   '/app-protect.js','/session-restore.js','/report-problem.js','/js/runtime-config.js','/js/config.js','/js/offline-gate.js','/js/header-labels.js','/js/offline-first.js','/js/theme.engine.js','/js/theme-contrast-guard.js','/js/settings-broadcast-listener.js','/js/necpa-session-resilience.js','/js/services.friend.js'
+  // v100: games + wallet precached so the first open after a deploy paints from cache instead of waiting on the
+  // network for ~330KB of game scripts. URLs include the ?v= query because the cache key does.
+  ,'/game-v3.html','/money.html','/games-crossword-v4.js?v=8.0','/games-chess-v1.js?v=2.4','/games-chess-3d.js?v=1','/games-commercial-v5.js?v=5.3','/games-v4-enhancements.js?v=4.4','/js/settings-broadcast-listener.js'
 ];
 
 const NETWORK_FIRST_PATTERNS = [
