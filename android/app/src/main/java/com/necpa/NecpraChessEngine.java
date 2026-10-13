@@ -500,8 +500,21 @@ public final class NecpraChessEngine {
         return a;
     }
 
+    // King of the Hill: a king standing on d4/e4/d5/e5 wins at once. The flag is static because the search is static;
+    // the activity sets it for every game it starts (Game.setHill) and clears it for standard games, puzzles and live rooms.
+    private static volatile boolean HILL;
+
+    public static void setHill(boolean on) { HILL = on; }
+
+    /** True when the king of the given colour stands on one of the four centre squares. */
+    static boolean kingOnHill(State s, boolean white) {
+        char k = white ? 'K' : 'k';
+        return s.b[27] == k || s.b[28] == k || s.b[35] == k || s.b[36] == k;
+    }
+
     private static int ab(State s, int d, int a, int b, Ctx ctx, int ply) {
         if (ctx.abort) return 0;
+        if (HILL && kingOnHill(s, !s.white)) return -MATE + ply;   // the side that just moved reached the hill
         if ((++ctx.n & 255) == 0 && System.nanoTime() > ctx.deadline) {
             ctx.abort = true;
             return 0;
@@ -620,6 +633,38 @@ public final class NecpraChessEngine {
         return best;
     }
 
+    // ------------------------------------------------------------------ game review
+
+    /** Centipawn loss never reported above this (a missed mate would otherwise dwarf everything). */
+    public static final int REVIEW_CAP = 1000;
+
+    /**
+     * For every ply of {@code g}, how much the move that was played lost compared with the best move at the given depth
+     * (in centipawns, from the mover's point of view, 0 = best). Returns null if the time budget ran out first.
+     */
+    public static int[] reviewLosses(Game g, int depth, long budgetMs) {
+        int n = g.moves.size();
+        int[] loss = new int[n];
+        Ctx ctx = new Ctx();
+        ctx.deadline = System.nanoTime() + budgetMs * 1_000_000L;
+        for (int i = 0; i < n; i++) {
+            State before = g.stateAt(i), after = g.stateAt(i + 1);
+            int best = ab(before, depth, -MATE * 2, MATE * 2, ctx, 0);
+            int played = -ab(after, depth - 1, -MATE * 2, MATE * 2, ctx, 1);
+            if (ctx.abort) return null;
+            loss[i] = Math.max(0, Math.min(REVIEW_CAP, best - played));
+        }
+        return loss;
+    }
+
+    /** "??" blunder, "?" mistake, "?!" inaccuracy, "" otherwise. */
+    public static String reviewMark(int loss) {
+        if (loss >= 300) return "??";
+        if (loss >= 150) return "?";
+        if (loss >= 70) return "?!";
+        return "";
+    }
+
     // ------------------------------------------------------------------ game wrapper
 
     /** Result of {@link Game#assess()}. */
@@ -647,6 +692,14 @@ public final class NecpraChessEngine {
         public Game() { this(start()); }
 
         public Game(State base) { this.base = base; }
+
+        /** King of the Hill variant (also switches the shared search flag). */
+        public boolean hill;
+
+        public void setHill(boolean on) {
+            hill = on;
+            NecpraChessEngine.setHill(on);
+        }
 
         public State current() { return states.isEmpty() ? base : states.get(states.size() - 1); }
 
@@ -685,6 +738,7 @@ public final class NecpraChessEngine {
 
         public Outcome assess() {
             State s = current();
+            if (hill && kingOnHill(s, !s.white)) return new Outcome(true, "hill", !s.white, false);
             List<Move> ms = legal(s);
             boolean chk = inCheck(s);
             if (ms.isEmpty()) return chk ? new Outcome(true, "mate", !s.white, true) : new Outcome(true, "stalemate", false, false);
@@ -692,6 +746,31 @@ public final class NecpraChessEngine {
             if (s.half >= 100) return new Outcome(true, "fifty", false, chk);
             if (repetitions(s) >= 3) return new Outcome(true, "rep", false, chk);
             return new Outcome(false, "", false, chk);
+        }
+
+        /** PGN text (headers + numbered SAN moves). A puzzle / custom start adds the FEN + SetUp headers. */
+        public String pgn(String white, String black, String result) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("[Event \"Necpra Chess\"]\n[Site \"Necpra\"]\n[Date \"")
+                    .append(new java.text.SimpleDateFormat("yyyy.MM.dd", java.util.Locale.US).format(new java.util.Date())).append("\"]\n")
+                    .append("[White \"").append(white).append("\"]\n[Black \"").append(black).append("\"]\n")
+                    .append("[Result \"").append(result).append("\"]\n");
+            if (hill) sb.append("[Variant \"King of the Hill\"]\n");
+            if (!positionKey(base).equals(positionKey(start())) || base.ply != 0) {
+                sb.append("[SetUp \"1\"]\n[FEN \"").append(toFen(base)).append("\"]\n");
+            }
+            sb.append('\n');
+            int fullmove = base.ply / 2 + 1;
+            boolean whiteToMove = base.white;
+            for (int i = 0; i < sans.size(); i++) {
+                if (whiteToMove) sb.append(fullmove).append(". ");
+                else if (i == 0) sb.append(fullmove).append("... ");
+                sb.append(sans.get(i)).append(' ');
+                if (!whiteToMove) fullmove++;
+                whiteToMove = !whiteToMove;
+            }
+            sb.append(result);
+            return sb.toString();
         }
 
         public List<String> playedNames() {

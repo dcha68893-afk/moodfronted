@@ -28,6 +28,22 @@ public final class NecpraBlockEngine {
             {{0, 0}, {1, 0}, {1, 1}, {1, 2}},
             {{0, 0}, {0, 1}, {0, 2}, {1, 1}},
             {{0, 1}, {1, 0}, {1, 1}, {2, 1}},
+            // Block Blast parity (same 15 shapes as the web arcade): long bars, big blocks, S/Z, big-L corners.
+            {{0, 0}, {0, 1}, {0, 2}, {0, 3}},
+            {{0, 0}, {1, 0}, {2, 0}, {3, 0}},
+            {{0, 0}, {0, 1}, {0, 2}, {0, 3}, {0, 4}},
+            {{0, 0}, {1, 0}, {2, 0}, {3, 0}, {4, 0}},
+            {{0, 0}, {0, 1}, {0, 2}, {1, 0}, {1, 1}, {1, 2}},
+            {{0, 0}, {0, 1}, {1, 0}, {1, 1}, {2, 0}, {2, 1}},
+            {{0, 0}, {0, 1}, {0, 2}, {1, 0}, {1, 1}, {1, 2}, {2, 0}, {2, 1}, {2, 2}},
+            {{0, 1}, {0, 2}, {1, 0}, {1, 1}},
+            {{0, 0}, {0, 1}, {1, 1}, {1, 2}},
+            {{0, 0}, {1, 0}, {1, 1}, {2, 1}},
+            {{0, 1}, {1, 0}, {1, 1}, {2, 0}},
+            {{0, 0}, {1, 0}, {2, 0}, {2, 1}, {2, 2}},
+            {{0, 0}, {0, 1}, {0, 2}, {1, 0}, {2, 0}},
+            {{0, 0}, {0, 1}, {0, 2}, {1, 2}, {2, 2}},
+            {{0, 2}, {1, 2}, {2, 0}, {2, 1}, {2, 2}},
     };
 
     /** An immutable piece: cells normalised so the minimum row/col is 0. */
@@ -99,7 +115,12 @@ public final class NecpraBlockEngine {
         public boolean levelComplete;
         public boolean gameOver;
         public List<int[]> clearedCells = new ArrayList<>(); // {r,c,color}
+        public boolean perfectClear;   // board completely empty after the clear (+PERFECT_CLEAR_BONUS)
+        public String praise;          // "Great!" / "Excellent!" / "Unbelievable!" for 2 / 3 / 4+ lines, else null
     }
+
+    public static final int PERFECT_CLEAR_BONUS = 1000;
+    public static final String MODE_LEVELS = "levels", MODE_CLASSIC = "classic", MODE_DAILY = "daily";
 
     // ------------------------------------------------------------------ state
 
@@ -112,11 +133,27 @@ public final class NecpraBlockEngine {
     private String difficulty = "moderate";
     private final int[] charges = new int[3]; // rotate, shuffle, blast
     private Random rng;
+    private boolean endless;   // Classic / Daily: no level target, play until no move fits
 
     public static final int POWER_ROTATE = 0, POWER_SHUFFLE = 1, POWER_BLAST = 2;
     public static final int CHARGES_PER_LEVEL = 3;
 
-    public NecpraBlockEngine(int level, String difficulty, long seed) {
+    /** Endless (Classic / Daily) game: empty board, no target, ends only when nothing fits. */
+    public static NecpraBlockEngine endless(String difficulty, long seed) {
+        return new NecpraBlockEngine(1, difficulty, seed, true);
+    }
+
+    /** Same piece sequence for everyone on a given day (date-hash seed). */
+    public static long dailySeed(String yyyyMmDd) {
+        long h = 1125899906842597L;
+        for (int i = 0; i < yyyyMmDd.length(); i++) h = 31 * h + yyyyMmDd.charAt(i);
+        return h ^ 0x426C6F636B44L;
+    }
+
+    public NecpraBlockEngine(int level, String difficulty, long seed) { this(level, difficulty, seed, false); }
+
+    private NecpraBlockEngine(int level, String difficulty, long seed, boolean endless) {
+        this.endless = endless;
         this.level = Math.max(1, level);
         this.difficulty = difficulty == null ? "moderate" : difficulty;
         this.rng = new Random(seed);
@@ -131,7 +168,7 @@ public final class NecpraBlockEngine {
         levelDone = false;
         over = false;
         Arrays.fill(charges, CHARGES_PER_LEVEL);
-        prefill(level);
+        if (!endless) prefill(level);
         refillTray();
     }
 
@@ -146,7 +183,9 @@ public final class NecpraBlockEngine {
     public int charges(int power) { return charges[power]; }
     public void addCharge(int power) { charges[power]++; }
 
-    public int target() { return targetFor(level); }
+    public boolean isEndless() { return endless; }
+
+    public int target() { return endless ? Integer.MAX_VALUE : targetFor(level); }
 
     public static int targetFor(int lv) {
         int t = 500;
@@ -191,9 +230,17 @@ public final class NecpraBlockEngine {
     }
 
     private int[][][] pool() {
-        if ("easy".equals(difficulty)) return Arrays.copyOfRange(SHAPES, 0, 8);
-        if ("hard".equals(difficulty)) return Arrays.copyOfRange(SHAPES, 3, SHAPES.length);
-        return SHAPES;
+        int[][][] base;
+        if ("easy".equals(difficulty)) base = Arrays.copyOfRange(SHAPES, 0, 8);
+        else if ("hard".equals(difficulty)) base = Arrays.copyOfRange(SHAPES, 3, SHAPES.length);
+        else base = SHAPES;
+        // Small shapes are listed twice so the big 5/6/9-cell pieces come up less often (as on the web).
+        List<int[][]> w = new ArrayList<>();
+        for (int[][] s : base) {
+            w.add(s);
+            if (s.length < 5) w.add(s);
+        }
+        return w.toArray(new int[0][][]);
     }
 
     /** Fills the tray with three pieces, guaranteeing at least one of them can be placed. */
@@ -241,7 +288,16 @@ public final class NecpraBlockEngine {
         if (trayCount() == 0) refillTray();
         clearLines(res);
         res.combo = combo;
-        if (score >= target()) {
+        int lines = res.clearedRows.length + res.clearedCols.length;
+        if (lines >= 4) res.praise = "Unbelievable!";
+        else if (lines == 3) res.praise = "Excellent!";
+        else if (lines == 2) res.praise = "Great!";
+        if (lines > 0 && boardEmpty()) {
+            res.perfectClear = true;
+            score += PERFECT_CLEAR_BONUS;
+            res.gained += PERFECT_CLEAR_BONUS;
+        }
+        if (!endless && score >= target()) {
             levelDone = true;
             res.levelComplete = true;
         } else if (!anyMove()) {
@@ -249,6 +305,11 @@ public final class NecpraBlockEngine {
             res.gameOver = true;
         }
         return res;
+    }
+
+    private boolean boardEmpty() {
+        for (int r = 0; r < N; r++) for (int c = 0; c < N; c++) if (board[r][c] >= 0) return false;
+        return true;
     }
 
     private void clearLines(PlaceResult res) {
@@ -395,6 +456,7 @@ public final class NecpraBlockEngine {
         sb.append('|');
         for (int i = 0; i < 3; i++) sb.append(tray[i] == null ? "-" : tray[i].encode()).append(i < 2 ? "/" : "");
         sb.append('|').append(hold == null ? "-" : hold.encode());
+        sb.append('|').append(endless ? "E" : "L");
         return sb.toString();
     }
 
@@ -402,7 +464,8 @@ public final class NecpraBlockEngine {
         try {
             String[] p = s.split("\\|", -1);
             if (p.length < 7 || p[4].length() != N * N) return null;
-            NecpraBlockEngine e = new NecpraBlockEngine(Integer.parseInt(p[0]), difficulty, System.nanoTime());
+            boolean endlessSave = p.length > 7 && "E".equals(p[7]);
+            NecpraBlockEngine e = new NecpraBlockEngine(Integer.parseInt(p[0]), difficulty, System.nanoTime(), endlessSave);
             e.score = Integer.parseInt(p[1]);
             e.combo = Integer.parseInt(p[2]);
             String[] ch = p[3].split(",");
@@ -415,7 +478,7 @@ public final class NecpraBlockEngine {
             String[] tr = p[5].split("/");
             for (int i = 0; i < 3; i++) e.tray[i] = "-".equals(tr[i]) ? null : Piece.decode(tr[i]);
             e.hold = "-".equals(p[6]) ? null : Piece.decode(p[6]);
-            e.levelDone = e.score >= e.target();
+            e.levelDone = !e.endless && e.score >= e.target();
             e.over = !e.levelDone && !e.anyMove();
             return e;
         } catch (RuntimeException ex) {

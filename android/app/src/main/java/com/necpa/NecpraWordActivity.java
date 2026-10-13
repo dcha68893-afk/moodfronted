@@ -37,7 +37,7 @@ public class NecpraWordActivity extends NecpraGameActivity {
     private long matchStartMs;
 
     private LinearLayout content;
-    private TextView tvLevel, tvFound, tvHints, tvPreview, tvOpp, tvInfo;
+    private TextView tvLevel, tvFound, tvHints, tvBonus, tvPreview, tvOpp, tvInfo;
     private TextView btnHint, btnList, btnShuffle, btnRestart;
     private BoardView boardView;
     private WheelView wheelView;
@@ -100,9 +100,14 @@ public class NecpraWordActivity extends NecpraGameActivity {
         tvLevel = statChip("LEVEL 1");
         tvFound = statChip("0 / 0 words");
         tvHints = statChip("💡 0");
-        for (TextView t : new TextView[]{tvLevel, tvFound, tvHints}) {
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
-            lp.leftMargin = lp.rightMargin = dp(4);
+        tvBonus = statChip("⭐ 0");
+        for (TextView t : new TextView[]{tvLevel, tvFound, tvHints, tvBonus}) {
+            // 4 chips must fit a 360dp screen: share the row, never wrap, tighter padding
+            t.setSingleLine(true);
+            t.setGravity(Gravity.CENTER);
+            t.setPadding(dp(8), t.getPaddingTop(), dp(8), t.getPaddingBottom());
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, t == tvFound ? 1.5f : 1f);
+            lp.leftMargin = lp.rightMargin = dp(3);
             chips.addView(t, lp);
         }
         content.addView(chips, new LinearLayout.LayoutParams(-1, -2));
@@ -191,6 +196,7 @@ public class NecpraWordActivity extends NecpraGameActivity {
         tvLevel.setText("LEVEL " + eng.endlessLevel());
         tvFound.setText(eng.foundCount() + " / " + eng.totalWords() + " words");
         tvHints.setText("💡 " + eng.hints());
+        tvBonus.setText("⭐ " + eng.bonusCount());
         boardView.invalidate();
         wheelView.invalidate();
         if (!roomMode) tvInfo.setText("Swipe across the letters to spell a word");
@@ -200,7 +206,7 @@ public class NecpraWordActivity extends NecpraGameActivity {
 
     private void onWord(String word) {
         if (eng == null || finishedLevel || submittedRoom) return;
-        NecpraWordEngine.Submit r = eng.submit(word);
+        NecpraWordEngine.Submit r = eng.submit(word, !roomMode);   // live matches reject non-grid words (fair scoring)
         switch (r) {
             case NEW_WORD:
                 sfx.play(NecpraSfx.WORD);
@@ -212,6 +218,28 @@ public class NecpraWordActivity extends NecpraGameActivity {
                 if (roomMode) roomProgress();
                 else saveNow();
                 if (eng.isComplete()) levelDone();
+                break;
+            case BONUS_WORD: {
+                // Wordscapes-style bonus word: a real word that is not in the grid earns coins (same rule as the web game).
+                sfx.play(NecpraSfx.WORD);
+                sfx.haptic(root, 0);
+                String bw = word.toUpperCase();
+                int bonusCoins = NecpraWordEngine.bonusCoins(bw);
+                earn(bonusCoins, null);
+                floatText("⭐ +" + bonusCoins, root.getWidth() / 2f, root.getHeight() * 0.3f, cGold);
+                if (eng.lastBonusGaveHint()) {
+                    store.setWordHints(eng.hints());
+                    toast("⭐ " + NecpraWordEngine.BONUS_HINT_EVERY + " bonus words! +1 hint");
+                } else {
+                    toast("⭐ BONUS " + bw + "  +" + bonusCoins);
+                }
+                refresh();
+                saveNow();
+                break;
+            }
+            case ALREADY_BONUS:
+                toast("Bonus word already found");
+                sfx.play(NecpraSfx.WRONG);
                 break;
             case ALREADY_FOUND:
                 toast("Already found");
@@ -311,7 +339,7 @@ public class NecpraWordActivity extends NecpraGameActivity {
         }
         final int done = eng.endlessLevel();
         // No hints used is a perfect score; every hint spent lowers the praise a step.
-        int hintsUsed = Math.max(0, hintsAtStart - eng.hints());
+        int hintsUsed = eng.hintsUsedThisLevel();
         double ratio = hintsUsed == 0 ? 1.0 : hintsUsed == 1 ? 0.9 : hintsUsed == 2 ? 0.8 : hintsUsed == 3 ? 0.65 : 0.5;
         eng.grantCompleteRewards();
         store.setWordHints(eng.hints());
@@ -321,7 +349,7 @@ public class NecpraWordActivity extends NecpraGameActivity {
         store.setStars("crossword", done, 3);
         earn(bonus, null);
         levelResult(done, ratio, 3,
-                new String[][]{{"Words", found + " / " + eng.totalWords()}, {"Bonus", "🪙 " + bonus}, {"Hints", "+1 (💡 " + eng.hints() + ")"}},
+                new String[][]{{"Words", found + " / " + eng.totalWords()}, {"Bonus", "🪙 " + bonus}, {"Hints", "+1 (💡 " + eng.hints() + ")"}, {"Bonus words", "⭐ " + eng.bonusCount()}},
                 "Next level", new Runnable() {
                     @Override public void run() {
                         eng.next();

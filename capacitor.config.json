@@ -19,5 +19,8 @@
         "list"
       ]
     }
+  },
+  "android": {
+    "appendUserAgent": "NecpraApp/1.2"
   }
 }

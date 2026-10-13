@@ -57,6 +57,7 @@ public final class NecpraGameApi {
             c.setReadTimeout(30000);
             c.setUseCaches(false);
             c.setRequestProperty("Accept", "application/json");
+            c.setRequestProperty("X-Necpra-Client", "android");   // server refuses coin purchases from the Play build
             if (token != null && !token.isEmpty()) c.setRequestProperty("Authorization", "Bearer " + token);
             if (body != null) {
                 c.setDoOutput(true);

@@ -112,7 +112,7 @@ html,body{background:var(--kyn-bg-root);color:var(--kyn-text-primary)}
 #necpraLevelDone .nld-row{flex-wrap:wrap}#necpraLevelDone .nld-row button{flex:1 1 40%}#necpraLevelDone #nldNext{flex:1 1 100%}
 #necpraLevelDone .nld-rows{margin:8px 0 14px;display:grid;gap:4px;font-size:13px;color:var(--muted)}#necpraLevelDone .nld-rows b{color:var(--kyn-text-primary)}
 #necpraLevelDone .stars{font-size:30px;color:var(--gold);letter-spacing:4px}#necpraLevelDone .stars i{font-style:normal;opacity:.25}
-.coins[aria-label="Buy coins"]::after{content:"+";display:inline-grid;place-items:center;width:18px;height:18px;margin-left:8px;border-radius:50%;background:linear-gradient(#ffd766,#f0a91c);color:#2a1a00;font-weight:900;font-size:13px;line-height:1}
+.in-app .coins[aria-label="Buy coins"]::after{display:none!important} .coins[aria-label="Buy coins"]::after{content:"+";display:inline-grid;place-items:center;width:18px;height:18px;margin-left:8px;border-radius:50%;background:linear-gradient(#ffd766,#f0a91c);color:#2a1a00;font-weight:900;font-size:13px;line-height:1}
 #home{background:var(--g-page)}
 #home .top{background:color-mix(in srgb,var(--kyn-bg-header) 82%,transparent);border-bottom:1px solid var(--g-line)}
 .hero{padding:10px 2px 22px}
@@ -215,12 +215,15 @@ async function pay(){if(busy)return;const ph=document.getElementById('nbPhone').
   else msg('Payment not confirmed yet. If M-Pesa took your money, coins will appear shortly — reopen the game to refresh.');
  }catch(e){msg(e.message||'Payment failed')}
  busy=false;go.disabled=false}
-window.__buyGameCoins=function(){const m=buildModal();document.getElementById('nbBal').textContent='Balance: 🪙 '+bal().toLocaleString();drawPacks();try{const p=localStorage.getItem('necpra.mpesa.phone');if(p)document.getElementById('nbPhone').value=p}catch(_){}msg('');m.classList.add('show')};
+/* Inside the Android app coins are earned, not bought (Google Play Payments policy). */
+const __inApp=()=>{try{return /NecpraApp/i.test(navigator.userAgent)||!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform())}catch(_){return false}};
+try{if(__inApp())document.documentElement.classList.add('in-app')}catch(_){}
+window.__buyGameCoins=function(){if(__inApp()){try{toast('Earn coins by playing: levels, daily challenges and matches')}catch(_){}return}const m=buildModal();document.getElementById('nbBal').textContent='Balance: 🪙 '+bal().toLocaleString();drawPacks();try{const p=localStorage.getItem('necpra.mpesa.phone');if(p)document.getElementById('nbPhone').value=p}catch(_){}msg('');m.classList.add('show')};
 /* Pick up coins credited on the server (previous purchases / match rewards) */
 setTimeout(syncServerCoins,1500);document.addEventListener('visibilitychange',()=>{if(!document.hidden)syncServerCoins()});
 })();
 </script>
-<script id="mood-crossword-v4" src="/games-crossword-v4.js?v=8.0"></script><script src="/games-chess-v1.js?v=2.4"></script><script>
+<script id="mood-crossword-v4" src="/games-crossword-v4.js?v=8.2"></script><script src="/games-chess-v1.js?v=2.5"></script><script>
 'use strict';const $=id=>document.getElementById(id),S=['home','block','trivia','crossword','chess'];let data=JSON.parse(localStorage.getItem('moodArcadeV3')||'{}');data.coins??=1200;data.games??=0;data.best??=0;data.streak??=0;window.data=data;function save(){localStorage.setItem('moodArcadeV3',JSON.stringify(data));updateHome()}function updateHome(){$('coins').textContent=data.coins.toLocaleString();$('tc').textContent=data.coins.toLocaleString();$('games').textContent=data.games;$('best').textContent=data.best;$('streak').textContent=data.streak}function show(x){S.forEach(s=>$(s).classList.toggle('active',s===x))}
 // FIX (NAV BAR STILL VISIBLE INSIDE A GAME): home() and openGame() only ever
 // toggled which internal .screen was visible — nothing here ever told the

@@ -114,6 +114,8 @@ public class NecpraAuthActivity extends AppCompatActivity {
         content.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(content, new ViewGroup.LayoutParams(-1, -2));
         root.addView(scroll);
+        // Target SDK 36 draws edge-to-edge: keep content clear of the status bar, navigation bar and keyboard.
+        NecpraConversationsActivity.applyInsets(root);
         setContentView(root);
 
         Intent in = getIntent();
@@ -274,7 +276,7 @@ public class NecpraAuthActivity extends AppCompatActivity {
         agree.setPadding(dp(20), dp(12), dp(24), 0);
         CheckBox cb = new CheckBox(this);
         agree.addView(cb);
-        TextView t1 = tv("I agree to the ", 14, sub, false);
+        TextView t1 = tv("I am 13 or older and agree to the ", 14, sub, false);
         agree.addView(t1);
         agree.addView(linkText("Terms", SITE + "/legal/terms.html"));
         agree.addView(tv(" and ", 14, sub, false));
@@ -289,10 +291,13 @@ public class NecpraAuthActivity extends AppCompatActivity {
             if (!Patterns.EMAIL_ADDRESS.matcher(e).matches()) { showMessage("Please enter a valid email address", true); return; }
             if (p.length() < 8) { showMessage("Password must be at least 8 characters", true); return; }
             if (!p.equals(p2)) { showMessage("Passwords do not match", true); return; }
-            if (!cb.isChecked()) { showMessage("You must accept the terms and conditions", true); return; }
+            if (!cb.isChecked()) { showMessage("You must confirm you are 13 or older and accept the Terms and Privacy Policy", true); return; }
             doRegister(n, u, e, p);
         });
         outlineButton("Continue with Google", v -> { if (!busy) finishWith(ACTION_GOOGLE); });
+        TextView googleNote = tv("By continuing with Google you confirm you are 13 or older and agree to the Terms and Privacy Policy.", 12, sub, false);
+        googleNote.setPadding(dp(24), dp(8), dp(24), 0);
+        content.addView(googleNote);
         TextView sw = linkText("Already have an account? Log in", null);
         sw.setOnClickListener(v -> { if (!busy) render(Mode.LOGIN); });
         padded(sw, 24, 18);

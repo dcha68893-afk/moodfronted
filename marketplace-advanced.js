@@ -599,6 +599,15 @@ async function _advMoneyCall(path, body) {
         if (step._error) return { success: false, message: step.message };
         const r = await _api('POST', path, body, false, { 'X-Money-Step-Up': step, 'Idempotency-Key': key });
         if (r && r.status === 401) { sessionStorage.removeItem('necpra_money_step_up'); continue; }   // expired step-up: ask again once
+        // Wallet features are 18+: the server asks for a one-time confirmation (self-declaration), then we retry once.
+        if (r && r.status === 403 && (r.errorCode === 'ADULT_CONFIRMATION_REQUIRED' || r.code === 'ADULT_CONFIRMATION_REQUIRED' || /confirm you are 18/i.test(String(r.message || '')))) {
+            if (attempt === 0 && window.confirm('Wallet features are for people aged 18 and over.\n\nAre you 18 or older?')) {
+                const c = await _api('POST', '/money/adult-confirm', {}, false);
+                if (c && c.success !== false && !(c.status >= 400)) continue;
+                return { success: false, message: 'Could not save your confirmation. Please try again.' };
+            }
+            return { success: false, message: 'You must be 18 or older to use the wallet.' };
+        }
         return r;
     }
     return { success: false, message: 'Verification expired. Please try again.' };

@@ -814,7 +814,30 @@ public abstract class NecpraGameActivity extends Activity {
     private static final int[][] PACKS = {{5, 10}, {10, 20}, {50, 100}};
     private boolean buying;
 
+    /** Google Play Payments policy: game currency is not sold through M-Pesa inside the Play app. Set true only with Play Billing. */
+    private static final boolean COIN_PURCHASE_ENABLED = false;
+
+    private void earnCoinsDialog() {
+        LinearLayout c = column();
+        c.addView(text("🪙  Earn coins", 22, cText, true));
+        TextView bal = text("Balance: 🪙 " + String.format(java.util.Locale.US, "%,d", store.coins()), 13, cSub, false);
+        bal.setPadding(0, dp(4), 0, dp(12));
+        c.addView(bal);
+        TextView how = text("Coins are earned by playing: finish levels, win live matches, play the daily challenge and find bonus words in Word Connect.", 14.5f, cText, false);
+        how.setLineSpacing(0, 1.15f);
+        how.setPadding(0, 0, 0, dp(14));
+        c.addView(how);
+        final Modal m = modal(c, true);
+        c.addView(button("Got it", PRIMARY, new Runnable() {
+            @Override public void run() { m.dismiss(); }
+        }));
+    }
+
     protected void buyCoinsDialog() {
+        if (!COIN_PURCHASE_ENABLED) {
+            earnCoinsDialog();
+            return;
+        }
         final LinearLayout c = column();
         c.addView(text("🪙  Buy coins", 22, cText, true));
         TextView bal = text("Balance: 🪙 " + String.format(java.util.Locale.US, "%,d", store.coins()), 13, cSub, false);

@@ -162,7 +162,8 @@ public class NecpraArcadeActivity extends NecpraGameActivity {
         card.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 sfx.play(NecpraSfx.TAP);
-                launch(g[0], null);
+                if ("block".equals(g[0])) chooseBlockMode();
+                else launch(g[0], null);
             }
         });
         return card;
@@ -205,6 +206,43 @@ public class NecpraArcadeActivity extends NecpraGameActivity {
         }
         Intent i = new Intent(this, cls);
         if (roomCode != null) i.putExtra(EXTRA_ROOM, roomCode);
+        startActivity(i);
+    }
+
+    /** Block Puzzle has three solo modes (same as the web arcade): Levels, Classic (endless) and Daily. */
+    private void chooseBlockMode() {
+        LinearLayout c = column();
+        c.addView(text("Block Puzzle", 22, cText, true));
+        TextView sub = text("Choose a mode", 14, cSub, false);
+        sub.setPadding(0, dp(6), 0, dp(12));
+        c.addView(sub);
+        final Modal m = modal(c, false);
+        c.addView(button("Levels", PRIMARY, new Runnable() {
+            @Override public void run() {
+                m.dismiss();
+                launchBlock(NecpraBlockEngine.MODE_LEVELS);
+            }
+        }));
+        c.addView(space(8));
+        int best = store.modeBest("block.classic");
+        c.addView(button("Classic · endless" + (best > 0 ? "  (best " + String.format(java.util.Locale.US, "%,d", best) + ")" : ""), SECONDARY, new Runnable() {
+            @Override public void run() {
+                m.dismiss();
+                launchBlock(NecpraBlockEngine.MODE_CLASSIC);
+            }
+        }));
+        c.addView(space(8));
+        c.addView(button("Daily · same pieces for everyone" + (store.dailyClaimed("block") ? "" : "  +🪙"), GOLD, new Runnable() {
+            @Override public void run() {
+                m.dismiss();
+                launchBlock(NecpraBlockEngine.MODE_DAILY);
+            }
+        }));
+    }
+
+    private void launchBlock(String blockMode) {
+        Intent i = new Intent(this, NecpraBlockActivity.class);
+        i.putExtra(EXTRA_MODE, blockMode);
         startActivity(i);
     }
 

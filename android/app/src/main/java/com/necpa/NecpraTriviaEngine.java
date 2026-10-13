@@ -14,7 +14,7 @@ import java.util.Set;
  */
 public final class NecpraTriviaEngine {
     public static final int QUESTIONS_PER_LEVEL = 8;
-    public static final String[] SUBJECTS = {"mixed", "general", "science", "math", "geography", "history", "kenya", "tech"};
+    public static final String[] SUBJECTS = {"mixed", "general", "science", "math", "geography", "history", "kenya", "tech", "sports", "entertainment", "arts"};
 
     public static final class Question {
         public final int id;

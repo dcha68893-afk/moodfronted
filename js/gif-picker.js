@@ -1,7 +1,7 @@
 /**
- * gif-picker.js — Tenor GIF search for Necpa
+ * gif-picker.js — GIF search for Necpra (via our /api/gifs proxy)
  *
- * Phase 1 feature: GIF Search (Tenor/Giphy)
+ * Phase 1 feature: GIF Search (GIPHY via server)
  *
  * - Adds a GIF button next to the emoji button in the message input
  * - Opens an in-chat GIF picker with search + trending
@@ -12,16 +12,16 @@
  *
  * Tenor API key: uses window.TENOR_API_KEY if set, otherwise the public
  * demo key (rate-limited, fine for dev/small scale).
- * Set window.TENOR_API_KEY = "YOUR_KEY" in your HTML before this script.
+ * GIFs are served by /api/gifs (server env GIPHY_API_KEY).
  */
 
 (function (global) {
   'use strict';
 
   // ── Config ─────────────────────────────────────────────────────────────────
-  const TENOR_KEY    = global.TENOR_API_KEY || 'AIzaSyAyimkuYQYF_FXVALexPzfL7eomIcLW2jY'; // public demo key
-  const TENOR_BASE   = 'https://tenor.googleapis.com/v2';
-  const CLIENT_KEY   = 'necpa';
+  // The Tenor API was shut down on 30 Jun 2026. GIFs now come from our own server (/api/gifs), which holds the
+  // provider key (GIPHY_API_KEY) so no key ships in the app.
+  const GIF_API      = '/api/gifs';
   const PAGE_LIMIT   = 20;
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -137,11 +137,21 @@
   }
 
   // ── Tenor API ───────────────────────────────────────────────────────────────
+  function _apiBase() { return global.API_BASE_URL || global.BACKEND_URL || ''; }
+  function _token() {
+    try {
+      return global.authToken || sessionStorage.getItem('kynecta_auth_token') || localStorage.getItem('kynecta_auth_token')
+        || localStorage.getItem('authToken') || localStorage.getItem('token') || '';
+    } catch (_) { return ''; }
+  }
+
   async function _fetchGifs(query, pos = '') {
-    const endpoint = query
-      ? `${TENOR_BASE}/search?q=${encodeURIComponent(query)}&key=${TENOR_KEY}&client_key=${CLIENT_KEY}&limit=${PAGE_LIMIT}&pos=${pos}&media_filter=gif,tinygif`
-      : `${TENOR_BASE}/featured?key=${TENOR_KEY}&client_key=${CLIENT_KEY}&limit=${PAGE_LIMIT}&pos=${pos}&media_filter=gif,tinygif`;
-    const res  = await fetch(endpoint);
+    const qs = `limit=${PAGE_LIMIT}&pos=${encodeURIComponent(pos)}` + (query ? `&q=${encodeURIComponent(query)}` : '');
+    const endpoint = `${_apiBase()}${GIF_API}/${query ? 'search' : 'trending'}?${qs}`;
+    const t = _token();
+    const res = await fetch(endpoint, { headers: t ? { Authorization: `Bearer ${t}` } : {}, credentials: 'include' });
+    if (res.status === 503) { const e = new Error('unavailable'); e.unavailable = true; throw e; }
+    if (!res.ok) throw new Error('gif http ' + res.status);
     const data = await res.json();
     return { results: data.results || [], next: data.next || '' };
   }
@@ -193,7 +203,7 @@
       _nextPos = next;
       _renderResults(results, append);
     } catch (e) {
-      if (grid) grid.innerHTML = '<div class="gif-empty">Couldn\'t load GIFs 😔</div>';
+      if (grid) grid.innerHTML = e && e.unavailable ? '<div class="gif-empty">GIFs are temporarily unavailable</div>' : '<div class="gif-empty">Couldn\'t load GIFs 😔</div>';
     } finally {
       _loading = false;
     }
@@ -206,6 +216,7 @@
     panel.innerHTML = `
       <input id="kynGifSearch" type="text" placeholder="Search GIFs…" autocomplete="off" />
       <div id="kynGifGrid"></div>
+      <div style="font-size:10px;opacity:.55;text-align:center;padding:3px 0">Powered by GIPHY</div>
     `;
     return panel;
   }
@@ -285,36 +296,36 @@
   function _sendGif({ tiny, full, title, id }) {
     _closePanel();
 
-    // Register a Tenor impression (required by API ToS)
-    fetch(`${TENOR_BASE}/registershare?id=${id}&key=${TENOR_KEY}&client_key=${CLIENT_KEY}`).catch(() => {});
-
     // Use the same send path as existing messages
     const core = global.MessagesCore || global.messagesCore || global.__messagesCore;
     if (core && core.sendMessage) {
       core.sendMessage(title || 'GIF', {
         type: 'gif',
-        metadata: { gifUrl: tiny, gifFullUrl: full, gifTitle: title, gifId: id, powered: 'Tenor' },
+        metadata: { gifUrl: tiny, gifFullUrl: full, gifTitle: title, gifId: id, powered: 'GIPHY' },
       });
       return;
     }
 
     // Fallback: fire a custom event that messages-core listens for
     window.dispatchEvent(new CustomEvent('kyn:sendGif', {
-      detail: { type: 'gif', content: title || 'GIF', metadata: { gifUrl: tiny, gifFullUrl: full, gifTitle: title, powered: 'Tenor' } }
+      detail: { type: 'gif', content: title || 'GIF', metadata: { gifUrl: tiny, gifFullUrl: full, gifTitle: title, powered: 'GIPHY' } }
     }));
   }
 
   // ── GIF bubble renderer (called from messages-ui) ──────────────────────────
   function renderGifBubble(message) {
     const meta = message.metadata || {};
-    const url  = meta.gifUrl || meta.gifFullUrl || message.content;
-    const title = meta.gifTitle || 'GIF';
+    // gifUrl/gifTitle come from the SENDER's message metadata: escape them and only allow https image URLs.
+    const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const rawUrl = String(meta.gifUrl || meta.gifFullUrl || message.content || '');
+    const url  = /^https:\/\//i.test(rawUrl) ? esc(rawUrl) : '';
+    const title = esc(meta.gifTitle || 'GIF');
     return `
       <div class="msg-gif-container" title="${title}">
         <img src="${url}" alt="${title}" loading="lazy" />
         <span class="msg-gif-badge">GIF</span>
       </div>
-      <div class="msg-gif-powered">via Tenor</div>
+      <div class="msg-gif-powered">via ${(meta.powered || 'GIPHY').replace(/[<>&"]/g, '')}</div>
     `;
   }
 

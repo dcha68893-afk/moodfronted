@@ -116,6 +116,46 @@ public final class NecpraGameStore {
 
     public synchronized int bestScore(String game) { return p.getInt("bs." + game, 0); }
 
+    /** Per-mode best (Block Classic / Daily etc.), separate from the level-based best. Returns true when raised. */
+    public synchronized int modeBest(String key) { return p.getInt("mb." + key, 0); }
+
+    public synchronized boolean setModeBest(String key, int score) {
+        if (score <= modeBest(key)) return false;
+        p.edit().putInt("mb." + key, score).apply();
+        return true;
+    }
+
+    /** True exactly once per calendar day for the given daily reward key (claims it). */
+    public synchronized boolean claimDaily(String key) {
+        String k = "dc." + key;
+        if (today().equals(p.getString(k, ""))) return false;
+        p.edit().putString(k, today()).apply();
+        return true;
+    }
+
+    /** Chess mate-in-1 puzzle progress: comma list of solved puzzle indexes. */
+    public synchronized java.util.Set<Integer> solvedPuzzles() {
+        java.util.Set<Integer> out = new java.util.HashSet<>();
+        for (String x : p.getString("pz", "").split(",")) {
+            if (!x.isEmpty()) {
+                try { out.add(Integer.parseInt(x)); } catch (NumberFormatException ignored) { }
+            }
+        }
+        return out;
+    }
+
+    /** Marks a puzzle solved; true only the first time. */
+    public synchronized boolean markPuzzleSolved(int idx) {
+        java.util.Set<Integer> s = solvedPuzzles();
+        if (!s.add(idx)) return false;
+        StringBuilder sb = new StringBuilder();
+        for (int v : s) sb.append(v).append(',');
+        p.edit().putString("pz", sb.toString()).apply();
+        return true;
+    }
+
+    public synchronized boolean dailyClaimed(String key) { return today().equals(p.getString("dc." + key, "")); }
+
     public synchronized int stars(String game, int level) { return p.getInt("st." + game + "." + level, 0); }
 
     public synchronized void setStars(String game, int level, int stars) {

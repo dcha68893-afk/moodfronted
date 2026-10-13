@@ -20,6 +20,8 @@
   p, li { color: var(--text); }
   ul { padding-left: 20px; }
   .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 28px 32px; }
+  .pref-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)} .pref-label small{display:block;color:var(--text-light)} .pref-toggle input{width:20px;height:20px}
+  .pref-toggle-track{display:none}
 </style>
 </head>
 <body>
@@ -27,7 +29,7 @@
     <a class="top-link" href="../index.html"><i class="fas fa-arrow-left"></i> Back to Necpra</a>
     <h1><i class="fas fa-file-contract"></i> Terms of Service</h1>
     <div class="updated">Effective: January 2026</div>
-    <div class="card" id="legalBody">Loading…</div>
+    <div class="card" id="legalBody"><p>Effective: January 2026. By using Necpra you agree to these terms.</p><h4>Eligibility</h4><p>You must be 13 years or older. Users under 18 require parental consent.</p><h4>Account responsibilities</h4><ul><li>Keep your credentials secure. You are responsible for all activity on your account.</li><li>Do not share account access with others.</li><li>Report any unauthorised access immediately.</li></ul><h4>Wallet, payments and coins</h4><ul><li>Wallet features (top-up, transfers, withdrawals, airtime, marketplace payments) are for users aged 18 and over and are provided together with our payment partners; fees and limits are shown before you confirm.</li><li>Arcade coins are an in-game item with no cash value; they cannot be withdrawn or exchanged for money, and are earned by playing in the Android app.</li></ul><h4>Your content and reporting</h4><p>You are responsible for what you post. Use the Report and Block options in chats, statuses, profiles and groups to flag abuse; we review reports and may remove content or suspend accounts.</p><h4>Prohibited conduct</h4><ul><li>Harassment, hate speech, or threats of violence.</li><li>Distributing spam, malware, or illegal content.</li><li>Attempting to reverse-engineer or scrape the platform.</li></ul><h4>Intellectual property</h4><p>Necpra grants you a limited, non-exclusive licence to use the service. You retain ownership of content you post.</p><h4>Notifications preferences</h4><div class="pref-row"><span class="pref-label">Terms update notifications<small>Email me when terms change materially</small></span><label class="pref-toggle"><input type="checkbox" id="pref_terms_updates" checked><span class="pref-toggle-track"></span></label></div><div class="pref-row"><span class="pref-label">Promotional offers<small>Receive offers and feature announcements</small></span><label class="pref-toggle"><input type="checkbox" id="pref_terms_promos"><span class="pref-toggle-track"></span></label></div><h4>Termination</h4><p>We reserve the right to suspend accounts that violate these terms. You may delete your account at any time in Settings.</p></div>
   </div>
 
   <script src="../js/legal-content.js"></script>

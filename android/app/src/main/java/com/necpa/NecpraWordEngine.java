@@ -43,14 +43,17 @@ public final class NecpraWordEngine {
         public final List<String> words;
         public final List<Placed> placed;
         public final int h, w;
+        /** Real words that can be spelled from the wheel but are not grid words: kept as bonus words. */
+        public final Set<String> bonus;
 
-        Level(String root, char[] letters, List<String> words, List<Placed> placed, int h, int w) {
+        Level(String root, char[] letters, List<String> words, List<Placed> placed, int h, int w, Set<String> bonus) {
             this.root = root;
             this.letters = letters;
             this.words = words;
             this.placed = placed;
             this.h = h;
             this.w = w;
+            this.bonus = bonus;
         }
     }
 
@@ -74,16 +77,23 @@ public final class NecpraWordEngine {
             String[] q = item.split(":");
             placed.add(new Placed(q[0], Integer.parseInt(q[1]), Integer.parseInt(q[2]), "A".equals(q[3])));
         }
-        return new Level(p[0], p[1].toUpperCase().toCharArray(), words, placed, Integer.parseInt(p[4]), Integer.parseInt(p[5]));
+        Set<String> bonus = new HashSet<>();
+        if (p.length > 6 && !p[6].isEmpty()) for (String b : p[6].split(",")) if (!b.isEmpty() && !words.contains(b)) bonus.add(b);
+        return new Level(p[0], p[1].toUpperCase().toCharArray(), words, placed, Integer.parseInt(p[4]), Integer.parseInt(p[5]), bonus);
     }
 
-    public enum Submit { NEW_WORD, ALREADY_FOUND, NOT_IN_PUZZLE, TOO_SHORT }
+    public static final int BONUS_HINT_EVERY = 5;
+
+    public enum Submit { NEW_WORD, ALREADY_FOUND, NOT_IN_PUZZLE, TOO_SHORT, BONUS_WORD, ALREADY_BONUS }
 
     // ------------------------------------------------------------------ state
 
     private int idx, lap, hints;
     private Level lv;
     private final Set<String> found = new HashSet<>();
+    private final Set<String> bonusFound = new HashSet<>();
+    private boolean lastBonusGaveHint;
+    private int hintsUsedCount;   // hints spent on this level (a bonus-word hint must not hide a spent one)
     private final Set<Integer> hinted = new HashSet<>();  // cells revealed by hints: r*100+c
     private int[] wheel;                                  // wheel[position] = letter index
     private boolean complete;
@@ -101,6 +111,8 @@ public final class NecpraWordEngine {
     private void load() {
         lv = level(idx);
         found.clear();
+        bonusFound.clear();
+        hintsUsedCount = 0;
         hinted.clear();
         complete = false;
         wheel = new int[lv.letters.length];
@@ -153,11 +165,31 @@ public final class NecpraWordEngine {
         return false;
     }
 
-    public Submit submit(String word) {
+    public int bonusCount() { return bonusFound.size(); }
+    public int hintsUsedThisLevel() { return hintsUsedCount; }
+    /** True when the bonus word just accepted by submit() also earned the every-5th-word free hint. */
+    public boolean lastBonusGaveHint() { return lastBonusGaveHint; }
+    public static int bonusCoins(String word) { return 5 * word.length(); }
+
+    public Submit submit(String word) { return submit(word, true); }
+
+    /** allowBonus=false (live matches) keeps scores fair: a non-grid word is simply rejected. */
+    public Submit submit(String word, boolean allowBonus) {
         word = word.toUpperCase();
+        lastBonusGaveHint = false;
         if (word.length() < 3) return Submit.TOO_SHORT;
         if (found.contains(word)) return Submit.ALREADY_FOUND;
-        if (!lv.words.contains(word)) return Submit.NOT_IN_PUZZLE;
+        if (!lv.words.contains(word)) {
+            if (!allowBonus || !lv.bonus.contains(word)) return Submit.NOT_IN_PUZZLE;
+            if (bonusFound.contains(word)) return Submit.ALREADY_BONUS;
+            bonusFound.add(word);
+            coinsEarned += bonusCoins(word);
+            if (bonusFound.size() % BONUS_HINT_EVERY == 0 && hints < MAX_HINTS) {
+                hints++;
+                lastBonusGaveHint = true;
+            }
+            return Submit.BONUS_WORD;
+        }
         found.add(word);
         coinsEarned += 10 * word.length();
         if (found.size() >= lv.words.size()) complete = true;
@@ -181,6 +213,7 @@ public final class NecpraWordEngine {
                     if (!isRevealed(r, c)) {
                         hinted.add(r * 100 + c);
                         hints--;
+                        hintsUsedCount++;
                         return new int[]{r, c};
                     }
                 }
@@ -224,7 +257,13 @@ public final class NecpraWordEngine {
         sb.append(String.join(",", found)).append('|');
         StringBuilder h = new StringBuilder();
         for (int cell : hinted) h.append(cell).append(',');
-        sb.append(h);
+        sb.append(h).append('|');
+        boolean firstBonus = true;
+        for (String b : bonusFound) {   // manual join: String.join needs API 26, minSdk is 24
+            if (!firstBonus) sb.append(',');
+            sb.append(b);
+            firstBonus = false;
+        }
         return sb.toString();
     }
 
@@ -234,7 +273,8 @@ public final class NecpraWordEngine {
             NecpraWordEngine e = new NecpraWordEngine(Integer.parseInt(p[0]), Integer.parseInt(p[1]));
             if (!p[2].isEmpty()) for (String w : p[2].split(",")) if (e.lv.words.contains(w)) e.found.add(w);
             if (p.length > 3 && !p[3].isEmpty()) for (String c : p[3].split(",")) if (!c.isEmpty()) e.hinted.add(Integer.parseInt(c));
-            if (e.found.size() >= e.lv.words.size()) e.found.clear(); // a finished puzzle must not reload pre-solved
+            if (p.length > 4 && !p[4].isEmpty()) for (String b : p[4].split(",")) if (e.lv.bonus.contains(b)) e.bonusFound.add(b);
+            if (e.found.size() >= e.lv.words.size()) { e.found.clear(); e.bonusFound.clear(); } // a finished puzzle must not reload pre-solved
             return e;
         } catch (RuntimeException ex) {
             return null;

@@ -123,6 +123,8 @@ public class NecpraSettingsActivity extends AppCompatActivity {
         body = new LinearLayout(this); body.setOrientation(LinearLayout.VERTICAL);
         body.setPadding(16,16,16,32); scroll.addView(body);
         root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        // Target SDK 36 draws edge-to-edge: keep content clear of the status bar, navigation bar and keyboard.
+        NecpraConversationsActivity.applyInsets(root);
         setContentView(root);
     }
 
@@ -509,7 +511,7 @@ public class NecpraSettingsActivity extends AppCompatActivity {
     private void deleteAccount(){
         final EditText e=new EditText(this);e.setHint("Type: delete my account");
         new AlertDialog.Builder(this).setTitle("Delete account permanently").setMessage("This cannot be undone.").setView(e)
-                .setNegativeButton("Cancel",null).setPositiveButton("Delete",(d,w)->{if(!"delete my account".equalsIgnoreCase(e.getText().toString().trim())){toast("Confirmation did not match");return;}io.execute(()->{try{request("DELETE","/api/account",null);NativeBackgroundSync.clearAll(getApplicationContext());runOnUiThread(()->{setResult(RESULT_OK,new Intent().putExtra(RES_ACCOUNT_DELETED,true).putExtra(RES_LOGGED_OUT,true));finish();});}catch(Throwable x){runOnUiThread(()->toast("Account deletion failed"));}});}).show();
+                .setNegativeButton("Cancel",null).setPositiveButton("Delete",(d,w)->{if(!"delete my account".equalsIgnoreCase(e.getText().toString().trim())){toast("Confirmation did not match");return;}io.execute(()->{try{request("DELETE","/api/account",null);NativeBackgroundSync.clearAll(getApplicationContext());runOnUiThread(()->{setResult(RESULT_OK,new Intent().putExtra(RES_ACCOUNT_DELETED,true).putExtra(RES_LOGGED_OUT,true));finish();});}catch(Throwable x){String m="Account deletion failed";try{String em=x.getMessage();int i=em==null?-1:em.indexOf('{');if(i>=0){String mm=new JSONObject(em.substring(i)).optString("message","");if(!mm.isEmpty())m=mm;}}catch(Throwable ignore){}final String fm=m;runOnUiThread(()->new AlertDialog.Builder(this).setTitle("Account not deleted").setMessage(fm).setPositiveButton("OK",null).show());}});}).show();
     }
 
     private void toggle(String label,String key,boolean value,String section){

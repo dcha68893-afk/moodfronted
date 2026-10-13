@@ -19,7 +19,7 @@ import org.json.JSONObject;
  */
 public class NecpraTriviaActivity extends NecpraGameActivity {
     private static final long REVEAL_MS = 900;
-    private static final String[] SUBJECT_LABELS = {"Mixed", "General", "Science", "Maths", "Geography", "History", "Kenya", "Tech"};
+    private static final String[] SUBJECT_LABELS = {"Mixed", "General", "Science", "Maths", "Geography", "History", "Kenya", "Tech", "Sports", "Entertainment", "Arts & Books"};
 
     private NecpraTriviaEngine eng;
     private int levelNo = 1;
@@ -87,6 +87,11 @@ public class NecpraTriviaActivity extends NecpraGameActivity {
             });
             room.start();
             setAnswersEnabled(false);
+            return;
+        }
+        if ("daily".equals(getIntent().getStringExtra(EXTRA_MODE))) {
+            startDaily();
+            pullServerCoins();
             return;
         }
         int want = getIntent().getIntExtra(EXTRA_LEVEL, 0);
@@ -232,6 +237,12 @@ public class NecpraTriviaActivity extends NecpraGameActivity {
         sub.setPadding(0, dp(6), 0, dp(12));
         c.addView(sub);
         final Modal m = modal(c, false);
+        c.addView(button("📅  Daily Challenge" + (store.dailyClaimed("trivia") ? " (bonus claimed)" : "  +50 🪙"), GOLD, new Runnable() {
+            @Override public void run() {
+                m.dismiss();
+                startDaily();
+            }
+        }));
         LinearLayout row = null;
         for (int i = 0; i < NecpraTriviaEngine.SUBJECTS.length; i++) {
             if (i % 2 == 0) {
@@ -283,7 +294,42 @@ public class NecpraTriviaActivity extends NecpraGameActivity {
         return new NecpraTriviaEngine(levelNo, "mixed", store.difficulty(), 1L, false).secondsPerQuestion();
     }
 
+    // ------------------------------------------------------------------ Daily Challenge
+
+    /** Same 8 questions for every player today; coin bonus once per day; never advances the level. */
+    private boolean dailyRun;
+
+    private void startDaily() {
+        dailyRun = true;
+        subject = "mixed";
+        levelNo = 9;   // mixed difficulty (same as the web daily)
+        eng = new NecpraTriviaEngine(levelNo, "mixed", "moderate", NecpraBlockEngine.dailySeed("trivia-" + NecpraGameStore.today()), true);
+        showQuestion();
+    }
+
+    private void finishDaily(int score, int correct, int total, int stars) {
+        store.recordGame("trivia", score, 1);
+        boolean first = store.claimDaily("trivia");
+        int bonus = first ? 50 + correct * 10 : 0;
+        if (bonus > 0) earn(bonus, "Daily challenge");
+        sfx.play(NecpraSfx.WIN);
+        double ratio = total == 0 ? 0 : (double) correct / total;
+        resultCard(praise(ratio), "Daily Challenge complete", stars,
+                new String[][]{{"Correct", correct + " of " + total}, {"Score", score + " pts"},
+                        {"Daily bonus", first ? "🪙 +" + bonus : "already claimed today"}},
+                "Pick a subject", new Runnable() {
+                    @Override public void run() {
+                        dailyRun = false;
+                        levelNo = store.level("trivia");
+                        showSubjectPicker();
+                    }
+                }, "Quit", new Runnable() {
+                    @Override public void run() { finish(); }
+                });
+    }
+
     private void startLevel() {
+        dailyRun = false;
         eng = new NecpraTriviaEngine(levelNo, subject, store.difficulty(), System.nanoTime(), false);
         store.saveResume("trivia", null);
         showQuestion();
@@ -298,7 +344,7 @@ public class NecpraTriviaActivity extends NecpraGameActivity {
             return;
         }
         NecpraTriviaEngine.Question q = eng.current();
-        tvLevel.setText("LEVEL " + eng.level());
+        tvLevel.setText(dailyRun ? "DAILY" : "LEVEL " + eng.level());
         tvScore.setText(eng.score() + " pts");
         tvStreak.setText("STREAK ×" + eng.streak());
         tvCount.setText("Question " + (eng.index() + 1) + " of " + eng.total());
@@ -448,6 +494,10 @@ public class NecpraTriviaActivity extends NecpraGameActivity {
             submitRoom(score, correct, total);
             return;
         }
+        if (dailyRun) {
+            finishDaily(score, correct, total, stars);
+            return;
+        }
         store.saveResume("trivia", null);
         store.recordGame("trivia", score, levelNo + 1);
         store.setStars("trivia", levelNo, stars);
@@ -475,12 +525,12 @@ public class NecpraTriviaActivity extends NecpraGameActivity {
     }
 
     private void saveNow(boolean answeredInstant) {
-        if (roomMode || eng == null || eng.finished()) return;
+        if (roomMode || dailyRun || eng == null || eng.finished()) return;
         store.saveResume("trivia", eng.serialize());
     }
 
     @Override protected void onSaveGame() {
-        if (!roomMode && eng != null && !eng.finished()) store.saveResume("trivia", eng.serialize());
+        if (!roomMode && !dailyRun && eng != null && !eng.finished()) store.saveResume("trivia", eng.serialize());
     }
 
     @Override protected void onBackRequested() {

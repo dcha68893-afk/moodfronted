@@ -28,7 +28,7 @@ import java.util.List;
  * </ul>
  */
 public class NecpraChessActivity extends NecpraGameActivity {
-    public static final String MODE_CPU = "cpu", MODE_LOCAL = "local";
+    public static final String MODE_CPU = "cpu", MODE_LOCAL = "local", MODE_PUZZLE = "puzzle", MODE_PUZZLE_DAILY = "puzzleDaily";
 
     private static final int[] REWARD = {30, 60, 120};   // easy, medium, hard win
 
@@ -56,6 +56,10 @@ public class NecpraChessActivity extends NecpraGameActivity {
     private HorizontalScrollView movesScroll;
     private TextView btnUndo, btnResign, btnFlip;
     private boolean flipped;
+    private TextView btnHint, btnPuz;
+    private boolean hillVariant;   // King of the Hill for the next / current game
+    private int hintsLeft = 3, puzIdx;
+    private boolean puzDaily, hintBusy;
 
     @Override protected String gameId() { return "chess"; }
 
@@ -112,16 +116,35 @@ public class NecpraChessActivity extends NecpraGameActivity {
         }
         content.addView(bar, new LinearLayout.LayoutParams(-1, -2));
 
+        LinearLayout bar2 = row();
+        bar2.setPadding(0, dp(6), 0, 0);
+        btnHint = toolButton("💡\nHint ×3", new Runnable() { @Override public void run() { useHint(); } });
+        TextView btnPgn = toolButton("📋\nCopy PGN", new Runnable() { @Override public void run() { copyPgn(); } });
+        btnPuz = toolButton("🧩\nPuzzles", new Runnable() { @Override public void run() { puzzleMenuFromGame(); } });
+        TextView[] bs2 = {btnHint, btnPgn, btnPuz};
+        for (int i = 0; i < bs2.length; i++) {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(56), 1f);
+            lp.leftMargin = dp(i == 0 ? 0 : 6);
+            bar2.addView(bs2[i], lp);
+        }
+        content.addView(bar2, new LinearLayout.LayoutParams(-1, -2));
+
         if (roomCode != null) {
             mode = "room";
             btnUndo.setVisibility(View.GONE);
             btnFlip.setVisibility(View.GONE);
+            btnHint.setVisibility(View.GONE);
+            btnPuz.setVisibility(View.GONE);   // no hints / puzzles in a live match
             ((View) btnNew).setVisibility(View.GONE);
             startRoom();
             return;
         }
         level = store.chessLevel();
         final String requested = getIntent().getStringExtra(EXTRA_MODE);
+        if (MODE_PUZZLE.equals(requested) || MODE_PUZZLE_DAILY.equals(requested)) {
+            startRequested(requested);
+            return;
+        }
         final String rs = store.resume("chess");
         if (rs != null && restore(rs)) {
             started = true;
@@ -133,6 +156,8 @@ public class NecpraChessActivity extends NecpraGameActivity {
     }
 
     private void startRequested(String requested) {
+        if (MODE_PUZZLE.equals(requested)) { startPuzzleNext(); return; }
+        if (MODE_PUZZLE_DAILY.equals(requested)) { startPuzzle(NecpraChessPuzzles.dayIndex(NecpraGameStore.today()), true); return; }
         if (MODE_LOCAL.equals(requested) || MODE_CPU.equals(requested)) {
             mode = requested;
             newGame(true);
@@ -246,12 +271,34 @@ public class NecpraChessActivity extends NecpraGameActivity {
         sideBox.addView(sideRow);
         c.addView(sideBox);
 
+        c.addView(space(10));
+        c.addView(label("Variant"));
+        final boolean[] hill = {hillVariant};
+        final TextView[] varBtns = new TextView[2];
+        final String[] varNames = {"Standard", "King of the Hill"};
+        LinearLayout varRow = row();
+        for (int i = 0; i < 2; i++) {
+            final int k = i;
+            varBtns[i] = chipOption(varNames[i], new Runnable() {
+                @Override public void run() {
+                    hill[0] = k == 1;
+                    markChips(varBtns, k);
+                }
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(44), 1f);
+            if (i > 0) lp.leftMargin = dp(8);
+            varRow.addView(varBtns[i], lp);
+        }
+        markChips(varBtns, hillVariant ? 1 : 0);
+        c.addView(varRow);
+
         c.addView(space(16));
         final Modal m = modal(c, false);
         c.addView(button("Start", PRIMARY, new Runnable() {
             @Override public void run() {
                 m.dismiss();
                 mode = opp[0];
+                hillVariant = hill[0];
                 level = lvl[0];
                 store.setChessLevel(level);
                 boolean white = true;
@@ -260,6 +307,20 @@ public class NecpraChessActivity extends NecpraGameActivity {
                     else if ("random".equals(side[0])) white = new java.util.Random().nextBoolean();
                 }
                 newGame(white);
+            }
+        }));
+        c.addView(space(8));
+        c.addView(button("🧩  Mate-in-1 puzzles", GOLD, new Runnable() {
+            @Override public void run() {
+                m.dismiss();
+                startPuzzleNext();
+            }
+        }));
+        c.addView(space(8));
+        c.addView(button("Puzzle of the day  +20 🪙", GOLD, new Runnable() {
+            @Override public void run() {
+                m.dismiss();
+                startPuzzle(NecpraChessPuzzles.dayIndex(NecpraGameStore.today()), true);
             }
         }));
         c.addView(space(8));
@@ -302,7 +363,12 @@ public class NecpraChessActivity extends NecpraGameActivity {
 
     private void newGame(boolean white) {
         aiToken++;
+        hintsLeft = 3;
+        hintBusy = false;
+        btnResign.setVisibility(View.VISIBLE);
         game = new NecpraChessEngine.Game();
+        game.setHill(hillVariant);
+        if (hillVariant) toast("King of the Hill: walk your king to the centre to win");
         myWhite = white;
         flipped = !white && MODE_CPU.equals(mode);
         selected = -1;
@@ -314,6 +380,218 @@ public class NecpraChessActivity extends NecpraGameActivity {
         store.saveResume("chess", null);
         refresh();
         thinkIfNeeded();
+    }
+
+    // ------------------------------------------------------------------ hint / PGN / puzzles
+
+    /** Hint: shows the engine's best move (piece selected, destination marked). 3 per game; not in live matches. */
+    private void useHint() {
+        if (over || !started || modalOpen() || "room".equals(mode) || hintBusy || !myTurn()) return;
+        if (hintsLeft <= 0) {
+            toast("No hints left in this game");
+            return;
+        }
+        hintBusy = true;
+        final NecpraChessEngine.State s = game.current();
+        final List<NecpraChessEngine.Move> legalNow = NecpraChessEngine.legal(s);
+        final int token = aiToken;
+        toast("Thinking…");
+        io.execute(new Runnable() {
+            @Override public void run() {
+                NecpraChessEngine.Move pick = null;
+                try { pick = NecpraChessEngine.pickMove(s, "hard"); } catch (RuntimeException ignored) { }
+                final NecpraChessEngine.Move mv = pick;
+                ui(new Runnable() {
+                    @Override public void run() {
+                        hintBusy = false;
+                        if (dead() || over || token != aiToken || mv == null || game.current() != s) return;
+                        hintsLeft--;
+                        selected = mv.f;
+                        targets.clear();
+                        for (NecpraChessEngine.Move m : legalNow) if (m.f == mv.f) targets.add(m);
+                        sfx.play(NecpraSfx.TAP);
+                        toast("Hint: " + NecpraChessEngine.san(s, mv, legalNow));
+                        refresh();
+                    }
+                });
+            }
+        });
+    }
+
+    /** Post-game review: flags blunders (??), mistakes (?) and inaccuracies (?!) for both sides (depth-3 search per move). */
+    private void reviewGame() {
+        if (modalOpen() || game.moves.size() < 2) return;
+        toast("Reviewing…");
+        final NecpraChessEngine.Game g = game;
+        NecpraChessEngine.setHill(g.hill);
+        io.execute(new Runnable() {
+            @Override public void run() {
+                final int[] loss = NecpraChessEngine.reviewLosses(g, 3, 12000);
+                ui(new Runnable() {
+                    @Override public void run() {
+                        if (dead()) return;
+                        if (loss == null) {
+                            toast("Review took too long — try a shorter game");
+                            return;
+                        }
+                        showReview(g, loss);
+                    }
+                });
+            }
+        });
+    }
+
+    private void showReview(NecpraChessEngine.Game g, int[] loss) {
+        int[][] cnt = new int[2][3];          // [white/black][blunder, mistake, inaccuracy]
+        long[] sum = new long[2];
+        int[] moves = new int[2];
+        boolean whiteFirst = g.base.white;
+        for (int i = 0; i < loss.length; i++) {
+            int side = ((i % 2 == 0) == whiteFirst) ? 0 : 1;
+            moves[side]++;
+            sum[side] += loss[i];
+            String mk = NecpraChessEngine.reviewMark(loss[i]);
+            if ("??".equals(mk)) cnt[side][0]++;
+            else if ("?".equals(mk)) cnt[side][1]++;
+            else if ("?!".equals(mk)) cnt[side][2]++;
+        }
+        LinearLayout c = column();
+        c.addView(text("Game review", 22, cText, true));
+        TextView sub = text("Depth-3 check of every move", 13.5f, cSub, false);
+        sub.setPadding(0, dp(4), 0, dp(10));
+        c.addView(sub);
+        for (int side = 0; side < 2; side++) {
+            if (moves[side] == 0) continue;
+            long avg = sum[side] / moves[side];
+            String who = side == 0 ? "White" : "Black";
+            c.addView(text(who + " · avg loss " + String.format(java.util.Locale.US, "%.1f", avg / 100.0) + " pawns", 15, cText, true));
+            TextView t = text("?? " + cnt[side][0] + "   ? " + cnt[side][1] + "   ?! " + cnt[side][2], 14, cSub, false);
+            t.setPadding(0, dp(2), 0, dp(8));
+            c.addView(t);
+        }
+        // worst three moves
+        Integer[] order = new Integer[loss.length];
+        for (int i = 0; i < order.length; i++) order[i] = i;
+        final int[] L = loss;
+        java.util.Arrays.sort(order, new java.util.Comparator<Integer>() {
+            @Override public int compare(Integer a, Integer b) { return Integer.compare(L[b], L[a]); }
+        });
+        StringBuilder worst = new StringBuilder();
+        for (int k = 0; k < Math.min(3, order.length); k++) {
+            int i = order[k];
+            if (loss[i] < 70) break;
+            int fullmove = g.base.ply / 2 + 1 + (i + (whiteFirst ? 0 : 1)) / 2;
+            boolean whiteMove = (i % 2 == 0) == whiteFirst;
+            worst.append(fullmove).append(whiteMove ? ". " : "... ").append(g.sans.get(i))
+                    .append(NecpraChessEngine.reviewMark(loss[i])).append("  (−")
+                    .append(String.format(java.util.Locale.US, "%.1f", loss[i] / 100.0)).append(")\n");
+        }
+        if (worst.length() > 0) {
+            c.addView(text("Biggest swings", 14, cSub, true));
+            TextView w = text(worst.toString().trim(), 15, cText, false);
+            w.setPadding(0, dp(4), 0, dp(10));
+            c.addView(w);
+        } else {
+            TextView ok = text("No significant mistakes — well played!", 15, cText, false);
+            ok.setPadding(0, dp(4), 0, dp(10));
+            c.addView(ok);
+        }
+        final Modal m = modal(c, false);
+        c.addView(button("Close", PRIMARY, new Runnable() {
+            @Override public void run() { m.dismiss(); }
+        }));
+    }
+
+    private void copyPgn() {
+        if (game.moves.isEmpty()) {
+            toast("No moves to copy yet");
+            return;
+        }
+        String result = "*";
+        if (over) {
+            NecpraChessEngine.Outcome o = game.assess();
+            if (o.over) result = ("mate".equals(o.kind) || "hill".equals(o.kind)) ? (o.whiteWins ? "1-0" : "0-1") : "1/2-1/2";
+        }
+        String w = MODE_LOCAL.equals(mode) || MODE_PUZZLE.equals(mode) ? "White" : (myWhite ? "Player" : "Computer");
+        String b = MODE_LOCAL.equals(mode) || MODE_PUZZLE.equals(mode) ? "Black" : (myWhite ? "Computer" : "Player");
+        try {
+            android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("PGN", game.pgn(w, b, result)));
+            toast("PGN copied");
+        } catch (RuntimeException e) {
+            toast("Couldn't copy the PGN");
+        }
+    }
+
+    private void startPuzzleNext() {
+        java.util.Set<Integer> done = store.solvedPuzzles();
+        int i = 0;
+        while (i < NecpraChessPuzzles.count() && done.contains(i)) i++;
+        startPuzzle(i >= NecpraChessPuzzles.count() ? 0 : i, false);
+    }
+
+    private void startPuzzle(int idx, boolean daily) {
+        aiToken++;
+        puzIdx = ((idx % NecpraChessPuzzles.count()) + NecpraChessPuzzles.count()) % NecpraChessPuzzles.count();
+        puzDaily = daily;
+        mode = MODE_PUZZLE;
+        NecpraChessEngine.State base = NecpraChessEngine.fromFen(NecpraChessPuzzles.fen(puzIdx));
+        game = new NecpraChessEngine.Game(base);
+        game.setHill(false);
+        myWhite = base.white;
+        flipped = !myWhite;
+        hintsLeft = 1;
+        selected = -1;
+        targets.clear();
+        over = false;
+        thinking = false;
+        resultText = "";
+        started = true;
+        hintBusy = false;
+        btnResign.setVisibility(View.GONE);   // nothing to resign in a puzzle
+        refresh();
+    }
+
+    /** From the in-game toolbar: leave the current game for puzzles (asks first if a game is in progress). */
+    private void puzzleMenuFromGame() {
+        if (modalOpen() || "room".equals(mode)) return;
+        if (MODE_PUZZLE.equals(mode)) {
+            startPuzzleNext();
+            return;
+        }
+        if (over || game.moves.isEmpty()) {
+            startPuzzleNext();
+            return;
+        }
+        confirm("Switch to puzzles?", "Your current game is saved and you can resume it from the chess menu.", "Puzzles", "Keep playing", false, new Runnable() {
+            @Override public void run() {
+                saveNow();
+                startPuzzleNext();
+            }
+        });
+    }
+
+    private void puzzleSolved() {
+        over = true;
+        resultText = "Puzzle solved!";
+        selected = -1;
+        targets.clear();
+        boolean first = store.markPuzzleSolved(puzIdx);
+        int bonus = first ? 10 : 0;
+        if (puzDaily && store.claimDaily("chessPuzzle")) bonus += 20;
+        if (bonus > 0) earn(bonus, "Puzzle solved");
+        store.recordGame("chess", bonus, 1);
+        sfx.play(NecpraSfx.WIN);
+        sfx.haptic(root, 1);
+        refresh();
+        int solved = store.solvedPuzzles().size();
+        resultCard("Puzzle solved!", "Checkmate in 1 · " + solved + " of " + NecpraChessPuzzles.count() + " solved", 3,
+                bonus > 0 ? new String[][]{{"Coins", "🪙 +" + bonus}} : null,
+                "Next puzzle", new Runnable() {
+                    @Override public void run() { startPuzzle(puzIdx + 1, false); }
+                }, "Leave", new Runnable() {
+                    @Override public void run() { finish(); }
+                });
     }
 
     private boolean myTurn() {
@@ -383,17 +661,33 @@ public class NecpraChessActivity extends NecpraGameActivity {
     /** Plays a move on the board. {@code remote} moves arrive from the opponent and are not published again. */
     private void play(NecpraChessEngine.Move mv, boolean remote) {
         NecpraChessEngine.State before = game.current();
+        if (MODE_PUZZLE.equals(mode) && !NecpraChessPuzzles.mates(before, mv)) {
+            // Puzzle: only a checkmating move is accepted; anything else is rejected and the position stays.
+            selected = -1;
+            targets.clear();
+            sfx.play(NecpraSfx.WRONG);
+            sfx.haptic(root, 2);
+            toast("Not checkmate — try again");
+            board.invalidate();
+            return;
+        }
         game.commit(mv);
         selected = -1;
         targets.clear();
         sfx.play(mv.isCapture() ? NecpraSfx.CAPTURE : NecpraSfx.MOVE);
+        if (mv.castle != 0) { sfx.play(NecpraSfx.PLACE); sfx.haptic(root, 1); }
+        else if (mv.isCapture()) sfx.haptic(root, 1);
         NecpraChessEngine.Outcome o = game.assess();
+        if (MODE_PUZZLE.equals(mode) && o.over) {
+            puzzleSolved();
+            return;
+        }
         if ("room".equals(mode) && !remote) publish(null);
         if (o.over) {
             finishGame(o, false);
             return;
         }
-        if (o.check) sfx.play(NecpraSfx.WRONG);
+        if (o.check) { sfx.play(NecpraSfx.ERROR); sfx.haptic(root, 2); }   // distinct check cue (strong haptic)
         refresh();
         if (!remote) thinkIfNeeded();
         else if (before != null) saveNow();
@@ -490,6 +784,9 @@ public class NecpraChessActivity extends NecpraGameActivity {
         if ("mate".equals(o.kind)) {
             text = "Checkmate — " + (o.whiteWins ? "White" : "Black") + " wins.";
             iWon = MODE_LOCAL.equals(mode) ? Boolean.TRUE : Boolean.valueOf(o.whiteWins == myWhite);
+        } else if ("hill".equals(o.kind)) {
+            text = (o.whiteWins ? "White" : "Black") + " king reached the hill — wins!";
+            iWon = MODE_LOCAL.equals(mode) ? Boolean.TRUE : Boolean.valueOf(o.whiteWins == myWhite);
         } else if ("stalemate".equals(o.kind)) {
             text = "Draw by stalemate.";
         } else if ("material".equals(o.kind)) {
@@ -549,6 +846,8 @@ public class NecpraChessActivity extends NecpraGameActivity {
                 @Override public void run() { showSetup(); }
             }, "Leave", new Runnable() {
                 @Override public void run() { finish(); }
+            }, game.moves.size() >= 4 ? "Review game" : null, new Runnable() {
+                @Override public void run() { reviewGame(); }
             });
         }
     }
@@ -556,7 +855,7 @@ public class NecpraChessActivity extends NecpraGameActivity {
     // ------------------------------------------------------------------ persistence (resume)
 
     private void saveNow() {
-        if (over || !started || "room".equals(mode)) return;
+        if (over || !started || "room".equals(mode) || MODE_PUZZLE.equals(mode)) return;
         if (game.moves.isEmpty()) {
             store.saveResume("chess", null);
             return;
@@ -564,7 +863,9 @@ public class NecpraChessActivity extends NecpraGameActivity {
         StringBuilder sb = new StringBuilder();
         sb.append(mode).append('|').append(myWhite ? 'w' : 'b').append('|').append(level).append('|');
         for (String n : game.playedNames()) sb.append(n).append(' ');
-        store.saveResume("chess", sb.toString().trim());
+        String saved = sb.toString().trim();
+        if (game.hill) saved += "|H";   // 5th field: King of the Hill
+        store.saveResume("chess", saved);
     }
 
     @Override protected void onSaveGame() { saveNow(); }
@@ -577,6 +878,7 @@ public class NecpraChessActivity extends NecpraGameActivity {
             myWhite = !"b".equals(p[1]);
             level = p[2];
             NecpraChessEngine.Game g = new NecpraChessEngine.Game();
+            g.setHill(p.length > 4 && "H".equals(p[4]));
             if (!p[3].trim().isEmpty()) {
                 for (String name : p[3].trim().split(" ")) {
                     NecpraChessEngine.Move found = null;
@@ -587,6 +889,7 @@ public class NecpraChessActivity extends NecpraGameActivity {
             }
             if (g.assess().over) return false;
             game = g;
+            hillVariant = g.hill;
             flipped = !myWhite && MODE_CPU.equals(mode);
             over = false;
             return true;
@@ -598,6 +901,7 @@ public class NecpraChessActivity extends NecpraGameActivity {
     // ------------------------------------------------------------------ rooms (Play Together)
 
     private void startRoom() {
+        NecpraChessEngine.setHill(false);   // live matches are standard chess
         status.setText("Joining match…");
         room = new NecpraRoomSession(this, roomCode, new NecpraRoomSession.Listener() {
             @Override public void onRoom(JSONObject r) { onRoomUpdate(r); }
@@ -769,6 +1073,9 @@ public class NecpraChessActivity extends NecpraGameActivity {
         } else if ("room".equals(mode) && !roomReady) {
             status.setText("Waiting for your friend…  Code " + roomCode);
             status.setTextColor(cSub);
+        } else if (MODE_PUZZLE.equals(mode)) {
+            status.setText("Puzzle " + (puzIdx + 1) + " of " + NecpraChessPuzzles.count() + " — " + (s.white ? "White" : "Black") + " to move, mate in 1");
+            status.setTextColor(cText);
         } else if (thinking) {
             status.setText("Computer is thinking…");
             status.setTextColor(cSub);
@@ -789,6 +1096,8 @@ public class NecpraChessActivity extends NecpraGameActivity {
             @Override public void run() { movesScroll.fullScroll(View.FOCUS_RIGHT); }
         });
         btnUndo.setAlpha(game.moves.isEmpty() || over ? 0.4f : 1f);
+        btnHint.setText("💡\nHint ×" + hintsLeft);
+        btnHint.setAlpha(hintsLeft <= 0 || over ? 0.4f : 1f);
         board.invalidate();
         if (started && !over) saveNow();
     }

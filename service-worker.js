@@ -96,7 +96,7 @@ const CORE_STATIC_ASSETS = [
   '/app-protect.js','/session-restore.js','/report-problem.js','/js/runtime-config.js','/js/config.js','/js/offline-gate.js','/js/header-labels.js','/js/offline-first.js','/js/theme.engine.js','/js/theme-contrast-guard.js','/js/settings-broadcast-listener.js','/js/necpa-session-resilience.js','/js/services.friend.js'
   // v100: games + wallet precached so the first open after a deploy paints from cache instead of waiting on the
   // network for ~330KB of game scripts. URLs include the ?v= query because the cache key does.
-  ,'/game-v3.html','/money.html','/games-crossword-v4.js?v=8.0','/games-chess-v1.js?v=2.4','/games-chess-3d.js?v=1','/games-commercial-v5.js?v=5.3','/games-v4-enhancements.js?v=4.4','/js/settings-broadcast-listener.js'
+  ,'/game-v3.html','/money.html','/games-crossword-v4.js?v=8.2','/games-chess-v1.js?v=2.5','/games-chess-3d.js?v=1','/games-commercial-v5.js?v=5.3','/games-v4-enhancements.js?v=4.4','/js/settings-broadcast-listener.js'
 ];
 
 const NETWORK_FIRST_PATTERNS = [

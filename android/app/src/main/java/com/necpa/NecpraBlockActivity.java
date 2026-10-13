@@ -55,6 +55,8 @@ public class NecpraBlockActivity extends NecpraGameActivity {
     @Override
     protected void onBuild(Bundle saved) {
         roomCode = getIntent().getStringExtra(EXTRA_ROOM);
+        String reqMode = getIntent().getStringExtra(EXTRA_MODE);
+        if (NecpraBlockEngine.MODE_CLASSIC.equals(reqMode) || NecpraBlockEngine.MODE_DAILY.equals(reqMode)) mode = reqMode;
         roomMode = roomCode != null;
         scene = new BlockScene();
         glView = new NecpraGl.View(this, scene);
@@ -77,24 +79,105 @@ public class NecpraBlockActivity extends NecpraGameActivity {
                 }
             });
             room.start();
+        } else if (isEndless()) {
+            startEndless();
+        } else if (getIntent().getStringExtra(EXTRA_MODE) == null) {
+            // Opened from the web games hub (no mode given): let the player pick Levels / Classic / Daily first.
+            chooseMode();
         } else {
-            int want = getIntent().getIntExtra(EXTRA_LEVEL, 0);
-            if (want > 0) store.adoptLevel("block", want);
-            levelNo = store.level("block");
-            NecpraBlockEngine e = null;
-            String r = store.resume("block");
-            if (r != null) {
-                NecpraBlockEngine d = NecpraBlockEngine.deserialize(r, store.difficulty());
-                // A replayed (already unlocked) level resumes as that level, not as the highest one.
-                if (d != null && !d.isOver() && !d.isLevelComplete() && d.level() >= 1 && d.level() <= levelNo) {
-                    e = d;
-                    levelNo = d.level();
-                }
-            }
-            if (e == null) e = new NecpraBlockEngine(levelNo, store.difficulty(), System.nanoTime());
-            install(e, true);
+            startLevels();
         }
         pullServerCoins();
+    }
+
+    private void startLevels() {
+        mode = NecpraBlockEngine.MODE_LEVELS;
+        int want = getIntent().getIntExtra(EXTRA_LEVEL, 0);
+        if (want > 0) store.adoptLevel("block", want);
+        levelNo = store.level("block");
+        NecpraBlockEngine e = null;
+        String r = store.resume("block");
+        if (r != null) {
+            NecpraBlockEngine d = NecpraBlockEngine.deserialize(r, store.difficulty());
+            // A replayed (already unlocked) level resumes as that level, not as the highest one.
+            if (d != null && !d.isOver() && !d.isLevelComplete() && d.level() >= 1 && d.level() <= levelNo) {
+                e = d;
+                levelNo = d.level();
+            }
+        }
+        if (e == null) e = new NecpraBlockEngine(levelNo, store.difficulty(), System.nanoTime());
+        install(e, true);
+    }
+
+    private void chooseMode() {
+        LinearLayout c = column();
+        c.addView(text("Block Puzzle", 22, cText, true));
+        TextView sub = text("Choose a mode", 14, cSub, false);
+        sub.setPadding(0, dp(6), 0, dp(12));
+        c.addView(sub);
+        final Modal m = modal(c, false);
+        c.addView(button("Levels", PRIMARY, new Runnable() {
+            @Override public void run() {
+                m.dismiss();
+                startLevels();
+            }
+        }));
+        c.addView(space(8));
+        int best = store.modeBest("block.classic");
+        c.addView(button("Classic · endless" + (best > 0 ? "  (best " + String.format(java.util.Locale.US, "%,d", best) + ")" : ""), SECONDARY, new Runnable() {
+            @Override public void run() {
+                m.dismiss();
+                mode = NecpraBlockEngine.MODE_CLASSIC;
+                startEndless();
+            }
+        }));
+        c.addView(space(8));
+        c.addView(button("Daily · same pieces for everyone" + (store.dailyClaimed("block") ? "" : "  +🪙"), GOLD, new Runnable() {
+            @Override public void run() {
+                m.dismiss();
+                mode = NecpraBlockEngine.MODE_DAILY;
+                startEndless();
+            }
+        }));
+        c.addView(space(8));
+        c.addView(button("Back", SECONDARY, new Runnable() {
+            @Override public void run() {
+                m.dismiss();
+                finish();
+            }
+        }));
+    }
+
+    // ------------------------------------------------------------------ Classic / Daily (endless modes)
+
+    /** "levels" (default), "classic" (endless, personal best) or "daily" (endless, same pieces for everyone today). */
+    private String mode = NecpraBlockEngine.MODE_LEVELS;
+    private int endlessBestStart;
+
+    private boolean isEndless() { return !roomMode && !NecpraBlockEngine.MODE_LEVELS.equals(mode); }
+
+    private boolean isDaily() { return NecpraBlockEngine.MODE_DAILY.equals(mode); }
+
+    private String bestKey() { return isDaily() ? "block.daily." + NecpraGameStore.today() : "block.classic"; }
+
+    private String resumeKey() { return isEndless() ? (isDaily() ? "block.daily." + NecpraGameStore.today() : "block.classic") : "block"; }
+
+    private NecpraBlockEngine newEndless() {
+        // Daily uses the fixed "moderate" pool and a date seed so every player gets the same piece sequence today.
+        return isDaily() ? NecpraBlockEngine.endless("moderate", NecpraBlockEngine.dailySeed(NecpraGameStore.today()))
+                : NecpraBlockEngine.endless(store.difficulty(), System.nanoTime());
+    }
+
+    private void startEndless() {
+        NecpraBlockEngine e = null;
+        String r = store.resume(resumeKey());
+        if (r != null) {
+            NecpraBlockEngine d = NecpraBlockEngine.deserialize(r, isDaily() ? "moderate" : store.difficulty());
+            if (d != null && d.isEndless() && !d.isOver()) e = d;
+        }
+        if (e == null) e = newEndless();
+        endlessBestStart = store.modeBest(bestKey());
+        install(e, true);
     }
 
     private void buildHud() {
@@ -183,11 +266,14 @@ public class NecpraBlockActivity extends NecpraGameActivity {
         ui(new Runnable() {
             @Override public void run() {
                 levelNo = level;
-                tvLevel.setText("LEVEL " + level);
-                tvScore.setText(String.format(java.util.Locale.US, "%,d / %,d", score, target));
+                boolean endlessHud = target == Integer.MAX_VALUE;
+                int best = endlessHud ? Math.max(score, store.modeBest(bestKey())) : 0;
+                tvLevel.setText(endlessHud ? (isDaily() ? "DAILY" : "CLASSIC") : "LEVEL " + level);
+                tvScore.setText(endlessHud ? String.format(java.util.Locale.US, "%,d · BEST %,d", score, best)
+                        : String.format(java.util.Locale.US, "%,d / %,d", score, target));
                 tvCombo.setText("COMBO ×" + combo);
                 tvCombo.setTextColor(combo >= 2 ? cGold : cText);
-                float f = Math.max(0f, Math.min(1f, score / (float) Math.max(1, target)));
+                float f = Math.max(0f, Math.min(1f, score / (float) Math.max(1, endlessHud ? best : target)));
                 int w = Math.round((progressTrack.getWidth()) * f);
                 FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) progressFill.getLayoutParams();
                 lp.width = w;
@@ -204,7 +290,7 @@ public class NecpraBlockActivity extends NecpraGameActivity {
 
     @Override protected void onSaveGame() {
         String b = saveBlob;
-        if (b != null && !roomMode) store.saveResume("block", b);
+        if (b != null && !roomMode) store.saveResume(resumeKey(), b);
     }
 
     @Override protected void onPause() {
@@ -280,16 +366,23 @@ public class NecpraBlockActivity extends NecpraGameActivity {
             toast("You can't restart a live match");
             return;
         }
-        confirm("Start this level over?", "Your board and score for this level are lost.", "Restart", "Keep playing", true, new Runnable() {
+        confirm(isEndless() ? "Start over?" : "Start this level over?", "Your board and score are lost.", "Restart", "Keep playing", true, new Runnable() {
             @Override public void run() {
-                store.saveResume("block", null);
-                install(new NecpraBlockEngine(levelNo, store.difficulty(), System.nanoTime()), true);
+                store.saveResume(resumeKey(), null);
+                install(isEndless() ? newEndless() : new NecpraBlockEngine(levelNo, store.difficulty(), System.nanoTime()), true);
             }
         });
     }
 
     /** GL thread: a legal placement happened. */
     void afterPlace(NecpraBlockEngine e, NecpraBlockEngine.PlaceResult r) {
+        if (e.isEndless()) store.setModeBest(bestKey(), e.score());
+        if (r.perfectClear) {
+            sound(NecpraSfx.WIN);
+            say("✨ PERFECT CLEAR  +" + NecpraBlockEngine.PERFECT_CLEAR_BONUS);
+        } else if (r.praise != null) {
+            say(r.praise);
+        }
         hud(e.level(), e.score(), e.target(), e.combo(), e.charges(0), e.charges(1), e.charges(2));
         roomProgress(e);
     }
@@ -357,11 +450,23 @@ public class NecpraBlockActivity extends NecpraGameActivity {
                     submitRoom(score);
                     return;
                 }
-                store.saveResume("block", null);
-                store.recordGame("block", score, level);
+                store.saveResume(resumeKey(), null);
+                store.recordGame("block", score, isEndless() ? 1 : level);
+                String endlessLine = "";
+                if (isEndless()) {
+                    store.setModeBest(bestKey(), score);
+                    endlessLine = score > endlessBestStart && score > 0 ? " 🏆 New best!" : " Best " + String.format(java.util.Locale.US, "%,d", Math.max(endlessBestStart, score)) + ".";
+                    if (isDaily() && score > 0 && store.claimDaily("block")) {
+                        int reward = Math.min(150, score / 10);
+                        if (reward > 0) {
+                            earn(reward, null);
+                            endlessLine += "  🪙 +" + reward + " daily coins!";
+                        }
+                    }
+                }
                 LinearLayout c = column();
                 c.addView(text("No more moves", 22, cText, true));
-                TextView b = text("Score " + String.format(java.util.Locale.US, "%,d", score) + ". Spend 🪙 " + CONTINUE_COST
+                TextView b = text("Score " + String.format(java.util.Locale.US, "%,d", score) + "." + endlessLine + " Spend 🪙 " + CONTINUE_COST
                         + " to clear a few blocks and keep going.", 14.5f, cSub, false);
                 b.setPadding(0, dp(8), 0, dp(16));
                 c.addView(b);
@@ -380,7 +485,8 @@ public class NecpraBlockActivity extends NecpraGameActivity {
                 c.addView(button("New game", PRIMARY, new Runnable() {
                     @Override public void run() {
                         m.dismiss();
-                        install(new NecpraBlockEngine(level, store.difficulty(), System.nanoTime()), true);
+                        if (isEndless()) startEndless();
+                        else install(new NecpraBlockEngine(level, store.difficulty(), System.nanoTime()), true);
                     }
                 }));
                 c.addView(space(8));

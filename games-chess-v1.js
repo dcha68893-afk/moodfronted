@@ -94,6 +94,7 @@ function qs(s,ms,a,b,ctx,d){
  return a}
 function ab(s,d,a,b,ctx,pl){
  if(ctx.abort)return 0;
+ if(hill&&kingOnHill(s,opp(s.turn)))return -MATE+pl;
  if((++ctx.n&255)===0&&Date.now()>ctx.dl){ctx.abort=true;return 0}
  if(s.half>=100)return 0;
  const ms=legal(s);if(!ms.length)return inCheck(s.b,s.turn)?-MATE+pl:0;
@@ -144,6 +145,7 @@ function myRole(room){if(window.__gameRoomRole)return window.__gameRoomRole==='h
 
 function repCount(s){const k=pkey(s);let n=pkey(base)===k?1:0;for(const h of hist)if(pkey(h.s)===k)n++;return n}
 function assess(s){
+ if(hill){const w=opp(s.turn);if(kingOnHill(s,w))return{over:true,kind:'hill',winner:w}}
  const ms=legal(s),chk=inCheck(s.b,s.turn);
  if(!ms.length)return chk?{over:true,kind:'mate',winner:opp(s.turn)}:{over:true,kind:'stalemate'};
  if(insufficient(s.b))return{over:true,kind:'material'};
@@ -154,7 +156,8 @@ const cname=c=>c==='w'?'White':'Black';
 function finish(r){
  over=true;thinking=false;aiTok++;clearInterval(clock);clock=null;
  let text,res;
- if(r.kind==='mate'){text='Checkmate — '+cname(r.winner)+' wins.';res=mode==='room'?(r.winner===role?'win':'loss'):mode==='cpu'?(r.winner===myColor?'win':'loss'):'win'}
+ if(r.kind==='hill'){text='King of the Hill - '+cname(r.winner)+' wins.';res=mode==='room'?(r.winner===role?'win':'loss'):mode==='cpu'?(r.winner===myColor?'win':'loss'):'win'}
+ else if(r.kind==='mate'){text='Checkmate — '+cname(r.winner)+' wins.';res=mode==='room'?(r.winner===role?'win':'loss'):mode==='cpu'?(r.winner===myColor?'win':'loss'):'win'}
  else if(r.kind==='resign'){text=(mode==='room'||mode==='cpu')?(r.winner===myColor?'Opponent resigned.':'You resigned.'):cname(opp(r.winner))+' resigned.';res=(mode==='room'||mode==='cpu')?(r.winner===myColor?'win':'loss'):'win'}
  else{text={stalemate:'Draw by stalemate.',material:'Draw — insufficient material.',fifty:'Draw — 50-move rule.',rep:'Draw by threefold repetition.'}[r.kind];res='draw'}
  resultText=text;
@@ -162,7 +165,9 @@ function finish(r){
  if(res==='win')buzz([30,40,80]);else buzz(30);
  render();showResult()}
 
-let hintsLeft=3,puzIdx=0,puzDaily=false;
+let hintsLeft=3,puzIdx=0,puzDaily=false,hill=false,hillPick=false;
+/* King of the Hill: a king standing on d4/e4/d5/e5 wins at once (checked in assess() and inside the search). */
+const kingOnHill=(s,c)=>{const k=c==='w'?'K':'k';return s.b[27]===k||s.b[28]===k||s.b[35]===k||s.b[36]===k};
 function chToast(t){try{window.toast&&window.toast(t)}catch(_){}}
 function pgnFallback(t){try{const a=document.createElement('textarea');a.value=t;a.style.cssText='position:fixed;opacity:0;top:0;left:0';document.body.appendChild(a);a.select();document.execCommand('copy');a.remove()}catch(_){}}
 function pgnText(){const mv=hist.map(h=>h.san);let body='';for(let i=0;i<mv.length;i++){if(i%2===0)body+=(i/2+1)+'. ';body+=mv[i]+' '}
@@ -319,7 +324,7 @@ function puzCoins(n){try{if(window.data){window.data.coins=(Number(window.data.c
 function startPuzzle(idx,isDaily){
  aiTok++;thinking=false;promoMs=null;idx=((idx%PUZZLES.length)+PUZZLES.length)%PUZZLES.length;
  const pz=PUZZLES[idx],b=parse(pz[0]);if(!b){chToast('Puzzle unavailable');return}
- mode='puzzle';level='puzzle';puzIdx=idx;puzDaily=!!isDaily;myColor=pz[1];role=myColor;hintsLeft=1;
+ mode='puzzle';level='puzzle';hill=false;puzIdx=idx;puzDaily=!!isDaily;myColor=pz[1];role=myColor;hintsLeft=1;
  base={b,turn:pz[1],rights:{wK:false,wQ:false,bK:false,bQ:false},ep:-1,half:0,ply:0};
  hist=[];view=0;over=false;resultText='';selected=-1;targets=[];flipped=pz[1]==='b';startAt=Date.now();startClock();started=true;
  hideOverlay();render()}
@@ -333,8 +338,9 @@ function showPuzzleDone(){
 function showMenu(){
  aiTok++;thinking=false;
  const o=ov('<div class="ch-ovc"><h2>Game Master Chess</h2><p>Full rules: castling, en passant, promotion, draws</p><div class="ch-seg" id="chSide"><button data-c="w">♔ White</button><button data-c="b">♚ Black</button><button data-c="r">Random</button></div>'
- +'<button class="ch-big" data-lv="easy">Computer · Easy</button><button class="ch-big" data-lv="medium">Computer · Medium</button><button class="ch-big" data-lv="hard">Computer · Hard</button><button class="ch-big alt" data-lv="pass">Pass &amp; Play (2 players)</button><button class="ch-big alt" id="chPuzDay">Puzzle of the day (+20)</button><button class="ch-big alt" id="chPuz">Mate-in-1 puzzles</button>'
+ +'<button class="ch-big" data-lv="easy">Computer · Easy</button><button class="ch-big" data-lv="medium">Computer · Medium</button><button class="ch-big" data-lv="hard">Computer · Hard</button><button class="ch-big alt" id="chHill"></button><button class="ch-big alt" data-lv="pass">Pass &amp; Play (2 players)</button><button class="ch-big alt" id="chPuzDay">Puzzle of the day (+20)</button><button class="ch-big alt" id="chPuz">Mate-in-1 puzzles</button>'
  +'<p>To play a friend online, use the Play Together button.</p>'+(started&&hist.length&&!over?'<button class="ch-big alt" id="chResume">Resume game</button>':'')+'<button class="ch-big alt" id="chExit2">Back to arcade</button></div>');
+ const hb=o.querySelector('#chHill'),hmark=()=>{hb.textContent='Variant: '+(hillPick?'King of the Hill':'Standard')+' (tap to change)'};hmark();hb.onclick=()=>{hillPick=!hillPick;hmark()};
  const mark=()=>o.querySelectorAll('#chSide button').forEach(x=>x.classList.toggle('on',x.dataset.c===sidePick));mark();
  o.querySelectorAll('#chSide button').forEach(x=>x.onclick=()=>{sidePick=x.dataset.c;mark()});
  o.querySelectorAll('[data-lv]').forEach(x=>x.onclick=()=>{const lv=x.dataset.lv,c=sidePick==='r'?(Math.random()<.5?'w':'b'):sidePick;startSolo(lv==='pass'?'pass':'cpu',lv==='pass'?level:lv,c)});
@@ -344,7 +350,8 @@ function showMenu(){
  o.querySelector('#chExit2').onclick=()=>{hideOverlay();window.home&&window.home()}}
 function startSolo(m,lv,c){
  try{localStorage.removeItem(SAVE_KEY)}catch(_){}
- aiTok++;thinking=false;promoMs=null;mode=m;level=lv;myColor=m==='cpu'?c:'w';role=myColor;
+ aiTok++;thinking=false;promoMs=null;mode=m;level=lv;hill=hillPick;myColor=m==='cpu'?c:'w';role=myColor;
+ if(hill)chToast('King of the Hill: walk your king to the centre to win');
  hintsLeft=3;base=newState();hist=[];view=0;over=false;resultText='';selected=-1;targets=[];flipped=m==='cpu'&&myColor==='b';startAt=Date.now();startClock();
  hideOverlay();render();if(m==='cpu'&&myColor==='b')thinkSoon()}
 
@@ -362,13 +369,13 @@ const SAVE_KEY='necpra.resume.v1.chess';
 function saveSolo(){try{
  if(mode==='room'||mode==='puzzle'||roomOf()||!started)return;
  if(over||!hist.length){if(over)localStorage.removeItem(SAVE_KEY);return}
- localStorage.setItem(SAVE_KEY,JSON.stringify({mode,level,myColor,flipped,base:encode(base),hist:hist.map(h=>({p:encode(h.s),m:h.m,san:h.san}))}))}catch(_){}}
+ localStorage.setItem(SAVE_KEY,JSON.stringify({mode,level,myColor,flipped,hill,base:encode(base),hist:hist.map(h=>({p:encode(h.s),m:h.m,san:h.san}))}))}catch(_){}}
 function restoreSolo(){try{
  const d=JSON.parse(localStorage.getItem(SAVE_KEY)||'null');if(!d||!Array.isArray(d.hist)||!d.hist.length)return false;
  const b=decode(d.base);if(!b)return false;const h=[];
  for(const x of d.hist){const st=decode(x.p);if(!st||!x.m)return false;h.push({s:st,m:x.m,san:x.san||''})}
  mode=d.mode==='pass'?'pass':'cpu';level=d.level||'medium';myColor=mode==='cpu'?(d.myColor==='b'?'b':'w'):'w';role=myColor;
- base=b;hist=h;view=hist.length;over=false;resultText='';selected=-1;targets=[];flipped=!!d.flipped;startAt=Date.now();startClock();return true}catch(_){return false}}
+ hill=!!d.hill;hillPick=hill;base=b;hist=h;view=hist.length;over=false;resultText='';selected=-1;targets=[];flipped=!!d.flipped;startAt=Date.now();startClock();return true}catch(_){return false}}
 setInterval(saveSolo,1500);window.addEventListener('pagehide',saveSolo);document.addEventListener('visibilitychange',()=>{if(document.hidden)saveSolo()});
 function init(force){
  const sec=$('chess');if(!sec)return;
@@ -378,7 +385,7 @@ function init(force){
  if(started&&initKey===key&&!over&&force!==true){build();render();return}
  initKey=key;started=true;aiTok++;thinking=false;promoMs=null;build();
  if(room){
-  mode='room';role=myRole(room);myColor=role;base=newState();hist=[];view=0;over=false;resultText='';selected=-1;targets=[];flipped=role==='b';startAt=Date.now();startClock();
+  mode='room';hill=false;role=myRole(room);myColor=role;base=newState();hist=[];view=0;over=false;resultText='';selected=-1;targets=[];flipped=role==='b';startAt=Date.now();startClock();
   if(room.state&&room.state.position){const ns=decode(room.state.position);if(ns)base=ns}
   hideOverlay();render();if(!(room.state&&room.state.position))publish(base);
   if(!listening){listening=true;window.addEventListener('game:room:update',onRoomUpdate)}

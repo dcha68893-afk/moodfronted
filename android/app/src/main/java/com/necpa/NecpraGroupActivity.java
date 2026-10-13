@@ -363,17 +363,20 @@ public class NecpraGroupActivity extends AppCompatActivity {
     }
 
     private void memberMenu(final Member m) {
-        if (!iAmManager() || "owner".equals(m.role)) return;
-        final List<String> items = new ArrayList<>(); final List<Integer> ops = new ArrayList<>();   // 0 remove, 1 make admin, 2 remove admin, 3 make owner, 4 mute, 5 unmute
-        if (!"admin".equals(m.role) || iAmOwner()) { items.add("Remove from group"); ops.add(0); items.add(m.muted ? "Unmute member" : "Mute member"); ops.add(m.muted ? 5 : 4); }
-        if (iAmOwner()) {
+        // Every member can report another member (Google Play user-generated-content policy); only managers get the admin actions.
+        final boolean canManage = iAmManager() && !"owner".equals(m.role);
+        final List<String> items = new ArrayList<>(); final List<Integer> ops = new ArrayList<>();   // 0 remove, 1 make admin, 2 remove admin, 3 make owner, 4 mute, 5 unmute, 9 report
+        if (canManage && (!"admin".equals(m.role) || iAmOwner())) { items.add("Remove from group"); ops.add(0); items.add(m.muted ? "Unmute member" : "Mute member"); ops.add(m.muted ? 5 : 4); }
+        if (canManage && iAmOwner()) {
             if ("admin".equals(m.role)) { items.add("Remove admin role"); ops.add(2); } else { items.add("Make admin"); ops.add(1); }
             items.add("Make group owner"); ops.add(3);
         }
-        if (items.isEmpty()) return;
+        items.add("Report member"); ops.add(9);
         new AlertDialog.Builder(this).setTitle(m.name).setItems(items.toArray(new String[0]), (d, which) -> {
             int op = ops.get(which);
-            if (op == 0) {
+            if (op == 9) {
+                reportMember(m);
+            } else if (op == 0) {
                 new AlertDialog.Builder(this).setTitle("Remove " + m.name + "?").setMessage("They will no longer receive new messages from this group.")
                         .setPositiveButton("Remove", (d2, w2) -> work(() -> {
                             NecpraMessageRepository.Resp r = repo.api("DELETE", "/api/group-admin/" + chatId + "/members/" + m.id, null);
@@ -404,6 +407,19 @@ public class NecpraGroupActivity extends AppCompatActivity {
                 }, null);
             }
         }).show();
+    }
+
+    private void reportMember(final Member m) {
+        final String[] labels = {"Spam", "Harassment or abuse", "Hate speech", "Violence or threats", "Sexual content", "Misinformation", "Something else"};
+        final String[] keys = {"spam", "harassment", "hate_speech", "violence", "sexual_content", "misinformation", "other"};
+        new AlertDialog.Builder(this).setTitle("Report " + m.name)
+                .setItems(labels, (d, which) -> work(() -> {
+                    NecpraMessageRepository.Resp r = repo.api("POST", "/api/group-platform/" + chatId + "/report",
+                            new JSONObject().put("userId", m.id).put("reason", keys[which]));
+                    if (!r.ok()) throw new IOException(r.message());
+                    toast("Report submitted. Group admins will review it.");
+                }, null))
+                .setNegativeButton("Cancel", null).show();
     }
 
     private void showAddPicker() {
