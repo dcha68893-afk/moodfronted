@@ -74,6 +74,19 @@
     } catch (_) { return false; }
   }
 
+  // Capacitor APKs ship their own web assets in the app package. They must not
+  // register the browser PWA service worker: the native bootstrap in js/config.js
+  // disables it, but this controller is loaded earlier in <head>. Detect native
+  // before any registration/update path so offline cold-start always uses bundled
+  // assets and cannot race a worker that serves the generic offline shell.
+  function isNativeShell() {
+    try {
+      return !!(window.Capacitor &&
+        typeof window.Capacitor.isNativePlatform === 'function' &&
+        window.Capacitor.isNativePlatform());
+    } catch (_) { return false; }
+  }
+
   function browserInfo() {
     var inApp = /FBAN|FBAV|Instagram|MicroMessenger|Line\/|TikTok|musical_ly|Snapchat|; wv\)/i.test(ua);
     var miui = /MiuiBrowser|XiaoMi/i.test(ua);
@@ -127,12 +140,15 @@
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.addEventListener('controllerchange', function () {
-      if (!initialController || !isStandalone()) return;
+      if (isNativeShell() || !initialController || !isStandalone()) return;
       reloadForNativeUpdate();
     });
   }
 
   function registerServiceWorker() {
+    // The installed Android APK is a native Capacitor shell, not a PWA.
+    // Return a harmless no-op before touching navigator.serviceWorker.
+    if (isNativeShell()) return Promise.resolve(null);
     if (!('serviceWorker' in navigator)) {
       return Promise.reject(new Error('Service workers are not supported in this browser'));
     }
@@ -151,7 +167,7 @@
   }
 
   function checkForUpdateNow() {
-    if (!('serviceWorker' in navigator)) return Promise.resolve(null);
+    if (isNativeShell() || !('serviceWorker' in navigator)) return Promise.resolve(null);
     return registerServiceWorker().then(function (reg) {
       if (reg && reg.waiting && isStandalone()) {
         activateWaitingWorker(reg, true);
@@ -171,7 +187,7 @@
   // at launch, then at most once every six hours, preserves deployment pickup
   // without turning foreground events into a polling loop.
   function scheduleUpdateCheck() {
-    if (!('serviceWorker' in navigator)) return;
+    if (isNativeShell() || !('serviceWorker' in navigator)) return;
     var KEY = 'necpra:sw:last-update-check:v1';
     var MAX_AGE = 6 * 60 * 60 * 1000;
     var now = Date.now();
@@ -642,7 +658,7 @@
   }
 
   function wireServiceWorkerUpdates() {
-    if (!('serviceWorker' in navigator)) return;
+    if (isNativeShell() || !('serviceWorker' in navigator)) return;
 
     var refreshing = false;
     var hadControllerOnLoad = !!navigator.serviceWorker.controller;
@@ -779,7 +795,7 @@
   // Start registration immediately. The install controller is loaded in <head>,
   // so this gives Chromium the earliest possible chance to establish PWA
   // installability before the user presses the in-app Install button.
-  registerServiceWorker().catch(function () {});
-  if (document.readyState === 'complete') wireServiceWorkerUpdates();
-  else window.addEventListener('load', wireServiceWorkerUpdates, { once: true });
+  if (!isNativeShell()) registerServiceWorker().catch(function () {});
+  if (!isNativeShell() && document.readyState === 'complete') wireServiceWorkerUpdates();
+  else if (!isNativeShell()) window.addEventListener('load', wireServiceWorkerUpdates, { once: true });
 })();
