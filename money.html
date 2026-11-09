@@ -69,7 +69,7 @@ h4{margin:16px 0 4px;font-size:13px}
 .sw{position:relative;display:block;margin:0;width:46px;height:26px;flex:0 0 auto}.sw input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;z-index:1;cursor:pointer}.sw span{position:absolute;inset:0;background:var(--line);border-radius:13px;transition:.2s}.sw span:before{content:"";position:absolute;left:3px;top:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:.2s}.sw input:checked+span{background:var(--accent)}.sw input:checked+span:before{transform:translateX(20px)}
 .tabs{overflow-x:auto;scrollbar-width:none}.tabs::-webkit-scrollbar{display:none}.tab{flex:0 0 auto;padding:9px 13px}
 .wstats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px;position:relative;z-index:1}.wstat{background:rgba(255,255,255,.16);border-radius:12px;padding:8px 10px;min-width:0}.wstat span{display:block;font-size:10.5px;opacity:.88}.wstat b{font-size:12.5px;white-space:nowrap}
-.hacts{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px;position:relative;z-index:1}.hact{border:0;background:#fff;color:#0f766e;border-radius:14px;padding:10px 2px;font:inherit;font-size:11.5px;font-weight:800;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:5px}.hact i{font-size:16px}.hact:active{transform:scale(.96)}
+.hacts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px;position:relative;z-index:1}.hact{border:0;background:#fff;color:#0f766e;border-radius:14px;padding:10px 2px;font:inherit;font-size:11.5px;font-weight:800;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:5px}.hact i{font-size:16px}.hact:active{transform:scale(.96)}
 .kv{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13px}.kv:last-child{border-bottom:0}.kv span{color:var(--muted)}.kv b{text-align:right;word-break:break-word}
 .stat2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}.stat2>div{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px}.stat2 span{font-size:11.5px;color:var(--muted)}.stat2 b{display:block;font-size:16px;margin-top:2px}
 .chip.completed,.chip.active{background:rgba(34,197,94,.15);color:#16a34a}.chip.processing,.chip.due{background:rgba(245,158,11,.16);color:#b45309}.chip.overdue{background:rgba(239,68,68,.14);color:#dc2626}
@@ -80,7 +80,7 @@ details.rules{margin-top:10px;font-size:12px;color:var(--muted);line-height:1.5}
 <body>
 <main class="money">
 <section class="hero">
-  <div class="top"><h1><i class="fas fa-wallet"></i>&nbsp; NECPRA Wallet</h1><button class="refresh" id="refreshBtn" type="button" aria-label="Refresh"><i class="fas fa-rotate"></i></button></div>
+  <div class="top"><div style="min-width:0"><h1><i class="fas fa-wallet"></i>&nbsp; NECPRA Wallet</h1><div class="caption" id="wUser" style="margin-top:3px;font-weight:700"></div></div><div style="display:flex;gap:8px;z-index:1"><button class="refresh" id="eyeBtn" type="button" aria-label="Show or hide balance"><i class="fas fa-eye-slash"></i></button><button class="refresh" id="refreshBtn" type="button" aria-label="Refresh"><i class="fas fa-rotate"></i></button></div></div>
   <div class="caption" style="margin-top:12px">Available balance</div>
   <div class="balance" id="balance" style="margin-top:2px">KSh 0</div>
   <div class="caption" id="balCaption">Your personal spendable NECPRA wallet balance</div>
@@ -89,7 +89,6 @@ details.rules{margin-top:10px;font-size:12px;color:var(--muted);line-height:1.5}
     <button class="hact" data-act="addMoney" type="button"><i class="fas fa-circle-plus"></i>Add money</button>
     <button class="hact" data-act="sendMoney" type="button"><i class="fas fa-paper-plane"></i>Send</button>
     <button class="hact" data-act="withdraw" type="button"><i class="fas fa-download"></i>Withdraw</button>
-    <button class="hact" data-act="payBills" type="button"><i class="fas fa-file-invoice-dollar"></i>Pay bills</button>
   </div>
   <div class="pills" style="display:none"><b id="pCircles">0</b><b id="pIncoming">0</b><b id="pOutgoing">0</b></div>
 </section>
@@ -122,6 +121,10 @@ async function api(path,opt){opt=opt||{};var b=apiBase();if(!b)throw Error('API 
   var r=await fetch(b+path,Object.assign({},opt,{headers:Object.assign({'Content-Type':'application/json'},token()?{Authorization:'Bearer '+token()}:{},opt.headers||{})}));
   var d=await r.json().catch(function(){return{}});if(!r.ok){var er=Error(d.message||d.error||('Request failed ('+r.status+')'));er.status=r.status;er.errorCode=d.errorCode||d.code||'';if(er.errorCode==='ADULT_CONFIRMATION_REQUIRED'){try{localStorage.removeItem(adultKey());adultGate()}catch(_){}}throw er}return d}
 function money(n){return 'KSh '+Number(n||0).toLocaleString('en-KE',{maximumFractionDigits:2})}
+var SHOW_KEY='necpra_money_show_balance';
+var BAL_SHOWN=false;try{BAL_SHOWN=sessionStorage.getItem(SHOW_KEY)==='1'}catch(_){}
+function wm(n){return BAL_SHOWN?money(n):'KSh \u2022\u2022\u2022\u2022'}
+function tokenUser(){try{var p=JSON.parse(atob(token().split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));return p.username||p.userName||p.name||''}catch(_){return''}}
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function ago(d){if(!d)return'';var s=(Date.now()-new Date(d))/1000;if(s<60)return'just now';if(s<3600)return Math.floor(s/60)+' min ago';if(s<86400)return Math.floor(s/3600)+' h ago';if(s<604800)return Math.floor(s/86400)+' d ago';return new Date(d).toLocaleDateString('en-KE',{day:'numeric',month:'short'})}
 function left(d){if(!d)return'';var s=(new Date(d)-Date.now())/1000;if(s<=0)return'expired';if(s<3600)return Math.ceil(s/60)+' min left';return Math.ceil(s/3600)+' h left'}
@@ -191,7 +194,7 @@ async function loadOrders(){S.orders=null;render();
   catch(e){S.orders=[];S.ordersErr=e.message}
   render()}
 function header(){var o=(S.overview&&S.overview.overview)||{};
-  var w=S.wallet;$('balance').textContent=w?money(w.balance):(S.walletErr?'—':'KSh 0');$('balCaption').textContent=w?(w.isFrozen?'Your wallet is frozen. Contact support.':'Your personal spendable NECPRA wallet balance'):(S.walletErr?'Wallet unavailable: '+S.walletErr:'Loading your wallet…');$('wPending').textContent=w?money(w.pendingTotal):'—';$('wIn').textContent=w?money(w.receivedThisMonth):'—';$('wOut').textContent=w?money(w.spentThisMonth):'—';$('pCircles').textContent=o.circleCount!=null?o.circleCount:S.circles.length;
+  var w=S.wallet;$('balance').textContent=w?wm(w.balance):(S.walletErr?'—':'KSh 0');$('balCaption').textContent=w?(w.isFrozen?'Your wallet is frozen. Contact support.':'Your personal spendable NECPRA wallet balance'):(S.walletErr?'Wallet unavailable: '+S.walletErr:'Loading your wallet…');$('wPending').textContent=w?wm(w.pendingTotal):'—';$('wIn').textContent=w?wm(w.receivedThisMonth):'—';$('wOut').textContent=w?wm(w.spentThisMonth):'—';var un=(w&&w.username)||tokenUser(),dn=w&&w.displayName;$('wUser').textContent=un?(dn&&dn!==un?dn+' · @'+un:'@'+un):'';$('eyeBtn').innerHTML='<i class="fas fa-eye'+(BAL_SHOWN?'':'-slash')+'"></i>';$('eyeBtn').setAttribute('aria-label',BAL_SHOWN?'Hide balance':'Show balance');$('pCircles').textContent=o.circleCount!=null?o.circleCount:S.circles.length;
   var inc=S.incoming.filter(function(r){return r.status==='requested'}).length;$('pIncoming').textContent=o.pendingIncoming!=null?o.pendingIncoming:inc;
   $('pOutgoing').textContent=o.pendingOutgoing!=null?o.pendingOutgoing:S.outgoing.filter(function(r){return r.status==='requested'}).length;
   var dot=$('reqDot'),n=Number($('pIncoming').textContent)||0;dot.style.display=n?'inline-block':'none';dot.textContent=n}
@@ -219,11 +222,11 @@ function viewWallet(){
   var w=S.wallet;
   if(!w&&S.walletErr)return '<div class="card"><div class="empty"><i class="fas fa-triangle-exclamation"></i>'+esc(S.walletErr)+'<div style="margin-top:12px"><button class="primary small" data-act="retryWallet" type="button">Try again</button></div></div></div>';
   if(!w)return skeleton();
-  var pend='';if(w.pendingDeposits>0)pend+='<div class="notice warn">'+money(w.pendingDeposits)+' deposit waiting for M-PESA confirmation. Your balance updates automatically once it is confirmed.</div>';
-  if(w.pendingWithdrawals>0)pend+='<div class="notice">'+money(w.pendingWithdrawals)+' is on its way to your M-PESA (already taken from your balance).</div>';
+  var pend='';if(w.pendingDeposits>0)pend+='<div class="notice warn">'+wm(w.pendingDeposits)+' deposit waiting for M-PESA confirmation. Your balance updates automatically once it is confirmed.</div>';
+  if(w.pendingWithdrawals>0)pend+='<div class="notice">'+wm(w.pendingWithdrawals)+' is on its way to your M-PESA (already taken from your balance).</div>';
   var rec=(w.recent||[]).map(function(x){var cr=x.type==='credit',t=(x.kind==='transfer_in'||x.kind==='transfer_out')&&x.description?x.description:(KT[x.kind]||(cr?'Money in':'Money out'));
-    return '<div class="row" data-act="receipt" data-id="'+esc(x.id)+'" style="cursor:pointer"><div class="ico" style="background:'+(cr?'#16a34a':'#2563eb')+'"><i class="fas fa-'+(KI[x.kind]||(cr?'circle-arrow-down':'circle-arrow-up'))+'"></i></div><div class="mid"><div class="row-title">'+esc(t)+'</div><div class="row-sub">'+esc(ago(x.createdAt))+(x.status&&x.status!=='completed'?' · '+chip(x.status):'')+'</div></div><div class="amt '+(cr?'pos':'')+'">'+(cr?'+':'-')+money(x.amount)+'</div></div>'}).join('');
-  return pend+'<div class="stat2"><div><span>Pending</span><b>'+money(w.pendingTotal)+'</b></div><div><span>Saved in goals</span><b>'+money(w.savedInGoals)+'</b></div><div><span>Received this month</span><b style="color:#16a34a">'+money(w.receivedThisMonth)+'</b></div><div><span>Spent this month</span><b>'+money(w.spentThisMonth)+'</b></div></div>'
+    return '<div class="row" data-act="receipt" data-id="'+esc(x.id)+'" style="cursor:pointer"><div class="ico" style="background:'+(cr?'#16a34a':'#2563eb')+'"><i class="fas fa-'+(KI[x.kind]||(cr?'circle-arrow-down':'circle-arrow-up'))+'"></i></div><div class="mid"><div class="row-title">'+esc(t)+'</div><div class="row-sub">'+esc(ago(x.createdAt))+(x.status&&x.status!=='completed'?' · '+chip(x.status):'')+'</div></div><div class="amt '+(cr?'pos':'')+'">'+(cr?'+':'-')+wm(x.amount)+'</div></div>'}).join('');
+  return pend+'<div class="stat2"><div><span>Pending</span><b>'+wm(w.pendingTotal)+'</b></div><div><span>Saved in goals</span><b>'+wm(w.savedInGoals)+'</b></div><div><span>Received this month</span><b style="color:#16a34a">'+wm(w.receivedThisMonth)+'</b></div><div><span>Spent this month</span><b>'+wm(w.spentThisMonth)+'</b></div></div>'
    +'<div class="btns" style="margin:0 0 12px"><button class="secondary small" data-act="receive" type="button" style="flex:1"><i class="fas fa-qrcode"></i>&nbsp; Receive money</button><button class="secondary small" data-act="newGoal" type="button" style="flex:1"><i class="fas fa-piggy-bank"></i>&nbsp; New savings goal</button></div>'
    +'<h4>Recent transactions</h4>'+(rec?'<div class="card">'+rec+'</div>':'<div class="card"><div class="empty"><i class="fas fa-receipt"></i>No wallet transactions yet.<div style="margin-top:12px"><button class="primary" data-act="addMoney" type="button">Add money</button></div></div></div>')
    +'<div class="row-sub" style="text-align:center;margin:6px 0">Money Circles hold group contributions and are separate from this balance.</div>'}
@@ -235,7 +238,7 @@ function viewGoals(){
   if(!S.goals.length)return head+'<div class="card"><div class="empty"><i class="fas fa-piggy-bank"></i>No savings goals yet.<div style="margin-top:12px"><button class="primary" data-act="newGoal" type="button">Create a goal</button></div></div></div>';
   return head+'<div class="card">'+S.goals.map(function(g){var c=GCAT[g.category]||GCAT.personal;
     return '<div class="circle"><div class="head"><div class="ico" style="background:#f59e0b"><i class="fas fa-'+c[1]+'"></i></div><div class="mid" style="min-width:0;flex:1"><div class="row-title">'+esc(g.name)+' '+(g.status==='completed'?'<span class="chip ok">Goal reached</span>':'')+'</div><div class="row-sub">'+esc(c[0])+(g.dueDate?' · by '+esc(String(g.dueDate).slice(0,10)):'')+'</div></div></div>'
-     +'<div class="bar"><i style="width:'+g.progress+'%"></i></div><div class="meta"><span>'+money(g.saved)+' saved</span><span>'+g.progress+'% of '+money(g.target)+'</span></div>'
+     +'<div class="bar"><i style="width:'+g.progress+'%"></i></div><div class="meta"><span>'+wm(g.saved)+' saved</span><span>'+g.progress+'% of '+wm(g.target)+'</span></div>'
      +'<div class="btns"><button class="primary small" data-act="goalDep" data-id="'+esc(g.id)+'" type="button">Add</button><button class="secondary small" data-act="goalWd" data-id="'+esc(g.id)+'" type="button">Move back</button><button class="danger small" data-act="goalClose" data-id="'+esc(g.id)+'" type="button">Close</button></div></div>'}).join('')+'</div><div style="text-align:center"><button class="secondary" data-act="newGoal" type="button">+ New goal</button></div>'}
 function newGoal(){
   modal('New savings goal','<label>Goal name</label><input class="input" id="ngName" maxlength="80" placeholder="e.g. Term 1 school fees"><label>Category</label><select class="input" id="ngCat">'+Object.keys(GCAT).map(function(k){return '<option value="'+k+'">'+GCAT[k][0]+'</option>'}).join('')+'</select><label>Target amount (KSh)</label><input class="input" id="ngTarget" type="number" inputmode="decimal" min="1" placeholder="20000"><label>Target date (optional)</label><input class="input" id="ngDate" type="date"><div class="actions"><button class="secondary" data-act="close" type="button">Cancel</button><button class="primary" id="ngGo" type="button">Create goal</button></div>');
@@ -243,7 +246,7 @@ function newGoal(){
     busy(b,true,'Creating…');await api('/wallet/goals',{method:'POST',body:JSON.stringify({name:name,category:$('ngCat').value,target:t,dueDate:$('ngDate').value||undefined})});closeModal();toast('Goal created');S.tab='goals';S.goals=null;loadGoals();render()}catch(e){busy(b,false);toast(e.message,true)}}}
 async function goalMove(id,dir){
   var g=(S.goals||[]).find(function(x){return String(x.id)===String(id)});if(!g)return;
-  var v=await ask(dir==='deposit'?'Add to '+g.name:'Move back to wallet','Amount (KSh)','number',dir==='deposit'?'Available in wallet: '+money(S.wallet&&S.wallet.balance):'Saved in this goal: '+money(g.saved));if(!v)return;
+  var v=await ask(dir==='deposit'?'Add to '+g.name:'Move back to wallet','Amount (KSh)','number',dir==='deposit'?'Available in wallet: '+wm(S.wallet&&S.wallet.balance):'Saved in this goal: '+wm(g.saved));if(!v)return;
   try{await api('/wallet/goals/'+encodeURIComponent(id)+'/'+dir,{method:'POST',body:JSON.stringify({amount:Number(v)})});closeModal();toast(dir==='deposit'?'Saved to goal':'Moved back to wallet');loadGoals();loadWallet()}catch(e){closeModal();toast(e.message,true)}}
 async function goalClose(id){var g=(S.goals||[]).find(function(x){return String(x.id)===String(id)});if(!g)return;
   if(!confirm('Close "'+g.name+'"? '+(g.saved>0?money(g.saved)+' will go back to your wallet.':'')))return;
@@ -268,6 +271,12 @@ async function showReceipt(id){try{openReceipt(ud(await api('/wallet/receipt/'+e
 /* ----- step-up wrapper (same fresh-password check the rest of Money uses) ----- */
 async function withStep(send){var st=await stepUp();if(!st)return null;
   try{return await send(st)}catch(e1){if(e1&&e1.errorCode==='MONEY_STEP_UP_REQUIRED'){try{sessionStorage.removeItem('necpra_money_step_up')}catch(_){}var s2=await stepUp(true);if(!s2)return null;return await send(s2)}throw e1}}
+function friendlyMpesa(r){r=String(r||'');
+  if(/receiver party|invalid.*(shortcode|party)|PartyB/i.test(r))return 'Deposits are not fully set up on our side yet (M-PESA business number mismatch). You were not charged. Please try again later or contact support.';
+  if(/cancel/i.test(r))return 'You cancelled the M-PESA prompt. You were not charged.';
+  if(/insufficient|not enough/i.test(r))return 'Your M-PESA balance is too low for this deposit.';
+  if(/timeout|timed out|did not respond/i.test(r))return 'The M-PESA prompt timed out. You were not charged.';
+  return r||'The payment was cancelled or failed. You were not charged.'}
 function newIdem(){return crypto.randomUUID?crypto.randomUUID():String(Date.now())+'-'+Math.random()}
 function quoteRows(q){return '<div class="card" style="padding:2px 14px"><div class="kv"><span>Amount</span><b>'+money(q.amount)+'</b></div><div class="kv"><span>Fee</span><b>'+(q.fee>0?money(q.fee):'Free')+'</b></div><div class="kv"><span>Total deducted</span><b>'+money(q.total)+'</b></div><div class="kv"><span>Wallet balance</span><b>'+money(q.available)+'</b></div></div>'
   +'<div class="row-sub" style="margin:8px 0">Limits: '+money(q.min)+' to '+money(q.max)+' per '+(q.type==='withdraw'?'withdrawal':'transfer')+' · '+money(q.dailyLimit)+' per day ('+money(q.dailyRemaining)+' left today)</div>'
@@ -290,14 +299,14 @@ async function watchTopup(cid,amount,sandbox){
     var d;try{d=ud(await api('/marketplace/wallet/topup/'+encodeURIComponent(cid)))||{}}catch(_){continue}
     if(d.status==='completed'){await loadWallet();var ref=cid;try{var rc=(S.wallet&&S.wallet.recent||[]).find(function(x){return x.kind==='topup'});if(rc)ref=rc.reference||cid}catch(_){}
       modal('Money added','<div style="text-align:center"><div class="ok-big"><i class="fas fa-check"></i></div><div style="font-weight:800;font-size:22px">+'+money(amount)+'</div><div class="row-sub" style="margin-top:4px">Deposit confirmed</div></div><div class="card" style="margin-top:12px;padding:2px 14px"><div class="kv"><span>Transaction reference</span><b>'+esc(ref)+'</b></div><div class="kv"><span>New wallet balance</span><b>'+money(d.balance!=null?d.balance:(S.wallet&&S.wallet.balance))+'</b></div></div><div class="actions"><button class="primary" data-act="close" type="button">Done</button></div>');return}
-    if(d.status==='failed'){box('xmark','Deposit not completed',esc(d.reason||'The payment was cancelled or failed. You were not charged.'),'<button class="secondary" data-act="close" type="button">Close</button><button class="primary" data-act="addMoney" type="button">Try again</button>');return}
+    if(d.status==='failed'){box('xmark','Deposit not completed',esc(friendlyMpesa(d.reason)),'<button class="secondary" data-act="close" type="button">Close</button><button class="primary" data-act="addMoney" type="button">Try again</button>');return}
   }
   if(my===topupWatchId&&$('modal').classList.contains('open'))box('clock','Still waiting','We have not received confirmation yet. If you already paid, your balance will update automatically once Safaricom confirms. You can close this safely.','<button class="primary" data-act="close" type="button">Close</button>');
   loadWallet()}
 
 /* ----- send to another NECPRA user (username or phone), with fees + limits shown before confirming ----- */
 function sendMoney(){
-  modal('Send money','<div class="notice">Send wallet money to another NECPRA user. Find them by username or phone number.</div><label>Username or phone</label><input class="input" id="smTo" placeholder="@username or 07XX XXX XXX" autocomplete="off"><div id="smWho" class="row-sub" style="margin-top:6px;min-height:16px"></div><label>Amount (KSh)</label><input class="input" id="smAmt" type="number" inputmode="decimal" min="1" placeholder="500"><div class="row-sub" id="smBal">Available: '+money(S.wallet&&S.wallet.balance)+'</div><label>Note (optional)</label><input class="input" id="smNote" maxlength="140" placeholder="What is it for?"><div class="actions"><button class="secondary" data-act="close" type="button">Cancel</button><button class="primary" id="smGo" type="button">Review</button></div>');
+  modal('Send money','<div class="notice">Send wallet money to another NECPRA user. Find them by username or phone number.</div><label>Username or phone</label><input class="input" id="smTo" placeholder="@username or 07XX XXX XXX" autocomplete="off"><div id="smWho" class="row-sub" style="margin-top:6px;min-height:16px"></div><label>Amount (KSh)</label><input class="input" id="smAmt" type="number" inputmode="decimal" min="1" placeholder="500"><div class="row-sub" id="smBal">Available: '+wm(S.wallet&&S.wallet.balance)+'</div><label>Note (optional)</label><input class="input" id="smNote" maxlength="140" placeholder="What is it for?"><div class="actions"><button class="secondary" data-act="close" type="button">Cancel</button><button class="primary" id="smGo" type="button">Review</button></div>');
   var who=null,timer=null,seq=0;
   async function resolve(v){var my=++seq,out=$('smWho');if(!out)return null;out.textContent='Looking up…';try{var r=ud(await api('/wallet/lookup?q='+encodeURIComponent(v)));if(my!==seq||!$('smWho'))return null;who=r;out.innerHTML='<b style="color:#16a34a">✓ '+esc(r.displayName||r.username)+'</b> (@'+esc(r.username)+')';return r}catch(e){if(my===seq){who=null;out.textContent=e.message}return null}}
   $('smTo').addEventListener('input',function(){who=null;clearTimeout(timer);var v=this.value.trim();if(v.replace(/^@/,'').length<3){$('smWho').textContent='';return}timer=setTimeout(function(){resolve(v)},400)});
@@ -313,7 +322,7 @@ function sendMoney(){
 
 /* ----- withdraw to M-PESA ----- */
 function withdrawMoney(){
-  modal('Withdraw to M-PESA','<div class="notice">The money is taken from your wallet now and sent to your M-PESA. If the payout fails it is returned automatically.</div><label>Amount (KSh)</label><input class="input" id="wdAmt" type="number" inputmode="decimal" min="10" placeholder="1000"><div class="row-sub">Available: '+money(S.wallet&&S.wallet.balance)+'</div><label>M-PESA phone</label><input class="input" id="wdPhone" inputmode="tel" placeholder="07XX XXX XXX" value="'+esc(lastPhone())+'"><div class="actions"><button class="secondary" data-act="close" type="button">Cancel</button><button class="primary" id="wdGo" type="button">Review</button></div>');
+  modal('Withdraw to M-PESA','<div class="notice">The money is taken from your wallet now and sent to your M-PESA. If the payout fails it is returned automatically.</div><label>Amount (KSh)</label><input class="input" id="wdAmt" type="number" inputmode="decimal" min="10" placeholder="1000"><div class="row-sub">Available: '+wm(S.wallet&&S.wallet.balance)+'</div><label>M-PESA phone</label><input class="input" id="wdPhone" inputmode="tel" placeholder="07XX XXX XXX" value="'+esc(lastPhone())+'"><div class="actions"><button class="secondary" data-act="close" type="button">Cancel</button><button class="primary" id="wdGo" type="button">Review</button></div>');
   $('wdGo').onclick=async function(){var b=this;try{var amt=Number($('wdAmt').value||0),ph=$('wdPhone').value.trim();if(!(amt>0))throw Error('Enter an amount');if(!ph)throw Error('Enter your M-PESA phone');
     busy(b,true,'Checking…');var q=ud(await api('/wallet/quote?type=withdraw&amount='+encodeURIComponent(amt)));busy(b,false);
     modal('Confirm withdrawal','<div style="text-align:center;margin-bottom:8px"><div class="row-sub">Withdraw to M-PESA</div><div style="font-weight:800;font-size:17px">'+esc(ph)+'</div></div>'+quoteRows(q)+'<div class="actions"><button class="secondary" id="wdBack" type="button">Back</button><button class="primary" id="wdConfirm" type="button"'+(q.canProceed?'':' disabled')+'>Withdraw '+money(q.amount)+'</button></div>');
@@ -328,9 +337,6 @@ function receiveMoney(){
   var u='';try{var p=JSON.parse(atob(token().split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));u=p.username||p.userName||''}catch(_){}
   modal('Receive money','<div class="notice">Anyone on NECPRA can send you money using your username or the phone number on your account. You can also receive from M-PESA by adding money to your wallet.</div>'+(u?'<div class="card" style="text-align:center;padding:16px"><div class="row-sub">Your NECPRA username</div><div style="font-size:20px;font-weight:800;margin:4px 0">@'+esc(u)+'</div><button class="secondary small" id="rcCopy" type="button">Copy username</button></div>':'<div class="row-sub">Your username is shown on your profile.</div>')+'<div class="actions"><button class="secondary" data-act="addMoney" type="button">Add money from M-PESA</button><button class="primary" data-act="close" type="button">Done</button></div>');
   var c=$('rcCopy');if(c)c.onclick=function(){if(navigator.clipboard)navigator.clipboard.writeText('@'+u).then(function(){toast('Username copied')},function(){toast('Could not copy',true)})}}
-function payBills(){
-  modal('Pay bills','<div class="row-sub" style="margin-bottom:8px">Choose what you want to pay.</div><div class="card" style="padding:2px 14px"><div class="row" data-act="payBillsPL" style="cursor:pointer"><div class="ico" style="background:#f59e0b"><i class="fas fa-calendar-check"></i></div><div class="mid"><div class="row-title">Pay Later orders</div><div class="row-sub">Settle a reserved marketplace order</div></div></div><div class="row" data-act="payBillsReq" style="cursor:pointer"><div class="ico" style="background:#2563eb"><i class="fas fa-hand-holding-heart"></i></div><div class="mid"><div class="row-title">Pay for someone</div><div class="row-sub">Request money for family, friends or a bill</div></div></div><div class="row" data-act="payBillsSend" style="cursor:pointer"><div class="ico" style="background:#16a34a"><i class="fas fa-paper-plane"></i></div><div class="mid"><div class="row-title">Send from wallet</div><div class="row-sub">Pay another NECPRA user directly</div></div></div></div>');
-}
 
 
 function viewCircles(){
@@ -496,13 +502,14 @@ document.addEventListener('click',function(e){
   var t=e.target.closest('[data-tab],[data-act]');if(!t){if(e.target.id==='modal')closeModal();return}
   if(t.dataset.tab){S.tab=t.dataset.tab;try{sessionStorage.setItem('necpra_money_tab',S.tab)}catch(_){}if(S.tab==='paylater'&&S.orders===null)loadOrders();if(S.tab==='goals'&&S.goals===null)loadGoals();render();return}
   var a=t.dataset.act,id=t.dataset.id;
-  if(a==='payBillsPL'){closeModal();S.tab='paylater';try{sessionStorage.setItem('necpra_money_tab',S.tab)}catch(_){}if(S.orders===null)loadOrders();render();window.scrollTo({top:0,behavior:'smooth'})}else if(a==='payBillsReq'){newRequest()}else if(a==='payBillsSend'){sendMoney()}else if(a==='addMoney')addMoney();else if(a==='sendMoney')sendMoney();else if(a==='withdraw')withdrawMoney();else if(a==='payBills')payBills();else if(a==='receive')receiveMoney();else if(a==='receipt')showReceipt(id);else if(a==='newGoal')newGoal();else if(a==='goalDep')goalMove(id,'deposit');else if(a==='goalWd')goalMove(id,'withdraw');else if(a==='goalClose')goalClose(id);else if(a==='plRemind')plRemind(id);else if(a==='retryWallet'){loadWallet(true)}else if(a==='retryGoals'){loadGoals()}
+  if(a==='addMoney')addMoney();else if(a==='sendMoney')sendMoney();else if(a==='withdraw')withdrawMoney();else if(a==='receive')receiveMoney();else if(a==='receipt')showReceipt(id);else if(a==='newGoal')newGoal();else if(a==='goalDep')goalMove(id,'deposit');else if(a==='goalWd')goalMove(id,'withdraw');else if(a==='goalClose')goalClose(id);else if(a==='plRemind')plRemind(id);else if(a==='retryWallet'){loadWallet(true)}else if(a==='retryGoals'){loadGoals()}
   else if(a==='newCircle')newCircle();else if(a==='newRequest')newRequest();else if(a==='close')closeModal();
   else if(a==='retry')load(true);else if(a==='contribute')contribute(id);else if(a==='circle')circleDetail(id);else if(a==='closePanel')closePanel();else if(a==='panelMain'){P.view='main';drawPanel()}
   else if(a==='payReq')payReq(id);else if(a==='payOrder')payOrder(id);else if(a==='cancelReq')cancelReq(id);
   else if(a&&a.indexOf('seg:')===0){S.reqSeg=a.slice(4);render()}
   else if(a&&a.indexOf('goto:')===0){S.tab=a.slice(5);try{sessionStorage.setItem('necpra_money_tab',S.tab)}catch(_){}if(S.tab==='paylater'&&S.orders===null)loadOrders();render();var tb=document.querySelector('.tabs');if(tb)tb.scrollIntoView({behavior:'smooth',block:'start'})}
 });
+$('eyeBtn').addEventListener('click',function(){BAL_SHOWN=!BAL_SHOWN;try{sessionStorage.setItem(SHOW_KEY,BAL_SHOWN?'1':'0')}catch(_){}header();render()});
 $('refreshBtn').addEventListener('click',function(){S.orders=null;load(true);loadWallet(true);if(S.tab==='goals')loadGoals();if(S.tab==='paylater')loadOrders()});
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeModal()});
 // back button inside this module: close an open sheet first (hardware back is handled by the shell)
