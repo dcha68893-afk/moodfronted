@@ -24,7 +24,7 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.53.0';
+const SW_VERSION = '19.54.0';
 // FIX: bumped so activate() drops every existing cache immediately on this
 // deploy — anyone with a stale pre-rebuild group.html (or the old, now-
 // deleted group-core-*/group-os-* files, or the misspelled necpra-* icons
@@ -87,7 +87,7 @@ const SW_VERSION = '19.53.0';
 // v102 (ICON-FONT + GAMES-LOAD FIX): icon fonts (Font Awesome css + woff2) are now precached and preloaded by the pages so icons
 // no longer wait on the network (the font is font-display:block, i.e. invisible until it arrives).
 // Cache names must only ever move forward.
-const CACHE_NAME = 'necpra-static-v102';
+const CACHE_NAME = 'necpra-static-v103';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [

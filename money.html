@@ -293,10 +293,15 @@ async function watchTopup(cid,amount,sandbox){
   var my=++topupWatchId;
   function box(icon,title,body,btns){modal('Add money','<div style="text-align:center"><div class="ok-big" style="'+(icon==='clock'?'background:rgba(245,158,11,.16);color:#b45309':(icon==='xmark'?'background:rgba(239,68,68,.14);color:#dc2626':''))+'"><i class="fas fa-'+icon+(icon==='clock'?' fa-spin':'')+'"></i></div><div style="font-weight:800;font-size:17px">'+title+'</div><div class="row-sub" style="margin:6px 0 4px">'+body+'</div></div>'+(sandbox?'<div class="notice warn">Payments are in test (sandbox) mode: no real prompt reaches a phone.</div>':'')+'<div class="kv"><span>Reference</span><b>'+esc(cid)+'</b></div><div class="actions">'+btns+'</div>')}
   box('clock','Waiting for M-PESA','Enter your M-PESA PIN on your phone to pay '+money(amount)+'.','<button class="secondary" data-act="close" type="button">Close</button>');
+  var miss=0;
   for(var i=0;i<30;i++){
     await new Promise(function(r){setTimeout(r,4000)});
     if(my!==topupWatchId||!$('modal').classList.contains('open'))return;
-    var d;try{d=ud(await api('/marketplace/wallet/topup/'+encodeURIComponent(cid)))||{}}catch(_){continue}
+    var d;try{d=ud(await api('/marketplace/wallet/topup/'+encodeURIComponent(cid)))||{};miss=0}catch(e){
+      /* A 404 means the status row can't be matched (not a pending payment). Don't hammer the server
+         30 times: after a few misses, refresh the real wallet balance and stop polling. */
+      if(e&&e.status===404&&++miss>=3){await loadWallet();if(my===topupWatchId&&$('modal').classList.contains('open'))box('clock','Checking your balance','We could not read the live status of this deposit. If you already paid, your wallet balance above reflects it. You can close this safely.','<button class="primary" data-act="close" type="button">Close</button>');return}
+      continue}
     if(d.status==='completed'){await loadWallet();var ref=cid;try{var rc=(S.wallet&&S.wallet.recent||[]).find(function(x){return x.kind==='topup'});if(rc)ref=rc.reference||cid}catch(_){}
       modal('Money added','<div style="text-align:center"><div class="ok-big"><i class="fas fa-check"></i></div><div style="font-weight:800;font-size:22px">+'+money(amount)+'</div><div class="row-sub" style="margin-top:4px">Deposit confirmed</div></div><div class="card" style="margin-top:12px;padding:2px 14px"><div class="kv"><span>Transaction reference</span><b>'+esc(ref)+'</b></div><div class="kv"><span>New wallet balance</span><b>'+money(d.balance!=null?d.balance:(S.wallet&&S.wallet.balance))+'</b></div></div><div class="actions"><button class="primary" data-act="close" type="button">Done</button></div>');return}
     if(d.status==='failed'){box('xmark','Deposit not completed',esc(friendlyMpesa(d.reason)),'<button class="secondary" data-act="close" type="button">Close</button><button class="primary" data-act="addMoney" type="button">Try again</button>');return}
