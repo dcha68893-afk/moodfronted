@@ -24,7 +24,7 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.52.0';
+const SW_VERSION = '19.53.0';
 // FIX: bumped so activate() drops every existing cache immediately on this
 // deploy — anyone with a stale pre-rebuild group.html (or the old, now-
 // deleted group-core-*/group-os-* files, or the misspelled necpra-* icons
@@ -83,7 +83,9 @@ const SW_VERSION = '19.52.0';
 // v74: profile-photo fix (js/avatar-fix.js added, message.html + js/config.js changed). Bump forces every installed
 // PWA/Android app to drop old copies and show the 'Update ready - Refresh' banner.
 // v89: native-init.js (native Profile/Settings routing) is now network-first so an installed APK never runs a stale copy.
-const CACHE_NAME = 'necpra-static-v100';
+// v101 (OFFLINE-OPEN + GAMES-BLANK FIX): see the comments on navigation(), crawlCore() and the CLEAR_CACHE handler below.
+// Cache names must only ever move forward.
+const CACHE_NAME = 'necpra-static-v101';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -200,7 +202,12 @@ function isLiveCodeAsset(url){
 }
 function local(url){try{return new URL(url,self.location.origin).origin===self.location.origin;}catch(_){return false;}}
 function stale(res){try{const d=res.headers.get('date');return d&&(Date.now()-new Date(d).getTime()>CACHE_MAX_AGE);}catch(_){return false;}}
-const OFFLINE_SHELL='<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Necpra - Offline</title></head><body><main style="font-family:system-ui;text-align:center;padding:4rem"><h1>Necpra</h1><p>You are offline.</p><button onclick="location.reload()">Try again</button></main></body></html>';
+const SHELL_STYLE='<style>:root{color-scheme:light dark}body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:system-ui,sans-serif;background:#f8fafc;color:#0f172a;text-align:center}@media(prefers-color-scheme:dark){body{background:#0b1220;color:#e5e7eb}}main{padding:2rem;max-width:22rem}h1{margin:0 0 .5rem;font-size:1.4rem}p{opacity:.8;line-height:1.5}button{margin-top:1rem;padding:.7rem 1.6rem;border:0;border-radius:999px;background:#2563eb;color:#fff;font-size:1rem}</style>';
+// Top-level fallback: only reached when NOTHING usable is cached. Reloads itself the moment the device is back online.
+const OFFLINE_SHELL='<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Necpra</title>'+SHELL_STYLE+'</head><body><main><h1>Necpra</h1><p>This screen has not been saved on your device yet. Connect to the internet once and Necpra will open offline from then on.</p><button onclick="location.reload()">Try again</button></main><script>addEventListener("online",function(){location.reload()})</script></body></html>';
+// Iframe fallback (games, status, groups ... are iframes inside chat.html). NEVER the landing page: index.html frame-busts and hides itself, which is what made the Games screen come up empty.
+const FRAME_SHELL='<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Necpra</title>'+SHELL_STYLE+'</head><body><main><p>This section is not available offline yet. Connect once to download it.</p><button onclick="location.reload()">Try again</button></main><script>addEventListener("online",function(){location.reload()})</script></body></html>';
+function offlineResponse(html){return new Response(html,{status:200,headers:{'Content-Type':'text/html;charset=utf-8','Cache-Control':'no-store'}});}
 
 function badAssetResponse(request,res){
   // A script/stylesheet answered with an HTML page is never valid code: it is a wake-up/404/fallback page.
@@ -237,12 +244,28 @@ async function refreshNav(request,cache){
   await cache.put(navKey(request.url),clean.clone()).catch(()=>{});
   return clean;
 }
+function isFrameRequest(request){const d=request.destination;return d==='iframe'||d==='frame'||d==='embed'||d==='object';}
+// App-shell fallback for a page that is not cached. ROOT-CAUSE FIX: this used to try '/' first for EVERY uncached
+// document, including iframes and /chat.html itself. index.html forwards signed-in users to chat.html (-> uncached ->
+// '/' -> chat.html ... a hidden-page redirect loop = blank screen) and frame-busts when loaded inside an iframe
+// (the Games panel). The page that was asked for is never answered with a shell that redirects straight back to it.
+const SHELL_PAGES=['/chat.html','/index.html','/'];
+async function cachedShell(cache,key){
+  const toChat=/\/chat\.html$/i.test(key);
+  for(const u of SHELL_PAGES){
+    const k=navKey(new URL(u,self.location.origin).href);
+    if(k===key)continue;
+    if(toChat&&(u==='/'||u==='/index.html'))continue;
+    let r=await cache.match(k);
+    if(r){if(r.redirected)r=await cleanNav(u,r);return r;}
+  }
+  return null;
+}
 async function navigation(request,event){
   const cache=await caches.open(CACHE_NAME);
   const key=navKey(request.url);
-  // INSTANT OPEN: always answer from the cached page when there is one, then refresh it in
-  // the background for the next launch. (Before, a launch right after a deploy had to wait on
-  // the network, and with no timeout a cold server meant a long blank screen.)
+  const frame=isFrameRequest(request);
+  // INSTANT OPEN: answer from the cached page when there is one, then refresh it in the background.
   let cachedNav=await cache.match(key);
   if(cachedNav){
     if(cachedNav.redirected)cachedNav=await cleanNav(request.url,cachedNav);
@@ -250,25 +273,92 @@ async function navigation(request,event){
     if(event&&event.waitUntil)event.waitUntil(bg);
     return cachedNav;
   }
-  // Nothing cached for this exact page: race the network against a 6s timeout that falls
-  // back to any cached app shell. If no shell is cached either, keep waiting for the network.
+  // Nothing cached for this exact page: race the network against a timeout.
   const net=refreshNav(request,cache).catch(()=>null);
   const timeout=new Promise(res=>setTimeout(()=>res('timeout'),NAV_TIMEOUT_MS));
   const first=await Promise.race([net,timeout]);
   if(first&&first!=='timeout')return first;
-  const shell=async()=>{
-    for(const u of ['/','/index.html','/chat.html']){
-      let r=await cache.match(new URL(u,self.location.origin).href);
-      if(r){if(r.redirected)r=await cleanNav(u,r);return r;}
-    }
-    return null;
-  };
-  if(first==='timeout'){
-    const s2=await shell();if(s2){if(event&&event.waitUntil)event.waitUntil(net);return s2;}
-    const late=await net;if(late)return late;
+  if(first==='timeout'&&event&&event.waitUntil)event.waitUntil(net);
+  // Network failed / too slow and the page is not cached.
+  if(frame)return offlineResponse(FRAME_SHELL);
+  const shell=await cachedShell(cache,key);
+  if(shell)return shell;
+  if(first==='timeout'){const late=await net;if(late)return late;}
+  return offlineResponse(OFFLINE_SHELL);
+}
+// SELF-HEALING OFFLINE SHELL. The install step only caches the short CORE_STATIC_ASSETS list, silently skips any file
+// that failed to download (cold server, flaky mobile data) and never retries - the worker then installs "fine" with an
+// empty cache and the next offline launch lands on the offline page. crawlCore() reads each core page, finds the
+// scripts/styles/iframes it needs and caches them too; maybeRepair() re-runs it on later online launches until every
+// core page is cached.
+const CORE_PAGES=['/','/chat.html','/message.html','/status.html','/group.html','/friend.html','/settings.html','/Tools.html','/game.html','/game-v3.html','/money.html'];
+const REPAIR_KEY='/__necpra_core_ready__';
+const REPAIR_INTERVAL_MS=6*60*60*1000;
+let repairRunning=false,lastRepairTry=0;
+function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
+function isHtmlPath(p){return p==='/'||/\.html?$/i.test(p);}
+async function pool(items,limit,fn){let i=0;await Promise.all(Array.from({length:Math.min(limit,items.length)},async()=>{while(i<items.length){const it=items[i++];try{await fn(it);}catch(_){}}}));}
+function extractRefs(html,base){
+  const out=new Set();
+  const add=raw=>{try{if(!raw||/^(data:|blob:|javascript:|mailto:|tel:|#)/i.test(raw))return;const u=new URL(raw.replace(/&amp;/g,'&'),base);if(u.origin!==self.location.origin)return;out.add(u.pathname+u.search);}catch(_){}};
+  const tagRe=/<(script|iframe|link)\b[^>]*>/gi;let m;
+  while((m=tagRe.exec(html))){
+    const tag=m[0],name=m[1].toLowerCase();
+    if(name==='script'){const a=/\ssrc\s*=\s*["']([^"']+)["']/i.exec(tag);if(a)add(a[1]);}
+    else if(name==='iframe'){const a=/\ssrc\s*=\s*["']([^"']+)["']/i.exec(tag),b=/\sdata-src\s*=\s*["']([^"']+)["']/i.exec(tag);if(a)add(a[1]);if(b)add(b[1]);}
+    else if(/\srel\s*=\s*["'][^"']*(stylesheet|modulepreload)/i.test(tag)){const a=/\shref\s*=\s*["']([^"']+)["']/i.exec(tag);if(a)add(a[1]);}
   }
-  const s3=await shell();if(s3)return s3;
-  return new Response(OFFLINE_SHELL,{status:200,headers:{'Content-Type':'text/html;charset=utf-8'}});
+  return Array.from(out);
+}
+async function cacheAsset(cache,url,seen){
+  if(seen.has(url))return true;seen.add(url);
+  let r=await cache.match(url);
+  if(!r){
+    const n=await fetch(url,{cache:'no-cache',credentials:'same-origin'});
+    if(!n||!n.ok)return false;
+    const ct=(n.headers.get('content-type')||'').toLowerCase();
+    if(/\.(js|mjs|css)(\?|$)/i.test(url)&&ct.indexOf('text/html')!==-1)return false;   // wake-up / 404 page, not code
+    await cache.put(url,n.clone());r=n;
+  }
+  if(/\.css(\?|$)/i.test(url)){   // icon/web fonts referenced by the stylesheet
+    try{
+      const css=await r.clone().text(),re=/url\(\s*["']?([^"')]+)["']?\s*\)/gi,fonts=[];let m;
+      while((m=re.exec(css))){if(/\.(woff2?|ttf|otf)(\?|#|$)/i.test(m[1])){try{const u=new URL(m[1],new URL(url,self.location.origin));if(u.origin===self.location.origin)fonts.push(u.pathname+u.search);}catch(_){}}}
+      await pool(fonts,4,f=>cacheAsset(cache,f,seen));
+    }catch(_){}
+  }
+  return true;
+}
+async function cachePage(cache,url,depth,seen){
+  const key=navKey(url);
+  if(seen.has(key))return;seen.add(key);
+  let r;try{r=await fetch(url,{cache:'no-store',credentials:'same-origin'});}catch(_){return;}
+  if(!r||!r.ok)return;
+  const clean=await cleanNav(url,r);
+  await cache.put(key,clean.clone()).catch(()=>{});
+  let html='';try{html=await clean.clone().text();}catch(_){return;}
+  const refs=extractRefs(html,new URL(url,self.location.origin).href),pages=[],assets=[];
+  refs.forEach(u=>{(isHtmlPath(u.split('?')[0])?pages:assets).push(u);});
+  await pool(assets,6,a=>cacheAsset(cache,a,seen));
+  if(depth>0)await pool(pages,3,p=>cachePage(cache,p,depth-1,seen));
+}
+async function crawlCore(cache){
+  const seen=new Set();
+  for(const p of CORE_PAGES)await cachePage(cache,p,1,seen);
+  const have=await Promise.all(CORE_PAGES.map(p=>cache.match(navKey(new URL(p,self.location.origin).href))));
+  return have.every(Boolean);
+}
+async function maybeRepair(force){
+  if(repairRunning)return;
+  if(self.navigator&&self.navigator.onLine===false)return;
+  const now=Date.now();
+  if(!force&&now-lastRepairTry<60000)return;
+  repairRunning=true;lastRepairTry=now;
+  try{
+    const cache=await caches.open(CACHE_NAME);
+    if(!force){const m=await cache.match(REPAIR_KEY);if(m){const t=Number(await m.text());if(t&&now-t<REPAIR_INTERVAL_MS)return;}}
+    if(await crawlCore(cache))await cache.put(REPAIR_KEY,new Response(String(Date.now()),{headers:{'Content-Type':'text/plain'}}));
+  }catch(_){}finally{repairRunning=false;}
 }
 // UI CODE IS CACHE-FIRST WITH BACKGROUND REFRESH (was: network-first with NO timeout, which made
 // every module wait on the network - a slow/cold server meant a blank UI even with files cached).
@@ -288,23 +378,29 @@ async function networkFirst(request,event){
     return old;
   }
   try{const r=await refresh;if(r.ok&&!badAssetResponse(request,r))return r;return r;}
-  catch(_){return new Response('Resource unavailable offline',{status:503});}
+  catch(_){const alt=await cache.match(request,{ignoreSearch:true});if(alt)return alt;return new Response('Resource unavailable offline',{status:503});}
 }
 async function staticAsset(request){
   const cache=await caches.open(CACHE_NAME);const old=await cache.match(request);if(old&&!stale(old))return old;
-  try{const r=await fetch(request);const good=r.ok&&!badAssetResponse(request,r);if(good)await cache.put(request,r.clone()).catch(()=>{});return good?r:(old||r);}catch(_){return old||new Response('Resource unavailable offline',{status:503});}
+  try{const r=await fetch(request);const good=r.ok&&!badAssetResponse(request,r);if(good)await cache.put(request,r.clone()).catch(()=>{});return good?r:(old||r);}catch(_){return old||(await cache.match(request,{ignoreSearch:true}))||new Response('Resource unavailable offline',{status:503});}
 }
 async function api(request){try{return await fetch(request);}catch(_){return new Response(JSON.stringify({error:'Network request failed',offline:true}),{status:503,headers:{'Content-Type':'application/json'}});}}
 
 self.addEventListener('install',event=>{
-  event.waitUntil(caches.open(CACHE_NAME).then(cache=>Promise.all(CORE_STATIC_ASSETS.map(a=>fetch(a,{cache:'no-store',credentials:'same-origin'}).then(async r=>{if(!r.ok)return null;const isDoc=a==='/'||/\.html$/i.test(a);return cache.put(isDoc?navKey(a):a,isDoc?await cleanNav(a,r):r);}).catch(()=>null)))).then(()=>console.log('[SW] Installed '+SW_VERSION)));
+  event.waitUntil((async()=>{
+    const cache=await caches.open(CACHE_NAME);
+    await Promise.all(CORE_STATIC_ASSETS.map(a=>fetch(a,{cache:'no-store',credentials:'same-origin'}).then(async r=>{if(!r.ok)return null;const isDoc=a==='/'||/\.html$/i.test(a);return cache.put(isDoc?navKey(a):a,isDoc?await cleanNav(a,r):r);}).catch(()=>null)));
+    // Also cache every script/style/iframe the core pages use (capped so install can never hang).
+    await Promise.race([crawlCore(cache).then(ok=>ok?cache.put(REPAIR_KEY,new Response(String(Date.now()),{headers:{'Content-Type':'text/plain'}})):null),sleep(20000)]).catch(()=>{});
+    console.log('[SW] Installed '+SW_VERSION);
+  })());
 });
 self.addEventListener('activate',event=>{
   event.waitUntil(caches.keys().then(names=>Promise.all(names.filter(n=>n!==CACHE_NAME&&n.indexOf('necpra-ui-snapshots')!==0).map(n=>caches.delete(n)))).then(()=>self.clients.claim()).then(()=>self.clients.matchAll({type:'window',includeUncontrolled:true})).then(cs=>cs.forEach(c=>c.postMessage({type:'SW_UPDATED',version:SW_VERSION}))));
 });
 self.addEventListener('fetch',event=>{
   const r=event.request,url=r.url;if(r.method!=='GET')return;
-  if(r.mode==='navigate'||r.destination==='document'){event.respondWith(navigation(r,event));return;}
+  if(r.mode==='navigate'||r.destination==='document'){if(!isFrameRequest(r))event.waitUntil(sleep(8000).then(()=>maybeRepair(false)).catch(()=>{}));event.respondWith(navigation(r,event));return;}
   if(isApi(url)){event.respondWith(api(r));return;}
   if(local(url)&&isNetworkFirst(url)){event.respondWith(networkFirst(r,event));return;}
   // Non-critical HTML/CSS/JS/JSON uses the cache-first path below. Critical
@@ -330,14 +426,19 @@ self.addEventListener('message',event=>{
   }
   // index.html asks for this (MessageChannel) to render the "Offline ready / vX" status line; it was never answered.
   if(d.type==='GET_CACHE_INFO'&&event.ports&&event.ports[0]){const port=event.ports[0];event.waitUntil(caches.open(CACHE_NAME).then(c=>c.keys()).then(k=>port.postMessage({version:SW_VERSION,cache:CACHE_NAME,count:k.length})).catch(()=>port.postMessage({version:SW_VERSION,cache:CACHE_NAME,count:0})));}
-  if(d.type==='CLEAR_CACHE')event.waitUntil(caches.delete(CACHE_NAME));
+  // ROOT-CAUSE FIX: 'Clear media cache' (and the Auto-Clear Cache setting) send CLEAR_CACHE. This used to delete the WHOLE cache - every page, script and stylesheet - so the next offline launch had nothing to open. It now removes only media (images/video/audio) and acknowledges with CACHE_CLEARED, which the callers wait for.
+  if(d.type==='CLEAR_CACHE')event.waitUntil(clearMediaOnly().then(()=>notifyCleared(event)));
   if(d.type==='INVALIDATE_URLS'&&Array.isArray(d.urls))event.waitUntil(caches.open(CACHE_NAME).then(c=>Promise.all(d.urls.map(u=>c.delete(u)))));
   if(d.type==='FORCE_REFRESH')event.waitUntil(caches.open(CACHE_NAME).then(c=>Promise.all(['/js/theme.engine.js','/theme.colors.css','/js/e2e-encryption.js','/js/authStorage.js','/js/auth.account.limit.js','/js/google-auth.js','/js/app.cache.unified.js','/js/app.cache.js'].map(async u=>{try{const r=await fetch(u,{cache:'no-store'});if(r.ok)await c.put(u,r);}catch(_){}}))));
   if(d.type==='ACTIVE_CHAT_CHANGED'){if(!self.__kynActiveChatByClient)self.__kynActiveChatByClient=new Map();const id=event.source&&event.source.id;if(id){if(d.chatId)self.__kynActiveChatByClient.set(id,String(d.chatId));else self.__kynActiveChatByClient.delete(id);}}
   if(d.type==='REGISTER_BACKGROUND_SYNC'&&self.registration.sync)event.waitUntil(self.registration.sync.register(d.tag||'offline-message-queue').catch(()=>{}));
   if(d.type==='RUN_CLEANUP')event.waitUntil(cleanupOldEntries());
 });
-async function cleanupOldEntries(){try{const c=await caches.open(CACHE_NAME),keys=await c.keys(),cut=Date.now()-CACHE_MAX_AGE;for(const k of keys){const r=await c.match(k);const d=r&&r.headers.get('date');if(d&&new Date(d).getTime()<cut)await c.delete(k);}}catch(_) {}}
+const MEDIA_RE=/\.(png|jpe?g|gif|webp|avif|bmp|mp4|webm|mov|m4v|mp3|ogg|oga|m4a|wav|aac)(\?|$)/i;
+function keepForShell(pathname){return /^\/(icons|assets|fonts)\//i.test(pathname)||/^\/(favicon|necpa-|necpra-)/i.test(pathname);}
+async function clearMediaOnly(){try{const c=await caches.open(CACHE_NAME),keys=await c.keys();await Promise.all(keys.map(k=>{try{const u=new URL(k.url);if(MEDIA_RE.test(u.pathname)&&!keepForShell(u.pathname))return c.delete(k);}catch(_){}return null;}));}catch(_){}}
+async function notifyCleared(event){try{if(event.ports&&event.ports[0])event.ports[0].postMessage({type:'CACHE_CLEARED'});}catch(_){}try{const cs=await self.clients.matchAll({type:'window',includeUncontrolled:true});cs.forEach(c=>c.postMessage({type:'CACHE_CLEARED'}));}catch(_){}}
+async function cleanupOldEntries(){try{const c=await caches.open(CACHE_NAME),keys=await c.keys(),cut=Date.now()-CACHE_MAX_AGE;for(const k of keys){let p='';try{p=new URL(k.url).pathname;}catch(_){}if(!MEDIA_RE.test(p)||keepForShell(p))continue;const r=await c.match(k);const d=r&&r.headers.get('date');if(d&&new Date(d).getTime()<cut)await c.delete(k);}}catch(_) {}}
 self.addEventListener('sync',event=>{
   if(event.tag==='offline-message-queue')event.waitUntil(self.clients.matchAll({type:'window',includeUncontrolled:true}).then(cs=>{const c=cs.find(x=>x.focused)||cs[0];if(c)c.postMessage({type:'FLUSH_OFFLINE_QUEUE',source:'background-sync'});}));
   if(event.tag==='offline-status-sync')event.waitUntil(self.clients.matchAll({type:'window'}).then(cs=>cs.forEach(c=>c.postMessage({type:'SYNC_STATUS_UPDATES',source:'background-sync'}))));
