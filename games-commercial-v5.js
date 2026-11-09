@@ -137,7 +137,6 @@ body[data-game] .screen.active .card,body[data-game] .screen.active .question,bo
 #trivia .answer{transform:translateZ(18px);box-shadow:0 16px 28px #0007,inset 0 1px #fff2}
 #crossword .wc-board{transform:translateZ(22px) rotateX(5deg);filter:drop-shadow(0 24px 32px #0009)}
 #crossword .wc-wheelwrap{transform:translateZ(28px)}
-#chess .ch-board,#chess .board{transform:translateZ(24px) rotateX(4deg);transform-style:preserve-3d;box-shadow:0 30px 46px #0009}
 body[data-game] .action,body[data-game] .life,body[data-game] .answer,body[data-game] .wc-letter{transition:transform .16s,filter .16s,box-shadow .16s}
 body[data-game] .action:hover,body[data-game] .life:hover,body[data-game] .answer:hover,body[data-game] .wc-letter:hover{transform:translateY(-3px) translateZ(12px);filter:brightness(1.08)}
 @media(prefers-reduced-motion:reduce){#block .board,#trivia .question,#crossword .wc-board,#crossword .wc-wheelwrap,#chess .ch-board,#chess .board{transform:none!important}}

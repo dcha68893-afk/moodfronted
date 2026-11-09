@@ -1390,6 +1390,8 @@
         #gcRecordCancel { background: rgba(255,255,255,.1); color: var(--text-secondary); }
         #gcRecordSend   { background: #0084ff; color: #fff; }
     </style>
+    <link rel="preload" href="/fonts/fa-solid-900.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/fonts/fa-regular-400.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="/css/vendor/font-awesome.min.css">
     <!-- ✅ GLOBAL DARK THEME SYSTEM -->
     <link rel="stylesheet" href="theme.colors.css">
@@ -1914,7 +1916,7 @@
         //  - tapping a tab loads that module IMMEDIATELY and pauses the queue until it has
         //    loaded (6s cap), so the module the user is waiting for gets the full bandwidth.
         var QUEUE = ['statusIframe','groupIframe','friendsIframe','settingsIframe','toolsIframe','moneyIframe','gamesIframe'];
-        var SLOTS = 1, running = 0, queueOn = false, urgent = 0;
+        var SLOTS = 2, running = 0, queueOn = false, urgent = 0;   // two modules boot at a time (was one) so the tail of the queue is reached sooner
 
         function pump() {
             if (!queueOn) return;
@@ -1927,11 +1929,32 @@
                     var released = false;
                     function rel() { if (released) return; released = true; running--; setTimeout(pump, 120); }
                     fr.addEventListener('load', function () { fr.__kynLoaded = true; rel(); }, { once: true });
-                    setTimeout(rel, 4000);
+                    setTimeout(rel, 2500);   // a slow module frees its slot after 2.5s (was 4s)
                 })(f);
                 load(id);
             }
             if (!QUEUE.length && running === 0) window.__modulesWarmed = true;
+        }
+
+        // In the installed app the Games tab opens the NATIVE arcade, so booting the ~350 KB web arcade in the background only
+        // competes with the modules the user actually sees. Skip it when the native arcade is usable; tapping Games still
+        // loads it on demand (__loadModuleIframe) if the native one fails to open.
+        function skipWebArcadeIfNative(done) {
+            var finished = false;
+            function fin() { if (finished) return; finished = true; done(); }
+            try {
+                var P = window.NecpraNative;
+                var off = false;
+                try { off = localStorage.getItem('necpra_native_games') === '0'; } catch (_) {}
+                if (off || !P || !P.nativeGamesAvailable) { fin(); return; }
+                P.nativeGamesAvailable().then(function (a) {
+                    if (a && a.available && a.games && a.games.indexOf('arcade') >= 0) {
+                        QUEUE = QUEUE.filter(function (q) { return q !== 'gamesIframe'; });
+                    }
+                    fin();
+                }, fin);
+                setTimeout(fin, 1500);
+            } catch (_) { fin(); }
         }
 
         function warmAll() { queueOn = true; pump(); }
@@ -1958,8 +1981,9 @@
             if (window.__modulesWarmupStarted) return;
             window.__modulesWarmupStarted = true;
             var begin = function () {
-                try { warmAll(); } catch (e) {
+                try { skipWebArcadeIfNative(warmAll); } catch (e) {
                     console.warn('[Necpra] Module warm-up failed:', e);
+                    try { warmAll(); } catch (_) {}
                 }
             };
             var msg = document.getElementById('messagesIframe');

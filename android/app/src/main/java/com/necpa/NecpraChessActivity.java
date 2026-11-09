@@ -4,11 +4,15 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.RadialGradient;
 import android.graphics.RectF;
+import android.graphics.Shader;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -53,6 +57,9 @@ public class NecpraChessActivity extends NecpraGameActivity {
     private BoardView board;
     private LinearLayout content;
     private TextView topName, bottomName, status, moves;
+    private TextView topLead, bottomLead, topAvatar, bottomAvatar;
+    private LinearLayout topStrip, bottomStrip;
+    private CapturedView topCaptured, bottomCaptured;
     private HorizontalScrollView movesScroll;
     private TextView btnUndo, btnResign, btnFlip;
     private boolean flipped;
@@ -73,21 +80,26 @@ public class NecpraChessActivity extends NecpraGameActivity {
     protected void onBuild(Bundle saved) {
         roomCode = getIntent().getStringExtra(EXTRA_ROOM);
         content = column();
-        content.setPadding(dp(12), dp(70), dp(12), dp(12));
+        content.setPadding(dp(8), dp(70), dp(8), dp(12));
         stage.addView(content, new android.widget.FrameLayout.LayoutParams(-1, -1));
 
+        // Player strips and the board share one square-driven group, so names, avatars and board line up edge to edge.
+        BoardGroup group = new BoardGroup(this);
         topName = text("", 14, cText, true);
-        topName.setPadding(dp(4), 0, 0, dp(6));
-        content.addView(topName, new LinearLayout.LayoutParams(-1, -2));
-
+        topLead = text("", 13, cSub, true);
+        topAvatar = avatar();
+        topCaptured = new CapturedView(this);
+        topStrip = playerStrip(topAvatar, topName, topCaptured, topLead);
         board = new BoardView(this);
-        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(-1, 0, 1f);
-        blp.gravity = Gravity.CENTER_HORIZONTAL;
-        content.addView(board, blp);
-
         bottomName = text("", 14, cText, true);
-        bottomName.setPadding(dp(4), dp(6), 0, 0);
-        content.addView(bottomName, new LinearLayout.LayoutParams(-1, -2));
+        bottomLead = text("", 13, cSub, true);
+        bottomAvatar = avatar();
+        bottomCaptured = new CapturedView(this);
+        bottomStrip = playerStrip(bottomAvatar, bottomName, bottomCaptured, bottomLead);
+        group.addView(topStrip);
+        group.addView(board);
+        group.addView(bottomStrip);
+        content.addView(group, new LinearLayout.LayoutParams(-1, 0, 1f));
 
         status = text("", 14.5f, cSub, true);
         status.setGravity(Gravity.CENTER);
@@ -639,8 +651,12 @@ public class NecpraChessActivity extends NecpraGameActivity {
         LinearLayout r = row();
         char[] order = {'Q', 'R', 'B', 'N'};
         for (final char q : order) {
-            TextView t = text(glyph(white ? q : Character.toLowerCase(q)), 38, white ? Color.WHITE : Color.parseColor("#111111"), false);
-            t.setGravity(Gravity.CENTER);
+            final char shown = white ? q : Character.toLowerCase(q);
+            View t = new View(this) {
+                @Override protected void onDraw(Canvas cv) {
+                    NecpraChessPieces.draw(cv, shown, getWidth() / 2f, getHeight() / 2f, Math.min(getWidth(), getHeight()) * 0.92f);
+                }
+            };
             t.setBackground(round(Color.parseColor("#769656"), 14));
             pressable(t);
             t.setOnClickListener(new View.OnClickListener() {
@@ -1054,7 +1070,7 @@ public class NecpraChessActivity extends NecpraGameActivity {
 
     @Override protected void onInsets(int top, int bottom, int left, int right) {
         if (content == null) return;
-        content.setPadding(dp(12) + left, top + dp(58), dp(12) + right, bottom + dp(12));
+        content.setPadding(dp(8) + left, top + dp(58), dp(8) + right, bottom + dp(12));
     }
 
     // ------------------------------------------------------------------ view refresh
@@ -1065,6 +1081,9 @@ public class NecpraChessActivity extends NecpraGameActivity {
         boolean iAmBottomWhite = !flipped;
         topName.setText(nameFor(!iAmBottomWhite));
         bottomName.setText(nameFor(iAmBottomWhite));
+        boolean live = started && !over;
+        updateStrip(!iAmBottomWhite, topStrip, topAvatar, topName, topCaptured, topLead, s, live);
+        updateStrip(iAmBottomWhite, bottomStrip, bottomAvatar, bottomName, bottomCaptured, bottomLead, s, live);
         if (over) {
             status.setText(resultText);
             status.setTextColor(cText);
@@ -1112,33 +1131,148 @@ public class NecpraChessActivity extends NecpraGameActivity {
         return "Computer (" + l + ") · " + colour;
     }
 
-    private static String glyph(char piece) {
-        String g;
-        switch (Character.toUpperCase(piece)) {
-            case 'K': g = "\u265A"; break;
-            case 'Q': g = "\u265B"; break;
-            case 'R': g = "\u265C"; break;
-            case 'B': g = "\u265D"; break;
-            case 'N': g = "\u265E"; break;
-            default: g = "\u265F"; break;
+    // ------------------------------------------------------------------ player strips
+
+    private static final String CAP_ORDER = "QRBNP";
+    private static final int[] START_COUNT = {1, 2, 2, 2, 8};
+
+    private TextView avatar() {
+        TextView t = text("", 15, Color.WHITE, true);
+        t.setGravity(Gravity.CENTER);
+        return t;
+    }
+
+    private LinearLayout playerStrip(TextView av, TextView name, CapturedView captured, TextView lead) {
+        LinearLayout strip = row();
+        strip.setPadding(dp(8), 0, dp(10), 0);
+        strip.setBackground(roundStroke(alpha(cCard, night ? 0xB0 : 0xD0), cLine, 12));
+        strip.addView(av, new LinearLayout.LayoutParams(dp(32), dp(32)));
+        LinearLayout col = column();
+        col.setGravity(Gravity.CENTER_VERTICAL);
+        name.setSingleLine(true);
+        name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        col.addView(name, new LinearLayout.LayoutParams(-1, -2));
+        col.addView(captured, new LinearLayout.LayoutParams(-1, dp(15)));
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(0, -2, 1f);
+        clp.leftMargin = dp(10);
+        strip.addView(col, clp);
+        strip.addView(lead, new LinearLayout.LayoutParams(-2, -2));
+        return strip;
+    }
+
+    private static int material(NecpraChessEngine.State s, boolean white) {
+        int sum = 0;
+        for (int i = 0; i < 64; i++) {
+            char p = s.at(i);
+            if (p != '.' && Character.isUpperCase(p) == white) sum += NecpraChessPieces.value(p);
         }
-        return g + "\uFE0E"; // force text presentation, never the emoji pawn
+        return sum;
+    }
+
+    /** Fills one player strip: avatar, captured pieces, "+N" material lead and a green tint on the side to move. */
+    private void updateStrip(boolean white, LinearLayout strip, TextView av, TextView name, CapturedView cap, TextView lead,
+                             NecpraChessEngine.State s, boolean live) {
+        int[] have = new int[5];
+        for (int i = 0; i < 64; i++) {
+            char p = s.at(i);
+            if (p == '.' || Character.isUpperCase(p) == white) continue;   // count the OPPONENT's pieces still on the board
+            int k = CAP_ORDER.indexOf(Character.toUpperCase(p));
+            if (k >= 0) have[k]++;
+        }
+        StringBuilder taken = new StringBuilder();   // opponent pieces this player has captured
+        for (int k = 0; k < 5; k++) {
+            int n = Math.max(0, START_COUNT[k] - have[k]);
+            for (int j = 0; j < n; j++) taken.append(white ? Character.toLowerCase(CAP_ORDER.charAt(k)) : CAP_ORDER.charAt(k));
+        }
+        cap.set(taken.toString());
+        int diff = material(s, white) - material(s, !white);
+        lead.setText(diff > 0 ? "+" + diff : "");
+        lead.setTextColor(cGood);
+        String label = name.getText().toString();
+        av.setText(label.isEmpty() ? "?" : label.substring(0, 1).toUpperCase());
+        av.setTextColor(white ? Color.parseColor("#1D1D1F") : Color.parseColor("#F3F4F6"));
+        GradientDrawable dot = new GradientDrawable();
+        dot.setShape(GradientDrawable.OVAL);
+        dot.setColor(white ? Color.parseColor("#F3F4F6") : Color.parseColor("#2A2A2C"));
+        dot.setStroke(dp(1.5f), white ? Color.parseColor("#9CA3AF") : Color.parseColor("#000000"));
+        av.setBackground(dot);
+        boolean toMove = live && s.white == white;
+        strip.setBackground(toMove
+                ? roundStroke(Color.parseColor("#33769656"), Color.parseColor("#769656"), 12)
+                : roundStroke(alpha(cCard, night ? 0xB0 : 0xD0), cLine, 12));
+    }
+
+    /** Small row of captured pieces, drawn with the same vector pieces as the board. */
+    private final class CapturedView extends View {
+        private String pieces = "";
+
+        CapturedView(Context c) { super(c); }
+
+        void set(String p) {
+            if (!p.equals(pieces)) {
+                pieces = p;
+                invalidate();
+            }
+        }
+
+        @Override protected void onDraw(Canvas cv) {
+            float h = getHeight();
+            float step = h * 0.62f;
+            float x = h / 2f;
+            char prev = 0;
+            for (int i = 0; i < pieces.length(); i++) {
+                char p = pieces.charAt(i);
+                if (prev != 0 && p != prev) x += h * 0.28f;   // small gap between piece types
+                if (x + h / 2f > getWidth()) break;
+                NecpraChessPieces.draw(cv, p, x, h / 2f, h * 1.05f);
+                x += step;
+                prev = p;
+            }
+        }
+    }
+
+    /** Lays the two player strips and the board out as one block: board is the biggest square that fits, strips match it. */
+    private final class BoardGroup extends ViewGroup {
+        BoardGroup(Context c) { super(c); }
+
+        private int stripH() { return dp(46); }
+
+        @Override protected void onMeasure(int wSpec, int hSpec) {
+            int w = MeasureSpec.getSize(wSpec);
+            int sh = stripH();
+            int h = MeasureSpec.getMode(hSpec) == MeasureSpec.UNSPECIFIED ? w + 2 * sh : MeasureSpec.getSize(hSpec);
+            int side = Math.max(0, Math.min(w, h - 2 * sh - dp(8)));
+            for (int i = 0; i < getChildCount(); i++) {
+                View v = getChildAt(i);
+                int ch = v instanceof BoardView ? side : sh;
+                v.measure(MeasureSpec.makeMeasureSpec(side, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(ch, MeasureSpec.EXACTLY));
+            }
+            setMeasuredDimension(w, h);
+        }
+
+        @Override protected void onLayout(boolean changed, int l, int t, int r, int b) {
+            if (getChildCount() < 3) return;
+            View top = getChildAt(0), brd = getChildAt(1), bot = getChildAt(2);
+            int side = brd.getMeasuredWidth(), sh = stripH(), gap = dp(4);
+            int total = side + 2 * sh + 2 * gap;
+            int x = (r - l - side) / 2;
+            int y = Math.max(0, (b - t - total) / 2);
+            top.layout(x, y, x + side, y + sh);
+            brd.layout(x, y + sh + gap, x + side, y + sh + gap + side);
+            bot.layout(x, y + sh + gap + side + gap, x + side, y + sh + gap + side + gap + sh);
+        }
     }
 
     // ------------------------------------------------------------------ board
 
     private final class BoardView extends View {
         private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint pieceFill = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint pieceLine = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint glow = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint coord = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF rect = new RectF();
 
         BoardView(Context c) {
             super(c);
-            pieceFill.setTextAlign(Paint.Align.CENTER);
-            pieceLine.setTextAlign(Paint.Align.CENTER);
-            pieceLine.setStyle(Paint.Style.STROKE);
             coord.setTextAlign(Paint.Align.LEFT);
             coord.setFakeBoldText(true);
         }
@@ -1184,12 +1318,7 @@ public class NecpraChessActivity extends NecpraGameActivity {
                 char k = s.white ? 'K' : 'k';
                 for (int i = 0; i < 64; i++) if (s.at(i) == k) checkSq = i;
             }
-            pieceFill.setTextSize(cell * 0.82f);
-            pieceLine.setTextSize(cell * 0.82f);
-            pieceLine.setStrokeWidth(Math.max(2f, cell * 0.045f));
             coord.setTextSize(cell * 0.2f);
-            Paint.FontMetrics fm = pieceFill.getFontMetrics();
-            float baseShift = -(fm.ascent + fm.descent) / 2f;
 
             for (int vr = 0; vr < 8; vr++) {
                 for (int vc = 0; vc < 8; vc++) {
@@ -1208,8 +1337,10 @@ public class NecpraChessActivity extends NecpraGameActivity {
                         cv.drawRect(rect, fill);
                     }
                     if (sq == checkSq) {
-                        fill.setColor(Color.parseColor("#B0E53935"));
-                        cv.drawCircle(rect.centerX(), rect.centerY(), cell * 0.5f, fill);
+                        glow.setShader(new RadialGradient(rect.centerX(), rect.centerY(), cell * 0.72f,
+                                new int[]{Color.parseColor("#E6E53935"), Color.parseColor("#80E53935"), Color.parseColor("#00E53935")},
+                                new float[]{0f, 0.55f, 1f}, Shader.TileMode.CLAMP));
+                        cv.drawRect(rect, glow);
                     }
                     if (vc == 0) {
                         coord.setColor(light ? Color.parseColor("#769656") : Color.parseColor("#EEEED2"));
@@ -1221,14 +1352,7 @@ public class NecpraChessActivity extends NecpraGameActivity {
                     }
                     char p = s.at(sq);
                     if (p != '.') {
-                        boolean white = Character.isUpperCase(p);
-                        String g = glyph(p);
-                        float cx = rect.centerX(), cy = rect.centerY() + baseShift;
-                        pieceLine.setColor(white ? Color.parseColor("#1A1A1A") : Color.parseColor("#B3FFFFFF"));
-                        pieceLine.setStrokeWidth(white ? Math.max(2f, cell * 0.05f) : Math.max(1f, cell * 0.018f));
-                        cv.drawText(g, cx, cy, pieceLine);
-                        pieceFill.setColor(white ? Color.WHITE : Color.parseColor("#141414"));
-                        cv.drawText(g, cx, cy, pieceFill);
+                        NecpraChessPieces.draw(cv, p, rect.centerX(), rect.centerY(), cell * 0.94f);
                     }
                 }
             }

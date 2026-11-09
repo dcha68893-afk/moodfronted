@@ -84,8 +84,10 @@ const SW_VERSION = '19.53.0';
 // PWA/Android app to drop old copies and show the 'Update ready - Refresh' banner.
 // v89: native-init.js (native Profile/Settings routing) is now network-first so an installed APK never runs a stale copy.
 // v101 (OFFLINE-OPEN + GAMES-BLANK FIX): see the comments on navigation(), crawlCore() and the CLEAR_CACHE handler below.
+// v102 (ICON-FONT + GAMES-LOAD FIX): icon fonts (Font Awesome css + woff2) are now precached and preloaded by the pages so icons
+// no longer wait on the network (the font is font-display:block, i.e. invisible until it arrives).
 // Cache names must only ever move forward.
-const CACHE_NAME = 'necpra-static-v101';
+const CACHE_NAME = 'necpra-static-v102';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -98,7 +100,8 @@ const CORE_STATIC_ASSETS = [
   '/app-protect.js','/session-restore.js','/report-problem.js','/js/runtime-config.js','/js/config.js','/js/offline-gate.js','/js/header-labels.js','/js/offline-first.js','/js/theme.engine.js','/js/theme-contrast-guard.js','/js/settings-broadcast-listener.js','/js/necpa-session-resilience.js','/js/services.friend.js'
   // v100: games + wallet precached so the first open after a deploy paints from cache instead of waiting on the
   // network for ~330KB of game scripts. URLs include the ?v= query because the cache key does.
-  ,'/game-v3.html','/money.html','/games-crossword-v4.js?v=8.2','/games-chess-v1.js?v=2.5','/games-chess-3d.js?v=1','/games-commercial-v5.js?v=5.3','/games-v4-enhancements.js?v=4.4','/js/settings-broadcast-listener.js'
+  ,'/game-v3.html','/money.html','/games-crossword-v4.js?v=8.2','/games-chess-v1.js?v=2.6','/games-chess-3d.js?v=1','/games-commercial-v5.js?v=5.4','/games-v4-enhancements.js?v=4.4','/js/settings-broadcast-listener.js'
+  ,'/css/vendor/font-awesome.min.css','/fonts/fa-solid-900.woff2','/fonts/fa-regular-400.woff2','/fonts/fa-brands-400.woff2'
 ];
 
 const NETWORK_FIRST_PATTERNS = [

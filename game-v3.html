@@ -223,7 +223,7 @@ window.__buyGameCoins=function(){if(__inApp()){try{toast('Earn coins by playing:
 setTimeout(syncServerCoins,1500);document.addEventListener('visibilitychange',()=>{if(!document.hidden)syncServerCoins()});
 })();
 </script>
-<script id="mood-crossword-v4" src="/games-crossword-v4.js?v=8.2"></script><script src="/games-chess-v1.js?v=2.5"></script><script>
+<script id="mood-crossword-v4" src="/games-crossword-v4.js?v=8.2"></script><script src="/games-chess-v1.js?v=2.6"></script><script>
 'use strict';const $=id=>document.getElementById(id),S=['home','block','trivia','crossword','chess'];let data=JSON.parse(localStorage.getItem('moodArcadeV3')||'{}');data.coins??=1200;data.games??=0;data.best??=0;data.streak??=0;window.data=data;function save(){localStorage.setItem('moodArcadeV3',JSON.stringify(data));updateHome()}function updateHome(){$('coins').textContent=data.coins.toLocaleString();$('tc').textContent=data.coins.toLocaleString();$('games').textContent=data.games;$('best').textContent=data.best;$('streak').textContent=data.streak}function show(x){S.forEach(s=>$(s).classList.toggle('active',s===x))}
 // FIX (NAV BAR STILL VISIBLE INSIDE A GAME): home() and openGame() only ever
 // toggled which internal .screen was visible — nothing here ever told the
