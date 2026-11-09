@@ -645,16 +645,50 @@
     if (!('serviceWorker' in navigator)) return;
 
     var refreshing = false;
+    var applying = false;
     var hadControllerOnLoad = !!navigator.serviceWorker.controller;
+    var SEEN_KEY = '_sw_last_version';           // worker version this device is already running
+    var DISMISS_PREFIX = 'pwa_update_dismissed_'; // per-version "not now" (session only)
+
+    // FIX (update banner kept coming back after pressing Refresh):
+    // the banner used to be driven only by SW_UPDATED messages compared with a
+    // "last version" that was written *after* the banner showed, never when the
+    // user actually applied the update. After Refresh the new worker re-announced
+    // itself to the freshly loaded page, the stored version did not match, and the
+    // banner popped up again. Now we ask the controlling worker which version this
+    // page is actually running, remember it, and only prompt when a genuinely
+    // NEWER version than the one running appears (and not for one the user already
+    // applied or dismissed).
+    function getControllerVersion() {
+      return new Promise(function (resolve) {
+        var c = navigator.serviceWorker.controller;
+        if (!c) return resolve('');
+        var done = false;
+        function finish(v) { if (!done) { done = true; resolve(v || ''); } }
+        try {
+          var ch = new MessageChannel();
+          ch.port1.onmessage = function (e) { finish(e.data && e.data.version ? String(e.data.version) : ''); };
+          c.postMessage({ type: 'GET_SW_VERSION' }, [ch.port2]);
+        } catch (_) { finish(''); }
+        setTimeout(function () { finish(''); }, 2000);
+      });
+    }
+    var bootVersionPromise = hadControllerOnLoad
+      ? getControllerVersion().then(function (v) { if (v) ls('set', SEEN_KEY, v); return v; })
+      : Promise.resolve('');
+
+    function dismissedFor(v) { try { return !!sessionStorage.getItem(DISMISS_PREFIX + (v || 'any')); } catch (_) { return false; } }
 
     function reloadOnce() {
       if (refreshing) return;
       refreshing = true;
+      try { sessionStorage.removeItem('pwa_update_acknowledged'); } catch (_) {}
       window.location.reload();
     }
 
-    function showUpdateBanner() {
-      if (document.getElementById('pwaUpdateBanner')) return;
+    function showUpdateBanner(version) {
+      if (document.getElementById('pwaUpdateBanner') || applying) return;
+      if (dismissedFor(version)) return;
       inject('pwaUpdateBanner',
         '<div style="position:fixed;top:0;left:0;right:0;z-index:2147483647;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;box-shadow:0 4px 20px rgba(0,0,0,.2)">' +
         '<div style="flex:1"><strong style="display:block;font-size:13px">Update ready</strong><span style="font-size:11px;opacity:.9">Refresh to get the latest Necpra version.</span></div>' +
@@ -663,60 +697,70 @@
       var u = document.getElementById('pwaUpdateButton');
       var c = document.getElementById('pwaUpdateClose');
       if (u) u.addEventListener('click', window._pwaApplyUpdate);
-      if (c) c.addEventListener('click', function () { var b = document.getElementById('pwaUpdateBanner'); if (b) b.remove(); });
+      if (c) c.addEventListener('click', function () {
+        var b = document.getElementById('pwaUpdateBanner'); if (b) b.remove();
+        try { sessionStorage.setItem(DISMISS_PREFIX + (version || 'any'), '1'); } catch (_) {}
+      });
     }
 
+    // Activate the new worker and reload ONCE. If the new worker is still
+    // installing when Refresh is pressed we wait for it, because reloading while
+    // the OLD worker still controls the page just serves the old cached copy and
+    // the banner would come straight back.
     window._pwaApplyUpdate = function () {
+      if (applying) return;
+      applying = true;
       var banner = document.getElementById('pwaUpdateBanner');
       if (banner) banner.remove();
       try { sessionStorage.setItem('pwa_update_acknowledged', '1'); } catch (_) {}
       navigator.serviceWorker.getRegistration().then(function (registration) {
-        if (registration && registration.waiting) registration.waiting.postMessage({ type: 'SKIP_WAITING' });
-        else { try { sessionStorage.removeItem('pwa_update_acknowledged'); } catch (_) {} reloadOnce(); }
+        if (!registration) return reloadOnce();
+        if (registration.waiting) { registration.waiting.postMessage({ type: 'SKIP_WAITING' }); return; }
+        var w = registration.installing;
+        if (w) {
+          w.addEventListener('statechange', function () {
+            if (w.state === 'installed' && registration.waiting) registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+            else if (w.state === 'activated') reloadOnce();
+          });
+          return;
+        }
+        // Nothing waiting: the new worker is already in control (SW_UPDATED path).
+        reloadOnce();
       }).catch(reloadOnce);
-      setTimeout(function () {
-        var pending = null;
-        try { pending = sessionStorage.getItem('pwa_update_acknowledged'); } catch (_) {}
-        if (pending) { try { sessionStorage.removeItem('pwa_update_acknowledged'); } catch (_) {} reloadOnce(); }
-      }, 4000);
+      // Safety net: never leave the user stuck on a dead button.
+      setTimeout(reloadOnce, 6000);
     };
 
     navigator.serviceWorker.addEventListener('controllerchange', function () {
       var pending = null;
       try { pending = sessionStorage.getItem('pwa_update_acknowledged'); } catch (_) {}
-      if (!refreshing && pending) {
-        try { sessionStorage.removeItem('pwa_update_acknowledged'); } catch (_) {}
-        reloadOnce();
-      }
+      if (!refreshing && pending) reloadOnce();
       emit();
     });
 
-    navigator.serviceWorker.addEventListener('message', function (event) {
-      if (!event.data || event.data.type !== 'SW_UPDATED') return;
-      var version = String(event.data.version || '');
-      var last = ls('get', '_sw_last_version') || '';
-      if (hadControllerOnLoad && version && version !== last) {
-        ls('set', '_sw_last_version', version);
-        showUpdateBanner();
-      }
-    });
-
-    // The worker may have activated before the load handler was installed.
-    // Surface that pending update now instead of silently losing the event.
-    if (hadControllerOnLoad && earlySwUpdateVersion) {
-      var earlyLast = ls('get', '_sw_last_version') || '';
-      if (earlySwUpdateVersion !== earlyLast) {
-        ls('set', '_sw_last_version', earlySwUpdateVersion);
-        showUpdateBanner();
-      }
+    function onNewerVersion(version) {
+      bootVersionPromise.then(function (running) {
+        if (!hadControllerOnLoad || !version) return;
+        if (version === running) return;                      // already running this version: no prompt
+        if (version === (ls('get', SEEN_KEY) || '')) return;   // already applied / seen on this device
+        showUpdateBanner(version);
+      });
     }
 
+    navigator.serviceWorker.addEventListener('message', function (event) {
+      if (!event.data || event.data.type !== 'SW_UPDATED') return;
+      onNewerVersion(String(event.data.version || ''));
+    });
+
+    // The worker may have activated before this handler was installed.
+    if (earlySwUpdateVersion) onNewerVersion(earlySwUpdateVersion);
+
     registerServiceWorker().then(function (registration) {
-      // Browser tabs keep the existing "Update ready" banner so a deployment
-      // cannot interrupt an active session. The installed Android shell is
-      // different: it must activate the waiting worker automatically.
+      if (!registration) return;
+      // Browser tabs show the banner so a deployment cannot interrupt an active
+      // session. The installed Android shell activates the waiting worker itself.
       if (registration.waiting && navigator.serviceWorker.controller) {
-        if (!activateWaitingWorker(registration, true)) showUpdateBanner();
+        if (!activateWaitingWorker(registration, true)) showUpdateBanner('waiting');
       }
 
       registration.addEventListener('updatefound', function () {
@@ -724,13 +768,11 @@
         if (!worker) return;
         worker.addEventListener('statechange', function () {
           if (worker.state === 'installed' && navigator.serviceWorker.controller) {
-            if (!activateWaitingWorker(registration, true)) showUpdateBanner();
+            if (!activateWaitingWorker(registration, true)) showUpdateBanner('waiting');
           }
         });
       });
 
-      // Resume/launch checks above are authoritative. Keep a low-frequency
-      // fallback for a browser tab that stays open while a deployment lands.
       setInterval(function () { checkForUpdateNow(); }, isStandalone() ? 10 * 60 * 1000 : 30 * 60 * 1000);
     }).catch(function () { /* already logged by registerServiceWorker */ });
   }
