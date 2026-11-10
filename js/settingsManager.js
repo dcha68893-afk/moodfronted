@@ -925,7 +925,7 @@
     function _stripLargeDataUrisForLocalCache(value) {
         if (typeof value === 'string') {
             return (value.length > 2048 && value.slice(0, 5) === 'data:')
-                ? '__CACHED_ELSEWHERE__'
+                ? ''  /* FIX: was the literal '__CACHED_ELSEWHERE__', which got requested as an image URL (404) */
                 : value;
         }
         if (Array.isArray(value)) {

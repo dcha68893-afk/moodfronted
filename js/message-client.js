@@ -31,6 +31,29 @@
     const decryptFlights = new Map();
     const decryptResults = new Map();
 
+    // FIX (SENDER-SEES-"Decrypting…"-FOR-OWN-MESSAGE): a sender can never decrypt the
+    // ciphertext it just produced (the ratchet key belongs to the recipient). Whenever
+    // our own message came back from the server (socket echo, history, delta sync, list
+    // refresh) as a raw envelope with no plaintext attached, it was pushed through
+    // decrypt and showed "Decrypting…" until it timed out. We now remember the
+    // plaintext we typed, keyed by clientMessageId AND by the ciphertext we sent, and
+    // use it for every copy of that message. Memory only - nothing extra is written to disk.
+    const ownPlain = new Map();
+    function rememberOwnPlaintext(clientMessageId, ciphertext, plaintext) {
+        if (plaintext == null) return;
+        if (clientMessageId) ownPlain.set('c:' + clientMessageId, plaintext);
+        if (typeof ciphertext === 'string' && ciphertext && ciphertext !== plaintext) ownPlain.set('e:' + ciphertext, plaintext);
+        if (ownPlain.size > 1000) { const first = ownPlain.keys().next().value; ownPlain.delete(first); }
+    }
+    function lookupOwnPlaintext(message) {
+        if (!message) return undefined;
+        const me = window._kynCurrentUserId;
+        if (message.senderId != null && me != null && String(message.senderId) !== String(me)) return undefined;
+        if (message.clientMessageId && ownPlain.has('c:' + message.clientMessageId)) return ownPlain.get('c:' + message.clientMessageId);
+        if (typeof message.content === 'string' && ownPlain.has('e:' + message.content)) return ownPlain.get('e:' + message.content);
+        return undefined;
+    }
+
     function waitForMessageE2E(timeoutMs) {
         timeoutMs = timeoutMs || 8000;
         if (typeof window.KynectaMessageE2EReady === 'function') {
@@ -148,6 +171,7 @@
             const wanted = (ACK_RANK[existing.status] ?? 0) > (ACK_RANK[status] ?? 1) ? existing.status : status;
             const merged = Object.assign({}, stub, existing, { id: realId, chatId: realChatId, clientMessageId: cid, status: wanted });
             delete merged._optimisticId;
+            if (merged.displayContent === undefined || merged.displayContent === 'Decrypting…') { const _o = lookupOwnPlaintext(merged); if (_o !== undefined) merged.displayContent = _o; }
             target.set(realId, merged);
             persistMessage(realChatId, merged);
             upsertConversationMeta(realChatId, { lastMessage: merged });
@@ -254,6 +278,10 @@
             }
         }
 
+        if (message.displayContent === undefined) {
+            const _own = lookupOwnPlaintext(message);
+            if (_own !== undefined) message = Object.assign({}, message, { displayContent: _own });
+        }
         message = applyBufferedDelivery(Object.assign({}, message));
         if (message.type === 'status_reply') {
             let meta = message.metadata;
@@ -428,6 +456,18 @@
         if (!message || message.id == null || message.displayContent !== undefined) return;
         const key = String(chatId) + ':' + String(message.id);
         const ciphertext = typeof message.content === 'string' ? message.content : '';
+        {
+            const _own = lookupOwnPlaintext(message);
+            if (_own !== undefined) {
+                const bucket = getOrCreateConversationBucket(chatId);
+                const next = Object.assign({}, bucket.get(message.id) || message, { displayContent: _own });
+                bucket.set(message.id, next);
+                syncLastMessageDisplay(chatId, message.id, _own, true);
+                persistMessage(chatId, next);
+                notify('message:decrypted', { chatId, messageId: message.id });
+                return;
+            }
+        }
         if (!looksLikeEnvelope(ciphertext)) {
             const bucket = getOrCreateConversationBucket(chatId);
             const current = bucket.get(message.id) || message;
@@ -1024,6 +1064,7 @@
                     throw new Error('Secure messaging is not ready yet');
                 }
                 outgoingContent = await window.KynectaE2E.encryptForChat(content, chatId || null, recipientUserId);
+                rememberOwnPlaintext(clientMessageId, outgoingContent, content);
             } catch (err) {
                 bucket.set(optimisticId, Object.assign({}, optimisticMessage, { status: 'failed' }));
                 notify('message:failed', { chatId: optimisticMessage.chatId, clientMessageId, error: err.message });
@@ -2221,6 +2262,7 @@
         removeReaction,
         searchMessages,
         retryDecrypt,
+        peekOwnPlaintext: lookupOwnPlaintext,
         sendTypingStart,
         sendTypingStop,
         isTyping: (chatId) => typingState.has(chatId),

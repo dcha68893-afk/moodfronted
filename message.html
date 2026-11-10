@@ -652,6 +652,11 @@
       // and the E2E core's decrypt cache first; only fall back to the placeholder if both come up empty.
       const _isPh = (t) => t === 'Decrypting…' || t === '🔒 Encrypted message' || t === '🔒 Unable to decrypt this message';
       if (lastMessage.displayContent !== undefined && !_isPh(lastMessage.displayContent)) return lastMessage.displayContent;
+      // FIX (SENDER-SEES-"Decrypting…"): our own message is never decrypted - use the plaintext we sent.
+      try {
+        const _own = window.MessageModule && window.MessageModule.peekOwnPlaintext && window.MessageModule.peekOwnPlaintext(lastMessage);
+        if (typeof _own === 'string') return _own;
+      } catch (_) {}
       if (lastMessage.displayContent !== undefined && lastMessage.displayContent !== 'Decrypting…') {
         try {
           if (chatId != null && lastMessage.id != null) {
@@ -1148,6 +1153,9 @@
       const editedTag = m.isEdited ? ' (edited)' : '';
       const isDeletedForEveryone = m.deleted && m.deleteForEveryone;
       const decryptFailed = m.displayContent === '🔒 Encrypted message' || m.displayContent === '🔒 Unable to decrypt this message';
+      if (isMine && (m.displayContent === undefined || m.displayContent === 'Decrypting…' || m.displayContent === '🔒 Encrypted message')) {
+        try { const _o = window.MessageModule && window.MessageModule.peekOwnPlaintext && window.MessageModule.peekOwnPlaintext(m); if (typeof _o === 'string') m = Object.assign({}, m, { displayContent: _o }); } catch (_) {}
+      }
       const decryptPending = m.displayContent === 'Decrypting…';
       const content = isDeletedForEveryone ? 'This message was deleted' : (m.displayContent !== undefined ? m.displayContent : '…');
       const statusCard = isDeletedForEveryone ? '' : statusReplyHtml(m, isMine);

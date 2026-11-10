@@ -72,7 +72,7 @@
 #crossword .wc-letter.active{background:linear-gradient(135deg,#8c6cff,#22c8df);box-shadow:0 0 28px #6dcbff77,0 10px 24px #0007}
 #crossword .wc-traceline{stroke:#8f7bff;stroke-width:7;filter:drop-shadow(0 0 7px #8f7bff99)}
 @media(max-width:520px){#trivia .question{font-size:18px}.wc-board{width:94vw!important}.wc-wheelwrap{width:86vw!important;height:86vw!important}}
-.ch-top{height:64px;display:flex;align-items:center;gap:12px;padding:10px 14px;background:rgba(9,15,25,.9);border-bottom:1px solid #fff2;color:#fff}.ch-top>div{flex:1}.ch-top small{display:block;color:#9eb0c8;font-size:9px;letter-spacing:1.5px;margin-top:2px}.ch-top span{font-variant-numeric:tabular-nums;font-weight:1000}.ch-meta{display:flex;justify-content:space-between;gap:8px;padding:10px 14px;font-size:11px;color:#b7c4d7}.ch-board{width:min(94vw,560px);aspect-ratio:1;margin:auto;display:grid;grid-template-columns:repeat(8,1fr);border:5px solid #182333;border-radius:16px;overflow:hidden;box-shadow:0 20px 55px #0009}.ch-sq{display:grid;place-items:center;font-size:clamp(28px,8vw,62px);line-height:1;transition:.12s;position:relative}.ch-sq.light{background:#e8edf2;color:#111}.ch-sq.dark{background:#587086;color:#111}.ch-sq.dark{color:#111}.ch-sq.selected{outline:4px solid #ffd34e;outline-offset:-4px;z-index:2}.ch-sq.legal:after{content:"";position:absolute;width:20%;height:20%;border-radius:50%;background:#1f2937aa}.ch-sq.last{box-shadow:inset 0 0 0 5px #ffd34e66}.ch-actions{display:flex;justify-content:center;padding:14px}.ch-actions button{min-width:130px;height:44px;border-radius:14px;background:var(--g-surface);border:1px solid var(--g-line);font-weight:900}@media(max-width:420px){.ch-board{width:96vw;border-width:3px}.ch-sq{font-size:11vw}}</style><style id="arcadeV6css">
+.ch-top{height:64px;display:flex;align-items:center;gap:12px;padding:10px 14px;background:rgba(9,15,25,.9);border-bottom:1px solid #fff2;color:#fff}.ch-top>div{flex:1}.ch-top small{display:block;color:#9eb0c8;font-size:9px;letter-spacing:1.5px;margin-top:2px}.ch-top span{font-variant-numeric:tabular-nums;font-weight:1000}.ch-meta{display:flex;justify-content:space-between;gap:8px;padding:10px 14px;font-size:11px;color:#b7c4d7}.ch-board{width:min(94vw,560px);aspect-ratio:1;margin:auto;display:grid;grid-template-columns:repeat(8,minmax(0,1fr));grid-template-rows:repeat(8,minmax(0,1fr));grid-auto-rows:minmax(0,1fr);flex:none;height:auto;border:5px solid #182333;border-radius:16px;overflow:hidden;box-shadow:0 20px 55px #0009}.ch-sq{display:grid;place-items:center;font-size:clamp(28px,8vw,62px);line-height:1;transition:.12s;position:relative}.ch-sq.light{background:#e8edf2;color:#111}.ch-sq.dark{background:#587086;color:#111}.ch-sq.dark{color:#111}.ch-sq.selected{outline:4px solid #ffd34e;outline-offset:-4px;z-index:2}.ch-sq.legal:after{content:"";position:absolute;width:20%;height:20%;border-radius:50%;background:#1f2937aa}.ch-sq.last{box-shadow:inset 0 0 0 5px #ffd34e66}.ch-actions{display:flex;justify-content:center;padding:14px}.ch-actions button{min-width:130px;height:44px;border-radius:14px;background:var(--g-surface);border:1px solid var(--g-line);font-weight:900}@media(max-width:420px){.ch-board{width:96vw;border-width:3px}.ch-sq{font-size:11vw}}</style><style id="arcadeV6css">
 #block{--bt-a:#87502b;--bt-b:#542714;--bt-line:#2b1208;--bt-c:#6d351d;--bt-d:#3b1b0e;--bt-e:#612e17;--bt-f:#32170c;--bt-edge:#b86d38;--bt-text:#ffe9b7;--bt-g1:#a35a31;--bt-g2:#4a200f;--bt-frame:#cf8750;--bt-cell:#552716;--bt-cellb:#2f1308;background:linear-gradient(var(--bt-c),var(--bt-d))}
 #block[data-bt="1"]{--bt-a:#2f6bb3;--bt-b:#173a6b;--bt-line:#0b1c3a;--bt-c:#1d3f73;--bt-d:#0f2244;--bt-e:#1c3a6a;--bt-f:#0e2143;--bt-edge:#4f8fe0;--bt-text:#dcebff;--bt-g1:#3c78c0;--bt-g2:#16305c;--bt-frame:#68a5ee;--bt-cell:#17305a;--bt-cellb:#0b1a36}
 #block[data-bt="2"]{--bt-a:#3f9455;--bt-b:#1e5230;--bt-line:#0d2a17;--bt-c:#24603a;--bt-d:#12301c;--bt-e:#1f5a33;--bt-f:#10301b;--bt-edge:#4fb36f;--bt-text:#e0ffe9;--bt-g1:#3f9a5c;--bt-g2:#1a4a2a;--bt-frame:#6fd08c;--bt-cell:#1a4a2a;--bt-cellb:#0d2a17}
@@ -171,6 +171,39 @@ button:active,.answer:active{transform:scale(.96)}
 .stars{font-size:38px;letter-spacing:6px;color:#ffc93c;text-shadow:0 4px 18px #ffc93c88;margin-bottom:8px}
 .stars i{font-style:normal;color:var(--g-line);text-shadow:none}
 @media (prefers-reduced-motion:reduce){.overlay.show .modal{animation:none}}
+</style><style id="necpra-layout-fix">
+/* FIX (GAMES-SQUEEZE-EACH-OTHER): every game screen was a fixed-height, non-scrolling box, so when space ran
+   short the boards, trays, answer lists and wheels were SHRUNK (flex-shrink, container-height sizing, fixed
+   tray heights, 3D transforms) and overlapped their neighbours. Now every game uses the same rule: each
+   block keeps its own size, and if the screen is too short the content simply continues DOWN and the
+   screen scrolls. Top bars stay pinned. */
+.screen:not(#home){overflow-x:hidden;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+.screen:not(#home)>.top,.screen:not(#home)>.wc-top,.screen:not(#home)>.ch-top{flex:none;position:sticky;top:0;z-index:5}
+.screen:not(#home)>*{flex-shrink:0}
+/* Boards never get squeezed or 3D-tilted over their neighbours */
+#block .board,#crossword .wc-board,#chess .ch-board:not(.ch3d){transform:none!important;flex:none!important;height:auto}
+/* Block Puzzle: 10x10, every cell identical, content flows down */
+#block .blockbody{flex:1 0 auto;min-height:min-content;justify-content:flex-start;gap:12px}
+#block .board{grid-template-columns:repeat(10,minmax(0,1fr))!important;grid-template-rows:repeat(10,minmax(0,1fr));grid-auto-rows:minmax(0,1fr);aspect-ratio:1/1}
+#block .cell{min-width:0;min-height:0;aspect-ratio:1/1}
+#block .tray,#block .block-dock,#block .block-hold-wrap,#block .block-opponent,#block .block-mode{flex:none}
+/* Trivia: question and answers keep their size and stack downward */
+#trivia .tvbody{flex:1 0 auto;overflow:visible;min-height:min-content}
+#trivia .question{flex:none}
+#trivia .answers{grid-auto-rows:minmax(58px,auto)}
+#trivia .answer{flex:none;height:auto;min-height:58px}
+/* Word Connect: board and wheel no longer sized from the leftover height */
+#crossword .wc-wrap{flex:1 0 auto!important;height:auto!important;min-height:100%}
+#crossword .wc-boardwrap{flex:none!important;container-type:normal!important;overflow:visible!important;min-height:0!important;height:auto!important}
+#crossword .wc-board{width:min(94vw,420px)!important;aspect-ratio:var(--ar,1)!important}
+#crossword .wc-cell{min-width:0;min-height:0}
+#crossword .wc-current,#crossword .wc-wheelwrap,#crossword .wc-tools,#crossword .wc-tool{flex:none!important}
+#crossword .wc-wheelwrap{transform:none!important}
+/* Chess: all 64 squares equal, board keeps its square shape */
+#chess .ch-scroll{overflow-y:auto}
+#chess .ch-board:not(.ch3d){display:grid;grid-template-columns:repeat(8,minmax(0,1fr))!important;grid-template-rows:repeat(8,minmax(0,1fr))!important;grid-auto-rows:minmax(0,1fr);aspect-ratio:1/1}
+#chess .ch-sq{min-width:0;min-height:0;aspect-ratio:1/1}
+#chess .ch-cap,#chess .ch-meta,#chess .ch-moves,#chess .ch-bar{flex:none}
 </style><div id="toast" class="toast"></div>
 <script id="necpra-coins-module">
 /* Necpra Arcade coins: spend + M-Pesa top-up. Balance = window.data.coins (arcade wallet). */

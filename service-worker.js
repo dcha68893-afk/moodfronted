@@ -87,7 +87,7 @@ const SW_VERSION = '19.54.0';
 // v102 (ICON-FONT + GAMES-LOAD FIX): icon fonts (Font Awesome css + woff2) are now precached and preloaded by the pages so icons
 // no longer wait on the network (the font is font-display:block, i.e. invisible until it arrives).
 // Cache names must only ever move forward.
-const CACHE_NAME = 'necpra-static-v103';
+const CACHE_NAME = 'necpra-static-v104';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
