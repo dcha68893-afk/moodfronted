@@ -654,11 +654,18 @@
     } catch (_) { return null; }
   }
 
+  // FIX (GAMES SLOW / EMPTY ON EVERY RETURN): every tap on Games awaited a fresh native bridge round trip
+  // (nativeGamesAvailable) BEFORE launching the hub, and nothing was on screen meanwhile. Availability cannot change while
+  // the app runs, so a positive answer is remembered and the probe is started at startup (see installNativeArcadeRouting).
+  var arcadeUsableCache = null;
   async function nativeArcadeUsable() {
+    if (arcadeUsableCache === true) return true;
     if (!window.NecpraNative || !window.NecpraNative.openNativeArcade || !window.NecpraNative.nativeGamesAvailable) return false;
     try {
       var a = await window.NecpraNative.nativeGamesAvailable();
-      return !!(a && a.available && a.games && a.games.indexOf('arcade') >= 0);
+      var ok = !!(a && a.available && a.games && a.games.indexOf('arcade') >= 0);
+      if (ok) arcadeUsableCache = true;
+      return ok;
     } catch (_) { return false; }            // older APK without the arcade
   }
 
@@ -703,6 +710,7 @@
     if (window.__necpraArcadeRoutingInstalled) return;
     if (typeof window.navigateToPage !== 'function') return;
     window.__necpraArcadeRoutingInstalled = true;
+    try { nativeArcadeUsable(); } catch (_) {}   // warm the availability answer so the first tap is instant too
 
     var origNavigate = window.navigateToPage;
     window.navigateToPage = function (page, options) {
