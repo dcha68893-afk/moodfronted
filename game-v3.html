@@ -207,8 +207,8 @@ async function pay(){if(busy)return;const ph=document.getElementById('nbPhone').
  busy=true;const go=document.getElementById('nbGo');go.disabled=true;msg('Sending M-Pesa request…');
  try{localStorage.setItem('necpra.mpesa.phone',ph)}catch(_){}
  try{await syncServerCoins();const before=Number(localStorage.getItem(SEEN))||0;
-  await call('/coins/mpesa/stk',{method:'POST',body:JSON.stringify({amount:kes,phone:ph})});
-  msg('📲 Check your phone and enter your M-Pesa PIN…');
+  const _r=await call('/coins/mpesa/stk',{method:'POST',body:JSON.stringify({amount:kes,phone:ph})});
+  msg('📲 '+((_r&&_r.customerMessage)||'Check your phone and enter your M-Pesa PIN…'));
   const t0=Date.now();let credited=0;
   while(Date.now()-t0<120000){await new Promise(r=>setTimeout(r,3000));credited=await syncServerCoins();if(credited>0)break}
   if(credited>0){msg('✅ '+credited.toLocaleString()+' coins added!');document.getElementById('nbBal').textContent='Balance: 🪙 '+bal().toLocaleString();setTimeout(()=>{document.getElementById('necpraBuy').classList.remove('show')},1400)}

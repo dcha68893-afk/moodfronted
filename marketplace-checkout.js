@@ -924,6 +924,7 @@ async function _doMpesaPayment(order) {
         return;
     }
 
+    { const _de=document.getElementById('coMpesaDesc'); if(_de&&d.description) _de.textContent='For: '+d.description; }
     // Poll for payment confirmation
     _pollMpesa(order, _state.mpesaRequestId, 0);
 }
@@ -954,6 +955,7 @@ function _showMpesaWaiting(order) {
             <div style="font-weight:800;font-size:18px;margin-bottom:8px">Check Your Phone</div>
             <div style="font-size:14px;color:#374151;margin-bottom:6px">An M-Pesa prompt for <strong>${_fmt(total)}</strong> has been sent to</div>
             <div style="font-size:16px;font-weight:800;color:#f57224;margin-bottom:20px">${_esc(_state.mpesaPhone)}</div>
+            <div id="coMpesaDesc" style="font-size:13px;font-weight:700;color:#111827;margin:-8px 0 14px"></div>
             <div class="co-mpesa-status" id="coMpesaStatus">Waiting for payment confirmation…</div>
         </div>
         <div class="co-footer" style="gap:10px;display:flex;flex-direction:column">
