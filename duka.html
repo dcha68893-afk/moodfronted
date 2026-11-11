@@ -58,6 +58,19 @@ h3{margin:16px 0 8px;font-size:14px}
 #toasts{position:fixed;left:0;right:0;top:12px;display:flex;flex-direction:column;align-items:center;gap:6px;z-index:40;pointer-events:none}
 .toast{background:#1f2c34;color:#fff;border-radius:10px;padding:10px 14px;font-size:13.5px;max-width:92%;box-shadow:0 6px 18px rgba(0,0,0,.3)}.toast.err{background:#b3261e}
 .spin{text-align:center;padding:30px;color:var(--kyn-text-secondary,#54656f)}
+.tabs{overflow-x:auto;scrollbar-width:none}.tabs::-webkit-scrollbar{display:none}.tab{white-space:nowrap}
+.item.off{opacity:.55;cursor:default}
+.cl{display:grid;grid-template-columns:1fr auto;gap:6px 10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--kyn-border-light,#eef0f2)}
+.cl .ctl{display:flex;gap:6px;align-items:center;grid-column:1 / -1}
+.cl .ctl input{width:84px;padding:8px 9px}.cl .ctl .lt{margin-left:auto;font-weight:800}
+.cl .rm{background:none;color:var(--kyn-accent-danger,#d93025);padding:4px 8px}
+.cl .warn{color:var(--kyn-accent-danger,#d93025);font-size:12px;font-weight:700}
+.tot{display:flex;justify-content:space-between;padding:6px 0;font-size:14px}.tot.big{font-size:18px;font-weight:800;border-top:2px solid var(--kyn-border,#e3e7ea);margin-top:4px;padding-top:10px}
+.rcpt{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.5}
+.rcpt .c{text-align:center}.rcpt hr{border:0;border-top:1px dashed #999;margin:8px 0}
+.rcpt .r{display:flex;justify-content:space-between;gap:10px}.rcpt .due{font-weight:800;color:var(--kyn-accent-danger,#d93025)}
+.hid{display:none}
+@media print{body *{visibility:hidden}#modal,#modal *{visibility:visible}#modal{position:absolute;inset:0;background:#fff;display:block}.sheet{max-height:none;box-shadow:none}.sheet-h,.actions,.noprint{display:none!important}}
 </style>
 </head>
 <body>
@@ -110,7 +123,8 @@ async function api(method, path, body) {
 /* ───── state ───── */
 var UNITS = ['piece', 'kg', 'g', 'litre', 'ml', 'packet', 'bottle', 'carton', 'dozen', 'bundle', 'tray', 'sack', 'metre'];
 var TYPES = ['Duka / Grocery', 'Wholesale', 'Hardware', 'Chemist', 'Butchery', 'Cereals & Produce', 'Salon / Barber', 'Electronics', 'Clothing', 'Mama Mboga', 'Other'];
-var S = { loading: true, err: '', shops: [], maxShops: 5, shopId: null, tab: 'dash', dash: null, products: [], total: 0, categories: [], q: '', cat: '', low: false, busy: false, draftId: null, opId: null };
+var S = { loading: true, err: '', shops: [], maxShops: 5, shopId: null, tab: 'dash', dash: null, products: [], total: 0, categories: [], q: '', cat: '', low: false, busy: false, draftId: null, opId: null,
+  cart: [], saleId: null, disc: { type: 'amount', value: '' }, posQ: '', customers: [], coId: null, sales: [], salesSummary: null, range: 'today' };
 try { S.shopId = localStorage.getItem('necpra_duka_shop'); S.tab = sessionStorage.getItem('necpra_duka_tab') || 'dash'; } catch (_) {}
 var shop = function () { return S.shops.filter(function (s) { return s.id === S.shopId; })[0] || null; };
 
@@ -128,6 +142,7 @@ async function loadShops() {
   S.shops = d.shops; S.maxShops = d.maxShops;
   if (!shop()) S.shopId = S.shops[0] ? S.shops[0].id : null;
   try { S.shopId ? localStorage.setItem('necpra_duka_shop', S.shopId) : localStorage.removeItem('necpra_duka_shop'); } catch (_) {}
+  if (S.shopId && S.cartLoadedFor !== S.shopId) loadCart();
 }
 async function loadTab() {
   if (!S.shopId) return;
@@ -136,6 +151,17 @@ async function loadTab() {
     var qs = '?limit=500' + (S.q ? '&search=' + encodeURIComponent(S.q) : '') + (S.cat ? '&category=' + encodeURIComponent(S.cat) : '') + (S.low ? '&lowStock=true' : '');
     var d = await api('GET', '/shops/' + S.shopId + '/products' + qs);
     S.products = d.products; S.total = d.total; S.categories = d.categories;
+  }
+  if (S.tab === 'pos') {
+    var pd = await api('GET', '/shops/' + S.shopId + '/products?limit=500');
+    S.products = pd.products; S.categories = pd.categories;
+    if (!S.cartLoadedFor || S.cartLoadedFor !== S.shopId) loadCart();
+    syncCart();
+  }
+  if (S.tab === 'sales') {
+    var from = S.range === 'today' ? ymd(0) : S.range === '7' ? ymd(6) : S.range === '30' ? ymd(29) : '';
+    var sd = await api('GET', '/shops/' + S.shopId + '/sales?limit=100' + (from ? '&from=' + from : ''));
+    S.sales = sd.sales; S.salesSummary = sd.summary;
   }
 }
 async function refresh(keepFocus) {
@@ -175,12 +201,21 @@ function header() {
   var sw = S.shops.length > 1 ? '<select id="shopSel" class="grow" aria-label="Choose shop">' + S.shops.map(function (s) { return '<option value="' + esc(s.id) + '"' + (s.id === S.shopId ? ' selected' : '') + '>' + esc(s.name) + '</option>'; }).join('') + '</select>' : '<div class="grow"><b>' + esc(shop().name) + '</b><div class="s" style="font-size:12px;opacity:.8">' + esc(shop().location || shop().businessType || '') + '</div></div>';
   return '<div class="hero"><h1>NECPRA DUKA SMART</h1><p>Your shop. Your stock. Your money. Your assistant.</p></div>' +
     '<div class="bar">' + sw + (S.shops.length < S.maxShops ? '<button class="btn2" type="button" data-act="newShop" title="Add another shop"><i class="fas fa-plus"></i> Shop</button>' : '') + '</div>' +
-    '<div class="tabs"><button class="tab' + (S.tab === 'dash' ? ' on' : '') + '" data-act="tab" data-tab="dash" type="button">Dashboard</button><button class="tab' + (S.tab === 'products' ? ' on' : '') + '" data-act="tab" data-tab="products" type="button">Products</button><button class="tab' + (S.tab === 'settings' ? ' on' : '') + '" data-act="tab" data-tab="settings" type="button">My shop</button></div>';
+    '<div class="tabs">' + [['dash', 'Dashboard'], ['pos', 'Sell'], ['sales', 'Sales'], ['products', 'Products'], ['settings', 'My shop']].map(function (t) {
+      return '<button class="tab' + (S.tab === t[0] ? ' on' : '') + '" data-act="tab" data-tab="' + t[0] + '" type="button">' + t[1] + (t[0] === 'pos' && S.cart.length ? ' (' + S.cart.length + ')' : '') + '</button>';
+    }).join('') + '</div>';
 }
 function viewDash() {
   var d = S.dash; if (!d) return '<div class="spin">Loading…</div>';
-  var st = d.stock;
-  var cards = '<div class="grid"><div class="card stat"><small>Products</small><b>' + st.productCount + '</b></div>' +
+  var st = d.stock, ts = d.todaySales, cd = d.customerDebts;
+  var money = '<div class="grid"><div class="card stat"><small>Today\'s sales</small><b>' + KSH(ts.total) + '</b><div class="s">' + ts.count + ' sale' + (ts.count === 1 ? '' : 's') + '</div></div>' +
+    '<div class="card stat"><small>Est. profit today</small><b>' + KSH(d.estimatedProfit) + '</b><div class="s">Before expenses</div></div>' +
+    '<div class="card stat ' + (cd.total > 0 ? 'warn' : '') + '"><small>Customer debts</small><b>' + KSH(cd.total) + '</b><div class="s">' + cd.openSales + ' unpaid sale' + (cd.openSales === 1 ? '' : 's') + '</div></div>' +
+    '<div class="card stat"><small>Cash received today</small><b>' + KSH(ts.cashReceived) + '</b><div class="s">+ M-PESA ' + KSH(ts.mpesaReceived) + '</div></div></div>' +
+    '<div class="note">Credit given today: <b>' + KSH(ts.creditGiven) + '</b> (not cash). ' + (ts.mpesaReceived > ts.mpesaVerified ? 'M-PESA entered from receipt codes: ' + KSH(ts.mpesaReceived - ts.mpesaVerified) + ' — not independently verified.' : '') + '</div>' +
+    '<div class="actions" style="margin:0 0 12px"><button class="btn" data-act="tab" data-tab="pos" type="button"><i class="fas fa-cash-register"></i> New sale</button></div>';
+  var recentSales = d.recentSales.length ? '<h3>Recent sales</h3>' + d.recentSales.map(saleRow).join('') : '';
+  var cards = money + '<div class="grid"><div class="card stat"><small>Products</small><b>' + st.productCount + '</b></div>' +
     '<div class="card stat"><small>Stock value (cost)</small><b>' + KSH(st.valueAtCost) + '</b></div>' +
     '<div class="card stat"><small>Stock value (selling)</small><b>' + KSH(st.valueAtRetail) + '</b></div>' +
     '<div class="card stat ' + (st.outOfStockCount ? 'bad' : st.lowStockCount ? 'warn' : '') + '"><small>Needs restock</small><b>' + (st.outOfStockCount + st.lowStockCount) + '</b></div></div>';
@@ -189,7 +224,7 @@ function viewDash() {
     return '<div class="mv"><span>' + esc(m.productName) + ' <span class="s">· ' + esc(m.type) + '</span></span><span class="' + (m.qtyChange >= 0 ? 'pos' : 'neg') + '">' + (m.qtyChange >= 0 ? '+' : '') + QTY(m.qtyChange) + '</span></div>';
   }).join('') + '</div>' : '';
   var empty = !st.productCount ? '<div class="empty"><i class="fas fa-boxes-stacked"></i>No products yet.<br>Add your first product to start tracking stock.<div class="actions" style="justify-content:center"><button class="btn" data-act="addProduct" type="button" style="flex:0 0 auto">Add product</button></div></div>' : '';
-  return cards + empty + low + mv + '<div class="note">Sales, profit, expenses and debts will appear here as soon as those features are switched on. Nothing on this screen is sample data.</div>';
+  return cards + empty + recentSales + low + mv + '<div class="note">Expenses and supplier debts will appear here when those features are switched on. Nothing on this screen is sample data.</div>';
 }
 function viewProducts() {
   var cats = '<option value="">All categories</option>' + S.categories.map(function (c) { return '<option' + (c === S.cat ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('');
@@ -208,7 +243,7 @@ function render(keepFocus) {
   var html;
   if (S.err && !S.shops.length) html = '<div class="hero"><h1>NECPRA DUKA SMART</h1></div><div class="note err">' + esc(S.err) + '</div><div class="actions"><button class="btn" data-act="retry" type="button">Try again</button></div>';
   else if (!S.shops.length) html = viewOnboarding();
-  else html = header() + (S.err ? '<div class="note err">' + esc(S.err) + ' <a href="#" data-act="retry">Retry</a></div>' : '') + (S.tab === 'products' ? viewProducts() : S.tab === 'settings' ? viewSettings() : viewDash());
+  else html = header() + (S.err ? '<div class="note err">' + esc(S.err) + ' <a href="#" data-act="retry">Retry</a></div>' : '') + (S.tab === 'products' ? viewProducts() : S.tab === 'settings' ? viewSettings() : S.tab === 'pos' ? viewPos() : S.tab === 'sales' ? viewSales() : viewDash());
   app.innerHTML = html;
   if (fid && $(fid)) { $(fid).focus(); try { $(fid).setSelectionRange(pos, pos); } catch (_) {} }
 }
@@ -289,6 +324,223 @@ async function doDelete(btn, id) {
   try { var r = await api('DELETE', '/shops/' + S.shopId + '/products/' + id); closeModal(); toast(r.archived ? 'Product has history — archived instead' : 'Product deleted'); await refresh(); } catch (e) { toast(e.message, true); } finally { busy(btn, false); }
 }
 
+/* ───── POS / sales (Phase 2) ─────
+   The sale id is created when the first item is added and kept (with the cart, in localStorage) until the server confirms.
+   If the connection drops mid-confirm, tapping Confirm again re-sends the SAME id, so the server can never record it twice. */
+var NAIROBI_MS = 3 * 3600 * 1000; // Kenya is UTC+3, no daylight saving
+function ymd(daysAgo) { return new Date(Date.now() - daysAgo * 864e5 + NAIROBI_MS).toISOString().slice(0, 10); }
+function fmtWhen(iso) { try { return new Date(iso).toLocaleString('en-KE', { timeZone: 'Africa/Nairobi', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch (_) { return ''; } }
+var cartKey = function () { return 'necpra_duka_cart_' + S.shopId; };
+function loadCart() {
+  S.cart = []; S.saleId = null; S.disc = { type: 'amount', value: '' }; S.cartLoadedFor = S.shopId;
+  try { var o = JSON.parse(localStorage.getItem(cartKey()) || 'null'); if (o && Array.isArray(o.cart)) { S.cart = o.cart; S.saleId = o.saleId || null; S.disc = o.disc || S.disc; } } catch (_) {}
+}
+function saveCart() {
+  try { if (!S.cart.length) localStorage.removeItem(cartKey()); else localStorage.setItem(cartKey(), JSON.stringify({ cart: S.cart, saleId: S.saleId, disc: S.disc })); } catch (_) {}
+}
+// Refresh stock levels from the server list and drop products that no longer exist / were archived.
+function syncCart() {
+  var byId = {}; S.products.forEach(function (p) { byId[p.id] = p; });
+  var before = S.cart.length;
+  S.cart = S.cart.filter(function (l) { return byId[l.productId]; });
+  S.cart.forEach(function (l) { l.stock = byId[l.productId].stockQty; l.name = byId[l.productId].name; l.unit = byId[l.productId].unit; });
+  if (S.cart.length !== before) toast('Some products in your cart are no longer available and were removed', true);
+  saveCart();
+}
+// Same integer maths as the server (qty in milli-units x price in cents, rounded half-up).
+var cents = function (v) { return Math.round(Number(v) * 100); };
+function calc() {
+  var sub = 0, bad = '';
+  S.cart.forEach(function (l) {
+    var q = Number(l.qty), p = Number(l.price);
+    l.err = '';
+    if (!(q > 0) || !isFinite(q)) l.err = 'Enter a quantity';
+    else if (!isFinite(p) || p < 0) l.err = 'Enter a valid price';
+    else if (q > l.stock) l.err = 'Only ' + QTY(l.stock) + ' ' + l.unit + ' in stock';
+    l.lineTotal = l.err ? 0 : Math.round(Math.round(q * 1000) * cents(p) / 1000);
+    if (l.err && !bad) bad = l.name + ': ' + l.err;
+    sub += l.lineTotal;
+  });
+  var dv = Number(S.disc.value || 0), disc = 0;
+  if (S.disc.value !== '' && (!isFinite(dv) || dv < 0)) bad = bad || 'Enter a valid discount';
+  else if (S.disc.type === 'percent') { if (dv > 100) bad = bad || 'Discount cannot be more than 100%'; else disc = Math.round(sub * Math.round(dv * 100) / 10000); }
+  else disc = cents(dv);
+  if (disc > sub) bad = bad || 'Discount is more than the sale';
+  var total = sub - disc;
+  if (S.cart.length && !bad && total <= 0) bad = 'The sale total must be more than zero';
+  return { sub: sub, disc: disc, total: total, bad: bad };
+}
+var KC = function (c) { return KSH(c / 100); };
+
+function posResults() {
+  var q = S.posQ.toLowerCase(), list = S.products.filter(function (p) {
+    return !q || p.name.toLowerCase().indexOf(q) > -1 || (p.barcode || '').toLowerCase() === q || (p.category || '').toLowerCase().indexOf(q) > -1;
+  });
+  if (!S.products.length) return '<div class="empty"><i class="fas fa-box-open"></i>Add products first (Products tab), then sell them here.</div>';
+  if (!list.length) return '<div class="empty">No product matches “' + esc(S.posQ) + '”.</div>';
+  return list.slice(0, 12).map(function (p) {
+    var out = p.stockQty <= 0;
+    return '<div class="item' + (out ? ' off' : '') + '"' + (out ? '' : ' data-act="addToCart" data-id="' + esc(p.id) + '"') + '><div class="grow"><div class="t">' + esc(p.name) + '</div><div class="s">' + KSH(p.sellingPrice) + ' / ' + esc(p.unit) + '</div></div><div style="text-align:right"><b>' + QTY(p.stockQty) + '</b> <span class="s">' + esc(p.unit) + '</span><div>' + stockBadge(p) + '</div></div></div>';
+  }).join('') + (list.length > 12 ? '<div class="s" style="text-align:center">Showing 12 of ' + list.length + ' — type to narrow down</div>' : '');
+}
+function cartHtml() {
+  var c = calc();
+  if (!S.cart.length) return '<div class="empty"><i class="fas fa-cart-shopping"></i>No items yet. Tap a product above to add it.</div>';
+  var lines = S.cart.map(function (l, i) {
+    return '<div class="cl"><div><div class="t" style="font-weight:700">' + esc(l.name) + '</div><div class="s">' + esc(l.unit) + ' · ' + QTY(l.stock) + ' in stock</div>' + (l.err ? '<div class="warn" id="le' + i + '">' + esc(l.err) + '</div>' : '<div class="warn" id="le' + i + '"></div>') + '</div>' +
+      '<button class="rm" type="button" data-act="rmLine" data-i="' + i + '" aria-label="Remove ' + esc(l.name) + '"><i class="fas fa-trash"></i></button>' +
+      '<div class="ctl"><input class="cq" data-i="' + i + '" inputmode="decimal" value="' + esc(l.qty) + '" aria-label="Quantity"> × <input class="cp" data-i="' + i + '" inputmode="decimal" value="' + esc(l.price) + '" aria-label="Price"><span class="lt" id="lt' + i + '">' + KC(l.lineTotal) + '</span></div></div>';
+  }).join('');
+  return '<div class="card">' + lines + '<div class="tot"><span>Subtotal</span><span id="posSub">' + KC(c.sub) + '</span></div>' +
+    '<div class="tot" id="posDiscRow"' + (c.disc ? '' : ' style="display:none"') + '><span>Discount</span><span id="posDisc">− ' + KC(c.disc) + '</span></div>' +
+    '<div class="tot big"><span>Total</span><span id="posTotal">' + KC(c.total) + '</span></div></div>' +
+    '<div class="actions"><button class="btn2" data-act="clearCart" type="button">Clear</button><button class="btn" data-act="checkout" type="button" id="posGo">Checkout</button></div>';
+}
+function viewPos() {
+  return '<div class="bar"><input id="posQ" class="grow" type="search" placeholder="Search product or scan barcode" value="' + esc(S.posQ) + '" autocomplete="off"></div>' +
+    '<div id="posResults">' + posResults() + '</div><h3>Current sale</h3><div id="posCart">' + cartHtml() + '</div>';
+}
+// Typing in qty/price/discount must not rebuild the DOM (focus would be lost) — patch the numbers in place.
+function updatePosTotals() {
+  var c = calc();
+  S.cart.forEach(function (l, i) { var a = $('lt' + i), e = $('le' + i); if (a) a.textContent = KC(l.lineTotal); if (e) e.textContent = l.err; });
+  if ($('posSub')) { $('posSub').textContent = KC(c.sub); $('posTotal').textContent = KC(c.total); $('posDisc').textContent = '− ' + KC(c.disc); $('posDiscRow').style.display = c.disc ? '' : 'none'; }
+  saveCart();
+}
+function addToCart(id) {
+  var p = S.products.filter(function (x) { return x.id === id; })[0]; if (!p) return;
+  var ex = S.cart.filter(function (l) { return l.productId === id; })[0];
+  if (ex) { if (Number(ex.qty) + 1 > p.stockQty) return toast('Only ' + QTY(p.stockQty) + ' ' + p.unit + ' of ' + p.name + ' in stock', true); ex.qty = Number(ex.qty) + 1; }
+  else { if (p.stockQty <= 0) return toast(p.name + ' is out of stock', true); S.cart.push({ productId: p.id, name: p.name, unit: p.unit, price: p.sellingPrice, qty: Math.min(1, p.stockQty), stock: p.stockQty }); }
+  if (!S.saleId) S.saleId = uuid();
+  S.posQ = ''; saveCart(); render(); var q = $('posQ'); if (q) q.focus();
+}
+function clearCart() { S.cart = []; S.saleId = null; S.coId = null; S.disc = { type: 'amount', value: '' }; saveCart(); render(); }
+
+/* checkout */
+function payState() {
+  var c = calc(), cash = cents(val('payCash') || 0), mp = cents(val('payMp') || 0);
+  var mpApplied = Math.min(mp, c.total), cashApplied = Math.max(0, Math.min(cash, c.total - mpApplied));
+  var paid = mpApplied + cashApplied;
+  return { c: c, cash: cash, mp: mp, cashApplied: cashApplied, mpApplied: mpApplied, paid: paid, balance: c.total - paid, change: Math.max(0, cash - cashApplied), mpOver: mp > c.total };
+}
+function updateCheckout() {
+  var s = payState();
+  if ($('coTotal')) $('coTotal').textContent = KC(s.c.total);
+  if ($('mpBox')) $('mpBox').classList.toggle('hid', !(s.mp > 0));
+  if ($('newCust')) $('newCust').classList.toggle('hid', val('coCust') !== '__new');
+  var h = '';
+  h += 'Paid now: <b>' + KC(s.paid) + '</b>';
+  if (s.balance > 0) h += '<br>Balance on credit: <b style="color:var(--kyn-accent-danger,#d93025)">' + KC(s.balance) + '</b> — choose the customer who owes it.';
+  if (s.change > 0) h += '<br>Change to give: <b>' + KC(s.change) + '</b>';
+  if (s.mpOver) h += '<br><span class="warn" style="color:var(--kyn-accent-danger,#d93025)">M-PESA amount is more than the total.</span>';
+  if ($('coSum')) $('coSum').innerHTML = h;
+}
+async function openCheckout() {
+  var c = calc(); if (!S.cart.length) return; if (c.bad) return toast(c.bad, true);
+  S.coId = S.coId || uuid();
+  openModal('Checkout', '<div class="spin">Loading…</div>');
+  try { S.customers = (await api('GET', '/shops/' + S.shopId + '/customers?limit=500')).customers; } catch (e) { S.customers = []; }
+  var custOpts = '<option value="">— No customer —</option>' + S.customers.map(function (x) { return '<option value="' + esc(x.id) + '">' + esc(x.name) + (x.outstandingBalance > 0 ? ' (owes ' + KSH(x.outstandingBalance) + ')' : '') + '</option>'; }).join('') + '<option value="__new">+ Add new customer…</option>';
+  $('mBody').innerHTML = '<div class="tot big" style="border:0;margin:0"><span>Total to pay</span><span id="coTotal">' + KC(c.total) + '</span></div>' +
+    '<label>Discount (optional)</label><div class="two"><select id="dType"><option value="amount"' + (S.disc.type === 'amount' ? ' selected' : '') + '>KSh</option><option value="percent"' + (S.disc.type === 'percent' ? ' selected' : '') + '>%</option></select><input id="dVal" inputmode="decimal" value="' + esc(S.disc.value) + '" placeholder="0"></div>' +
+    '<h3>Payment</h3><label>Cash received (KSh)</label><div class="row"><input id="payCash" class="grow" inputmode="decimal" placeholder="0"><button class="btn2" type="button" data-act="fullCash">Full cash</button></div>' +
+    '<label>M-PESA amount (KSh)</label><input id="payMp" inputmode="decimal" placeholder="0">' +
+    '<div id="mpBox" class="hid"><div class="note">Enter the 10-character M-PESA receipt code from the confirmation SMS. An M-PESA payment cannot be saved without it — if you have no code, leave the amount empty and put the balance on credit.</div>' +
+    '<label>M-PESA receipt code *</label><input id="payCode" maxlength="10" autocapitalize="characters" placeholder="e.g. SGH7K2L9QX"><label>Customer phone (optional)</label><input id="payPh" inputmode="tel" placeholder="07XX XXX XXX"></div>' +
+    '<div class="note" id="coSum"></div>' +
+    '<label>Customer <span class="s">(required if any balance is left unpaid)</span></label><select id="coCust">' + custOpts + '</select>' +
+    '<div id="newCust" class="hid two"><div><label>Name *</label><input id="ncName" maxlength="120"></div><div><label>Phone</label><input id="ncPhone" inputmode="tel" placeholder="07XX XXX XXX"></div></div>' +
+    '<label>Note (optional)</label><input id="coNote" maxlength="240">' +
+    '<div class="actions"><button class="btn2" data-act="closeModal" type="button">Back</button><button class="btn" data-act="confirmSale" type="button">Confirm sale</button></div>';
+  updateCheckout();
+}
+async function confirmSale(btn) {
+  var s = payState(), c = s.c;
+  if (c.bad) return toast(c.bad, true);
+  if (s.mpOver) return toast('M-PESA amount is more than the total', true);
+  var code = val('payCode').toUpperCase().replace(/\s/g, '');
+  if (s.mp > 0 && !/^[A-Z0-9]{10}$/.test(code)) return toast('Enter the 10-character M-PESA receipt code, or clear the M-PESA amount', true);
+  var cust = val('coCust'), ncName = val('ncName');
+  if (s.balance > 0 && !cust) return toast('Choose the customer who owes the balance of ' + KC(s.balance), true);
+  if (cust === '__new' && !ncName) return toast('Enter the new customer\'s name', true);
+  var payments = [];
+  if (s.cashApplied > 0) payments.push({ method: 'cash', amount: s.cashApplied / 100 });
+  if (s.mp > 0) payments.push({ method: 'mpesa', amount: s.mp / 100, mpesaReceipt: code, payerPhone: val('payPh') || null });
+  busy(btn, true, 'Saving…');
+  try {
+    var customerId = cust || null;
+    if (cust === '__new') customerId = (await api('POST', '/shops/' + S.shopId + '/customers', { id: S.coId, name: ncName, phone: val('ncPhone') || null })).customer.id;
+    var body = {
+      id: S.saleId, customerId: customerId, payments: payments, note: val('coNote') || null,
+      items: S.cart.map(function (l) { return { productId: l.productId, qty: Number(l.qty), unitPrice: Number(l.price) }; })
+    };
+    if (S.disc.value !== '' && Number(S.disc.value) > 0) body.discount = { type: S.disc.type, value: Number(S.disc.value) };
+    var d = await api('POST', '/shops/' + S.shopId + '/sales', body);
+    var expected = c.total / 100;
+    S.cart = []; S.saleId = null; S.coId = null; S.disc = { type: 'amount', value: '' }; saveCart();
+    var warn = d.idempotent ? (Math.abs(d.sale.total - expected) > 0.005 ? 'This sale had already been saved earlier with a different total (' + KSH(d.sale.total) + '). Please check this receipt.' : 'This sale was already saved — nothing was recorded twice.') : '';
+    openReceipt(d, warn);
+    refresh();
+  } catch (e) {
+    if (e.offline || e.status === 0) toast('No internet — the sale was NOT saved yet. Your cart is kept: tap Confirm sale again when you are back online.', true);
+    else { toast(e.message, true); if (e.code === 'INSUFFICIENT_STOCK' || e.code === 'PRODUCT_NOT_FOUND' || e.code === 'PRODUCT_INACTIVE') { try { await loadTab(); syncCart(); } catch (_) {} } }
+  } finally { busy(btn, false); }
+}
+
+/* receipt */
+function receiptText(d) {
+  var s = d.sale, sh = d.shop, L = [];
+  L.push(sh.name); if (sh.location) L.push(sh.location); if (sh.phone) L.push('Tel ' + sh.phone); if (sh.kraPin) L.push('PIN ' + sh.kraPin);
+  L.push('Receipt #' + s.receiptNo + ' · ' + fmtWhen(s.soldAt)); if (s.customerName) L.push('Customer: ' + s.customerName); L.push('');
+  d.items.forEach(function (i) { L.push(QTY(i.qty) + ' ' + i.unit + ' ' + i.name + ' @ ' + KSH(i.unitPrice) + ' = ' + KSH(i.lineTotal)); });
+  L.push(''); L.push('Subtotal: ' + KSH(s.subtotal)); if (s.discountAmount > 0) L.push('Discount: -' + KSH(s.discountAmount)); L.push('TOTAL: ' + KSH(s.total));
+  d.payments.forEach(function (p) { L.push((p.method === 'mpesa' ? 'M-PESA ' + p.mpesaReceipt : 'Cash') + ': ' + KSH(p.amount)); });
+  if (s.balanceDue > 0) L.push('BALANCE DUE: ' + KSH(s.balanceDue));
+  if (sh.receiptFooter) { L.push(''); L.push(sh.receiptFooter); }
+  return L.join('\n');
+}
+function receiptHtml(d) {
+  var s = d.sale, sh = d.shop;
+  var rows = d.items.map(function (i) { return '<div>' + esc(i.name) + '</div><div class="r"><span>' + QTY(i.qty) + ' ' + esc(i.unit) + ' × ' + KSH(i.unitPrice) + '</span><span>' + KSH(i.lineTotal) + '</span></div>'; }).join('');
+  var pays = d.payments.map(function (p) { return '<div class="r"><span>' + (p.method === 'mpesa' ? 'M-PESA ' + esc(p.mpesaReceipt) + (p.verification === 'verified' ? ' ✓' : '') : 'Cash') + '</span><span>' + KSH(p.amount) + '</span></div>'; }).join('');
+  return '<div class="rcpt"><div class="c"><b>' + esc(sh.name) + '</b>' + (sh.location ? '<br>' + esc(sh.location) : '') + (sh.phone ? '<br>Tel ' + esc(sh.phone) : '') + (sh.kraPin ? '<br>PIN ' + esc(sh.kraPin) : '') + '</div><hr>' +
+    '<div class="r"><span>Receipt #' + s.receiptNo + '</span><span>' + esc(fmtWhen(s.soldAt)) + '</span></div>' + (s.customerName ? '<div>Customer: ' + esc(s.customerName) + '</div>' : '') + '<hr>' + rows + '<hr>' +
+    '<div class="r"><span>Subtotal</span><span>' + KSH(s.subtotal) + '</span></div>' + (s.discountAmount > 0 ? '<div class="r"><span>Discount</span><span>− ' + KSH(s.discountAmount) + '</span></div>' : '') +
+    '<div class="r"><b>TOTAL</b><b>' + KSH(s.total) + '</b></div><hr>' + (pays || '<div>No payment received</div>') +
+    (s.balanceDue > 0 ? '<div class="r due"><span>BALANCE DUE (credit)</span><span>' + KSH(s.balanceDue) + '</span></div>' : '') +
+    (sh.receiptFooter ? '<hr><div class="c">' + esc(sh.receiptFooter) + '</div>' : '') + '</div>';
+}
+var lastReceipt = null;
+function openReceipt(d, warn) {
+  lastReceipt = d;
+  openModal('Receipt', (warn ? '<div class="note noprint">' + esc(warn) + '</div>' : '') + receiptHtml(d) +
+    '<div class="actions"><button class="btn2" data-act="shareReceipt" type="button"><i class="fas fa-share-nodes"></i> Share</button><button class="btn2" data-act="printReceipt" type="button"><i class="fas fa-print"></i> Print</button><button class="btn" data-act="closeModal" type="button">Done</button></div>');
+}
+async function shareReceipt() {
+  if (!lastReceipt) return; var t = receiptText(lastReceipt);
+  try { if (navigator.share) { await navigator.share({ text: t }); return; } } catch (e) { if (e && e.name === 'AbortError') return; }
+  try { await navigator.clipboard.writeText(t); toast('Receipt copied — paste it into WhatsApp or SMS'); } catch (_) { toast('Could not share the receipt on this device', true); }
+}
+async function openSale(id) {
+  try { openReceipt(await api('GET', '/shops/' + S.shopId + '/sales/' + id)); } catch (e) { toast(e.message, true); }
+}
+
+/* sales list */
+function saleRow(s) {
+  var b = s.paymentStatus === 'paid' ? '<span class="badge">Paid</span>' : s.paymentStatus === 'partial' ? '<span class="badge low">Part-paid</span>' : '<span class="badge out">Credit</span>';
+  return '<div class="item" data-act="openSale" data-id="' + esc(s.id) + '"><div class="grow"><div class="t">#' + s.receiptNo + (s.customerName ? ' · ' + esc(s.customerName) : '') + '</div><div class="s">' + esc(fmtWhen(s.soldAt)) + (s.balanceDue > 0 ? ' · owes ' + KSH(s.balanceDue) : '') + '</div></div><div style="text-align:right"><b>' + KSH(s.total) + '</b><div>' + b + '</div></div></div>';
+}
+function viewSales() {
+  var m = S.salesSummary;
+  var f = '<div class="bar"><select id="rangeSel" class="grow">' + [['today', 'Today'], ['7', 'Last 7 days'], ['30', 'Last 30 days'], ['all', 'All time']].map(function (r) { return '<option value="' + r[0] + '"' + (S.range === r[0] ? ' selected' : '') + '>' + r[1] + '</option>'; }).join('') + '</select></div>';
+  var sum = m ? '<div class="grid"><div class="card stat"><small>Sales</small><b>' + KSH(m.total) + '</b><div class="s">' + m.count + ' sale' + (m.count === 1 ? '' : 's') + '</div></div>' +
+    '<div class="card stat"><small>Money received</small><b>' + KSH(m.amountPaid) + '</b></div>' +
+    '<div class="card stat ' + (m.balanceDue > 0 ? 'warn' : '') + '"><small>Unpaid (credit)</small><b>' + KSH(m.balanceDue) + '</b></div>' +
+    '<div class="card stat"><small>Gross profit</small><b>' + KSH(m.grossProfit) + '</b><div class="s">Sales − cost of goods</div></div></div>' : '';
+  return f + sum + (S.sales.length ? S.sales.map(saleRow).join('') : '<div class="empty"><i class="fas fa-receipt"></i>No sales in this period.</div>');
+}
+
 /* ───── shop actions ───── */
 async function createShop(btn) {
   var o = shopPayload(); if (!o.name) return toast('Enter your shop name', true);
@@ -314,7 +566,16 @@ document.addEventListener('click', function (ev) {
   var t = ev.target.closest && ev.target.closest('[data-act]'); if (!t) return;
   var a = t.dataset.act, id = t.dataset.id;
   if (t.tagName === 'A') ev.preventDefault();
-  if (a === 'closeModal') closeModal();
+  if (a === 'closeModal') { closeModal(); if (S.tab === 'pos') render(); }
+  else if (a === 'addToCart') addToCart(id);
+  else if (a === 'rmLine') { S.cart.splice(Number(t.dataset.i), 1); if (!S.cart.length) S.saleId = null; saveCart(); render(); }
+  else if (a === 'clearCart') clearCart();
+  else if (a === 'checkout') openCheckout();
+  else if (a === 'fullCash') { var s0 = payState(); $('payCash').value = (s0.c.total - s0.mpApplied) / 100; updateCheckout(); }
+  else if (a === 'confirmSale') confirmSale(t);
+  else if (a === 'shareReceipt') shareReceipt();
+  else if (a === 'printReceipt') window.print();
+  else if (a === 'openSale') openSale(id);
   else if (a === 'retry') { S.loading = true; boot(); }
   else if (a === 'tab') { S.tab = t.dataset.tab; try { sessionStorage.setItem('necpra_duka_tab', S.tab); } catch (_) {} render(); refresh(); }
   else if (a === 'toggleLow') { S.low = !S.low; refresh(); }
@@ -332,10 +593,28 @@ document.addEventListener('click', function (ev) {
   else if (a === 'doArchive') doArchive(t);
 });
 document.addEventListener('change', function (ev) {
-  if (ev.target.id === 'shopSel') { S.shopId = ev.target.value; try { localStorage.setItem('necpra_duka_shop', S.shopId); } catch (_) {} S.dash = null; refresh(); }
+  if (ev.target.id === 'shopSel') { S.shopId = ev.target.value; try { localStorage.setItem('necpra_duka_shop', S.shopId); } catch (_) {} S.dash = null; S.coId = null; loadCart(); refresh(); }
   else if (ev.target.id === 'catSel') { S.cat = ev.target.value; refresh(); }
+  else if (ev.target.id === 'rangeSel') { S.range = ev.target.value; refresh(); }
+  else if (ev.target.id === 'dType') { S.disc.type = ev.target.value; saveCart(); updateCheckout(); }
+  else if (ev.target.id === 'coCust') updateCheckout();
 });
-var qTimer; document.addEventListener('input', function (ev) { if (ev.target.id === 'qBox') { S.q = ev.target.value.trim(); clearTimeout(qTimer); qTimer = setTimeout(function () { refresh(true); }, 300); } });
+var qTimer; document.addEventListener('input', function (ev) {
+  var id = ev.target.id, cl = ev.target.classList;
+  if (id === 'qBox') { S.q = ev.target.value.trim(); clearTimeout(qTimer); qTimer = setTimeout(function () { refresh(true); }, 300); }
+  else if (id === 'posQ') { S.posQ = ev.target.value.trim(); $('posResults').innerHTML = posResults(); }
+  else if (cl && cl.contains('cq')) { S.cart[Number(ev.target.dataset.i)].qty = ev.target.value.replace(',', '.'); updatePosTotals(); }
+  else if (cl && cl.contains('cp')) { S.cart[Number(ev.target.dataset.i)].price = ev.target.value.replace(',', '.'); updatePosTotals(); }
+  else if (id === 'dVal') { S.disc.value = ev.target.value.replace(',', '.'); saveCart(); updateCheckout(); }
+  else if (id === 'payCash' || id === 'payMp') updateCheckout();
+});
+// Enter in the search box adds the product when exactly one matches (barcode scanners type the code then press Enter).
+document.addEventListener('keydown', function (ev) {
+  if (ev.key === 'Enter' && ev.target.id === 'posQ') {
+    var q = S.posQ.toLowerCase(), m = S.products.filter(function (p) { return p.stockQty > 0 && (p.barcode && p.barcode.toLowerCase() === q || p.name.toLowerCase().indexOf(q) > -1); });
+    if (q && m.length === 1) { ev.preventDefault(); addToCart(m[0].id); }
+  }
+});
 $('modal').addEventListener('click', function (ev) { if (ev.target === $('modal')) closeModal(); });
 
 window.addEventListener('message', function (ev) { if (ev && ev.data && ev.data.type === 'MODULE_VISIBLE' && S.shopId && !S.loading) refresh(); });
