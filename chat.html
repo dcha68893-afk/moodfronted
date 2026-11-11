@@ -61,7 +61,7 @@
     </style>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Necpra - Chat, Friends & Marketplace</title>
+    <title>Necpra - Chat, Friends & Duka Smart</title>
     <!-- PWA: manifest MUST be linked from the main shell so beforeinstallprompt fires -->
     <link rel="manifest" href="/manifest.json">
     <!-- PWA controller (single owner of beforeinstallprompt + install UI + service-worker registration).
@@ -1803,10 +1803,10 @@
             <span class="nav-label">Money</span>
         </button>
 
-        <!-- 5. Marketplace / Tools -->
-        <button class="mobile-nav-icon" data-page="tools" aria-label="Marketplace">
+        <!-- 5. NECPRA DUKA SMART (replaced the Marketplace shopping screen; page key stays "tools" so all existing navigation/warm-load code keeps working) -->
+        <button class="mobile-nav-icon" data-page="tools" aria-label="Duka Smart">
             <i class="fas fa-store"></i>
-            <span class="nav-label">Market</span>
+            <span class="nav-label">Duka</span>
         </button>
     </div>
     
@@ -1876,7 +1876,7 @@
         <iframe id="settingsIframe" class="content-iframe" data-src="settings.html" data-module="settings" loading="eager"></iframe>
     </div>
     <div id="toolsContent" class="iframe-container hidden">
-        <iframe id="toolsIframe" class="content-iframe" data-src="Tools.html" data-module="tools" loading="eager"></iframe>
+        <iframe id="toolsIframe" class="content-iframe" data-src="duka.html" data-module="tools" loading="eager"></iframe>
     </div>
     <!-- ADMIN MODULE: separate module (admin.html). Loaded on demand, only for admins. -->
     <div id="adminContent" class="iframe-container hidden">
@@ -2888,7 +2888,7 @@
             groups:   { icon: 'fa-users', title: 'Groups', subtitle: 'Communities stay responsive with local-first hydration.' },
             friends:  { icon: 'fa-user-friends', title: 'Friends', subtitle: 'Contacts, requests, and discovery live in one place.' },
             settings: { icon: 'fa-cog', title: 'Settings', subtitle: 'Profile, privacy, and preferences for the whole app.' },
-            tools:    { icon: 'fa-tools', title: 'Tools', subtitle: 'Utilities and marketplace actions for power users.' },
+            tools:    { icon: 'fa-store', title: 'Duka Smart', subtitle: 'Your shop. Your stock. Your money. Your assistant.' },
             money:    { icon: 'fa-wallet', title: 'Money', subtitle: 'Circles, payment requests and purchase plans.' },
             games:    { icon: 'fa-gamepad', title: 'Games', subtitle: 'Play pool and more — unlimited stages, real physics.' },
             admin:    { icon: 'fa-shield-alt', title: 'Admin', subtitle: 'Moderation, marketplace and platform controls.' }

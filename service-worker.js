@@ -87,12 +87,12 @@ const SW_VERSION = '19.54.0';
 // v102 (ICON-FONT + GAMES-LOAD FIX): icon fonts (Font Awesome css + woff2) are now precached and preloaded by the pages so icons
 // no longer wait on the network (the font is font-display:block, i.e. invisible until it arrives).
 // Cache names must only ever move forward.
-const CACHE_NAME = 'necpra-static-v104';
+const CACHE_NAME = 'necpra-static-v105';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
   '/index.html','/manifest.json','/icons/necpra-192.png','/icons/necpra-512.png',
-  '/','/chat.html','/message.html','/status.html','/group.html','/friend.html','/settings.html','/Tools.html','/game.html',
+  '/','/chat.html','/message.html','/status.html','/group.html','/friend.html','/settings.html','/Tools.html','/duka.html','/game.html',
   '/js/api.core.js','/js/api.request.js','/js/api.auth.js','/js/api.messages.js',
   '/js/app.core.bootstrap.js','/js/app.core.session.js','/js/app.core.ui.js','/js/app.ui.auth.js',
   '/js/app.cache.js','/js/app.cache.unified.js','/js/authStorage.js','/js/app.offline.queue.js','/js/auth.session.manager.js',
@@ -294,7 +294,7 @@ async function navigation(request,event){
 // empty cache and the next offline launch lands on the offline page. crawlCore() reads each core page, finds the
 // scripts/styles/iframes it needs and caches them too; maybeRepair() re-runs it on later online launches until every
 // core page is cached.
-const CORE_PAGES=['/','/chat.html','/message.html','/status.html','/group.html','/friend.html','/settings.html','/Tools.html','/game.html','/game-v3.html','/money.html'];
+const CORE_PAGES=['/','/chat.html','/message.html','/status.html','/group.html','/friend.html','/settings.html','/Tools.html','/duka.html','/game.html','/game-v3.html','/money.html'];
 const REPAIR_KEY='/__necpra_core_ready__';
 const REPAIR_INTERVAL_MS=6*60*60*1000;
 let repairRunning=false,lastRepairTry=0;
