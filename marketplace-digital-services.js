@@ -52,7 +52,7 @@ const customerPrice=n=>Math.round(Number(n)*(1+markupPercent()/100)*100)/100;
 const priceLabel=n=>customerPrice(n)===Number(n)?'KES '+Number(n).toFixed(2):'Pay KES '+customerPrice(n).toFixed(2);
 function shell(container,opts){
   opts=opts||{};tab=(opts.tab==='airtime'||opts.tab==='data'||opts.tab==='history')?opts.tab:'home';css();
-  container.innerHTML='<div class="dsvc"><div class="dsvc-hero"><div class="dsvc-kicker">Necpra Marketplace</div><div class="dsvc-title">Digital Services</div><div class="dsvc-sub">Choose a product, enter the recipient and pay securely with M-Pesa.</div></div><div class="dsvc-nav"><button data-tab="home">Overview</button><button data-tab="airtime">Airtime</button><button data-tab="data">Data</button><button data-tab="history">History</button></div><div id="dsvcBody"></div></div>';
+  container.innerHTML='<div class="dsvc"><div class="dsvc-hero"><div class="dsvc-kicker">NECPRA Wallet</div><div class="dsvc-title">Airtime &amp; Data</div><div class="dsvc-sub">Choose a product, enter the recipient and pay securely with M-Pesa.</div></div><div class="dsvc-nav"><button data-tab="home">Overview</button><button data-tab="airtime">Airtime</button><button data-tab="data">Data</button><button data-tab="history">History</button></div><div id="dsvcBody"></div></div>';
   container.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{tab=b.dataset.tab;renderBody(container)});renderBody(container);
 }
 let _renderSeq=0;

@@ -96,6 +96,7 @@ details.rules{margin-top:10px;font-size:12px;color:var(--muted);line-height:1.5}
 <div class="grid">
   <button class="action" data-act="newCircle" type="button"><i class="fas fa-users" style="background:#16a34a"></i><b>Money Circles</b><span>Chamas, family funds, trips and events.</span></button>
   <button class="action" data-act="newRequest" type="button"><i class="fas fa-hand-holding-heart" style="background:#2563eb"></i><b>Pay for Someone</b><span>Request money for family, friends or bills.</span></button>
+  <button class="action" data-act="goto:airtime" type="button"><i class="fas fa-mobile-screen" style="background:#16a34a"></i><b>Airtime &amp; Data</b><span>Buy airtime or data bundles with M-PESA.</span></button>
   <button class="action" data-act="goto:paylater" type="button"><i class="fas fa-calendar-check" style="background:#f59e0b"></i><b>Pay Later</b><span>Reserved marketplace orders to settle.</span></button>
   <button class="action" data-act="goto:activity" type="button"><i class="fas fa-receipt" style="background:#7c3aed"></i><b>Activity</b><span>Contributions, requests and records.</span></button>
 </div>
@@ -104,6 +105,7 @@ details.rules{margin-top:10px;font-size:12px;color:var(--muted);line-height:1.5}
   <button class="tab" data-tab="goals" type="button">Savings goals</button>
   <button class="tab" data-tab="circles" type="button">Circles</button>
   <button class="tab" data-tab="requests" type="button">Requests<span class="dot" id="reqDot" style="display:none">0</span></button>
+  <button class="tab" data-tab="airtime" type="button">Airtime &amp; Data</button>
   <button class="tab" data-tab="paylater" type="button">Pay Later</button>
   <button class="tab" data-tab="activity" type="button">Activity</button>
 </div>
@@ -111,6 +113,7 @@ details.rules{margin-top:10px;font-size:12px;color:var(--muted);line-height:1.5}
 </main>
 <div class="panel" id="panel"><div class="phead"><button class="pbtn" id="pBack" type="button" aria-label="Back"><i class="fas fa-arrow-left"></i></button><div class="ptitle" id="pTitle">Circle</div><button class="pbtn" id="pGear" type="button" aria-label="Settings" style="display:none"><i class="fas fa-gear"></i></button></div><div class="pbody" id="pBody"></div><div class="pfoot" id="pFoot"></div></div>
 <div class="modal" id="modal"><div class="sheet"><div class="grab"></div><h3 id="modalTitle">Money</h3><div id="modalBody"></div></div></div>
+<script src="/marketplace-digital-services.js"></script>
 <script>
 (function(){
 'use strict';
@@ -204,7 +207,7 @@ function skeleton(){return '<div class="card"><div class="skel"></div><div class
 function errBox(){return '<div class="card"><div class="empty"><i class="fas fa-triangle-exclamation"></i>'+esc(S.err)+'<div style="margin-top:12px"><button class="primary small" data-act="retry" type="button">Try again</button></div></div></div>'}
 function render(){
   document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('on',t.dataset.tab===S.tab)});
-  var p=$('pane');if(S.tab==='wallet'){p.innerHTML=viewWallet();return}if(S.tab==='goals'){p.innerHTML=viewGoals();return}if(S.loading){p.innerHTML=skeleton();return}if(S.err&&!S.overview){p.innerHTML=errBox();return}
+  var p=$('pane');if(S.tab==='airtime'){if(!p.querySelector('.dsvc')){if(typeof window.__renderDigitalServices==='function'){p.innerHTML='';window.__renderDigitalServices(p,{tab:'airtime'})}else p.innerHTML='<div class="card"><div class="empty"><i class="fas fa-triangle-exclamation"></i>Airtime &amp; Data could not load. Refresh and try again.</div></div>'}return}if(S.tab==='wallet'){p.innerHTML=viewWallet();return}if(S.tab==='goals'){p.innerHTML=viewGoals();return}if(S.loading){p.innerHTML=skeleton();return}if(S.err&&!S.overview){p.innerHTML=errBox();return}
   if(S.tab==='circles')p.innerHTML=viewCircles();else if(S.tab==='requests')p.innerHTML=viewRequests();
   else if(S.tab==='paylater')p.innerHTML=viewPayLater();else p.innerHTML=viewActivity()}
 /* ================= WALLET: dashboard, add money, send, withdraw, receipts, savings goals ================= */
@@ -504,7 +507,7 @@ var pollTimer=null;function pollSoon(){var n=0;clearInterval(pollTimer);pollTime
 
 /* ---------- events (one delegated handler: nothing depends on inline onclick) ---------- */
 document.addEventListener('click',function(e){
-  var t=e.target.closest('[data-tab],[data-act]');if(!t){if(e.target.id==='modal')closeModal();return}
+  if(e.target.closest&&e.target.closest('.dsvc'))return;var t=e.target.closest('[data-tab],[data-act]');if(!t){if(e.target.id==='modal')closeModal();return}
   if(t.dataset.tab){S.tab=t.dataset.tab;try{sessionStorage.setItem('necpra_money_tab',S.tab)}catch(_){}if(S.tab==='paylater'&&S.orders===null)loadOrders();if(S.tab==='goals'&&S.goals===null)loadGoals();render();return}
   var a=t.dataset.act,id=t.dataset.id;
   if(a==='addMoney')addMoney();else if(a==='sendMoney')sendMoney();else if(a==='withdraw')withdrawMoney();else if(a==='receive')receiveMoney();else if(a==='receipt')showReceipt(id);else if(a==='newGoal')newGoal();else if(a==='goalDep')goalMove(id,'deposit');else if(a==='goalWd')goalMove(id,'withdraw');else if(a==='goalClose')goalClose(id);else if(a==='plRemind')plRemind(id);else if(a==='retryWallet'){loadWallet(true)}else if(a==='retryGoals'){loadGoals()}

@@ -26,6 +26,7 @@ button:disabled{opacity:.55;cursor:default}
 .btnd{background:var(--kyn-accent-danger,#d93025);color:#fff}
 .tabs{display:flex;gap:6px;margin-bottom:12px;border-bottom:1px solid var(--kyn-border,#e3e7ea)}
 .tab{background:none;color:var(--kyn-text-secondary,#54656f);border-radius:0;padding:10px 14px;border-bottom:3px solid transparent}
+.tabs{overflow-x:auto;scrollbar-width:none}.tab{white-space:nowrap}
 .tab.on{color:var(--kyn-accent-primary,#0a8f5b);border-bottom-color:var(--kyn-accent-primary,#0a8f5b)}
 .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:12px}
 @media(min-width:640px){.grid{grid-template-columns:repeat(4,1fr)}}
@@ -44,6 +45,7 @@ h3{margin:16px 0 8px;font-size:14px}
 .empty i{font-size:34px;opacity:.5;display:block;margin-bottom:8px}
 .note{font-size:12.5px;color:var(--kyn-text-secondary,#54656f);background:var(--kyn-bg-input,#f0f2f5);border-radius:10px;padding:10px 12px;margin:10px 0}
 .err{background:rgba(217,48,37,.1);color:var(--kyn-accent-danger,#d93025)}
+.vafab{position:fixed;left:16px;bottom:calc(18px + env(safe-area-inset-bottom,0px));width:52px;height:52px;border-radius:50%;border:0;background:#0f766e;color:#fff;font-size:20px;box-shadow:0 6px 18px rgba(0,0,0,.25);z-index:40;cursor:pointer}
 .fab{position:fixed;right:16px;bottom:calc(18px + env(safe-area-inset-bottom,0px));box-shadow:0 6px 18px rgba(0,0,0,.25);border-radius:999px;padding:13px 18px;z-index:5}
 .modal{position:fixed;inset:0;background:var(--kyn-bg-overlay,rgba(0,0,0,.45));display:none;align-items:flex-end;justify-content:center;z-index:20}
 .modal.open{display:flex}
@@ -106,17 +108,21 @@ function apiBase() {
     (p && p.__getApiBase && p.__getApiBase()) || (p && p.API_BASE_URL) || '';
   return String(b).replace(/\/api\/?$/, '').replace(/\/$/, '');
 }
-async function api(method, path, body) {
+var API_TIMEOUT = 20000;
+function offlineErr(m) { return Object.assign(new Error(m), { status: 0, offline: true }); }
+async function api(method, path, body, opt) {
   var base = apiBase();
   if (base === '' && !/^(localhost|127\.)/.test(location.hostname)) throw Object.assign(new Error('The app is not connected to the server yet. Please reopen NECPRA.'), { status: 0 });
-  var r;
+  var r, ac = typeof AbortController === 'function' ? new AbortController() : null, tm = ac ? setTimeout(function () { ac.abort(); }, API_TIMEOUT) : 0;
   try {
-    r = await fetch(base + '/api/duka' + path, { method: method, headers: Object.assign({ 'Content-Type': 'application/json' }, token() ? { Authorization: 'Bearer ' + token() } : {}), body: body ? JSON.stringify(body) : undefined });
+    r = await fetch(base + '/api/duka' + path, { method: method, headers: Object.assign({ 'Content-Type': 'application/json' }, token() ? { Authorization: 'Bearer ' + token() } : {}), body: body ? JSON.stringify(body) : undefined, signal: ac ? ac.signal : undefined });
   } catch (e) {
-    throw Object.assign(new Error('No internet connection. Duka Smart needs a connection for now — your data is safe on the server.'), { status: 0, offline: true });
-  }
+    return fromCacheOrThrow(method, path, opt, offlineErr('No internet connection.'));
+  } finally { if (tm) clearTimeout(tm); }
+  if (r.status === 502 || r.status === 503 || r.status === 504) return fromCacheOrThrow(method, path, opt, offlineErr('The server is not reachable right now.'));
   var d = await r.json().catch(function () { return {}; });
   if (!r.ok) throw Object.assign(new Error(r.status === 401 ? 'Your session has expired. Please log in again.' : (d.message || 'Request failed (' + r.status + ')')), { status: r.status, code: d.errorCode || '' });
+  if (method === 'GET' && !(opt && opt.noCache)) cacheSet(path, d.data || {});
   return d.data || {};
 }
 
@@ -146,18 +152,26 @@ async function loadShops() {
 }
 async function loadTab() {
   if (!S.shopId) return;
+  S.staleAt = 0;
   if (S.tab === 'dash') S.dash = await api('GET', '/shops/' + S.shopId + '/dashboard');
   if (S.tab === 'products') {
     var qs = '?limit=500' + (S.q ? '&search=' + encodeURIComponent(S.q) : '') + (S.cat ? '&category=' + encodeURIComponent(S.cat) : '') + (S.low ? '&lowStock=true' : '');
-    var d = await api('GET', '/shops/' + S.shopId + '/products' + qs);
-    S.products = d.products; S.total = d.total; S.categories = d.categories;
+    var d;
+    try { d = await api('GET', '/shops/' + S.shopId + '/products' + qs); }
+    catch (e) {
+      if (!(e.offline && qs !== '?limit=500')) throw e;       // offline search/filter: filter the saved list on the phone
+      d = await api('GET', '/shops/' + S.shopId + '/products?limit=500'); var qq = S.q.toLowerCase();
+      d = { products: d.products.filter(function (p) { return (!qq || (p.name + ' ' + (p.barcode || '')).toLowerCase().indexOf(qq) >= 0) && (!S.cat || p.category === S.cat) && (!S.low || p.isLowStock); }), categories: d.categories };
+    }
+    S.products = applyPending(d.products.slice()); S.total = d.total != null ? d.total : S.products.length; S.categories = d.categories;
   }
   if (S.tab === 'pos') {
     var pd = await api('GET', '/shops/' + S.shopId + '/products?limit=500');
-    S.products = pd.products; S.categories = pd.categories;
+    var savedLow = S.low; S.low = false; S.products = applyPending(pd.products.slice()); S.low = savedLow; S.categories = pd.categories;
     if (!S.cartLoadedFor || S.cartLoadedFor !== S.shopId) loadCart();
     syncCart();
   }
+  if (S.tab === 'money') await loadMoney();
   if (S.tab === 'sales') {
     var from = S.range === 'today' ? ymd(0) : S.range === '7' ? ymd(6) : S.range === '30' ? ymd(29) : '';
     var sd = await api('GET', '/shops/' + S.shopId + '/sales?limit=100' + (from ? '&from=' + from : ''));
@@ -168,15 +182,24 @@ async function refresh(keepFocus) {
   try { S.err = ''; await loadTab(); } catch (e) { S.err = e.message; }
   S.loading = false; render(keepFocus);
 }
+/* No registration: first open silently creates a default shop for the logged-in user (renamable in Settings).
+   The id is kept in localStorage so a retry after a dropped connection can never create a second shop. */
+async function ensureDefaultShop() {
+  if (S.shops && S.shops.length) return;
+  var id = ''; try { id = localStorage.getItem('necpra_duka_autoshop') || ''; } catch (_) {}
+  if (!id) { id = uuid(); try { localStorage.setItem('necpra_duka_autoshop', id); } catch (_) {} }
+  var d = await api('POST', '/shops', { id: id, name: 'My Duka' });
+  S.shopId = d.shop.id; await loadShops();
+}
 async function boot() {
-  try { await loadShops(); await loadTab(); } catch (e) { S.err = e.message; }
-  S.loading = false; render();
+  try { await loadShops(); if (!S.shops.length) await ensureDefaultShop(); await loadTab(); } catch (e) { S.err = e.message; }
+  S.loading = false; render(); setTimeout(syncNow, 500);
 }
 
 /* ───── views ───── */
 function stockBadge(p) { return p.isOutOfStock ? '<span class="badge out">Out of stock</span>' : p.isLowStock ? '<span class="badge low">Low</span>' : '<span class="badge">In stock</span>'; }
 function productRow(p) {
-  return '<div class="item" data-act="openProduct" data-id="' + esc(p.id) + '"><div class="grow"><div class="t">' + esc(p.name) + '</div><div class="s">' +
+  return '<div class="item" data-act="openProduct" data-id="' + esc(p.id) + '"><div class="grow"><div class="t">' + esc(p.name) + (p.pending ? ' <span class="badge low">Not synced</span>' : '') + '</div><div class="s">' +
     esc(p.category || 'No category') + ' · Buy ' + KSH(p.buyingPrice) + ' → Sell ' + KSH(p.sellingPrice) + '</div></div><div style="text-align:right"><b>' +
     QTY(p.stockQty) + '</b> <span class="s">' + esc(p.unit) + '</span><div>' + stockBadge(p) + '</div></div></div>';
 }
@@ -201,7 +224,7 @@ function header() {
   var sw = S.shops.length > 1 ? '<select id="shopSel" class="grow" aria-label="Choose shop">' + S.shops.map(function (s) { return '<option value="' + esc(s.id) + '"' + (s.id === S.shopId ? ' selected' : '') + '>' + esc(s.name) + '</option>'; }).join('') + '</select>' : '<div class="grow"><b>' + esc(shop().name) + '</b><div class="s" style="font-size:12px;opacity:.8">' + esc(shop().location || shop().businessType || '') + '</div></div>';
   return '<div class="hero"><h1>NECPRA DUKA SMART</h1><p>Your shop. Your stock. Your money. Your assistant.</p></div>' +
     '<div class="bar">' + sw + (S.shops.length < S.maxShops ? '<button class="btn2" type="button" data-act="newShop" title="Add another shop"><i class="fas fa-plus"></i> Shop</button>' : '') + '</div>' +
-    '<div class="tabs">' + [['dash', 'Dashboard'], ['pos', 'Sell'], ['sales', 'Sales'], ['products', 'Products'], ['settings', 'My shop']].map(function (t) {
+    '<div class="tabs">' + [['dash', 'Dashboard'], ['pos', 'Sell'], ['sales', 'Sales'], ['products', 'Products'], ['money', 'Money'], ['settings', 'My shop']].map(function (t) {
       return '<button class="tab' + (S.tab === t[0] ? ' on' : '') + '" data-act="tab" data-tab="' + t[0] + '" type="button">' + t[1] + (t[0] === 'pos' && S.cart.length ? ' (' + S.cart.length + ')' : '') + '</button>';
     }).join('') + '</div>';
 }
@@ -209,10 +232,10 @@ function viewDash() {
   var d = S.dash; if (!d) return '<div class="spin">Loading…</div>';
   var st = d.stock, ts = d.todaySales, cd = d.customerDebts;
   var money = '<div class="grid"><div class="card stat"><small>Today\'s sales</small><b>' + KSH(ts.total) + '</b><div class="s">' + ts.count + ' sale' + (ts.count === 1 ? '' : 's') + '</div></div>' +
-    '<div class="card stat"><small>Est. profit today</small><b>' + KSH(d.estimatedProfit) + '</b><div class="s">Before expenses</div></div>' +
+    '<div class="card stat"><small>' + (d.netProfit != null ? 'Net profit today' : 'Est. profit today') + '</small><b>' + KSH(d.netProfit != null ? d.netProfit : d.estimatedProfit) + '</b><div class="s">' + (d.netProfit != null ? 'Gross ' + KSH(d.estimatedProfit) + ' − expenses ' + KSH(d.totalExpenses) : 'Before expenses') + '</div></div>' +
     '<div class="card stat ' + (cd.total > 0 ? 'warn' : '') + '"><small>Customer debts</small><b>' + KSH(cd.total) + '</b><div class="s">' + cd.openSales + ' unpaid sale' + (cd.openSales === 1 ? '' : 's') + '</div></div>' +
     '<div class="card stat"><small>Cash received today</small><b>' + KSH(ts.cashReceived) + '</b><div class="s">+ M-PESA ' + KSH(ts.mpesaReceived) + '</div></div></div>' +
-    '<div class="note">Credit given today: <b>' + KSH(ts.creditGiven) + '</b> (not cash). ' + (ts.mpesaReceived > ts.mpesaVerified ? 'M-PESA entered from receipt codes: ' + KSH(ts.mpesaReceived - ts.mpesaVerified) + ' — not independently verified.' : '') + '</div>' +
+    '<div class="note">Credit given today: <b>' + KSH(ts.creditGiven) + '</b> (not cash).' + (d.debtCollectedToday ? ' Debts collected today: <b>' + KSH(d.debtCollectedToday) + '</b>.' : '') + (d.supplierDebts ? ' You owe suppliers <b>' + KSH(d.supplierDebts) + '</b>.' : '') + ' ' + (ts.mpesaReceived > ts.mpesaVerified ? 'M-PESA entered from receipt codes: ' + KSH(ts.mpesaReceived - ts.mpesaVerified) + ' — not independently verified.' : '') + '</div>' +
     '<div class="actions" style="margin:0 0 12px"><button class="btn" data-act="tab" data-tab="pos" type="button"><i class="fas fa-cash-register"></i> New sale</button></div>';
   var recentSales = d.recentSales.length ? '<h3>Recent sales</h3>' + d.recentSales.map(saleRow).join('') : '';
   var cards = money + '<div class="grid"><div class="card stat"><small>Products</small><b>' + st.productCount + '</b></div>' +
@@ -243,7 +266,7 @@ function render(keepFocus) {
   var html;
   if (S.err && !S.shops.length) html = '<div class="hero"><h1>NECPRA DUKA SMART</h1></div><div class="note err">' + esc(S.err) + '</div><div class="actions"><button class="btn" data-act="retry" type="button">Try again</button></div>';
   else if (!S.shops.length) html = viewOnboarding();
-  else html = header() + (S.err ? '<div class="note err">' + esc(S.err) + ' <a href="#" data-act="retry">Retry</a></div>' : '') + (S.tab === 'products' ? viewProducts() : S.tab === 'settings' ? viewSettings() : S.tab === 'pos' ? viewPos() : S.tab === 'sales' ? viewSales() : viewDash());
+  else html = header() + syncBar() + (S.err ? '<div class="note err">' + esc(S.err) + ' <a href="#" data-act="retry">Retry</a></div>' : '') + (S.tab === 'products' ? viewProducts() : S.tab === 'money' ? viewMoney() : S.tab === 'settings' ? viewSettings() : S.tab === 'pos' ? viewPos() : S.tab === 'sales' ? viewSales() : viewDash()) + vaFab();
   app.innerHTML = html;
   if (fid && $(fid)) { $(fid).focus(); try { $(fid).setSelectionRange(pos, pos); } catch (_) {} }
 }
@@ -279,7 +302,10 @@ async function saveNewProduct(btn) {
   var o = productPayload(true), m = clientCheck(o); if (m) return toast(m, true);
   o.id = S.draftId; o.clientOpId = uuid();
   busy(btn, true, 'Saving…');
-  try { await api('POST', '/shops/' + S.shopId + '/products', o); closeModal(); toast('Product added'); S.draftId = null; await refresh(); } catch (e) { toast(e.message, true); } finally { busy(btn, false); }
+  try {
+    var w = await write({ type: 'product.create', id: o.id, path: '/shops/' + S.shopId + '/products', body: o, label: 'Add product: ' + o.name, offlineOk: true });
+    closeModal(); toast(w.queued ? 'Saved on this phone — it will sync when you are online' : 'Product added'); S.draftId = null; await refresh();
+  } catch (e) { toast(e.message, true); } finally { busy(btn, false); }
 }
 async function openProduct(id) {
   var p = S.products.filter(function (x) { return x.id === id; })[0] || (S.dash && S.dash.lowStockProducts.filter(function (x) { return x.id === id; })[0]);
@@ -298,7 +324,7 @@ async function loadMovements(id) {
     var d = await api('GET', '/shops/' + S.shopId + '/products/' + id + '/movements?limit=15');
     var el = $('mvList'); if (!el) return;
     el.innerHTML = d.movements.length ? d.movements.map(function (m) { return '<div class="mv"><span>' + esc(m.type) + (m.note ? ' · ' + esc(m.note) : '') + '<div class="s">' + new Date(m.createdAt).toLocaleString('en-KE') + '</div></div><span class="' + (m.qtyChange >= 0 ? 'pos' : 'neg') + '">' + (m.qtyChange >= 0 ? '+' : '') + QTY(m.qtyChange) + ' → ' + QTY(m.balanceAfter) + '</span></div>'; }).join('') : '<div class="s">No stock changes yet.</div>';
-  } catch (e) { var el2 = $('mvList'); if (el2) el2.innerHTML = '<div class="s">' + esc(e.message) + '</div>'; }
+  } catch (e) { var el2 = $('mvList'); if (el2) el2.innerHTML = '<div class="s">' + (e.offline ? 'Stock history needs internet. Changes you make now are saved and will sync.' : esc(e.message)) + '</div>'; }
 }
 async function saveProduct(btn, id) {
   var o = productPayload(false), m = clientCheck(o); if (m) return toast(m, true);
@@ -311,8 +337,12 @@ async function adjust(btn, id, sign) {
   if (dmg && sign > 0) return toast(why + ' stock can only be removed', true);
   busy(btn, true, 'Saving…');
   try {
-    var d = await api('POST', '/shops/' + S.shopId + '/products/' + id + '/stock', { qtyChange: sign * q, type: dmg ? 'damage' : 'adjustment', note: why, clientOpId: S.opId });
-    S.opId = uuid(); $('adjQty').value = ''; $('curStock').textContent = QTY(d.product.stockQty); toast('Stock updated'); loadMovements(id); loadTab().then(function () { render(); }).catch(function () {});
+    var cur = S.products.filter(function (x) { return x.id === id; })[0], nm = cur ? cur.name : 'product';
+    var w = await write({ type: 'stock.adjust', id: S.opId, path: '/shops/' + S.shopId + '/products/' + id + '/stock', body: { qtyChange: sign * q, type: dmg ? 'damage' : 'adjustment', note: why, clientOpId: S.opId }, label: 'Stock ' + (sign > 0 ? '+' : '−') + QTY(q) + ': ' + nm, offlineOk: true,
+      precheck: function () { if (sign < 0 && cur && q > cur.stockQty) throw new Error('Not enough stock: only ' + QTY(cur.stockQty) + ' ' + cur.unit + ' available'); } });
+    S.opId = uuid(); if ($('adjQty')) $('adjQty').value = '';
+    if (w.queued) { await loadTab(); var np = S.products.filter(function (x) { return x.id === id; })[0]; var cs = $('curStock'); if (np && cs) cs.textContent = QTY(np.stockQty); toast('Saved on this phone — stock will sync when you are online'); }
+    else { var cs2 = $('curStock'); if (cs2) cs2.textContent = QTY(w.data.product.stockQty); toast('Stock updated'); loadMovements(id); loadTab().then(function () { render(); }).catch(function () {}); }
   } catch (e) { toast(e.message, true); } finally { busy(btn, false); }
 }
 function confirmDelete(id) {
@@ -476,14 +506,17 @@ async function confirmSale(btn) {
       items: S.cart.map(function (l) { return { productId: l.productId, qty: Number(l.qty), unitPrice: Number(l.price) }; })
     };
     if (S.disc.value !== '' && Number(S.disc.value) > 0) body.discount = { type: S.disc.type, value: Number(S.disc.value) };
-    var d = await api('POST', '/shops/' + S.shopId + '/sales', body);
+    var canQueue = s.mp === 0 && s.balance === 0 && cust !== '__new';
+    var w = await write({ type: 'sale.create', id: S.saleId, path: '/shops/' + S.shopId + '/sales', body: body, label: 'Cash sale ' + KC(c.total), meta: { total: c.total / 100 }, offlineOk: canQueue,
+      offlineMsg: 'No internet. M-PESA and credit sales cannot be recorded offline because the payment cannot be confirmed. Nothing was saved and your cart is kept. Take the full amount in cash, or try again when you are online.' });
+    var d = w.queued ? provisionalReceipt(c, payments, customerId) : w.data;
     var expected = c.total / 100;
     S.cart = []; S.saleId = null; S.coId = null; S.disc = { type: 'amount', value: '' }; saveCart();
-    var warn = d.idempotent ? (Math.abs(d.sale.total - expected) > 0.005 ? 'This sale had already been saved earlier with a different total (' + KSH(d.sale.total) + '). Please check this receipt.' : 'This sale was already saved — nothing was recorded twice.') : '';
+    var warn = w.queued ? 'Saved on this phone only. It gets its official receipt number when it syncs — keep the goods/receipt note until then.' : d.idempotent ? (Math.abs(d.sale.total - expected) > 0.005 ? 'This sale had already been saved earlier with a different total (' + KSH(d.sale.total) + '). Please check this receipt.' : 'This sale was already saved — nothing was recorded twice.') : '';
     openReceipt(d, warn);
     refresh();
   } catch (e) {
-    if (e.offline || e.status === 0) toast('No internet — the sale was NOT saved yet. Your cart is kept: tap Confirm sale again when you are back online.', true);
+    if (e.offline || e.status === 0) toast(e.nosave ? e.message : 'No internet — the sale was NOT saved. Your cart is kept: tap Confirm sale again.', true);
     else { toast(e.message, true); if (e.code === 'INSUFFICIENT_STOCK' || e.code === 'PRODUCT_NOT_FOUND' || e.code === 'PRODUCT_INACTIVE') { try { await loadTab(); syncCart(); } catch (_) {} } }
   } finally { busy(btn, false); }
 }
@@ -561,6 +594,581 @@ async function doArchive(btn) {
   try { await api('DELETE', '/shops/' + S.shopId); closeModal(); S.shopId = null; S.dash = null; await loadShops(); S.tab = 'dash'; await refresh(); toast('Shop archived'); } catch (e) { toast(e.message, true); } finally { busy(btn, false); }
 }
 
+/* ───── Money (Phase 5): expenses, debts, suppliers, reports ─────
+   Revenue, cash received, credit, expenses, supplier payments and NET profit are always shown as separate figures. */
+var FIN = [['expenses', 'Expenses'], ['debts', 'Debts'], ['suppliers', 'Suppliers'], ['reports', 'Reports']];
+var EXP_CATS = ['rent', 'transport', 'electricity', 'wages', 'packaging', 'airtime', 'licence', 'repairs', 'other'];
+S.fin = 'expenses'; S.rp = 'daily'; S.fd = {};
+try { S.fin = sessionStorage.getItem('necpra_duka_fin') || 'expenses'; } catch (_) {}
+async function loadMoney() {
+  var b = '/shops/' + S.shopId;
+  if (S.fin === 'expenses') {
+    try { S.fd.exp = await api('GET', b + '/expenses?from=' + ymd(29)); }
+    catch (e) { if (!e.offline) throw e; S.fd.exp = { expenses: [], total: 0, byCategory: [], offlineEmpty: true }; }   // can still ADD expenses offline
+  }
+  else if (S.fin === 'debts') S.fd.debts = await api('GET', b + '/debts');
+  else if (S.fin === 'suppliers') S.fd.sup = await api('GET', b + '/suppliers');
+  else S.fd.rep = await api('GET', b + '/reports?period=' + S.rp);
+}
+function viewMoney() {
+  var nav = '<div class="tabs">' + FIN.map(function (f) { return '<button class="tab' + (S.fin === f[0] ? ' on' : '') + '" data-act="fin" data-f="' + f[0] + '" type="button">' + f[1] + '</button>'; }).join('') + '</div>';
+  return nav + (S.fin === 'expenses' ? viewExpenses() : S.fin === 'debts' ? viewDebts() : S.fin === 'suppliers' ? viewSuppliers() : viewReports());
+}
+function typed(id, label, extra) { return '<label>' + label + '</label><input id="' + id + '" ' + (extra || '') + '>'; }
+/* Expenses */
+function viewExpenses() {
+  var d = S.fd.exp; if (!d) return '<div class="spin">Loading…</div>';
+  var cats = d.byCategory.map(function (c) { return '<span class="badge">' + esc(c.category) + ' ' + KSH(c.total) + '</span>'; }).join(' ');
+  return '<div class="grid"><div class="card stat"><small>Expenses (30 days)</small><b>' + KSH(d.total) + '</b><div class="s">Reduce your profit</div></div></div>' +
+    '<div class="actions" style="margin:0 0 12px"><button class="btn" data-act="addExpense" type="button"><i class="fas fa-plus"></i> Add expense</button></div>' + (d.offlineEmpty ? '<div class="note">Your saved expenses are not on this phone yet. You can still add new ones — they are sent when you are back online.</div>' : '') +
+    (cats ? '<div class="note">' + cats + '</div>' : '') +
+    (d.expenses.length ? d.expenses.map(function (e) {
+      var v = e.status === 'voided';
+      return '<div class="item"' + (v ? ' style="opacity:.55"' : '') + '><div class="grow"><div class="t">' + esc(e.category) + ' · ' + KSH(e.amount) + (v ? ' <span class="badge out">Voided</span>' : '') + '</div><div class="s">' + esc(e.expenseDate) + ' · ' + esc(e.method) + (e.description ? ' · ' + esc(e.description) : '') + (v && e.voidReason ? ' · ' + esc(e.voidReason) : '') + '</div></div>' +
+        (v ? '' : '<button class="btn2" data-act="voidExpense" data-id="' + esc(e.id) + '" type="button">Void</button>') + '</div>';
+    }).join('') : '<div class="note">No expenses recorded in the last 30 days.</div>');
+}
+function openAddExpense() {
+  S.draftId = uuid();
+  openModal('Add expense', typed('xAmt', 'Amount (KSh) *', 'inputmode="decimal" placeholder="0"') +
+    '<label>Category</label><select id="xCat">' + opt(EXP_CATS, 'other') + '</select>' +
+    typed('xDesc', 'Description', 'maxlength="200" placeholder="e.g. November rent"') +
+    '<div class="two"><div><label>Paid by</label><select id="xMeth"><option value="cash">Cash</option><option value="mpesa">M-PESA</option><option value="other">Other</option></select></div>' +
+    '<div><label>Date</label><input id="xDate" type="date" value="' + ymd(0) + '" max="' + ymd(0) + '"></div></div>' +
+    '<div class="actions"><button class="btn2" data-act="closeModal" type="button">Cancel</button><button class="btn" data-act="saveExpense" type="button">Save expense</button></div>');
+}
+async function saveExpense(btn) {
+  var amt = Number(val('xAmt').replace(',', '.')); if (!(amt > 0)) return toast('Enter the amount spent', true);
+  busy(btn, true, 'Saving…');
+  try {
+    var w = await write({ type: 'expense.create', id: S.draftId, path: '/shops/' + S.shopId + '/expenses', body: { id: S.draftId, amount: amt, category: val('xCat'), description: val('xDesc') || null, method: val('xMeth'), expenseDate: val('xDate') || undefined }, label: 'Expense: ' + val('xCat') + ' ' + KSH(amt), meta: { amount: amt }, offlineOk: true });
+    S.draftId = null; closeModal(); toast(w.queued ? 'Saved on this phone — it will sync when you are online' : 'Expense saved'); refresh();
+  }
+  catch (e) { toast(e.message, true); } finally { busy(btn, false); }
+}
+function openVoidExpense(id) {
+  openModal('Void this expense?', '<div class="note">The expense stays in your records marked as voided and no longer reduces your profit.</div>' + typed('vWhy', 'Reason (optional)', 'maxlength="200"') +
+    '<div class="actions"><button class="btn2" data-act="closeModal" type="button">Keep it</button><button class="btnd" data-act="doVoid" data-id="' + esc(id) + '" type="button">Void expense</button></div>');
+}
+async function doVoid(btn, id) {
+  busy(btn, true, 'Voiding…');
+  try { await api('POST', '/shops/' + S.shopId + '/expenses/' + id + '/void', { reason: val('vWhy') || null }); closeModal(); toast('Expense voided'); refresh(); }
+  catch (e) { toast(e.message, true); } finally { busy(btn, false); }
+}
+/* Debts: customers who owe you + suppliers you owe */
+function viewDebts() {
+  var d = S.fd.debts; if (!d) return '<div class="spin">Loading…</div>';
+  var c = d.customersOweYou, s = d.youOweSuppliers;
+  return '<div class="grid"><div class="card stat ' + (c.total > 0 ? 'warn' : '') + '"><small>Customers owe you</small><b>' + KSH(c.total) + '</b></div><div class="card stat ' + (s.total > 0 ? 'warn' : '') + '"><small>You owe suppliers</small><b>' + KSH(s.total) + '</b></div></div>' +
+    '<h3>Customer credit</h3>' + (c.customers.length ? c.customers.map(function (x) {
+      return '<div class="item"><div class="grow"><div class="t">' + esc(x.name) + ' · ' + KSH(x.owed) + '</div><div class="s">' + x.unpaidSales + ' unpaid sale' + (x.unpaidSales === 1 ? '' : 's') + ' · since ' + esc(fmtWhen(x.oldestSaleAt)) + (x.phone ? ' · ' + esc(x.phone) : '') + '</div></div><button class="btn" data-act="collect" data-id="' + esc(x.id) + '" data-name="' + esc(x.name) + '" data-owed="' + x.owed + '" type="button">Collect</button></div>';
+    }).join('') : '<div class="note">No customer owes you anything.</div>') +
+    '<h3>Suppliers you owe</h3>' + (s.suppliers.length ? s.suppliers.map(function (x) {
+      return '<div class="item" data-act="supplier" data-id="' + esc(x.id) + '"><div class="grow"><div class="t">' + esc(x.name) + '</div><div class="s">You owe ' + KSH(x.owed) + '</div></div><span class="badge low">Pay</span></div>';
+    }).join('') : '<div class="note">You do not owe any supplier.</div>') +
+    '<div class="note">Customer credit is not cash until it is collected, and it is not extra profit.</div>';
+}
+function openCollect(id, name, owed) {
+  S.draftId = uuid(); S.collectId = id;
+  openModal('Collect from ' + name, '<div class="note">Owes <b>' + KSH(owed) + '</b>. The money is applied to the oldest unpaid sales first.</div>' +
+    typed('cAmt', 'Amount received (KSh) *', 'inputmode="decimal" value="' + owed + '"') +
+    '<label>Received by</label><select id="cMeth"><option value="cash">Cash</option><option value="mpesa">M-PESA</option></select>' +
+    typed('cCode', 'M-PESA receipt code (required for M-PESA)', 'maxlength="20" placeholder="e.g. SGH7K2L9QX" autocapitalize="characters"') +
+    typed('cNote', 'Note', 'maxlength="240"') +
+    '<div class="note">M-PESA is recorded from the receipt code. It is marked “verified” only when it matches a paid NECPRA payment.</div>' +
+    '<div class="actions"><button class="btn2" data-act="closeModal" type="button">Cancel</button><button class="btn" data-act="doCollect" type="button">Record payment received</button></div>');
+}
+async function doCollect(btn) {
+  var amt = Number(val('cAmt').replace(',', '.')); if (!(amt > 0)) return toast('Enter the amount received', true);
+  var m = val('cMeth'); if (m === 'mpesa' && !val('cCode')) return toast('Enter the M-PESA receipt code', true);
+  busy(btn, true, 'Saving…');
+  try {
+    var d = await api('POST', '/shops/' + S.shopId + '/customers/' + S.collectId + '/payments', { id: S.draftId, amount: amt, method: m, mpesaReceipt: m === 'mpesa' ? val('cCode') : undefined, note: val('cNote') || null });
+    S.draftId = null; closeModal(); toast('Received ' + KSH(d.payment.amount) + '. Still owed: ' + KSH(d.remainingBalance)); refresh();
+  } catch (e) { toast(e.message, true); } finally { busy(btn, false); }
+}
+/* Suppliers */
+function viewSuppliers() {
+  var d = S.fd.sup; if (!d) return '<div class="spin">Loading…</div>';
+  return '<div class="grid"><div class="card stat ' + (d.totalOwed > 0 ? 'warn' : '') + '"><small>You owe suppliers</small><b>' + KSH(d.totalOwed) + '</b></div></div>' +
+    '<div class="actions" style="margin:0 0 12px"><button class="btn" data-act="addSupplier" type="button"><i class="fas fa-plus"></i> Add supplier</button></div>' +
+    (d.suppliers.length ? d.suppliers.map(function (x) {
+      return '<div class="item" data-act="supplier" data-id="' + esc(x.id) + '"><div class="grow"><div class="t">' + esc(x.name) + '</div><div class="s">' + (x.owed > 0 ? 'You owe ' + KSH(x.owed) : 'Nothing owed') + (x.phone ? ' · ' + esc(x.phone) : '') + '</div></div></div>';
+    }).join('') : '<div class="note">No suppliers yet. Add the people you buy stock from to track what you owe them.</div>');
+}
+function openAddSupplier() {
+  S.draftId = uuid();
+  openModal('Add supplier', typed('sName', 'Supplier name *', 'maxlength="120"') + typed('sPhone', 'Phone', 'inputmode="tel" placeholder="07XX XXX XXX"') + typed('sNotes', 'Notes', 'maxlength="240"') +
+    '<div class="actions"><button class="btn2" data-act="closeModal" type="button">Cancel</button><button class="btn" data-act="saveSupplier" type="button">Save supplier</button></div>');
+}
+async function saveSupplier(btn) {
+  if (!val('sName')) return toast('Enter the supplier name', true);
+  busy(btn, true, 'Saving…');
+  try { await api('POST', '/shops/' + S.shopId + '/suppliers', { id: S.draftId, name: val('sName'), phone: val('sPhone') || null, notes: val('sNotes') || null }); S.draftId = null; closeModal(); toast('Supplier added'); refresh(); }
+  catch (e) { toast(e.message, true); } finally { busy(btn, false); }
+}
+async function openSupplier(id) {
+  try {
+    var d = await api('GET', '/shops/' + S.shopId + '/suppliers/' + id + '/ledger');
+    S.supId = id; S.billId = uuid(); S.payId = uuid();
+    var rows = d.entries.slice(0, 12).map(function (e) { return '<div class="item"><div class="grow"><div class="t">' + (e.type === 'bill' ? 'Bill' : 'Paid') + ' · ' + KSH(e.amount) + '</div><div class="s">' + esc(e.entryDate) + (e.reference ? ' · ' + esc(e.reference) : '') + (e.dueDate ? ' · due ' + esc(e.dueDate) : '') + ' · balance ' + KSH(e.balanceAfter) + '</div></div></div>'; }).join('');
+    openModal(d.supplier.name, '<div class="note">You owe this supplier <b>' + KSH(d.owed) + '</b>. Stock bought on credit is recorded as a bill; it only affects profit when the stock is sold.</div>' +
+      '<div class="card"><b>Stock bought on credit</b>' + typed('bAmt', 'Bill amount (KSh)', 'inputmode="decimal"') + '<div class="two"><div>' + typed('bRef', 'Invoice no.', 'maxlength="40"') + '</div><div><label>Due date</label><input id="bDue" type="date"></div></div><div class="actions"><button class="btn" data-act="addBill" type="button">Add bill</button></div></div>' +
+      '<div class="card" style="margin-top:10px"><b>Pay supplier</b>' + typed('pAmt', 'Amount paid (KSh)', 'inputmode="decimal" value="' + (d.owed > 0 ? d.owed : '') + '"') + '<label>Paid by</label><select id="pMeth"><option value="cash">Cash</option><option value="mpesa">M-PESA</option><option value="other">Other</option></select>' + typed('pRef', 'Reference (M-PESA code, optional)', 'maxlength="40"') + '<div class="actions"><button class="btn" data-act="paySupplier" type="button">Record payment</button></div></div>' +
+      (rows ? '<h3>History</h3>' + rows : '') + '<div class="actions"><button class="btn2" data-act="closeModal" type="button">Close</button></div>');
+  } catch (e) { toast(e.message, true); }
+}
+async function supEntry(btn, kind) {
+  var amt = Number(val(kind === 'bill' ? 'bAmt' : 'pAmt').replace(',', '.')); if (!(amt > 0)) return toast('Enter the amount', true);
+  var body = kind === 'bill' ? { id: S.billId, amount: amt, reference: val('bRef') || null, dueDate: val('bDue') || undefined } : { id: S.payId, amount: amt, method: val('pMeth'), reference: val('pRef') || null };
+  busy(btn, true, 'Saving…');
+  try { var d = await api('POST', '/shops/' + S.shopId + '/suppliers/' + S.supId + '/' + (kind === 'bill' ? 'bills' : 'payments'), body); toast((kind === 'bill' ? 'Bill added' : 'Payment recorded') + '. You owe ' + KSH(d.owed)); closeModal(); refresh(); }
+  catch (e) { toast(e.message, true); busy(btn, false); }
+}
+/* Reports */
+function periodLabel(p, b) { return p === 'monthly' ? b.slice(0, 7) : p === 'weekly' ? 'Week of ' + b.slice(5) : b.slice(5); }
+function viewReports() {
+  var d = S.fd.rep; var seg = '<div class="tabs">' + [['daily', 'Daily'], ['weekly', 'Weekly'], ['monthly', 'Monthly']].map(function (x) { return '<button class="tab' + (S.rp === x[0] ? ' on' : '') + '" data-act="rp" data-p="' + x[0] + '" type="button">' + x[1] + '</button>'; }).join('') + '</div>';
+  if (!d) return seg + '<div class="spin">Loading…</div>';
+  var t = d.totals, ps = d.position;
+  function st(l, v, s, c) { return '<div class="card stat ' + (c || '') + '"><small>' + l + '</small><b>' + KSH(v) + '</b>' + (s ? '<div class="s">' + s + '</div>' : '') + '</div>'; }
+  var rows = d.rows.slice().reverse().filter(function (r) { return r.salesCount || r.expenses || r.totalCashReceived || r.supplierPayments; }).map(function (r) {
+    return '<div class="item"><div class="grow"><div class="t">' + esc(periodLabel(d.period, r.periodStart)) + ' · profit ' + KSH(r.netProfit) + '</div><div class="s">Sales ' + KSH(r.revenue) + ' (' + r.salesCount + ') · expenses ' + KSH(r.expenses) + ' · cash in ' + KSH(r.totalCashReceived) + (r.creditGiven ? ' · credit ' + KSH(r.creditGiven) : '') + '</div></div></div>';
+  }).join('');
+  return seg + '<div class="note">' + esc(d.from) + ' to ' + esc(d.to) + '</div>' +
+    '<div class="grid">' + st('Revenue (sales)', t.revenue, t.salesCount + ' sales') + st('Cost of goods sold', t.costOfGoodsSold, 'Buying cost of what you sold') + st('Gross profit', t.grossProfit, 'Revenue − cost') + st('Expenses', t.expenses, 'Rent, transport…') + '</div>' +
+    '<div class="grid">' + st('Net profit', t.netProfit, 'Gross profit − expenses', t.netProfit < 0 ? 'bad' : '') + st('Cash received', t.totalCashReceived, 'Cash ' + KSH(t.cashFromSales) + ' · M-PESA ' + KSH(t.mpesaFromSales) + ' · debts collected ' + KSH(t.debtCollected)) + st('Credit given', t.creditGiven, 'Not cash', t.creditGiven > 0 ? 'warn' : '') + st('Paid to suppliers', t.supplierPayments, 'Not an expense') + '</div>' +
+    '<div class="grid">' + st('Customers owe you', ps.customersOweYou, 'Right now') + st('You owe suppliers', ps.youOweSuppliers, 'Right now') + st('Stock at cost', ps.stockAtCost, 'Right now') + '</div>' +
+    (rows ? '<h3>By ' + (d.period === 'daily' ? 'day' : d.period === 'weekly' ? 'week' : 'month') + '</h3>' + rows : '<div class="note">No activity in this period.</div>') +
+    '<div class="note">Net profit is your actual profit. Cash received and credit are money movements, not profit. Paying a supplier is not an expense — stock cost is counted when the stock is sold.</div>';
+}
+
+/* ───── Offline-first (Phase 6) ─────
+   Works offline: add products, stock changes, FULLY PAID CASH sales, expenses; last-saved screens/reports are shown.
+   Needs internet (never faked offline): M-PESA payments, credit sales, new customers, editing/deleting products, suppliers, debt collection.
+   Every queued change keeps ONE fixed id (the server's idempotency key), so a retry after a lost response can never double-record. */
+var OBK = 'necpra_duka_outbox_v1', CK = 'necpra_duka_cache_v1:', CIDX = 'necpra_duka_cache_idx', NOTEK = 'necpra_duka_syncnotes', LEASEK = 'necpra_duka_sync_lease';
+var syncing = false, MAX_TRIES = 5;
+function lsGet(k, d) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (_) { return d; } }
+function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (_) { return false; } }
+function curUid() { try { var o = JSON.parse(atob(token().split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); return String(o.id || o.userId || o.sub || ''); } catch (_) { return ''; } }
+/* cache of the last successful GET answers (per user) so screens and reports still open offline */
+function cKey(path) { return CK + curUid() + ':' + path; }
+function cacheSet(path, data) {
+  if (/[?&]search=/.test(path)) return;
+  var k = cKey(path), rec = { at: Date.now(), data: data }, idx = lsGet(CIDX, []).filter(function (x) { return x !== k; });
+  if (!lsSet(k, rec)) { idx.slice(0, 6).forEach(function (x) { try { localStorage.removeItem(x); } catch (_) {} }); idx = idx.slice(6); if (!lsSet(k, rec)) return; }
+  idx.push(k); while (idx.length > 30) { try { localStorage.removeItem(idx.shift()); } catch (_) {} } lsSet(CIDX, idx);
+}
+function cacheGet(path) { return lsGet(cKey(path), null); }
+function fromCacheOrThrow(method, path, opt, err) {
+  if (method === 'GET' && !(opt && opt.noCache)) { var c = cacheGet(path); if (c) { S.staleAt = S.staleAt ? Math.min(S.staleAt, c.at) : c.at; return c.data; } }
+  throw err;
+}
+/* outbox */
+function obAll() { return lsGet(OBK, []); }
+function obSave(l) { if (!lsSet(OBK, l)) { toast('Phone storage is full — this change was NOT saved. Free some space and try again.', true); return false; } return true; }
+function obMine() { var u = curUid(); return obAll().filter(function (o) { return o.userId === u; }); }
+function obPending() { return obMine().filter(function (o) { return o.status === 'pending'; }); }
+function obFailed() { return obMine().filter(function (o) { return o.status === 'failed'; }); }
+function obUpdate(opId, patch) { var l = obAll(); l.forEach(function (o) { if (o.opId === opId) for (var k in patch) o[k] = patch[k]; }); return obSave(l); }
+function obRemove(opId) { obSave(obAll().filter(function (o) { return o.opId !== opId; })); }
+function note(text, warn) { var n = lsGet(NOTEK, []); n.unshift({ at: Date.now(), text: text, warn: !!warn }); lsSet(NOTEK, n.slice(0, 15)); }
+function enqueue(spec) {
+  var l = obAll();
+  if (l.some(function (o) { return o.opId === spec.id; })) return true;           // same id twice = same change
+  l.push({ opId: spec.id, userId: curUid(), shopId: S.shopId, type: spec.type, method: spec.method || 'POST', path: spec.path, body: spec.body, label: spec.label, meta: spec.meta || {}, createdAt: Date.now(), status: 'pending', attempts: 0, err: '' });
+  return obSave(l);
+}
+/* Record a change: straight to the server when online and nothing is waiting, otherwise (if allowed) on this phone. Order is always kept. */
+async function write(spec) {
+  var waiting = obPending().some(function (o) { return o.shopId === S.shopId; });
+  if (waiting && navigator.onLine !== false) { await syncNow(); waiting = obPending().some(function (o) { return o.shopId === S.shopId; }); }
+  if (!waiting && navigator.onLine !== false) {
+    try { return { data: await api(spec.method || 'POST', spec.path, spec.body, { noCache: true }), queued: false }; }
+    catch (e) { if (!e.offline) throw e; }
+  }
+  if (!spec.offlineOk) throw Object.assign(new Error(spec.offlineMsg || 'No internet connection. This needs internet — please try again when you are back online.'), { status: 0, offline: true, nosave: true });
+  if (spec.precheck) spec.precheck();
+  if (!enqueue(spec)) throw new Error('Could not save on this phone (storage full).');
+  render(); setTimeout(syncNow, 800);
+  return { queued: true };
+}
+/* what is waiting to sync, applied on top of the server's numbers so stock and POS stay correct offline */
+function pendingDelta(o) {
+  var m = /\/products\/([^/]+)\/stock$/.exec(o.path || '');
+  if (o.type === 'stock.adjust' && m) return [[m[1], Number(o.body.qtyChange) || 0]];
+  if (o.type === 'sale.create') return (o.body.items || []).map(function (i) { return [i.productId, -Number(i.qty)]; });
+  return [];
+}
+function applyPending(list) {
+  var ops = obPending().filter(function (o) { return o.shopId === S.shopId; }), byId = {};
+  list.forEach(function (p) { byId[p.id] = p; });
+  ops.forEach(function (o) {
+    if (o.type === 'product.create' && !byId[o.body.id]) {
+      var b = o.body, p = { id: b.id, name: b.name, barcode: b.barcode, category: b.category, unit: b.unit || 'piece', buyingPrice: Number(b.buyingPrice) || 0, sellingPrice: Number(b.sellingPrice) || 0, stockQty: Number(b.stockQty) || 0, minStock: Number(b.minStock) || 0, isActive: true, pending: true };
+      if ((S.q && (p.name + ' ' + (p.barcode || '')).toLowerCase().indexOf(S.q.toLowerCase()) < 0) || (S.cat && p.category !== S.cat)) return;
+      byId[p.id] = p; list.push(p);
+    }
+  });
+  ops.forEach(function (o) { pendingDelta(o).forEach(function (d) { var p = byId[d[0]]; if (p) p.stockQty = Math.round((p.stockQty + d[1]) * 1000) / 1000; }); });
+  list.forEach(function (p) { if (p.pending || ops.length) { p.isOutOfStock = p.stockQty <= 0; p.isLowStock = p.stockQty <= 0 || (p.minStock > 0 && p.stockQty <= p.minStock); } });
+  return S.low ? list.filter(function (p) { return p.isLowStock; }) : list;
+}
+/* sync engine: one at a time, oldest first, never in two tabs at once */
+function leaseTake() { var l = lsGet(LEASEK, null), now = Date.now(); if (l && l.exp > now && l.id !== S.leaseId) return false; S.leaseId = S.leaseId || uuid(); lsSet(LEASEK, { id: S.leaseId, exp: now + 90000 }); return (lsGet(LEASEK, {}) || {}).id === S.leaseId; }
+function leaseDrop() { var l = lsGet(LEASEK, null); if (l && l.id === S.leaseId) try { localStorage.removeItem(LEASEK); } catch (_) {} }
+async function syncNow() {
+  if (syncing || navigator.onLine === false || !token() || !obPending().length) return;
+  if (!leaseTake()) return;
+  syncing = true; S.syncState = 'syncing'; render(true);
+  var done = 0, stop = '';
+  try {
+    for (;;) {
+      var op = obPending()[0]; if (!op) break;
+      lsSet(LEASEK, { id: S.leaseId, exp: Date.now() + 90000 });
+      try {
+        var d = await api(op.method, op.path, op.body, { noCache: true });
+        obRemove(op.opId); done++; syncedNote(op, d);
+      } catch (e) {
+        if (e.offline) { obUpdate(op.opId, { attempts: op.attempts + 1 }); stop = 'offline'; break; }
+        if (e.status === 401) { stop = 'auth'; break; }
+        if (e.status >= 500) { if (op.attempts + 1 >= MAX_TRIES) obUpdate(op.opId, { status: 'failed', err: e.message, attempts: op.attempts + 1 }); else { obUpdate(op.opId, { attempts: op.attempts + 1, err: e.message }); stop = 'server'; break; } }
+        else { obUpdate(op.opId, { status: 'failed', err: e.message, code: e.code || '', attempts: op.attempts + 1 }); note('Could not save: ' + op.label + ' — ' + e.message, true); }
+      }
+    }
+  } finally { syncing = false; leaseDrop(); S.syncState = ''; }
+  if (done) { toast(done + ' change' + (done === 1 ? '' : 's') + ' synced'); try { S.staleAt = 0; await loadTab(); } catch (_) {} }
+  if (stop === 'auth') toast('Your session has expired. Log in again — your offline changes are kept and will sync after.', true);
+  render();
+  if (stop === 'offline' || stop === 'server') setTimeout(syncNow, 30000);
+}
+function syncedNote(op, d) {
+  if (op.type === 'sale.create' && d && d.sale) {
+    var exp = Number(op.meta.total), warn = d.idempotent || Math.abs(d.sale.total - exp) > 0.005;
+    note(d.idempotent ? 'Sale was already saved earlier (receipt #' + d.sale.receiptNo + '). Nothing was recorded twice.' : 'Sale synced as receipt #' + d.sale.receiptNo + ' (' + KSH(d.sale.total) + ')' + (Math.abs(d.sale.total - exp) > 0.005 ? ' — the total differs from the ' + KSH(exp) + ' shown on this phone. Please check it.' : '.'), warn && !d.idempotent);
+  }
+}
+function pendingSummary(list) {
+  var s = list.filter(function (o) { return o.type === 'sale.create'; }), e = list.filter(function (o) { return o.type === 'expense.create'; }), p = list.length - s.length - e.length, out = [];
+  if (s.length) out.push(s.length + ' sale' + (s.length === 1 ? '' : 's') + ' (' + KSH(s.reduce(function (a, o) { return a + Number(o.meta.total || 0); }, 0)) + ')');
+  if (e.length) out.push(e.length + ' expense' + (e.length === 1 ? '' : 's') + ' (' + KSH(e.reduce(function (a, o) { return a + Number(o.meta.amount || 0); }, 0)) + ')');
+  if (p) out.push(p + ' product/stock update' + (p === 1 ? '' : 's'));
+  return out.length ? ': ' + out.join(', ') + '. Not in your sales history or reports until synced.' : '';
+}
+function syncBar() {
+  var pend = obPending(), fail = obFailed(), h = '';
+  if (navigator.onLine === false) h += '<div class="note"><b>You are offline.</b> You can still add products, change stock, record fully paid cash sales and expenses. They are kept on this phone and sent when you are back online. M-PESA, credit sales and customer payments need internet.</div>';
+  if (S.staleAt) h += '<div class="note">Showing information saved on this phone (' + esc(fmtWhen(new Date(S.staleAt).toISOString())) + '). It may be out of date.</div>';
+  if (pend.length) h += '<div class="note" data-act="syncStatus" style="cursor:pointer">' + (S.syncState === 'syncing' ? 'Syncing… ' : '') + '<b>' + pend.length + ' change' + (pend.length === 1 ? '' : 's') + ' waiting to sync</b>' + esc(pendingSummary(pend)) + ' <u>Details</u></div>';
+  if (fail.length) h += '<div class="note err" data-act="syncStatus" style="cursor:pointer"><b>' + fail.length + ' change' + (fail.length === 1 ? '' : 's') + ' need attention</b> — the server did not accept ' + (fail.length === 1 ? 'it' : 'them') + '. <u>Review</u></div>';
+  return h;
+}
+function openSyncStatus() {
+  var l = obMine(), notes = lsGet(NOTEK, []);
+  var rows = l.map(function (o) {
+    return '<div class="item"><div class="grow"><div class="t">' + esc(o.label) + '</div><div class="s">' + esc(fmtWhen(new Date(o.createdAt).toISOString())) + ' · ' + (o.status === 'failed' ? '<b style="color:#b42318">Needs attention</b>' : 'Waiting to sync' + (o.attempts ? ' (tried ' + o.attempts + '×)' : '')) + '</div>' + (o.err ? '<div class="s">' + esc(o.err) + '</div>' : '') + '</div>' +
+      (o.status === 'failed' ? '<div><button class="btn2" data-act="retryOp" data-id="' + esc(o.opId) + '" type="button">Retry</button> <button class="btn2" data-act="discardOp" data-id="' + esc(o.opId) + '" type="button">Discard</button></div>' : '') + '</div>';
+  }).join('');
+  openModal('Sync status', (navigator.onLine === false ? '<div class="note">You are offline.</div>' : '') + (rows || '<div class="note">Everything is synced. Nothing is waiting.</div>') +
+    (notes.length ? '<h3>Recent results</h3>' + notes.slice(0, 8).map(function (n) { return '<div class="note' + (n.warn ? ' err' : '') + '">' + esc(n.text) + '</div>'; }).join('') : '') +
+    '<div class="actions"><button class="btn2" data-act="closeModal" type="button">Close</button>' + (obPending().length ? '<button class="btn" data-act="syncNow" type="button">Sync now</button>' : '') + '</div>');
+}
+function openDiscard(id) {
+  var o = obAll().filter(function (x) { return x.opId === id; })[0]; if (!o) return;
+  openModal('Discard this change?', '<div class="note err"><b>' + esc(o.label) + '</b><br>' + esc(o.err || '') + '</div><div class="note">' + (o.type === 'sale.create' ? 'This sale will be removed from this phone and will NOT be recorded on the server. If the customer already took the goods, fix the stock and use Retry instead.' : 'This change will be removed from this phone and will NOT be recorded on the server.') + ' This cannot be undone.</div>' +
+    '<div class="actions"><button class="btn2" data-act="syncStatus" type="button">Keep it</button><button class="btnd" data-act="doDiscard" data-id="' + esc(id) + '" type="button">Discard</button></div>');
+}
+window.addEventListener('online', function () { setTimeout(syncNow, 1000); render(true); });
+window.addEventListener('offline', function () { render(true); });
+document.addEventListener('visibilitychange', function () { if (!document.hidden) syncNow(); });
+setInterval(function () { if (obPending().length) syncNow(); }, 30000);
+function provisionalReceipt(c, payments, custId) {
+  var cu = (S.customers || []).filter(function (x) { return x.id === custId; })[0];
+  return { shop: shop() || { name: 'My Duka' }, sale: { receiptNo: 'PENDING SYNC', soldAt: new Date().toISOString(), customerName: cu ? cu.name : null, subtotal: c.sub / 100, discountAmount: c.disc / 100, total: c.total / 100, balanceDue: 0 },
+    items: S.cart.map(function (l) { return { name: l.name, unit: l.unit, qty: Number(l.qty), unitPrice: Number(l.price), lineTotal: l.lineTotal / 100 }; }), payments: payments };
+}
+
+/* ───── Voice assistant (Phase 7): English + Kiswahili, by voice or typing ─────
+   Understanding is rule-based and runs on the phone (no audio or text leaves the device except through the normal DUKA API).
+   READS (stock, debts, reports) answer straight away. EVERY WRITE (add product, cash sale, expense) only ever shows a
+   confirmation card: nothing changes until the owner TAPS Confirm. Saying "yes" never confirms. */
+var VNUM = { zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90,
+  moja: 1, mbili: 2, tatu: 3, nne: 4, tano: 5, sita: 6, saba: 7, nane: 8, tisa: 9, kumi: 10, ishirini: 20, thelathini: 30, arobaini: 40, hamsini: 50, sitini: 60, sabini: 70, themanini: 80, tisini: 90 };
+var VUNIT = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, moja: 1, mbili: 2, tatu: 3, nne: 4, tano: 5, sita: 6, saba: 7, nane: 8, tisa: 9 };
+var VMULT = { hundred: 1, thousand: 1, mia: 1, elfu: 1 };
+function isNumWord(t) { return Object.prototype.hasOwnProperty.call(VNUM, t) || Object.prototype.hasOwnProperty.call(VMULT, t); }
+function wordsToNumber(tk) {
+  var total = 0, run = 0, i = 0;
+  while (i < tk.length) {
+    var t = tk[i], nx = tk[i + 1];
+    if (t === 'na' || t === 'and') { i++; continue; }
+    if (t === 'a') { i++; continue; }
+    if (t === 'hundred') { run = (run || 1) * 100; i++; continue; }
+    if (t === 'thousand') { total += (run || 1) * 1000; run = 0; i++; continue; }
+    if (t === 'mia' || t === 'elfu') { var k = 1; if (nx && Object.prototype.hasOwnProperty.call(VUNIT, nx)) { k = VUNIT[nx]; i++; } if (t === 'mia') run += k * 100; else { total += k * 1000; } i++; continue; }
+    run += VNUM[t]; i++;
+  }
+  return total + run;
+}
+function vNorm(text) {
+  var s = String(text || '').toLowerCase().replace(/[“”‘’"']/g, '').replace(/(\d),(\d{3})/g, '$1$2').replace(/(\d+(?:\.\d+)?)\s*k\b/g, function (m, n) { return String(Number(n) * 1000); });
+  s = s.replace(/\b(ksh|kshs|kes|shillings?|shilingi|bob)\b|\/=/g, ' ').replace(/[?!;:,()]/g, ' ').replace(/\.(?!\d)/g, ' ').replace(/\s+/g, ' ').trim();
+  var tk = s.split(' '), out = [], i = 0;
+  while (i < tk.length) {
+    var t = tk[i], startRun = isNumWord(t) || (t === 'a' && (tk[i + 1] === 'hundred' || tk[i + 1] === 'thousand'));
+    if (!startRun) { out.push(t); i++; continue; }
+    var run = [t], j = i + 1;
+    while (j < tk.length) {
+      if (isNumWord(tk[j]) || (tk[j] === 'a' && isNumWord(tk[j + 1]))) { run.push(tk[j]); j++; }
+      else if ((tk[j] === 'na' || tk[j] === 'and') && tk[j + 1] && isNumWord(tk[j + 1])) { run.push(tk[j]); j++; }
+      else break;
+    }
+    // "one" / "a" alone before a word are left as words only when not part of a quantity; here every run is a number
+    out.push(String(wordsToNumber(run))); i = j;
+  }
+  return out.join(' ');
+}
+var SW_HINT = /\b(ongeza|bidhaa|uza|nimeuza|niliuza|mauzo|gharama|matumizi|nimetumia|nimelipa|ngapi|kiasi|deni|madeni|ananidai|anadaiwa|ripoti|leo|wiki|mwezi|nina|angalia|stoku|baki|imebaki|kilichobaki|faida|kwa|ya|weka|rekodi|nani|bei|kununua|kuuza|idadi|sukari|unga|maziwa|mkate)\b/g;
+var EN_HINT = /\b(add|product|sell|sold|sale|expense|spent|how|much|many|debt|debts|owe|owes|report|today|week|month|have|check|stock|left|profit|record|who|buying|selling|quantity)\b/g;
+function vLang(text, fallback) { var s = String(text).toLowerCase(), a = (s.match(SW_HINT) || []).length, b = (s.match(EN_HINT) || []).length; return a > b ? 'sw' : b > a ? 'en' : fallback; }
+var VCATS = { rent: ['rent', 'kodi'], transport: ['transport', 'usafiri', 'nauli', 'fare', 'fuel', 'petrol', 'mafuta ya gari'], electricity: ['electricity', 'umeme', 'kplc', 'stima', 'power'], wages: ['wages', 'wage', 'salary', 'salaries', 'mshahara', 'mishahara'], packaging: ['packaging', 'vifungashio', 'paper bags'], airtime: ['airtime', 'muda wa maongezi'], licence: ['licence', 'license', 'leseni', 'permit'], repairs: ['repairs', 'repair', 'ukarabati', 'matengenezo'] };
+var VALIAS = { sukari: 'sugar', unga: 'flour', maziwa: 'milk', mkate: 'bread', mchele: 'rice', mafuta: 'oil', chumvi: 'salt', chai: 'tea', sabuni: 'soap', maji: 'water', mayai: 'eggs', nyama: 'meat', nyanya: 'tomatoes', vitunguu: 'onions', maharagwe: 'beans', mahindi: 'maize', soda: 'soda' };
+function vToks(s) { return vNorm(s).split(' ').filter(Boolean).map(function (w) { return w.length > 3 && w.slice(-1) === 's' ? w.slice(0, -1) : w; }); }
+function vAlias(tk) {
+  var en = tk.map(function (w) { return VALIAS[w] || w; }), sw = tk.map(function (w) { for (var k in VALIAS) if (VALIAS[k] === w) return k; return w; });
+  return [tk, en, sw];
+}
+function vMatch(query, list) {
+  var qv = vAlias(vToks(query)).filter(function (t) { return t.length; }), scored = [];
+  list.forEach(function (p) {
+    var pt = vToks(p.name), best = 0;
+    qv.forEach(function (q) {
+      if (q.every(function (a) { return pt.some(function (b) { return b === a || (a.length > 2 && b.indexOf(a) === 0); }); })) best = Math.max(best, vToks(p.name).join(' ') === q.join(' ') ? 3 : 2);
+    });
+    if (best) scored.push({ p: p, s: best });
+  });
+  scored.sort(function (a, b) { return b.s - a.s; });
+  if (!scored.length) return [];
+  if (scored[0].s === 3) return [scored[0].p];
+  return scored.map(function (x) { return x.p; });
+}
+var STOCK_STOP = /\b(how|much|many|of|is|are|left|remaining|remain|do|i|have|check|stock|stocks|the|in|my|what|for|me|show|tell|about|nina|ngapi|kiasi|cha|ya|kilichobaki|imebaki|zimebaki|baki|angalia|stoku|je|la|kwa|bado|iliyobaki|nimebakiwa|na|shop|duka|inventory|level|quantity)\b/g;
+function vParse(raw, fallbackLang) {
+  var lang = vLang(raw, fallbackLang || 'en'), s = vNorm(raw), num = /(^| )\d+(\.\d+)?( |$)/.test(s), out = { lang: lang, text: s };
+  if (/^(yes|yeah|yep|confirm|confirmed|ok|okay|ndio|sawa|thibitisha|haya|fanya)$/.test(s)) return Object.assign(out, { intent: 'confirmWord' });
+  if (/^(no|cancel|stop|hapana|acha|ghairi|sitaki)$/.test(s)) return Object.assign(out, { intent: 'cancelWord' });
+  var m;
+  if (/\b(add|new|create|ongeza|weka)\b.*\b(product|products|item|items|bidhaa)\b/.test(s)) {
+    var rest = s.replace(/^.*?\b(product|products|item|items|bidhaa)\b/, '').trim();
+    var KW = [['buy', /\b(?:bei ya )?(?:buying|buy|bought|cost|kununua|nunua|ununuzi)(?: price| bei)?(?: ya| of| is| at)?\s*(\d+(?:\.\d+)?)/], ['stock', /\b(?:stock|quantity|qty|units|pieces|idadi|stoku|kiasi|opening)(?: ya| of| is| at)?\s*(\d+(?:\.\d+)?)/], ['sell', /\b(?:bei ya )?(?:selling|sell|kuuza|uza|price|bei)(?: price)?(?: ya| of| is| at)?\s*(\d+(?:\.\d+)?)/]];
+    var res = { buy: null, sell: null, stock: null }, work = rest, firstIdx = rest.length;
+    KW.forEach(function (k) {   // each keyword consumes its own words, so "buying price 100 selling price 150" is read correctly
+      var mm = k[1].exec(work);
+      if (mm) { res[k[0]] = Number(mm[1]); firstIdx = Math.min(firstIdx, mm.index); work = work.slice(0, mm.index) + ' '.repeat(mm[0].length) + work.slice(mm.index + mm[0].length); }
+    });
+    if (res.buy == null && res.sell == null && res.stock == null) { var nums = rest.match(/(?:^| )(\d+(?:\.\d+)?)(?= |$)/g); if (nums && nums.length) { firstIdx = rest.search(/(?:^| )\d+(?:\.\d+)?(?= |$)/); nums = nums.map(function (x) { return Number(x); }); res.buy = nums[0]; res.sell = nums[1] != null ? nums[1] : null; res.stock = nums[2] != null ? nums[2] : null; } }
+    name = rest.slice(0, firstIdx).replace(/\b(called|named|inaitwa|jina|la|ya|a|an|new|mpya)\b/g, ' ').replace(/\s+/g, ' ').trim();
+    return Object.assign(out, { intent: 'addProduct', name: name, buy: res.buy, sell: res.sell, stock: res.stock });
+  }
+  var expTrig = /\b(expense|expenses|spent|spend|gharama|matumizi|nimetumia|nimelipa|nilitumia|nililipa)\b/.test(s);
+  if (expTrig && (num || !/\b(report|ripoti|summary|muhtasari|today|leo|week|wiki|month|mwezi)\b/.test(s))) {
+    var amt = (/(^| )(\d+(?:\.\d+)?)( |$)/.exec(s) || [])[2], cat = 'other';
+    for (var c in VCATS) if (VCATS[c].some(function (w) { return new RegExp('\\b' + w + '\\b').test(s); })) { cat = c; break; }
+    var desc = ''; if ((m = /\b(?:on|for|kwa|ya)\s+(?:the\s+)?([a-z ]+?)\s*$/.exec(s.replace(/\d+(\.\d+)?/g, ' ').replace(/\s+/g, ' ').trim()))) desc = m[1].trim();
+    return Object.assign(out, { intent: 'expense', amount: amt ? Number(amt) : null, category: cat, description: desc && !/^(expense|gharama)$/.test(desc) ? desc : '' });
+  }
+  if (/^(sell|sold|record (a )?sale|record sales|sale of|uza|nimeuza|niliuza|nimeuzia|rekodi (mauzo|uuzaji)|weka mauzo)\b/.test(s) && num) {
+    var body = s.replace(/^(sell|sold|record (a )?sale|record sales|sale of|uza|nimeuza|niliuza|nimeuzia|rekodi (mauzo|uuzaji)|weka mauzo)( of| ya| za| ni)?/, '').replace(/\b(cash|taslimu|pesa taslimu|for cash|kwa pesa taslimu|please|tafadhali|of|ya|za)\b/g, ' ').trim();
+    var items = body.split(/\s+(?:and|na|plus)\s+|\s*\+\s*/).map(function (seg) {
+      seg = seg.trim(); if (!seg) return null;
+      var q = 1, nm = seg, mm;
+      if ((mm = /^(\d+(?:\.\d+)?)\s+(?:(?:pieces?|pcs|packets?|pakiti|vipande|kipande|kg|bottles?|chupa|loaves|units?)\s+)?(?:of\s+)?(.+)$/.exec(seg))) { q = Number(mm[1]); nm = mm[2]; }
+      else if ((mm = /^(.+?)\s+(\d+(?:\.\d+)?)(?:\s+(?:pieces?|pcs|packets?|pakiti|vipande|kg))?$/.exec(seg))) { q = Number(mm[2]); nm = mm[1]; }
+      return { qty: q, name: nm.replace(/\s+/g, ' ').trim() };
+    }).filter(Boolean);
+    return Object.assign(out, { intent: 'sale', items: items });
+  }
+  if (/\b(owe|owes|owed|debt|debts|deni|madeni|anadaiwa|ananidai|wanadaiwa|wadeni|wanaodaiwa|credit customers)\b/.test(s)) {
+    var who = s.replace(/\b(who|how|much|does|do|owe|owes|owed|me|my|debt|debts|deni|madeni|anadaiwa|ananidai|wanadaiwa|wadeni|check|show|kiasi|gani|nani|angalia|the|customer|customers|wateja|mteja|is|are|what|kwa|ya|la|credit|total|jumla)\b/g, ' ').replace(/\s+/g, ' ').trim();
+    return Object.assign(out, { intent: 'debts', who: who });
+  }
+  if (/\b(report|ripoti|summary|muhtasari|profit|faida|mauzo|sales|takings|income|revenue|mapato|expenses|gharama)\b/.test(s) && !/^(sell|sold|uza|nimeuza)\b/.test(s)) {
+    var days = /\b(week|wiki)\b/.test(s) ? 7 : /\b(month|mwezi)\b/.test(s) ? 30 : 1;
+    return Object.assign(out, { intent: 'report', days: days });
+  }
+  if (/\b(low|running out|zinazoisha|zinakwisha|ndogo|finished|imeisha|zimeisha|out of)\b/.test(s) && /\b(stock|stoku|bidhaa|items|products)\b|running out|zinazoisha|zinakwisha/.test(s)) return Object.assign(out, { intent: 'lowstock' });
+  if (/\b(stock|stoku|left|remaining|baki|imebaki|zimebaki|kilichobaki|iliyobaki|ngapi|do i have|how much|how many|inventory|nina|angalia|check)\b/.test(s)) {
+    return Object.assign(out, { intent: 'stock', query: s.replace(STOCK_STOP, ' ').replace(/\s+/g, ' ').trim() });
+  }
+  return Object.assign(out, { intent: 'unknown' });
+}
+/* ── assistant UI and actions ── */
+S.va = { lang: (navigator.language || '').toLowerCase().indexOf('sw') === 0 ? 'sw' : 'en', speak: true, log: [], pending: null, listening: false };
+var VSR = window.SpeechRecognition || window.webkitSpeechRecognition, vRec = null;
+function T(en, sw, l) { return (l || S.va.rl) === 'sw' ? sw : en; }
+function vSay(text, who) {
+  S.va.log.push({ who: who || 'bot', text: text }); if (S.va.log.length > 30) S.va.log.shift();
+  if ((who || 'bot') === 'bot' && S.va.speak && window.speechSynthesis && window.SpeechSynthesisUtterance && S.va.spoke) { try { speechSynthesis.cancel(); var u = new SpeechSynthesisUtterance(text.replace(/<[^>]+>/g, '').replace(/KSh\s?/g, T('shillings ', 'shilingi ')).slice(0, 300)); u.lang = S.va.rl === 'sw' ? 'sw-KE' : 'en-KE'; speechSynthesis.speak(u); } catch (_) {} }
+}
+function vProducts() {
+  return api('GET', '/shops/' + S.shopId + '/products?limit=500').then(function (d) {
+    var sq = S.q, sc = S.cat, sl = S.low; S.q = ''; S.cat = ''; S.low = false;
+    try { return applyPending((d.products || []).slice()); } finally { S.q = sq; S.cat = sc; S.low = sl; }
+  });
+}
+function vPct(n) { return String(Math.round(n * 100) / 100); }
+async function vHandle(raw) {
+  raw = String(raw || '').trim(); if (!raw) return;
+  var cmd = vParse(raw, S.va.lang); S.va.rl = cmd.lang;
+  vSay(raw, 'me');
+  if (cmd.intent === 'confirmWord') { vSay(T('For your safety I cannot confirm by voice. Please tap the green Confirm button on the card.', 'Kwa usalama wako siwezi kuthibitisha kwa sauti. Tafadhali bonyeza kitufe cha Thibitisha kwenye kadi.')); return vRender(); }
+  if (cmd.intent === 'cancelWord') { S.va.pending = null; vSay(T('Cancelled. Nothing was changed.', 'Imeghairiwa. Hakuna kilichobadilishwa.')); return vRender(); }
+  if (S.va.pending && !S.va.pending.done) { S.va.pending = null; vSay(T('Earlier request cancelled — nothing was changed.', 'Ombi la awali limeghairiwa — hakuna kilichobadilishwa.')); }
+  vRender(true);
+  try {
+    if (cmd.intent === 'stock') await vStock(cmd);
+    else if (cmd.intent === 'lowstock') await vLow();
+    else if (cmd.intent === 'debts') await vDebts(cmd);
+    else if (cmd.intent === 'report') await vReport(cmd);
+    else if (cmd.intent === 'expense') vExpenseCard(cmd);
+    else if (cmd.intent === 'addProduct') vProductCard(cmd);
+    else if (cmd.intent === 'sale') await vSaleCard(cmd);
+    else vSay(T('Sorry, I did not understand. Try: "sell 3 sugar", "add expense 500 transport", "how much sugar is left", "who owes me", or "today\'s report".', 'Samahani, sijaelewa. Jaribu: "uza sukari 3", "nimetumia 500 usafiri", "sukari imebaki ngapi", "nani ananidai", au "ripoti ya leo".'));
+  } catch (e) { vSay(e.message || T('Something went wrong.', 'Hitilafu imetokea.')); }
+  vRender();
+}
+async function vStock(cmd) {
+  var list = await vProducts();
+  if (!cmd.query) {
+    var low = list.filter(function (p) { return p.isLowStock; });
+    return vSay(T('You have ' + list.length + ' products. ' + (low.length ? low.length + ' are low or out of stock.' : 'None are low.'), 'Una bidhaa ' + list.length + '. ' + (low.length ? low.length + ' zinakaribia kuisha au zimeisha.' : 'Hakuna inayokaribia kuisha.')));
+  }
+  var hits = vMatch(cmd.query, list);
+  if (!hits.length) return vSay(T('I could not find a product like "' + cmd.query + '".', 'Sikupata bidhaa kama "' + cmd.query + '".'));
+  vSay(hits.slice(0, 4).map(function (p) { return p.name + ': ' + QTY(p.stockQty) + ' ' + p.unit + (p.isOutOfStock ? T(' (out of stock)', ' (imeisha)') : p.isLowStock ? T(' (low)', ' (inakaribia kuisha)') : ''); }).join('; '));
+}
+async function vLow() {
+  var low = (await vProducts()).filter(function (p) { return p.isLowStock; });
+  vSay(low.length ? T('Low or out of stock: ', 'Zinazokaribia kuisha au zimeisha: ') + low.slice(0, 8).map(function (p) { return p.name + ' (' + QTY(p.stockQty) + ')'; }).join(', ') : T('Nothing is low on stock.', 'Hakuna bidhaa inayokaribia kuisha.'));
+}
+async function vDebts(cmd) {
+  var d = await api('GET', '/shops/' + S.shopId + '/debts'), c = d.customersOweYou, s = d.youOweSuppliers;
+  if (cmd.who) {
+    var q = cmd.who.toLowerCase(), hit = c.customers.filter(function (x) { return x.name.toLowerCase().indexOf(q) >= 0 || q.indexOf(x.name.toLowerCase()) >= 0; });
+    return vSay(hit.length ? hit.map(function (x) { return x.name + T(' owes ', ' anadaiwa ') + KSH(x.owed); }).join('; ') : T('No customer named "' + cmd.who + '" owes you anything.', 'Hakuna mteja aitwaye "' + cmd.who + '" anayekudai.'));
+  }
+  vSay(T('Customers owe you ' + KSH(c.total) + (c.customers.length ? ': ' + c.customers.slice(0, 3).map(function (x) { return x.name + ' ' + KSH(x.owed); }).join(', ') : '') + '. You owe suppliers ' + KSH(s.total) + '.',
+    'Wateja wanakudai ' + KSH(c.total) + (c.customers.length ? ': ' + c.customers.slice(0, 3).map(function (x) { return x.name + ' ' + KSH(x.owed); }).join(', ') : '') + '. Wewe unadaiwa na wasambazaji ' + KSH(s.total) + '.'));
+}
+async function vReport(cmd) {
+  var d = await api('GET', '/shops/' + S.shopId + '/reports?period=daily&from=' + ymd(cmd.days - 1) + '&to=' + ymd(0)), t = d.totals;
+  var label = cmd.days === 1 ? T('today', 'leo') : cmd.days === 7 ? T('the last 7 days', 'siku 7 zilizopita') : T('the last 30 days', 'siku 30 zilizopita');
+  vSay(T('For ' + label + ': sales ' + KSH(t.revenue) + ' (' + t.salesCount + '), expenses ' + KSH(t.expenses) + ', net profit ' + KSH(t.netProfit) + '. Cash received ' + KSH(t.totalCashReceived) + ', credit given ' + KSH(t.creditGiven) + '.',
+    'Kwa ' + label + ': mauzo ' + KSH(t.revenue) + ' (' + t.salesCount + '), gharama ' + KSH(t.expenses) + ', faida halisi ' + KSH(t.netProfit) + '. Pesa taslimu iliyopokelewa ' + KSH(t.totalCashReceived) + ', mkopo uliotolewa ' + KSH(t.creditGiven) + '.'));
+}
+function vExpenseCard(cmd) {
+  S.va.pending = { kind: 'expense', id: uuid(), done: false, d: { amount: cmd.amount, category: cmd.category, description: cmd.description } };
+  vSay(T('Please check this expense and tap Confirm.', 'Tafadhali angalia gharama hii kisha bonyeza Thibitisha.'));
+}
+function vProductCard(cmd) {
+  S.va.pending = { kind: 'product', id: uuid(), done: false, d: { name: cmd.name, buy: cmd.buy, sell: cmd.sell, stock: cmd.stock } };
+  vSay(T('Please check this new product and tap Confirm.', 'Tafadhali angalia bidhaa hii mpya kisha bonyeza Thibitisha.'));
+}
+async function vSaleCard(cmd) {
+  var list = await vProducts(), lines = [], ask = null;
+  for (var i = 0; i < cmd.items.length; i++) {
+    var it = cmd.items[i], hits = vMatch(it.name, list);
+    if (!hits.length) return vSay(T('I could not find "' + it.name + '" in your products. Nothing was recorded.', 'Sikupata "' + it.name + '" kwenye bidhaa zako. Hakuna kilichorekodiwa.'));
+    if (hits.length > 1 && !ask) ask = { idx: i, opts: hits.slice(0, 5) };
+    lines.push({ qty: it.qty, name: it.name, productId: hits.length === 1 ? hits[0].id : null });
+  }
+  S.va.pending = { kind: 'sale', id: uuid(), done: false, d: { lines: lines }, ask: ask, list: list };
+  vSay(ask ? T('Which "' + cmd.items[ask.idx].name + '" do you mean?', 'Unamaanisha "' + cmd.items[ask.idx].name + '" ipi?') : T('Please check this cash sale and tap Confirm.', 'Tafadhali angalia mauzo haya ya pesa taslimu kisha bonyeza Thibitisha.'));
+}
+function vCard() {
+  var P = S.va.pending; if (!P) return ''; var d = P.d, h = '';
+  if (P.done) return '';
+  var btns = '<div class="actions"><button class="btn2" data-act="vaCancel" type="button">' + T('Cancel', 'Ghairi') + '</button><button class="btn" data-act="vaConfirm" type="button">' + T('Confirm', 'Thibitisha') + '</button></div>';
+  if (P.kind === 'expense') h = '<b>' + T('Record expense', 'Rekodi gharama') + '</b>' + typed('vaAmt', T('Amount (KSh) *', 'Kiasi (KSh) *'), 'inputmode="decimal" value="' + (d.amount == null ? '' : d.amount) + '"') + '<label>' + T('Category', 'Aina') + '</label><select id="vaCat">' + opt(EXP_CATS, d.category) + '</select>' + typed('vaDesc', T('Description', 'Maelezo'), 'maxlength="200" value="' + esc(d.description) + '"') + '<div class="note">' + T('This will reduce your profit. Paid in cash.', 'Hii itapunguza faida yako. Imelipwa taslimu.') + '</div>' + btns;
+  else if (P.kind === 'product') h = '<b>' + T('Add new product', 'Ongeza bidhaa mpya') + '</b>' + typed('vaName', T('Name *', 'Jina *'), 'maxlength="120" value="' + esc(d.name) + '"') + '<div class="two"><div>' + typed('vaBuy', T('Buying price *', 'Bei ya kununua *'), 'inputmode="decimal" value="' + (d.buy == null ? '' : d.buy) + '"') + '</div><div>' + typed('vaSell', T('Selling price *', 'Bei ya kuuza *'), 'inputmode="decimal" value="' + (d.sell == null ? '' : d.sell) + '"') + '</div></div>' + typed('vaStock', T('Opening stock', 'Idadi ya kuanzia'), 'inputmode="decimal" value="' + (d.stock == null ? '' : d.stock) + '"') + btns;
+  else if (P.kind === 'sale') {
+    if (P.ask) return '<b>' + T('Choose the product', 'Chagua bidhaa') + '</b>' + P.ask.opts.map(function (p) { return '<div class="item" data-act="vaPick" data-id="' + esc(p.id) + '"><div class="grow"><div class="t">' + esc(p.name) + '</div><div class="s">' + KSH(p.sellingPrice) + ' · ' + T('stock ', 'stoku ') + QTY(p.stockQty) + '</div></div></div>'; }).join('') + '<div class="actions"><button class="btn2" data-act="vaCancel" type="button">' + T('Cancel', 'Ghairi') + '</button></div>';
+    var tot = 0; h = '<b>' + T('Cash sale', 'Mauzo ya pesa taslimu') + '</b>' + d.lines.map(function (l, i) {
+      var p = P.list.filter(function (x) { return x.id === l.productId; })[0], line = Math.round(Math.round(Number(l.qty) * 1000) * cents(p.sellingPrice) / 1000); tot += line;
+      return '<div class="item"><div class="grow"><div class="t">' + esc(p.name) + '</div><div class="s">' + KSH(p.sellingPrice) + ' × <input id="vaQ' + i + '" value="' + l.qty + '" inputmode="decimal" style="width:70px;display:inline-block"> · ' + T('in stock ', 'stoku ') + QTY(p.stockQty) + '</div></div><b>' + KC(line) + '</b></div>';
+    }).join('') + '<div class="note"><b>' + T('Total to receive in cash: ', 'Jumla ya kupokea taslimu: ') + KC(tot) + '</b><br>' + T('This will deduct the stock and record a fully paid cash sale.', 'Hii itapunguza stoku na kurekodi mauzo yaliyolipwa kikamilifu taslimu.') + '</div>' + btns;
+  }
+  return '<div class="card" style="margin-top:10px">' + h + '</div>';
+}
+function vRender(thinking) {
+  var el = $('vaPanel'); if (!el) return;
+  var log = S.va.log.map(function (m) { return '<div class="note' + (m.who === 'me' ? '' : '') + '" style="' + (m.who === 'me' ? 'text-align:right;background:#eef6ff' : '') + '">' + esc(m.text) + '</div>'; }).join('');
+  el.innerHTML = '<div class="two"><div><label>' + T('Language', 'Lugha', S.va.lang) + '</label><select id="vaLang"><option value="en"' + (S.va.lang === 'en' ? ' selected' : '') + '>English</option><option value="sw"' + (S.va.lang === 'sw' ? ' selected' : '') + '>Kiswahili</option></select></div>' +
+    '<div style="align-self:end">' + (VSR ? '<button class="btn' + (S.va.listening ? ' on' : '') + '" data-act="vaMic" type="button" aria-label="Microphone" style="width:100%"><i class="fas fa-microphone"></i> ' + (S.va.listening ? T('Listening…', 'Nasikiliza…', S.va.lang) : T('Speak', 'Ongea', S.va.lang)) + '</button>' : '<div class="note">' + T('Voice is not supported on this browser — type instead.', 'Sauti haitumiki kwenye kivinjari hiki — andika badala yake.', S.va.lang) + '</div>') + '</div></div>' +
+    '<div class="two" style="margin-top:8px"><div><input id="vaText" placeholder="' + (S.va.lang === 'sw' ? 'Andika amri, mf. uza sukari 3' : 'Type a command, e.g. sell 3 sugar') + '" autocomplete="off"></div><div><button class="btn2" data-act="vaSend" type="button">' + (S.va.lang === 'sw' ? 'Tuma' : 'Send') + '</button></div></div>' +
+    '<div style="margin:8px 0;display:flex;gap:6px;flex-wrap:wrap">' + (S.va.lang === 'sw' ? ['sukari imebaki ngapi', 'nimetumia 500 kwa usafiri', 'uza sukari 2', 'nani ananidai', 'ripoti ya leo'] : ['how much sugar is left', 'add expense 500 transport', 'sell 2 sugar', 'who owes me', "today's report"]).map(function (x) { return '<button class="badge" data-act="vaChip" data-q="' + esc(x) + '" type="button">' + esc(x) + '</button>'; }).join('') + '</div>' +
+    '<div id="vaLog" style="max-height:30vh;overflow:auto">' + log + (thinking ? '<div class="note">…</div>' : '') + '</div>' + vCard() +
+    '<label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" id="vaSpeak"' + (S.va.speak ? ' checked' : '') + ' style="width:auto"> ' + T('Speak replies', 'Sema majibu', S.va.lang) + '</label>' +
+    '<div class="note">' + T('Anything that changes stock or money waits for you to tap Confirm.', 'Chochote kinachobadilisha stoku au pesa kinasubiri ubonyeze Thibitisha.', S.va.lang) + '</div>';
+  var lg = $('vaLog'); if (lg) lg.scrollTop = lg.scrollHeight;
+}
+function vaFab() { return S.shopId ? '<button class="vafab" data-act="vaOpen" type="button" aria-label="Voice assistant" title="Voice assistant"><i class="fas fa-microphone"></i></button>' : ''; }
+function openAssistant() {
+  S.va.rl = S.va.rl || S.va.lang;
+  openModal(S.va.lang === 'sw' ? 'Msaidizi wa Duka' : 'Duka assistant', '<div id="vaPanel"></div>');
+  if (!S.va.log.length) { S.va.rl = S.va.lang; vSay(T('Hi! Ask me about stock, debts or reports, or tell me to record a sale, expense or new product.', 'Karibu! Niulize kuhusu stoku, madeni au ripoti, au niambie nirekodi mauzo, gharama au bidhaa mpya.')); }
+  vRender(); setTimeout(function () { var e = $('vaText'); e && e.focus(); }, 60);
+}
+function vaMic() {
+  if (!VSR) return;
+  if (S.va.listening && vRec) { try { vRec.stop(); } catch (_) {} return; }
+  try {
+    vRec = new VSR(); vRec.lang = S.va.lang === 'sw' ? 'sw-KE' : 'en-KE'; vRec.interimResults = false; vRec.maxAlternatives = 1;
+    vRec.onresult = function (e) { var t = e.results[0][0].transcript; S.va.spoke = true; vHandle(t); };
+    vRec.onerror = function (e) { S.va.listening = false; vSay(T('I could not hear you (' + (e.error || 'error') + '). You can also type.', 'Sikukusikia (' + (e.error || 'hitilafu') + '). Unaweza pia kuandika.')); vRender(); };
+    vRec.onend = function () { S.va.listening = false; vRender(); };
+    S.va.listening = true; vRec.start(); vRender();
+  } catch (_) { S.va.listening = false; vRender(); }
+}
+async function vaConfirm(btn) {
+  var P = S.va.pending; if (!P || P.done || P.busy) return;
+  P.busy = true; busy(btn, true, T('Saving…', 'Inahifadhi…'));
+  try {
+    var msg = '';
+    if (P.kind === 'expense') {
+      var amt = Number(val('vaAmt').replace(',', '.')); if (!(amt > 0)) throw new Error(T('Enter the amount spent.', 'Weka kiasi kilichotumika.'));
+      var w = await write({ type: 'expense.create', id: P.id, path: '/shops/' + S.shopId + '/expenses', body: { id: P.id, amount: amt, category: val('vaCat'), description: val('vaDesc') || null, method: 'cash' }, label: 'Expense: ' + val('vaCat') + ' ' + KSH(amt), meta: { amount: amt }, offlineOk: true });
+      msg = w.queued ? T('Saved on this phone. Expense ' + KSH(amt) + ' will sync when you are online.', 'Imehifadhiwa kwenye simu. Gharama ' + KSH(amt) + ' itatumwa ukiwa mtandaoni.') : T('Expense of ' + KSH(amt) + ' recorded.', 'Gharama ya ' + KSH(amt) + ' imerekodiwa.');
+    } else if (P.kind === 'product') {
+      var o = { id: P.id, name: val('vaName'), category: null, unit: 'piece', buyingPrice: val('vaBuy') === '' ? null : Number(val('vaBuy')), sellingPrice: val('vaSell') === '' ? null : Number(val('vaSell')), minStock: 0, stockQty: val('vaStock') === '' ? 0 : Number(val('vaStock')), barcode: null, clientOpId: uuid() };
+      confirmedLoss = true; var bad = clientCheck(o); if (bad) throw new Error(bad); if (!(o.stockQty >= 0)) throw new Error(T('Stock cannot be negative.', 'Stoku haiwezi kuwa hasi.'));
+      var w2 = await write({ type: 'product.create', id: P.id, path: '/shops/' + S.shopId + '/products', body: o, label: 'Add product: ' + o.name, offlineOk: true });
+      msg = w2.queued ? T('Saved on this phone. "' + o.name + '" will sync when you are online.', 'Imehifadhiwa kwenye simu. "' + o.name + '" itatumwa ukiwa mtandaoni.') : T('"' + o.name + '" added.', '"' + o.name + '" imeongezwa.');
+    } else if (P.kind === 'sale') {
+      var items = [], tot = 0;
+      P.d.lines.forEach(function (l, i) {
+        var q = Number(String(val('vaQ' + i)).replace(',', '.')), p = P.list.filter(function (x) { return x.id === l.productId; })[0];
+        if (!(q > 0)) throw new Error(T('Enter a quantity above zero for ' + p.name + '.', 'Weka idadi zaidi ya sifuri kwa ' + p.name + '.'));
+        if (q > p.stockQty) throw new Error(T('Only ' + QTY(p.stockQty) + ' ' + p.unit + ' of ' + p.name + ' in stock.', p.name + ' imebaki ' + QTY(p.stockQty) + ' tu.'));
+        items.push({ productId: p.id, qty: q, unitPrice: p.sellingPrice }); tot += Math.round(Math.round(q * 1000) * cents(p.sellingPrice) / 1000);
+      });
+      var body = { id: P.id, items: items, payments: [{ method: 'cash', amount: tot / 100 }] };
+      var w3 = await write({ type: 'sale.create', id: P.id, path: '/shops/' + S.shopId + '/sales', body: body, label: 'Cash sale ' + KC(tot), meta: { total: tot / 100 }, offlineOk: true });
+      msg = w3.queued ? T('Saved on this phone. Cash sale of ' + KC(tot) + ' will sync when you are online.', 'Imehifadhiwa kwenye simu. Mauzo ya ' + KC(tot) + ' yatatumwa ukiwa mtandaoni.') : T('Sale recorded: ' + KC(tot) + ' cash (receipt #' + w3.data.sale.receiptNo + ').', 'Mauzo yamerekodiwa: ' + KC(tot) + ' taslimu (risiti #' + w3.data.sale.receiptNo + ').');
+    }
+    P.done = true; S.va.pending = null; vSay(msg); S.va.spoke = S.va.spoke; vRender();
+    try { await loadTab(); render(); vRender(); } catch (_) {}
+  } catch (e) { P.busy = false; vSay(e.message); vRender(); }
+}
+function vaPick(id) {
+  var P = S.va.pending; if (!P || !P.ask) return;
+  P.d.lines[P.ask.idx].productId = id; P.ask = null;
+  for (var i = 0; i < P.d.lines.length; i++) if (!P.d.lines[i].productId) { var hits = vMatch(P.d.lines[i].name, P.list); if (hits.length === 1) P.d.lines[i].productId = hits[0].id; else { P.ask = { idx: i, opts: hits.slice(0, 5) }; break; } }
+  vSay(P.ask ? T('Which "' + P.d.lines[P.ask.idx].name + '" do you mean?', 'Unamaanisha "' + P.d.lines[P.ask.idx].name + '" ipi?') : T('Please check this cash sale and tap Confirm.', 'Tafadhali angalia mauzo haya kisha bonyeza Thibitisha.'));
+  vRender();
+}
+
 /* ───── events ───── */
 document.addEventListener('click', function (ev) {
   var t = ev.target.closest && ev.target.closest('[data-act]'); if (!t) return;
@@ -591,6 +1199,31 @@ document.addEventListener('click', function (ev) {
   else if (a === 'saveShop') saveShop(t);
   else if (a === 'archiveShop') archiveShop();
   else if (a === 'doArchive') doArchive(t);
+  else if (a === 'vaOpen') openAssistant();
+  else if (a === 'vaMic') vaMic();
+  else if (a === 'vaSend') { var vi = $('vaText'); if (vi && vi.value.trim()) { var vt = vi.value; vi.value = ''; S.va.spoke = false; vHandle(vt); } }
+  else if (a === 'vaChip') { S.va.spoke = false; vHandle(t.dataset.q); }
+  else if (a === 'vaConfirm') vaConfirm(t);
+  else if (a === 'vaCancel') { S.va.pending = null; vSay(T('Cancelled. Nothing was changed.', 'Imeghairiwa. Hakuna kilichobadilishwa.')); vRender(); }
+  else if (a === 'vaPick') vaPick(id);
+  else if (a === 'syncStatus') openSyncStatus();
+  else if (a === 'syncNow') { closeModal(); syncNow(); }
+  else if (a === 'retryOp') { obUpdate(id, { status: 'pending', attempts: 0, err: '' }); closeModal(); render(); syncNow(); }
+  else if (a === 'discardOp') openDiscard(id);
+  else if (a === 'doDiscard') { obRemove(id); note('Discarded a change that could not be saved.', true); closeModal(); render(); }
+  else if (a === 'fin') { S.fin = t.dataset.f; try { sessionStorage.setItem('necpra_duka_fin', S.fin); } catch (_) {} render(); refresh(); }
+  else if (a === 'rp') { S.rp = t.dataset.p; S.fd.rep = null; render(); refresh(); }
+  else if (a === 'addExpense') openAddExpense();
+  else if (a === 'saveExpense') saveExpense(t);
+  else if (a === 'voidExpense') openVoidExpense(id);
+  else if (a === 'doVoid') doVoid(t, id);
+  else if (a === 'collect') openCollect(id, t.dataset.name, Number(t.dataset.owed));
+  else if (a === 'doCollect') doCollect(t);
+  else if (a === 'supplier') openSupplier(id);
+  else if (a === 'addSupplier') openAddSupplier();
+  else if (a === 'saveSupplier') saveSupplier(t);
+  else if (a === 'addBill') supEntry(t, 'bill');
+  else if (a === 'paySupplier') supEntry(t, 'payment');
 });
 document.addEventListener('change', function (ev) {
   if (ev.target.id === 'shopSel') { S.shopId = ev.target.value; try { localStorage.setItem('necpra_duka_shop', S.shopId); } catch (_) {} S.dash = null; S.coId = null; loadCart(); refresh(); }
@@ -598,6 +1231,8 @@ document.addEventListener('change', function (ev) {
   else if (ev.target.id === 'rangeSel') { S.range = ev.target.value; refresh(); }
   else if (ev.target.id === 'dType') { S.disc.type = ev.target.value; saveCart(); updateCheckout(); }
   else if (ev.target.id === 'coCust') updateCheckout();
+  else if (ev.target.id === 'vaLang') { S.va.lang = ev.target.value; S.va.rl = S.va.lang; var mt = $('mTitle'); if (mt) mt.textContent = S.va.lang === 'sw' ? 'Msaidizi wa Duka' : 'Duka assistant'; vRender(); }
+  else if (ev.target.id === 'vaSpeak') { S.va.speak = ev.target.checked; try { if (!S.va.speak && window.speechSynthesis) speechSynthesis.cancel(); } catch (_) {} }
 });
 var qTimer; document.addEventListener('input', function (ev) {
   var id = ev.target.id, cl = ev.target.classList;
@@ -610,6 +1245,7 @@ var qTimer; document.addEventListener('input', function (ev) {
 });
 // Enter in the search box adds the product when exactly one matches (barcode scanners type the code then press Enter).
 document.addEventListener('keydown', function (ev) {
+  if (ev.key === 'Enter' && ev.target.id === 'vaText' && ev.target.value.trim()) { ev.preventDefault(); var vt = ev.target.value; ev.target.value = ''; S.va.spoke = false; vHandle(vt); return; }
   if (ev.key === 'Enter' && ev.target.id === 'posQ') {
     var q = S.posQ.toLowerCase(), m = S.products.filter(function (p) { return p.stockQty > 0 && (p.barcode && p.barcode.toLowerCase() === q || p.name.toLowerCase().indexOf(q) > -1); });
     if (q && m.length === 1) { ev.preventDefault(); addToCart(m[0].id); }
@@ -619,6 +1255,8 @@ $('modal').addEventListener('click', function (ev) { if (ev.target === $('modal'
 
 window.addEventListener('message', function (ev) { if (ev && ev.data && ev.data.type === 'MODULE_VISIBLE' && S.shopId && !S.loading) refresh(); });
 window.__DUKA_BOOT__ = boot;
+/* handle for the automated end-to-end tests (read/act only; no secrets) */
+window.__duka = { parse: vParse, norm: vNorm, S: S, syncNow: syncNow, obMine: obMine, cacheGet: cacheGet, updateCheckout: updateCheckout, saveCart: saveCart };
 boot();
 })();
 </script>
