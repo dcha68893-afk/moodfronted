@@ -172,7 +172,7 @@ async function loadTab() {
     if (!S.cartLoadedFor || S.cartLoadedFor !== S.shopId) loadCart();
     syncCart();
   }
-  if (S.tab === 'group') { var gp = await api('GET', '/shops/' + S.shopId + '/products?limit=500'); S.products = applyPending(gp.products.slice()); S.gb = { orders: (await api('GET', '/group-buy/orders', null, GB_NOCACHE)).orders, dash: await api('GET', '/group-buy/dashboard', null, GB_NOCACHE) }; }
+  if (S.tab === 'group') { var gp = await api('GET', '/shops/' + S.shopId + '/products?limit=500'); S.products = applyPending(gp.products.slice()); S.gb = { orders: (await api('GET', '/group-buy/orders')).orders, dash: await api('GET', '/group-buy/dashboard') }; }
   if (S.tab === 'waste') { var wp = await api('GET', '/shops/' + S.shopId + '/products?limit=500'); S.products = applyPending(wp.products.slice()); S.waste = await api('GET', '/shops/' + S.shopId + '/waste'); }
   if (S.tab === 'money') await loadMoney();
   if (S.tab === 'sales') {
@@ -719,7 +719,7 @@ function viewSales() {
     '<div class="card stat"><small>Money received</small><b>' + KSH(m.amountPaid) + '</b></div>' +
     '<div class="card stat ' + (m.balanceDue > 0 ? 'warn' : '') + '"><small>Unpaid (credit)</small><b>' + KSH(m.balanceDue) + '</b></div>' +
     '<div class="card stat"><small>Gross profit</small><b>' + KSH(m.grossProfit) + '</b><div class="s">Sales − cost of goods</div></div></div>' : '';
-  return f + sum + (S.sales.length ? S.sales.map(saleRow).join('') : '<div class="empty"><i class="fas fa-receipt"></i>No sales in this period.</div>');
+  return f + sum + (S.sales.length ? exBar('sales') + S.sales.map(saleRow).join('') : '<div class="empty"><i class="fas fa-receipt"></i>No sales in this period.</div>');
 }
 
 /* ───── shop actions ───── */
@@ -769,7 +769,7 @@ function viewExpenses() {
   var cats = d.byCategory.map(function (c) { return '<span class="badge">' + esc(c.category) + ' ' + KSH(c.total) + '</span>'; }).join(' ');
   return '<div class="grid"><div class="card stat"><small>Expenses (30 days)</small><b>' + KSH(d.total) + '</b><div class="s">Reduce your profit</div></div></div>' +
     '<div class="actions" style="margin:0 0 12px"><button class="btn" data-act="addExpense" type="button"><i class="fas fa-plus"></i> Add expense</button></div>' + (d.offlineEmpty ? '<div class="note">Your saved expenses are not on this phone yet. You can still add new ones — they are sent when you are back online.</div>' : '') +
-    (cats ? '<div class="note">' + cats + '</div>' : '') +
+    (cats ? '<div class="note">' + cats + '</div>' : '') + (d.expenses.length ? exBar('exp') : '') +
     (d.expenses.length ? d.expenses.map(function (e) {
       var v = e.status === 'voided';
       return '<div class="item"' + (v ? ' style="opacity:.55"' : '') + '><div class="grow"><div class="t">' + esc(e.category) + ' · ' + KSH(e.amount) + (v ? ' <span class="badge out">Voided</span>' : '') + '</div><div class="s">' + esc(e.expenseDate) + ' · ' + esc(e.method) + (e.description ? ' · ' + esc(e.description) : '') + (v && e.voidReason ? ' · ' + esc(e.voidReason) : '') + '</div></div>' +
@@ -808,7 +808,7 @@ function viewDebts() {
   var d = S.fd.debts; if (!d) return '<div class="spin">Loading…</div>';
   var c = d.customersOweYou, s = d.youOweSuppliers;
   return '<div class="grid"><div class="card stat ' + (c.total > 0 ? 'warn' : '') + '"><small>Customers owe you</small><b>' + KSH(c.total) + '</b></div><div class="card stat ' + (s.total > 0 ? 'warn' : '') + '"><small>You owe suppliers</small><b>' + KSH(s.total) + '</b></div></div>' +
-    '<h3>Customer credit</h3>' + (c.customers.length ? c.customers.map(function (x) {
+    exBar('debts') + '<h3>Customer credit</h3>' + (c.customers.length ? c.customers.map(function (x) {
       return '<div class="item"><div class="grow"><div class="t">' + esc(x.name) + ' · ' + KSH(x.owed) + '</div><div class="s">' + x.unpaidSales + ' unpaid sale' + (x.unpaidSales === 1 ? '' : 's') + ' · since ' + esc(fmtWhen(x.oldestSaleAt)) + (x.phone ? ' · ' + esc(x.phone) : '') + '</div></div><button class="btn" data-act="collect" data-id="' + esc(x.id) + '" data-name="' + esc(x.name) + '" data-owed="' + x.owed + '" type="button">Collect</button></div>';
     }).join('') : '<div class="note">No customer owes you anything.</div>') +
     '<h3>Suppliers you owe</h3>' + (s.suppliers.length ? s.suppliers.map(function (x) {
@@ -883,7 +883,7 @@ function viewReports() {
   var rows = d.rows.slice().reverse().filter(function (r) { return r.salesCount || r.expenses || r.totalCashReceived || r.supplierPayments; }).map(function (r) {
     return '<div class="item"><div class="grow"><div class="t">' + esc(periodLabel(d.period, r.periodStart)) + ' · profit ' + KSH(r.netProfit) + '</div><div class="s">Sales ' + KSH(r.revenue) + ' (' + r.salesCount + ') · expenses ' + KSH(r.expenses) + (r.stockLosses ? ' · spoiled stock ' + KSH(r.stockLosses) : '') + ' · cash in ' + KSH(r.totalCashReceived) + (r.creditGiven ? ' · credit ' + KSH(r.creditGiven) : '') + '</div></div></div>';
   }).join('');
-  return seg + '<div class="note">' + esc(d.from) + ' to ' + esc(d.to) + '</div>' +
+  return seg + exBar('rep') + '<div class="note">' + esc(d.from) + ' to ' + esc(d.to) + '</div>' +
     '<div class="grid">' + st('Revenue (sales)', t.revenue, t.salesCount + ' sales') + st('Cost of goods sold', t.costOfGoodsSold, 'Buying cost of what you sold') + st('Gross profit', t.grossProfit, 'Revenue − cost') + st('Expenses', t.expenses, 'Rent, transport…') + '</div>' +
     '<div class="grid">' + st('Net profit', t.netProfit, 'Gross profit − expenses' + (t.stockLosses ? ' − spoiled stock ' + KSH(t.stockLosses) : ''), t.netProfit < 0 ? 'bad' : '') + st('Cash received', t.totalCashReceived, 'Cash ' + KSH(t.cashFromSales) + ' · M-PESA ' + KSH(t.mpesaFromSales) + ' · debts collected ' + KSH(t.debtCollected)) + st('Credit given', t.creditGiven, 'Not cash', t.creditGiven > 0 ? 'warn' : '') + st('Paid to suppliers', t.supplierPayments, 'Not an expense') + '</div>' +
     '<div class="grid">' + st('Customers owe you', ps.customersOweYou, 'Right now') + st('You owe suppliers', ps.youOweSuppliers, 'Right now') + st('Stock at cost', ps.stockAtCost, 'Right now') + '</div>' +
@@ -1328,7 +1328,7 @@ var gbBad = function (e) { toast(e.message || 'Something went wrong', true); };
 function gbHours(h) { return new Date(Date.now() + Number(h) * 3600000).toISOString(); }
 function gbStatusLabel(s) { return { open: T('Open', 'Wazi'), locked: T('Awaiting payment', 'Inasubiri malipo'), confirmed: T('Confirmed', 'Imethibitishwa'), delivered: T('Delivered', 'Imewasili'), completed: T('Completed', 'Imekamilika'), cancelled: T('Cancelled', 'Imeghairiwa'), disputed: T('Disputed', 'Ina mgogoro') }[s] || s; }
 function viewGroup() {
-  var g = S.gb; if (!g) return '<div class="note">' + T('Loading…', 'Inapakia…') + '</div>';
+  var g = S.gb; if (!g) return S.loading ? '<div class="note">' + T('Loading…', 'Inapakia…') + '</div>' : '<h3>' + T('Buy stock together', 'Nunua bidhaa pamoja') + '</h3><div class="note">' + T('Group buying needs internet for live supplier quotes. You can still save a draft order below.', 'Ununuzi wa pamoja unahitaji mtandao. Unaweza kuhifadhi rasimu.') + '</div><div class="actions"><button class="btn" data-act="gbNew" type="button"><i class="fas fa-users"></i> ' + T('Start a group order', 'Anzisha oda ya pamoja') + '</button></div>' + gbDraftsView();
   var d = g.dash, m = d.mine;
   var cards = '<div class="two"><div class="card"><div class="s">' + T('Open group orders', 'Oda za pamoja zilizo wazi') + '</div><b>' + d.marketplace.openOrders + '</b></div>' +
     '<div class="card"><div class="s">' + T('Awaiting my payment', 'Zinasubiri malipo yangu') + '</div><b>' + m.awaitingPayment + '</b></div></div>' +
@@ -1347,25 +1347,297 @@ function viewGroup() {
   return '<h3>' + T('Buy stock together', 'Nunua bidhaa pamoja') + '</h3>' + cards +
     '<div class="actions"><button class="btn" data-act="gbNew" type="button"><i class="fas fa-users"></i> ' + T('Start a group order', 'Anzisha oda ya pamoja') + '</button>' +
     '<button class="btn2" data-act="gbSupplier" type="button">' + T('I am a supplier', 'Mimi ni msambazaji') + '</button></div>' +
-    '<h3>' + T('Open orders', 'Oda zilizo wazi') + '</h3><div class="card">' + list + '</div>' + mine +
+    gbDraftsView() + '<h3>' + T('Open orders', 'Oda zilizo wazi') + '</h3><div class="card">' + list + '</div>' + mine + (m.orders.length ? exBar('gb') : '') +
     '<div class="note">' + T('Prices shown come only from suppliers NECPRA has verified. No saving is shown unless a real quote exists.', 'Bei zinatoka kwa wasambazaji waliothibitishwa na NECPRA pekee. Hakuna akiba inayoonyeshwa bila bei halisi.') + '</div>';
 }
+/* ───── Group-buy drafts (offline) ─────
+   A draft is only a note kept on this phone: it is NOT an order, NOT a join and NOT a payment. Group buying needs live supplier quotes and
+   NECPRA payment checks, so nothing is sent until the trader taps Send while online. When sent, the server re-checks everything
+   (order still open? still before closing time?) and may refuse; the reason is then shown on the draft. Each order draft keeps ONE fixed id,
+   which the server uses to make a retry harmless (a lost response can never create two orders). Closing times are saved as "hours after you send",
+   so a draft written yesterday never carries a closing time that has already passed. */
+var GBDK = 'necpra_duka_gbdrafts_v1';
+function gbDrafts() { var a = lsGet(GBDK, []); return Array.isArray(a) ? a.filter(function (d) { return d && d.id && d.shopId === S.shopId; }) : []; }
+function gbDraftsAll() { var a = lsGet(GBDK, []); return Array.isArray(a) ? a : []; }
+function gbDraftSave(d) {
+  var a = gbDraftsAll().filter(function (x) { return x.id !== d.id && !(d.kind === 'join' && x.kind === 'join' && x.shopId === d.shopId && x.orderId === d.orderId); });
+  a.push(d); if (!lsSet(GBDK, a)) { toast(T('Could not save the draft — the phone storage is full.', 'Imeshindwa kuhifadhi — nafasi imejaa.'), true); return false; } return true;
+}
+function gbDraftDel(id) { lsSet(GBDK, gbDraftsAll().filter(function (x) { return x.id !== id; })); }
+function gbDraftFromForm() {
+  var close = Number(val('gbClose')) || 24, pay = Number(val('gbPay')) || 24;
+  return { id: S.gbDraftId || uuid(), kind: 'order', shopId: S.shopId, savedAt: new Date().toISOString(), productName: val('gbName'), unit: val('gbUnit'), market: val('gbMarket'),
+    qty: numOrNull('gbQty'), minQty: numOrNull('gbMin') || 0, closeH: close, payH: pay, referencePrice: numOrNull('gbRef') };
+}
+function gbDraftOk(d) {
+  if (!d.productName) { toast(T('Enter the product name', 'Weka jina la bidhaa'), true); return false; }
+  if (!d.market) { toast(T('Enter the market or delivery place', 'Weka soko au mahali'), true); return false; }
+  if (d.qty != null && !(d.qty > 0)) { toast(T('Your quantity must be more than zero', 'Kiasi lazima kiwe zaidi ya sifuri'), true); return false; }
+  return true;
+}
+function gbSaveDraft() {
+  var d = gbDraftFromForm(); if (!gbDraftOk(d)) return;
+  if (!gbDraftSave(d)) return; S.gbDraftId = null; closeModal(); toast(T('Draft saved on this phone. It is not sent yet.', 'Rasimu imehifadhiwa. Haijatumwa bado.')); render();
+}
+function gbDraftSaveJoin() {
+  var s = S.gbOff; if (!s) return; var q = numOrNull('gbJQty'); if (!(q > 0)) return toast(T('Enter the quantity you want', 'Weka kiasi unachotaka'), true);
+  var d = { id: uuid(), kind: 'join', shopId: S.shopId, savedAt: new Date().toISOString(), orderId: s.id, productName: s.productName, unit: s.unit, market: s.market, closesAt: s.closesAt, qty: q, referencePrice: numOrNull('gbJRef') };
+  if (!gbDraftSave(d)) return; S.gbOff = null; closeModal(); toast(T('Draft saved on this phone. You have NOT joined yet.', 'Rasimu imehifadhiwa. Bado hujajiunga.')); render();
+}
+/* Offline: no live order details are available, so only the saved list row is shown — never invented quotes, prices or savings. */
+function gbOfflineOpen(id) {
+  var o = (S.gb && S.gb.orders || []).filter(function (x) { return x.id === id; })[0];
+  if (!o) return toast(T('No internet connection.', 'Hakuna mtandao.'), true);
+  S.gbOff = o;
+  var ex = gbDrafts().filter(function (d) { return d.kind === 'join' && d.orderId === id; })[0];
+  openModal(esc(o.productName), '<div class="note"><b>' + T('You are offline.', 'Hauko mtandaoni.') + '</b> ' + T('Supplier quotes, prices and payments are live and cannot be shown or confirmed now. You can save a draft and send it when you are back online.', 'Bei na malipo ni za moja kwa moja. Unaweza kuhifadhi rasimu na kuituma ukiwa mtandaoni.') + '</div>' +
+    '<div class="s">' + esc(o.market) + ' · ' + QTY(o.combinedQty) + ' ' + esc(o.unit) + ' · ' + T('closes ', 'inafungwa ') + esc(fmtWhen(o.closesAt)) + ' · ' + T('as last saved on this phone', 'kama ilivyohifadhiwa mwisho') + '</div>' +
+    '<label>' + T('Your quantity', 'Kiasi chako') + ' (' + esc(o.unit) + ')</label><input id="gbJQty" type="number" min="0" step="any" inputmode="decimal" value="' + (ex ? ex.qty : '') + '">' +
+    '<label>' + T('What you usually pay per unit (optional)', 'Bei unayolipa kawaida (si lazima)') + '</label><input id="gbJRef" type="number" min="0" step="any" inputmode="decimal" value="' + (ex && ex.referencePrice != null ? ex.referencePrice : '') + '">' +
+    '<div class="actions"><button class="btn2" data-act="closeModal" type="button">' + T('Close', 'Funga') + '</button><button class="btn" data-act="gbDraftJoin" type="button">' + T('Save join draft', 'Hifadhi rasimu ya kujiunga') + '</button></div>');
+}
+async function gbSendDraft(btn, id, quiet) {
+  var d = gbDraftsAll().filter(function (x) { return x.id === id; })[0]; if (!d) return false;
+  if (navigator.onLine === false) { toast(T('Still offline. Draft kept.', 'Bado uko nje ya mtandao. Rasimu imehifadhiwa.'), true); return false; }
+  busy(btn, true, T('Sending…', 'Inatuma…'));
+  try {
+    if (d.kind === 'order') {
+      var body = { id: d.id, shopId: d.shopId, productName: d.productName, unit: d.unit, market: d.market, minQty: d.minQty || 0, closesAt: gbHours(d.closeH), paymentDeadline: gbHours(d.closeH + d.payH) };
+      if (d.qty != null) body.qty = d.qty; if (d.referencePrice != null) body.referencePrice = d.referencePrice;
+      await api('POST', '/group-buy/orders', body);
+    } else await api('POST', '/group-buy/orders/' + d.orderId + '/join', { shopId: d.shopId, qty: d.qty, referencePrice: d.referencePrice });
+    gbDraftDel(id); if (!quiet) { toast(d.kind === 'order' ? T('Group order created', 'Oda imeundwa') : T('You joined the order', 'Umejiunga na oda')); refresh(); }
+    return true;
+  } catch (e) {
+    if (e.offline) { if (!quiet) toast(T('Could not reach the server. Draft kept.', 'Seva haipatikani. Rasimu imehifadhiwa.'), true); return false; }
+    var all = gbDraftsAll(); all.forEach(function (x) { if (x.id === id) x.error = e.message || 'Rejected'; }); lsSet(GBDK, all);
+    if (!quiet) { toast(e.message || 'Rejected', true); render(true); }
+    return false;
+  } finally { busy(btn, false); }
+}
+async function gbSendAllDrafts(btn) {
+  var list = gbDrafts(), ok = 0; if (!list.length) return;
+  busy(btn, true, T('Sending…', 'Inatuma…'));
+  for (var i = 0; i < list.length; i++) { if (await gbSendDraft(null, list[i].id, true)) ok++; }
+  busy(btn, false); toast(ok + ' / ' + list.length + T(' sent. Any that were refused stay as drafts with the reason.', ' zimetumwa. Zilizokataliwa zinabaki na sababu.'), ok !== list.length); refresh();
+}
+function gbDraftsView() {
+  var l = gbDrafts(); if (!l.length) return '';
+  return '<h3>' + T('My drafts (not sent)', 'Rasimu zangu (hazijatumwa)') + '</h3><div class="card">' + l.map(function (d) {
+    var title = d.kind === 'order' ? T('New group order: ', 'Oda mpya: ') + esc(d.productName) : T('Join: ', 'Jiunge: ') + esc(d.productName);
+    var sub = d.kind === 'order' ? esc(d.market) + (d.qty != null ? ' · ' + QTY(d.qty) + ' ' + esc(d.unit) : '') + ' · ' + T('closes ', 'inafungwa ') + d.closeH + T(' h after you send', ' saa baada ya kutuma') : QTY(d.qty) + ' ' + esc(d.unit) + ' · ' + esc(d.market);
+    return '<div class="item"><div class="grow"><div class="t">' + title + '</div><div class="s">' + sub + ' · ' + T('saved ', 'imehifadhiwa ') + esc(fmtWhen(d.savedAt)) + '</div>' + (d.error ? '<div class="s" style="color:#b3261e">' + T('Not accepted: ', 'Haikukubaliwa: ') + esc(d.error) + '</div>' : '') + '</div>' +
+      '<button class="btn2" data-act="gbDraftSend" data-id="' + esc(d.id) + '" type="button">' + T('Send', 'Tuma') + '</button><button class="btn2" data-act="gbDraftDel" data-id="' + esc(d.id) + '" type="button" aria-label="' + T('Delete draft', 'Futa rasimu') + '"><i class="fas fa-trash"></i></button></div>';
+  }).join('') + (l.length > 1 ? '<div class="actions"><button class="btn" data-act="gbDraftSendAll" type="button">' + T('Send all drafts', 'Tuma zote') + '</button></div>' : '') + '</div>' +
+    '<div class="note">' + T('A draft is only a note on this phone. Nothing is ordered, joined or paid until you send it.', 'Rasimu ni kumbukumbu tu kwenye simu hii. Hakuna kinachoagizwa au kulipwa hadi uitume.') + '</div>';
+}
+window.addEventListener('online', function () { var n = gbDrafts().length; if (n) { toast(n + T(' group-buy draft(s) waiting. Open Group buy to send them.', ' rasimu za ununuzi wa pamoja zinasubiri. Fungua Ununuzi wa pamoja kuzituma.')); } });
+
+/* ───── Export to Excel (.xlsx) and PDF ─────
+   Built on the phone from the figures already loaded on screen, so it also works offline (it exports the last information shown —
+   if the screen says "saved on this phone", the file carries that older information, and the file says so). No server call, no third-party library. */
+var EX = (function () {
+  var CRC = (function () { var t = [], c, n, k; for (n = 0; n < 256; n++) { c = n; for (k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+  function crc32(u) { var c = 0xFFFFFFFF; for (var i = 0; i < u.length; i++) c = CRC[(c ^ u[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+  function utf8(s) { return new TextEncoder().encode(s); }
+  function concat(list) { var n = 0, o = 0, r; list.forEach(function (p) { n += p.length; }); r = new Uint8Array(n); list.forEach(function (p) { r.set(p, o); o += p.length; }); return r; }
+  /* ZIP (stored, no compression) — an .xlsx is a zip of XML files */
+  function zip(files) {
+    var d = new Date(), dt = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate(), tm = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+    var parts = [], cen = [], off = 0;
+    files.forEach(function (f) {
+      var nm = utf8(f.name), c = crc32(f.data), h = new DataView(new ArrayBuffer(30)), e = new DataView(new ArrayBuffer(46));
+      h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true); h.setUint16(10, tm, true); h.setUint16(12, dt, true);
+      h.setUint32(14, c, true); h.setUint32(18, f.data.length, true); h.setUint32(22, f.data.length, true); h.setUint16(26, nm.length, true);
+      parts.push(new Uint8Array(h.buffer), nm, f.data);
+      e.setUint32(0, 0x02014b50, true); e.setUint16(4, 20, true); e.setUint16(6, 20, true); e.setUint16(8, 0x0800, true); e.setUint16(12, tm, true); e.setUint16(14, dt, true);
+      e.setUint32(16, c, true); e.setUint32(20, f.data.length, true); e.setUint32(24, f.data.length, true); e.setUint16(28, nm.length, true); e.setUint32(42, off, true);
+      cen.push(new Uint8Array(e.buffer), nm);
+      off += 30 + nm.length + f.data.length;
+    });
+    var csz = 0, end = new DataView(new ArrayBuffer(22));
+    cen.forEach(function (p) { csz += p.length; });
+    end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true); end.setUint32(12, csz, true); end.setUint32(16, off, true);
+    return concat(parts.concat(cen, [new Uint8Array(end.buffer)]));
+  }
+  function xe(s) { return String(s).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+  function colL(i) { var s = ''; i++; while (i > 0) { var m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; }
+  function sheetName(n, used) { var b = String(n || 'Sheet').replace(/[\[\]:*?\/\\]/g, ' ').trim().slice(0, 31) || 'Sheet', nm = b, i = 2; while (used.indexOf(nm.toLowerCase()) >= 0) nm = b.slice(0, 28) + ' ' + (i++); used.push(nm.toLowerCase()); return nm; }
+  function sheetXml(sh) {
+    var all = [sh.cols.map(function (c) { return c.h; })].concat(sh.rows), x = '';
+    all.forEach(function (row, ri) {
+      var cells = '';
+      row.forEach(function (v, ci) {
+        var ref = colL(ci) + (ri + 1), col = sh.cols[ci] || {};
+        if (v == null || v === '') return;
+        if (ri === 0) cells += '<c r="' + ref + '" s="1" t="inlineStr"><is><t xml:space="preserve">' + xe(v) + '</t></is></c>';
+        else if (typeof v === 'number' && isFinite(v)) cells += '<c r="' + ref + '"' + (col.t === 'money' ? ' s="2"' : '') + '><v>' + v + '</v></c>';
+        else cells += '<c r="' + ref + '" t="inlineStr"><is><t xml:space="preserve">' + xe(v) + '</t></is></c>';
+      });
+      x += '<row r="' + (ri + 1) + '">' + cells + '</row>';
+    });
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>' +
+      sh.cols.map(function (c, i) { return '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + Math.max(10, Math.min(48, (c.w || 14) + 2)) + '" customWidth="1"/>'; }).join('') + '</cols><sheetData>' + x + '</sheetData></worksheet>';
+  }
+  function xlsx(doc) {
+    var used = [], names = doc.sheets.map(function (s) { return sheetName(s.name, used); });
+    var f = [
+      { name: '[Content_Types].xml', x: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' + doc.sheets.map(function (s, i) { return '<Override PartName="/xl/worksheets/sheet' + (i + 1) + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'; }).join('') + '</Types>' },
+      { name: '_rels/.rels', x: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>' },
+      { name: 'xl/workbook.xml', x: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>' + names.map(function (n, i) { return '<sheet name="' + xe(n) + '" sheetId="' + (i + 1) + '" r:id="rId' + (i + 1) + '"/>'; }).join('') + '</sheets></workbook>' },
+      { name: 'xl/_rels/workbook.xml.rels', x: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' + names.map(function (n, i) { return '<Relationship Id="rId' + (i + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' + (i + 1) + '.xml"/>'; }).join('') + '<Relationship Id="rId' + (names.length + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>' },
+      { name: 'xl/styles.xml', x: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="4" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>' }
+    ];
+    doc.sheets.forEach(function (s, i) { f.push({ name: 'xl/worksheets/sheet' + (i + 1) + '.xml', x: sheetXml(s) }); });
+    return zip(f.map(function (o) { return { name: o.name, data: utf8(o.x) }; }));
+  }
+  /* PDF — plain A4 pages, Courier tables (fixed-width so columns always line up) */
+  function money(n) { var v = Number(n); if (!isFinite(v)) return ''; var p = v.toFixed(2).split('.'); return p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + p[1]; }
+  function qtyS(n) { var v = Number(n); return isFinite(v) ? String(Math.round(v * 1000) / 1000) : ''; }
+  function clean(s) { return String(s == null ? '' : s).replace(/[–—]/g, '-').replace(/→/g, '>').replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[^\x20-\x7E -ÿ]/g, '?'); }
+  function pe(s) { return clean(s).replace(/[\\()]/g, '\\$&'); }
+  function pdf(doc) {
+    var W = 595, H = 842, M = 40, FS = 8, CW = FS * 0.6, LH = 12, maxc = Math.floor((W - 2 * M) / CW), pages = [], cur, y;
+    function np() { cur = []; pages.push(cur); y = H - M; }
+    function txt(font, size, x, yy, s) { cur.push('BT /' + font + ' ' + size + ' Tf ' + x.toFixed(1) + ' ' + yy.toFixed(1) + ' Td (' + pe(s) + ') Tj ET'); }
+    function need(h) { if (y - h < M + 18) np(); }
+    np();
+    txt('F1', 15, M, y, doc.title); y -= 17;
+    (doc.lines || []).forEach(function (l) { need(12); txt('F4', 9, M, y, l); y -= 12; });
+    y -= 6;
+    doc.sheets.forEach(function (sh) {
+      var gap = 2, w = sh.cols.map(function (c) { return Math.max(4, c.w || 12); }), tot = w.reduce(function (a, b) { return a + b; }, 0) + gap * (w.length - 1);
+      if (tot > maxc) { var k = (maxc - gap * (w.length - 1)) / (tot - gap * (w.length - 1)); w = w.map(function (x) { return Math.max(4, Math.floor(x * k)); }); }
+      function fit(v, i) {
+        var c = sh.cols[i], s = typeof v === 'number' ? (c.t === 'money' ? money(v) : qtyS(v)) : clean(v), n = w[i];
+        if (s.length > n) s = s.slice(0, n - 1) + '.';
+        return typeof v === 'number' ? s.padStart(n) : s.padEnd(n);
+      }
+      function line(row) { return sh.cols.map(function (c, i) { return fit(row[i], i); }).join('  '); }
+      function head() { need(LH * 3); txt('F3', FS, M, y, line(sh.cols.map(function (c) { return c.h; }).map(function (h) { return String(h); }))); cur.push(M + ' ' + (y - 3).toFixed(1) + ' m ' + (W - M) + ' ' + (y - 3).toFixed(1) + ' l S'); y -= LH + 2; }
+      need(LH * 4); txt('F1', 10, M, y, sh.name); y -= LH + 2;
+      head();
+      if (!sh.rows.length) { txt('F4', 9, M, y, 'Nothing to show for this period.'); y -= LH; }
+      sh.rows.forEach(function (r) { if (y - LH < M + 18) { np(); head(); } txt('F2', FS, M, y, line(r)); y -= LH; });
+      y -= 10;
+    });
+    pages.forEach(function (p, i) { y = M - 8; cur = p; txt('F4', 7, M, y, 'NECPRA Duka Smart  |  ' + doc.stamp + '  |  Page ' + (i + 1) + ' of ' + pages.length); });
+    var objs = [null, '<< /Type /Catalog /Pages 2 0 R >>', '', '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>', '<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>', '<< /Type /Font /Subtype /Type1 /BaseFont /Courier-Bold /Encoding /WinAnsiEncoding >>', '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>'], kids = [];
+    pages.forEach(function (p, i) {
+      var pn = 7 + i * 2, s = p.join('\n');
+      kids.push(pn + ' 0 R');
+      objs[pn] = '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + W + ' ' + H + '] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R /F4 6 0 R >> >> /Contents ' + (pn + 1) + ' 0 R >>';
+      objs[pn + 1] = '<< /Length ' + s.length + ' >>\nstream\n' + s + '\nendstream';
+    });
+    objs[2] = '<< /Type /Pages /Kids [' + kids.join(' ') + '] /Count ' + pages.length + ' >>';
+    var out = '%PDF-1.4\n', offs = [];
+    for (var i = 1; i < objs.length; i++) { offs[i] = out.length; out += i + ' 0 obj\n' + objs[i] + '\nendobj\n'; }
+    var xr = out.length; out += 'xref\n0 ' + objs.length + '\n0000000000 65535 f \n';
+    for (i = 1; i < objs.length; i++) out += String(offs[i]).padStart(10, '0') + ' 00000 n \n';
+    out += 'trailer\n<< /Size ' + objs.length + ' /Root 1 0 R >>\nstartxref\n' + xr + '\n%%EOF';
+    var u = new Uint8Array(out.length); for (i = 0; i < out.length; i++) u[i] = out.charCodeAt(i) & 255;
+    return u;
+  }
+  return { xlsx: xlsx, pdf: pdf, crc32: crc32 };
+})();
+async function exSave(name, mime, bytes) {
+  try {
+    var f = new File([bytes], name, { type: mime });
+    if (navigator.canShare && navigator.canShare({ files: [f] })) { await navigator.share({ files: [f], title: name }); return true; }
+  } catch (e) { if (e && e.name === 'AbortError') return false; }
+  var u = URL.createObjectURL(new Blob([bytes], { type: mime })), a = document.createElement('a');
+  a.href = u; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(u); }, 4000);
+  return true;
+}
+function exStamp() { return 'Generated ' + new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }); }
+/* The figures for each export come only from what is already loaded from real records; nothing is estimated or invented here. */
+function exDoc(kind) {
+  var sh = shop(), sn = sh ? sh.name : 'Shop', M = 'money', doc = { stamp: exStamp(), lines: [sn], sheets: [] };
+  if (S.staleAt) doc.lines.push('Note: these figures were saved on this phone on ' + fmtWhen(new Date(S.staleAt).toISOString()) + ' and may be out of date.');
+  if (kind === 'rep') {
+    var d = S.fd && S.fd.rep; if (!d) return null; var t = d.totals, ps = d.position;
+    doc.title = 'Profit and loss report (' + d.period + ')'; doc.lines.push(d.from + ' to ' + d.to);
+    doc.sheets.push({ name: 'Summary', cols: [{ h: 'Item', w: 34 }, { h: 'Amount (KSh)', w: 16, t: M }], rows: [
+      ['Revenue (sales)', t.revenue], ['Cost of goods sold', t.costOfGoodsSold], ['Gross profit', t.grossProfit], ['Expenses', t.expenses], ['Spoiled stock (inventory loss)', t.stockLosses || 0], ['Net profit', t.netProfit],
+      ['Cash received', t.totalCashReceived], ['  of which cash sales', t.cashFromSales], ['  of which M-PESA sales', t.mpesaFromSales], ['  of which debts collected', t.debtCollected], ['Credit given (not cash)', t.creditGiven], ['Paid to suppliers (not an expense)', t.supplierPayments],
+      ['Customers owe you (now)', ps.customersOweYou], ['You owe suppliers (now)', ps.youOweSuppliers], ['Stock at cost (now)', ps.stockAtCost]] });
+    doc.sheets.push({ name: 'By ' + (d.period === 'daily' ? 'day' : d.period === 'weekly' ? 'week' : 'month'), cols: [{ h: 'Period', w: 11 }, { h: 'Sales', w: 6 }, { h: 'Revenue', w: 12, t: M }, { h: 'Expenses', w: 11, t: M }, { h: 'Spoiled', w: 10, t: M }, { h: 'Net profit', w: 12, t: M }, { h: 'Cash in', w: 12, t: M }, { h: 'Credit', w: 10, t: M }, { h: 'Paid suppl.', w: 11, t: M }],
+      rows: d.rows.map(function (r) { return [r.periodStart, r.salesCount, r.revenue, r.expenses, r.stockLosses || 0, r.netProfit, r.totalCashReceived, r.creditGiven || 0, r.supplierPayments || 0]; }) });
+    return { doc: doc, file: 'profit-report-' + d.period };
+  }
+  if (kind === 'debts') {
+    var g = S.fd && S.fd.debts; if (!g) return null; doc.title = 'Debts';
+    doc.sheets.push({ name: 'Customers owe you', cols: [{ h: 'Customer', w: 26 }, { h: 'Phone', w: 14 }, { h: 'Unpaid sales', w: 12 }, { h: 'Since', w: 14 }, { h: 'Owed (KSh)', w: 14, t: M }], rows: g.customersOweYou.customers.map(function (x) { return [x.name, x.phone || '', x.unpaidSales, fmtWhen(x.oldestSaleAt), x.owed]; }) });
+    doc.sheets.push({ name: 'You owe suppliers', cols: [{ h: 'Supplier', w: 30 }, { h: 'Owed (KSh)', w: 14, t: M }], rows: g.youOweSuppliers.suppliers.map(function (x) { return [x.name, x.owed]; }) });
+    return { doc: doc, file: 'debts' };
+  }
+  if (kind === 'exp') {
+    var e = S.fd && S.fd.exp; if (!e) return null; doc.title = 'Expenses (last 30 days)'; doc.lines.push('Total (not voided): KSh ' + money(e.total));
+    doc.sheets.push({ name: 'Expenses', cols: [{ h: 'Date', w: 11 }, { h: 'Category', w: 16 }, { h: 'Method', w: 8 }, { h: 'Amount (KSh)', w: 13, t: M }, { h: 'Status', w: 8 }, { h: 'Note', w: 30 }], rows: e.expenses.map(function (x) { return [x.expenseDate, x.category, x.method, x.amount, x.status === 'voided' ? 'voided' : 'ok', x.description || '']; }) });
+    return { doc: doc, file: 'expenses' };
+  }
+  if (kind === 'sales') {
+    doc.title = 'Sales (' + ({ today: 'today', '7': 'last 7 days', '30': 'last 30 days', all: 'all time' }[S.range] || S.range) + ')';
+    var m = S.salesSummary; if (m) doc.lines.push('Sales KSh ' + money(m.total) + ' (' + m.count + ')  |  received KSh ' + money(m.amountPaid) + '  |  unpaid KSh ' + money(m.balanceDue) + '  |  gross profit KSh ' + money(m.grossProfit));
+    doc.sheets.push({ name: 'Sales', cols: [{ h: 'Receipt', w: 8 }, { h: 'Date', w: 15 }, { h: 'Customer', w: 20 }, { h: 'Total (KSh)', w: 13, t: M }, { h: 'Balance due', w: 12, t: M }, { h: 'Payment', w: 9 }, { h: 'Status', w: 10 }],
+      rows: S.sales.map(function (s) { return [String(s.receiptNo), fmtWhen(s.soldAt), s.customerName || '', s.total, s.balanceDue || 0, s.paymentStatus, s.status === 'voided' ? 'cancelled' : 'completed']; }) });
+    return { doc: doc, file: 'sales' };
+  }
+  if (kind === 'waste') {
+    var w = S.waste; if (!w) return null; doc.title = 'Waste and stock at risk'; var sm = w.summary;
+    doc.lines.push('Stock at risk (estimate): KSh ' + money(sm.stockAtRiskValue) + '  |  Spoilage losses, last 30 days: KSh ' + money(sm.lossesLast30Days) + '  |  previous 30 days: KSh ' + money(sm.lossesPrevious30Days));
+    doc.lines.push('Risk figures are estimates from your own sales and stock records, not confirmed spoilage.');
+    var br = []; w.items.forEach(function (it) { it.batches.forEach(function (b) { br.push([it.name, it.unit, b.qtyOnHandEstimate, b.ageDays, b.freshness, b.estimatedAtRiskQty || 0]); }); });
+    doc.sheets.push({ name: 'Perishable stock by batch', cols: [{ h: 'Product', w: 22 }, { h: 'Unit', w: 8 }, { h: 'Qty (est.)', w: 11 }, { h: 'Age (days)', w: 10 }, { h: 'Freshness', w: 11 }, { h: 'May not sell', w: 12 }], rows: br });
+    doc.sheets.push({ name: 'Selling speed and next purchase', cols: [{ h: 'Product', w: 22 }, { h: 'In stock', w: 10 }, { h: 'Avg/day', w: 9 }, { h: 'Days left', w: 9 }, { h: 'Basis', w: 11 }, { h: 'Next buy (est.)', w: 14 }],
+      rows: w.items.map(function (it) { return [it.name, it.stockQty, it.sales.avgDailyQty, it.sales.daysOfStockLeft == null ? '' : it.sales.daysOfStockLeft, it.sales.confidence === 'preliminary' ? 'preliminary' : 'your sales', it.reorder ? it.reorder.suggestedQty : '']; }) });
+    return { doc: doc, file: 'waste-report' };
+  }
+  if (kind === 'gb') {
+    var gb = S.gb; if (!gb) return null; doc.title = 'Group purchases'; var mine = gb.dash.mine;
+    doc.lines.push('Verified savings on completed orders: KSh ' + money(gb.dash.verifiedSavings.amount) + ' (only counted where a real supplier quote exists)');
+    doc.sheets.push({ name: 'My group purchases', cols: [{ h: 'Product', w: 22 }, { h: 'Qty', w: 9 }, { h: 'Unit', w: 8 }, { h: 'Order status', w: 14 }, { h: 'Amount due', w: 12, t: M }, { h: 'Paid', w: 12, t: M }],
+      rows: mine.orders.map(function (o) { return [o.product, o.qty, o.unit, o.orderStatus, o.amountDue == null ? '' : o.amountDue, o.amountPaid == null ? '' : o.amountPaid]; }) });
+    return { doc: doc, file: 'group-purchases' };
+  }
+  return null;
+}
+async function exRun(btn, kind, fmt) {
+  var x = exDoc(kind); if (!x) return toast('Nothing loaded to export yet. Open the screen first.', true);
+  var d = x.doc, base = x.file + '-' + ymd(0);
+  busy(btn, true, 'Preparing…');
+  try {
+    if (fmt === 'pdf') await exSave(base + '.pdf', 'application/pdf', EX.pdf(d));
+    else await exSave(base + '.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', EX.xlsx(d));
+  } catch (e) { toast('Could not create the file: ' + (e && e.message || e), true); } finally { busy(btn, false); }
+}
+function exBar(kind) {
+  return '<div class="actions noprint" style="margin:10px 0"><button class="btn2" data-act="exRun" data-k="' + kind + '" data-f="pdf" type="button"><i class="fas fa-file-pdf"></i> PDF</button>' +
+    '<button class="btn2" data-act="exRun" data-k="' + kind + '" data-f="xlsx" type="button"><i class="fas fa-file-excel"></i> Excel</button></div>';
+}
+
 function gbNew() {
+  S.gbNewId = uuid(); S.gbDraftId = S.gbNewId;
   openModal(T('Start a group order', 'Anzisha oda ya pamoja'),
     '<label>' + T('Product', 'Bidhaa') + '</label><input id="gbName" maxlength="160" placeholder="Tomatoes">' +
     '<div class="two"><div><label>' + T('Unit', 'Kipimo') + '</label><select id="gbUnit">' + opt(UNITS, 'kg') + '</select></div><div><label>' + T('Market / delivery place', 'Soko / mahali') + '</label><input id="gbMarket" maxlength="160"></div></div>' +
     '<div class="two"><div><label>' + T('Your quantity', 'Kiasi chako') + '</label><input id="gbQty" type="number" min="0" step="any" inputmode="decimal"></div><div><label>' + T('Minimum for the group', 'Kiwango cha chini cha kikundi') + '</label><input id="gbMin" type="number" min="0" step="any" inputmode="decimal"></div></div>' +
     '<div class="two"><div><label>' + T('Closes in (hours)', 'Inafungwa baada ya (saa)') + '</label><input id="gbClose" type="number" min="1" value="24"></div><div><label>' + T('Pay within (hours of closing)', 'Lipa ndani ya (saa)') + '</label><input id="gbPay" type="number" min="1" value="24"></div></div>' +
     '<label>' + T('What you usually pay per unit (optional, only used to show YOUR saving)', 'Bei unayolipa kawaida (si lazima)') + '</label><input id="gbRef" type="number" min="0" step="any" inputmode="decimal">' +
-    '<div class="actions"><button class="btn2" data-act="closeModal" type="button">' + T('Cancel', 'Ghairi') + '</button><button class="btn" data-act="gbCreate" type="button">' + T('Create', 'Unda') + '</button></div>');
+    '<div class="actions"><button class="btn2" data-act="closeModal" type="button">' + T('Cancel', 'Ghairi') + '</button><button class="btn2" data-act="gbSaveDraft" type="button">' + T('Save draft', 'Hifadhi rasimu') + '</button><button class="btn" data-act="gbCreate" type="button">' + T('Create', 'Unda') + '</button></div>' +
+    '<div class="s">' + T('No internet? Save a draft and send it later. A draft is not an order.', 'Hakuna mtandao? Hifadhi rasimu utume baadaye.') + '</div>');
 }
 async function gbCreate(btn) {
   var close = Number(val('gbClose')) || 24, pay = Number(val('gbPay')) || 24;
-  var body = { id: uuid(), shopId: S.shopId, productName: val('gbName'), unit: val('gbUnit'), market: val('gbMarket'), minQty: numOrNull('gbMin') || 0,
+  var body = { id: S.gbNewId || (S.gbNewId = uuid()), shopId: S.shopId, productName: val('gbName'), unit: val('gbUnit'), market: val('gbMarket'), minQty: numOrNull('gbMin') || 0,
     closesAt: gbHours(close), paymentDeadline: gbHours(close + pay) };
   if (numOrNull('gbQty')) body.qty = numOrNull('gbQty'); if (numOrNull('gbRef') != null) body.referencePrice = numOrNull('gbRef');
   busy(btn, true);
-  try { await api('POST', '/group-buy/orders', body); closeModal(); toast(T('Group order created', 'Oda imeundwa')); refresh(); } catch (e) { gbBad(e); } finally { busy(btn, false); }
+  try { await api('POST', '/group-buy/orders', body); S.gbNewId = S.gbDraftId = null; closeModal(); toast(T('Group order created', 'Oda imeundwa')); refresh(); }
+  catch (e) {
+    if (e.offline) { var dr = gbDraftFromForm(); if (gbDraftOk(dr) && gbDraftSave(dr)) { S.gbNewId = S.gbDraftId = null; closeModal(); toast(T('No internet — saved as a draft. Nothing was ordered yet.', 'Hakuna mtandao — imehifadhiwa kama rasimu. Hakuna kilichoagizwa.')); render(); } }
+    else gbBad(e);
+  } finally { busy(btn, false); }
 }
 function gbSupplier() {
   openModal(T('Supplier registration', 'Usajili wa msambazaji'),
@@ -1383,7 +1655,7 @@ async function gbOpen(id) {
     var d = await api('GET', '/group-buy/orders/' + id, null, GB_NOCACHE), rec = null;
     try { rec = await api('GET', '/group-buy/orders/' + id + '/recommendation?shopId=' + S.shopId, null, GB_NOCACHE); } catch (_) {}
     S.gbSel = { id: id, d: d, rec: rec }; gbModal();
-  } catch (e) { gbBad(e); }
+  } catch (e) { if (e.offline) gbOfflineOpen(id); else gbBad(e); }
 }
 function gbModal() {
   var s = S.gbSel, d = s.d, o = d.order, you = d.you, h = '';
@@ -1432,6 +1704,8 @@ async function gbDo(btn, method, path, body, msg) {
 function gbAct(a, t, id) {
   var s = S.gbSel, you = s && s.d.you;
   if (a === 'gbOpen') gbOpen(id);
+  else if (a === 'gbSaveDraft') gbSaveDraft(); else if (a === 'gbDraftJoin') gbDraftSaveJoin(); else if (a === 'gbDraftSend') gbSendDraft(t, id);
+  else if (a === 'gbDraftSendAll') gbSendAllDrafts(t); else if (a === 'gbDraftDel') { if (confirm(T('Delete this draft?', 'Futa rasimu hii?'))) { gbDraftDel(id); render(true); } }
   else if (a === 'gbNew') gbNew(); else if (a === 'gbCreate') gbCreate(t); else if (a === 'gbSupplier') gbSupplier(); else if (a === 'gbSupReg') gbSupReg(t);
   else if (a === 'gbJoin') gbDo(t, 'POST', '/join', { shopId: S.shopId, qty: numOrNull('gbJQty'), referencePrice: numOrNull('gbJRef') }, T('Saved', 'Imehifadhiwa'));
   else if (a === 'gbWithdraw') { if (confirm(T('Withdraw from this order? Anything you paid will be queued for refund.', 'Ujiondoe? Ulicholipa kitarejeshwa.'))) gbDo(t, 'POST', '/withdraw', {}); }
@@ -1461,7 +1735,7 @@ function viewWaste() {
     return '<div class="card"><div class="t">' + esc(it.name) + ' · ' + T('in stock ', 'stoku ') + QTY(it.stockQty) + ' ' + esc(it.unit) + '</div><div class="s">' + T('Selling about ', 'Inauzwa takriban ') + QTY(it.sales.avgDailyQty) + '/' + T('day', 'siku') + (it.sales.daysOfStockLeft != null ? ' · ' + it.sales.daysOfStockLeft + ' ' + T('days of stock left', 'siku za stoku') : '') + (it.sales.confidence === 'preliminary' ? ' · ' + T('preliminary', 'awali') : '') + '</div>' + b + sug + rec + '</div>';
   }).join('') : '<div class="s">' + T('No perishable stock yet. Mark a product as perishable and add stock with its shelf life.', 'Hakuna bidhaa zinazoharibika bado.') + '</div>';
   return '<h3>' + T('Waste prevention', 'Kuzuia upotevu') + '</h3>' + head +
-    '<div class="actions"><button class="btn" data-act="wsBatch" type="button">' + T('Receive stock', 'Pokea stoku') + '</button><button class="btn2" data-act="wsLoss" type="button">' + T('Record spoiled stock', 'Rekodi iliyoharibika') + '</button></div>' + items +
+    '<div class="actions"><button class="btn" data-act="wsBatch" type="button">' + T('Receive stock', 'Pokea stoku') + '</button><button class="btn2" data-act="wsLoss" type="button">' + T('Record spoiled stock', 'Rekodi iliyoharibika') + '</button></div>' + (w.items.length ? exBar('waste') : '') + items +
     '<div class="note">' + esc(w.disclaimer) + ' ' + T('Prices never change unless you approve.', 'Bei hazibadiliki bila idhini yako.') + '</div>';
 }
 function wsProductSel(id) { return '<select id="' + id + '">' + S.products.map(function (p) { return '<option value="' + esc(p.id) + '">' + esc(p.name) + ' (' + esc(p.unit) + ')</option>'; }).join('') + '</select>'; }
@@ -1561,6 +1835,7 @@ document.addEventListener('click', function (ev) {
   else if (a === 'openSale') openSale(id);
   else if (a === 'voidSale') openVoidSale(id);
   else if (a === 'doVoidSale') doVoidSale(t, id);
+  else if (a === 'exRun') exRun(t, t.dataset.k, t.dataset.f);
   else if (/^(gb|ws)[A-Z]/.test(a)) extraAct(a, t, id);
   else if (a === 'retry') { S.loading = true; boot(); }
   else if (a === 'tab') { S.tab = t.dataset.tab; try { sessionStorage.setItem('necpra_duka_tab', S.tab); } catch (_) {} render(); refresh(); }
