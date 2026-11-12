@@ -1984,7 +1984,7 @@ async function fnOpen() {
         (p.rejectReason ? '<div class="s">' + esc(p.rejectReason) + '</div>' : '') + '</div></div>';
     }).join('') : '<div class="s">' + T('No device application yet.', 'Bado hujaomba kifaa.') + '</div>';
     h += '<div class="note">' + T('A late instalment never switches off your scale or stops you selling. You will only get reminders.', 'Kuchelewa kulipa hakuzimi mizani yako wala kukuzuia kuuza. Utapata vikumbusho tu.') + '</div>' +
-      '<div class="actions">' + (openPlan ? '' : '<button class="btn" data-act="fnApply" type="button">' + T('Apply for a Smart Scale', 'Omba Smart Scale') + '</button>') + '<button class="btn2" data-act="closeModal" type="button">' + T('Close', 'Funga') + '</button></div>';
+      '<div class="actions">' + (openPlan ? '' : '<button class="btn" data-act="fnApply" type="button">' + T('Apply for a Smart Scale', 'Omba Smart Scale') + '</button>') + (plans.length ? '<button class="btn2" data-act="fnRem" type="button">' + T('Reminders', 'Vikumbusho') + '</button>' : '') + '<button class="btn2" data-act="closeModal" type="button">' + T('Close', 'Funga') + '</button></div>';
     $('mBody').innerHTML = h;
   } catch (e) { closeModal(); gbBad(e); }
 }
@@ -2036,11 +2036,43 @@ async function fnPoll(planId, attempt, n) {
   if (n >= 30) return fnStkMsg(T('Still waiting. If you paid, it will appear here once M-PESA confirms. You can also enter the receipt code below.', 'Bado inasubiri. Ukilipa, itaonekana hapa M-PESA ikithibitisha. Unaweza pia kuweka nambari ya risiti hapa chini.'));
   FN.stkTimer = setTimeout(function () { fnPoll(planId, attempt, n + 1); }, 4000);
 }
+/* Instalment reminders: push is on by default, SMS only after the trader agrees (it costs NECPRA per message). Reminders never affect the scale or selling. */
+async function fnRemForm() {
+  openModal(T('Instalment reminders', 'Vikumbusho vya malipo'), '<div class="spin">Loading…</div>');
+  try {
+    var d = await api('GET', '/shops/' + S.shopId + '/financing/reminder-settings', null, GB_NOCACHE), c = d.settings, log = [];
+    try { log = (await api('GET', '/shops/' + S.shopId + '/financing/reminder-log', null, GB_NOCACHE)).reminders || []; } catch (_) {}
+    var kindTxt = { deposit: T('Deposit', 'Amana'), upcoming: T('Due soon', 'Inakaribia'), overdue: T('Overdue', 'Imechelewa') };
+    var stTxt = { sent: T('sent', 'imetumwa'), failed: T('failed', 'imeshindwa'), skipped: T('not delivered', 'haikufikishwa'), sending: T('sending', 'inatumwa') };
+    var h = '<div class="note">' + T('We remind you before an instalment is due, and once a week if one is overdue. Messages are sent between 8am and 8pm. Reminders never switch off your scale or stop you selling.', 'Tunakukumbusha kabla ya malipo ya awamu, na mara moja kwa wiki ikiwa yamechelewa. Ujumbe hutumwa kati ya saa 2 asubuhi na saa 2 usiku. Vikumbusho havizimi mizani wala kukuzuia kuuza.') + '</div>' +
+      '<label style="display:flex;gap:8px;align-items:center"><input id="fnRemPush" type="checkbox" style="width:auto"' + (c.pushEnabled ? ' checked' : '') + '> <span>' + T('App notifications', 'Arifa za programu') + '</span></label>' +
+      '<label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px"><input id="fnRemSms" type="checkbox" style="width:auto;margin-top:3px"' + (c.smsEnabled ? ' checked' : '') + (d.smsAvailable ? '' : ' disabled') + '> <span>' + T('Also send me SMS reminders', 'Nitumie pia vikumbusho kwa SMS') + '</span></label>' +
+      (d.smsAvailable ? '' : '<div class="s">' + T('SMS reminders are not switched on yet. App notifications still work.', 'Vikumbusho vya SMS bado havijawashwa. Arifa za programu zinaendelea kufanya kazi.') + '</div>') +
+      '<label>' + T('Phone for SMS', 'Simu ya SMS') + '</label><input id="fnRemPh" inputmode="tel" placeholder="07XX XXX XXX" value="' + esc(c.smsPhone || d.shopPhone || '') + '">' +
+      '<label style="display:flex;gap:8px;align-items:flex-start"><input id="fnRemCons" type="checkbox" style="width:auto;margin-top:3px"' + (c.smsConsent ? ' checked' : '') + '> <span>' + T('I agree to receive SMS reminders about my Smart Scale instalments on this number.', 'Nakubali kupokea vikumbusho vya SMS kuhusu malipo ya awamu ya Smart Scale yangu kwenye nambari hii.') + '</span></label>' +
+      '<label>' + T('Message language', 'Lugha ya ujumbe') + '</label><select id="fnRemLang"><option value="en"' + (c.language === 'en' ? ' selected' : '') + '>English</option><option value="sw"' + (c.language === 'sw' ? ' selected' : '') + '>Kiswahili</option></select>' +
+      '<div class="actions">' + fnBack() + '<button class="btn" data-act="fnRemSave" type="button">' + T('Save', 'Hifadhi') + '</button></div>';
+    if (log.length) h += '<h3>' + T('Recent reminders', 'Vikumbusho vya hivi karibuni') + '</h3>' + log.slice(0, 8).map(function (x) { return '<div class="s">' + new Date(x.at).toLocaleDateString('en-KE') + ' · ' + (kindTxt[x.kind] || esc(x.kind)) + ' · ' + (x.channel === 'sms' ? 'SMS' : T('app', 'programu')) + ' · ' + (stTxt[x.status] || esc(x.status)) + '</div>'; }).join('');
+    $('mBody').innerHTML = h;
+  } catch (e) { closeModal(); gbBad(e); }
+}
 async function fnAct(a, t, id) {
   if (a === 'fnOpen') return fnOpen();
   if (a === 'fnApply') return fnApplyForm();
   if (a === 'fnPlan') return fnPlan(id);
+  if (a === 'fnRem') return fnRemForm();
   var base = '/shops/' + S.shopId + '/financing';
+  if (a === 'fnRemSave') {
+    var wantSms = $('fnRemSms').checked, body = { pushEnabled: $('fnRemPush').checked, language: val('fnRemLang') || 'en' };
+    if (wantSms) {
+      if (!$('fnRemCons').checked) return toast(T('Please tick the box to agree to SMS reminders', 'Tafadhali kubali kupokea vikumbusho vya SMS'), true);
+      if (!val('fnRemPh')) return toast(T('Enter the phone number for SMS', 'Weka nambari ya simu ya SMS'), true);
+      body.smsEnabled = true; body.smsConsent = true; body.smsPhone = val('fnRemPh');
+    } else if (!$('fnRemSms').disabled) body.smsEnabled = false;
+    busy(t, true);
+    try { await api('PUT', base + '/reminder-settings', body); toast(T('Reminder settings saved', 'Mipangilio ya vikumbusho imehifadhiwa')); fnRemForm(); } catch (e) { gbBad(e); } finally { busy(t, false); }
+    return;
+  }
   if (a === 'fnApplyGo') {
     if (!$('fnConsent').checked) return toast(T('Please tick the box to agree to share your shop figures', 'Tafadhali kubali kushiriki takwimu za duka'), true);
     busy(t, true);
