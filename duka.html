@@ -137,7 +137,7 @@ var shop = function () { return S.shops.filter(function (s) { return s.id === S.
 
 function toast(m, bad) { var t = document.createElement('div'); t.className = 'toast' + (bad ? ' err' : ''); t.textContent = m; $('toasts').appendChild(t); setTimeout(function () { t.remove(); }, 4200); }
 function openModal(title, html) { $('mTitle').textContent = title; $('mBody').innerHTML = html; $('modal').classList.add('open'); }
-function closeModal() { $('modal').classList.remove('open'); $('mBody').innerHTML = ''; }
+function closeModal() { stopScan(); $('modal').classList.remove('open'); $('mBody').innerHTML = ''; }
 function busy(btn, on, txt) { if (!btn) return; btn.disabled = on; if (on) { btn.dataset.t = btn.textContent; btn.textContent = txt || 'Please wait…'; } else if (btn.dataset.t) btn.textContent = btn.dataset.t; }
 function opt(list, sel) { return list.map(function (u) { return '<option' + (u === sel ? ' selected' : '') + '>' + esc(u) + '</option>'; }).join(''); }
 var val = function (id) { var e = $(id); return e ? e.value.trim() : ''; };
@@ -173,7 +173,7 @@ async function loadTab() {
     syncCart();
   }
   if (S.tab === 'group') { var gp = await api('GET', '/shops/' + S.shopId + '/products?limit=500'); S.products = applyPending(gp.products.slice()); S.gb = { orders: (await api('GET', '/group-buy/orders', null, GB_NOCACHE)).orders, dash: await api('GET', '/group-buy/dashboard', null, GB_NOCACHE) }; }
-  if (S.tab === 'waste') { var wp = await api('GET', '/shops/' + S.shopId + '/products?limit=500'); S.products = applyPending(wp.products.slice()); S.waste = await api('GET', '/shops/' + S.shopId + '/waste', null, GB_NOCACHE); }
+  if (S.tab === 'waste') { var wp = await api('GET', '/shops/' + S.shopId + '/products?limit=500'); S.products = applyPending(wp.products.slice()); S.waste = await api('GET', '/shops/' + S.shopId + '/waste'); }
   if (S.tab === 'money') await loadMoney();
   if (S.tab === 'sales') {
     var from = S.range === 'today' ? ymd(0) : S.range === '7' ? ymd(6) : S.range === '30' ? ymd(29) : '';
@@ -235,7 +235,7 @@ function viewDash() {
   var d = S.dash; if (!d) return '<div class="spin">Loading…</div>';
   var st = d.stock, ts = d.todaySales, cd = d.customerDebts;
   var money = '<div class="grid"><div class="card stat"><small>Today\'s sales</small><b>' + KSH(ts.total) + '</b><div class="s">' + ts.count + ' sale' + (ts.count === 1 ? '' : 's') + '</div></div>' +
-    '<div class="card stat"><small>' + (d.netProfit != null ? 'Net profit today' : 'Est. profit today') + '</small><b>' + KSH(d.netProfit != null ? d.netProfit : d.estimatedProfit) + '</b><div class="s">' + (d.netProfit != null ? 'Gross ' + KSH(d.estimatedProfit) + ' − expenses ' + KSH(d.totalExpenses) : 'Before expenses') + '</div></div>' +
+    '<div class="card stat"><small>' + (d.netProfit != null ? 'Net profit today' : 'Est. profit today') + '</small><b>' + KSH(d.netProfit != null ? d.netProfit : d.estimatedProfit) + '</b><div class="s">' + (d.netProfit != null ? 'Gross ' + KSH(d.estimatedProfit) + ' − expenses ' + KSH(d.totalExpenses) + (d.stockLossesToday ? ' − spoiled stock ' + KSH(d.stockLossesToday) : '') : 'Before expenses') + '</div></div>' +
     '<div class="card stat ' + (cd.total > 0 ? 'warn' : '') + '"><small>Customer debts</small><b>' + KSH(cd.total) + '</b><div class="s">' + cd.openSales + ' unpaid sale' + (cd.openSales === 1 ? '' : 's') + '</div></div>' +
     '<div class="card stat"><small>Cash received today</small><b>' + KSH(ts.cashReceived) + '</b><div class="s">+ M-PESA ' + KSH(ts.mpesaReceived) + '</div></div></div>' +
     '<div class="note">Credit given today: <b>' + KSH(ts.creditGiven) + '</b> (not cash).' + (d.debtCollectedToday ? ' Debts collected today: <b>' + KSH(d.debtCollectedToday) + '</b>.' : '') + (d.supplierDebts ? ' You owe suppliers <b>' + KSH(d.supplierDebts) + '</b>.' : '') + ' ' + (ts.mpesaReceived > ts.mpesaVerified ? 'M-PESA entered from receipt codes: ' + KSH(ts.mpesaReceived - ts.mpesaVerified) + ' — not independently verified.' : '') + '</div>' +
@@ -286,10 +286,13 @@ function productForm(p) {
     '<div class="two">' + (isNew ? '<div><label>Available stock</label><input id="pStock" inputmode="decimal" value="0"></div>' : '<div><label>Current stock</label><input value="' + QTY(p.stockQty) + '" disabled></div>') +
     '<div><label>Minimum stock (alert level)</label><input id="pMin" inputmode="decimal" value="' + (p.minStock != null ? p.minStock : 0) + '"></div></div>' +
     '<label>Description (optional)</label><textarea id="pDesc" maxlength="500" rows="2" placeholder="e.g. 2kg packet, brand, size">' + esc(p.description) + '</textarea>' +
-    '<label>Barcode (optional)</label><input id="pBar" maxlength="64" value="' + esc(p.barcode) + '">';
+    '<label>Barcode (optional)</label><input id="pBar" maxlength="64" value="' + esc(p.barcode) + '">' +
+    '<label>Buy in packs? (optional)</label><div class="two"><div><input id="pPackUnit" maxlength="20" list="packList" value="' + esc(p.packUnit) + '" placeholder="e.g. crate, tray, sack"><datalist id="packList"><option value="crate"><option value="tray"><option value="sack"><option value="carton"><option value="box"></datalist></div>' +
+    '<div><input id="pPackSize" inputmode="decimal" value="' + (p.packSize != null ? p.packSize : '') + '" placeholder="how many ' + esc(p.unit || 'units') + ' in one"></div></div>' +
+    '<div class="s">Example: crate + 30 for eggs. When you receive 2 crates, the shop adds 60 eggs at the right cost per egg.</div>';
 }
 function productPayload(isNew) {
-  var o = { name: val('pName'), category: val('pCat') || null, unit: val('pUnit') || 'piece', buyingPrice: numOrNull('pBuy'), sellingPrice: numOrNull('pSell'), minStock: numOrNull('pMin') || 0, barcode: val('pBar') || null, description: val('pDesc') || null };
+  var o = { name: val('pName'), category: val('pCat') || null, unit: val('pUnit') || 'piece', buyingPrice: numOrNull('pBuy'), sellingPrice: numOrNull('pSell'), minStock: numOrNull('pMin') || 0, barcode: val('pBar') || null, description: val('pDesc') || null, packUnit: val('pPackUnit') || null, packSize: numOrNull('pPackSize') };
   if (isNew) o.stockQty = numOrNull('pStock') || 0;
   return o;
 }
@@ -297,6 +300,7 @@ function clientCheck(o) {
   if (!o.name) return 'Enter the product name';
   if (o.buyingPrice == null || isNaN(o.buyingPrice)) return 'Enter the buying price';
   if (o.sellingPrice == null || isNaN(o.sellingPrice)) return 'Enter the selling price';
+  if (!!o.packUnit !== !!o.packSize) return 'For a pack, enter both its name (e.g. crate) and how many units it holds (e.g. 30)';
   if (o.sellingPrice < o.buyingPrice && !confirmedLoss) { confirmedLoss = true; return 'Selling price is lower than buying price — you would lose money on each sale. Tap Save again if this is intended.'; }
   return '';
 }
@@ -428,10 +432,10 @@ function cartHtml() {
   return '<div class="card">' + lines + '<div class="tot"><span>Subtotal</span><span id="posSub">' + KC(c.sub) + '</span></div>' +
     '<div class="tot" id="posDiscRow"' + (c.disc ? '' : ' style="display:none"') + '><span>Discount</span><span id="posDisc">− ' + KC(c.disc) + '</span></div>' +
     '<div class="tot big"><span>Total</span><span id="posTotal">' + KC(c.total) + '</span></div></div>' +
-    '<div class="actions"><button class="btn2" data-act="clearCart" type="button">Clear</button><button class="btn" data-act="checkout" type="button" id="posGo">Checkout</button></div>';
+    '<div class="actions"><button class="btn2" data-act="clearCart" type="button">Clear</button><button class="btn2" data-act="parkBill" type="button">Hold bill</button><button class="btn" data-act="checkout" type="button" id="posGo">Checkout</button></div>';
 }
 function viewPos() {
-  return '<div class="bar"><input id="posQ" class="grow" type="search" placeholder="Search product or scan barcode" value="' + esc(S.posQ) + '" autocomplete="off"></div>' +
+  return '<div class="bar"><input id="posQ" class="grow" type="search" placeholder="Search product or scan barcode" value="' + esc(S.posQ) + '" autocomplete="off"><button class="btn2" data-act="openScan" type="button" aria-label="Scan barcode" style="flex:0 0 auto"><i class="fas fa-barcode"></i> Scan</button></div>' + parkedHtml() +
     '<div id="posResults">' + posResults() + '</div><h3>Current sale</h3><div id="posCart">' + cartHtml() + '</div>';
 }
 // Typing in qty/price/discount must not rebuild the DOM (focus would be lost) — patch the numbers in place.
@@ -450,6 +454,122 @@ function addToCart(id) {
   S.posQ = ''; saveCart(); render(); var q = $('posQ'); if (q) q.focus();
 }
 function clearCart() { S.cart = []; S.saleId = null; S.coId = null; S.disc = { type: 'amount', value: '' }; saveCart(); render(); }
+
+/* ───── Customer sessions: hold a bill while serving the next customer ─────
+   A held bill is a whole cart (its own sale id, discount and prices) kept in localStorage per shop, so it survives the app
+   closing or the phone restarting. Each held bill keeps its own sale id, so resuming and confirming one can never double-record
+   another. Stock is re-checked against the server list when a bill is resumed. */
+var MAX_PARKED = 10;
+var parkKey = function () { return 'necpra_duka_parked_' + S.shopId; };
+function loadParked() { try { var a = JSON.parse(localStorage.getItem(parkKey()) || '[]'); return Array.isArray(a) ? a.filter(function (b) { return b && Array.isArray(b.cart) && b.cart.length; }) : []; } catch (_) { return []; } }
+function saveParked(a) { try { a.length ? localStorage.setItem(parkKey(), JSON.stringify(a)) : localStorage.removeItem(parkKey()); return true; } catch (_) { return false; } }
+function billSum(b) { return b.cart.reduce(function (t, l) { var q = Number(l.qty), pr = Number(l.price); return t + (q > 0 && pr >= 0 ? q * pr : 0); }, 0); }
+function parkCurrent() {
+  var a = loadParked();
+  if (a.length >= MAX_PARKED) { toast('You can hold up to ' + MAX_PARKED + ' bills. Finish or discard one first.', true); return false; }
+  var n = a.reduce(function (m, b) { return Math.max(m, b.n || 0); }, 0) + 1;
+  a.push({ n: n, label: 'Customer ' + n, cart: S.cart, saleId: S.saleId || uuid(), disc: S.disc, at: Date.now() });
+  if (!saveParked(a)) { toast('Could not hold the bill (phone storage is full). Your cart is kept.', true); return false; }
+  return true;
+}
+function parkBill() {
+  if (!S.cart.length) return toast('Add items before holding a bill', true);
+  if (!parkCurrent()) return;
+  S.cart = []; S.saleId = null; S.coId = null; S.disc = { type: 'amount', value: '' }; saveCart(); render();
+  toast('Bill held. You can serve the next customer.');
+}
+function resumeBill(i) {
+  var a = loadParked(), b = a[i]; if (!b) return;
+  a.splice(i, 1);
+  if (S.cart.length) {
+    // Swap: the bill on screen goes onto the held list so nothing is ever lost.
+    var n = a.reduce(function (m, x) { return Math.max(m, x.n || 0); }, b.n || 0) + 1;
+    a.push({ n: n, label: 'Customer ' + n, cart: S.cart, saleId: S.saleId || uuid(), disc: S.disc, at: Date.now() });
+  }
+  if (!saveParked(a)) return toast('Could not switch bills (phone storage is full).', true);
+  S.cart = b.cart; S.saleId = b.saleId; S.disc = b.disc || { type: 'amount', value: '' }; S.coId = null;
+  syncCart(); render();
+}
+function discardBill(i) {
+  var a = loadParked(), b = a[i]; if (!b) return;
+  if (!window.confirm('Discard ' + b.label + '\u2019s held bill (' + b.cart.length + ' item' + (b.cart.length === 1 ? '' : 's') + ')? This cannot be undone.')) return;
+  a.splice(i, 1); saveParked(a); render();
+}
+function parkedHtml() {
+  var a = loadParked(); if (!a.length) return '';
+  return '<h3>Held bills (' + a.length + ')</h3>' + a.map(function (b, i) {
+    return '<div class="card" style="margin-bottom:8px"><div class="t" style="font-weight:700">' + esc(b.label) + ' · ' + KSH(billSum(b)) + '</div><div class="s">' + b.cart.length + ' item' + (b.cart.length === 1 ? '' : 's') + ' · held ' + esc(fmtWhen(new Date(b.at).toISOString())) + '</div>' +
+      '<div class="actions"><button class="btn2" data-act="discardBill" data-i="' + i + '" type="button">Discard</button><button class="btn" data-act="resumeBill" data-i="' + i + '" type="button">Resume</button></div></div>';
+  }).join('');
+}
+
+/* ───── Barcode scanner (phone camera) ─────
+   Uses the browser's built-in BarcodeDetector. Where the phone does not have it, nothing is faked: the seller is told, and the
+   search box still takes a typed code or a Bluetooth/USB scanner. A barcode in view is added ONCE; it is added again only after it
+   has left the camera for a moment, so holding a pack in front of the lens cannot add it twice. Prices come from the seller's own
+   catalogue; a code that is not in it is never guessed. */
+var SCAN = { stream: null, timer: null, det: null, seen: {}, lastAdd: 0, busy: false };
+function scanSupported() { return !!(window.BarcodeDetector && navigator.mediaDevices && navigator.mediaDevices.getUserMedia); }
+function scanLog(msg, bad, code) {
+  var el = $('scanLog'); if (!el) return;
+  var d = document.createElement('div'); d.className = 's'; if (bad) d.style.color = 'var(--kyn-accent-danger,#d93025)';
+  d.textContent = msg;
+  if (code) { var b = document.createElement('button'); b.className = 'btn2'; b.type = 'button'; b.dataset.act = 'scanNew'; b.dataset.code = code; b.textContent = 'Add as new product'; b.style.marginLeft = '8px'; d.appendChild(b); }
+  el.insertBefore(d, el.firstChild); while (el.childNodes.length > 6) el.removeChild(el.lastChild);
+}
+function stopScan() {
+  if (SCAN.timer) { clearInterval(SCAN.timer); SCAN.timer = null; }
+  if (SCAN.stream) { try { SCAN.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (_) {} SCAN.stream = null; }
+  SCAN.det = null; SCAN.seen = {}; SCAN.busy = false;
+}
+async function openScan() {
+  if (!scanSupported()) return toast('Camera barcode scanning is not available on this phone. Type the code in the search box, or use a Bluetooth scanner.', true);
+  stopScan();
+  openModal('Scan barcode', '<video id="scanVid" playsinline muted autoplay style="width:100%;border-radius:12px;background:#000;max-height:50vh"></video><div class="s" id="scanMsg">Starting camera…</div>' +
+    '<div class="card" id="scanLog" style="margin-top:8px;min-height:48px"></div><div class="actions"><button class="btn" data-act="closeModal" type="button">Done</button></div>');
+  try {
+    SCAN.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+    var v = $('scanVid'); if (!v) { stopScan(); return; }
+    v.srcObject = SCAN.stream; await v.play();
+    SCAN.det = new window.BarcodeDetector();
+    if ($('scanMsg')) $('scanMsg').textContent = 'Point the camera at a barcode. Each product is added once.';
+    SCAN.timer = setInterval(scanTick, 300);
+  } catch (e) {
+    stopScan();
+    var m = $('scanMsg'); if (m) m.textContent = e && e.name === 'NotAllowedError' ? 'Camera permission was refused. Allow the camera for NECPRA in your phone settings.' : 'Could not start the camera: ' + ((e && e.message) || 'unknown error');
+  }
+}
+// True only the first time a code appears; it can count again once it has been out of view for 1.5 s. A short global gap stops
+// two different codes from being added in the same instant.
+function scanAccept(code, now) {
+  var prev = SCAN.seen[code]; SCAN.seen[code] = now;
+  if (prev && now - prev < 1500) return false;
+  if (now - SCAN.lastAdd < 700) return false;
+  SCAN.lastAdd = now; return true;
+}
+async function scanTick() {
+  var v = $('scanVid'); if (!SCAN.det || SCAN.busy || !v || v.readyState < 2) return;
+  SCAN.busy = true;
+  try {
+    var found = await SCAN.det.detect(v), now = Date.now();
+    for (var k = 0; k < found.length; k++) {
+      var code = String(found[k].rawValue || '').trim(); if (!code) continue;
+      if (scanAccept(code, now)) scanHandle(code);
+    }
+  } catch (_) {} finally { SCAN.busy = false; }
+}
+function scanHandle(code) {
+  var q = code.toLowerCase();
+  var p = S.products.filter(function (x) { return x.isActive !== false && x.barcode && String(x.barcode).toLowerCase() === q; })[0];
+  if (!p) { scanLog('Not in your products: ' + code, true, code); try { navigator.vibrate && navigator.vibrate([40, 60, 40]); } catch (_) {} return; }
+  if (p.stockQty <= 0) { scanLog(p.name + ' is out of stock', true); return; }
+  var ex = S.cart.filter(function (l) { return l.productId === p.id; })[0];
+  if (ex && Number(ex.qty) + 1 > p.stockQty) { scanLog('Only ' + QTY(p.stockQty) + ' ' + p.unit + ' of ' + p.name + ' in stock', true); return; }
+  addToCart(p.id);
+  scanLog('Added ' + p.name + ' · ' + KSH(p.sellingPrice));
+  try { navigator.vibrate && navigator.vibrate(50); } catch (_) {}
+}
+function scanNew(code) { stopScan(); closeModal(); openAddProduct(); setTimeout(function () { var e = $('pBar'); if (e) e.value = code; }, 60); }
 
 /* checkout */
 function payState() {
@@ -761,11 +881,11 @@ function viewReports() {
   var t = d.totals, ps = d.position;
   function st(l, v, s, c) { return '<div class="card stat ' + (c || '') + '"><small>' + l + '</small><b>' + KSH(v) + '</b>' + (s ? '<div class="s">' + s + '</div>' : '') + '</div>'; }
   var rows = d.rows.slice().reverse().filter(function (r) { return r.salesCount || r.expenses || r.totalCashReceived || r.supplierPayments; }).map(function (r) {
-    return '<div class="item"><div class="grow"><div class="t">' + esc(periodLabel(d.period, r.periodStart)) + ' · profit ' + KSH(r.netProfit) + '</div><div class="s">Sales ' + KSH(r.revenue) + ' (' + r.salesCount + ') · expenses ' + KSH(r.expenses) + ' · cash in ' + KSH(r.totalCashReceived) + (r.creditGiven ? ' · credit ' + KSH(r.creditGiven) : '') + '</div></div></div>';
+    return '<div class="item"><div class="grow"><div class="t">' + esc(periodLabel(d.period, r.periodStart)) + ' · profit ' + KSH(r.netProfit) + '</div><div class="s">Sales ' + KSH(r.revenue) + ' (' + r.salesCount + ') · expenses ' + KSH(r.expenses) + (r.stockLosses ? ' · spoiled stock ' + KSH(r.stockLosses) : '') + ' · cash in ' + KSH(r.totalCashReceived) + (r.creditGiven ? ' · credit ' + KSH(r.creditGiven) : '') + '</div></div></div>';
   }).join('');
   return seg + '<div class="note">' + esc(d.from) + ' to ' + esc(d.to) + '</div>' +
     '<div class="grid">' + st('Revenue (sales)', t.revenue, t.salesCount + ' sales') + st('Cost of goods sold', t.costOfGoodsSold, 'Buying cost of what you sold') + st('Gross profit', t.grossProfit, 'Revenue − cost') + st('Expenses', t.expenses, 'Rent, transport…') + '</div>' +
-    '<div class="grid">' + st('Net profit', t.netProfit, 'Gross profit − expenses', t.netProfit < 0 ? 'bad' : '') + st('Cash received', t.totalCashReceived, 'Cash ' + KSH(t.cashFromSales) + ' · M-PESA ' + KSH(t.mpesaFromSales) + ' · debts collected ' + KSH(t.debtCollected)) + st('Credit given', t.creditGiven, 'Not cash', t.creditGiven > 0 ? 'warn' : '') + st('Paid to suppliers', t.supplierPayments, 'Not an expense') + '</div>' +
+    '<div class="grid">' + st('Net profit', t.netProfit, 'Gross profit − expenses' + (t.stockLosses ? ' − spoiled stock ' + KSH(t.stockLosses) : ''), t.netProfit < 0 ? 'bad' : '') + st('Cash received', t.totalCashReceived, 'Cash ' + KSH(t.cashFromSales) + ' · M-PESA ' + KSH(t.mpesaFromSales) + ' · debts collected ' + KSH(t.debtCollected)) + st('Credit given', t.creditGiven, 'Not cash', t.creditGiven > 0 ? 'warn' : '') + st('Paid to suppliers', t.supplierPayments, 'Not an expense') + '</div>' +
     '<div class="grid">' + st('Customers owe you', ps.customersOweYou, 'Right now') + st('You owe suppliers', ps.youOweSuppliers, 'Right now') + st('Stock at cost', ps.stockAtCost, 'Right now') + '</div>' +
     (rows ? '<h3>By ' + (d.period === 'daily' ? 'day' : d.period === 'weekly' ? 'week' : 'month') + '</h3>' + rows : '<div class="note">No activity in this period.</div>') +
     '<div class="note">Net profit is your actual profit. Cash received and credit are money movements, not profit. Paying a supplier is not an expense — stock cost is counted when the stock is sold.</div>';
@@ -827,6 +947,8 @@ function pendingDelta(o) {
   var m = /\/products\/([^/]+)\/stock$/.exec(o.path || '');
   if (o.type === 'stock.adjust' && m) return [[m[1], Number(o.body.qtyChange) || 0]];
   if (o.type === 'sale.create') return (o.body.items || []).map(function (i) { return [i.productId, -Number(i.qty)]; });
+  if (o.type === 'stock.batch' && o.meta && o.meta.productId) return [[o.meta.productId, Number(o.meta.qty) || 0]];
+  if (o.type === 'stock.loss' && o.body && o.body.productId) return [[o.body.productId, -(Number(o.body.qty) || 0)]];
   return [];
 }
 function applyPending(list) {
@@ -881,12 +1003,12 @@ function pendingSummary(list) {
   var s = list.filter(function (o) { return o.type === 'sale.create'; }), e = list.filter(function (o) { return o.type === 'expense.create'; }), p = list.length - s.length - e.length, out = [];
   if (s.length) out.push(s.length + ' sale' + (s.length === 1 ? '' : 's') + ' (' + KSH(s.reduce(function (a, o) { return a + Number(o.meta.total || 0); }, 0)) + ')');
   if (e.length) out.push(e.length + ' expense' + (e.length === 1 ? '' : 's') + ' (' + KSH(e.reduce(function (a, o) { return a + Number(o.meta.amount || 0); }, 0)) + ')');
-  if (p) out.push(p + ' product/stock update' + (p === 1 ? '' : 's'));
+  if (p) out.push(p + ' product/stock/loss update' + (p === 1 ? '' : 's'));
   return out.length ? ': ' + out.join(', ') + '. Not in your sales history or reports until synced.' : '';
 }
 function syncBar() {
   var pend = obPending(), fail = obFailed(), h = '';
-  if (navigator.onLine === false) h += '<div class="note"><b>You are offline.</b> You can still add products, change stock, record fully paid cash sales and expenses. They are kept on this phone and sent when you are back online. M-PESA, credit sales and customer payments need internet.</div>';
+  if (navigator.onLine === false) h += '<div class="note"><b>You are offline.</b> You can still add products, change stock, receive stock, record spoiled stock, fully paid cash sales and expenses. They are kept on this phone and sent when you are back online. M-PESA, credit sales and customer payments need internet.</div>';
   if (S.staleAt) h += '<div class="note">Showing information saved on this phone (' + esc(fmtWhen(new Date(S.staleAt).toISOString())) + '). It may be out of date.</div>';
   if (pend.length) h += '<div class="note" data-act="syncStatus" style="cursor:pointer">' + (S.syncState === 'syncing' ? 'Syncing… ' : '') + '<b>' + pend.length + ' change' + (pend.length === 1 ? '' : 's') + ' waiting to sync</b>' + esc(pendingSummary(pend)) + ' <u>Details</u></div>';
   if (fail.length) h += '<div class="note err" data-act="syncStatus" style="cursor:pointer"><b>' + fail.length + ' change' + (fail.length === 1 ? '' : 's') + ' need attention</b> — the server did not accept ' + (fail.length === 1 ? 'it' : 'them') + '. <u>Review</u></div>';
@@ -1343,22 +1465,48 @@ function viewWaste() {
     '<div class="note">' + esc(w.disclaimer) + ' ' + T('Prices never change unless you approve.', 'Bei hazibadiliki bila idhini yako.') + '</div>';
 }
 function wsProductSel(id) { return '<select id="' + id + '">' + S.products.map(function (p) { return '<option value="' + esc(p.id) + '">' + esc(p.name) + ' (' + esc(p.unit) + ')</option>'; }).join('') + '</select>'; }
+// A change just queued on the phone: show its effect on stock now (a later reload re-applies every queued change from the server numbers).
+function bumpLocal(pid, d) { var p = S.products.filter(function (x) { return x.id === pid; })[0]; if (!p) return; p.stockQty = Math.round((p.stockQty + d) * 1000) / 1000; p.isOutOfStock = p.stockQty <= 0; p.isLowStock = p.stockQty <= 0 || (p.minStock > 0 && p.stockQty <= p.minStock); }
 function wsBatch() {
+  S.batchId = uuid(); S.batchPerId = uuid();
   openModal(T('Receive stock', 'Pokea stoku'), '<label>' + T('Product', 'Bidhaa') + '</label>' + wsProductSel('wbProd') +
-    '<div class="two"><div><label>' + T('Quantity', 'Kiasi') + '</label><input id="wbQty" type="number" step="any" inputmode="decimal"></div><div><label>' + T('Cost per unit', 'Gharama kwa kipimo') + '</label><input id="wbCost" type="number" step="any" inputmode="decimal"></div></div>' +
+    '<label>' + T('Count stock by', 'Hesabu stoku kwa') + '</label><select id="wbMode"><option value="unit">' + T('Single units', 'Vipimo vya kuuza') + '</option><option value="pack">' + T('Packs (crate, tray, sack)', 'Vifurushi (kreti, trei, gunia)') + '</option></select>' +
+    '<div class="two"><div><label id="wbQtyL">' + T('Quantity', 'Kiasi') + '</label><input id="wbQty" type="number" step="any" inputmode="decimal"></div><div><label id="wbCostL">' + T('Cost per unit', 'Gharama kwa kipimo') + '</label><input id="wbCost" type="number" step="any" inputmode="decimal"></div></div><div class="s" id="wbConv"></div>' +
     '<div class="two"><div><label>' + T('Stays fresh about (days)', 'Hukaa safi (siku)') + '</label><input id="wbShelf" type="number" step="any" placeholder="3"></div><div><label>' + T('Condition (optional)', 'Hali (si lazima)') + '</label><input id="wbCond" maxlength="160"></div></div>' +
     '<div class="actions"><button class="btn2" data-act="closeModal" type="button">' + T('Cancel', 'Ghairi') + '</button><button class="btn" data-act="wsBatchSave" type="button">' + T('Save', 'Hifadhi') + '</button></div>');
+}
+function wbUpdate() {
+  var pr = S.products.filter(function (x) { return x.id === val('wbProd'); })[0], pack = val('wbMode') === 'pack';
+  if ($('wbQtyL')) $('wbQtyL').textContent = pack ? T('Number of ', 'Idadi ya ') + ((pr && pr.packUnit) || 'packs') : T('Quantity', 'Kiasi');
+  if ($('wbCostL')) $('wbCostL').textContent = pack ? T('Price of one ', 'Bei ya ') + ((pr && pr.packUnit) || 'pack') : T('Cost per unit', 'Gharama kwa kipimo');
+  var h = '';
+  if (pack) {
+    if (!pr || !pr.packSize) h = T('This product has no pack set yet.', 'Bidhaa hii haina kifurushi bado.');
+    else { var n = numOrNull('wbQty'), c = numOrNull('wbCost'); h = '1 ' + pr.packUnit + ' = ' + QTY(pr.packSize) + ' ' + pr.unit + (n > 0 ? ' → ' + QTY(n * pr.packSize) + ' ' + pr.unit + ' ' + T('added to stock', 'zinaongezwa') : '') + (c > 0 ? ' · ' + KSH(Math.round(c / pr.packSize * 100) / 100) + ' ' + T('each', 'kila moja') : ''); }
+  }
+  if ($('wbConv')) $('wbConv').textContent = h;
 }
 async function wsBatchSave(btn) {
   busy(btn, true);
   try {
-    var pid = val('wbProd'), shelf = numOrNull('wbShelf');
-    if (shelf) await api('PATCH', '/shops/' + S.shopId + '/products/' + pid + '/perishable', { isPerishable: true, shelfLifeDays: shelf });
-    await api('POST', '/shops/' + S.shopId + '/products/' + pid + '/batches', { id: uuid(), qty: numOrNull('wbQty'), unitCost: numOrNull('wbCost'), shelfLifeDays: shelf || undefined, condition: val('wbCond') || undefined });
-    closeModal(); toast(T('Stock added', 'Stoku imeongezwa')); refresh();
+    var pid = val('wbProd'), shelf = numOrNull('wbShelf'), packMode = val('wbMode') === 'pack', n = numOrNull('wbQty'), c = numOrNull('wbCost');
+    var pr = S.products.filter(function (x) { return x.id === pid; })[0]; if (!pr) throw new Error(T('Choose a product', 'Chagua bidhaa'));
+    if (!(n > 0)) throw new Error(T('Enter a quantity greater than zero', 'Weka kiasi kinachozidi sifuri'));
+    if (c == null || isNaN(c) || c < 0) throw new Error(T('Enter the cost', 'Weka gharama'));
+    if (packMode && !pr.packSize) throw new Error(T('Set this product\'s pack first (Products → edit → Buy in packs).', 'Weka kifurushi cha bidhaa hii kwanza.'));
+    var units = packMode ? Math.round(n * pr.packSize * 1000) / 1000 : n;
+    if (!S.batchId) { S.batchId = uuid(); S.batchPerId = uuid(); }
+    // Both writes go straight to the server when online and are kept on the phone (in order) when offline.
+    // Each has a fixed id, so a retry or a lost response can never record the stock twice.
+    if (shelf) await write({ type: 'product.perishable', id: S.batchPerId, method: 'PATCH', path: '/shops/' + S.shopId + '/products/' + pid + '/perishable', body: { isPerishable: true, shelfLifeDays: shelf }, label: 'Freshness: ' + pr.name, offlineOk: true });
+    var body = Object.assign({ id: S.batchId, shelfLifeDays: shelf || undefined, condition: val('wbCond') || undefined }, packMode ? { packs: n, packCost: c } : { qty: n, unitCost: c });
+    var w = await write({ type: 'stock.batch', id: S.batchId, path: '/shops/' + S.shopId + '/products/' + pid + '/batches', body: body, label: 'Receive ' + QTY(units) + ' ' + pr.unit + ': ' + pr.name, meta: { productId: pid, qty: units }, offlineOk: true });
+    S.batchId = null; S.batchPerId = null;
+    closeModal(); toast(w.queued ? T('Saved on this phone — it will sync when you are online', 'Imehifadhiwa kwenye simu — itatumwa ukiwa mtandaoni') : T('Stock added', 'Stoku imeongezwa')); if (!w.queued) refresh(); else { bumpLocal(pid, units); render(); }
   } catch (e) { gbBad(e); } finally { busy(btn, false); }
 }
 function wsLoss() {
+  S.lossId = uuid();
   openModal(T('Record spoiled stock', 'Rekodi iliyoharibika'), '<div class="note">' + T('This is recorded as a loss at cost. It is not a sale.', 'Hii inarekodiwa kama hasara. Si mauzo.') + '</div><label>' + T('Product', 'Bidhaa') + '</label>' + wsProductSel('wlProd') +
     '<div class="two"><div><label>' + T('Quantity lost', 'Kiasi kilichopotea') + '</label><input id="wlQty" type="number" step="any" inputmode="decimal"></div><div><label>' + T('Reason', 'Sababu') + '</label><select id="wlReason"><option value="spoiled">' + T('Spoiled', 'Imeharibika') + '</option><option value="damaged">' + T('Damaged', 'Imeumia') + '</option><option value="expired">' + T('Expired', 'Imeisha muda') + '</option><option value="theft">' + T('Theft', 'Wizi') + '</option><option value="other">' + T('Other', 'Nyingine') + '</option></select></div></div>' +
     '<label>' + T('What did you do with it?', 'Ulifanya nini nayo?') + '</label><select id="wlHandling"><option value="disposed">' + T('Threw away', 'Nilitupa') + '</option><option value="discounted">' + T('Sold cheaply', 'Niliuza kwa bei ndogo') + '</option><option value="returned">' + T('Returned to supplier', 'Nilirudisha') + '</option><option value="other">' + T('Other', 'Nyingine') + '</option></select>' +
@@ -1367,8 +1515,17 @@ function wsLoss() {
 }
 async function wsLossSave(btn) {
   busy(btn, true);
-  try { await api('POST', '/shops/' + S.shopId + '/losses', { id: uuid(), productId: val('wlProd'), qty: numOrNull('wlQty'), reason: val('wlReason'), handling: val('wlHandling'), condition: val('wlCond') || undefined }); closeModal(); toast(T('Loss recorded', 'Hasara imerekodiwa')); refresh(); }
-  catch (e) { gbBad(e); } finally { busy(btn, false); }
+  try {
+    var pid = val('wlProd'), q = numOrNull('wlQty'), pr = S.products.filter(function (x) { return x.id === pid; })[0];
+    if (!pr) throw new Error(T('Choose a product', 'Chagua bidhaa'));
+    if (!(q > 0)) throw new Error(T('Enter the quantity lost', 'Weka kiasi kilichopotea'));
+    if (!S.lossId) S.lossId = uuid();
+    var w = await write({ type: 'stock.loss', id: S.lossId, path: '/shops/' + S.shopId + '/losses', label: 'Loss ' + QTY(q) + ' ' + pr.unit + ': ' + pr.name + ' (' + val('wlReason') + ')', offlineOk: true,
+      body: { id: S.lossId, productId: pid, qty: q, reason: val('wlReason'), handling: val('wlHandling'), condition: val('wlCond') || undefined },
+      precheck: function () { if (q > pr.stockQty) throw new Error(T('You only have ', 'Una tu ') + QTY(pr.stockQty) + ' ' + pr.unit + T(' of ', ' ya ') + pr.name); } });
+    S.lossId = null;
+    closeModal(); toast(w.queued ? T('Saved on this phone — it will sync when you are online', 'Imehifadhiwa kwenye simu — itatumwa ukiwa mtandaoni') : T('Loss recorded', 'Hasara imerekodiwa')); if (!w.queued) refresh(); else { bumpLocal(pid, -q); render(); }
+  } catch (e) { gbBad(e); } finally { busy(btn, false); }
 }
 async function wsApply(btn, id, price, warn) {
   var p = S.products.filter(function (x) { return x.id === id; })[0], nm = p ? p.name : '';
@@ -1391,6 +1548,11 @@ document.addEventListener('click', function (ev) {
   else if (a === 'addToCart') addToCart(id);
   else if (a === 'rmLine') { S.cart.splice(Number(t.dataset.i), 1); if (!S.cart.length) S.saleId = null; saveCart(); render(); }
   else if (a === 'clearCart') clearCart();
+  else if (a === 'parkBill') parkBill();
+  else if (a === 'resumeBill') resumeBill(Number(t.dataset.i));
+  else if (a === 'discardBill') discardBill(Number(t.dataset.i));
+  else if (a === 'openScan') openScan();
+  else if (a === 'scanNew') scanNew(t.dataset.code);
   else if (a === 'checkout') openCheckout();
   else if (a === 'fullCash') { var s0 = payState(); $('payCash').value = (s0.c.total - s0.mpApplied) / 100; updateCheckout(); }
   else if (a === 'confirmSale') confirmSale(t);
@@ -1459,6 +1621,8 @@ var qTimer; document.addEventListener('input', function (ev) {
   else if (id === 'dVal') { S.disc.value = ev.target.value.replace(',', '.'); saveCart(); updateCheckout(); }
   else if (id === 'payCash' || id === 'payMp') updateCheckout();
 });
+document.addEventListener('input', function (ev) { if (ev.target && (ev.target.id === 'wbQty' || ev.target.id === 'wbCost')) wbUpdate(); });
+document.addEventListener('change', function (ev) { if (ev.target && (ev.target.id === 'wbMode' || ev.target.id === 'wbProd')) wbUpdate(); });
 // Enter in the search box adds the product when exactly one matches (barcode scanners type the code then press Enter).
 document.addEventListener('keydown', function (ev) {
   if (ev.key === 'Enter' && ev.target.id === 'vaText' && ev.target.value.trim()) { ev.preventDefault(); var vt = ev.target.value; ev.target.value = ''; S.va.spoke = false; vHandle(vt); return; }
@@ -1472,7 +1636,7 @@ $('modal').addEventListener('click', function (ev) { if (ev.target === $('modal'
 window.addEventListener('message', function (ev) { if (ev && ev.data && ev.data.type === 'MODULE_VISIBLE' && S.shopId && !S.loading) refresh(); });
 window.__DUKA_BOOT__ = boot;
 /* handle for the automated end-to-end tests (read/act only; no secrets) */
-window.__duka = { parse: vParse, norm: vNorm, S: S, syncNow: syncNow, obMine: obMine, cacheGet: cacheGet, updateCheckout: updateCheckout, saveCart: saveCart };
+window.__duka = { parse: vParse, norm: vNorm, S: S, syncNow: syncNow, obMine: obMine, cacheGet: cacheGet, updateCheckout: updateCheckout, saveCart: saveCart, scanAccept: scanAccept, scanHandle: scanHandle, wbUpdate: wbUpdate };
 boot();
 })();
 </script>
