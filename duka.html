@@ -40,6 +40,7 @@ h3{margin:16px 0 8px;font-size:14px}
 .item .s{font-size:12.5px;color:var(--kyn-text-secondary,#54656f)}
 .badge{font-size:11.5px;font-weight:800;padding:3px 8px;border-radius:999px;white-space:nowrap;background:rgba(10,143,91,.14);color:var(--kyn-accent-primary,#0a8f5b)}
 .badge.low{background:rgba(224,138,0,.16);color:var(--kyn-accent-warning,#c27800)}
+.badge.void{background:rgba(120,120,120,.18);color:#666}.rcpt .void{font-weight:800;text-align:center;color:var(--kyn-accent-danger,#d93025);border:2px solid currentColor;padding:4px;margin:6px 0}
 .badge.out{background:rgba(217,48,37,.14);color:var(--kyn-accent-danger,#d93025)}
 .empty{text-align:center;color:var(--kyn-text-secondary,#54656f);padding:28px 12px}
 .empty i{font-size:34px;opacity:.5;display:block;margin-bottom:8px}
@@ -282,10 +283,11 @@ function productForm(p) {
     '<div><label>Selling price (KSh) *</label><input id="pSell" inputmode="decimal" value="' + (p.sellingPrice != null ? p.sellingPrice : '') + '"></div></div>' +
     '<div class="two">' + (isNew ? '<div><label>Available stock</label><input id="pStock" inputmode="decimal" value="0"></div>' : '<div><label>Current stock</label><input value="' + QTY(p.stockQty) + '" disabled></div>') +
     '<div><label>Minimum stock (alert level)</label><input id="pMin" inputmode="decimal" value="' + (p.minStock != null ? p.minStock : 0) + '"></div></div>' +
+    '<label>Description (optional)</label><textarea id="pDesc" maxlength="500" rows="2" placeholder="e.g. 2kg packet, brand, size">' + esc(p.description) + '</textarea>' +
     '<label>Barcode (optional)</label><input id="pBar" maxlength="64" value="' + esc(p.barcode) + '">';
 }
 function productPayload(isNew) {
-  var o = { name: val('pName'), category: val('pCat') || null, unit: val('pUnit') || 'piece', buyingPrice: numOrNull('pBuy'), sellingPrice: numOrNull('pSell'), minStock: numOrNull('pMin') || 0, barcode: val('pBar') || null };
+  var o = { name: val('pName'), category: val('pCat') || null, unit: val('pUnit') || 'piece', buyingPrice: numOrNull('pBuy'), sellingPrice: numOrNull('pSell'), minStock: numOrNull('pMin') || 0, barcode: val('pBar') || null, description: val('pDesc') || null };
   if (isNew) o.stockQty = numOrNull('pStock') || 0;
   return o;
 }
@@ -476,7 +478,7 @@ async function openCheckout() {
     '<label>Discount (optional)</label><div class="two"><select id="dType"><option value="amount"' + (S.disc.type === 'amount' ? ' selected' : '') + '>KSh</option><option value="percent"' + (S.disc.type === 'percent' ? ' selected' : '') + '>%</option></select><input id="dVal" inputmode="decimal" value="' + esc(S.disc.value) + '" placeholder="0"></div>' +
     '<h3>Payment</h3><label>Cash received (KSh)</label><div class="row"><input id="payCash" class="grow" inputmode="decimal" placeholder="0"><button class="btn2" type="button" data-act="fullCash">Full cash</button></div>' +
     '<label>M-PESA amount (KSh)</label><input id="payMp" inputmode="decimal" placeholder="0">' +
-    '<div id="mpBox" class="hid"><div class="note">Enter the 10-character M-PESA receipt code from the confirmation SMS. An M-PESA payment cannot be saved without it — if you have no code, leave the amount empty and put the balance on credit.</div>' +
+    '<div id="mpBox" class="hid"><div class="note">Enter the 10-character M-PESA receipt code. NECPRA only counts an M-PESA payment as paid after it confirms the code was paid in full. If it cannot confirm it, the sale is <b>not</b> saved — remove the M-PESA amount and put the balance on credit.</div><div id="mpErr" class="note hid" style="color:var(--kyn-accent-danger,#d93025);font-weight:700"></div>' +
     '<label>M-PESA receipt code *</label><input id="payCode" maxlength="10" autocapitalize="characters" placeholder="e.g. SGH7K2L9QX"><label>Customer phone (optional)</label><input id="payPh" inputmode="tel" placeholder="07XX XXX XXX"></div>' +
     '<div class="note" id="coSum"></div>' +
     '<label>Customer <span class="s">(required if any balance is left unpaid)</span></label><select id="coCust">' + custOpts + '</select>' +
@@ -517,6 +519,7 @@ async function confirmSale(btn) {
     refresh();
   } catch (e) {
     if (e.offline || e.status === 0) toast(e.nosave ? e.message : 'No internet — the sale was NOT saved. Your cart is kept: tap Confirm sale again.', true);
+    else if (e.code === 'MPESA_NOT_VERIFIED' || e.code === 'MPESA_RECEIPT_USED') { var me = $('mpErr'); if (me) { me.textContent = e.message; me.classList.remove('hid'); } toast('M-PESA payment not confirmed — sale not saved', true); }
     else { toast(e.message, true); if (e.code === 'INSUFFICIENT_STOCK' || e.code === 'PRODUCT_NOT_FOUND' || e.code === 'PRODUCT_INACTIVE') { try { await loadTab(); syncCart(); } catch (_) {} } }
   } finally { busy(btn, false); }
 }
@@ -525,7 +528,7 @@ async function confirmSale(btn) {
 function receiptText(d) {
   var s = d.sale, sh = d.shop, L = [];
   L.push(sh.name); if (sh.location) L.push(sh.location); if (sh.phone) L.push('Tel ' + sh.phone); if (sh.kraPin) L.push('PIN ' + sh.kraPin);
-  L.push('Receipt #' + s.receiptNo + ' · ' + fmtWhen(s.soldAt)); if (s.customerName) L.push('Customer: ' + s.customerName); L.push('');
+  L.push('Receipt #' + s.receiptNo + ' · ' + fmtWhen(s.soldAt)); if (s.status === 'voided') L.push('*** CANCELLED' + (s.voidReason ? ': ' + s.voidReason : '') + ' ***'); if (s.customerName) L.push('Customer: ' + s.customerName); L.push('');
   d.items.forEach(function (i) { L.push(QTY(i.qty) + ' ' + i.unit + ' ' + i.name + ' @ ' + KSH(i.unitPrice) + ' = ' + KSH(i.lineTotal)); });
   L.push(''); L.push('Subtotal: ' + KSH(s.subtotal)); if (s.discountAmount > 0) L.push('Discount: -' + KSH(s.discountAmount)); L.push('TOTAL: ' + KSH(s.total));
   d.payments.forEach(function (p) { L.push((p.method === 'mpesa' ? 'M-PESA ' + p.mpesaReceipt : 'Cash') + ': ' + KSH(p.amount)); });
@@ -538,7 +541,7 @@ function receiptHtml(d) {
   var rows = d.items.map(function (i) { return '<div>' + esc(i.name) + '</div><div class="r"><span>' + QTY(i.qty) + ' ' + esc(i.unit) + ' × ' + KSH(i.unitPrice) + '</span><span>' + KSH(i.lineTotal) + '</span></div>'; }).join('');
   var pays = d.payments.map(function (p) { return '<div class="r"><span>' + (p.method === 'mpesa' ? 'M-PESA ' + esc(p.mpesaReceipt) + (p.verification === 'verified' ? ' ✓' : '') : 'Cash') + '</span><span>' + KSH(p.amount) + '</span></div>'; }).join('');
   return '<div class="rcpt"><div class="c"><b>' + esc(sh.name) + '</b>' + (sh.location ? '<br>' + esc(sh.location) : '') + (sh.phone ? '<br>Tel ' + esc(sh.phone) : '') + (sh.kraPin ? '<br>PIN ' + esc(sh.kraPin) : '') + '</div><hr>' +
-    '<div class="r"><span>Receipt #' + s.receiptNo + '</span><span>' + esc(fmtWhen(s.soldAt)) + '</span></div>' + (s.customerName ? '<div>Customer: ' + esc(s.customerName) + '</div>' : '') + '<hr>' + rows + '<hr>' +
+    '<div class="r"><span>Receipt #' + s.receiptNo + '</span><span>' + esc(fmtWhen(s.soldAt)) + '</span></div>' + (s.status === 'voided' ? '<div class="void">CANCELLED' + (s.voidReason ? '<br><small>' + esc(s.voidReason) + '</small>' : '') + '</div>' : '') + (s.customerName ? '<div>Customer: ' + esc(s.customerName) + '</div>' : '') + '<hr>' + rows + '<hr>' +
     '<div class="r"><span>Subtotal</span><span>' + KSH(s.subtotal) + '</span></div>' + (s.discountAmount > 0 ? '<div class="r"><span>Discount</span><span>− ' + KSH(s.discountAmount) + '</span></div>' : '') +
     '<div class="r"><b>TOTAL</b><b>' + KSH(s.total) + '</b></div><hr>' + (pays || '<div>No payment received</div>') +
     (s.balanceDue > 0 ? '<div class="r due"><span>BALANCE DUE (credit)</span><span>' + KSH(s.balanceDue) + '</span></div>' : '') +
@@ -548,7 +551,30 @@ var lastReceipt = null;
 function openReceipt(d, warn) {
   lastReceipt = d;
   openModal('Receipt', (warn ? '<div class="note noprint">' + esc(warn) + '</div>' : '') + receiptHtml(d) +
+    (d.sale && d.sale.id && d.sale.status === 'completed' ? '<div class="actions noprint"><button class="btnd" data-act="voidSale" data-id="' + esc(d.sale.id) + '" type="button">Cancel this sale</button></div>' : '') +
     '<div class="actions"><button class="btn2" data-act="shareReceipt" type="button"><i class="fas fa-share-nodes"></i> Share</button><button class="btn2" data-act="printReceipt" type="button"><i class="fas fa-print"></i> Print</button><button class="btn" data-act="closeModal" type="button">Done</button></div>');
+}
+/* Cancel (void) a sale: server restores the stock and reports how much money must be handed back. Needs internet — it is never queued offline. */
+function openVoidSale(id) {
+  var d = lastReceipt, paid = d && d.sale ? Number(d.sale.amountPaid || 0) : 0;
+  openModal('Cancel this sale?', '<div class="note">The goods go back into stock and the sale stops counting in your totals and customer debts. The receipt is kept and marked CANCELLED. This cannot be undone.' +
+    (paid > 0 ? '<br><b>You received ' + KSH(paid) + ' for this sale — hand it back to the customer yourself. NECPRA does not send money back.</b>' : '') + '</div>' +
+    '<label>Reason *</label><input id="voidWhy" maxlength="240" placeholder="e.g. Customer returned the goods">' +
+    '<div class="actions"><button class="btn2" data-act="closeModal" type="button">Keep sale</button><button class="btnd" data-act="doVoidSale" data-id="' + esc(id) + '" type="button">Cancel sale</button></div>');
+  setTimeout(function () { var e = $('voidWhy'); e && e.focus(); }, 50);
+}
+async function doVoidSale(btn, id) {
+  var why = val('voidWhy');
+  if (why.length < 3) return toast('Please give a short reason', true);
+  busy(btn, true, 'Cancelling…');
+  try {
+    var d = await api('POST', '/shops/' + S.shopId + '/sales/' + id + '/void', { reason: why });
+    var due = Number(d.refundDue || 0);
+    openReceipt(d, due > 0 ? 'Sale cancelled. Hand back ' + KSH(due) + ' to the customer.' : 'Sale cancelled. Stock has been restored.');
+    toast('Sale cancelled'); refresh();
+  } catch (e) {
+    toast(e.offline || e.status === 0 ? 'You need internet to cancel a sale. Nothing was changed.' : e.message, true);
+  } finally { busy(btn, false); }
 }
 async function shareReceipt() {
   if (!lastReceipt) return; var t = receiptText(lastReceipt);
@@ -561,8 +587,8 @@ async function openSale(id) {
 
 /* sales list */
 function saleRow(s) {
-  var b = s.paymentStatus === 'paid' ? '<span class="badge">Paid</span>' : s.paymentStatus === 'partial' ? '<span class="badge low">Part-paid</span>' : '<span class="badge out">Credit</span>';
-  return '<div class="item" data-act="openSale" data-id="' + esc(s.id) + '"><div class="grow"><div class="t">#' + s.receiptNo + (s.customerName ? ' · ' + esc(s.customerName) : '') + '</div><div class="s">' + esc(fmtWhen(s.soldAt)) + (s.balanceDue > 0 ? ' · owes ' + KSH(s.balanceDue) : '') + '</div></div><div style="text-align:right"><b>' + KSH(s.total) + '</b><div>' + b + '</div></div></div>';
+  var b = s.status === 'voided' ? '<span class="badge void">Cancelled</span>' : s.paymentStatus === 'paid' ? '<span class="badge">Paid</span>' : s.paymentStatus === 'partial' ? '<span class="badge low">Part-paid</span>' : '<span class="badge out">Credit</span>';
+  return '<div class="item" data-act="openSale" data-id="' + esc(s.id) + '"><div class="grow"><div class="t">#' + s.receiptNo + (s.customerName ? ' · ' + esc(s.customerName) : '') + '</div><div class="s">' + esc(fmtWhen(s.soldAt)) + (s.balanceDue > 0 && s.status !== 'voided' ? ' · owes ' + KSH(s.balanceDue) : '') + '</div></div><div style="text-align:right' + (s.status === 'voided' ? ';text-decoration:line-through;opacity:.6' : '') + '"><b>' + KSH(s.total) + '</b><div>' + b + '</div></div></div>';
 }
 function viewSales() {
   var m = S.salesSummary;
@@ -1184,6 +1210,8 @@ document.addEventListener('click', function (ev) {
   else if (a === 'shareReceipt') shareReceipt();
   else if (a === 'printReceipt') window.print();
   else if (a === 'openSale') openSale(id);
+  else if (a === 'voidSale') openVoidSale(id);
+  else if (a === 'doVoidSale') doVoidSale(t, id);
   else if (a === 'retry') { S.loading = true; boot(); }
   else if (a === 'tab') { S.tab = t.dataset.tab; try { sessionStorage.setItem('necpra_duka_tab', S.tab); } catch (_) {} render(); refresh(); }
   else if (a === 'toggleLow') { S.low = !S.low; refresh(); }
