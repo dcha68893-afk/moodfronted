@@ -175,6 +175,7 @@ async function loadTab() {
   if (S.tab === 'group') { var gp = await api('GET', '/shops/' + S.shopId + '/products?limit=500'); S.products = applyPending(gp.products.slice()); S.gb = { orders: (await api('GET', '/group-buy/orders')).orders, dash: await api('GET', '/group-buy/dashboard') }; }
   if (S.tab === 'waste') { var wp = await api('GET', '/shops/' + S.shopId + '/products?limit=500'); S.products = applyPending(wp.products.slice()); S.waste = await api('GET', '/shops/' + S.shopId + '/waste'); }
   if (S.tab === 'money') await loadMoney();
+  if (S.tab === 'admin' && S.isAdmin) await loadAdmin();
   if (S.tab === 'sales') {
     var from = S.range === 'today' ? ymd(0) : S.range === '7' ? ymd(6) : S.range === '30' ? ymd(29) : '';
     var sd = await api('GET', '/shops/' + S.shopId + '/sales?limit=100' + (from ? '&from=' + from : ''));
@@ -195,7 +196,7 @@ async function ensureDefaultShop() {
   S.shopId = d.shop.id; await loadShops();
 }
 async function boot() {
-  try { await loadShops(); if (!S.shops.length) await ensureDefaultShop(); await loadTab(); } catch (e) { S.err = e.message; }
+  try { await loadShops(); if (!S.shops.length) await ensureDefaultShop(); await checkAdmin(); await loadTab(); } catch (e) { S.err = e.message; }
   S.loading = false; render(); setTimeout(syncNow, 500);
 }
 
@@ -227,7 +228,7 @@ function header() {
   var sw = S.shops.length > 1 ? '<select id="shopSel" class="grow" aria-label="Choose shop">' + S.shops.map(function (s) { return '<option value="' + esc(s.id) + '"' + (s.id === S.shopId ? ' selected' : '') + '>' + esc(s.name) + '</option>'; }).join('') + '</select>' : '<div class="grow"><b>' + esc(shop().name) + '</b><div class="s" style="font-size:12px;opacity:.8">' + esc(shop().location || shop().businessType || '') + '</div></div>';
   return '<div class="hero"><h1>NECPRA DUKA SMART</h1><p>Your shop. Your stock. Your money. Your assistant.</p></div>' +
     '<div class="bar">' + sw + (S.shops.length < S.maxShops ? '<button class="btn2" type="button" data-act="newShop" title="Add another shop"><i class="fas fa-plus"></i> Shop</button>' : '') + '</div>' +
-    '<div class="tabs">' + [['dash', 'Dashboard'], ['pos', 'Sell'], ['sales', 'Sales'], ['products', 'Products'], ['group', 'Buy together'], ['waste', 'Waste'], ['money', 'Money'], ['settings', 'My shop']].map(function (t) {
+    '<div class="tabs">' + [['dash', 'Dashboard'], ['pos', 'Sell'], ['sales', 'Sales'], ['products', 'Products'], ['group', 'Buy together'], ['waste', 'Waste'], ['money', 'Money'], ['settings', 'My shop']].concat(S.isAdmin ? [['admin', 'Admin']] : []).map(function (t) {
       return '<button class="tab' + (S.tab === t[0] ? ' on' : '') + '" data-act="tab" data-tab="' + t[0] + '" type="button">' + t[1] + (t[0] === 'pos' && S.cart.length ? ' (' + S.cart.length + ')' : '') + '</button>';
     }).join('') + '</div>';
 }
@@ -261,6 +262,7 @@ function viewProducts() {
 }
 function viewSettings() {
   return '<div class="card"><b>Shop details</b>' + shopForm(shop()) + '<div class="actions"><button class="btn" data-act="saveShop" type="button">Save changes</button></div></div>' +
+    '<div class="card" style="margin-top:12px"><b>Device financing</b><div class="note">Apply for a NECPRA Smart Scale on weekly instalments, see your balance and record repayments. This is separate from your shop sales and profit.</div><div class="actions"><button class="btn" data-act="fnOpen" type="button">Open device financing</button></div></div>' +
     '<div class="card" style="margin-top:12px"><b>Archive this shop</b><div class="note">Archiving hides the shop but keeps all its records safe. It does not delete any history.</div><div class="actions"><button class="btnd" data-act="archiveShop" type="button">Archive shop</button></div></div>';
 }
 function render(keepFocus) {
@@ -269,7 +271,7 @@ function render(keepFocus) {
   var html;
   if (S.err && !S.shops.length) html = '<div class="hero"><h1>NECPRA DUKA SMART</h1></div><div class="note err">' + esc(S.err) + '</div><div class="actions"><button class="btn" data-act="retry" type="button">Try again</button></div>';
   else if (!S.shops.length) html = viewOnboarding();
-  else html = header() + syncBar() + (S.err ? '<div class="note err">' + esc(S.err) + ' <a href="#" data-act="retry">Retry</a></div>' : '') + (S.tab === 'products' ? viewProducts() : S.tab === 'money' ? viewMoney() : S.tab === 'settings' ? viewSettings() : S.tab === 'pos' ? viewPos() : S.tab === 'sales' ? viewSales() : S.tab === 'group' ? viewGroup() : S.tab === 'waste' ? viewWaste() : viewDash()) + vaFab();
+  else html = header() + syncBar() + (S.err ? '<div class="note err">' + esc(S.err) + ' <a href="#" data-act="retry">Retry</a></div>' : '') + (S.tab === 'products' ? viewProducts() : S.tab === 'money' ? viewMoney() : S.tab === 'settings' ? viewSettings() : S.tab === 'pos' ? viewPos() : S.tab === 'sales' ? viewSales() : S.tab === 'group' ? viewGroup() : S.tab === 'waste' ? viewWaste() : S.tab === 'admin' ? viewAdmin() : viewDash()) + vaFab();
   app.innerHTML = html;
   if (fid && $(fid)) { $(fid).focus(); try { $(fid).setSelectionRange(pos, pos); } catch (_) {} }
 }
@@ -435,7 +437,7 @@ function cartHtml() {
     '<div class="actions"><button class="btn2" data-act="clearCart" type="button">Clear</button><button class="btn2" data-act="parkBill" type="button">Hold bill</button><button class="btn" data-act="checkout" type="button" id="posGo">Checkout</button></div>';
 }
 function viewPos() {
-  return '<div class="bar"><input id="posQ" class="grow" type="search" placeholder="Search product or scan barcode" value="' + esc(S.posQ) + '" autocomplete="off"><button class="btn2" data-act="openScan" type="button" aria-label="Scan barcode" style="flex:0 0 auto"><i class="fas fa-barcode"></i> Scan</button></div>' + parkedHtml() +
+  return '<div class="bar"><input id="posQ" class="grow" type="search" placeholder="Search product or scan barcode" value="' + esc(S.posQ) + '" autocomplete="off"><button class="btn2" data-act="openScan" type="button" aria-label="Scan barcode" style="flex:0 0 auto"><i class="fas fa-barcode"></i> Scan</button><button class="btn2" data-act="openCam" type="button" aria-label="Camera sell" style="flex:0 0 auto"><i class="fas fa-camera"></i> Camera</button></div>' + parkedHtml() +
     '<div id="posResults">' + posResults() + '</div><h3>Current sale</h3><div id="posCart">' + cartHtml() + '</div>';
 }
 // Typing in qty/price/discount must not rebuild the DOM (focus would be lost) — patch the numbers in place.
@@ -521,6 +523,7 @@ function stopScan() {
   if (SCAN.timer) { clearInterval(SCAN.timer); SCAN.timer = null; }
   if (SCAN.stream) { try { SCAN.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (_) {} SCAN.stream = null; }
   SCAN.det = null; SCAN.seen = {}; SCAN.busy = false;
+  if (typeof stopCam === 'function') stopCam();
 }
 async function openScan() {
   if (!scanSupported()) return toast('Camera barcode scanning is not available on this phone. Type the code in the search box, or use a Bluetooth scanner.', true);
@@ -570,6 +573,157 @@ function scanHandle(code) {
   try { navigator.vibrate && navigator.vibrate(50); } catch (_) {}
 }
 function scanNew(code) { stopScan(); closeModal(); openAddProduct(); setTimeout(function () { var e = $('pBar'); if (e) e.value = code; }, 60); }
+
+/* ───── Camera product recognition (matches against the seller's OWN catalogue) ─────
+   How it works, honestly: the seller "teaches" each product once or a few times by showing it to the camera. The phone stores a small
+   colour/layout signature per photo (on the phone, per shop, usable offline). While the camera is open each frame is compared with
+   those signatures. A product is added only when the SAME product is the clear best match for 3 frames in a row; a doubtful match
+   asks the seller to confirm instead. After an add, that product cannot be added again until it has left the view (or another product
+   was added), and there is a 1.5 s gap between adds, so one item in front of the lens is never added twice.
+   Limits: this is colour matching, not weight or counting. Products that look alike (e.g. tomatoes vs red apples) may be confused, so
+   keep confirmation on and teach 2-3 views per product in your usual lighting. Loose products sold by weight always ask for the
+   quantity; a phone camera cannot read weight. Thresholds below are starting values and need tuning on real phones and produce. */
+var CAM = { stream: null, timer: null, cv: null, busy: false, streak: { id: null, n: 0 }, armed: {}, lastAdd: 0, lostAt: 0, asked: {}, sig: null };
+var CAM_LOW = 0.88, CAM_HIGH = 0.93, CAM_MARGIN = 0.02, CAM_NEED = 3, CAM_GAP = 1500, CAM_MAXREF = 6;
+var CAM_WEIGHT_UNITS = ['kg', 'g', 'l', 'ml', 'litre', 'liter', 'litres', 'liters', 'lb'];
+function camKey() { return 'duka_vis_' + S.shopId; }
+function camLoad() { try { return JSON.parse(localStorage.getItem(camKey()) || '{}') || {}; } catch (_) { return {}; } }
+function camSave(m) { try { localStorage.setItem(camKey(), JSON.stringify(m)); return true; } catch (_) { toast('Phone storage is full, could not save the product photo', true); return false; } }
+function camIsWeight(p) { return CAM_WEIGHT_UNITS.indexOf(String(p.unit || '').toLowerCase()) >= 0; }
+function camSig(v) {
+  var W = 64, G = 4, B = 8, vw = v.videoWidth, vh = v.videoHeight; if (!vw || !vh) return null;
+  var cv = CAM.cv || (CAM.cv = document.createElement('canvas')); cv.width = cv.height = W;
+  var cx = cv.getContext('2d', { willReadFrequently: true }), side = Math.min(vw, vh) * 0.7;
+  cx.drawImage(v, (vw - side) / 2, (vh - side) / 2, side, side, 0, 0, W, W);
+  var d = cx.getImageData(0, 0, W, W).data, per = B + 2, sig = new Float32Array(G * G * per + B), cs = new Float32Array(G * G), cv2 = new Float32Array(G * G), cn = new Float32Array(G * G), gv = 0, gh = G * G * per, cell = W / G;
+  for (var y = 0; y < W; y++) for (var x = 0; x < W; x++) {
+    var i = (y * W + x) * 4, r = d[i] / 255, g = d[i + 1] / 255, b = d[i + 2] / 255, mx = Math.max(r, g, b), mn = Math.min(r, g, b), dl = mx - mn, s = mx ? dl / mx : 0, h = 0;
+    if (dl) { if (mx === r) h = ((g - b) / dl) % 6; else if (mx === g) h = (b - r) / dl + 2; else h = (r - g) / dl + 4; h *= 60; if (h < 0) h += 360; }
+    var c = Math.floor(y / cell) * G + Math.floor(x / cell); cs[c] += s; cv2[c] += mx; cn[c]++; gv += mx;
+    if (s > 0.2 && mx > 0.15) { var bn = Math.floor(h / 360 * B) % B; sig[c * per + bn] += s * mx; sig[gh + bn] += s * mx; }
+  }
+  gv = gv / (W * W) || 1;
+  for (var k = 0; k < G * G; k++) { var n = cn[k] || 1; for (var j = 0; j < B; j++) sig[k * per + j] /= n; sig[k * per + B] = cs[k] / n; sig[k * per + B + 1] = Math.min(2, (cv2[k] / n) / gv) / 2; }
+  var ss = 0, t; for (t = 0; t < sig.length; t++) ss += sig[t] * sig[t]; ss = Math.sqrt(ss) || 1; for (t = 0; t < sig.length; t++) sig[t] /= ss;
+  return sig;
+}
+function camDot(a, b) { var s = 0, n = Math.min(a.length, b.length); for (var i = 0; i < n; i++) s += a[i] * b[i]; return s; }
+function camMatch(sig) {
+  var refs = camLoad(), out = [];
+  S.products.forEach(function (p) {
+    if (p.isActive === false || !refs[p.id] || !refs[p.id].length) return;
+    var best = 0; refs[p.id].forEach(function (r) { var d = camDot(sig, r); if (d > best) best = d; });
+    out.push({ id: p.id, p: p, sim: best });
+  });
+  out.sort(function (a, b) { return b.sim - a.sim; }); return out;
+}
+function camLog(html, bad) {
+  var el = $('camLog'); if (!el) return;
+  var d = document.createElement('div'); d.className = 's'; d.style.margin = '4px 0'; if (bad) d.style.color = 'var(--kyn-accent-danger,#d93025)';
+  d.innerHTML = html; el.insertBefore(d, el.firstChild); while (el.childNodes.length > 6) el.removeChild(el.lastChild);
+}
+function camStatus(msg) { var m = $('camMsg'); if (m) m.textContent = msg; }
+function camTotal() { try { return 'Bill: ' + KC(calc().total); } catch (_) { return ''; } }
+function stopCam() {
+  if (CAM.timer) { clearInterval(CAM.timer); CAM.timer = null; }
+  if (CAM.stream) { try { CAM.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (_) {} CAM.stream = null; }
+  CAM.busy = false; CAM.streak = { id: null, n: 0 }; CAM.armed = {}; CAM.asked = {}; CAM.lostAt = 0;
+}
+function camPickOpts() {
+  var refs = camLoad();
+  return '<option value="">— Choose product to teach —</option>' + S.products.filter(function (p) { return p.isActive !== false; }).map(function (p) {
+    var n = (refs[p.id] || []).length; return '<option value="' + esc(p.id) + '">' + esc(p.name) + ' (' + n + ' photo' + (n === 1 ? '' : 's') + ')</option>';
+  }).join('');
+}
+async function openCam() {
+  if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) return toast('This phone or browser cannot open the camera here.', true);
+  stopScan();
+  openModal('Camera sell', '<video id="camVid" playsinline muted autoplay style="width:100%;border-radius:12px;background:#000;max-height:42vh"></video><div class="s" id="camMsg">Starting camera…</div>' +
+    '<div class="card" id="camLog" style="margin-top:8px;min-height:48px"></div>' +
+    '<label>Teach the camera a product <span class="s">(hold it in the middle of the view)</span></label><select id="camPick">' + camPickOpts() + '</select>' +
+    '<div class="actions"><button class="btn2" data-act="camForget" type="button">Forget photos</button><button class="btn2" data-act="camNew" type="button">New product</button><button class="btn" data-act="camTeach" type="button">Save photo</button></div>' +
+    '<div class="actions"><button class="btn" data-act="closeModal" type="button">Done</button></div>');
+  try {
+    CAM.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+    var v = $('camVid'); if (!v) { stopCam(); return; }
+    v.srcObject = CAM.stream; await v.play();
+    camStatus(Object.keys(camLoad()).length ? 'Show a product. A clear match is added to the bill.' : 'No products taught yet. Choose a product below, hold it in view and tap Save photo.');
+    CAM.timer = setInterval(camTick, 400);
+  } catch (e) {
+    stopCam(); camStatus(e && e.name === 'NotAllowedError' ? 'Camera permission was refused. Allow the camera for NECPRA in your phone settings.' : 'Could not start the camera: ' + ((e && e.message) || 'unknown error'));
+  }
+}
+function camTick() {
+  var v = $('camVid'); if (CAM.busy || !v || v.readyState < 2) return;
+  CAM.busy = true;
+  try {
+    var sig = camSig(v); if (!sig) return; CAM.sig = sig;
+    var m = camMatch(sig), now = Date.now();
+    if (!m.length) { camStatus('No products taught yet. Choose a product below and tap Save photo.'); return; }
+    var top = m[0], second = m[1] || null;
+    if (top.sim < CAM_LOW) {
+      CAM.streak = { id: null, n: 0 };
+      if (!CAM.lostAt) CAM.lostAt = now; else if (now - CAM.lostAt > 1200) CAM.armed = {};
+      camStatus('Looking for a product… ' + camTotal()); return;
+    }
+    CAM.lostAt = 0;
+    if (CAM.armed[top.id]) { camStatus(top.p.name + ' already added. Move it away to add another. ' + camTotal()); return; }
+    if (CAM.streak.id === top.id) CAM.streak.n++; else CAM.streak = { id: top.id, n: 1 };
+    if (CAM.streak.n < CAM_NEED || now - CAM.lastAdd < CAM_GAP) { camStatus('Checking ' + top.p.name + '… ' + camTotal()); return; }
+    var margin = top.sim - (second ? second.sim : 0);
+    if (top.sim >= CAM_HIGH && margin >= CAM_MARGIN) camAdd(top.p);
+    else if (!CAM.asked[top.id] || now - CAM.asked[top.id] > 5000) {
+      CAM.asked[top.id] = now;
+      camLog('Is this <b>' + esc(top.p.name) + '</b>? <button class="btn2" type="button" data-act="camYes" data-id="' + esc(top.id) + '" style="margin-left:6px">Yes, add</button>');
+    }
+  } catch (_) {} finally { CAM.busy = false; }
+}
+function camPutLine(p, q) {
+  var ex = S.cart.filter(function (l) { return l.productId === p.id; })[0], have = ex ? Number(ex.qty) : 0;
+  if (p.stockQty <= 0) { camLog(esc(p.name) + ' is out of stock', true); return false; }
+  if (have + q > p.stockQty) { camLog('Only ' + QTY(p.stockQty) + ' ' + esc(p.unit) + ' of ' + esc(p.name) + ' in stock', true); return false; }
+  if (ex) ex.qty = have + q; else S.cart.push({ productId: p.id, name: p.name, unit: p.unit, price: p.sellingPrice, qty: q, stock: p.stockQty });
+  if (!S.saleId) S.saleId = uuid();
+  S.posQ = ''; saveCart(); render();
+  try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (_) {}
+  CAM.armed = {}; CAM.armed[p.id] = true; CAM.lastAdd = Date.now(); CAM.streak = { id: null, n: 0 };
+  try { navigator.vibrate && navigator.vibrate(50); } catch (_) {}
+  return true;
+}
+function camAdd(p) {
+  if (camIsWeight(p)) {
+    CAM.armed[p.id] = true; CAM.lastAdd = Date.now(); CAM.streak = { id: null, n: 0 };
+    camLog('<b>' + esc(p.name) + '</b> is sold by ' + esc(p.unit) + ' at ' + KSH(p.sellingPrice) + '. Enter the weighed amount: <input id="camQ_' + esc(p.id) + '" inputmode="decimal" style="width:70px"> <button class="btn2" type="button" data-act="camQty" data-id="' + esc(p.id) + '">Add</button>');
+    return;
+  }
+  if (camPutLine(p, 1)) camLog('Added <b>' + esc(p.name) + '</b> · ' + KSH(p.sellingPrice) + ' <button class="btn2" type="button" data-act="camPlus" data-id="' + esc(p.id) + '">+1</button> <button class="btn2" type="button" data-act="camUndo" data-id="' + esc(p.id) + '">Undo</button> · ' + camTotal());
+}
+function camYes(id) { var p = S.products.filter(function (x) { return x.id === id; })[0]; if (p) camAdd(p); }
+function camQty(id) {
+  var p = S.products.filter(function (x) { return x.id === id; })[0], e = $('camQ_' + id); if (!p || !e) return;
+  var q = Number(String(e.value).replace(',', '.')); if (!(q > 0)) return toast('Enter the amount weighed', true);
+  if (camPutLine(p, q)) camLog('Added <b>' + esc(p.name) + '</b> · ' + QTY(q) + ' ' + esc(p.unit) + ' · ' + camTotal());
+}
+function camPlus(id) { var p = S.products.filter(function (x) { return x.id === id; })[0]; if (p && camPutLine(p, 1)) camLog('<b>' + esc(p.name) + '</b> +1 · ' + camTotal()); }
+function camUndo(id) {
+  var i = -1; S.cart.forEach(function (l, k) { if (l.productId === id) i = k; }); if (i < 0) return;
+  if (Number(S.cart[i].qty) > 1) S.cart[i].qty = Number(S.cart[i].qty) - 1; else S.cart.splice(i, 1);
+  if (!S.cart.length) S.saleId = null; saveCart(); render(); camLog('Removed one · ' + camTotal());
+}
+function camTeach() {
+  var pid = val('camPick'); if (!pid) return toast('Choose the product first', true);
+  var v = $('camVid'); var sig = v && camSig(v); if (!sig) return toast('Camera is not ready yet', true);
+  var refs = camLoad(); refs[pid] = (refs[pid] || []).concat([Array.prototype.slice.call(sig)]).slice(-CAM_MAXREF);
+  if (!camSave(refs)) return;
+  var sel = $('camPick'); if (sel) { sel.innerHTML = camPickOpts(); sel.value = pid; }
+  CAM.armed[pid] = true; camLog('Saved photo ' + refs[pid].length + ' of up to ' + CAM_MAXREF + '. Teach 2-3 different views for best results.');
+}
+function camForget() {
+  var pid = val('camPick'); if (!pid) return toast('Choose the product first', true);
+  var refs = camLoad(); delete refs[pid]; camSave(refs);
+  var sel = $('camPick'); if (sel) { sel.innerHTML = camPickOpts(); sel.value = pid; } camLog('Photos for this product removed.');
+}
+function camNew() { stopCam(); closeModal(); openAddProduct(); toast('Save the product, then open Camera and teach it'); }
 
 /* checkout */
 function payState() {
@@ -1346,7 +1500,7 @@ function viewGroup() {
   }).join('') : '';
   return '<h3>' + T('Buy stock together', 'Nunua bidhaa pamoja') + '</h3>' + cards +
     '<div class="actions"><button class="btn" data-act="gbNew" type="button"><i class="fas fa-users"></i> ' + T('Start a group order', 'Anzisha oda ya pamoja') + '</button>' +
-    '<button class="btn2" data-act="gbSupplier" type="button">' + T('I am a supplier', 'Mimi ni msambazaji') + '</button></div>' +
+    '<button class="btn2" data-act="gbSupplier" type="button">' + T('I am a supplier', 'Mimi ni msambazaji') + '</button><button class="btn2" data-act="gbChamas" type="button"><i class="fas fa-people-group"></i> ' + T('My Chamas', 'Chama zangu') + '</button></div>' +
     gbDraftsView() + '<h3>' + T('Open orders', 'Oda zilizo wazi') + '</h3><div class="card">' + list + '</div>' + mine + (m.orders.length ? exBar('gb') : '') +
     '<div class="note">' + T('Prices shown come only from suppliers NECPRA has verified. No saving is shown unless a real quote exists.', 'Bei zinatoka kwa wasambazaji waliothibitishwa na NECPRA pekee. Hakuna akiba inayoonyeshwa bila bei halisi.') + '</div>';
 }
@@ -1695,7 +1849,309 @@ function gbModal() {
     h += '</div>';
   }
   if (you && ['confirmed', 'delivered'].indexOf(o.status) >= 0) h += '<div class="actions"><button class="btn2" data-act="gbDispute" type="button">' + T('Report a problem', 'Ripoti tatizo') + '</button></div>';
+  if (o.isOrganiser && ['open', 'locked'].indexOf(o.status) >= 0) h += '<div class="actions"><button class="btn2" data-act="gbChamaLink" type="button">' + T('Share with a Chama', 'Shiriki na Chama') + '</button></div>';
+  if (you && o.status === 'locked' && ['joined', 'confirmed'].indexOf(you.status) >= 0 && you.amountDue != null) h += '<div class="actions"><button class="btn2" data-act="gbChamaAsk" type="button">' + T('Ask my Chama to fund my share', 'Omba Chama yangu ifadhili sehemu yangu') + '</button></div>';
   openModal(esc(o.productName), h);
+}
+/* ───── Chama (money circle) + Group Buying ─────
+   Uses the existing NECPRA Chama (money circles). Nothing here moves Chama money: a trader ASKS the circle to fund their share,
+   the owner and a majority of members approve, and the owner then RECORDS the payout they made through the Money module. That
+   record is shown as "recorded by the circle owner, not verified by NECPRA". The trader's own order payment is a separate step
+   that still needs a verified M-PESA receipt. Joining a linked order and paying for it stay each member's own decision. */
+var CH = { circleId: null, role: null, fundId: null };
+function chStatus(s) { return { requested: T('Waiting for votes', 'Inasubiri kura'), approved: T('Approved', 'Imeidhinishwa'), rejected: T('Rejected', 'Imekataliwa'), settled: T('Payout recorded', 'Malipo yamerekodiwa'), cancelled: T('Cancelled', 'Imeghairiwa') }[s] || s; }
+async function chList() {
+  openModal(T('My Chamas', 'Chama zangu'), '<div class="spin">Loading…</div>');
+  try {
+    var r = await api('GET', '/group-buy/chama/circles', null, GB_NOCACHE), cs = r.circles || [];
+    $('mBody').innerHTML = cs.length ? cs.map(function (c) {
+      return '<div class="item" data-act="gbChamaOpen" data-id="' + esc(c.id) + '"><div class="grow"><div class="t">' + esc(c.name) + '</div><div class="s">' + c.members + ' ' + T('members', 'wanachama') + ' · ' + (c.role === 'owner' ? T('you are the owner', 'wewe ni mmiliki') : T('member', 'mwanachama')) + '</div></div></div>';
+    }).join('') + '<div class="actions"><button class="btn" data-act="closeModal" type="button">' + T('Close', 'Funga') + '</button></div>'
+      : '<div class="note">' + T('You are not in an active Chama yet. Join or start one in NECPRA Money, then come back here.', 'Bado hujajiunga na Chama. Jiunge au anzisha kwenye NECPRA Money kisha urudi hapa.') + '</div><div class="actions"><button class="btn" data-act="closeModal" type="button">' + T('Close', 'Funga') + '</button></div>';
+    S.chCircles = cs;
+  } catch (e) { closeModal(); gbBad(e); }
+}
+async function chOpen(circleId) {
+  openModal(T('Chama', 'Chama'), '<div class="spin">Loading…</div>');
+  try {
+    var res = await Promise.all([api('GET', '/group-buy/chama/circles/' + circleId + '/orders', null, GB_NOCACHE), api('GET', '/group-buy/chama/circles/' + circleId + '/funding', null, GB_NOCACHE)]);
+    var c = (S.chCircles || []).filter(function (x) { return x.id === circleId; })[0] || { name: 'Chama', role: 'member' };
+    CH.circleId = circleId; CH.role = c.role; $('mTitle').textContent = c.name;
+    var h = '<h3>' + T('Orders shared with this Chama', 'Oda zilizoshirikiwa na Chama hii') + '</h3>';
+    var os = res[0].orders || [];
+    h += os.length ? os.map(function (o) {
+      return '<div class="item" data-act="gbOpen" data-id="' + esc(o.id) + '"><div class="grow"><div class="t">' + esc(o.productName) + ' · ' + esc(o.market) + '</div><div class="s">' + gbStatusLabel(o.status) + ' · ' + T('closes ', 'inafungwa ') + new Date(o.closesAt).toLocaleString('en-KE') + '</div>' +
+        '<div class="s">' + (o.circleParticipants.length ? o.circleParticipants.map(function (p) { return esc(p.shopName) + ' ' + QTY(p.qty) + ' ' + esc(o.unit); }).join(' · ') : T('No Chama member has joined yet', 'Hakuna mwanachama aliyejiunga bado')) + '</div></div></div>';
+    }).join('') : '<div class="s">' + T('No orders shared yet. The organiser of a group order can share it from the order screen.', 'Hakuna oda zilizoshirikiwa. Mratibu anaweza kuishiriki kutoka kwenye oda.') + '</div>';
+    h += '<h3>' + T('Funding requests', 'Maombi ya ufadhili') + '</h3>';
+    var fs = res[1].funding || [];
+    h += fs.length ? fs.map(function (f) {
+      var v = f.voting, vt = v ? '<div class="s">' + T('Approvals ', 'Ndiyo ') + v.approvals + '/' + v.approvalsNeeded + ' · ' + T('rejections ', 'Hapana ') + v.rejections + (v.ownerApprovalNeeded ? ' · ' + T('owner ', 'mmiliki ') + (v.ownerApproved ? T('approved', 'ameidhinisha') : T('has not approved yet', 'bado')) : '') + '</div>' : '';
+      var acts = '';
+      if (f.status === 'requested' && !f.mine) acts += '<button class="btn' + (f.myVote === 'approve' ? '' : '2') + '" data-act="gbChamaVote" data-id="' + esc(f.id) + '" data-v="approve" type="button">' + T('Approve', 'Idhinisha') + '</button><button class="btn' + (f.myVote === 'reject' ? '' : '2') + '" data-act="gbChamaVote" data-id="' + esc(f.id) + '" data-v="reject" type="button">' + T('Reject', 'Kataa') + '</button>';
+      if (f.status === 'approved' && CH.role === 'owner') acts += '<button class="btn" data-act="gbChamaSettle" data-id="' + esc(f.id) + '" type="button">' + T('Record payout', 'Rekodi malipo') + '</button>';
+      if (f.mine && (f.status === 'requested' || f.status === 'approved')) acts += '<button class="btn2" data-act="gbChamaCancel" data-id="' + esc(f.id) + '" type="button">' + T('Cancel my request', 'Ghairi ombi langu') + '</button>';
+      return '<div class="card" style="margin-bottom:8px"><div class="t" style="font-weight:700">' + esc(f.shopName) + ' · ' + esc(f.productName) + ' · ' + KSH(f.amount) + '</div><div class="s">' + chStatus(f.status) + (f.mine ? ' · ' + T('your request', 'ombi lako') : '') + '</div>' + vt +
+        (f.settlement ? '<div class="s">' + T('Payout ref ', 'Kumbukumbu ') + esc(f.settlement.payoutRef) + ' · ' + esc(f.settlement.label) + '</div>' : '') +
+        (f.status === 'approved' && CH.role !== 'owner' ? '<div class="s">' + T('Waiting for the Chama owner to record the payout.', 'Inasubiri mmiliki kurekodi malipo.') + '</div>' : '') + (acts ? '<div class="actions">' + acts + '</div>' : '') + '</div>';
+    }).join('') : '<div class="s">' + T('No funding requests.', 'Hakuna maombi.') + '</div>';
+    h += '<div class="note">' + T('Chama money is not moved from here. An approved request is paid out by the Chama owner through NECPRA Money. Your order payment still needs a verified M-PESA receipt.', 'Pesa za Chama hazihamishwi hapa. Ombi lililoidhinishwa hulipwa na mmiliki kupitia NECPRA Money. Malipo ya oda bado yanahitaji risiti ya M-PESA iliyothibitishwa.') + '</div>' +
+      '<div class="actions"><button class="btn" data-act="closeModal" type="button">' + T('Close', 'Funga') + '</button></div>';
+    $('mBody').innerHTML = h;
+  } catch (e) { closeModal(); gbBad(e); }
+}
+async function chLinkForm() {
+  try {
+    var cs = (await api('GET', '/group-buy/chama/circles', null, GB_NOCACHE)).circles || []; S.chCircles = cs;
+    if (!cs.length) return toast(T('You are not in an active Chama.', 'Hujajiunga na Chama yoyote.'), true);
+    openModal(T('Share with a Chama', 'Shiriki na Chama'), '<div class="note">' + T('Members of the Chama will see this order and can join with their own shop. Each member pays for their own share.', 'Wanachama wataona oda hii na wanaweza kujiunga. Kila mmoja hulipia sehemu yake.') + '</div>' +
+      '<label>' + T('Chama', 'Chama') + '</label><select id="chPick">' + cs.map(function (c) { return '<option value="' + esc(c.id) + '">' + esc(c.name) + '</option>'; }).join('') + '</select>' +
+      '<div class="actions"><button class="btn2" data-act="gbChamaBack" type="button">' + T('Back', 'Rudi') + '</button><button class="btn" data-act="gbChamaLinkGo" type="button">' + T('Share', 'Shiriki') + '</button></div>');
+  } catch (e) { gbBad(e); }
+}
+async function chFundForm() {
+  var you = S.gbSel && S.gbSel.d.you; if (!you || you.amountDue == null) return;
+  try {
+    var cs = (await api('GET', '/group-buy/chama/circles', null, GB_NOCACHE)).circles || []; S.chCircles = cs;
+    if (!cs.length) return toast(T('You are not in an active Chama.', 'Hujajiunga na Chama yoyote.'), true);
+    CH.fundId = CH.fundId || uuid();
+    openModal(T('Ask my Chama to fund my share', 'Omba Chama yangu ifadhili sehemu yangu'), '<div class="note">' + T('This is only a request. The Chama owner and a majority of members must approve it, and the order must already be shared with that Chama.', 'Hili ni ombi tu. Mmiliki na wengi wa wanachama lazima waidhinishe, na oda lazima iwe imeshirikiwa na Chama hiyo.') + '</div>' +
+      '<label>Chama</label><select id="chPick">' + cs.map(function (c) { return '<option value="' + esc(c.id) + '">' + esc(c.name) + '</option>'; }).join('') + '</select>' +
+      '<label>' + T('Amount (KSh) — at most your amount due ', 'Kiasi (KSh) — kisichozidi deni lako ') + KSH(you.amountDue) + '</label><input id="chAmt" type="number" step="any" inputmode="decimal" value="' + esc(you.amountDue) + '">' +
+      '<div class="actions"><button class="btn2" data-act="gbChamaBack" type="button">' + T('Back', 'Rudi') + '</button><button class="btn" data-act="gbChamaFundGo" type="button">' + T('Send request', 'Tuma ombi') + '</button></div>');
+  } catch (e) { gbBad(e); }
+}
+async function chAct(a, t, id) {
+  if (a === 'gbChamas') return chList();
+  if (a === 'gbChamaOpen') return chOpen(id);
+  if (a === 'gbChamaBack') return S.gbSel ? gbModal() : closeModal();
+  if (a === 'gbChamaLink') return chLinkForm();
+  if (a === 'gbChamaAsk') return chFundForm();
+  if (a === 'gbChamaLinkGo') {
+    busy(t, true);
+    try { var r = await api('POST', '/group-buy/orders/' + S.gbSel.id + '/chama/link', { circleId: val('chPick') }); toast(T('Shared with the Chama', 'Imeshirikiwa na Chama')); gbModal(); } catch (e) { gbBad(e); } finally { busy(t, false); }
+    return;
+  }
+  if (a === 'gbChamaFundGo') {
+    var amt = numOrNull('chAmt'); if (!(amt > 0)) return toast(T('Enter the amount', 'Weka kiasi'), true);
+    busy(t, true);
+    try { await api('POST', '/group-buy/orders/' + S.gbSel.id + '/chama/funding', { id: CH.fundId, circleId: val('chPick'), amount: amt }); CH.fundId = null; toast(T('Request sent to your Chama', 'Ombi limetumwa kwa Chama')); chOpen(val('chPick')); } catch (e) { gbBad(e); } finally { busy(t, false); }
+    return;
+  }
+  if (a === 'gbChamaVote') {
+    busy(t, true);
+    try { await api('POST', '/group-buy/chama/funding/' + id + '/vote', { vote: t.dataset.v }); toast(T('Vote saved', 'Kura imehifadhiwa')); chOpen(CH.circleId); } catch (e) { gbBad(e); } finally { busy(t, false); }
+    return;
+  }
+  if (a === 'gbChamaCancel') {
+    if (!confirm(T('Cancel this request?', 'Ghairi ombi hili?'))) return;
+    busy(t, true);
+    try { await api('POST', '/group-buy/chama/funding/' + id + '/cancel', {}); toast(T('Request cancelled', 'Ombi limeghairiwa')); chOpen(CH.circleId); } catch (e) { gbBad(e); } finally { busy(t, false); }
+    return;
+  }
+  if (a === 'gbChamaSettle') {
+    var ref = prompt(T('Enter the reference of the payout you made through NECPRA Money', 'Weka kumbukumbu ya malipo uliyofanya kupitia NECPRA Money'));
+    if (!ref || !ref.trim()) return;
+    busy(t, true);
+    try { await api('POST', '/group-buy/chama/funding/' + id + '/settle', { payoutRef: ref.trim(), note: null }); toast(T('Payout recorded', 'Malipo yamerekodiwa')); chOpen(CH.circleId); } catch (e) { gbBad(e); } finally { busy(t, false); }
+  }
+}
+/* ───── Device financing (NECPRA Smart Scale on instalments) ─────
+   Kept apart from sales and shop profit. NECPRA sets the price, deposit and weekly amount when it approves an application; nothing is
+   invented here. A repayment counts only when NECPRA confirms the M-PESA receipt was a paid NECPRA payment of that amount. Starting an
+   M-PESA prompt for repayments is not available yet (needs a financing receiving account in mpesaStkService), so the trader pays
+   through NECPRA and enters the receipt code. Late payment never disables the scale or blocks sales; it only produces reminders. */
+var FN = { appId: null, payId: null, repId: null, planId: null, stkId: null, stkTimer: null };
+function fnStatus(s) { return { applied: T('Waiting for NECPRA', 'Inasubiri NECPRA'), approved: T('Approved: pay the deposit', 'Imeidhinishwa: lipa amana'), active: T('Active', 'Inaendelea'), completed: T('Fully paid', 'Imelipwa yote'), rejected: T('Not approved', 'Haikuidhinishwa'), cancelled: T('Cancelled', 'Imeghairiwa') }[s] || s; }
+function fnBack(btn) { return '<button class="btn2" data-act="fnOpen" type="button">' + T('Back', 'Rudi') + '</button>'; }
+function fnProgress(pg) {
+  if (!pg) return '';
+  return '<div class="s">' + T('Price ', 'Bei ') + KSH(pg.priceTotal) + ' · ' + T('paid ', 'umelipa ') + KSH(pg.paid) + ' · ' + T('balance ', 'salio ') + '<b>' + KSH(pg.balance) + '</b></div>' +
+    (pg.depositOutstanding > 0 ? '<div class="s">' + T('Deposit still to pay: ', 'Amana inayobaki: ') + KSH(pg.depositOutstanding) + '</div>' : '') +
+    (pg.arrears > 0 ? '<div class="s" style="color:var(--kyn-accent-danger,#d93025)">' + T('Overdue: ', 'Iliyochelewa: ') + KSH(pg.arrears) + '</div>' : '') +
+    (pg.nextInstalment ? '<div class="s">' + T('Next: ', 'Inayofuata: ') + KSH(pg.nextInstalment.amountLeft) + ' ' + T('by ', 'kufikia ') + esc(pg.nextInstalment.dueDate) + '</div>' : '');
+}
+async function fnOpen() {
+  openModal(T('Device financing', 'Mkopo wa kifaa'), '<div class="spin">Loading…</div>');
+  try {
+    var r = await api('GET', '/shops/' + S.shopId + '/financing', null, GB_NOCACHE), rem = [];
+    try { rem = (await api('GET', '/shops/' + S.shopId + '/financing/reminders', null, GB_NOCACHE)).reminders || []; } catch (_) {}
+    var plans = r.plans || [], openPlan = plans.some(function (p) { return ['applied', 'approved', 'active'].indexOf(p.status) >= 0; });
+    var h = rem.map(function (x) { return '<div class="note' + (x.kind === 'overdue' ? ' err' : '') + '">' + esc(x.message) + '</div>'; }).join('');
+    h += plans.length ? plans.map(function (p) {
+      return '<div class="item" data-act="fnPlan" data-id="' + esc(p.id) + '"><div class="grow"><div class="t">' + esc(p.deviceModel) + ' · ' + fnStatus(p.status) + '</div>' +
+        (p.terms ? '<div class="s">' + T('Deposit ', 'Amana ') + KSH(p.terms.deposit) + ' · ' + KSH(p.terms.weeklyAmount) + T(' weekly for ', ' kwa wiki kwa ') + p.terms.weeks + T(' weeks', ' wiki') + '</div>' : '') + fnProgress(p.progress) +
+        (p.rejectReason ? '<div class="s">' + esc(p.rejectReason) + '</div>' : '') + '</div></div>';
+    }).join('') : '<div class="s">' + T('No device application yet.', 'Bado hujaomba kifaa.') + '</div>';
+    h += '<div class="note">' + T('A late instalment never switches off your scale or stops you selling. You will only get reminders.', 'Kuchelewa kulipa hakuzimi mizani yako wala kukuzuia kuuza. Utapata vikumbusho tu.') + '</div>' +
+      '<div class="actions">' + (openPlan ? '' : '<button class="btn" data-act="fnApply" type="button">' + T('Apply for a Smart Scale', 'Omba Smart Scale') + '</button>') + '<button class="btn2" data-act="closeModal" type="button">' + T('Close', 'Funga') + '</button></div>';
+    $('mBody').innerHTML = h;
+  } catch (e) { closeModal(); gbBad(e); }
+}
+async function fnApplyForm() {
+  try {
+    var el = await api('GET', '/shops/' + S.shopId + '/financing/eligibility', null, GB_NOCACHE);
+    FN.appId = FN.appId || uuid();
+    openModal(T('Apply for a Smart Scale', 'Omba Smart Scale'), '<div class="note">' + esc(el.note) + '</div>' +
+      el.checks.map(function (c) { return '<div class="s">' + (c.ok ? '✔ ' : '✖ ') + esc(c.detail) + '</div>'; }).join('') +
+      '<div class="note">' + T('NECPRA sets the price, deposit and weekly amount when it approves. You will see them here before you pay anything.', 'NECPRA huweka bei, amana na kiasi cha wiki inapoidhinisha. Utaviona hapa kabla ya kulipa chochote.') + '</div>' +
+      '<label>' + T('Note (optional)', 'Maelezo (si lazima)') + '</label><input id="fnNote" maxlength="300">' +
+      '<label style="display:flex;gap:8px;align-items:flex-start"><input id="fnConsent" type="checkbox" style="width:auto;margin-top:3px"> <span>' + T('I agree to share the shop figures above with NECPRA for this application.', 'Nakubali kushiriki takwimu za duka hapo juu na NECPRA kwa ombi hili.') + '</span></label>' +
+      '<div class="actions">' + fnBack() + '<button class="btn" data-act="fnApplyGo" type="button">' + T('Send application', 'Tuma ombi') + '</button></div>');
+  } catch (e) { gbBad(e); }
+}
+async function fnPlan(planId) {
+  openModal(T('Device plan', 'Mpango wa kifaa'), '<div class="spin">Loading…</div>');
+  try {
+    var d = await api('GET', '/shops/' + S.shopId + '/financing/' + planId + '/statement', null, GB_NOCACHE), p = d.plan, stkOn = false; FN.planId = planId;
+    try { stkOn = (await api('GET', '/shops/' + S.shopId + '/financing/pay-stk/enabled', null, GB_NOCACHE)).enabled === true; } catch (_) {}
+    FN.stkTimer && clearTimeout(FN.stkTimer); FN.payId = FN.payId || uuid(); FN.repId = FN.repId || uuid();
+    var h = '<div class="t" style="font-weight:700">' + esc(p.deviceModel) + ' · ' + fnStatus(p.status) + '</div>' + fnProgress(p.progress) +
+      (p.warrantyUntil ? '<div class="s">' + T('Warranty until ', 'Dhamana hadi ') + esc(String(p.warrantyUntil).slice(0, 10)) + '</div>' : '') +
+      '<div class="s">' + T('Ownership: ', 'Umiliki: ') + esc(p.ownership || '—') + '</div>';
+    if (d.schedule.length) h += '<h3>' + T('Instalments', 'Malipo ya wiki') + '</h3>' + d.schedule.map(function (s) { return '<div class="s">' + s.no + '. ' + esc(s.dueDate) + ' · ' + KSH(s.amount) + ' · ' + (s.status === 'paid' ? T('paid', 'imelipwa') : s.status === 'overdue' ? '<b style="color:var(--kyn-accent-danger,#d93025)">' + T('overdue', 'imechelewa') + '</b>' : T('upcoming', 'inakuja')) + (s.paid > 0 && s.status !== 'paid' ? ' (' + KSH(s.paid) + ')' : '') + '</div>'; }).join('');
+    h += '<h3>' + T('Payments', 'Malipo') + '</h3>' + (d.payments.length ? d.payments.map(function (x) { return '<div class="s">' + new Date(x.recordedAt).toLocaleDateString('en-KE') + ' · ' + KSH(x.amount) + ' · ' + esc(x.mpesaReceipt) + '</div>'; }).join('') : '<div class="s">' + T('No payments yet.', 'Hakuna malipo bado.') + '</div>');
+    if (stkOn && ['approved', 'active'].indexOf(p.status) >= 0) h += '<h3>' + T('Pay with an M-PESA prompt', 'Lipa kwa ombi la M-PESA') + '</h3><div class="note">' + T('We send a prompt to your phone. Enter your M-PESA PIN. The payment is recorded only after M-PESA confirms it.', 'Tunatuma ombi kwenye simu yako. Weka PIN ya M-PESA. Malipo yanarekodiwa baada ya M-PESA kuthibitisha.') + '</div>' +
+      '<div class="two"><div><label>' + T('M-PESA phone', 'Simu ya M-PESA') + '</label><input id="fnPh" inputmode="tel" placeholder="07XX XXX XXX"></div><div><label>' + T('Amount (whole KSh)', 'Kiasi (KSh nzima)') + '</label><input id="fnStkAmt" type="number" step="1" inputmode="numeric" value="' + esc(Math.ceil(p.progress && p.progress.depositOutstanding > 0 ? p.progress.depositOutstanding : (p.progress && p.progress.nextInstalment ? p.progress.nextInstalment.amountLeft : 0)) || '') + '"></div></div>' +
+      '<div class="s" id="fnStkMsg"></div><div class="actions"><button class="btn" data-act="fnStk" type="button">' + T('Send M-PESA prompt', 'Tuma ombi la M-PESA') + '</button></div>';
+    if (['approved', 'active'].indexOf(p.status) >= 0) h += '<h3>' + T('Record a repayment', 'Rekodi malipo') + '</h3><div class="note">' + T('Pay through NECPRA, then enter the M-PESA receipt code here. It counts only after NECPRA confirms that receipt was paid in full. If it cannot confirm, nothing is recorded.', 'Lipa kupitia NECPRA, kisha weka nambari ya risiti ya M-PESA hapa. Inahesabiwa baada ya NECPRA kuthibitisha. Isipothibitishwa, hakuna kinachorekodiwa.') + '</div>' +
+      '<div class="two"><div><label>M-PESA ' + T('receipt code', 'nambari ya risiti') + '</label><input id="fnCode" maxlength="10" autocapitalize="characters" style="text-transform:uppercase"></div><div><label>' + T('Amount (KSh)', 'Kiasi (KSh)') + '</label><input id="fnAmt" type="number" step="any" inputmode="decimal" value="' + esc(p.progress && p.progress.depositOutstanding > 0 ? p.progress.depositOutstanding : (p.progress && p.progress.nextInstalment ? p.progress.nextInstalment.amountLeft : '')) + '"></div></div>' +
+      '<div class="actions"><button class="btn" data-act="fnPay" type="button">' + T('Submit repayment', 'Tuma malipo') + '</button></div>';
+    if (d.repairs.length) h += '<h3>' + T('Repair & warranty', 'Matengenezo na dhamana') + '</h3>' + d.repairs.map(function (r) { return '<div class="s">' + esc(r.kind) + ' · ' + esc(r.status) + ' · ' + esc(r.details) + (r.resolution ? ' → ' + esc(r.resolution) : '') + '</div>'; }).join('');
+    if (['active', 'completed'].indexOf(p.status) >= 0) h += '<h3>' + T('Report a problem with the device', 'Ripoti tatizo la kifaa') + '</h3><select id="fnKind"><option value="warranty">' + T('Warranty claim', 'Dai la dhamana') + '</option><option value="repair">' + T('Repair', 'Matengenezo') + '</option></select><input id="fnDet" maxlength="400" placeholder="' + T('What is wrong?', 'Tatizo ni nini?') + '"><div class="actions"><button class="btn2" data-act="fnRepair" type="button">' + T('Send request', 'Tuma ombi') + '</button></div>';
+    h += '<div class="actions">' + fnBack() + '</div>';
+    $('mBody').innerHTML = h;
+  } catch (e) { closeModal(); gbBad(e); }
+}
+function fnStkMsg(m, bad) { var e = $('fnStkMsg'); if (e) { e.textContent = m; e.style.color = bad ? 'var(--kyn-accent-danger,#d93025)' : ''; } }
+// Asks the server every 4 s (up to ~2 minutes) whether M-PESA confirmed this attempt. Nothing is shown as paid until the server has recorded it.
+async function fnPoll(planId, attempt, n) {
+  if (FN.planId !== planId || FN.stkId !== attempt || !$('fnStkMsg')) return;
+  try {
+    var r = await api('GET', '/shops/' + S.shopId + '/financing/' + planId + '/pay-stk?id=' + attempt, null, GB_NOCACHE);
+    if (r.state === 'recorded') { toast(T('Payment confirmed and recorded', 'Malipo yamethibitishwa na kurekodiwa')); return fnPlan(planId); }
+    if (r.state === 'not_paid') return fnStkMsg(r.detail || T('The payment was not completed.', 'Malipo hayakukamilika.'), true);
+    fnStkMsg(r.state === 'confirming' ? T('M-PESA confirmed. Recording your payment…', 'M-PESA imethibitisha. Inarekodi…') : T('Waiting for you to enter your M-PESA PIN…', 'Inasubiri uweke PIN ya M-PESA…'));
+  } catch (_) {}
+  if (n >= 30) return fnStkMsg(T('Still waiting. If you paid, it will appear here once M-PESA confirms. You can also enter the receipt code below.', 'Bado inasubiri. Ukilipa, itaonekana hapa M-PESA ikithibitisha. Unaweza pia kuweka nambari ya risiti hapa chini.'));
+  FN.stkTimer = setTimeout(function () { fnPoll(planId, attempt, n + 1); }, 4000);
+}
+async function fnAct(a, t, id) {
+  if (a === 'fnOpen') return fnOpen();
+  if (a === 'fnApply') return fnApplyForm();
+  if (a === 'fnPlan') return fnPlan(id);
+  var base = '/shops/' + S.shopId + '/financing';
+  if (a === 'fnApplyGo') {
+    if (!$('fnConsent').checked) return toast(T('Please tick the box to agree to share your shop figures', 'Tafadhali kubali kushiriki takwimu za duka'), true);
+    busy(t, true);
+    try { var r = await api('POST', base + '/applications', { id: FN.appId, consentShareData: true, note: val('fnNote') || null }); FN.appId = null; toast(T('Application sent', 'Ombi limetumwa')); fnOpen(); } catch (e) { gbBad(e); } finally { busy(t, false); }
+    return;
+  }
+  if (a === 'fnStk') {
+    var sph = val('fnPh'), samt = numOrNull('fnStkAmt'); if (!sph) return toast(T('Enter the M-PESA phone number', 'Weka nambari ya simu ya M-PESA'), true);
+    if (!(samt >= 1) || Math.floor(samt) !== samt) return toast(T('Enter a whole amount in shillings', 'Weka kiasi kamili cha shilingi'), true);
+    FN.stkId = uuid(); busy(t, true);
+    try { var sr = await api('POST', base + '/' + FN.planId + '/pay-stk', { id: FN.stkId, amount: samt, phone: sph }); fnStkMsg(sr.message || T('Check your phone and enter your M-PESA PIN.', 'Angalia simu yako uweke PIN ya M-PESA.')); fnPoll(FN.planId, FN.stkId, 0); } catch (e) { gbBad(e); } finally { busy(t, false); }
+    return;
+  }
+  if (a === 'fnPay') {
+    var code = val('fnCode').toUpperCase().replace(/\s/g, ''), amt = numOrNull('fnAmt');
+    if (!/^[A-Z0-9]{10}$/.test(code)) return toast(T('Enter the 10-character M-PESA receipt code', 'Weka nambari ya risiti yenye herufi 10'), true);
+    if (!(amt > 0)) return toast(T('Enter the amount', 'Weka kiasi'), true);
+    busy(t, true);
+    try { await api('POST', base + '/' + FN.planId + '/payments', { id: FN.payId, amount: amt, mpesaReceipt: code }); FN.payId = null; toast(T('Repayment recorded', 'Malipo yamerekodiwa')); fnPlan(FN.planId); } catch (e) { gbBad(e); } finally { busy(t, false); }
+    return;
+  }
+  if (a === 'fnRepair') {
+    var det = val('fnDet'); if (!det) return toast(T('Describe the problem', 'Eleza tatizo'), true);
+    busy(t, true);
+    try { await api('POST', base + '/' + FN.planId + '/repairs', { id: FN.repId, kind: val('fnKind'), details: det }); FN.repId = null; toast(T('Request sent', 'Ombi limetumwa')); fnPlan(FN.planId); } catch (e) { gbBad(e); } finally { busy(t, false); }
+  }
+}
+/* ───── Admin console (only for accounts listed as admin in the server .env: DUKA_ADMIN_IDS) ─────
+   The server decides who is an admin (GET /admin/me) and enforces it on every admin route; this tab is simply not shown to anyone
+   else. Covers: device-financing applications, supplier verification, group-buy disputes, refunds to pay out, and repair requests.
+   Marketplace admin is not part of DUKA SMART here. */
+var ADM_SECS = [['fin', 'Financing', 'financingApplications'], ['sup', 'Suppliers', 'suppliersPending'], ['disp', 'Disputes', 'openDisputes'], ['ref', 'Refunds', 'pendingRefunds'], ['rep', 'Repairs', 'openRepairs']];
+var ADM_ST = { fin: [['applied', 'New'], ['approved', 'Approved'], ['active', 'Active'], ['completed', 'Completed'], ['rejected', 'Rejected']], sup: [['pending', 'Pending'], ['verified', 'Verified'], ['suspended', 'Suspended']], disp: [['open', 'Open'], ['resolved', 'Resolved']], ref: [['pending', 'To pay out'], ['paid_out', 'Paid out']], rep: [['open', 'Open'], ['in_repair', 'In repair'], ['resolved', 'Resolved'], ['rejected', 'Rejected']] };
+var ADM_DEF = { fin: 'applied', sup: 'pending', disp: 'open', ref: 'pending', rep: 'open' };
+S.adm = { sec: 'fin', st: 'applied', rows: [], ov: null, id: null };
+async function checkAdmin() { try { S.isAdmin = (await api('GET', '/admin/me', null, GB_NOCACHE)).isAdmin === true; } catch (_) { S.isAdmin = false; } if (!S.isAdmin && S.tab === 'admin') S.tab = 'dash'; }
+async function loadAdmin() {
+  var A = S.adm, path = { fin: '/financing/admin/applications?status=', sup: '/admin/suppliers?status=', disp: '/admin/disputes?status=', ref: '/admin/refunds?status=', rep: '/admin/repairs?status=' }[A.sec], key = { fin: 'applications', sup: 'suppliers', disp: 'disputes', ref: 'refunds', rep: 'repairs' }[A.sec];
+  var r = await Promise.all([api('GET', '/admin/overview', null, GB_NOCACHE), api('GET', path + A.st, null, GB_NOCACHE)]);
+  A.ov = r[0]; A.rows = r[1][key] || [];
+}
+function admRow(id) { return S.adm.rows.filter(function (x) { return x.id === id; })[0]; }
+function viewAdmin() {
+  var A = S.adm; if (!S.isAdmin) return '<div class="note err">Not allowed.</div>';
+  var h = '<h3>Admin</h3><div class="grid">' + ADM_SECS.map(function (x) { return '<div class="card stat' + (A.sec === x[0] ? ' on' : '') + '" data-act="admSec" data-id="' + x[0] + '" style="cursor:pointer"><small>' + x[1] + '</small><b>' + (A.ov ? A.ov[x[2]] : '…') + '</b><div class="s">waiting</div></div>'; }).join('') + '</div>';
+  h += '<div class="bar">' + ADM_ST[A.sec].map(function (x) { return '<button class="' + (A.st === x[0] ? 'btn' : 'btn2') + '" data-act="admSt" data-id="' + x[0] + '" type="button">' + x[1] + '</button>'; }).join('') + '</div>';
+  if (!A.rows.length) return h + '<div class="card"><div class="s">Nothing here.</div></div>';
+  return h + A.rows.map(function (r) {
+    var t = '', s = '', b = '';
+    if (A.sec === 'fin') {
+      t = esc(r.shopName) + ' · ' + esc(r.deviceModel); s = esc(r.shopPhone || '') + (r.terms ? ' · price ' + KSH(r.terms.devicePrice) + ', deposit ' + KSH(r.terms.deposit) + ', ' + KSH(r.terms.weeklyAmount) + '/week × ' + r.terms.weeks : '') + (r.progress ? ' · balance ' + KSH(r.progress.balance) : '') + (r.note ? '<br>Note: ' + esc(r.note) : '');
+      if (r.status === 'applied') b = '<button class="btn" data-act="admReview" data-id="' + esc(r.id) + '" type="button">Review</button>';
+      else if (['approved', 'active'].indexOf(r.status) >= 0) b = '<button class="btn2" data-act="admLink" data-id="' + esc(r.id) + '" type="button">' + (r.deviceId ? 'Change device' : 'Link device') + '</button>';
+      if (r.deviceId) s += '<br>Device linked';
+    } else if (A.sec === 'sup') {
+      t = esc(r.businessName); s = esc(r.phone) + (r.location ? ' · ' + esc(r.location) : '') + (r.products ? '<br>' + esc(r.products) : '');
+      if (r.status !== 'verified') b += '<button class="btn" data-act="admSup" data-id="' + esc(r.id) + '" data-v="verify" type="button">Verify</button>';
+      if (r.status !== 'suspended') b += '<button class="btn2" data-act="admSup" data-id="' + esc(r.id) + '" data-v="suspend" type="button">Suspend</button>';
+    } else if (A.sec === 'disp') {
+      t = esc(r.product) + ' · ' + esc(r.kind); s = esc(r.details) + '<br>Order ' + esc(r.orderStatus) + ' · ' + new Date(r.createdAt).toLocaleString('en-KE');
+      b = '<button class="btn2" data-act="admTrail" data-id="' + esc(r.orderId) + '" type="button">Order trail</button>' + (r.status === 'open' ? '<button class="btn" data-act="admResolve" data-id="' + esc(r.id) + '" type="button">Mark resolved</button>' : '');
+    } else if (A.sec === 'ref') {
+      t = esc(r.shopName) + ' · ' + KSH(r.amount); s = esc(r.product) + ' · ' + esc(r.reason) + (r.shopPhone ? '<br>' + esc(r.shopPhone) : '') + (r.payoutRef ? '<br>Ref ' + esc(r.payoutRef) : '');
+      if (r.status === 'pending') b = '<button class="btn" data-act="admPaid" data-id="' + esc(r.id) + '" type="button">Mark paid out</button>';
+    } else {
+      t = esc(r.shopName) + ' · ' + esc(r.kind) + ' · ' + esc(r.deviceModel); s = esc(r.details) + (r.resolution ? '<br>→ ' + esc(r.resolution) : '') + (r.shopPhone ? '<br>' + esc(r.shopPhone) : '');
+      b = '<button class="btn2" data-act="admRepair" data-id="' + esc(r.id) + '" type="button">Update</button>';
+    }
+    return '<div class="card" style="margin-bottom:8px"><div class="t" style="font-weight:700">' + t + '</div><div class="s">' + s + '</div>' + (b ? '<div class="actions">' + b + '</div>' : '') + '</div>';
+  }).join('');
+}
+function admReviewModal(r) {
+  var el = r.eligibility || {}, f = el.figures || {};
+  openModal('Review application', '<div class="t" style="font-weight:700">' + esc(r.shopName) + ' · ' + esc(r.shopPhone || '') + '</div><div class="s">' + esc(r.deviceModel) + '</div>' +
+    '<div class="note">Indicative figures from the shop\'s recorded sales (shared with the trader\'s consent): ' + (f.shopAgeDays != null ? f.shopAgeDays + ' days recorded, ' + f.sales28d + ' sales in 28 days, average weekly gross profit ' + KSH(f.avgWeeklyGrossProfit) : 'not available') + '.</div>' +
+    (el.checks || []).map(function (c) { return '<div class="s">' + (c.ok ? '✔ ' : '✖ ') + esc(c.detail) + '</div>'; }).join('') +
+    '<h3>Terms you offer</h3><div class="two"><div><label>Device price (KSh)</label><input id="adPrice" type="number" step="any" inputmode="decimal"></div><div><label>Deposit (KSh)</label><input id="adDep" type="number" step="any" inputmode="decimal"></div></div>' +
+    '<div class="two"><div><label>Weekly amount (KSh)</label><input id="adWeek" type="number" step="any" inputmode="decimal"></div><div><label>Warranty (months)</label><input id="adWar" type="number" inputmode="numeric" value="12"></div></div>' +
+    '<div class="actions"><button class="btn" data-act="admApprove" data-id="' + esc(r.id) + '" type="button">Approve</button></div>' +
+    '<label>Or reject — reason the trader will see</label><input id="adRej" maxlength="240"><div class="actions"><button class="btnd" data-act="admReject" data-id="' + esc(r.id) + '" type="button">Reject</button><button class="btn2" data-act="closeModal" type="button">Close</button></div>');
+}
+async function admDone(msg) { closeModal(); toast(msg); try { await loadAdmin(); } catch (e) { gbBad(e); } render(); }
+async function admAct(a, t, id) {
+  var A = S.adm;
+  try {
+    if (a === 'admSec') { A.sec = id; A.st = ADM_DEF[id]; busy(t, true); await loadAdmin(); return render(); }
+    if (a === 'admSt') { A.st = id; await loadAdmin(); return render(); }
+    if (a === 'admReview') { var r0 = admRow(id); if (r0) admReviewModal(r0); return; }
+    if (a === 'admApprove') {
+      var price = numOrNull('adPrice'), dep = numOrNull('adDep'), wk = numOrNull('adWeek'); if (!(price > 0) || !(wk > 0) || dep == null || dep < 0) return toast('Enter the price, deposit and weekly amount', true);
+      busy(t, true); await api('POST', '/financing/admin/' + id + '/approve', { devicePrice: price, deposit: dep, weeklyAmount: wk, warrantyMonths: numOrNull('adWar') || 0 }); return admDone('Approved');
+    }
+    if (a === 'admReject') { var why = val('adRej'); if (!why) return toast('Enter the reason for the trader', true); busy(t, true); await api('POST', '/financing/admin/' + id + '/reject', { reason: why }); return admDone('Rejected'); }
+    if (a === 'admLink') {
+      var r1 = admRow(id); if (!r1) return; var ds = (await api('GET', '/admin/shops/' + r1.shopId + '/devices', null, GB_NOCACHE)).devices || [];
+      if (!ds.length) return toast('Register the device on this trader\'s shop first (Smart Scale devices)', true);
+      return openModal('Link device', '<div class="s">' + esc(r1.shopName) + '</div><label>Device</label><select id="adDev">' + ds.map(function (d) { return '<option value="' + esc(d.id) + '">' + esc(d.serialNo) + (d.label ? ' · ' + esc(d.label) : '') + (d.status !== 'active' ? ' (' + esc(d.status) + ')' : '') + '</option>'; }).join('') + '</select><div class="actions"><button class="btn2" data-act="closeModal" type="button">Cancel</button><button class="btn" data-act="admLinkGo" data-id="' + esc(id) + '" type="button">Link</button></div>');
+    }
+    if (a === 'admLinkGo') { busy(t, true); await api('POST', '/financing/admin/' + id + '/link-device', { deviceId: val('adDev') }); return admDone('Device linked'); }
+    if (a === 'admSup') { if (!confirm((t.dataset.v === 'verify' ? 'Verify' : 'Suspend') + ' this supplier?')) return; busy(t, true); await api('POST', '/group-buy/suppliers/' + id + '/' + t.dataset.v, {}); return admDone(t.dataset.v === 'verify' ? 'Supplier verified' : 'Supplier suspended'); }
+    if (a === 'admResolve') { if (!confirm('Mark this dispute as resolved?')) return; busy(t, true); await api('POST', '/group-buy/disputes/' + id + '/resolve', {}); return admDone('Dispute resolved'); }
+    if (a === 'admTrail') {
+      var tr = (await api('GET', '/group-buy/orders/' + id + '/audit', null, GB_NOCACHE)).entries || [];
+      return openModal('Order trail', (tr.length ? tr.map(function (e) { return '<div class="s">' + new Date(e.at).toLocaleString('en-KE') + ' · user ' + esc(e.userId) + ' · <b>' + esc(e.action) + '</b>' + (e.data ? ' ' + esc(JSON.stringify(e.data)) : '') + '</div>'; }).join('') : '<div class="s">No entries.</div>') + '<div class="actions"><button class="btn" data-act="closeModal" type="button">Close</button></div>');
+    }
+    if (a === 'admPaid') { var ref = prompt('Enter the reference of the refund you paid out'); if (!ref || !ref.trim()) return; busy(t, true); await api('POST', '/group-buy/refunds/' + id + '/paid-out', { payoutRef: ref.trim() }); return admDone('Refund marked as paid out'); }
+    if (a === 'admRepair') {
+      return openModal('Update request', '<label>Status</label><select id="adRst"><option value="in_repair">In repair</option><option value="resolved">Resolved</option><option value="rejected">Rejected</option></select><label>Note for the trader</label><input id="adRes" maxlength="300"><div class="actions"><button class="btn2" data-act="closeModal" type="button">Cancel</button><button class="btn" data-act="admRepairGo" data-id="' + esc(id) + '" type="button">Save</button></div>');
+    }
+    if (a === 'admRepairGo') { busy(t, true); await api('POST', '/financing/admin/repairs/' + id + '/status', { status: val('adRst'), resolution: val('adRes') || null }); return admDone('Saved'); }
+  } catch (e) { gbBad(e); busy(t, false); }
 }
 async function gbDo(btn, method, path, body, msg) {
   busy(btn, true);
@@ -1703,6 +2159,7 @@ async function gbDo(btn, method, path, body, msg) {
 }
 function gbAct(a, t, id) {
   var s = S.gbSel, you = s && s.d.you;
+  if (a.indexOf('gbChama') === 0) return chAct(a, t, id);
   if (a === 'gbOpen') gbOpen(id);
   else if (a === 'gbSaveDraft') gbSaveDraft(); else if (a === 'gbDraftJoin') gbDraftSaveJoin(); else if (a === 'gbDraftSend') gbSendDraft(t, id);
   else if (a === 'gbDraftSendAll') gbSendAllDrafts(t); else if (a === 'gbDraftDel') { if (confirm(T('Delete this draft?', 'Futa rasimu hii?'))) { gbDraftDel(id); render(true); } }
@@ -1809,6 +2266,8 @@ async function wsApply(btn, id, price, warn) {
   try { await api('PATCH', '/shops/' + S.shopId + '/products/' + id, { sellingPrice: Number(price) }); toast(T('Price updated', 'Bei imebadilishwa')); refresh(); } catch (e) { gbBad(e); } finally { busy(btn, false); }
 }
 function extraAct(a, t, id) {
+  if (a.indexOf('fn') === 0) return fnAct(a, t, id);
+  if (a.indexOf('adm') === 0) return admAct(a, t, id);
   if (a.indexOf('gb') === 0) return gbAct(a, t, id);
   if (a === 'wsBatch') wsBatch(); else if (a === 'wsBatchSave') wsBatchSave(t); else if (a === 'wsLoss') wsLoss(); else if (a === 'wsLossSave') wsLossSave(t);
   else if (a === 'wsApply') wsApply(t, id, t.dataset.p, t.dataset.warn === '1');
@@ -1827,6 +2286,14 @@ document.addEventListener('click', function (ev) {
   else if (a === 'discardBill') discardBill(Number(t.dataset.i));
   else if (a === 'openScan') openScan();
   else if (a === 'scanNew') scanNew(t.dataset.code);
+  else if (a === 'openCam') openCam();
+  else if (a === 'camYes') camYes(id);
+  else if (a === 'camQty') camQty(id);
+  else if (a === 'camPlus') camPlus(id);
+  else if (a === 'camUndo') camUndo(id);
+  else if (a === 'camTeach') camTeach();
+  else if (a === 'camForget') camForget();
+  else if (a === 'camNew') camNew();
   else if (a === 'checkout') openCheckout();
   else if (a === 'fullCash') { var s0 = payState(); $('payCash').value = (s0.c.total - s0.mpApplied) / 100; updateCheckout(); }
   else if (a === 'confirmSale') confirmSale(t);
@@ -1836,7 +2303,7 @@ document.addEventListener('click', function (ev) {
   else if (a === 'voidSale') openVoidSale(id);
   else if (a === 'doVoidSale') doVoidSale(t, id);
   else if (a === 'exRun') exRun(t, t.dataset.k, t.dataset.f);
-  else if (/^(gb|ws)[A-Z]/.test(a)) extraAct(a, t, id);
+  else if (/^(gb|ws|fn|adm)[A-Z]/.test(a)) extraAct(a, t, id);
   else if (a === 'retry') { S.loading = true; boot(); }
   else if (a === 'tab') { S.tab = t.dataset.tab; try { sessionStorage.setItem('necpra_duka_tab', S.tab); } catch (_) {} render(); refresh(); }
   else if (a === 'toggleLow') { S.low = !S.low; refresh(); }
