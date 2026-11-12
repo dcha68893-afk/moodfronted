@@ -172,6 +172,8 @@ async function loadTab() {
     if (!S.cartLoadedFor || S.cartLoadedFor !== S.shopId) loadCart();
     syncCart();
   }
+  if (S.tab === 'group') { var gp = await api('GET', '/shops/' + S.shopId + '/products?limit=500'); S.products = applyPending(gp.products.slice()); S.gb = { orders: (await api('GET', '/group-buy/orders', null, GB_NOCACHE)).orders, dash: await api('GET', '/group-buy/dashboard', null, GB_NOCACHE) }; }
+  if (S.tab === 'waste') { var wp = await api('GET', '/shops/' + S.shopId + '/products?limit=500'); S.products = applyPending(wp.products.slice()); S.waste = await api('GET', '/shops/' + S.shopId + '/waste', null, GB_NOCACHE); }
   if (S.tab === 'money') await loadMoney();
   if (S.tab === 'sales') {
     var from = S.range === 'today' ? ymd(0) : S.range === '7' ? ymd(6) : S.range === '30' ? ymd(29) : '';
@@ -225,7 +227,7 @@ function header() {
   var sw = S.shops.length > 1 ? '<select id="shopSel" class="grow" aria-label="Choose shop">' + S.shops.map(function (s) { return '<option value="' + esc(s.id) + '"' + (s.id === S.shopId ? ' selected' : '') + '>' + esc(s.name) + '</option>'; }).join('') + '</select>' : '<div class="grow"><b>' + esc(shop().name) + '</b><div class="s" style="font-size:12px;opacity:.8">' + esc(shop().location || shop().businessType || '') + '</div></div>';
   return '<div class="hero"><h1>NECPRA DUKA SMART</h1><p>Your shop. Your stock. Your money. Your assistant.</p></div>' +
     '<div class="bar">' + sw + (S.shops.length < S.maxShops ? '<button class="btn2" type="button" data-act="newShop" title="Add another shop"><i class="fas fa-plus"></i> Shop</button>' : '') + '</div>' +
-    '<div class="tabs">' + [['dash', 'Dashboard'], ['pos', 'Sell'], ['sales', 'Sales'], ['products', 'Products'], ['money', 'Money'], ['settings', 'My shop']].map(function (t) {
+    '<div class="tabs">' + [['dash', 'Dashboard'], ['pos', 'Sell'], ['sales', 'Sales'], ['products', 'Products'], ['group', 'Buy together'], ['waste', 'Waste'], ['money', 'Money'], ['settings', 'My shop']].map(function (t) {
       return '<button class="tab' + (S.tab === t[0] ? ' on' : '') + '" data-act="tab" data-tab="' + t[0] + '" type="button">' + t[1] + (t[0] === 'pos' && S.cart.length ? ' (' + S.cart.length + ')' : '') + '</button>';
     }).join('') + '</div>';
 }
@@ -267,7 +269,7 @@ function render(keepFocus) {
   var html;
   if (S.err && !S.shops.length) html = '<div class="hero"><h1>NECPRA DUKA SMART</h1></div><div class="note err">' + esc(S.err) + '</div><div class="actions"><button class="btn" data-act="retry" type="button">Try again</button></div>';
   else if (!S.shops.length) html = viewOnboarding();
-  else html = header() + syncBar() + (S.err ? '<div class="note err">' + esc(S.err) + ' <a href="#" data-act="retry">Retry</a></div>' : '') + (S.tab === 'products' ? viewProducts() : S.tab === 'money' ? viewMoney() : S.tab === 'settings' ? viewSettings() : S.tab === 'pos' ? viewPos() : S.tab === 'sales' ? viewSales() : viewDash()) + vaFab();
+  else html = header() + syncBar() + (S.err ? '<div class="note err">' + esc(S.err) + ' <a href="#" data-act="retry">Retry</a></div>' : '') + (S.tab === 'products' ? viewProducts() : S.tab === 'money' ? viewMoney() : S.tab === 'settings' ? viewSettings() : S.tab === 'pos' ? viewPos() : S.tab === 'sales' ? viewSales() : S.tab === 'group' ? viewGroup() : S.tab === 'waste' ? viewWaste() : viewDash()) + vaFab();
   app.innerHTML = html;
   if (fid && $(fid)) { $(fid).focus(); try { $(fid).setSelectionRange(pos, pos); } catch (_) {} }
 }
@@ -1196,6 +1198,191 @@ function vaPick(id) {
 }
 
 /* ───── events ───── */
+/* ───── NECPRA Group Buying ("Buy together") + Smart Waste Prevention ─────
+   Both need a live connection (quotes, payment checks and stock changes are never faked offline).
+   All figures come from the server; estimates are labelled as estimates. */
+var GB_NOCACHE = { noCache: true };
+var gbBad = function (e) { toast(e.message || 'Something went wrong', true); };
+function gbHours(h) { return new Date(Date.now() + Number(h) * 3600000).toISOString(); }
+function gbStatusLabel(s) { return { open: T('Open', 'Wazi'), locked: T('Awaiting payment', 'Inasubiri malipo'), confirmed: T('Confirmed', 'Imethibitishwa'), delivered: T('Delivered', 'Imewasili'), completed: T('Completed', 'Imekamilika'), cancelled: T('Cancelled', 'Imeghairiwa'), disputed: T('Disputed', 'Ina mgogoro') }[s] || s; }
+function viewGroup() {
+  var g = S.gb; if (!g) return '<div class="note">' + T('Loading…', 'Inapakia…') + '</div>';
+  var d = g.dash, m = d.mine;
+  var cards = '<div class="two"><div class="card"><div class="s">' + T('Open group orders', 'Oda za pamoja zilizo wazi') + '</div><b>' + d.marketplace.openOrders + '</b></div>' +
+    '<div class="card"><div class="s">' + T('Awaiting my payment', 'Zinasubiri malipo yangu') + '</div><b>' + m.awaitingPayment + '</b></div></div>' +
+    '<div class="two"><div class="card"><div class="s">' + T('Pending deliveries', 'Zinazosubiri kuletwa') + '</div><b>' + m.pendingDeliveries + '</b></div>' +
+    '<div class="card"><div class="s">' + T('Verified savings', 'Akiba iliyothibitishwa') + '</div><b>' + KSH(d.verifiedSavings.amount) + '</b><div class="s">' + T('vs the price you entered, on completed orders', 'ukilinganisha na bei uliyoweka, oda zilizokamilika') + '</div></div></div>';
+  var list = g.orders.length ? g.orders.map(function (o) {
+    return '<div class="item" data-act="gbOpen" data-id="' + esc(o.id) + '"><div class="grow"><div class="t">' + esc(o.productName) + ' · ' + esc(o.market) + '</div>' +
+      '<div class="s">' + QTY(o.combinedQty) + ' ' + esc(o.unit) + ' · ' + o.participants + ' ' + T('traders', 'wafanyabiashara') + (o.needsMoreQty > 0 ? ' · ' + T('needs ', 'inahitaji ') + QTY(o.needsMoreQty) + ' ' + T('more', 'zaidi') : '') +
+      (o.bestQuotedPrice != null ? ' · ' + T('best quote ', 'bei bora ') + KSH(o.bestQuotedPrice) + '/' + esc(o.unit) : ' · ' + T('no supplier quote yet', 'bado hakuna bei ya msambazaji')) + '</div>' +
+      '<div class="s">' + T('Closes ', 'Inafungwa ') + new Date(o.closesAt).toLocaleString('en-KE') + (o.joinedByMe ? ' · ' + T('you joined', 'umejiunga') : '') + '</div></div></div>';
+  }).join('') : '<div class="s">' + T('No open group orders in your area yet. Start one!', 'Hakuna oda za pamoja bado. Anzisha moja!') + '</div>';
+  var mine = m.orders.length ? '<h3>' + T('My group purchases', 'Manunuzi yangu ya pamoja') + '</h3>' + m.orders.map(function (o) {
+    return '<div class="item" data-act="gbOpen" data-id="' + esc(o.orderId) + '"><div class="grow"><div class="t">' + esc(o.product) + ' · ' + QTY(o.qty) + ' ' + esc(o.unit) + '</div><div class="s">' + gbStatusLabel(o.orderStatus) +
+      (o.amountDue != null ? ' · ' + T('due ', 'deni ') + KSH(o.amountDue) + ' · ' + T('paid ', 'umelipa ') + KSH(o.amountPaid) : '') + '</div></div></div>';
+  }).join('') : '';
+  return '<h3>' + T('Buy stock together', 'Nunua bidhaa pamoja') + '</h3>' + cards +
+    '<div class="actions"><button class="btn" data-act="gbNew" type="button"><i class="fas fa-users"></i> ' + T('Start a group order', 'Anzisha oda ya pamoja') + '</button>' +
+    '<button class="btn2" data-act="gbSupplier" type="button">' + T('I am a supplier', 'Mimi ni msambazaji') + '</button></div>' +
+    '<h3>' + T('Open orders', 'Oda zilizo wazi') + '</h3><div class="card">' + list + '</div>' + mine +
+    '<div class="note">' + T('Prices shown come only from suppliers NECPRA has verified. No saving is shown unless a real quote exists.', 'Bei zinatoka kwa wasambazaji waliothibitishwa na NECPRA pekee. Hakuna akiba inayoonyeshwa bila bei halisi.') + '</div>';
+}
+function gbNew() {
+  openModal(T('Start a group order', 'Anzisha oda ya pamoja'),
+    '<label>' + T('Product', 'Bidhaa') + '</label><input id="gbName" maxlength="160" placeholder="Tomatoes">' +
+    '<div class="two"><div><label>' + T('Unit', 'Kipimo') + '</label><select id="gbUnit">' + opt(UNITS, 'kg') + '</select></div><div><label>' + T('Market / delivery place', 'Soko / mahali') + '</label><input id="gbMarket" maxlength="160"></div></div>' +
+    '<div class="two"><div><label>' + T('Your quantity', 'Kiasi chako') + '</label><input id="gbQty" type="number" min="0" step="any" inputmode="decimal"></div><div><label>' + T('Minimum for the group', 'Kiwango cha chini cha kikundi') + '</label><input id="gbMin" type="number" min="0" step="any" inputmode="decimal"></div></div>' +
+    '<div class="two"><div><label>' + T('Closes in (hours)', 'Inafungwa baada ya (saa)') + '</label><input id="gbClose" type="number" min="1" value="24"></div><div><label>' + T('Pay within (hours of closing)', 'Lipa ndani ya (saa)') + '</label><input id="gbPay" type="number" min="1" value="24"></div></div>' +
+    '<label>' + T('What you usually pay per unit (optional, only used to show YOUR saving)', 'Bei unayolipa kawaida (si lazima)') + '</label><input id="gbRef" type="number" min="0" step="any" inputmode="decimal">' +
+    '<div class="actions"><button class="btn2" data-act="closeModal" type="button">' + T('Cancel', 'Ghairi') + '</button><button class="btn" data-act="gbCreate" type="button">' + T('Create', 'Unda') + '</button></div>');
+}
+async function gbCreate(btn) {
+  var close = Number(val('gbClose')) || 24, pay = Number(val('gbPay')) || 24;
+  var body = { id: uuid(), shopId: S.shopId, productName: val('gbName'), unit: val('gbUnit'), market: val('gbMarket'), minQty: numOrNull('gbMin') || 0,
+    closesAt: gbHours(close), paymentDeadline: gbHours(close + pay) };
+  if (numOrNull('gbQty')) body.qty = numOrNull('gbQty'); if (numOrNull('gbRef') != null) body.referencePrice = numOrNull('gbRef');
+  busy(btn, true);
+  try { await api('POST', '/group-buy/orders', body); closeModal(); toast(T('Group order created', 'Oda imeundwa')); refresh(); } catch (e) { gbBad(e); } finally { busy(btn, false); }
+}
+function gbSupplier() {
+  openModal(T('Supplier registration', 'Usajili wa msambazaji'),
+    '<div class="note">' + T('NECPRA must verify your business before you can send price quotes.', 'NECPRA lazima ithibitishe biashara yako kabla ya kutuma bei.') + '</div>' +
+    '<label>' + T('Business name', 'Jina la biashara') + '</label><input id="gsName" maxlength="140"><label>' + T('Phone', 'Simu') + '</label><input id="gsPhone" inputmode="tel" placeholder="07…">' +
+    '<label>' + T('Location', 'Mahali') + '</label><input id="gsLoc" maxlength="160"><label>' + T('What you supply', 'Unachosambaza') + '</label><input id="gsProd" maxlength="300">' +
+    '<div class="actions"><button class="btn2" data-act="closeModal" type="button">' + T('Cancel', 'Ghairi') + '</button><button class="btn" data-act="gbSupReg" type="button">' + T('Register', 'Jisajili') + '</button></div>');
+}
+async function gbSupReg(btn) {
+  busy(btn, true);
+  try { var r = await api('POST', '/group-buy/suppliers', { id: uuid(), businessName: val('gsName'), phone: val('gsPhone'), location: val('gsLoc'), products: val('gsProd') }); closeModal(); toast(r.note || 'Registered'); } catch (e) { gbBad(e); } finally { busy(btn, false); }
+}
+async function gbOpen(id) {
+  try {
+    var d = await api('GET', '/group-buy/orders/' + id, null, GB_NOCACHE), rec = null;
+    try { rec = await api('GET', '/group-buy/orders/' + id + '/recommendation?shopId=' + S.shopId, null, GB_NOCACHE); } catch (_) {}
+    S.gbSel = { id: id, d: d, rec: rec }; gbModal();
+  } catch (e) { gbBad(e); }
+}
+function gbModal() {
+  var s = S.gbSel, d = s.d, o = d.order, you = d.you, h = '';
+  h += '<div class="s">' + esc(o.market) + ' · ' + gbStatusLabel(o.status) + ' · ' + T('combined ', 'jumla ') + QTY(o.combinedQty) + ' ' + esc(o.unit) + (o.minQty ? ' · ' + T('minimum ', 'chini ') + QTY(o.minQty) : '') + '</div>';
+  if (o.cancelReason) h += '<div class="note err">' + esc(o.cancelReason) + '</div>';
+  if (d.quotes.length) {
+    h += '<h3>' + T('Supplier quotes', 'Bei za wasambazaji') + '</h3>' + d.quotes.map(function (q) {
+      var p = q.yourCostPreview, pr = '';
+      if (p) pr = '<div class="s">' + T('Your cost: ', 'Gharama yako: ') + T('goods ', 'bidhaa ') + KSH(p.goods) + ' + ' + T('transport ', 'usafiri ') + KSH(p.transportShare) + (p.platformFee ? ' + ' + T('platform fee ', 'ada ya jukwaa ') + KSH(p.platformFee) : '') + ' = <b>' + KSH(p.totalPayable) + '</b>' +
+        (p.savingVsYourReferencePrice != null ? '<br>' + T('Estimated saving vs your price: ', 'Akiba inayokadiriwa: ') + KSH(p.savingVsYourReferencePrice) : '') + (p.meetsMinimum ? '' : '<br>' + T('Group is below the minimum', 'Kikundi kiko chini ya kiwango')) + '</div>';
+      var pick = o.isOrganiser && o.status === 'open' ? '<button class="btn2" data-act="gbLock" data-id="' + esc(q.id) + '" type="button">' + T('Choose this supplier', 'Chagua msambazaji huyu') + '</button>' : '';
+      return '<div class="item"><div class="grow"><div class="t">' + esc(q.supplierName) + ' · ' + KSH(q.unitPrice) + '/' + esc(o.unit) + '</div><div class="s">' + T('transport ', 'usafiri ') + KSH(q.transportFee) + ' · ' + T('available ', 'inapatikana ') + QTY(q.availableQty) + (q.terms ? ' · ' + esc(q.terms) : '') + '</div>' + pr + '</div>' + pick + '</div>';
+    }).join('');
+  } else h += '<div class="note">' + T('No supplier quote yet — so no price and no saving is shown.', 'Hakuna bei ya msambazaji bado — kwa hivyo hakuna bei wala akiba.') + '</div>';
+  var rc = s.rec && s.rec.recommendedQty != null ? '<div class="note">' + T('Suggested for you: ', 'Tunapendekeza: ') + QTY(s.rec.recommendedQty) + ' ' + esc(o.unit) + ' — ' + esc(s.rec.reason) + ' (' + T('estimate; you can choose any amount', 'makadirio; unaweza kuchagua kiasi chochote') + ')</div>' : (s.rec && s.rec.message ? '<div class="s">' + esc(s.rec.message) + '</div>' : '');
+  if (o.status === 'open') {
+    h += rc + '<label>' + T('Your quantity', 'Kiasi chako') + ' (' + esc(o.unit) + ')</label><input id="gbJQty" type="number" min="0" step="any" inputmode="decimal" value="' + (you ? you.qty : '') + '">' +
+      '<label>' + T('What you usually pay per unit (optional)', 'Bei unayolipa kawaida (si lazima)') + '</label><input id="gbJRef" type="number" min="0" step="any" inputmode="decimal" value="' + (you && you.referencePrice != null ? you.referencePrice : '') + '">' +
+      '<div class="actions"><button class="btn" data-act="gbJoin" type="button">' + (you ? T('Update my quantity', 'Badilisha kiasi') : T('Join', 'Jiunge')) + '</button>' + (you ? '<button class="btn2" data-act="gbWithdraw" type="button">' + T('Withdraw', 'Jiondoe') + '</button>' : '') + '</div>';
+  }
+  if (you && o.status === 'locked') {
+    if (you.status === 'joined') h += '<div class="note">' + T('Your amount to pay: ', 'Kiasi cha kulipa: ') + '<b>' + KSH(you.amountDue) + '</b></div><div class="actions"><button class="btn" data-act="gbConfirm" type="button">' + T('Confirm ', 'Thibitisha ') + KSH(you.amountDue) + '</button><button class="btn2" data-act="gbWithdraw" type="button">' + T('Withdraw', 'Jiondoe') + '</button></div>';
+    else if (you.status === 'confirmed') h += '<div class="note">' + T('Pay ', 'Lipa ') + KSH(you.amountDue) + T(' with M-PESA (paybill/till per your NECPRA payment), then enter the receipt code. It only counts once NECPRA verifies it.', ' kwa M-PESA, kisha weka nambari ya risiti. Inahesabiwa baada ya NECPRA kuthibitisha.') + '</div>' +
+      '<div class="two"><div><label>M-PESA ' + T('receipt code', 'nambari ya risiti') + '</label><input id="gbCode" maxlength="10" style="text-transform:uppercase"></div><div><label>' + T('Amount', 'Kiasi') + '</label><input id="gbAmt" type="number" step="any" value="' + you.amountDue + '"></div></div>' +
+      '<div class="actions"><button class="btn" data-act="gbPay" type="button">' + T('Submit payment', 'Tuma malipo') + '</button><button class="btn2" data-act="gbWithdraw" type="button">' + T('Withdraw', 'Jiondoe') + '</button></div>';
+    else if (you.status === 'paid') h += '<div class="note">' + T('Paid in full. Waiting for the other traders.', 'Umelipa kamili. Tunasubiri wengine.') + '</div>';
+  }
+  if (you && ['delivered', 'disputed'].indexOf(o.status) >= 0 && you.status === 'paid' && you.allocatedQty != null)
+    h += '<div class="note">' + T('Your share received: ', 'Sehemu yako: ') + QTY(you.allocatedQty) + ' ' + esc(o.unit) + '</div><label>' + T('Add to which product?', 'Weka kwa bidhaa gani?') + '</label><select id="gbProd">' + S.products.map(function (p) { return '<option value="' + esc(p.id) + '">' + esc(p.name) + '</option>'; }).join('') + '</select>' +
+      '<div class="actions"><button class="btn" data-act="gbReceive" type="button">' + T('Add to my stock', 'Weka kwenye stoku yangu') + '</button></div>';
+  if (you && you.status === 'received') h += '<div class="note">' + T('Stock added to your shop.', 'Stoku imeongezwa.') + '</div>';
+  if (o.isOrganiser) {
+    h += '<h3>' + T('Organiser', 'Mratibu') + '</h3>' + (d.participants || []).map(function (p) { return '<div class="s">' + esc(p.shopName) + ' · ' + QTY(p.qty) + ' ' + esc(o.unit) + ' · ' + esc(p.status) + '</div>'; }).join('') + '<div class="actions">';
+    if (o.status === 'locked') h += '<button class="btn" data-act="gbOrgConfirm" type="button">' + T('Confirm order (all paid)', 'Thibitisha oda (wote wamelipa)') + '</button><button class="btn2" data-act="gbExpire" type="button">' + T('Remove late payers', 'Ondoa wasiolipa') + '</button>';
+    if (o.status === 'confirmed') h += '<input id="gbRecv" type="number" step="any" placeholder="' + T('Quantity received', 'Kiasi kilichopokelewa') + '"><button class="btn" data-act="gbDelivery" type="button">' + T('Record delivery', 'Rekodi uwasilishaji') + '</button>';
+    if (['open', 'locked'].indexOf(o.status) >= 0) h += '<button class="btn2" data-act="gbCancel" type="button">' + T('Cancel order', 'Ghairi oda') + '</button>';
+    h += '</div>';
+  }
+  if (you && ['confirmed', 'delivered'].indexOf(o.status) >= 0) h += '<div class="actions"><button class="btn2" data-act="gbDispute" type="button">' + T('Report a problem', 'Ripoti tatizo') + '</button></div>';
+  openModal(esc(o.productName), h);
+}
+async function gbDo(btn, method, path, body, msg) {
+  busy(btn, true);
+  try { var r = await api(method, '/group-buy/orders/' + S.gbSel.id + path, body); toast(msg || T('Done', 'Imekamilika')); await gbOpen(S.gbSel.id); refresh(); return r; } catch (e) { gbBad(e); } finally { busy(btn, false); }
+}
+function gbAct(a, t, id) {
+  var s = S.gbSel, you = s && s.d.you;
+  if (a === 'gbOpen') gbOpen(id);
+  else if (a === 'gbNew') gbNew(); else if (a === 'gbCreate') gbCreate(t); else if (a === 'gbSupplier') gbSupplier(); else if (a === 'gbSupReg') gbSupReg(t);
+  else if (a === 'gbJoin') gbDo(t, 'POST', '/join', { shopId: S.shopId, qty: numOrNull('gbJQty'), referencePrice: numOrNull('gbJRef') }, T('Saved', 'Imehifadhiwa'));
+  else if (a === 'gbWithdraw') { if (confirm(T('Withdraw from this order? Anything you paid will be queued for refund.', 'Ujiondoe? Ulicholipa kitarejeshwa.'))) gbDo(t, 'POST', '/withdraw', {}); }
+  else if (a === 'gbLock') gbDo(t, 'POST', '/lock', { quoteId: id }, T('Order locked. Traders can now confirm and pay.', 'Oda imefungwa. Sasa thibitisha na ulipe.'));
+  else if (a === 'gbConfirm') gbDo(t, 'POST', '/participants/me/confirm', { amountDue: you.amountDue });
+  else if (a === 'gbPay') gbDo(t, 'POST', '/pay', { id: uuid(), amount: numOrNull('gbAmt'), mpesaReceipt: val('gbCode').toUpperCase() }, T('Payment verified', 'Malipo yamethibitishwa'));
+  else if (a === 'gbOrgConfirm') gbDo(t, 'POST', '/confirm', {});
+  else if (a === 'gbExpire') gbDo(t, 'POST', '/expire-unpaid', {});
+  else if (a === 'gbCancel') { if (confirm(T('Cancel this order for everyone?', 'Ghairi oda kwa wote?'))) gbDo(t, 'POST', '/cancel', { reason: 'Cancelled by the organiser' }); }
+  else if (a === 'gbDelivery') gbDo(t, 'POST', '/delivery', { receivedQty: numOrNull('gbRecv') }, T('Delivery recorded', 'Uwasilishaji umerekodiwa'));
+  else if (a === 'gbReceive') gbDo(t, 'POST', '/receive', { id: uuid(), productId: val('gbProd') }, T('Stock added', 'Stoku imeongezwa'));
+  else if (a === 'gbDispute') { var det = prompt(T('Describe the problem (shortage, damaged, quality, late…)', 'Eleza tatizo')); if (det) gbDo(t, 'POST', '/disputes', { id: uuid(), kind: 'other', details: det }, T('Problem reported', 'Tatizo limeripotiwa')); }
+}
+
+var FRESH = { fresh: ['Fresh', 'Safi'], monitor: ['Monitor', 'Angalia'], sell_soon: ['Sell soon', 'Uza haraka'], at_risk: ['At risk', 'Hatarini'], unknown: ['No shelf life set', 'Haijawekwa'] };
+function viewWaste() {
+  var w = S.waste; if (!w) return '<div class="note">' + T('Loading…', 'Inapakia…') + '</div>';
+  var sm = w.summary;
+  var head = '<div class="two"><div class="card"><div class="s">' + T('Stock at risk (estimate)', 'Stoku hatarini (makadirio)') + '</div><b>' + KSH(sm.stockAtRiskValue) + '</b></div>' +
+    '<div class="card"><div class="s">' + T('Spoilage losses, 30 days', 'Hasara ya kuharibika, siku 30') + '</div><b>' + KSH(sm.lossesLast30Days) + '</b><div class="s">' + T('before: ', 'kabla: ') + KSH(sm.lossesPrevious30Days) + '</div></div></div>';
+  var items = w.items.length ? w.items.map(function (it) {
+    var b = it.batches.map(function (x) { return '<div class="s"><span class="badge' + (x.freshness === 'at_risk' || x.freshness === 'sell_soon' ? ' low' : '') + '">' + FRESH[x.freshness][S.va.rl === 'sw' ? 1 : 0] + '</span> ' + QTY(x.qtyOnHandEstimate) + ' ' + esc(it.unit) + ' · ' + x.ageDays + ' ' + T('days old', 'siku') + (x.estimatedAtRiskQty > 0 ? ' · ' + T('may not sell in time: ', 'huenda isiuzwe: ') + QTY(x.estimatedAtRiskQty) : '') + '</div>'; }).join('');
+    var sg = it.discountSuggestion, sug = '';
+    if (sg) sug = '<div class="note">' + T('Suggestion (you decide): ', 'Pendekezo (wewe unaamua): ') + KSH(sg.originalPrice) + ' → <b>' + KSH(sg.suggestedPrice) + '</b> · ' + T('expected ', 'mapato ') + KSH(sg.expectedRevenue) + ' · ' + T('margin/unit ', 'faida/kipimo ') + KSH(sg.marginPerUnitAfter) +
+      (sg.warning ? '<br><b>' + esc(sg.warning) + '</b>' : '') + '<div class="actions"><button class="btn2" data-act="wsApply" data-id="' + esc(it.productId) + '" data-p="' + sg.suggestedPrice + '" data-warn="' + (sg.warning ? 1 : 0) + '" type="button">' + T('Approve this price', 'Kubali bei hii') + '</button></div></div>';
+    var rd = it.reorder, rec = '<div class="s">' + T('Next purchase (estimate, ', 'Ununuzi ujao (makadirio, ') + (rd.confidence === 'preliminary' ? T('preliminary — little sales history', 'awali — mauzo machache') : T('from your sales', 'kutoka mauzo yako')) + '): <b>' + QTY(rd.suggestedQty) + ' ' + esc(it.unit) + '</b> — ' + esc(rd.reason) + '</div>';
+    return '<div class="card"><div class="t">' + esc(it.name) + ' · ' + T('in stock ', 'stoku ') + QTY(it.stockQty) + ' ' + esc(it.unit) + '</div><div class="s">' + T('Selling about ', 'Inauzwa takriban ') + QTY(it.sales.avgDailyQty) + '/' + T('day', 'siku') + (it.sales.daysOfStockLeft != null ? ' · ' + it.sales.daysOfStockLeft + ' ' + T('days of stock left', 'siku za stoku') : '') + (it.sales.confidence === 'preliminary' ? ' · ' + T('preliminary', 'awali') : '') + '</div>' + b + sug + rec + '</div>';
+  }).join('') : '<div class="s">' + T('No perishable stock yet. Mark a product as perishable and add stock with its shelf life.', 'Hakuna bidhaa zinazoharibika bado.') + '</div>';
+  return '<h3>' + T('Waste prevention', 'Kuzuia upotevu') + '</h3>' + head +
+    '<div class="actions"><button class="btn" data-act="wsBatch" type="button">' + T('Receive stock', 'Pokea stoku') + '</button><button class="btn2" data-act="wsLoss" type="button">' + T('Record spoiled stock', 'Rekodi iliyoharibika') + '</button></div>' + items +
+    '<div class="note">' + esc(w.disclaimer) + ' ' + T('Prices never change unless you approve.', 'Bei hazibadiliki bila idhini yako.') + '</div>';
+}
+function wsProductSel(id) { return '<select id="' + id + '">' + S.products.map(function (p) { return '<option value="' + esc(p.id) + '">' + esc(p.name) + ' (' + esc(p.unit) + ')</option>'; }).join('') + '</select>'; }
+function wsBatch() {
+  openModal(T('Receive stock', 'Pokea stoku'), '<label>' + T('Product', 'Bidhaa') + '</label>' + wsProductSel('wbProd') +
+    '<div class="two"><div><label>' + T('Quantity', 'Kiasi') + '</label><input id="wbQty" type="number" step="any" inputmode="decimal"></div><div><label>' + T('Cost per unit', 'Gharama kwa kipimo') + '</label><input id="wbCost" type="number" step="any" inputmode="decimal"></div></div>' +
+    '<div class="two"><div><label>' + T('Stays fresh about (days)', 'Hukaa safi (siku)') + '</label><input id="wbShelf" type="number" step="any" placeholder="3"></div><div><label>' + T('Condition (optional)', 'Hali (si lazima)') + '</label><input id="wbCond" maxlength="160"></div></div>' +
+    '<div class="actions"><button class="btn2" data-act="closeModal" type="button">' + T('Cancel', 'Ghairi') + '</button><button class="btn" data-act="wsBatchSave" type="button">' + T('Save', 'Hifadhi') + '</button></div>');
+}
+async function wsBatchSave(btn) {
+  busy(btn, true);
+  try {
+    var pid = val('wbProd'), shelf = numOrNull('wbShelf');
+    if (shelf) await api('PATCH', '/shops/' + S.shopId + '/products/' + pid + '/perishable', { isPerishable: true, shelfLifeDays: shelf });
+    await api('POST', '/shops/' + S.shopId + '/products/' + pid + '/batches', { id: uuid(), qty: numOrNull('wbQty'), unitCost: numOrNull('wbCost'), shelfLifeDays: shelf || undefined, condition: val('wbCond') || undefined });
+    closeModal(); toast(T('Stock added', 'Stoku imeongezwa')); refresh();
+  } catch (e) { gbBad(e); } finally { busy(btn, false); }
+}
+function wsLoss() {
+  openModal(T('Record spoiled stock', 'Rekodi iliyoharibika'), '<div class="note">' + T('This is recorded as a loss at cost. It is not a sale.', 'Hii inarekodiwa kama hasara. Si mauzo.') + '</div><label>' + T('Product', 'Bidhaa') + '</label>' + wsProductSel('wlProd') +
+    '<div class="two"><div><label>' + T('Quantity lost', 'Kiasi kilichopotea') + '</label><input id="wlQty" type="number" step="any" inputmode="decimal"></div><div><label>' + T('Reason', 'Sababu') + '</label><select id="wlReason"><option value="spoiled">' + T('Spoiled', 'Imeharibika') + '</option><option value="damaged">' + T('Damaged', 'Imeumia') + '</option><option value="expired">' + T('Expired', 'Imeisha muda') + '</option><option value="theft">' + T('Theft', 'Wizi') + '</option><option value="other">' + T('Other', 'Nyingine') + '</option></select></div></div>' +
+    '<label>' + T('What did you do with it?', 'Ulifanya nini nayo?') + '</label><select id="wlHandling"><option value="disposed">' + T('Threw away', 'Nilitupa') + '</option><option value="discounted">' + T('Sold cheaply', 'Niliuza kwa bei ndogo') + '</option><option value="returned">' + T('Returned to supplier', 'Nilirudisha') + '</option><option value="other">' + T('Other', 'Nyingine') + '</option></select>' +
+    '<label>' + T('Condition (optional)', 'Hali (si lazima)') + '</label><input id="wlCond" maxlength="200">' +
+    '<div class="actions"><button class="btn2" data-act="closeModal" type="button">' + T('Cancel', 'Ghairi') + '</button><button class="btn" data-act="wsLossSave" type="button">' + T('Record loss', 'Rekodi hasara') + '</button></div>');
+}
+async function wsLossSave(btn) {
+  busy(btn, true);
+  try { await api('POST', '/shops/' + S.shopId + '/losses', { id: uuid(), productId: val('wlProd'), qty: numOrNull('wlQty'), reason: val('wlReason'), handling: val('wlHandling'), condition: val('wlCond') || undefined }); closeModal(); toast(T('Loss recorded', 'Hasara imerekodiwa')); refresh(); }
+  catch (e) { gbBad(e); } finally { busy(btn, false); }
+}
+async function wsApply(btn, id, price, warn) {
+  var p = S.products.filter(function (x) { return x.id === id; })[0], nm = p ? p.name : '';
+  if (!confirm(T('Change the price of ', 'Badilisha bei ya ') + nm + T(' to ', ' kuwa ') + KSH(price) + '?')) return;
+  if (warn && !confirm(T('This is at or below your cost. Do you really want to sell at a loss?', 'Hii ni sawa au chini ya gharama yako. Una uhakika?'))) return;
+  busy(btn, true);
+  try { await api('PATCH', '/shops/' + S.shopId + '/products/' + id, { sellingPrice: Number(price) }); toast(T('Price updated', 'Bei imebadilishwa')); refresh(); } catch (e) { gbBad(e); } finally { busy(btn, false); }
+}
+function extraAct(a, t, id) {
+  if (a.indexOf('gb') === 0) return gbAct(a, t, id);
+  if (a === 'wsBatch') wsBatch(); else if (a === 'wsBatchSave') wsBatchSave(t); else if (a === 'wsLoss') wsLoss(); else if (a === 'wsLossSave') wsLossSave(t);
+  else if (a === 'wsApply') wsApply(t, id, t.dataset.p, t.dataset.warn === '1');
+}
+
 document.addEventListener('click', function (ev) {
   var t = ev.target.closest && ev.target.closest('[data-act]'); if (!t) return;
   var a = t.dataset.act, id = t.dataset.id;
@@ -1212,6 +1399,7 @@ document.addEventListener('click', function (ev) {
   else if (a === 'openSale') openSale(id);
   else if (a === 'voidSale') openVoidSale(id);
   else if (a === 'doVoidSale') doVoidSale(t, id);
+  else if (/^(gb|ws)[A-Z]/.test(a)) extraAct(a, t, id);
   else if (a === 'retry') { S.loading = true; boot(); }
   else if (a === 'tab') { S.tab = t.dataset.tab; try { sessionStorage.setItem('necpra_duka_tab', S.tab); } catch (_) {} render(); refresh(); }
   else if (a === 'toggleLow') { S.low = !S.low; refresh(); }
