@@ -1331,6 +1331,9 @@ async function vHandle(raw) {
   if (S.va.pending && !S.va.pending.done) { S.va.pending = null; vSay(T('Earlier request cancelled — nothing was changed.', 'Ombi la awali limeghairiwa — hakuna kilichobadilishwa.')); }
   vRender(true);
   try {
+    if (window.NecpraVoiceSales && window.__necpraDukaVoice && ['stock', 'lowstock', 'debts', 'report', 'expense', 'addProduct'].indexOf(cmd.intent) < 0) {   // natural-language sales on the trader's own catalogue
+      if (await NecpraVoiceSales.start(raw, window.__necpraDukaVoice.adapter, { force: cmd.intent === 'sale' })) { vRender(); return; }
+    }
     if (cmd.intent === 'stock') await vStock(cmd);
     else if (cmd.intent === 'lowstock') await vLow();
     else if (cmd.intent === 'debts') await vDebts(cmd);
@@ -1409,7 +1412,7 @@ function vRender(thinking) {
   var el = $('vaPanel'); if (!el) return;
   var log = S.va.log.map(function (m) { return '<div class="note' + (m.who === 'me' ? '' : '') + '" style="' + (m.who === 'me' ? 'text-align:right;background:#eef6ff' : '') + '">' + esc(m.text) + '</div>'; }).join('');
   el.innerHTML = '<div class="two"><div><label>' + T('Language', 'Lugha', S.va.lang) + '</label><select id="vaLang"><option value="en"' + (S.va.lang === 'en' ? ' selected' : '') + '>English</option><option value="sw"' + (S.va.lang === 'sw' ? ' selected' : '') + '>Kiswahili</option></select></div>' +
-    '<div style="align-self:end">' + (VSR ? '<button class="btn' + (S.va.listening ? ' on' : '') + '" data-act="vaMic" type="button" aria-label="Microphone" style="width:100%"><i class="fas fa-microphone"></i> ' + (S.va.listening ? T('Listening…', 'Nasikiliza…', S.va.lang) : T('Speak', 'Ongea', S.va.lang)) + '</button>' : '<div class="note">' + T('Voice is not supported on this browser — type instead.', 'Sauti haitumiki kwenye kivinjari hiki — andika badala yake.', S.va.lang) + '</div>') + '</div></div>' +
+    '<div style="align-self:end">' + ((VSR || window.NecpraVoiceUI) ? '<button class="btn' + (S.va.listening ? ' on' : '') + '" data-act="vaMic" type="button" aria-label="Microphone" style="width:100%"><i class="fas fa-microphone"></i> ' + (S.va.listening ? T('Listening…', 'Nasikiliza…', S.va.lang) : T('Speak', 'Ongea', S.va.lang)) + '</button>' : '<div class="note">' + T('Voice is not supported on this browser — type instead.', 'Sauti haitumiki kwenye kivinjari hiki — andika badala yake.', S.va.lang) + '</div>') + '</div></div>' +
     '<div class="two" style="margin-top:8px"><div><input id="vaText" placeholder="' + (S.va.lang === 'sw' ? 'Andika amri, mf. uza sukari 3' : 'Type a command, e.g. sell 3 sugar') + '" autocomplete="off"></div><div><button class="btn2" data-act="vaSend" type="button">' + (S.va.lang === 'sw' ? 'Tuma' : 'Send') + '</button></div></div>' +
     '<div style="margin:8px 0;display:flex;gap:6px;flex-wrap:wrap">' + (S.va.lang === 'sw' ? ['sukari imebaki ngapi', 'nimetumia 500 kwa usafiri', 'uza sukari 2', 'nani ananidai', 'ripoti ya leo'] : ['how much sugar is left', 'add expense 500 transport', 'sell 2 sugar', 'who owes me', "today's report"]).map(function (x) { return '<button class="badge" data-act="vaChip" data-q="' + esc(x) + '" type="button">' + esc(x) + '</button>'; }).join('') + '</div>' +
     '<div id="vaLog" style="max-height:30vh;overflow:auto">' + log + (thinking ? '<div class="note">…</div>' : '') + '</div>' + vCard() +
@@ -1425,15 +1428,20 @@ function openAssistant() {
   vRender(); setTimeout(function () { var e = $('vaText'); e && e.focus(); }, 60);
 }
 function vaMic() {
-  if (!VSR) return;
-  if (S.va.listening && vRec) { try { vRec.stop(); } catch (_) {} return; }
-  try {
-    vRec = new VSR(); vRec.lang = S.va.lang === 'sw' ? 'sw-KE' : 'en-KE'; vRec.interimResults = false; vRec.maxAlternatives = 1;
-    vRec.onresult = function (e) { var t = e.results[0][0].transcript; S.va.spoke = true; vHandle(t); };
-    vRec.onerror = function (e) { S.va.listening = false; vSay(T('I could not hear you (' + (e.error || 'error') + '). You can also type.', 'Sikukusikia (' + (e.error || 'hitilafu') + '). Unaweza pia kuandika.')); vRender(); };
-    vRec.onend = function () { S.va.listening = false; vRender(); };
-    S.va.listening = true; vRec.start(); vRender();
-  } catch (_) { S.va.listening = false; vRender(); }
+  // Shared NECPRA Voice Engine: continuous, interim results, pause-tolerant, full transcript preserved (replaces the single-result recogniser).
+  if (!window.NecpraVoiceUI) return;
+  if (S.va.listening) { if (!window.NecpraVoiceRemote || NecpraVoiceRemote.mode() !== 'bridge') { try { NecpraVoice.finish('manual'); } catch (_) {} } return; } // in the app shell the parent's voice sheet has the Finish button
+  S.va.listening = true; vRender();
+  (window.NecpraVoiceRemote ? NecpraVoiceRemote.capture : NecpraVoiceUI.capture)({ mode: 'dictation', lang: S.va.lang, title: T('Duka assistant', 'Msaidizi wa Duka'), prompt: T('Tell me what to do. Take your time, then tap Finish or say "finish recording".', 'Niambie unachotaka. Chukua muda, kisha bonyeza Maliza au sema "maliza kurekodi".') })
+    .then(function (r) {
+      S.va.listening = false;
+      if (r && r.ok && r.transcript) {
+        S.va.spoke = true;
+        try { NecpraVoice.audit('duka.voice', { module: 'duka', outcome: 'captured', lang: r.lang, durationMs: r.durationMs, chars: r.transcript.length }); } catch (_) {}
+        return vHandle(r.transcript);
+      }
+      vRender();
+    }, function () { S.va.listening = false; vRender(); });
 }
 async function vaConfirm(btn) {
   var P = S.va.pending; if (!P || P.done || P.busy) return;
@@ -2411,9 +2419,52 @@ window.addEventListener('message', function (ev) { if (ev && ev.data && ev.data.
 window.__DUKA_BOOT__ = boot;
 /* handle for the automated end-to-end tests (read/act only; no secrets) */
 window.__duka = { parse: vParse, norm: vNorm, S: S, syncNow: syncNow, obMine: obMine, cacheGet: cacheGet, updateCheckout: updateCheckout, saveCart: saveCart, scanAccept: scanAccept, scanHandle: scanHandle, wbUpdate: wbUpdate };
+/* NECPRA voice: adapter between the shared voice-sales flow and DUKA's own cart/checkout. Voice never saves a sale itself:
+   it fills S.cart (same model as camera/barcode/manual) and opens the normal checkout, where stock, offline, credit-customer
+   and M-PESA verification rules apply and the trader taps Confirm sale. */
+window.__necpraDukaVoice = {
+  adapter: {
+    getProducts: async function () {
+      if (!S.shopId) return []; var list; try { list = await vProducts(); } catch (e) { list = S.products || []; }
+      return list.filter(function (p) { return p && p.id && p.isActive !== false && !p.archived; }).map(function (p) { return { id: p.id, name: p.name, unit: p.unit, sellingPrice: Number(p.sellingPrice), stockQty: Number(p.stockQty) }; });
+    },
+    getCustomers: async function () { try { return (await api('GET', '/shops/' + S.shopId + '/customers?limit=500')).customers || []; } catch (e) { return []; } },
+    wasApplied: function (id) { try { return JSON.parse(sessionStorage.getItem('necpra_voice_applied') || '[]').indexOf(id) >= 0; } catch (_) { return false; } },
+    applyLines: function (lines, disc, id) {
+      try { var done = JSON.parse(sessionStorage.getItem('necpra_voice_applied') || '[]'); done.push(id); sessionStorage.setItem('necpra_voice_applied', JSON.stringify(done.slice(-30))); } catch (_) {}
+      var merged = 0;
+      lines.forEach(function (l) {
+        var ex = S.cart.filter(function (c) { return c.productId === l.productId; })[0];   // same product -> same line, never a duplicate line
+        if (ex) { ex.qty = Math.round((Number(ex.qty) + l.qty) * 1000) / 1000; ex.stock = l.stock; merged++; }
+        else S.cart.push({ productId: l.productId, name: l.name, unit: l.unit, price: l.price, qty: l.qty, stock: l.stock });
+      });
+      if (!S.saleId) S.saleId = uuid();
+      if (disc && disc.value > 0 && !(S.disc.value !== '' && Number(S.disc.value) > 0)) S.disc = { type: disc.type, value: String(disc.value) };
+      S.tab = 'pos'; try { sessionStorage.setItem('necpra_duka_tab', 'pos'); } catch (_) {}
+      saveCart(); return { merged: merged };
+    },
+    closeAssistant: function () { closeModal(); },
+    checkout: async function (o) {
+      render(); await openCheckout();
+      try {
+        var c = calc();
+        if (o.method === 'mpesa' && $('payMp')) $('payMp').value = c.total / 100; else if (o.method === 'cash' && $('payCash')) $('payCash').value = c.total / 100;
+        if (o.customerId && $('coCust')) $('coCust').value = o.customerId;
+        updateCheckout(); if (o.method === 'mpesa' && $('payCode')) $('payCode').focus();
+      } catch (_) {}
+    }
+  },
+  // a spoken request forwarded by the app shell while this screen is open
+  onIntent: function (text) {
+    if (!S.shopId || !window.NecpraVoiceSalesNLU) return false;
+    var cmd = vParse(text, S.va.lang), known = cmd.intent && ['unknown', 'confirmWord', 'cancelWord'].indexOf(cmd.intent) < 0;
+    if (!known && !NecpraVoiceSalesNLU.looksLikeSaleStatement(text)) return false;
+    openAssistant(); vHandle(text); return true;
+  }
+};
 boot();
 })();
 </script>
-<script src="/js/header-labels.js" defer></script>
+<script src="/js/voice/necpra-voice-engine.js"></script><script src="/js/voice/necpra-voice-ui.js"></script><script src="/js/voice/necpra-voice-intents.js"></script><script src="/js/voice/necpra-voice-bridge.js"></script><script src="/js/voice/necpra-voice-remote.js"></script><script src="/js/voice/necpra-voice-sales-nlu.js"></script><script src="/js/voice/necpra-voice-sales.js"></script><script src="/js/voice/necpra-voice-init.js"></script><script>try{NecpraVoiceInit.start({fab:false});NecpraVoiceRemote.onIntent(function(p){return window.__necpraDukaVoice?window.__necpraDukaVoice.onIntent(p.transcript):false})}catch(_){}</script><script src="/js/header-labels.js" defer></script>
 </body>
 </html>

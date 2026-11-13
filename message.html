@@ -558,6 +558,7 @@
   <script src="/js/group-unread-store.js"></script>
   <script src="/js/group-message-isolation.js"></script>
   <script src="/js/message-client.js"></script>
+  <script src="/js/voice/necpra-voice-engine.js"></script><script src="/js/voice/necpra-voice-ui.js"></script><script src="/js/voice/necpra-voice-intents.js"></script><script src="/js/voice/necpra-voice-bridge.js"></script><script src="/js/voice/necpra-voice-remote.js"></script><script src="/js/voice/necpra-voice-init.js"></script><script src="/js/voice/necpra-voice-messenger.js"></script>
 
 
   <script>
@@ -2942,6 +2943,7 @@
       }
     });
 
+    try { NecpraVoiceInit.start({ fab: false }); NecpraVoiceMessenger.init({ MM: window.MessageModule, isLocked: function (id) { return _kynCLGetSet('locked_chats').has(String(id)); }, getPreview: safeConvPreview }); } catch (e) { console.error('[voice]', e); }
     renderConversationList();
     renderChatPanel(null);
   })();
