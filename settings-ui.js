@@ -824,7 +824,7 @@ function updateConnectionState(state) {
             
         case 'FAILED':
             statusIndicator.style.backgroundColor = 'var(--danger-color)';
-            statusText.textContent = 'Offline';
+            statusText.textContent = '';   // never print "Offline": settings keep showing saved values silently
             break;
             
         default:
@@ -3648,7 +3648,7 @@ export function loadStatusSection(container) {
 
             const response = await secureFetchWrapper(`/api/user-status/${userId}`, 'GET');
             const data = response && response.data && response.data.userStatus ? response.data.userStatus : {};
-            if (badge) badge.textContent = data.isOnline ? 'Active now' : 'Offline';
+            if (badge) badge.textContent = data.isOnline ? 'Active now' : 'Away';
             if (lastActiveEl) {
                 if (data.isOnline) {
                     lastActiveEl.textContent = 'Now';
@@ -3660,8 +3660,8 @@ export function loadStatusSection(container) {
                 }
             }
         } catch (e) {
-            if (badge) badge.textContent = 'Unavailable';
-            if (lastActiveEl) lastActiveEl.textContent = '—';
+            if (badge && !/^(Active now|Away)$/.test(badge.textContent || '')) badge.textContent = '—';   // keep the last known value; no error/offline text
+            if (lastActiveEl && !lastActiveEl.textContent) lastActiveEl.textContent = '—';
         }
     })();
 }

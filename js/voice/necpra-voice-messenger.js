@@ -140,10 +140,14 @@
     return true;
   }
 
+  // Right after the app opens, the chat list may still be loading. Matching a spoken name against an empty list made "open chat with Denis" miss, so wait a few seconds for it.
+  function waitConvs(ms) { return new Promise(function (res) { var end = Date.now() + ms; (function poll() { var n = 0; try { n = cfg.MM.getConversations().length; } catch (_) {} if (n || Date.now() > end) return res(); setTimeout(poll, 150); })(); }); }
   async function handle(payload) {
-    var list = contacts(), probe = payload && payload.mode === 'probe', text = payload.transcript;
+    var probe = payload && payload.mode === 'probe', text = payload.transcript;
+    var list = contacts();
     var it = I.parseMessengerIntent(text, list) || I.parseOpenChat(text), cmd = it ? null : I.parseComposerCommand(text);
     if (!it && !cmd) return false;
+    if (!list.length) { await waitConvs(probe ? 3000 : 8000); list = contacts(); it = I.parseMessengerIntent(text, list) || I.parseOpenChat(text); }
     if (probe) { if (!it || it.type !== 'open') return false; return !!findMatches(it.variants || [it.name], await allContacts()); } // lookup only: nothing is opened or spoken
     if (busy) { await say('I am still working on your last request.', 'Bado nashughulikia ombi lako la awali.'); return true; }
     busy = true;

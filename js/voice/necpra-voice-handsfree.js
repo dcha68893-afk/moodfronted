@@ -9,6 +9,7 @@
   var T = UI.T, on = false, paused = false, bar = null, idleRuns = 0, loopId = 0, textEl = null, offText = null;
 
   var RULES = [
+    { id: 'wake', re: /^(?:hey |ok |okay )?(?:necpra |kynecta )?(?:open voice|start voice|voice mode|voice on|listen|fungua sauti|washa sauti|sikiliza)[.!]?$/i },
     { id: 'stop', re: /\b(stop listening|hands[- ]?free off|acha kusikiliza|zima sauti)\b/i },
     { id: 'back', re: /\b(go back|previous screen|rudi nyuma|rudi)\b/i },
     { id: 'down', re: /\b(scroll down|go down|shuka chini|telemka)\b/i },
@@ -28,13 +29,14 @@
     var hit = RULES.filter(function (r) { return r.re.test(text); })[0]; if (!hit) return Promise.resolve(false);
     var sc = doc.scrollingElement || doc.documentElement;
     switch (hit.id) {
+      case 'wake': return V.speak(T('I am listening. What would you like to do?', 'Nasikiliza. Unataka kufanya nini?'), { force: true }).then(function () { return true; });
       case 'stop': disable(); return V.speak(T('Hands-free is off.', 'Hands-free imezimwa.'), { force: true }).then(function () { return true; });
       case 'back': root.history.back(); return Promise.resolve(true);
       case 'down': root.scrollBy({ top: root.innerHeight * 0.8, behavior: 'smooth' }); return Promise.resolve(true);
       case 'up': root.scrollBy({ top: -root.innerHeight * 0.8, behavior: 'smooth' }); return Promise.resolve(true);
       case 'read': return V.speak(visibleText(), { force: true, sensitive: false }).then(function () { return true; }); // note: reads what is on screen; user chose to ask for it
       case 'cancel': root.dispatchEvent(new CustomEvent('necpra:voice:cancel')); return V.speak(T('Cancelled.', 'Imeghairiwa.'), { force: true }).then(function () { return true; });
-      case 'help': return V.speak(T('You can say: go back, scroll down, scroll up, read this page, cancel, or stop listening. Other screens add more commands.', 'Unaweza kusema: rudi nyuma, shuka chini, panda juu, soma ukurasa, ghairi, au acha kusikiliza. Skrini nyingine zinaongeza amri zaidi.'), { force: true }).then(function () { return true; });
+      case 'help': if (root.NecpraVoiceKnowledge && root.NecpraVoiceKnowledge.respond('what can you do')) return Promise.resolve(true); return V.speak(T('You can say: go back, scroll down, scroll up, read this page, cancel, or stop listening. Other screens add more commands.', 'Unaweza kusema: rudi nyuma, shuka chini, panda juu, soma ukurasa, ghairi, au acha kusikiliza. Skrini nyingine zinaongeza amri zaidi.'), { force: true }).then(function () { return true; });
     }
     return Promise.resolve(false);
   }

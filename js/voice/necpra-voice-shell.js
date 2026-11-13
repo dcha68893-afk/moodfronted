@@ -10,7 +10,7 @@
 
   async function forward(page, result, mode, timeoutMs) {
     var host = cfg.host(), f = frameFor(page); if (!host || !f) return false;
-    if (!host.hasSession(f)) { if (!(await host.waitForSession(f, 6000))) return false; }
+    if (!host.hasSession(f)) { if (!(await host.waitForSession(f, 15000))) return false; }   /* a module opened for the first time can take several seconds to boot */
     var r = await host.sendIntent(f, { transcript: result.transcript, lang: result.lang, mode: mode || result.mode }, timeoutMs);
     return !!r.handled;
   }
@@ -21,7 +21,16 @@
   }
 
   async function handle(result) {
-    var text = result.transcript;
+    var text = result.transcript, K = root.NecpraVoiceKnowledge;
+    // "open voice": switch on Hands-Free so the user can keep talking with no taps (needs the one-time consent the first time).
+    if (K && K.isWake(text)) {
+      var HF = root.NecpraHandsFree;
+      if (HF && !HF.isOn()) { HF.enable({ skipConsent: !!V.getSettings().handsFree }); return true; }
+      V.speak(T('I am listening. What would you like to do?', 'Nasikiliza. Unataka kufanya nini?'), { force: true }); return true;
+    }
+    text = clean(text).replace(/^(?:(?:hey|hi|ok|okay)\s+)?(?:(?:can|could|would|will)\s+you\s+)(?:please\s+)?/i, ''); result = Object.assign({}, result, { transcript: text }); // "can you open settings" is the command "open settings"
+    // Questions about the app itself ("how do I add a friend", "what can you do") are answered from the written guide, never sent to a screen as a command.
+    if (K && K.isHowTo(text) && K.respond(text)) return true;
     if (root.NecpraVoiceMoneyNLU && root.NecpraVoiceMoneyNLU.parse(text) && cfg.allowedPages.indexOf('money') >= 0) { // wallet / chama / orders / prepared payment
       if (cfg.getPage() !== 'money') cfg.navigate('money');
       if (await forward('money', result)) return true;
@@ -78,7 +87,9 @@
     if (I.isSaleStatement(text) && cfg.allowedPages.indexOf('tools') >= 0) { // "I sold…" from any screen goes to DUKA SMART
       if (cfg.getPage() !== 'tools') cfg.navigate('tools'); return forward('tools', result);
     }
-    var page = cfg.getPage(); return page ? forward(page, result) : false; // anything else goes to the screen the user is looking at
+    var page = cfg.getPage(), done = page ? await forward(page, result) : false; // anything else goes to the screen the user is looking at
+    if (done) return true;
+    return false; // not something any screen could do: the caller says so honestly and points to "what can you do" (never a made-up answer)
   }
 
   function init(c) {

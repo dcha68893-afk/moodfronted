@@ -190,13 +190,23 @@
 
   /* ───────── global entry point: one mic for the whole app ───────── */
   var fab = null;
+  // After the first spoken command works, offer Hands-Free ONCE so the user never has to tap the mic again (it shows its own consent dialog).
+  function offerHandsFree() {
+    try {
+      var HF = root.NecpraHandsFree; if (!HF || HF.isOn() || V.getSettings().handsFree) return;
+      if (root.localStorage.getItem('necpra_hf_offered')) return; root.localStorage.setItem('necpra_hf_offered', '1');
+      setTimeout(function () { HF.enable(); }, 1200);
+    } catch (_) {}
+  }
   function openGlobal() {
-    return capture({ mode: 'dictation', title: T('Speak to NECPRA', 'Ongea na NECPRA'), prompt: T('Say what you want to do. Say “finish recording” or tap Finish when done.', 'Sema unachotaka kufanya. Sema “maliza kurekodi” au bonyeza Maliza ukimaliza.') })
+    return capture({ mode: 'command', autoFinish: true, title: T('Speak to NECPRA', 'Ongea na NECPRA'), prompt: T('Say what you want to do. I finish by myself when you pause.', 'Sema unachotaka kufanya. Nitamaliza mwenyewe ukinyamaza.') })
       .then(function (r) {
         if (!r.ok || !r.transcript) return r;
         V.audit('voice.transcript', { module: 'global', outcome: 'captured', lang: r.lang, durationMs: r.durationMs, chars: r.transcript.length });
         return V.dispatch(r).then(function (d) {
-          if (!d.handled) { var m = T('I heard you, but no screen here can act on that yet.', 'Nimekusikia, lakini hakuna skrini hapa inayoweza kutekeleza hilo bado.'); announce(m + ' ' + r.transcript); V.speak(m); }
+          if (!d.handled) { var m = T('I heard you, but I do not know how to do that yet. Say “what can you do” to hear what I can do.', 'Nimekusikia, lakini sijui jinsi ya kufanya hilo bado. Sema “unaweza kufanya nini” kusikia ninachoweza kufanya.'); announce(m + ' ' + r.transcript); V.speak(m); }
+          offerHandsFree();
+          if (d.handled) offerHandsFree();
           return Object.assign({}, r, { handled: d.handled });
         });
       });

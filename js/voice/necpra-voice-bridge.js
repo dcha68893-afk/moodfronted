@@ -44,6 +44,12 @@
       }
     }
     win.addEventListener('message', onMessage);
+    // Frames that booted BEFORE this host existed (chat.html hard-codes message.html's src, so Messenger loads while the shell is still parsing)
+    // already sent their 'voice.hello' into the void. Tell every frame we are listening now so it can say hello again. Same-origin only, never '*'.
+    function announce() {
+      try { getFrames().forEach(function (f) { var w = f && f.contentWindow; if (w && own && own !== 'null') { try { w.postMessage({ ns: NS, v: VER, type: 'voice.host.ready', requestId: null, frameSession: null, payload: {} }, own); } catch (_) {} } }); } catch (_) {}
+    }
+    announce(); setTimeout(announce, 1500); setTimeout(announce, 5000);
     // Parent -> child: offer a recognised transcript to a module frame. The frame decides; it receives text only, never credentials.
     function sendIntent(frame, payload, timeoutMs) {
       var w = frame && frame.contentWindow, st = w && frames.get(w);
@@ -66,6 +72,7 @@
     function onMessage(ev) {
       if (ev.source !== parent || ev.origin !== origin || !ok(ev.data)) return; var m = ev.data;
       if (m.type === 'voice.hello.ack') session = m.frameSession;
+      if (m.type === 'voice.host.ready') { if (typeof opts.onHostReady === 'function') { try { opts.onHostReady(); } catch (_) {} } return; }
       if (m.type === 'voice.intent') {
         var rq = m.requestId, answer = function (h) { try { parent.postMessage({ ns: NS, v: VER, type: 'voice.intent.result', requestId: rq, frameSession: session, payload: { handled: !!h } }, origin); } catch (_) {} };
         if (!intentFn || m.frameSession !== session) return answer(false);

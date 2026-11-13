@@ -1453,12 +1453,13 @@
             /* NO filter — ever */
         }
 
+        /* Offline is silent: saved data keeps showing and no "Offline" label is ever drawn. */
         body.offline .offline-badge {
-            display: block;
+            display: none !important;
         }
 
         .offline-badge {
-            display: none;
+            display: none !important;
             position: fixed;
             top: 10px;
             left: 50%;
@@ -2656,14 +2657,14 @@
                 });
                 
                 window.addEventListener('offline', function() {
-                    document.body.classList.add('offline');
-                    if (offlineBadge) offlineBadge.style.display = 'block';
+                    document.body.classList.add('offline');   // class only: no visible "Offline" text
+                    if (offlineBadge) offlineBadge.style.display = 'none';
                 });
                 
                 // Initial online check
                 if (!navigator.onLine) {
                     document.body.classList.add('offline');
-                    if (offlineBadge) offlineBadge.style.display = 'block';
+                    if (offlineBadge) offlineBadge.style.display = 'none';
                 }
                 
                 // =============================================
