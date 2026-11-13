@@ -34,6 +34,29 @@
   function clean(t) { return String(t == null ? '' : t).replace(/\s+/g, ' ').trim(); }
   function uid() { return 'v' + now().toString(36) + Math.random().toString(36).slice(2, 8); }
 
+
+  /* ───────── replay guard ─────────
+   * Android Chrome and the Android speech plugin re-deliver text: (a) an interim that starts with the words that were
+   * just finalised, (b) cumulative finals ("hello", "hello how", "hello how are you"), (c) the same final twice.
+   * Without this guard the transcript reads "hello hello". We only drop text that starts with words we JUST committed
+   * (inside REPLAY_WINDOW_MS), so a person genuinely saying "hello" twice, seconds apart, is kept. */
+  var REPLAY_WINDOW_MS = 1500;
+  function tokens(t) { return clean(t).split(' ').filter(Boolean).map(function (w) { return { raw: w, n: w.toLowerCase().replace(/[^\p{L}\p{N}']/gu, '') }; }).filter(function (x) { return x.n; }); }
+  // Returns the part of `text` that is genuinely new given the segments already committed (may be '').
+  function stripReplay(segments, text, nowMs, windowMs) {
+    var tk = tokens(text); if (!tk.length || !segments.length) return clean(text);
+    windowMs = windowMs || REPLAY_WINDOW_MS;
+    var burst = [], edge = nowMs;
+    for (var i = segments.length - 1; i >= 0; i--) { if (edge - segments[i].at > windowMs) break; burst.unshift(segments[i]); edge = segments[i].at; }
+    for (var k = burst.length; k >= 1; k--) {   // longest committed run first: handles cumulative finals
+      var prev = tokens(burst.slice(burst.length - k).map(function (s) { return s.text; }).join(' '));
+      if (!prev.length || tk.length < prev.length) continue;
+      var same = true; for (var j = 0; j < prev.length; j++) if (prev[j].n !== tk[j].n) { same = false; break; }
+      if (same) return tk.slice(prev.length).map(function (x) { return x.raw; }).join(' ');
+    }
+    return clean(text);
+  }
+
   /* ───────── settings ───────── */
   var settings = Object.assign({}, DEFAULTS, readJSON('localStorage', SETTINGS_KEY) || {});
   var listeners = {};
@@ -181,14 +204,14 @@
       audio: function () { if (sess.state !== 'listening') { setState('listening'); } },
       activity: function () { sess.lastActivity = now(); sess.heard = true; resetSilence(sess); },
       interim: function (t) {
-        if (sess.closed) return; sess.interim = clean(t);
+        if (sess.closed) return; sess.interim = stripReplay(sess.segments, clean(t), now());
         if (sess.interim) { sess.heard = true; sess.lastActivity = now(); resetSilence(sess); if (FINISH_RE.test(joinText(sess.segments, sess.interim))) return finish('voice-finish'); }
         emitText();
       },
       final: function (t, conf) {
         if (sess.closed) return; t = clean(t); sess.interim = ''; if (!t) return;
-        var last = sess.segments[sess.segments.length - 1], n = now();
-        if (last && last.text === t && n - last.at < DUP_WINDOW_MS) return; // provider replay, not a repeat by the user
+        var n = now(); t = stripReplay(sess.segments, t, n); // provider replay / cumulative result, not a repeat by the user
+        if (!t) { emitText(); return; }
         sess.segments.push({ text: t, confidence: conf, uncertain: conf != null && conf < 0.5, at: n });
         sess.heard = true; sess.lastActivity = n; sess.netRetries = 0; persistRecovery(); emitText(); resetSilence(sess);
         emit('final', { text: t, confidence: conf, sessionId: sess.id });
@@ -198,7 +221,7 @@
       end: function () {
         if (sess.closed || sess.run !== run) return;
         sess.run = null;
-        if (sess.interim) { sess.segments.push({ text: sess.interim, confidence: null, uncertain: true, provisional: true, at: now() }); sess.interim = ''; persistRecovery(); }
+        if (sess.interim) { var pv = stripReplay(sess.segments, sess.interim, now(), 2500); sess.interim = ''; if (pv) { sess.segments.push({ text: pv, confidence: null, uncertain: true, provisional: true, at: now() }); persistRecovery(); } }
         var code = sess.lastError; sess.lastError = null;
         if (sess.finishing) return close(done(sess));
         if (code === 'aborted') return close(done(sess, 'cancelled'));
@@ -339,7 +362,7 @@
     on: on, off: off, getSettings: getSettings, setSettings: setSettings, resolveLang: resolveLang, message: msg,
     getRecovery: getRecovery, clearRecovery: clearRecovery, speak: speak, cancelSpeech: cancelSpeech, repeatLast: repeatLast, isSpeaking: isSpeaking, getVoices: getVoices,
     registerProvider: registerProvider, registerHandler: registerHandler, dispatch: dispatch, configure: configure, audit: audit,
-    _internals: { stripFinish: stripFinish, chunk: chunk }
+    _internals: { stripFinish: stripFinish, chunk: chunk, stripReplay: stripReplay }
   };
   root.NecpraVoice = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

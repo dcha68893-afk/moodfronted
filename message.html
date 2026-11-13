@@ -558,7 +558,7 @@
   <script src="/js/group-unread-store.js"></script>
   <script src="/js/group-message-isolation.js"></script>
   <script src="/js/message-client.js"></script>
-  <script src="/js/voice/necpra-voice-engine.js"></script><script src="/js/voice/necpra-voice-ui.js"></script><script src="/js/voice/necpra-voice-intents.js"></script><script src="/js/voice/necpra-voice-bridge.js"></script><script src="/js/voice/necpra-voice-remote.js"></script><script src="/js/voice/necpra-voice-init.js"></script><script src="/js/voice/necpra-voice-messenger.js"></script>
+  <script src="/js/voice/necpra-voice-engine.js"></script><script src="/js/voice/necpra-voice-ui.js"></script><script src="/js/voice/necpra-voice-intents.js"></script><script src="/js/voice/necpra-voice-bridge.js"></script><script src="/js/voice/necpra-voice-remote.js"></script><script src="/js/voice/necpra-voice-init.js"></script><script src="/js/voice/necpra-voice-messenger.js"></script><script src="/js/voice/necpra-voice-composer.js"></script>
 
 
   <script>
@@ -2603,6 +2603,13 @@
       // permanently empty list.
       if (gotDefinitiveAnswer) _knownUsersLoaded = true;
     }
+
+    // Voice ("chat with <friend>"): lets Messenger find friends who have no conversation yet. Read-only; uses the same
+    // friend sources as Start chat. Never waits more than 4s, so a slow network cannot stall a spoken command.
+    window.__kynVoiceFriends = async function () {
+      try { await Promise.race([_loadKnownUsers(), new Promise(function (r) { setTimeout(r, 4000); })]); } catch (_) {}
+      return _knownUsers.slice();
+    };
 
     // Instant, synchronous filter over whatever's already loaded — this is
     // what the search input calls on every keystroke, with no debounce, no

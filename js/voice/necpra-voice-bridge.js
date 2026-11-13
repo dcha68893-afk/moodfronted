@@ -38,7 +38,7 @@
         if (active || V.isListening()) return err(ev.source, ev.origin, m.requestId, st.session, 'busy', V.message('busy'));
         active = { src: ev.source, id: m.requestId };
         var mode = p.mode === 'command' ? 'command' : 'dictation', prompt = typeof p.prompt === 'string' ? p.prompt.slice(0, 160) : undefined;
-        return UI.capture({ mode: mode, prompt: prompt, title: p.title ? String(p.title).slice(0, 60) : undefined, lang: /^(auto|en|sw)$/.test(p.lang || '') ? p.lang : undefined })
+        return UI.capture({ mode: mode, prompt: prompt, title: p.title ? String(p.title).slice(0, 60) : undefined, lang: /^(auto|en|sw)$/.test(p.lang || '') ? p.lang : undefined, autoFinish: p.autoFinish === true ? true : undefined, pauseMs: typeof p.pauseMs === 'number' ? Math.min(10000, Math.max(1500, p.pauseMs)) : undefined })
           .then(function (r) { reply(ev.source, ev.origin, 'voice.result', m.requestId, st.session, { ok: !!r.ok, cancelled: !!r.cancelled, transcript: r.transcript || '', uncertain: r.uncertain || [], lang: r.lang, error: r.error || null, message: r.message || null, partial: !!r.partial }); })
           .then(function () { active = null; }, function () { active = null; err(ev.source, ev.origin, m.requestId, st.session, 'failed', 'Voice failed.'); });
       }

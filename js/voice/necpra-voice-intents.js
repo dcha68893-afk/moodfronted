@@ -14,12 +14,16 @@
     var q = norm(query).split(' ').filter(Boolean); if (!q.length) return { tier: -1, matches: [] };
     var tiers = [[], [], [], []];
     (contacts || []).forEach(function (c) {
-      var nt = norm(c.name).split(' ').filter(Boolean); if (!nt.length) return;
-      var exact = q.every(function (w) { return nt.indexOf(w) >= 0; });
-      var pref = q.every(function (w) { return nt.some(function (x) { return x.indexOf(w) === 0; }); });
-      var cont = norm(c.name).indexOf(q.join(' ')) >= 0;
-      var fz = q.every(function (w) { return w.length >= 4 && nt.some(function (x) { return lev(w, x) <= 1; }); });
-      if (exact) tiers[3].push(c); else if (pref) tiers[2].push(c); else if (cont) tiers[1].push(c); else if (fz) tiers[0].push(c);
+      var best = -1;
+      [c.name].concat(c.alt || []).forEach(function (nm) { // display name first, then username etc.
+        var nt = norm(nm).split(' ').filter(Boolean); if (!nt.length) return;
+        var exact = q.every(function (w) { return nt.indexOf(w) >= 0; });
+        var pref = q.every(function (w) { return nt.some(function (x) { return x.indexOf(w) === 0; }); });
+        var cont = norm(nm).indexOf(q.join(' ')) >= 0;
+        var fz = q.every(function (w) { return w.length >= 4 && nt.some(function (x) { return lev(w, x) <= 1; }); });
+        var t = exact ? 3 : pref ? 2 : cont ? 1 : fz ? 0 : -1; if (t > best) best = t;
+      });
+      if (best >= 0) tiers[best].push(c);
     });
     for (var t = 3; t >= 0; t--) if (tiers[t].length) return { tier: t, fuzzy: t === 0, matches: tiers[t] };
     return { tier: -1, matches: [] };
@@ -46,11 +50,50 @@
   }
   function tidy(t) { t = clean(t).replace(CONNECT, ''); return t ? t.charAt(0).toUpperCase() + t.slice(1) : ''; }
 
+
+  /* ───────── open a person's chat (works from ANY screen) ─────────
+   * Hard (soft:false): "open chat with Denis", "chat with Denis", "I want to chat with Denis", "talk to Denis",
+   *   "open Denis's chat", "ongea na Denis", "nataka kuongea na Denis", "fungua mazungumzo na Denis".
+   * Soft (soft:true): a bare "open Denis" / "fungua Denis": only treated as a chat if Denis is really a contact. */
+  var PAGE_WORD = /\b(messenger|messages?|chats?|inbox|ujumbe|mazungumzo|meseji|wallet|money|pesa|chama|mkoba|pochi|m ?pesa|savings|akiba|friends?|contacts?|marafiki|rafiki|duka|shop|store|biashara|tools?|groups?|vikundi|kikundi|status|stories|story|hali|settings?|mipangilio|games?|michezo|back|nyuma|calls?|requests?)\b/;
+  var NAME_NOISE = /^(?:the\s+)?(?:user|contact|person|friend|my friend|mtumiaji|rafiki yangu|rafiki)\s+/i;
+  function cleanName(n) { return clean(String(n || '').replace(/\b(please|now|tafadhali|sasa|for me|kwa ajili yangu)\b/gi, ' ').replace(/[,.!?]+$/, '')); }
+  function nameVariants(n) { n = cleanName(n); var out = n ? [n] : [], st = n.replace(NAME_NOISE, ''); if (st && st !== n) out.push(st); return out; }
+  var LEAD2 = /^(?:(?:hey|hi|ok|okay|so|now|uh|um|erm)\s+)?(?:please\s+|tafadhali\s+)?(?:can you\s+|could you\s+|would you\s+)?(?:please\s+)?(?:i\s+(?:want|wanna|need|would like|'d like|'?d like)\s+to\s+|i'?m going to\s+|let me\s+|let'?s\s+|nataka\s+|naomba\s+)?/i;
+  function parseOpenChat(input) {
+    var s = clean(input).replace(/[.!?,]+$/, ''), m, name = null, soft = false;
+    s = s.replace(LEAD2, '').replace(LEAD2, '');
+    if ((m = /^(?:open|go to|show|show me|fungua|nionyeshe|nenda kwa|nenda|take me to|nipeleke)\s+(?:to\s+)?(?:my\s+|the\s+|a\s+)?(?:chat|conversation|messages?|texts?|mazungumzo|ujumbe|meseji)\s+(?:with|from|of|na|za|ya|kwa|to)\s+(.+)$/i.exec(s))) name = m[1];
+    else if ((m = /^(?:open|go to|show|fungua|nionyeshe|nenda kwa|take me to|nipeleke)\s+(?:to\s+)?(?:my\s+|the\s+)?(?:chat|conversation|mazungumzo)\s+(.+)$/i.exec(s))) name = m[1];
+    else if ((m = /^(?:open|go to|show|fungua|nionyeshe|nenda kwa|take me to|nipeleke)\s+(?:to\s+)?(?:my\s+|the\s+)?(.+?)(?:'s|s'|’s)\s+(?:chat|conversation|messages?|mazungumzo)$/i.exec(s))) name = m[1];
+    else if ((m = /^(?:start\s+|begin\s+|open\s+)(?:a\s+|new\s+)*(?:chat|conversation|mazungumzo)\s+(?:with|to|na|kwa)\s+(.+)$/i.exec(s))) name = m[1];
+    else if ((m = /^(?:chat|talk|speak|converse|text|message|msg)\s+(?:with|to)\s+(.+)$/i.exec(s))) name = m[1];
+    else if ((m = /^(?:kuongea|kuzungumza|kuchati|ongea|zungumza|chati|ongelea)\s+(?:na|kwa)\s+(.+)$/i.exec(s))) name = m[1];
+    else if ((m = /^(?:open|go to|fungua|nionyeshe|nenda kwa|take me to|nipeleke)\s+(?:to\s+)?(?:my\s+|the\s+)?(.+)$/i.exec(s))) { name = m[1]; soft = true; }
+    if (name == null) return null;
+    name = cleanName(name); var wc = name.split(' ').filter(Boolean).length;
+    if (!name || wc > 4) return null;
+    if (soft && (PAGE_WORD.test(norm(name)) || wc > 3)) return null;      // "open settings" is navigation, never a person
+    if (!soft && PRONOUN.test(name)) return null;
+    return { type: 'open', name: name, variants: nameVariants(name), soft: soft };
+  }
+
+  // Commands for the message box of the chat that is open right now.
+  function parseComposerCommand(input) {
+    var s = clean(input).replace(/[.!?,]+$/, ''), n = norm(s), m;
+    s = s.replace(LEAD2, ''); n = norm(s);
+    if (/^(?:send|send it|send now|send message|send the message|send this|tuma|tuma sasa|tuma ujumbe|tuma huo)$/.test(n)) return { type: 'send' };
+    if (/^(?:clear|clear it|clear message|clear the message|clear the box|delete it|delete message|futa|futa ujumbe|futa yote)$/.test(n)) return { type: 'clear' };
+    if (/^(?:write|type|compose|dictate|andika|ingiza|anza kuandika)(?:\s+(?:a|the|my|new))*(?:\s+(?:message|text|ujumbe|meseji))?(?:\s+(?:by voice|for me|kwa sauti))?$/.test(n) || /^(?:start dictation|voice typing|dictation)$/.test(n)) return { type: 'dictate', text: '' };
+    if ((m = /^(?:write|type|andika|ingiza)\s+(?!a\s+message\b|message\b|text\b|new\b)(.+)$/i.exec(s))) return { type: 'dictate', text: tidy(m[1]) };
+    return null;
+  }
+
   function parseMessengerIntent(input, contacts) {
     var s = clean(input).replace(/[.!?]+$/, ''), m; s = s.replace(LEAD, '').replace(LEAD, '');
     if ((m = /^(?:read|soma|nisomee)\s+(?:out\s+)?(?:(?:my|all|the)\s+)?(?:(?:latest|new|unread|last|recent|mpya|za mwisho)\s+)?(?:messages?|ujumbe|texts?)(?:\s+(?:mpya|za mwisho|zote))?(?:\s+(?:from|kutoka kwa|kutoka|za)\s+(.+))?$/i.exec(s))) return { type: 'read', from: m[1] ? clean(m[1]) : '' };
     if ((m = /^(?:reply|respond|jibu)(?:\s+to\s+(?:him|her|them|(?:the\s+)?(?:last|latest)\s+message))?\s*(.*)$/i.exec(s))) return { type: 'reply', content: tidy(m[1]) };
-    if ((m = /^(?:open|go to|show|fungua|nionyeshe)\s+(?:my\s+|the\s+)?(?:chat|conversation|mazungumzo|ujumbe)\s+(?:with|from|of|na|za|ya)\s+(.+)$/i.exec(s))) return { type: 'open', name: clean(m[1]) };
+    var oc = parseOpenChat(s); if (oc && !oc.soft) return oc;
     if ((m = /^(?:search|find|look for|tafuta)\s+(?:for\s+)?(?:a\s+)?(?:chat|conversation|contact|mazungumzo)\s*(?:with|from|for|of|na|ya)?\s*(.+)$/i.exec(s))) return { type: 'search', name: clean(m[1]) };
     var rest = null, tell = false;
     if ((m = /^(?:send|write|compose|drop|tuma|andika)\s+(?:a\s+|an\s+)?(?:new\s+)?(?:voice\s+)?(?:message|text|sms|ujumbe|meseji)\s*(?:to|kwa)?\s*(.*)$/i.exec(s))) rest = m[1];
@@ -80,6 +123,7 @@
     if (/^(go back|back|previous screen|previous page|rudi nyuma|rudi)$/.test(s)) return { type: 'back' };
     var m = /^(?:please |tafadhali )?(?:open|go to|goto|take me to|show me|show|switch to|navigate to|fungua|nenda|nenda kwa|nipeleke|nionyeshe|rudi kwa)\s+(?:my |the |to )?(.+)$/.exec(s);
     if (!m || m[1].split(' ').length > 4) return null;
+    if (/\b(chat|chats|conversation|mazungumzo|messages?|ujumbe)\s+(with|from|of|na|za|ya|kwa|to)\s+\w+/.test(m[1])) return null; // that names a person: a chat, not the Messenger list
     for (var i = 0; i < PAGES.length; i++) if (PAGES[i][1].test(m[1])) return { type: 'navigate', page: PAGES[i][0], sub: /chama/.test(m[1]) ? 'chama' : null };
     return null;
   }
@@ -101,6 +145,6 @@
   }
 
   function isSaleStatement(t) { return /\b(nimeuza|nimeuzia|ameuza|tumeuza|(?:i|we)(?:\s+have)?\s+sold)\b/i.test(clean(t)); }
-  var api = { isSaleStatement: isSaleStatement, norm: norm, matchContacts: matchContacts, splitRecipient: splitRecipient, parseMessengerIntent: parseMessengerIntent, parseNav: parseNav, parseChoice: parseChoice, parseConfirmAnswer: parseConfirmAnswer, toSecondPerson: toSecondPerson, PAGE_LABEL: LABEL };
+  var api = { parseOpenChat: parseOpenChat, parseComposerCommand: parseComposerCommand, nameVariants: nameVariants, isSaleStatement: isSaleStatement, norm: norm, matchContacts: matchContacts, splitRecipient: splitRecipient, parseMessengerIntent: parseMessengerIntent, parseNav: parseNav, parseChoice: parseChoice, parseConfirmAnswer: parseConfirmAnswer, toSecondPerson: toSecondPerson, PAGE_LABEL: LABEL };
   root.NecpraVoiceIntents = api; if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
