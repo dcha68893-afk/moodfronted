@@ -229,7 +229,7 @@ function viewWallet(){
   if(w.pendingWithdrawals>0)pend+='<div class="notice">'+wm(w.pendingWithdrawals)+' is on its way to your M-PESA (already taken from your balance).</div>';
   var rec=(w.recent||[]).map(function(x){var cr=x.type==='credit',t=(x.kind==='transfer_in'||x.kind==='transfer_out')&&x.description?x.description:(KT[x.kind]||(cr?'Money in':'Money out'));
     return '<div class="row" data-act="receipt" data-id="'+esc(x.id)+'" style="cursor:pointer"><div class="ico" style="background:'+(cr?'#16a34a':'#2563eb')+'"><i class="fas fa-'+(KI[x.kind]||(cr?'circle-arrow-down':'circle-arrow-up'))+'"></i></div><div class="mid"><div class="row-title">'+esc(t)+'</div><div class="row-sub">'+esc(ago(x.createdAt))+(x.status&&x.status!=='completed'?' · '+chip(x.status):'')+'</div></div><div class="amt '+(cr?'pos':'')+'">'+(cr?'+':'-')+wm(x.amount)+'</div></div>'}).join('');
-  return pend+'<div class="stat2"><div style="grid-column:1/-1"><span>Saved in goals</span><b>'+wm(w.savedInGoals)+'</b></div></div>'
+  return pend+'<div class="stat2"><div><span>Pending</span><b>'+wm(w.pendingTotal)+'</b></div><div><span>Saved in goals</span><b>'+wm(w.savedInGoals)+'</b></div><div><span>Received this month</span><b style="color:#16a34a">'+wm(w.receivedThisMonth)+'</b></div><div><span>Spent this month</span><b>'+wm(w.spentThisMonth)+'</b></div></div>'
    +'<div class="btns" style="margin:0 0 12px"><button class="secondary small" data-act="receive" type="button" style="flex:1"><i class="fas fa-qrcode"></i>&nbsp; Receive money</button><button class="secondary small" data-act="newGoal" type="button" style="flex:1"><i class="fas fa-piggy-bank"></i>&nbsp; New savings goal</button></div>'
    +'<h4>Recent transactions</h4>'+(rec?'<div class="card">'+rec+'</div>':'<div class="card"><div class="empty"><i class="fas fa-receipt"></i>No wallet transactions yet.<div style="margin-top:12px"><button class="primary" data-act="addMoney" type="button">Add money</button></div></div></div>')
    +'<div class="row-sub" style="text-align:center;margin:6px 0">Money Circles hold group contributions and are separate from this balance.</div>'}
@@ -522,6 +522,16 @@ $('refreshBtn').addEventListener('click',function(){S.orders=null;load(true);loa
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeModal()});
 // back button inside this module: close an open sheet first (hardware back is handled by the shell)
 window.__moneyCloseTopLayer=function(){if($('modal').classList.contains('open')){closeModal();return true}if($('panel').classList.contains('open')){if(P.view==='settings'){P.view='main';drawPanel()}else closePanel();return true}return false};
-if(S.tab==='paylater')loadOrders(); if(S.tab==='goals')loadGoals(); adultCheck().then(function(ok){if(!ok)adultGate()}); if(cacheHydrate()){try{header()}catch(_){}render()} load(); })();
+if(S.tab==='paylater')loadOrders(); if(S.tab==='goals')loadGoals(); adultCheck().then(function(ok){if(!ok)adultGate()}); if(cacheHydrate()){try{header()}catch(_){}render()} /* NECPRA voice adapter. Read access + tab switching + PRE-FILLING the Send-money screen only. Nothing here sends money. */
+window.__necpraMoneyVoice={
+  state:function(){return{wallet:S.wallet,circles:S.circles,overview:S.overview,incoming:S.incoming,outgoing:S.outgoing,orders:S.orders,stale:!!S.walletErr}},
+  refresh:async function(){await loadWallet();try{await load()}catch(_){}},
+  setTab:function(t){var b=document.querySelector('.tab[data-tab="'+t+'"]');if(b)b.click()},
+  reveal:function(){if(!BAL_SHOWN&&$('eyeBtn'))$('eyeBtn').click()},
+  toast:function(m){toast(m)},
+  loadOrders:async function(){await loadOrders();return S.orders||[]},
+  prepareTransfer:function(o){sendMoney();var t=$('smTo'),a=$('smAmt');if(t&&o.to){t.value=o.to;t.dispatchEvent(new Event('input'))}if(a&&o.amount>0)a.value=String(o.amount);var go=$('smGo');if(go)go.focus()}
+};
+load(); })();
 </script>
-<script src="/js/header-labels.js" defer></script></body></html>
+<script src="/js/voice/necpra-voice-engine.js"></script><script src="/js/voice/necpra-voice-ui.js"></script><script src="/js/voice/necpra-voice-bridge.js"></script><script src="/js/voice/necpra-voice-remote.js"></script><script src="/js/voice/necpra-voice-sales-nlu.js"></script><script src="/js/voice/necpra-voice-money-nlu.js"></script><script src="/js/voice/necpra-voice-money.js"></script><script src="/js/voice/necpra-voice-init.js"></script><script>try{NecpraVoiceInit.start({fab:false});NecpraVoiceMoney.init(window.__necpraMoneyVoice)}catch(e){console.error('[voice]',e)}</script><script src="/js/header-labels.js" defer></script></body></html>

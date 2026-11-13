@@ -16,6 +16,10 @@
 
   async function handle(result) {
     var text = result.transcript;
+    if (root.NecpraVoiceMoneyNLU && root.NecpraVoiceMoneyNLU.parse(text) && cfg.allowedPages.indexOf('money') >= 0) { // wallet / chama / orders / prepared payment
+      if (cfg.getPage() !== 'money') cfg.navigate('money');
+      if (await forward('money', result)) return true;
+    }
     var nav = I.parseNav(text);
     if (nav && nav.type === 'back') { V.audit('voice.nav', { module: 'shell', outcome: 'executed', lang: result.lang }); (cfg.back || function () { root.history.back(); })(); return true; }
     if (nav && nav.type === 'navigate') {

@@ -18,8 +18,11 @@
     { id: 'cancel', re: /\b(cancel (that|what i was doing)|ghairi)\b/i }
   ];
   function visibleText() {
-    var n = doc.querySelector('main,[role=main]') || doc.body, t = (n.innerText || '').replace(/\s+/g, ' ').trim();
-    return (doc.title ? doc.title + '. ' : '') + t.slice(0, 1800);
+    var page = root.__currentPage, f = page && doc.getElementById(page + 'Iframe'), d = doc;
+    if (page === 'messages' && !V.getSettings().speakSensitive) return T('Messages are private. Say “read my latest messages”, or turn on “Allow reading private info aloud” in voice settings.', 'Ujumbe ni wa siri. Sema “soma ujumbe mpya”, au washa “Ruhusu kusoma taarifa za siri” kwenye mipangilio ya sauti.');
+    if (f) { try { if (f.contentDocument && f.contentDocument.body) d = f.contentDocument; } catch (_) {} } // same-origin module screen
+    var n = d.querySelector('main,[role=main]') || d.body, t = (n.innerText || '').replace(/\s+/g, ' ').trim();
+    return ((d.title || doc.title) ? (d.title || doc.title) + '. ' : '') + t.slice(0, 1800);
   }
   function builtin(text) {
     var hit = RULES.filter(function (r) { return r.re.test(text); })[0]; if (!hit) return Promise.resolve(false);
