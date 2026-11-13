@@ -302,7 +302,7 @@ function renderPeople(){
  const arr=Object.values(groups).sort((a,b)=>Number(!!a.viewedByMe)-Number(!!b.viewedByMe)||new Date(b.createdAt)-new Date(a.createdAt));
  const fresh=arr.filter(s=>!s.viewedByMe),viewed=arr.filter(s=>s.viewedByMe);
  const person=s=>{const u=s.owner||{};return '<div class="ns-person '+(s.viewedByMe?'is-viewed':'is-unviewed')+'" data-user="'+esc(s.userId)+'">'+avatar(u)+'<div class="ns-person-info"><div class="ns-person-name">'+esc(u.displayName||u.username||'User')+'</div><div class="ns-person-time">'+(s.viewedByMe?'Viewed':'New')+' · '+ago(s.createdAt)+' ago</div></div><i class="ns-story-ring '+(s.viewedByMe?'viewed':'unviewed')+'"></i></div>'};
- el.innerHTML=(fresh.length?'<div class="ns-status-label">NEW</div>'+fresh.map(person).join(''):'')+(viewed.length?'<div class="ns-status-label viewed-label">VIEWED</div>'+viewed.map(person).join(''):'')||'<div class="ns-empty-mini">No active friend statuses yet.</div>';
+ el.innerHTML=(fresh.length?'<div class="ns-status-label">NEW</div>'+fresh.map(person).join(''):'')+(viewed.length?'<div class="ns-status-label viewed-label">VIEWED</div>'+viewed.map(person).join(''):'')||'<div class="ns-empty-mini">No moments from friends yet. Tap the + button at the top to share yours, or open Discover to see what others post.</div>';
  el.querySelectorAll('[data-user]').forEach(x=>x.onclick=()=>openUser(x.dataset.user));
 }
 // Discover interest filtering: only narrows the Discover tab, and only once the person has

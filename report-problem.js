@@ -191,7 +191,7 @@
   // Small unobtrusive flag button (hidden on the login page).
   function addButton() {
     if (/index\.html$|\/$|auth\.html$/.test(location.pathname) || document.getElementById('__pr_btn')) return;
-    var b = el('button', 'position:fixed;left:10px;bottom:84px;z-index:2147482000;width:34px;height:34px;border-radius:50%;border:0;background:rgba(0,0,0,.45);color:#fff;font-size:16px;line-height:34px;padding:0;opacity:.75', '&#9873;');
+    var b = el('button', 'position:fixed;left:10px;bottom:84px;z-index:2147482000;width:40px;height:40px;border-radius:50%;border:0;background:rgba(15,23,42,.85);color:#fff;font-size:18px;line-height:40px;padding:0;opacity:1', '&#9873;');
     b.id = '__pr_btn'; b.title = 'Report a problem'; b.setAttribute('aria-label', 'Report a problem');
     b.onclick = function () { openSheet({}); };
     document.body.appendChild(b);

@@ -90,7 +90,8 @@ const SW_VERSION = '19.55.0';
 // v106: DUKA SMART held bills, barcode scanner and pack receiving. v107: offline stock batches and spoilage records (duka.html changed). v108: DUKA SMART PDF/Excel export and offline group-buy drafts (duka.html changed).
 // v109: NECPRA Universal Voice Engine scripts precached (duka.html changed). v110: voice Messenger/shell scripts; chat.html + message.html changed.
 // v111: voice sales (DUKA SMART natural-language sales); duka.html changed.
-const CACHE_NAME = 'necpra-static-v111';
+// v112 (UI REDESIGN): bottom bar labels/colours, Duka tabs, Money, Status, Friends; chat.html, duka.html, money.html, status.css, friend.html, report-problem.js changed; screen-fit rules added.
+const CACHE_NAME = 'necpra-static-v112';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
