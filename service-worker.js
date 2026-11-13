@@ -99,7 +99,8 @@ const SW_VERSION = '19.55.0';
 // v117: voice fix - frames that booted before the shell's voice host now re-hello, handlers/conversations are awaited; settings no longer prints Offline.
 // v119: voice understands more phrasings (alternative guesses, polite/Kiswahili/bare-word commands); money.html chama delete + choose where a chama receives money.
 // v120: voice answers questions (Duka counts/customers/sales, friend requests, unread messages, groups, status) and asks the module that owns the topic; duka.html + voice scripts changed.
-const CACHE_NAME = 'necpra-static-v120';
+// v121: voice understands slightly misheard/plural/glued place words ("walet", "statuses", "dukasmart"), "is there a friend request" is answered by the screen instead of the how-to guide, and a command that was not understood retries the other language (English<->Kiswahili) once; engine/intents/knowledge changed.
+const CACHE_NAME = 'necpra-static-v121';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [

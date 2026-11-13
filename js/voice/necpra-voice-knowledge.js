@@ -45,7 +45,7 @@
       s: 'Unaweza kuongea Kiingereza au Kiswahili. Lugha ya sauti imewekwa kiotomatiki kwa kawaida, na unaweza kuibadilisha kwenye mipangilio ya sauti.' }
   ];
 
-  var HOWTO = /^(?:hey |ok |okay |please )*(?:how (?:do|can|could|would|to|does)|how'?s|what can (?:i|you)|what (?:is|are|does) (?:the )?(?:feature|app|necpra|voice|hands ?free)|what do you|where (?:do|can|is|are)|is there (?:a|any)|tell me (?:about|what)|explain|describe|help(?: me)?$|which (?:features|modules|screens)|nini (?:ninaweza|unaweza|naweza)|nawezaje|ninawezaje|naweza|unaweza|niambie|nieleze|ni nini|wapi|msaada|nifanye)/i;
+  var HOWTO = /^(?:hey |ok |okay |please )*(?:how (?:do|can|could|would|to|does)|how'?s|what can (?:i|you)|what (?:is|are|does) (?:the )?(?:feature|app|necpra|voice|hands ?free)|what do you|where (?:do|can|is|are)|is there (?:a|any) (?:way|feature|option|setting|button|tab|page|screen|menu|shortcut|command)\b|tell me (?:about|what)|explain|describe|help(?: me)?$|which (?:features|modules|screens)|nini (?:ninaweza|unaweza|naweza)|nawezaje|ninawezaje|naweza|unaweza|niambie|nieleze|ni nini|wapi|msaada|nifanye)/i;
   var WAKE = /^(?:hey |ok |okay )?(?:necpra |kynecta )?(?:open voice|start voice|voice mode|voice on|listen|fungua sauti|washa sauti|sikiliza)[.!]?$/i;
 
   function isHowTo(text) { return HOWTO.test(clean(text)); }

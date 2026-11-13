@@ -115,7 +115,7 @@
     ['friends', /\b(friends?|contacts?|marafiki|rafiki)\b/],
     ['tools', /\b(duka(?: smart)?|shop|store|biashara|tools?|my business)\b/],
     ['group', /\b(groups?|vikundi|kikundi)\b/],
-    ['status', /\b(status|stories|story|hali)\b/],
+    ['status', /\b(status(?:es)?|stories|story|hali)\b/],
     ['settings', /\b(settings?|mipangilio)\b/],
     ['games', /\b(games?|michezo)\b/]
   ];
@@ -151,8 +151,20 @@
    * a bare "chama", or a brand word heard as "shama"/"doka". This only rewrites NAVIGATION-style requests into the canonical
    * "open <place>" the parsers already understand. Message text and anything else is passed through untouched. */
   var MSG_VERB = /^(?:tell|ask|send|message|text|msg|reply|respond|write|type|compose|dictate|post|tuma|andika|mwambie|mjulishe|jibu|ingiza)\b/i;
-  var PLACE = '(?:messenger|messages?|chats?|inbox|ujumbe|wallet|wallets|money|pesa|pochi|mkoba|chamas?|friends?|contacts?|marafiki|duka(?: smart)?|shop|store|tools?|groups?|vikundi|status|stories|settings?|mipangilio|games?|michezo|savings?|akiba|airtime|orders?|requests?)';
-  var HEARD = [[/\b(?:shama|chamma|chaama|cha ma|chamah)\b/gi, 'chama'], [/\b(?:doka|duca|dukka|ducka|dooka|douka)\b/gi, 'duka'], [/\b(?:pochy|poche|poochi|pochie)\b/gi, 'pochi'], [/\bm[\s-]?pesa\b/gi, 'mpesa']];
+  var PLACE = '(?:messenger|messages?|chats?|inbox|ujumbe|wallet|wallets|money|pesa|pochi|mkoba|chamas?|friends?|contacts?|marafiki|duka(?: smart)?|shop|store|tools?|groups?|vikundi|status(?:es)?|stories|settings?|mipangilio|games?|michezo|savings?|akiba|airtime|orders?|requests?)';
+  var HEARD = [[/\b(?:shama|chamma|chaama|cha ma|chamah)\b/gi, 'chama'], [/\b(?:doka|duca|dukka|ducka|dooka|douka)\b/gi, 'duka'], [/\b(?:pochy|poche|poochi|pochie)\b/gi, 'pochi'], [/\bm[\s-]?pesa\b/gi, 'mpesa'], [/\bduka[\s-]*smart\b/gi, 'duka smart'], [/\b(?:dukasmart|duka smart)\b/gi, 'duka smart'], [/\bstatuses\b/gi, 'status']];
+
+  /* A recogniser rarely returns a perfect single word: \"walet\", \"freinds\", \"setting\", \"gams\", \"markafiki\". For NAVIGATION requests only, a word that is
+   * ONE edit away from a place word the app really has is repaired to that word. Short words (< 5 letters) and words that are already exact are never touched. */
+  var VOCAB = ['messenger', 'messages', 'message', 'chats', 'chat', 'inbox', 'ujumbe', 'wallet', 'money', 'pesa', 'pochi', 'mkoba', 'chama', 'friends', 'friend', 'contacts', 'marafiki', 'rafiki', 'duka', 'shop', 'store', 'tools', 'groups', 'group', 'vikundi', 'kikundi', 'status', 'stories', 'settings', 'mipangilio', 'games', 'game', 'michezo', 'savings', 'akiba', 'airtime', 'orders', 'requests'];
+  function swapped(a, b) { if (a.length !== b.length) return false; for (var i = 0; i < a.length - 1; i++) if (a[i] !== b[i]) return a[i] === b[i + 1] && a[i + 1] === b[i] && a.slice(i + 2) === b.slice(i + 2); return false; } // two neighbouring letters swapped ("freinds")
+  function repairPlaceWords(t) {
+    return t.split(' ').map(function (w, i) {
+      var k = w.toLowerCase().replace(/[^a-z]/g, ''); if (i === 0 || k.length < 5 || VOCAB.indexOf(k) >= 0) return w;
+      var hit = null; for (var j = 0; j < VOCAB.length; j++) { if (VOCAB[j].length >= 5 && (lev(k, VOCAB[j]) === 1 || swapped(k, VOCAB[j]))) { if (hit) return w; hit = VOCAB[j]; } } // ambiguous -> leave alone
+      return hit || w;
+    }).join(' ');
+  }
   var VERB_TO_OPEN = /^(?:(?:hey|hi|ok|okay|so|now|uh|um|erm)\s+)*(?:please\s+|tafadhali\s+)?(?:(?:can|could|would|will)\s+(?:you|i)\s+(?:please\s+)?(?:see|view|open|go to|check|show me|take me to)|let me\s+(?:see|view|open|go to|check)|let'?s\s+go to|i\s+(?:want|wanna|need|would like|'?d like)\s+to\s+(?:see|view|open|go to|go into|check|visit)|(?:bring up|pull up|launch|access|visit|view|enter|go into|get into|take me into|navigate to|switch over to|switch to|open up|go on|go over to|onyesha|angalia|tazama|ingia(?: kwenye| kwa)?|nenda kwenye|nipeleke kwenye|fungua kwenye|nataka (?:kuona|kufungua|kwenda|kuangalia|kuingia)(?: kwenye| kwa)?))\s+/i;
   function normalizeUtterance(input) {
     var s = clean(input).replace(/[.!?]+$/, ''); if (!s) return s;
@@ -163,6 +175,7 @@
     if (!navish) return clean(input);
     t = probe.replace(/\s+(?:please|tafadhali|sasa|now|for me|kwa ajili yangu|thanks|thank you|asante)$/i, '');
     HEARD.forEach(function (h) { t = t.replace(h[0], h[1]); });
+    t = repairPlaceWords(t);
     t = t.replace(/\bkwenye\b/gi, 'kwa').replace(/\bchamas\b/gi, 'chama').replace(/\bwallets\b/gi, 'wallet');
     if (VERB_TO_OPEN.test(t)) t = t.replace(VERB_TO_OPEN, 'open ');
     t = t.replace(/^(?:check|see)\s+(?=(?:my\s+|the\s+)?(?:wallet|pochi|chama|friends?|groups?|status|games?|settings?|duka|messages?|savings?)\b)/i, 'open ');

@@ -80,6 +80,10 @@
     var nav = (root.navigator && (root.navigator.language || '')) || '';
     return /^sw/i.test(nav) ? 'sw-KE' : (nav || 'en-KE');
   }
+  /* One recogniser = one language. Kenyan speech mixes English and Kiswahili, and a phone set to English hears "fungua pochi" as nonsense (and the reverse).
+   * When the language is 'auto' and a spoken COMMAND was not understood by any screen, the NEXT command listen uses the other language once, then goes back. */
+  var flipNext = false;
+  function otherLang() { return /^sw/i.test(resolveLang('auto')) ? 'en-KE' : 'sw-KE'; }
   function msg(code, lang) { var m = MSG[code] || MSG.generic; return /^sw/i.test(lang || resolveLang()) ? m[1] : m[0]; }
 
   /* ───────── providers ───────── */
@@ -176,7 +180,7 @@
     opts = opts || {};
     if (S) return Promise.resolve(fail('busy', null, true));
     var sess = S = {
-      id: uid(), mode: opts.mode === 'command' ? 'command' : 'dictation', lang: resolveLang(opts.lang),
+      id: uid(), mode: opts.mode === 'command' ? 'command' : 'dictation', lang: (flipNext && opts.mode === 'command' && !opts.lang && settings.lang === 'auto') ? (flipNext = false, otherLang()) : resolveLang(opts.lang),
       pauseMs: opts.pauseMs || settings.pauseMs, autoFinish: opts.autoFinish != null ? !!opts.autoFinish : (opts.mode === 'command'),
       segments: [], interim: '', startedAt: now(), lastActivity: now(), heard: false, restarts: 0, quickEnds: 0,
       run: null, finishing: false, closed: false, timers: {}, netRetries: 0, provider: null, reason: null
@@ -352,6 +356,9 @@
         var alt = alts[k++];
         return dispatchOne(Object.assign({}, result, { transcript: alt, alternatives: [], usedAlternative: true })).then(function (r) { return r.handled ? r : again(); });
       })();
+    }).then(function (final) {
+      if (result && result.mode === 'command') flipNext = !final.handled;   // not understood -> try the other language on the next listen (once)
+      return final;
     });
   }
 
