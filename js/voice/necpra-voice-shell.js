@@ -5,6 +5,7 @@
   var doc = root.document, cfg = null;
   function sw() { return /^sw/i.test(V.resolveLang()); }
   function T(en, s) { return sw() ? s : en; }
+  function clean(t) { return String(t == null ? '' : t).replace(/\s+/g, ' ').trim(); }
   function frameFor(page) { return doc.getElementById(page + 'Iframe'); }
 
   async function forward(page, result, mode, timeoutMs) {
@@ -32,6 +33,26 @@
       if (cfg.getPage() !== 'messages') cfg.navigate('messages');
       V.audit('voice.nav', { module: 'shell', outcome: 'executed', lang: result.lang });
       return forward('messages', result);
+    }
+    // Settings by voice from ANY screen: "open privacy settings", "turn off read receipts", "dark mode". Runs before parseNav, which would only open
+    // the bare Settings page (or Messenger for "chat settings") and lose the request.
+    if (cfg.allowedPages.indexOf('settings') >= 0 && (/^(?:please\s+|tafadhali\s+)?(?:open|go to|show|take me to|fungua|nenda kwa|nipeleke|nionyeshe)\s+(?:the\s+|my\s+)?(?:(?:profile|security|privacy|notifications?|appearance|storage|backup|advanced|danger)(?:\s+settings?)?|(?:chat|friends?|groups?|status|mood)\s+settings?|mipangilio ya .+)$/i.test(clean(text)) ||
+        (/^(?:please\s+)?(?:(?:turn|switch|set)\s+(?:on|off)\s+|(?:enable|disable|washa|zima)\s+)/i.test(clean(text)) && /(receipts?|last seen|typing|online status|profile photo|notifications?|sounds?|vibrat|previews?|dark mode|light mode|theme|wallpaper|auto.?download|enter|suggestions?|discovery|read)/i.test(text)) || /^(?:dark mode|light mode|use dark mode|use light mode)$/i.test(clean(text)))) {
+      if (cfg.getPage() !== 'settings') cfg.navigate('settings');
+      V.audit('voice.nav', { module: 'shell', outcome: 'executed', lang: result.lang });
+      return forward('settings', result);
+    }
+    // Games by voice from ANY screen: "play chess", "start trivia".
+    if (cfg.allowedPages.indexOf('games') >= 0 && /^(?:please\s+|tafadhali\s+)?(?:(?:i\s+(?:want|wanna)\s+to\s+)?(?:play|start|launch|open|begin|fungua|cheza|anza))\s+(?:a\s+game\s+of\s+|the\s+game\s+|a\s+game\s+|game\s+|the\s+|some\s+|a\s+)?(?:chess|chesi|trivia|quiz|cross\s*word|block(?:s| puzzle)?|tetris)(?:\s+game)?$/i.test(clean(text))) {
+      if (cfg.getPage() !== 'games') cfg.navigate('games');
+      V.audit('voice.nav', { module: 'shell', outcome: 'executed', lang: result.lang });
+      return forward('games', result);
+    }
+    // "open group Family" / "tell the Family group saying ...": go to Groups AND hand the words over. This must run before parseNav, which would only open the Groups list and lose the group name.
+    if (cfg.allowedPages.indexOf('group') >= 0 && /^(?:please\s+|tafadhali\s+)?(?:(?:open|go to|show|fungua|nenda kwa|take me to|nipeleke)\s+(?:to\s+)?(?:the\s+|my\s+)?(?:group|kikundi)\s+(?!list\b|settings\b)\S|(?:open|go to|fungua|nenda kwa)\s+(?:the\s+|my\s+)?.+?\s+(?:group|kikundi)$|(?:send|post|write|tuma|andika)\s+(?:a\s+)?(?:message\s+|ujumbe\s+)?(?:to\s+|kwa\s+)?(?:the\s+)?(?:group|kikundi)\s+\S|(?:tell|message|mwambie)\s+(?:the\s+)?.+?\s+(?:group|kikundi)\s+\S|(?:tell|message|mwambie)\s+(?:the\s+)?(?:group|everyone|wote)\s+\S)/i.test(clean(text))) {
+      if (cfg.getPage() !== 'group') cfg.navigate('group');
+      V.audit('voice.nav', { module: 'shell', outcome: 'executed', lang: result.lang });
+      return forward('group', result);
     }
     var nav = I.parseNav(text);
     if (nav && nav.type === 'back') { V.audit('voice.nav', { module: 'shell', outcome: 'executed', lang: result.lang }); (cfg.back || function () { root.history.back(); })(); return true; }

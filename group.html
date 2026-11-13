@@ -915,6 +915,7 @@ window.addEventListener('message',e=>{
   if(d.type==='PARENT_GROUP_ACTION'){const action=d.payload&&d.payload.action;if(action==='members'||action==='info')showInfo();else if(action==='settings')showSettings();else if(action==='purpose')showPurpose();return}
 });
 window.__GROUP_LOAD_GROUPS=loadGroups;window.__GROUP_REFRESH_MESSAGES=loadMessages;loadUnread();loadGroups();
+window.__kynGroupsVoice={state:()=>S,open:openGroup,close:closeGroup,reload:loadMessages,loadGroups:loadGroups,send:sendGroupPayload,members:showMembers};
 })();
 </script>
 <!-- FIX: this module's own modals (membersModal, purposeModal, settingsModal
@@ -934,5 +935,5 @@ window.__GROUP_LOAD_GROUPS=loadGroups;window.__GROUP_REFRESH_MESSAGES=loadMessag
      this page already has. Now actually connecting it. -->
 <script defer src="js/group-chat-features.js?v=fixround-1"></script>
 <script src="js/group-discover.js"></script>
-<script src="back-nav.js"></script>
+<script src="/js/voice/necpra-voice-engine.js"></script><script src="/js/voice/necpra-voice-ui.js"></script><script src="/js/voice/necpra-voice-intents.js"></script><script src="/js/voice/necpra-voice-bridge.js"></script><script src="/js/voice/necpra-voice-remote.js"></script><script src="/js/voice/necpra-voice-init.js"></script><script src="/js/voice/necpra-voice-groups.js"></script><script>try{NecpraVoiceInit.start({fab:false});NecpraVoiceGroups.init()}catch(e){console.error('[voice]',e)}</script><script src="back-nav.js"></script>
 <script src="report-problem.js" defer></script><script src="/js/header-labels.js" defer></script></body></html>

@@ -4,14 +4,16 @@
   'use strict';
   var V = root.NecpraVoice, UI = root.NecpraVoiceUI, B = root.NecpraVoiceBridge; if (!V) return;
   var embedded = false; try { embedded = root.parent !== root; } catch (_) {}
-  var client = null, mode = embedded ? 'unknown' : 'local', pendingMode = null, intentFn = null;
+  var client = null, mode = embedded ? 'unknown' : 'local', pendingMode = null, intentFns = [];
+  // A screen can now have SEVERAL intent handlers (e.g. Messenger + chat search + voice notes). They are offered the words in order; the first that returns true wins.
+  function intentFn(p) { var i = 0; return (function next() { if (i >= intentFns.length) return Promise.resolve(false); var f = intentFns[i++]; return Promise.resolve().then(function () { return f(p); }).then(function (ok) { return ok ? true : next(); }, function () { return next(); }); })(); }
 
   function ensure() {
     if (mode !== 'unknown') return Promise.resolve(mode);
     if (pendingMode) return pendingMode;
     if (!B) { mode = 'local'; return Promise.resolve(mode); }
     client = B.client({ helloTimeoutMs: 2500 });
-    if (intentFn) client.onIntent(intentFn);
+    if (intentFns.length) client.onIntent(intentFn);
     return (pendingMode = client.hello().then(function () { mode = 'bridge'; return mode; }, function () { mode = 'local'; return mode; }));
   }
   function capture(o) {
@@ -23,10 +25,10 @@
   }
   // fn({transcript, lang}) -> true if handled. In a frame it receives intents forwarded by the shell; standalone it joins the engine's handler list.
   function onIntent(fn) {
-    intentFn = fn;
+    intentFns.push(fn); var id = 'module-' + (root.location ? root.location.pathname : 'page') + '-' + intentFns.length;
     return ensure().then(function (m) {
-      if (m === 'bridge') client.onIntent(fn);
-      else V.registerHandler('module-' + (root.location ? root.location.pathname : 'page'), function (r) { return fn({ transcript: r.transcript, lang: r.lang }); });
+      if (m === 'bridge') client.onIntent(intentFn);
+      else V.registerHandler(id, function (r) { return fn({ transcript: r.transcript, lang: r.lang }); });
     });
   }
   root.NecpraVoiceRemote = { capture: capture, onIntent: onIntent, mode: function () { return mode; }, ready: ensure };

@@ -92,7 +92,10 @@ const SW_VERSION = '19.55.0';
 // v111: voice sales (DUKA SMART natural-language sales); duka.html changed.
 // v112: voice Wallet/Chama/Pay Later; money.html and chat.html changed.
 // v113: voice fixes (repeated words, open a person's chat by voice, message-box mic); engine/intents/shell/messenger/bridge changed, composer added.
-const CACHE_NAME = 'necpra-static-v113';
+// v114: voice actions inside Friends (accept/decline/add/remove/search/tabs by voice); friend.html changed, necpra-voice-friends.js added.
+// v115: voice actions inside Groups and Status; group.html, status.html, shell and remote changed, groups/status scripts added.
+// v116: voice actions inside Settings and Games; settings.html, game.html and shell changed, settings/games scripts added.
+const CACHE_NAME = 'necpra-static-v116';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -102,7 +105,7 @@ const CORE_STATIC_ASSETS = [
   '/js/app.core.bootstrap.js','/js/app.core.session.js','/js/app.core.ui.js','/js/app.ui.auth.js',
   '/js/app.cache.js','/js/app.cache.unified.js','/js/authStorage.js','/js/app.offline.queue.js','/js/auth.session.manager.js',
   '/js/app.runtime.authority.js','/js/auth.account.limit.js','/js/google-auth.js','/js/app.offline.bootstrap.js',
-  '/app-protect.js','/session-restore.js','/report-problem.js','/js/runtime-config.js','/js/config.js','/js/offline-gate.js','/js/header-labels.js','/js/voice/necpra-voice-engine.js','/js/voice/necpra-voice-ui.js','/js/voice/necpra-voice-bridge.js','/js/voice/necpra-voice-handsfree.js','/js/voice/necpra-voice-init.js','/js/voice/necpra-voice-intents.js','/js/voice/necpra-voice-remote.js','/js/voice/necpra-voice-shell.js','/js/voice/necpra-voice-messenger.js','/js/voice/necpra-voice-composer.js','/js/voice/necpra-voice-sales-nlu.js','/js/voice/necpra-voice-sales.js','/js/voice/necpra-voice-money-nlu.js','/js/voice/necpra-voice-money.js','/js/offline-first.js','/js/theme.engine.js','/js/theme-contrast-guard.js','/js/settings-broadcast-listener.js','/js/necpa-session-resilience.js','/js/services.friend.js'
+  '/app-protect.js','/session-restore.js','/report-problem.js','/js/runtime-config.js','/js/config.js','/js/offline-gate.js','/js/header-labels.js','/js/voice/necpra-voice-engine.js','/js/voice/necpra-voice-ui.js','/js/voice/necpra-voice-bridge.js','/js/voice/necpra-voice-handsfree.js','/js/voice/necpra-voice-init.js','/js/voice/necpra-voice-intents.js','/js/voice/necpra-voice-remote.js','/js/voice/necpra-voice-shell.js','/js/voice/necpra-voice-messenger.js','/js/voice/necpra-voice-composer.js','/js/voice/necpra-voice-sales-nlu.js','/js/voice/necpra-voice-sales.js','/js/voice/necpra-voice-money-nlu.js','/js/voice/necpra-voice-money.js','/js/voice/necpra-voice-friends.js','/js/voice/necpra-voice-status.js','/js/voice/necpra-voice-settings.js','/js/voice/necpra-voice-games.js','/js/voice/necpra-voice-groups.js','/js/offline-first.js','/js/theme.engine.js','/js/theme-contrast-guard.js','/js/settings-broadcast-listener.js','/js/necpa-session-resilience.js','/js/services.friend.js'
   // v100: games + wallet precached so the first open after a deploy paints from cache instead of waiting on the
   // network for ~330KB of game scripts. URLs include the ?v= query because the cache key does.
   ,'/game-v3.html','/money.html','/games-crossword-v4.js?v=8.2','/games-chess-v1.js?v=2.6','/games-chess-3d.js?v=1','/games-commercial-v5.js?v=5.4','/games-v4-enhancements.js?v=4.4','/js/settings-broadcast-listener.js'
