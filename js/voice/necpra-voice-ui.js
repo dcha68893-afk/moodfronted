@@ -204,7 +204,7 @@
         if (!r.ok || !r.transcript) return r;
         V.audit('voice.transcript', { module: 'global', outcome: 'captured', lang: r.lang, durationMs: r.durationMs, chars: r.transcript.length });
         return V.dispatch(r).then(function (d) {
-          if (!d.handled) { var m = T('I heard you, but I do not know how to do that yet. Say “what can you do” to hear what I can do.', 'Nimekusikia, lakini sijui jinsi ya kufanya hilo bado. Sema “unaweza kufanya nini” kusikia ninachoweza kufanya.'); announce(m + ' ' + r.transcript); V.speak(m); }
+          if (!d.handled) { var m = T('I heard you, but I could not match that to something I can do. You can say things like “open wallet”, “open chama”, “open duka” or “what can you do”.', 'Nimekusikia, lakini sijapata ninachoweza kufanya hapo. Unaweza kusema “fungua pochi”, “fungua chama”, “fungua duka” au “unaweza kufanya nini”.'); announce(m + ' ' + r.transcript); V.speak(m); }
           offerHandsFree();
           if (d.handled) offerHandsFree();
           return Object.assign({}, r, { handled: d.handled });

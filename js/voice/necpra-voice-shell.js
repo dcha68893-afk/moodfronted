@@ -29,6 +29,7 @@
       V.speak(T('I am listening. What would you like to do?', 'Nasikiliza. Unataka kufanya nini?'), { force: true }); return true;
     }
     text = clean(text).replace(/^(?:(?:hey|hi|ok|okay)\s+)?(?:(?:can|could|would|will)\s+you\s+)(?:please\s+)?/i, ''); result = Object.assign({}, result, { transcript: text }); // "can you open settings" is the command "open settings"
+    if (I.normalizeUtterance) { text = I.normalizeUtterance(text) || text; result = Object.assign({}, result, { transcript: text }); } // "please open the shama screen" / bare "chama" -> "open chama"
     // Questions about the app itself ("how do I add a friend", "what can you do") are answered from the written guide, never sent to a screen as a command.
     if (K && K.isHowTo(text) && K.respond(text)) return true;
     if (root.NecpraVoiceMoneyNLU && root.NecpraVoiceMoneyNLU.parse(text) && cfg.allowedPages.indexOf('money') >= 0) { // wallet / chama / orders / prepared payment
@@ -89,6 +90,13 @@
     }
     var page = cfg.getPage(), done = page ? await forward(page, result) : false; // anything else goes to the screen the user is looking at
     if (done) return true;
+    // A question about ANOTHER module ("is there a friend request?" while in DUKA, "how many products do we have" while in Friends): ask the screen that owns the topic.
+    var topic = I.topicOf ? I.topicOf(text) : null;
+    if (topic && topic !== page && cfg.allowedPages.indexOf(topic) >= 0) {
+      cfg.navigate(topic);
+      if (await forward(topic, result)) { V.audit('voice.nav', { module: 'shell', outcome: 'executed', lang: result.lang }); return true; }
+      if (page) cfg.navigate(page);   // that screen could not answer either: stay where the user was
+    }
     return false; // not something any screen could do: the caller says so honestly and points to "what can you do" (never a made-up answer)
   }
 

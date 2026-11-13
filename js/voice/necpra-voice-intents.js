@@ -91,6 +91,8 @@
 
   function parseMessengerIntent(input, contacts) {
     var s = clean(input).replace(/[.!?]+$/, ''), m; s = s.replace(LEAD, '').replace(LEAD, '');
+    // A QUESTION about unread messages ("do I have new messages", "how many unread chats", "kuna ujumbe mpya") is answered, not treated as a command.
+    if (!/^(?:read|soma|nisomee|reply|respond|jibu|send|tuma|tell|text|message|write|andika)\b/i.test(s) && /\b(any|is there|are there|do i have|have i|how many|got|kuna|nina|je|ngapi|idadi)\b/i.test(s) && /\b(unread|new|pending|waiting|mpya|hazijasomwa)\b/i.test(s) && /\b(messages?|texts?|chats?|ujumbe|mazungumzo|meseji)\b/i.test(s)) return { type: 'unread' };
     if ((m = /^(?:read|soma|nisomee)\s+(?:out\s+)?(?:(?:my|all|the)\s+)?(?:(?:latest|new|unread|last|recent|mpya|za mwisho)\s+)?(?:messages?|ujumbe|texts?)(?:\s+(?:mpya|za mwisho|zote))?(?:\s+(?:from|kutoka kwa|kutoka|za)\s+(.+))?$/i.exec(s))) return { type: 'read', from: m[1] ? clean(m[1]) : '' };
     if ((m = /^(?:reply|respond|jibu)(?:\s+to\s+(?:him|her|them|(?:the\s+)?(?:last|latest)\s+message))?\s*(.*)$/i.exec(s))) return { type: 'reply', content: tidy(m[1]) };
     var oc = parseOpenChat(s); if (oc && !oc.soft) return oc;
@@ -144,7 +146,42 @@
     return { action: 'unknown' };
   }
 
+  /* ───────── utterance clean-up (runs BEFORE any parser) ─────────
+   * Speech recognisers rarely return the exact words a strict command grammar expects: "please", "can I see", "open up the wallet screen",
+   * a bare "chama", or a brand word heard as "shama"/"doka". This only rewrites NAVIGATION-style requests into the canonical
+   * "open <place>" the parsers already understand. Message text and anything else is passed through untouched. */
+  var MSG_VERB = /^(?:tell|ask|send|message|text|msg|reply|respond|write|type|compose|dictate|post|tuma|andika|mwambie|mjulishe|jibu|ingiza)\b/i;
+  var PLACE = '(?:messenger|messages?|chats?|inbox|ujumbe|wallet|wallets|money|pesa|pochi|mkoba|chamas?|friends?|contacts?|marafiki|duka(?: smart)?|shop|store|tools?|groups?|vikundi|status|stories|settings?|mipangilio|games?|michezo|savings?|akiba|airtime|orders?|requests?)';
+  var HEARD = [[/\b(?:shama|chamma|chaama|cha ma|chamah)\b/gi, 'chama'], [/\b(?:doka|duca|dukka|ducka|dooka|douka)\b/gi, 'duka'], [/\b(?:pochy|poche|poochi|pochie)\b/gi, 'pochi'], [/\bm[\s-]?pesa\b/gi, 'mpesa']];
+  var VERB_TO_OPEN = /^(?:(?:hey|hi|ok|okay|so|now|uh|um|erm)\s+)*(?:please\s+|tafadhali\s+)?(?:(?:can|could|would|will)\s+(?:you|i)\s+(?:please\s+)?(?:see|view|open|go to|check|show me|take me to)|let me\s+(?:see|view|open|go to|check)|let'?s\s+go to|i\s+(?:want|wanna|need|would like|'?d like)\s+to\s+(?:see|view|open|go to|go into|check|visit)|(?:bring up|pull up|launch|access|visit|view|enter|go into|get into|take me into|navigate to|switch over to|switch to|open up|go on|go over to|onyesha|angalia|tazama|ingia(?: kwenye| kwa)?|nenda kwenye|nipeleke kwenye|fungua kwenye|nataka (?:kuona|kufungua|kwenda|kuangalia|kuingia)(?: kwenye| kwa)?))\s+/i;
+  function normalizeUtterance(input) {
+    var s = clean(input).replace(/[.!?]+$/, ''); if (!s) return s;
+    if (MSG_VERB.test(s.replace(/^(?:(?:hey|hi|ok|okay|so|now|uh|um|erm)\s+)+/i, '').replace(/^(?:please|tafadhali)\s+/i, ''))) return clean(input);   // message content is never rewritten
+    var t = s.replace(/^(?:(?:hey|hi|ok|okay|so|now|uh|um|erm)\s+)+/i, '');
+    var probe = t.replace(/^(?:please|tafadhali)\s+/i, '');
+    var navish = VERB_TO_OPEN.test(probe) || /^(?:open|go to|goto|take me to|show me|show|fungua|nenda(?: kwa)?|nipeleke(?: kwa)?|nionyeshe|rudi kwa|check|see)\b/i.test(probe) || new RegExp('^(?:(?:my|the|to|kwa|ya|za)\\s+)*' + PLACE + '(?:\\s+(?:page|screen|tab|section|module|please|tafadhali|sasa|now))*$', 'i').test(probe);
+    if (!navish) return clean(input);
+    t = probe.replace(/\s+(?:please|tafadhali|sasa|now|for me|kwa ajili yangu|thanks|thank you|asante)$/i, '');
+    HEARD.forEach(function (h) { t = t.replace(h[0], h[1]); });
+    t = t.replace(/\bkwenye\b/gi, 'kwa').replace(/\bchamas\b/gi, 'chama').replace(/\bwallets\b/gi, 'wallet');
+    if (VERB_TO_OPEN.test(t)) t = t.replace(VERB_TO_OPEN, 'open ');
+    t = t.replace(/^(?:check|see)\s+(?=(?:my\s+|the\s+)?(?:wallet|pochi|chama|friends?|groups?|status|games?|settings?|duka|messages?|savings?)\b)/i, 'open ');
+    t = t.replace(/\s+(?:page|screen|tab|section|module)$/i, '');
+    if (new RegExp('^(?:(?:my|the|to|kwa|ya|za)\\s+)*' + PLACE + '$', 'i').test(t)) t = 'open ' + t.replace(/^(?:(?:my|the|to|kwa|ya|za)\s+)+/i, '');   // a bare "chama" or "my wallet" means "open it"
+    return clean(t);
+  }
+
   function isSaleStatement(t) { return /\b(nimeuza|nimeuzia|ameuza|tumeuza|(?:i|we)(?:\s+have)?\s+sold)\b/i.test(clean(t)); }
-  var api = { parseOpenChat: parseOpenChat, parseComposerCommand: parseComposerCommand, nameVariants: nameVariants, isSaleStatement: isSaleStatement, norm: norm, matchContacts: matchContacts, splitRecipient: splitRecipient, parseMessengerIntent: parseMessengerIntent, parseNav: parseNav, parseChoice: parseChoice, parseConfirmAnswer: parseConfirmAnswer, toSecondPerson: toSecondPerson, PAGE_LABEL: LABEL };
+  /* Which screen owns a question? Used by the shell when the screen you are on could not answer ("is there a friend request" while in DUKA). */
+  function topicOf(text) {
+    var n = norm(text);
+    if (/\b(unread|new messages?|ujumbe mpya|my messages|inbox|meseji mpya)\b/.test(n)) return 'messages';
+    if (/\b(friends?|friend requests?|marafiki|rafiki|maombi ya urafiki)\b/.test(n) || (/\b(requests?|maombi)\b/.test(n) && !/\b(payment|pay|money|pesa|malipo|chama)\b/.test(n))) return 'friends';
+    if (/\b(duka|products?|stock|inventory|customers?|wateja|bidhaa|sales|sold|mauzo|debts?|owe|owes|expenses?|profit|faida|shop|low stock)\b/.test(n)) return 'tools';
+    if (/\b(groups?|vikundi|kikundi)\b/.test(n)) return 'group';
+    if (/\b(status|statuses|stories|moments|hali)\b/.test(n)) return 'status';
+    return null;
+  }
+  var api = { topicOf: topicOf, normalizeUtterance: normalizeUtterance, parseOpenChat: parseOpenChat, parseComposerCommand: parseComposerCommand, nameVariants: nameVariants, isSaleStatement: isSaleStatement, norm: norm, matchContacts: matchContacts, splitRecipient: splitRecipient, parseMessengerIntent: parseMessengerIntent, parseNav: parseNav, parseChoice: parseChoice, parseConfirmAnswer: parseConfirmAnswer, toSecondPerson: toSecondPerson, PAGE_LABEL: LABEL };
   root.NecpraVoiceIntents = api; if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

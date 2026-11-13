@@ -97,7 +97,9 @@ const SW_VERSION = '19.55.0';
 // v116: voice actions inside Settings and Games; settings.html, game.html and shell changed, settings/games scripts added.
 // v118: voice guide (how-to answers), 'open voice' + hands-free offer, no Finish tap; knowledge file added, shell/ui/handsfree changed.
 // v117: voice fix - frames that booted before the shell's voice host now re-hello, handlers/conversations are awaited; settings no longer prints Offline.
-const CACHE_NAME = 'necpra-static-v118';
+// v119: voice understands more phrasings (alternative guesses, polite/Kiswahili/bare-word commands); money.html chama delete + choose where a chama receives money.
+// v120: voice answers questions (Duka counts/customers/sales, friend requests, unread messages, groups, status) and asks the module that owns the topic; duka.html + voice scripts changed.
+const CACHE_NAME = 'necpra-static-v120';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [

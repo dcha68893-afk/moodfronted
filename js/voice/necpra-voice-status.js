@@ -44,7 +44,7 @@
     if (/^(?:browse|show|open)\s+(?:all\s+)?(?:moments|statuses)$/.test(n)) return { type: 'browse' };
     if ((m = /^(?:search|find|look for|tafuta)\s+(?:for\s+)?(?:statuses?\s+|moments?\s+)?(?:about\s+|with\s+|by\s+)?(.+)$/i.exec(s)) && !/\b(chat|group|friend|message|ujumbe)\b/i.test(m[1])) return { type: 'search', query: clean(m[1]) };
     if ((m = /^(?:show|filter(?: by)?|only|onyesha)\s+(?:only\s+)?(all|photos?|pictures?|videos?|text|polls?)(?:\s+(?:moments|statuses))?$/i.exec(s))) return { type: 'filter', kind: /photo|picture/i.test(m[1]) ? 'image' : /video/i.test(m[1]) ? 'video' : /poll/i.test(m[1]) ? 'poll' : /text/i.test(m[1]) ? 'text' : 'all' };
-    if (/^(?:how many|nina)\b.*\b(statuses|moments|hali)\b/.test(n)) return { type: 'count' };
+    if (/^(?:how many|nina)\b.*\b(statuses|moments|hali)\b/.test(n) || (/\b(any|is there|are there|anyone|kuna|je kuna)\b/.test(n) && /\b(new\s+)?(status|statuses|moments?|hali)\b/.test(n) && !/\b(post|add|create|upload|weka|ongeza|search|find|tafuta)\b/.test(n))) return { type: 'count' };
     if (/^(?:who(?:'s| has| posted)|nani).*\b(status|posted|moments?)\b/.test(n)) return { type: 'who' };
     return null;
   }

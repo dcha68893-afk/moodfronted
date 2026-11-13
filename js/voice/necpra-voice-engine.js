@@ -91,14 +91,14 @@
       ensurePermission: function () { return Promise.resolve(true); }, // the browser prompts on start()
       createRun: function (cfg, cb) {
         var rec = new Ctor(), seen = {};
-        rec.lang = cfg.lang; rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 1;
+        rec.lang = cfg.lang; rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 5; // the recogniser's runner-up guesses let a command still match when the top guess mishears one word
         rec.onaudiostart = function () { cb.audio(); };
         rec.onspeechstart = function () { cb.activity(); };
         rec.onresult = function (e) {
           var interim = '';
           for (var i = e.resultIndex; i < e.results.length; i++) {
             var r = e.results[i], alt = r[0];
-            if (r.isFinal) { if (seen[i]) continue; seen[i] = true; cb.final(alt.transcript, typeof alt.confidence === 'number' ? alt.confidence : null); }
+            if (r.isFinal) { if (seen[i]) continue; seen[i] = true; var alts = []; for (var k = 1; k < r.length && k < 5; k++) if (r[k] && r[k].transcript) alts.push(r[k].transcript); cb.final(alt.transcript, typeof alt.confidence === 'number' ? alt.confidence : null, alts); }
             else interim += alt.transcript;
           }
           cb.interim(interim);
@@ -121,18 +121,18 @@
         return P.checkPermissions().then(function (s) { return s.speechRecognition === 'granted' ? true : P.requestPermissions().then(function (r) { return r.speechRecognition === 'granted'; }); });
       },
       createRun: function (cfg, cb) {
-        var P = plugin(), last = '', ended = false, subs = [];
+        var P = plugin(), last = '', lastAlts = [], ended = false, subs = [];
         function finishRun() {
           if (ended) return; ended = true;
-          if (last) { var t = last; last = ''; cb.final(t, null); }
+          if (last) { var t = last, al = lastAlts; last = ''; lastAlts = []; cb.final(t, null, al); }
           subs.forEach(function (s) { try { s.remove(); } catch (_) {} }); cb.end();
         }
         return {
           start: function () {
             Promise.all([
-              P.addListener('partialResults', function (d) { var t = d && d.matches && d.matches[0]; if (t != null) { last = t; cb.interim(t); } }),
+              P.addListener('partialResults', function (d) { var t = d && d.matches && d.matches[0]; if (t != null) { last = t; lastAlts = (d.matches || []).slice(1, 5); cb.interim(t); } }),
               P.addListener('listeningState', function (d) { if (d && d.status === 'stopped') finishRun(); })
-            ]).then(function (s) { subs = s; cb.audio(); return P.start({ language: cfg.lang, partialResults: true, popup: false, maxResults: 1 }); })
+            ]).then(function (s) { subs = s; cb.audio(); return P.start({ language: cfg.lang, partialResults: true, popup: false, maxResults: 5 }); })
               .catch(function (e) { ended = true; cb.error(/permission/i.test(String(e && e.message)) ? 'not-allowed' : 'generic'); cb.end(); });
           },
           stop: function () { P.stop().catch(function () {}); },
@@ -208,11 +208,11 @@
         if (sess.interim) { sess.heard = true; sess.lastActivity = now(); resetSilence(sess); if (FINISH_RE.test(joinText(sess.segments, sess.interim))) return finish('voice-finish'); }
         emitText();
       },
-      final: function (t, conf) {
-        if (sess.closed) return; t = clean(t); sess.interim = ''; if (!t) return;
+      final: function (t, conf, alts) {
+        if (sess.closed) return; var rawT = clean(t); t = rawT; sess.interim = ''; if (!t) return;
         var n = now(); t = stripReplay(sess.segments, t, n); // provider replay / cumulative result, not a repeat by the user
         if (!t) { emitText(); return; }
-        sess.segments.push({ text: t, confidence: conf, uncertain: conf != null && conf < 0.5, at: n });
+        sess.segments.push({ text: t, confidence: conf, uncertain: conf != null && conf < 0.5, at: n, alts: (t === rawT && alts && alts.length) ? alts.map(clean).filter(Boolean) : null });
         sess.heard = true; sess.lastActivity = n; sess.netRetries = 0; persistRecovery(); emitText(); resetSilence(sess);
         emit('final', { text: t, confidence: conf, sessionId: sess.id });
         if (FINISH_RE.test(joinText(sess.segments, ''))) finish('voice-finish');
@@ -266,7 +266,8 @@
 
   function build(sess, extra) {
     var segs = sess.segments.slice(), transcript = stripFinish(joinText(segs, ''));
-    return Object.assign({ transcript: transcript, segments: segs, uncertain: segs.filter(function (s) { return s.uncertain; }).map(function (s) { return s.text; }), lang: sess.lang, mode: sess.mode, durationMs: now() - sess.startedAt, sessionId: sess.id, provider: sess.provider && sess.provider.name }, extra);
+    var altList = (segs.length === 1 && segs[0].alts) ? segs[0].alts.filter(function (a) { return a.toLowerCase() !== transcript.toLowerCase(); }) : [];
+    return Object.assign({ alternatives: altList, transcript: transcript, segments: segs, uncertain: segs.filter(function (s) { return s.uncertain; }).map(function (s) { return s.text; }), lang: sess.lang, mode: sess.mode, durationMs: now() - sess.startedAt, sessionId: sess.id, provider: sess.provider && sess.provider.name }, extra);
   }
   function done(sess, reason) {
     var r = build(sess, { ok: true, reason: reason || sess.reason || 'finish' });
@@ -334,13 +335,24 @@
   var handlers = [];
   function registerHandler(id, fn) { handlers = handlers.filter(function (h) { return h.id !== id; }); handlers.unshift({ id: id, fn: fn }); return function () { handlers = handlers.filter(function (h) { return h.id !== id; }); }; }
   // Offers a finished transcript to modules, newest first; a handler returns true (or a promise of true) if it handled it.
-  function dispatch(result) {
+  function dispatchOne(result) {
     var i = 0;
     return (function next() {
       if (i >= handlers.length) return Promise.resolve({ handled: false });
       var h = handlers[i++];
       return Promise.resolve().then(function () { return h.fn(result); }).then(function (ok) { return ok ? { handled: true, by: h.id } : next(); }, function () { return next(); });
     })();
+  }
+  // If no screen understood the top guess, try the recogniser's other guesses ("open shama" / "open chama") before giving up.
+  function dispatch(result) {
+    return dispatchOne(result).then(function (d) {
+      var alts = (d.handled || !result || !result.alternatives) ? [] : result.alternatives.slice(0, 4), k = 0;
+      return (function again() {
+        if (k >= alts.length) return d;
+        var alt = alts[k++];
+        return dispatchOne(Object.assign({}, result, { transcript: alt, alternatives: [], usedAlternative: true })).then(function (r) { return r.handled ? r : again(); });
+      })();
+    });
   }
 
   /* ───────── audit (metadata only: never audio, never transcript text) ───────── */

@@ -30,6 +30,7 @@
     if ((m = /^(?:search|find|tafuta)\s+(?:this\s+group\s+)?(?:for\s+)?(?:messages?\s+(?:about|with|containing)\s+)?(.+)$/i.exec(s)) && /\b(this group|in here|messages? (?:about|with|containing))\b/i.test(s)) return { type: 'search', query: clean(m[1].replace(/\b(in here|in this group)\b/i, '')) };
     if (/^(?:show|open|list|who(?:'s| is| are) in|nionyeshe|orodhesha)\s+(?:the\s+)?(?:group\s+)?members?(?:\s+list)?$/.test(n) || /^(?:who is in (?:this )?group|wanachama)$/.test(n)) return { type: 'members' };
     if (/^(?:how many members|wanachama wangapi|idadi ya wanachama)$/.test(n)) return { type: 'member-count' };
+    if (/\b(how many|number of|do i have|am i in|idadi ya|nina|ngapi)\b/.test(n) && /\b(groups?|vikundi|kikundi)\b/.test(n) && !/\b(create|make|open|join|leave|send|tell|message)\b/.test(n)) return { type: 'group-count' };
     if ((m = /^(?:send|post|write|tuma|andika)\s+(?:a\s+)?(?:message\s+|ujumbe\s+)?(?:to\s+|kwa\s+)?(?:the\s+)?(?:group|kikundi)\s+(.+?)\s+(?:saying|that|kwamba|:)\s*(.+)$/i.exec(s))) return { type: 'send', name: strip(m[1]), text: clean(m[2]) };
     if ((m = /^(?:tell|message|send|mwambie|tuma ujumbe kwa)\s+(?:the\s+)?(.+?)\s+(?:group|kikundi)\s+(?:saying\s+|that\s+|kwamba\s+)?(.+)$/i.exec(s))) return { type: 'send', name: strip(m[1]), text: clean(m[2]) };
     if ((m = /^(?:tell|message|send|post|mwambie)\s+(?:the\s+)?(?:group|everyone|everybody|wote|kikundi)\s+(?:saying\s+|that\s+|kwamba\s+)?(.+)$/i.exec(s))) return { type: 'send', name: '', text: clean(m[1]) };
@@ -88,6 +89,11 @@
   async function run(p, lang) {
     var h = H(); if (!h) return false;
     if (p.type === 'refresh') { await h.loadGroups(); await say('Groups updated.', 'Vikundi vimesasishwa.'); return true; }
+    if (p.type === 'group-count') {
+      var gl = groups(), gc = gl.length; if (!gc) { await say('You are not in any groups yet.', 'Bado hujajiunga na kikundi chochote.'); return true; }
+      var gn = gl.slice(0, 5).map(function (x) { return x.name; }).join(', ');
+      await say('You are in ' + gc + (gc === 1 ? ' group' : ' groups') + ': ' + gn + (gc > 5 ? ', and ' + (gc - 5) + ' more' : '') + '.', 'Uko kwenye vikundi ' + gc + ': ' + gn + (gc > 5 ? ', na vingine ' + (gc - 5) : '') + '.'); return true;
+    }
     if (p.type === 'create') {
       var b = doc.getElementById('createGroupBtn'); if (!b) return false; b.click();
       var nm = await waitFor(function () { return doc.getElementById('gname'); }, 2000); if (nm && p.name) { nm.value = p.name; nm.dispatchEvent(new Event('input', { bubbles: true })); }

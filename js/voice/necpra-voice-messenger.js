@@ -153,7 +153,12 @@
     busy = true;
     try {
       if (cmd) { await composerCommand(cmd); return true; }
-      if (it.type === 'read') await read(it.from, list);
+      if (it.type === 'unread') {
+        var cv = cfg.MM.getConversations().filter(function (c) { return c && c.otherUser && !cfg.isLocked(c.chatId) && c.unreadCount > 0; });
+        if (!cv.length) await say('You have no unread messages.', 'Huna ujumbe ambao haujasomwa.');
+        else { var tot = cv.reduce(function (n, c) { return n + Number(c.unreadCount || 0); }, 0), nm = cv.slice(0, 3).map(function (c) { return name(c); }).join(', ');
+          await say('You have ' + tot + ' unread message' + (tot === 1 ? '' : 's') + ' in ' + cv.length + (cv.length === 1 ? ' chat' : ' chats') + ': ' + nm + '. Say read my messages to hear them.', 'Una ujumbe ' + tot + ' ambao haujasomwa kwenye mazungumzo ' + cv.length + ': ' + nm + '. Sema nisomee ujumbe kuvisikia.'); }
+      } else if (it.type === 'read') await read(it.from, list);
       else if (it.type === 'open' || it.type === 'search') { var handled = await openByVoice(it, await allContacts()); if (handled === false) return false; }
       else if (it.type === 'reply') {
         var act = cfg.MM.getActiveChatId(), c = list.filter(function (x) { return String(x.id) === String(act); })[0] || list.filter(function (x) { return x.conv.unreadCount > 0; })[0];

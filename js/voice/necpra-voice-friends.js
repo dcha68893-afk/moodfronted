@@ -42,6 +42,7 @@
     if ((m = /^(?:remove|unfriend|delete|ondoa|futa)\s+(.+?)(?:\s+(?:from\s+(?:my\s+)?friends?|kutoka kwa marafiki|kwenye marafiki))?$/i.exec(s)) && !/\b(request|ombi|message|ujumbe|chat|group|kikundi)\b/i.test(m[1])) return { type: 'remove', name: strip(m[1]) };
     if ((m = /^(?:send\s+(?:a\s+)?friend\s+request\s+to|send\s+(?:a\s+)?request\s+to|add|befriend|ongeza|mtumie\s+ombi\s+la\s+urafiki|tuma\s+ombi\s+la\s+urafiki\s+kwa)\s+(.+?)(?:\s+as\s+(?:a\s+|my\s+)?friend)?$/i.exec(s)) && !/\b(group|kikundi|contact list|number)\b/i.test(m[1])) return { type: 'add', name: strip(m[1]) };
     if ((m = /^(?:search(?:\s+for)?|find|look\s*up|look for|tafuta|nitafutie)\s+(?:a\s+|the\s+)?(?:person\s+|user\s+|friend\s+|people\s+)?(?:named\s+|called\s+)?(.+)$/i.exec(s)) && !/\b(chat|conversation|mazungumzo|group|vikundi|message)\b/i.test(m[1])) return { type: 'search', query: strip(m[1]) };
+    if (/\b(requests?|maombi)\b/.test(n) && /\b(any|is there|are there|do i have|have i|got|new|pending|waiting|incoming|who|nina|kuna|je|nani|ngapi|available|sent me|received|zipo|exist)\b/.test(n) && !/\b(accept|approve|decline|reject|cancel|send|add|kubali|kataa|ghairi|payment|pay|money|malipo)\b/.test(n)) return { type: 'count', what: 'requests', names: true };
     if (/^(?:how many|nina|idadi ya)\b.*\b(friends?|marafiki|requests?|maombi)\b/.test(n)) return { type: 'count', what: /request|maombi/.test(n) ? 'requests' : 'friends' };
     if ((m = /^(?:read|list|who are|who is in|soma|orodhesha|nisomee)\s+(?:out\s+)?(?:my\s+|all\s+|the\s+)?(?:(?:new|pending|incoming)\s+)?(friends?|requests?|marafiki|maombi)(?:\s+list)?$/.exec(n))) return { type: 'read', what: /request|maombi/.test(m[1]) ? 'requests' : 'friends' };
     if (/^(?:refresh|reload|update|onyesha upya|sasisha)(?:\s+(?:friends|the list|list|marafiki))?$/.test(n)) return { type: 'refresh' };
@@ -86,6 +87,11 @@
     }
     if (p.type === 'count' || p.type === 'read') {
       await load(p.what === 'requests' ? 'requests' : 'friends'); var list = asContacts(pool(p.what === 'requests' ? 'requests' : 'friends')), c = list.length;
+      if (p.type === 'count' && p.names && p.what === 'requests') {
+        if (!c) { await say('You have no pending friend requests.', 'Huna maombi ya urafiki yanayosubiri.'); return true; }
+        var who = list.slice(0, 5).map(function (x) { return x.name; }).join(', ');
+        await say('Yes, you have ' + c + ' pending friend request' + (c === 1 ? '' : 's') + ': ' + who + (c > 5 ? ', and ' + (c - 5) + ' more' : '') + '. Say accept followed by a name to accept.', 'Ndiyo, una maombi ' + c + ' ya urafiki yanayosubiri: ' + who + (c > 5 ? ', na wengine ' + (c - 5) : '') + '. Sema kubali ikifuatiwa na jina kukubali.'); return true;
+      }
       if (p.type === 'count') { await say('You have ' + c + (p.what === 'requests' ? ' pending friend request' : ' friend') + (c === 1 ? '.' : 's.'), 'Una ' + (p.what === 'requests' ? 'maombi ' : 'marafiki ') + c + '.'); return true; }
       if (!c) { await say(p.what === 'requests' ? 'You have no pending requests.' : 'You have no friends yet.', p.what === 'requests' ? 'Huna maombi yanayosubiri.' : 'Bado huna marafiki.'); return true; }
       var names = list.slice(0, 10).map(function (x) { return x.name; }).join(', '); await say(names + (c > 10 ? ', and ' + (c - 10) + ' more.' : '.'), names + (c > 10 ? ', na wengine ' + (c - 10) + '.' : '.')); return true;

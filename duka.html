@@ -1260,7 +1260,7 @@ function vMatch(query, list) {
   if (scored[0].s === 3) return [scored[0].p];
   return scored.map(function (x) { return x.p; });
 }
-var STOCK_STOP = /\b(how|much|many|of|is|are|left|remaining|remain|do|i|have|check|stock|stocks|the|in|my|what|for|me|show|tell|about|nina|ngapi|kiasi|cha|ya|kilichobaki|imebaki|zimebaki|baki|angalia|stoku|je|la|kwa|bado|iliyobaki|nimebakiwa|na|shop|duka|inventory|level|quantity)\b/g;
+var STOCK_STOP = /\b(we|our|ours|us|any|there|kuna|tunayo|available|products?|items?|goods|bidhaa|tunazo|zipo|how|much|many|of|is|are|left|remaining|remain|do|i|have|check|stock|stocks|the|in|my|what|for|me|show|tell|about|nina|ngapi|kiasi|cha|ya|kilichobaki|imebaki|zimebaki|baki|angalia|stoku|je|la|kwa|bado|iliyobaki|nimebakiwa|na|shop|duka|inventory|level|quantity)\b/g;
 function vParse(raw, fallbackLang) {
   var lang = vLang(raw, fallbackLang || 'en'), s = vNorm(raw), num = /(^| )\d+(\.\d+)?( |$)/.test(s), out = { lang: lang, text: s };
   if (/^(yes|yeah|yep|confirm|confirmed|ok|okay|ndio|sawa|thibitisha|haya|fanya)$/.test(s)) return Object.assign(out, { intent: 'confirmWord' });
@@ -1296,6 +1296,10 @@ function vParse(raw, fallbackLang) {
     }).filter(Boolean);
     return Object.assign(out, { intent: 'sale', items: items });
   }
+  // Questions about the shop itself: "how many products do we have in duka", "idadi ya bidhaa", "how many customers", "how much did we sell today"
+  if (/\b(how many|number of|count|total|idadi ya|ngapi)\b/.test(s) && /\b(customers?|wateja|mteja)\b/.test(s) && !/\b(owe|owes|debt|debts|deni|madeni|anadaiwa|ananidai)\b/.test(s)) return Object.assign(out, { intent: 'customers' });
+  if ((/\b(how many|number of|count|total|idadi ya|bidhaa ngapi|ngapi)\b/.test(s) && /\b(products?|items?|goods|bidhaa)\b/.test(s)) || (/\b(products?|items?|bidhaa)\b/.test(s) && /\b(do (we|i) have|have we|have i|nina|tunazo|are there|in (the |my |our )?(duka|shop|store|inventory|catalogue|catalog)|available)\b/.test(s) && !/\b(low|out of|finished|imeisha|zinakwisha|sell|sold|add|new)\b/.test(s))) return Object.assign(out, { intent: 'stock', query: '' });
+  if (/\b(how much|kiasi gani|ngapi|total)\b/.test(s) && /\b(sold|sell|made|earned|nimeuza|tumeuza|niliuza|tuliuza|mapato)\b/.test(s) && !/\b(sell|sold|uza|nimeuza)\s+\d/.test(s)) return Object.assign(out, { intent: 'report', days: /\b(week|wiki)\b/.test(s) ? 7 : /\b(month|mwezi)\b/.test(s) ? 30 : 1 });
   if (/\b(owe|owes|owed|debt|debts|deni|madeni|anadaiwa|ananidai|wanadaiwa|wadeni|wanaodaiwa|credit customers)\b/.test(s)) {
     var who = s.replace(/\b(who|how|much|does|do|owe|owes|owed|me|my|debt|debts|deni|madeni|anadaiwa|ananidai|wanadaiwa|wadeni|check|show|kiasi|gani|nani|angalia|the|customer|customers|wateja|mteja|is|are|what|kwa|ya|la|credit|total|jumla)\b/g, ' ').replace(/\s+/g, ' ').trim();
     return Object.assign(out, { intent: 'debts', who: who });
@@ -1305,7 +1309,7 @@ function vParse(raw, fallbackLang) {
     return Object.assign(out, { intent: 'report', days: days });
   }
   if (/\b(low|running out|zinazoisha|zinakwisha|ndogo|finished|imeisha|zimeisha|out of)\b/.test(s) && /\b(stock|stoku|bidhaa|items|products)\b|running out|zinazoisha|zinakwisha/.test(s)) return Object.assign(out, { intent: 'lowstock' });
-  if (/\b(stock|stoku|left|remaining|baki|imebaki|zimebaki|kilichobaki|iliyobaki|ngapi|do i have|how much|how many|inventory|nina|angalia|check)\b/.test(s)) {
+  if (/\b(stock|stoku|left|remaining|baki|imebaki|zimebaki|kilichobaki|iliyobaki|ngapi|do i have|do we have|have we|is there|are there|kuna|tunayo|how much|how many|inventory|nina|angalia|check)\b/.test(s)) {
     return Object.assign(out, { intent: 'stock', query: s.replace(STOCK_STOP, ' ').replace(/\s+/g, ' ').trim() });
   }
   return Object.assign(out, { intent: 'unknown' });
@@ -1339,6 +1343,7 @@ async function vHandle(raw) {
     }
     if (cmd.intent === 'stock') await vStock(cmd);
     else if (cmd.intent === 'lowstock') await vLow();
+    else if (cmd.intent === 'customers') await vCustomers();
     else if (cmd.intent === 'debts') await vDebts(cmd);
     else if (cmd.intent === 'report') await vReport(cmd);
     else if (cmd.intent === 'expense') vExpenseCard(cmd);
@@ -1357,6 +1362,10 @@ async function vStock(cmd) {
   var hits = vMatch(cmd.query, list);
   if (!hits.length) return vSay(T('I could not find a product like "' + cmd.query + '".', 'Sikupata bidhaa kama "' + cmd.query + '".'));
   vSay(hits.slice(0, 4).map(function (p) { return p.name + ': ' + QTY(p.stockQty) + ' ' + p.unit + (p.isOutOfStock ? T(' (out of stock)', ' (imeisha)') : p.isLowStock ? T(' (low)', ' (inakaribia kuisha)') : ''); }).join('; '));
+}
+async function vCustomers() {
+  var d = await api('GET', '/shops/' + S.shopId + '/customers?limit=500'), n = (d.customers || []).length;
+  vSay(n ? T('You have ' + n + ' customer' + (n === 1 ? '' : 's') + ' saved.', 'Una wateja ' + n + ' waliohifadhiwa.') : T('You have no saved customers yet.', 'Bado huna wateja waliohifadhiwa.'));
 }
 async function vLow() {
   var low = (await vProducts()).filter(function (p) { return p.isLowStock; });
@@ -2460,7 +2469,7 @@ window.__necpraDukaVoice = {
   // a spoken request forwarded by the app shell while this screen is open
   onIntent: function (text) {
     if (!S.shopId || !window.NecpraVoiceSalesNLU) return false;
-    var cmd = vParse(text, S.va.lang), known = cmd.intent && ['unknown', 'confirmWord', 'cancelWord'].indexOf(cmd.intent) < 0;
+    var cmd = vParse(text, S.va.lang), known = cmd.intent && ['unknown', 'confirmWord', 'cancelWord'].indexOf(cmd.intent) < 0;   // (an unknown phrase returns false so the shell can offer it to the screen that owns the topic)
     if (!known && !NecpraVoiceSalesNLU.looksLikeSaleStatement(text)) return false;
     openAssistant(); vHandle(text); return true;
   }
