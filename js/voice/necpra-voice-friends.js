@@ -24,8 +24,8 @@
   /* ───────── understanding (pure) ───────── */
   var TABS = [
     ['groups', /\b(discover groups?|find groups?|groups? to join|public groups?|vikundi vya kujiunga)\b/],
-    ['requests', /\b(?:friend |incoming |pending )?requests?\b(?! to| for| from)|\bmaombi(?: ya urafiki)?\b/],
     ['sent', /\b(sent requests?|outgoing requests?|requests? i sent|maombi niliyotuma|maombi yaliyotumwa)\b/],
+    ['requests', /\b(?:friend |incoming |pending )?requests?\b(?! to| for| from)|\bmaombi(?: ya urafiki)?\b/],
     ['nearby', /\b(nearby|near me|people near|karibu nami|watu karibu)\b/],
     ['discover', /\b(discover|suggestions?|suggested|people you may know|browse (?:all )?(?:users|people)|gundua|pendekezo)\b/],
     ['friends', /\b(my friends|friends list|all friends|marafiki wangu|orodha ya marafiki)\b/]

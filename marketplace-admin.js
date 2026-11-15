@@ -404,6 +404,7 @@ async function renderAdminDashboard(container) {
                 ['admin-notify',    '🔔', 'Notify', 0],
                 ['admin-settings',  '⚙️', 'Settings', 0],
                 ['admin-modules',   '🧩', 'Module Admin', 0],
+                ['admin-voice',     '🎙️', 'Voice phrases', 0],
                 ['admin-audit',     '📋', 'Audit Log', 0],
                 ['admin-approval',  '✅', 'Approve', d.products?.pending||0],
             ].map(([page,icon,label,badge])=>`
@@ -1102,6 +1103,128 @@ function _admEvidence(r) {
     return h;
 }
 
+// ─── Voice phrases (admin teaches the voice assistant; every user gets it) ───────────────────────────────────────────────
+// An admin picks a phrase and what it does: run a KNOWN action, or speak a fixed reply. The server validates everything; users' apps
+// download the list (cached on the phone). Admins cannot run code or reach data: only the action list below can be chosen.
+async function renderAdminVoice(container) {
+    if (!_isAdmin()) { container.innerHTML = _pageShell('Voice phrases', _noAccess()); return; }
+    container.innerHTML = _pageShell('Voice phrases', `<div style="padding:20px;text-align:center">⏳</div>`);
+    const [pl, ac] = await Promise.all([_api('GET', '/voice/phrases/admin'), _api('GET', '/voice/phrases/actions')]);
+    if (pl?._error || ac?._error) { container.innerHTML = _pageShell('Voice phrases', `<div style="margin:12px;background:#fee2e2;border-radius:12px;padding:12px;font-size:13px;color:#991b1b">${_esc(pl?._error || ac?._error)}</div>`); return; }
+    window.__admVoice = { actions: ac.actions || [], phrases: pl.phrases || [], editing: null, q: '' };
+    _admvDraw(container);
+}
+function _admvAct(id) { return (window.__admVoice.actions || []).find(a => a.id === id); }
+function _admvSlotInputs(actionId, slots) {
+    const a = _admvAct(actionId); if (!a) return '';
+    const entries = Object.entries(a.slots || {}); if (!entries.length) return `<div style="font-size:12px;color:#6b7280">This action needs no extra values.</div>`;
+    return entries.map(([k, d]) => {
+        const v = slots && slots[k] != null ? slots[k] : '';
+        const lbl = `${_esc(k)}${d.required ? ' *' : ' (optional)'}`;
+        if (d.type === 'enum') return `<label style="display:block;font-size:12px;font-weight:700;margin-top:8px">${lbl}<select class="adm-search-input" data-admv-slot="${_esc(k)}" style="width:100%;margin-top:4px">${d.required ? '' : '<option value="">—</option>'}${(d.values || []).map(x => `<option value="${_esc(x)}" ${String(v) === x ? 'selected' : ''}>${_esc(x)}</option>`).join('')}</select></label>`;
+        if (d.type === 'number') return `<label style="display:block;font-size:12px;font-weight:700;margin-top:8px">${lbl}<input class="adm-search-input" type="number" data-admv-slot="${_esc(k)}" value="${_esc(v)}" style="width:100%;margin-top:4px"></label>`;
+        return `<label style="display:block;font-size:12px;font-weight:700;margin-top:8px">${lbl}<input class="adm-search-input" type="text" data-admv-slot="${_esc(k)}" value="${_esc(v)}" placeholder="fixed value, or leave empty and write {${_esc(k)}} in the phrase" style="width:100%;margin-top:4px"></label>`;
+    }).join('');
+}
+function _admvDraw(container) {
+    const st = window.__admVoice, ed = st.editing ? st.phrases.find(p => p.id === st.editing) : null;
+    const kind = ed ? ed.kind : 'action', actionId = ed ? ed.action : (st.actions[0] && st.actions[0].id);
+    const mods = [...new Set(st.actions.map(a => a.module))];
+    const q = (st.q || '').toLowerCase();
+    const rows = st.phrases.filter(p => !q || p.phrase.toLowerCase().includes(q) || String(p.action || '').includes(q));
+    container = container || document.querySelector('.adm-body')?.parentElement?.parentElement;
+    (window.__admVoice.host = window.__admVoice.host || container);
+    window.__admVoice.host.innerHTML = _pageShell('Voice phrases', `
+        <div class="adm-section">
+            <div class="adm-section-title">${ed ? 'Edit phrase' : 'Teach a new phrase'}</div>
+            <div style="font-size:12px;color:#6b7280;margin-bottom:8px">When any user says this phrase, the assistant will do what you choose below. It works for everyone after their app syncs (a few minutes, or the next time it opens). Write it the way people actually speak (English, Kiswahili, Sheng). Use <b>{name}</b> to take a person/product from what they say, e.g. <i>wacha {name} awe rafiki wangu</i>.</div>
+            <label style="display:block;font-size:12px;font-weight:700">Phrase *<input id="admvPhrase" class="adm-search-input" type="text" maxlength="100" value="${_esc(ed ? ed.phrase : '')}" placeholder="e.g. pesa ngapi kwa pochi yangu" style="width:100%;margin-top:4px"></label>
+            <label style="display:block;font-size:12px;font-weight:700;margin-top:8px">What should it do? *
+                <select id="admvKind" class="adm-search-input" style="width:100%;margin-top:4px" onchange="window._admvKind(this.value)">
+                    <option value="action" ${kind === 'action' ? 'selected' : ''}>Do something in the app (run an action)</option>
+                    <option value="reply" ${kind === 'reply' ? 'selected' : ''}>Just answer with a message (spoken reply)</option>
+                </select></label>
+            <div id="admvActionBox" style="display:${kind === 'action' ? 'block' : 'none'}">
+                <label style="display:block;font-size:12px;font-weight:700;margin-top:8px">Action *
+                    <select id="admvAction" class="adm-search-input" style="width:100%;margin-top:4px" onchange="window._admvActionChanged(this.value)">
+                        ${mods.map(m => `<optgroup label="${_esc(m)}">${st.actions.filter(a => a.module === m).map(a => `<option value="${_esc(a.id)}" ${a.id === actionId ? 'selected' : ''}>${_esc(a.desc)}</option>`).join('')}</optgroup>`).join('')}
+                    </select></label>
+                <div id="admvSlots">${_admvSlotInputs(actionId, ed ? ed.slots : {})}</div>
+            </div>
+            <div id="admvReplyBox" style="display:${kind === 'reply' ? 'block' : 'none'}">
+                <label style="display:block;font-size:12px;font-weight:700;margin-top:8px">Reply in English * <textarea id="admvEn" class="adm-search-input" maxlength="300" rows="2" style="width:100%;margin-top:4px">${_esc(ed ? ed.reply_en : '')}</textarea></label>
+                <label style="display:block;font-size:12px;font-weight:700;margin-top:8px">Reply in Kiswahili (optional) <textarea id="admvSw" class="adm-search-input" maxlength="300" rows="2" style="width:100%;margin-top:4px">${_esc(ed ? ed.reply_sw : '')}</textarea></label>
+            </div>
+            <div id="admvMsg" style="font-size:12px;margin-top:8px;color:#b91c1c"></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+                <button class="adm-btn adm-btn-primary" onclick="window._admvSave()">${ed ? '💾 Save changes' : '➕ Add phrase'}</button>
+                ${ed ? `<button class="adm-btn adm-btn-secondary" onclick="window._admvEdit(null)">Cancel</button>` : ''}
+            </div>
+        </div>
+        <div class="adm-section">
+            <div class="adm-section-title">Try it</div>
+            <div style="display:flex;gap:6px"><input id="admvTry" class="adm-search-input" type="text" placeholder="say it like a user would" style="flex:1"><button class="adm-btn adm-btn-secondary" onclick="window._admvTry()">Test</button></div>
+            <div id="admvTryOut" style="font-size:12px;color:#374151;margin-top:6px;white-space:pre-wrap"></div>
+        </div>
+        <div class="adm-section">
+            <div class="adm-section-title">Taught phrases (${st.phrases.length})</div>
+            <input class="adm-search-input" type="search" placeholder="Search phrases" value="${_esc(st.q || '')}" oninput="window._admvSearch(this.value)" style="width:100%;margin-bottom:8px">
+            ${rows.length ? rows.map(p => `<div class="adm-row" style="display:block;margin-bottom:8px">
+                <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"><b style="font-size:13px;word-break:break-word">“${_esc(p.phrase)}”</b>
+                    <span class="adm-badge ${p.active ? 'green' : 'gray'}">${p.active ? 'ON' : 'OFF'}</span><span class="adm-badge gray">${p.kind === 'reply' ? 'reply' : _esc(p.action)}</span></div>
+                <div style="font-size:12px;color:#4b5563;margin-top:4px;word-break:break-word">${p.kind === 'reply' ? _esc(p.reply_en) : _esc(_admvDescribe(p))}</div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+                    <button class="adm-btn adm-btn-secondary" onclick="window._admvEdit(${Number(p.id)})">✏️ Edit</button>
+                    <button class="adm-btn adm-btn-warning" onclick="window._admvToggle(${Number(p.id)})">${p.active ? '⏸️ Turn off' : '▶️ Turn on'}</button>
+                    <button class="adm-btn adm-btn-danger" onclick="window._admvDelete(${Number(p.id)})">🗑️ Delete</button>
+                </div></div>`).join('') : `<div style="font-size:13px;color:#6b7280;padding:8px">${st.phrases.length ? 'No phrase matches your search.' : 'No phrases yet. Add the first one above.'}</div>`}
+        </div>`);
+}
+function _admvDescribe(p) {
+    const a = _admvAct(p.action); const slots = Object.entries(p.slots || {}).map(([k, v]) => `${k}=${v}`).join(', ');
+    return (a ? a.desc : p.action) + (slots ? ` (${slots})` : '') + (p.placeholder ? ` — takes {${p.placeholder}} from what the user says` : '');
+}
+window._admvKind = (k) => { document.getElementById('admvActionBox').style.display = k === 'action' ? 'block' : 'none'; document.getElementById('admvReplyBox').style.display = k === 'reply' ? 'block' : 'none'; };
+window._admvActionChanged = (id) => { document.getElementById('admvSlots').innerHTML = _admvSlotInputs(id, {}); };
+window._admvSearch = (v) => { const st = window.__admVoice; st.q = v; const keep = document.activeElement && document.activeElement.type === 'search'; _admvDraw(st.host); if (keep) { const el = document.querySelector('input[type=search]'); if (el) { el.focus(); el.setSelectionRange(v.length, v.length); } } };
+window._admvEdit = (id) => { window.__admVoice.editing = id; _admvDraw(window.__admVoice.host); };
+function _admvCollect() {
+    const kind = document.getElementById('admvKind').value, body = { phrase: document.getElementById('admvPhrase').value.trim(), kind };
+    if (kind === 'reply') { body.reply_en = document.getElementById('admvEn').value.trim(); body.reply_sw = document.getElementById('admvSw').value.trim(); }
+    else {
+        body.action = document.getElementById('admvAction').value; body.slots = {};
+        document.querySelectorAll('[data-admv-slot]').forEach(el => { const v = el.value.trim(); if (v !== '') body.slots[el.getAttribute('data-admv-slot')] = el.type === 'number' ? Number(v) : v; });
+    }
+    return body;
+}
+window._admvSave = async () => {
+    const st = window.__admVoice, msg = document.getElementById('admvMsg'); msg.style.color = '#b91c1c'; msg.textContent = '';
+    const body = _admvCollect();
+    const r = st.editing ? await _api('PATCH', '/voice/phrases/' + st.editing, body) : await _api('POST', '/voice/phrases', body);
+    if (r?._error) { msg.textContent = r._error; return; }
+    const saved = r.phrase; st.phrases = st.editing ? st.phrases.map(p => p.id === saved.id ? saved : p) : [saved, ...st.phrases]; st.editing = null;
+    _admvDraw(st.host); _toast('Saved. Users get it after their app syncs.', 'success', '🎙️');
+};
+window._admvToggle = async (id) => {
+    const st = window.__admVoice, p = st.phrases.find(x => x.id === id); if (!p) return;
+    const r = await _api('PATCH', '/voice/phrases/' + id, { active: !p.active }); if (r?._error) { _toast(r._error, 'error', '⚠️'); return; }
+    st.phrases = st.phrases.map(x => x.id === id ? r.phrase : x); _admvDraw(st.host);
+};
+window._admvDelete = async (id) => {
+    if (!window.confirm('Delete this phrase for everyone?')) return;
+    const st = window.__admVoice, r = await _api('DELETE', '/voice/phrases/' + id); if (r?._error) { _toast(r._error, 'error', '⚠️'); return; }
+    st.phrases = st.phrases.filter(x => x.id !== id); if (st.editing === id) st.editing = null; _admvDraw(st.host);
+};
+window._admvTry = async () => {
+    const out = document.getElementById('admvTryOut'), say = document.getElementById('admvTry').value.trim(); if (!say) return;
+    let N = null; try { N = (window.parent && window.parent.NecpraVoiceNLU) || window.NecpraVoiceNLU; } catch (_) {}
+    if (!N) { out.textContent = 'The voice engine is not available on this screen. Open Tools from the main app and try again.'; return; }
+    try { await N.syncPhrases(true); } catch (_) {}
+    const res = { transcript: say, alternatives: [], lang: 'en-KE' }, a = N.matchAdmin(res);
+    if (a) { out.textContent = a.kind === 'reply' ? 'Taught phrase → will say: “' + a.say.en + '”' : 'Taught phrase → ' + a.phrase + ' (screen: ' + a.module + ')'; return; }
+    const u = N.understand(res, ''); out.textContent = !u ? 'Not understood yet. Add it above.' : u.kind === 'action' ? 'Built-in → ' + u.phrase + ' (screen: ' + u.module + ')' : u.kind === 'ambiguous' ? 'Built-in would ask: did you mean ' + u.options.map(o => o.label).join(' or ') + '?' : 'Built-in would ask: ' + u.say;
+};
+
 async function renderAdminModules(container) {
     if (!_isAdmin()) { container.innerHTML = _pageShell('Module Admin', _noAccess()); return; }
     container.innerHTML = _pageShell('Module Admin', `<div style="padding:20px;text-align:center">⏳</div>`);
@@ -1229,6 +1352,7 @@ const ADMIN_ROUTES = {
     'admin-settings':   renderAdminSettings,
     'admin-audit':      renderAdminAudit,
     'admin-modules':    renderAdminModules,
+    'admin-voice':      renderAdminVoice,
     'admin-module':     renderAdminModule,
 };
 

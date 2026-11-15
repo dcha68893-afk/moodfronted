@@ -10,7 +10,7 @@
 
   var SETTINGS_KEY = 'necpra_voice_settings_v1';
   var RECOVERY_KEY = 'necpra_voice_recovery_v1';
-  var DEFAULTS = { lang: 'auto', speak: true, speakSensitive: false, readIncoming: false, rate: 1, voiceURI: '', pauseMs: 3500, handsFree: false };
+  var DEFAULTS = { lang: 'auto', speak: true, speakSensitive: false, readIncoming: false, rate: 1, voiceURI: '', pauseMs: 3500, handsFree: false, smart: true, logUnheard: false };
   var FINISH_RE = /(?:^|[\s,.!?])(finish recording|stop recording|end recording|nimemaliza kurekodi|maliza kurekodi)[\s.!?]*$/i;
   var MAX_RESTARTS = 400, IDLE_MS_DICTATION = 60000, IDLE_MS_COMMAND = 15000, DUP_WINDOW_MS = 1500;
 
@@ -380,7 +380,7 @@
     version: '1.0.0', start: start, finish: finish, cancel: cancel, state: state, isListening: isListening, isSupported: isSupported,
     on: on, off: off, getSettings: getSettings, setSettings: setSettings, resolveLang: resolveLang, message: msg,
     getRecovery: getRecovery, clearRecovery: clearRecovery, speak: speak, cancelSpeech: cancelSpeech, repeatLast: repeatLast, isSpeaking: isSpeaking, getVoices: getVoices,
-    registerProvider: registerProvider, registerHandler: registerHandler, dispatch: dispatch, configure: configure, audit: audit,
+    registerProvider: registerProvider, registerHandler: registerHandler, dispatch: dispatch, configure: configure, audit: audit, _cfg: function () { return cfg; },
     _internals: { stripFinish: stripFinish, chunk: chunk, stripReplay: stripReplay }
   };
   root.NecpraVoice = api;

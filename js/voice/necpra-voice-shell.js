@@ -20,8 +20,26 @@
     return forward('messages', result, 'probe', 4000);
   }
 
+  /* u = { phrase, module } from the in-app NLU or the optional AI. Go to the screen that owns the action and let ITS handler run the phrase. */
+  async function runUnderstood(u, result, page) {
+    var r2 = Object.assign({}, result, { transcript: u.phrase, alternatives: [], __understood: true });
+    if (u.module && u.module !== 'shell' && cfg.allowedPages.indexOf(u.module) >= 0) {
+      if (cfg.getPage() !== u.module) cfg.navigate(u.module);
+      if (await forward(u.module, r2)) { V.audit('voice.nav', { module: u.module, outcome: 'executed', lang: result.lang }); return true; }
+      if (page && cfg.getPage() !== page) cfg.navigate(page);
+      return false;
+    }
+    return !!(await handle(r2));   // navigation ("open wallet", "go back")
+  }
   async function handle(result) {
     var text = result.transcript, K = root.NecpraVoiceKnowledge;
+    // Phrases an ADMIN taught the assistant win over built-in matching (exact phrase only). A reply is spoken; an action runs on its own screen.
+    var AD = root.NecpraVoiceNLU;
+    if (AD && !result.__understood && !result.usedAlternative && !(K && K.isWake(text))) {
+      var hit = AD.matchAdmin(result);
+      if (hit && hit.kind === 'reply') { V.speak(T(hit.say.en, hit.say.sw), { force: true }); V.audit('voice.nav', { module: 'shell', outcome: 'admin-reply', lang: result.lang }); return true; }
+      if (hit && hit.kind === 'action' && (await runUnderstood(hit, result, null))) return true;
+    }
     // "open voice": switch on Hands-Free so the user can keep talking with no taps (needs the one-time consent the first time).
     if (K && K.isWake(text)) {
       var HF = root.NecpraHandsFree;
@@ -90,6 +108,22 @@
     }
     var page = cfg.getPage(), done = page ? await forward(page, result) : false; // anything else goes to the screen the user is looking at
     if (done) return true;
+    // Nothing on screen understood it. (1) Free in-app understanding: many ways of saying each action, English / Kiswahili / Sheng, no network.
+    // It yields a canonical phrase that the screens' own handlers parse, so their confirmations and privacy rules still apply.
+    var NLU = root.NecpraVoiceNLU;
+    if (!result.__understood && !result.usedAlternative && NLU) {
+      var local = NLU.understand(result, page);
+      if (local && local.kind === 'action') { if (await runUnderstood(local, result, page)) return true; result.__understood = true; }   // found the action but its screen could not do it: do not also pay for the AI
+      else if (local && local.kind === 'ambiguous') {   // two actions fit equally: ask, never guess
+        V.speak(T('Did you mean: ' + local.options[0].label + ', or ' + local.options[1].label + '?', 'Unamaanisha: ' + local.options[0].label + ', au ' + local.options[1].label + '?'), { force: true }); return true;
+      } else if (local && local.kind === 'need') { V.speak(local.say, { force: true }); return true; }   // the action is clear but the name/amount is missing
+    }
+    // (2) Optional AI fallback (only if the backend has it switched on and the user allows it). Silent no-op when off, offline, slow or unsure.
+    if (!result.__understood && !result.usedAlternative && root.NecpraVoiceUnderstand) {
+      var u = await root.NecpraVoiceUnderstand.rewrite(result, page);
+      if (u && u.phrase && (await runUnderstood(u, result, page))) return true;
+    }
+    if (!result.__understood && !result.usedAlternative && NLU && V.getSettings().logUnheard) NLU.logUnheard(result.transcript);   // opt-in, stays on the phone
     // A question about ANOTHER module ("is there a friend request?" while in DUKA, "how many products do we have" while in Friends): ask the screen that owns the topic.
     var topic = I.topicOf ? I.topicOf(text) : null;
     if (topic && topic !== page && cfg.allowedPages.indexOf(topic) >= 0) {
@@ -102,7 +136,9 @@
 
   function init(c) {
     cfg = Object.assign({ allowedPages: ['messages', 'money', 'friends', 'tools', 'group', 'status', 'settings', 'games'] }, c);
-    V.registerHandler('shell', handle); return true;
+    V.registerHandler('shell', handle);
+    try { setTimeout(function () { if (root.NecpraVoiceNLU) root.NecpraVoiceNLU.syncPhrases(true); }, 4000); } catch (_) {}   // fetch phrases the admin taught (cached on the phone afterwards)
+    return true;
   }
   root.NecpraVoiceShell = { init: init, _handle: handle };
 })(typeof window !== 'undefined' ? window : globalThis);
