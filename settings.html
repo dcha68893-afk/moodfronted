@@ -4090,5 +4090,87 @@
     })();
     </script>
 
+    <!-- ADMIN ENTRY (moved here from the chat header): a "Admin" item in the Settings menu, shown only to
+         admins. Access rules are unchanged — admin identity comes from the server-verified role (accounts
+         matching ADMIN_EMAIL / ADMIN_USERNAME in the backend .env), and the shell + backend both re-check it.
+         The item is created on demand (never present in the DOM for non-admins) and re-inserted if
+         settings-ui.js rebuilds #settingsMenu. -->
+    <script>
+    (function () {
+        'use strict';
+        var ITEM_ID = 'menu-admin';
+        var isAdmin = false;
+
+        function readParentState() {
+            // Same-origin shell exposes the server-verified role; fall back to its is-admin class (same
+            // tri-state rule the shell's own navigation guard uses).
+            try {
+                var p = window.parent;
+                if (!p || p === window) return null;
+                if (p.__necpraIsAdmin === true) return true;
+                if (p.__necpraIsAdmin === false) return false;
+                if (p.document && p.document.body && p.document.body.classList.contains('is-admin')) return true;
+            } catch (_) {}
+            return null;
+        }
+
+        function apply() {
+            var menu = document.getElementById('settingsMenu');
+            if (!menu) return;
+            var el = document.getElementById(ITEM_ID);
+            if (!isAdmin) { if (el) el.remove(); return; }
+            if (el && el.parentNode === menu) return;
+            el = document.createElement('a');
+            el.href = '#';
+            el.id = ITEM_ID;
+            el.className = 'menu-item';
+            el.setAttribute('role', 'button');
+            el.innerHTML = '<div class="menu-icon"><i class="fas fa-shield-alt"></i></div>' +
+                           '<div class="menu-text">Admin</div>';
+            el.addEventListener('click', function (e) {
+                e.preventDefault();
+                if (!isAdmin) return;
+                try {
+                    window.parent.postMessage({ type: 'SWITCH_MODULE', module: 'admin', source: 'settings', timestamp: Date.now() }, '*');
+                } catch (_) {}
+            });
+            var danger = menu.querySelector('[data-section="danger"]');
+            menu.insertBefore(el, danger || null);
+        }
+
+        function refreshFromParent() {
+            var s = readParentState();
+            if (s !== null) isAdmin = s;
+            apply();
+        }
+
+        window.addEventListener('message', function (e) {
+            var d = e && e.data;
+            if (!d || typeof d !== 'object') return;
+            if (d.type === 'USER_ROLE_UPDATE') {
+                isAdmin = d.isAdmin === true || d.role === 'admin' || d.role === 'moderator';
+                apply();
+            } else if (d.type === 'SESSION_DATA' || d.type === 'AUTH_READY' || d.type === 'PARENT_READY') {
+                refreshFromParent();
+            }
+        });
+
+        function init() {
+            refreshFromParent();
+            var menu = document.getElementById('settingsMenu');
+            if (menu && window.MutationObserver) {
+                new MutationObserver(function () {
+                    if (isAdmin && !document.getElementById(ITEM_ID)) apply();
+                }).observe(menu, { childList: true });
+            }
+            // the shell verifies the role asynchronously; re-read a couple of times as a safety net
+            setTimeout(refreshFromParent, 2000);
+            setTimeout(refreshFromParent, 6000);
+        }
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+        else init();
+    })();
+    </script>
+
 <script src="report-problem.js" defer></script><script src="/js/header-labels.js" defer></script></body>
 </html>
