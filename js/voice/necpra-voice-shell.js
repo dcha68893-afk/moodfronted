@@ -70,6 +70,18 @@
       V.audit('voice.nav', { module: 'shell', outcome: 'executed', lang: result.lang });
       return forward('settings', result);
     }
+    // Admin by voice from ANY screen, ADMINS ONLY: "open admin", "open admin orders", "fungua admin". Navigation only; the Admin module and the server re-check the role.
+    // For everyone else this branch is skipped, so "open admin" is not special (a contact called Admin still opens normally) and nothing reveals the module.
+    var am = /^(?:please\s+|tafadhali\s+)?(?:open|go to|show(?: me)?|take me to|fungua|nenda kwa|nipeleke|nionyeshe)\s+(?:the\s+|my\s+)?(?:admin|msimamizi|usimamizi)(?:\s+(?:panel|module|dashboard|paneli|menu))?(?:\s+(.+))?$/i.exec(clean(text));
+    var adminNow = root.__necpraIsAdmin === true || (root.__necpraIsAdmin == null && !!(doc.body && doc.body.classList.contains('is-admin')));
+    if (am && adminNow && cfg.allowedPages.indexOf('admin') >= 0) {
+      if (cfg.getPage() !== 'admin') cfg.navigate('admin');
+      V.audit('voice.nav', { module: 'shell', outcome: 'executed', lang: result.lang });
+      var rest = clean(am[1] || '');
+      if (rest && (await forward('admin', Object.assign({}, result, { transcript: 'open ' + rest, alternatives: [] })))) return true;
+      V.speak(T('Opening Admin.', 'Inafungua Admin.'));
+      return true;
+    }
     // Games by voice from ANY screen: "play chess", "start trivia".
     if (cfg.allowedPages.indexOf('games') >= 0 && /^(?:please\s+|tafadhali\s+)?(?:(?:i\s+(?:want|wanna)\s+to\s+)?(?:play|start|launch|open|begin|fungua|cheza|anza))\s+(?:a\s+game\s+of\s+|the\s+game\s+|a\s+game\s+|game\s+|the\s+|some\s+|a\s+)?(?:chess|chesi|trivia|quiz|cross\s*word|block(?:s| puzzle)?|tetris)(?:\s+game)?$/i.test(clean(text))) {
       if (cfg.getPage() !== 'games') cfg.navigate('games');
@@ -135,7 +147,7 @@
   }
 
   function init(c) {
-    cfg = Object.assign({ allowedPages: ['messages', 'money', 'friends', 'tools', 'group', 'status', 'settings', 'games'] }, c);
+    cfg = Object.assign({ allowedPages: ['messages', 'money', 'friends', 'tools', 'group', 'status', 'settings', 'games', 'admin'] }, c);
     V.registerHandler('shell', handle);
     try { setTimeout(function () { if (root.NecpraVoiceNLU) root.NecpraVoiceNLU.syncPhrases(true); }, 4000); } catch (_) {}   // fetch phrases the admin taught (cached on the phone afterwards)
     return true;
