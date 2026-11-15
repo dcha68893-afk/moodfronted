@@ -237,34 +237,9 @@
             box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.12);
         }
         
-        /* ADMIN MODULE ICON — lives in the global header, visible to admins only.
-           Hidden by default; body.is-admin is set by window.__necpraSyncAdmin() from the
-           same server-verified role the session protocol already carries. */
-        #headerAdminBtn {
-            display: none;
-            flex: 0 0 auto;
-            align-items: center;
-            justify-content: center;
-            width: 36px;
-            height: 36px;
-            margin: 0 8px 0 10px;
-            padding: 0;
-            border-radius: 12px;
-            border: 1px solid rgba(79, 70, 229, 0.35);
-            background: rgba(79, 70, 229, 0.10);
-            color: #4f46e5;
-            font-size: 15px;
-            cursor: pointer;
-            transition: transform .15s, background .15s, color .15s;
-        }
-        body.is-admin #headerAdminBtn { display: inline-flex; }
-        #headerAdminBtn:hover { background: rgba(79, 70, 229, 0.18); }
-        #headerAdminBtn:active { transform: scale(.94); }
-        #headerAdminBtn:focus-visible { outline: 2px solid #4f46e5; outline-offset: 2px; }
-        body.admin-page-active #headerAdminBtn { background: #4f46e5; color: #fff; border-color: #4f46e5; }
-        [data-theme="dark"] #headerAdminBtn { color: #a5b4fc; border-color: rgba(165,180,252,.4); background: rgba(99,102,241,.18); }
-        [data-theme="dark"] body.admin-page-active #headerAdminBtn,
-        body.admin-page-active[data-theme="dark"] #headerAdminBtn { background: #6366f1; color: #fff; }
+        /* ADMIN MODULE ENTRY: moved out of the header — it now lives inside the Settings module
+           (Settings > Admin, shown to admins only). body.is-admin is still maintained by
+           window.__necpraSyncAdmin() below. */
 
         /* Header module icons/actions (single source of truth in parent) */
         .header-actions {
@@ -1726,12 +1701,6 @@
             </button>
         </div>
 
-        <!-- ADMIN MODULE ICON: shown only when the signed-in user is an admin/moderator -->
-        <button id="headerAdminBtn" type="button" title="Admin" aria-label="Open Admin module"
-                onclick="if (window.__necpraIsAdmin === true || (window.__necpraIsAdmin === null && document.body.classList.contains('is-admin'))) navigateToPage('admin')">
-            <i class="fas fa-shield-alt"></i>
-        </button>
-
         <div id="profileTrigger" class="profile-trigger" title="Profile & Settings" aria-label="Profile">
             <img id="headerAvatar" class="profile-avatar-sm" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%237c3aed'%3E%3Cpath d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/%3E%3C/svg%3E" alt="avatar">
         </div>
@@ -2894,7 +2863,7 @@
             admin:    { icon: 'fa-shield-alt', title: 'Admin', subtitle: 'Moderation, marketplace and platform controls.' }
         };
 
-        // ADMIN ICON / ROLE SYNC — called with the same user object the session protocol already
+        // ADMIN ENTRY (Settings > Admin) / ROLE SYNC — called with the same user object the session protocol already
         // carries to every module (role / isAdmin). `verified` is true only for the server-verified
         // /api/profile result; unverified, non-admin data never gets pushed into the admin module.
         // Admin role is tri-state: null = not verified yet, true/false = server-verified.
@@ -2913,16 +2882,19 @@
             if (isVerified && !isAdmin && window.__currentPage === 'admin') {
                 navigateToPage('messages');
             }
-            const f = document.getElementById('adminIframe');
-            if (f && f.getAttribute('src') && f.contentWindow && isVerified) {
-                try {
-                    f.contentWindow.postMessage({
-                        type: 'USER_ROLE_UPDATE',
-                        role: u.role || (isAdmin ? 'admin' : 'user'),
-                        isAdmin
-                    }, '*');
-                } catch (_) {}
-            }
+            // Admin module + Settings module (the Admin entry now lives inside Settings)
+            ['adminIframe', 'settingsIframe'].forEach(function (frameId) {
+                const f = document.getElementById(frameId);
+                if (f && f.getAttribute('src') && f.contentWindow && isVerified) {
+                    try {
+                        f.contentWindow.postMessage({
+                            type: 'USER_ROLE_UPDATE',
+                            role: u.role || (isAdmin ? 'admin' : 'user'),
+                            isAdmin
+                        }, '*');
+                    } catch (_) {}
+                }
+            });
         };
 
         function updateHeaderContext(page) {
@@ -3323,7 +3295,7 @@
         window.__necpraBack = (typeof handleAppBackNavigation === 'function') ? handleAppBackNavigation : null;
         function navigateToPage(page, options = {}) {
             _chatLog('[Navigation] navigateToPage called with:', page, options);
-            // ADMIN MODULE is admin-only: the header icon is hidden for everyone else, and this
+            // ADMIN MODULE is admin-only: its Settings entry is hidden for everyone else, and this
             // guard stops any other path (history, deep link, stale click) from opening it.
             if (page === 'admin' && !(window.__necpraIsAdmin === true || (window.__necpraIsAdmin === null && document.body.classList.contains('is-admin')))) { console.warn('[Navigation] admin module requires an admin account'); return; }
             if ((page === 'tools' || page === 'tool' || page === 'marketplace') && window.__loadToolsIframe) window.__loadToolsIframe();
