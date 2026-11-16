@@ -1046,6 +1046,63 @@
       }
     }
 
+    // VOICE (js/voice/necpra-voice-messenger.js): chat-list actions for one chat id. Uses the SAME data paths as the long-press menu above and the
+    // chat "more" menu below (MessageModule.muteChat / archiveChat / deleteChat, the fav_chats / forced_unread sets, POST /friends/:id/block). The
+    // confirmation for archive / delete / block is asked by the voice layer BEFORE this runs, so there is no second confirm() popup here.
+    // Locked chats are refused. Returns { ok, noop?, error? } and never reports success for something that did not happen.
+    window.__kynVoiceChatAction = async function (action, chatId) {
+      const sid = String(chatId);
+      const MM = window.MessageModule;
+      const conv = MM.getConversations().find(c => String(c.chatId) === sid);
+      if (!conv) return { ok: false, error: 'chat not found' };
+      if (_kynCLGetSet('locked_chats').has(sid)) return { ok: false, error: 'chat is locked' };
+      const failMsg = (res) => (res && (res.error || res.message)) || 'unknown error';
+      const leaveIfOpen = () => {
+        if (String(MM.getActiveChatId()) !== sid) return;
+        MM.setActiveChatId(null);
+        const lp = document.getElementById('convListPanel'), cp = document.getElementById('chatPanel');
+        if (lp) lp.classList.remove('hide-on-mobile');
+        if (cp) cp.classList.add('hide-on-mobile');
+        renderChatPanel(null);
+      };
+      try {
+        if (action === 'fav' || action === 'unfav') {
+          const set = _kynCLGetSet('fav_chats'), has = set.has(sid);
+          if ((action === 'fav' && has) || (action === 'unfav' && !has)) return { ok: true, noop: true };
+          if (action === 'fav') set.add(sid); else set.delete(sid);
+          _kynCLSaveSet('fav_chats', set); renderConversationList(); return { ok: true };
+        }
+        if (action === 'unread') {
+          const forced = _kynCLGetSet('forced_unread'); forced.add(sid); _kynCLSaveSet('forced_unread', forced);
+          renderConversationList(); return { ok: true };
+        }
+        if (action === 'mute' || action === 'unmute') {
+          if ((action === 'mute' && conv.muted) || (action === 'unmute' && !conv.muted)) return { ok: true, noop: true };
+          const res = action === 'mute' ? await MM.muteChat(conv.chatId) : await MM.unmuteChat(conv.chatId);
+          if (!res || res.success === false) return { ok: false, error: failMsg(res) };
+          renderConversationList(); return { ok: true };
+        }
+        if (action === 'archive') {
+          const res = await MM.archiveChat(conv.chatId);
+          if (!(res && (res.status === 'success' || res.success))) return { ok: false, error: failMsg(res) };
+          leaveIfOpen(); renderConversationList(); return { ok: true };
+        }
+        if (action === 'delete') {
+          const res = await MM.deleteChat(conv.chatId);
+          if (!(res && (res.status === 'success' || res.success))) return { ok: false, error: failMsg(res) };
+          leaveIfOpen(); renderConversationList(); return { ok: true };
+        }
+        if (action === 'block') {
+          const otherUserId = conv.otherUser && conv.otherUser.id;
+          if (!otherUserId) return { ok: false, error: 'unknown user for this chat' };
+          const res = await MM.request().post(`/friends/${otherUserId}/block`);
+          if (!res || res.success === false) return { ok: false, error: failMsg(res) };
+          leaveIfOpen(); renderConversationList(); return { ok: true };
+        }
+        return { ok: false, error: 'unknown action' };
+      } catch (err) { return { ok: false, error: err && err.message || 'failed' }; }
+    };
+
     let viewingArchived = false;
 
     async function showArchivedView() {
@@ -2950,7 +3007,7 @@
       }
     });
 
-    try { NecpraVoiceInit.start({ fab: false }); NecpraVoiceMessenger.init({ MM: window.MessageModule, isLocked: function (id) { return _kynCLGetSet('locked_chats').has(String(id)); }, getPreview: safeConvPreview }); } catch (e) { console.error('[voice]', e); }
+    try { NecpraVoiceInit.start({ fab: false }); NecpraVoiceMessenger.init({ MM: window.MessageModule, isLocked: function (id) { return _kynCLGetSet('locked_chats').has(String(id)); }, getPreview: safeConvPreview, chatAction: function (a, id) { return window.__kynVoiceChatAction(a, id); } }); } catch (e) { console.error('[voice]', e); }
     renderConversationList();
     renderChatPanel(null);
   })();

@@ -28,6 +28,9 @@
     s = s.replace(/^(?:(?:hey|hi|ok|okay|so|now)\s+)?(?:please\s+|tafadhali\s+)?(?:can you\s+|could you\s+|would you\s+)?(?:please\s+)?(?:i\s+(?:want|wanna|need|would like)\s+to\s+|let me\s+|nataka\s+|naomba\s+)?/i, ''); n = I.norm(s);
     if ((m = /^(?:post|share|add|put|weka|chapisha)\s+(?:a\s+|new\s+)*(?:status|moment|story|hali)\s*(?:saying|that|:|kwamba)?\s*(.*)$/i.exec(s)) || (m = /^(?:update|change|set|badilisha)\s+my\s+status\s+(?:to|kuwa)\s+(.+)$/i.exec(s))) return { type: 'post', text: clean(m[1]) };
     if (/^(?:new|create|add|start)\s+(?:a\s+)?(?:status|moment)$/.test(n)) return { type: 'post', text: '' };
+    // Your OWN status: "show my status" (used to find nothing because "my" is not a person) and "who viewed my status" (viewer names only the owner may see).
+    if (/^(?:who|nani)\b.*\b(?:viewed|seen|saw|watched|looked at|views?|ameona|wameona|wametazama|walioona|walitazama)\b.*\b(?:my|yangu)\b.*\b(?:status|statuses|moment|story|hali)\b/.test(n) || /^(?:how many (?:views|people (?:viewed|saw|watched))|my status views|views on my status|idadi ya waliotazama hali yangu)\b/.test(n)) return { type: 'viewers' };
+    if (/^(?:(?:show|open|view|watch|play|see|fungua|nionyeshe|angalia)\s+)?(?:my|yangu)\s+(?:own\s+)?(?:status|statuses|moment|moments|story|stories|hali)$/.test(n) || /^(?:fungua|angalia|nionyeshe)\s+hali\s+yangu$/.test(n)) return { type: 'mine' };
     if ((m = /^(?:show|open|view|watch|play|see|fungua|nionyeshe|angalia)\s+(?:me\s+)?(.+?)(?:'s|s'|’s)?\s+(?:status|statuses|moment|moments|story|stories|hali)$/i.exec(s))) return { type: 'view', name: clean(m[1].replace(/^(?:the|my)\s+/i, '')) };
     if ((m = /^(?:show|open|view|watch|play|fungua|angalia)\s+(?:the\s+)?(?:status|moment|story|hali)\s+(?:of|from|ya|kutoka kwa)\s+(.+)$/i.exec(s))) return { type: 'view', name: clean(m[1]) };
     if (/^(?:next|next status|skip|inayofuata|mbele)$/.test(n)) return { type: 'next' };
@@ -63,6 +66,24 @@
       var ps = people(); if (!ps.length) { await say('No statuses are showing right now.', 'Hakuna hali zinazoonekana sasa.'); return true; }
       if (p.type === 'count') { await say(ps.length + (ps.length === 1 ? ' person has' : ' people have') + ' a status.', 'Watu ' + ps.length + ' wana hali.'); return true; }
       var names = ps.slice(0, 8).map(function (x) { return x.name; }).join(', '); await say(names + (ps.length > 8 ? ', and ' + (ps.length - 8) + ' more.' : '.'), names + (ps.length > 8 ? ', na wengine ' + (ps.length - 8) + '.' : '.')); return true;
+    }
+    if (p.type === 'mine' || p.type === 'viewers') {
+      // A viewer already open on SOMEONE ELSE's status (it has a reply box; your own has none) is closed first, so we never read another person's viewers.
+      if (viewerOpen() && q('[data-viewer] [data-reply]')) { click(q('[data-vclose]')); await sleep(350); }
+      if (!viewerOpen()) {
+        var mine = q('[data-my-status]'); if (!mine) return false; mine.click();
+        var opened = await waitFor(viewerOpen, 3500);
+        if (!opened) { click(q('[data-cancel]')); await say('You have no active status to open. Post one first, for example say "post a status".', 'Huna hali inayoonekana. Chapisha moja kwanza, mfano sema "chapisha hali".'); return true; }
+      }
+      if (p.type === 'mine') { V.audit('status.mine', Object.assign({ outcome: 'executed' }, meta)); await say('Opening your status.', 'Inafungua hali yako.'); return true; }
+      var vb = q('[data-viewers]'); if (!vb) { await say('I could not open the viewers list.', 'Sikuweza kufungua orodha ya waliotazama.'); return true; }
+      vb.click(); var head = await waitFor(function () { return q('.ns-viewer-list-head'); }, 4500);
+      if (!head) { await say(toastText() || 'I could not load who viewed your status.', toastText() || 'Sikuweza kupakia waliotazama hali yako.'); return true; }
+      var names = qa('.ns-viewer-row b').map(function (b) { return clean(b.textContent); }).filter(Boolean);
+      V.audit('status.viewers', Object.assign({ outcome: 'executed' }, meta));
+      if (!names.length) { await say('No one has viewed your status yet.', 'Hakuna aliyetazama hali yako bado.'); return true; }
+      var more = names.length > 8 ? names.length - 8 : 0, list = names.slice(0, 8).join(', ');
+      await say(names.length + (names.length === 1 ? ' person has' : ' people have') + ' viewed your status: ' + list + (more ? ', and ' + more + ' more' : '') + '.', 'Watu ' + names.length + ' wametazama hali yako: ' + list + (more ? ', na wengine ' + more : '') + '.'); return true;
     }
     if (p.type === 'view') {
       if (!p.name) return false; var ps2 = people(), cs = ps2.map(function (x) { return { id: x.id, name: x.name, x: x }; }), vs = I.nameVariants(p.name), hit = null;

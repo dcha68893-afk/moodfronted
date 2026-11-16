@@ -1278,6 +1278,15 @@ function vParse(raw, fallbackLang) {
     name = rest.slice(0, firstIdx).replace(/\b(called|named|inaitwa|jina|la|ya|a|an|new|mpya)\b/g, ' ').replace(/\s+/g, ' ').trim();
     return Object.assign(out, { intent: 'addProduct', name: name, buy: res.buy, sell: res.sell, stock: res.stock });
   }
+  // DUKA screens, suppliers, waste, group buying, refunds: read-only answers or navigation. Nothing here changes money or stock.
+  if ((m = /^(?:open|go to|take me to|fungua|nenda(?: kwa)?|nipeleke)\s+(?:the |my |ukurasa wa |sehemu ya )?(dashboard|home|sell|pos|new sale|sales|products?|stock|buy together|group buy(?:ing)?|waste|money|expenses|debts|suppliers?|reports?|settings|my shop|admin|dashibodi|mauzo|bidhaa|taka|upotevu|pesa|gharama|madeni|wasambazaji|ripoti|mipangilio)(?: tab| screen| page)?$/.exec(s))) {
+    var w = m[1], MAP = { dashboard: ['dash'], home: ['dash'], dashibodi: ['dash'], sell: ['pos'], pos: ['pos'], 'new sale': ['pos'], sales: ['sales'], mauzo: ['sales'], product: ['products'], products: ['products'], stock: ['products'], bidhaa: ['products'], 'buy together': ['group'], 'group buy': ['group'], 'group buying': ['group'], waste: ['waste'], upotevu: ['waste'], money: ['money'], pesa: ['money'], expenses: ['money', 'expenses'], gharama: ['money', 'expenses'], debts: ['money', 'debts'], madeni: ['money', 'debts'], supplier: ['money', 'suppliers'], suppliers: ['money', 'suppliers'], wasambazaji: ['money', 'suppliers'], report: ['money', 'reports'], reports: ['money', 'reports'], ripoti: ['money', 'reports'], settings: ['settings'], mipangilio: ['settings'], 'my shop': ['settings'], admin: ['admin'] };
+    return Object.assign(out, { intent: 'openTab', tab: (MAP[w] || ['dash'])[0], fin: (MAP[w] || [])[1] || null, label: w });
+  }
+  if (/\b(refund|refunds|void|cancel (?:a |the |that |this )?sale|undo (?:a |the |that )?sale|rudisha pesa|rejesha pesa|kurejesha pesa|futa mauzo|ghairi mauzo)\b/.test(s)) return Object.assign(out, { intent: 'refund' });
+  if (/\b(group buy|group buying|group orders?|buy together|buying together|ununuzi wa pamoja|nunua pamoja|oda za pamoja|oda ya pamoja)\b/.test(s)) return Object.assign(out, { intent: 'groupbuy' });
+  if (/\b(waste|wastage|spoil|spoiled|spoilt|spoilage|expiry|expiring|expire|expired|perishables?|at risk|upotevu|kuharibika|imeharibika|zinaharibika)\b/.test(s)) return Object.assign(out, { intent: 'waste', record: /\b(record|add|rekodi|weka|ongeza|received?|pokea)\b/.test(s) });
+  if (/\b(suppliers?|wasambazaji|msambazaji|wauzaji wangu)\b/.test(s)) return Object.assign(out, { intent: 'suppliers', manage: /\b(add|new|pay|paid|bill|record|ongeza|lipa|nimelipa|rekodi)\b/.test(s) });
   var expTrig = /\b(expense|expenses|spent|spend|gharama|matumizi|nimetumia|nimelipa|nilitumia|nililipa)\b/.test(s);
   if (expTrig && (num || !/\b(report|ripoti|summary|muhtasari|today|leo|week|wiki|month|mwezi)\b/.test(s))) {
     var amt = (/(^| )(\d+(?:\.\d+)?)( |$)/.exec(s) || [])[2], cat = 'other';
@@ -1338,10 +1347,15 @@ async function vHandle(raw) {
   if (S.va.pending && !S.va.pending.done) { S.va.pending = null; vSay(T('Earlier request cancelled — nothing was changed.', 'Ombi la awali limeghairiwa — hakuna kilichobadilishwa.')); }
   vRender(true);
   try {
-    if (window.NecpraVoiceSales && window.__necpraDukaVoice && ['stock', 'lowstock', 'debts', 'report', 'expense', 'addProduct'].indexOf(cmd.intent) < 0) {   // natural-language sales on the trader's own catalogue
+    if (window.NecpraVoiceSales && window.__necpraDukaVoice && ['stock', 'lowstock', 'debts', 'report', 'expense', 'addProduct', 'openTab', 'refund', 'groupbuy', 'waste', 'suppliers'].indexOf(cmd.intent) < 0) {   // natural-language sales on the trader's own catalogue
       if (await NecpraVoiceSales.start(raw, window.__necpraDukaVoice.adapter, { force: cmd.intent === 'sale' })) { vRender(); return; }
     }
     if (cmd.intent === 'stock') await vStock(cmd);
+    else if (cmd.intent === 'openTab') await vOpenTab(cmd);
+    else if (cmd.intent === 'refund') await vRefund();
+    else if (cmd.intent === 'groupbuy') await vGroupBuy();
+    else if (cmd.intent === 'waste') await vWaste(cmd);
+    else if (cmd.intent === 'suppliers') await vSuppliers(cmd);
     else if (cmd.intent === 'lowstock') await vLow();
     else if (cmd.intent === 'customers') await vCustomers();
     else if (cmd.intent === 'debts') await vDebts(cmd);
@@ -1352,6 +1366,48 @@ async function vHandle(raw) {
     else vSay(T('Sorry, I did not understand. Try: "sell 3 sugar", "add expense 500 transport", "how much sugar is left", "who owes me", or "today\'s report".', 'Samahani, sijaelewa. Jaribu: "uza sukari 3", "nimetumia 500 usafiri", "sukari imebaki ngapi", "nani ananidai", au "ripoti ya leo".'));
   } catch (e) { vSay(e.message || T('Something went wrong.', 'Hitilafu imetokea.')); }
   vRender();
+}
+function vGoTab(tab, fin) {
+  S.tab = tab; if (fin) S.fin = fin;
+  try { sessionStorage.setItem('necpra_duka_tab', S.tab); if (fin) sessionStorage.setItem('necpra_duka_fin', fin); } catch (_) {}
+  render(); refresh();
+}
+async function vOpenTab(cmd) {
+  if (cmd.tab === 'admin' && !S.isAdmin) return vSay(T('Admin is not available for your account.', 'Admin haipatikani kwa akaunti yako.'));
+  vGoTab(cmd.tab, cmd.fin);
+  vSay(T('Opening ' + cmd.label + '.', 'Inafungua ' + cmd.label + '.'));
+}
+async function vRefund() {
+  vGoTab('sales');
+  vSay(T('I cannot cancel a sale or hand back money by voice. I opened Sales: tap the sale, choose cancel, and give a short reason. Stock is restored and the app tells you how much to hand back.',
+    'Siwezi kughairi mauzo wala kurudisha pesa kwa sauti. Nimefungua Mauzo: bonyeza mauzo husika, chagua ghairi, kisha andika sababu fupi. Stoku hurudishwa na programu inakuambia kiasi cha kurudisha.'));
+}
+async function vSuppliers(cmd) {
+  if (cmd.manage) {
+    vGoTab('money', 'suppliers');
+    return vSay(T('Adding suppliers and recording payments is done on screen so you can check the amounts. I opened Suppliers.', 'Kuongeza wasambazaji na kurekodi malipo hufanywa kwenye skrini ili uhakiki kiasi. Nimefungua Wasambazaji.'));
+  }
+  var d = await api('GET', '/shops/' + S.shopId + '/suppliers'), list = d.suppliers || [];
+  if (!list.length) return vSay(T('You have no suppliers saved yet.', 'Bado huna wasambazaji waliohifadhiwa.'));
+  var owed = list.filter(function (x) { return x.owed > 0; });
+  vSay(T('You have ' + list.length + ' supplier' + (list.length === 1 ? '' : 's') + '. ' + (owed.length ? 'You owe ' + KSH(d.totalOwed) + ': ' + owed.slice(0, 4).map(function (x) { return x.name + ' ' + KSH(x.owed); }).join(', ') + '.' : 'You owe none of them anything.'),
+    'Una wasambazaji ' + list.length + '. ' + (owed.length ? 'Unadaiwa ' + KSH(d.totalOwed) + ': ' + owed.slice(0, 4).map(function (x) { return x.name + ' ' + KSH(x.owed); }).join(', ') + '.' : 'Huna deni kwa yeyote.')));
+}
+async function vWaste(cmd) {
+  if (cmd.record) {
+    vGoTab('waste');
+    return vSay(T('Receiving stock and recording spoiled stock are done on screen so you can check the quantities. I opened Waste.', 'Kupokea stoku na kurekodi iliyoharibika hufanywa kwenye skrini ili uhakiki idadi. Nimefungua Upotevu.'));
+  }
+  var w = await api('GET', '/shops/' + S.shopId + '/waste'), sm = w.summary || {}, items = w.items || [];
+  var risky = items.filter(function (it) { return (it.batches || []).some(function (b) { return b.freshness === 'at_risk' || b.freshness === 'sell_soon'; }); });
+  if (!items.length) return vSay(T('You have no perishable stock tracked yet. Mark a product as perishable and add stock with its shelf life.', 'Bado hakuna bidhaa zinazoharibika zinazofuatiliwa.'));
+  vSay(T('Stock at risk is about ' + KSH(sm.stockAtRiskValue) + ' (an estimate). Spoilage losses in the last 30 days: ' + KSH(sm.lossesLast30Days) + '. ' + (risky.length ? 'Sell soon: ' + risky.slice(0, 4).map(function (x) { return x.name; }).join(', ') + '.' : 'Nothing needs selling urgently.'),
+    'Stoku hatarini ni takriban ' + KSH(sm.stockAtRiskValue) + ' (makadirio). Hasara ya kuharibika siku 30: ' + KSH(sm.lossesLast30Days) + '. ' + (risky.length ? 'Uza haraka: ' + risky.slice(0, 4).map(function (x) { return x.name; }).join(', ') + '.' : 'Hakuna cha kuuza haraka.')));
+}
+async function vGroupBuy() {
+  var dash = await api('GET', '/group-buy/dashboard', null, GB_NOCACHE), m = dash.mine || {}, mk = dash.marketplace || {};
+  vSay(T(mk.openOrders + ' open group order' + (mk.openOrders === 1 ? '' : 's') + ' near you. Yours: ' + (m.awaitingPayment || 0) + ' awaiting your payment, ' + (m.pendingDeliveries || 0) + ' pending delivery. Verified savings: ' + KSH((dash.verifiedSavings || {}).amount || 0) + '. Joining and paying are done on screen.',
+    'Oda ' + mk.openOrders + ' za pamoja zipo karibu nawe. Zako: ' + (m.awaitingPayment || 0) + ' zinasubiri malipo yako, ' + (m.pendingDeliveries || 0) + ' zinasubiri kuletwa. Akiba iliyothibitishwa: ' + KSH((dash.verifiedSavings || {}).amount || 0) + '. Kujiunga na kulipa hufanywa kwenye skrini.'));
 }
 async function vStock(cmd) {
   var list = await vProducts();

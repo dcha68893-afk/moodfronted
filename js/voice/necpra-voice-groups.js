@@ -23,7 +23,7 @@
     var s = clean(input).replace(/[.!?,]+$/, ''), n = I.norm(s), m;
     s = s.replace(/^(?:(?:hey|hi|ok|okay|so|now)\s+)?(?:please\s+|tafadhali\s+)?(?:can you\s+|could you\s+|would you\s+)?(?:please\s+)?(?:i\s+(?:want|wanna|need|would like)\s+to\s+|let me\s+|nataka\s+|naomba\s+)?/i, ''); n = I.norm(s);
     if ((m = /^(?:create|make|start|new|unda|anzisha)\s+(?:a\s+|new\s+)*(?:group|kikundi)(?:\s+(?:called|named|iitwayo))?\s*(.*)$/i.exec(s))) return { type: 'create', name: strip(m[1]) };
-    if ((m = /^(?:open|go to|show|fungua|nenda kwa|take me to|nipeleke)\s+(?:to\s+)?(?:the\s+|my\s+)?(?:group|kikundi)\s+(?:chat\s+)?(.+)$/i.exec(s)) && !/^(?:list|s|settings|info)$/i.test(m[1])) return { type: 'open', name: strip(m[1]) };
+    if ((m = /^(?:open|go to|show|fungua|nenda kwa|take me to|nipeleke)\s+(?:to\s+)?(?:the\s+|my\s+)?(?:group|kikundi)\s+(?:chat\s+)?(.+)$/i.exec(s)) && !/^(?:list|s|settings|info|information|details|media|files|pinned|members?)$/i.test(m[1])) return { type: 'open', name: strip(m[1]) };
     if ((m = /^(?:open|go to|fungua|nenda kwa)\s+(?:the\s+|my\s+)?(.+?)\s+(?:group|kikundi)$/i.exec(s))) return { type: 'open', name: strip(m[1]) };
     if ((m = /^(?:read|soma|nisomee)\s+(?:out\s+)?(?:(?:me\s+)?(?:the\s+|my\s+)?(?:last|latest|recent|new|mpya|za mwisho)\s+)?(?:(\d+|one|two|three|five|ten)\s+)?(?:group\s+)?(?:messages?|ujumbe|texts?)(?:\s+(?:here|in this group|kwenye kikundi hiki))?$/i.exec(s))) return { type: 'read', count: ({ one: 1, two: 2, three: 3, five: 5, ten: 10 })[String(m[1] || '').toLowerCase()] || Number(m[1]) || 5 };
     if ((m = /^(?:search|find|look for|tafuta)\s+(?:for\s+)?(.+?)\s+(?:in|within|kwenye|ndani ya)\s+(?:this\s+|the\s+)?(?:group|chat|kikundi)(?:\s+.*)?$/i.exec(s))) return { type: 'search', query: clean(m[1]) };
@@ -35,7 +35,15 @@
     if ((m = /^(?:tell|message|send|mwambie|tuma ujumbe kwa)\s+(?:the\s+)?(.+?)\s+(?:group|kikundi)\s+(?:saying\s+|that\s+|kwamba\s+)?(.+)$/i.exec(s))) return { type: 'send', name: strip(m[1]), text: clean(m[2]) };
     if ((m = /^(?:tell|message|send|post|mwambie)\s+(?:the\s+)?(?:group|everyone|everybody|wote|kikundi)\s+(?:saying\s+|that\s+|kwamba\s+)?(.+)$/i.exec(s))) return { type: 'send', name: '', text: clean(m[1]) };
     if (/^(?:send|post|write|tuma|andika)\s+(?:a\s+)?(?:message|ujumbe)(?:\s+to\s+(?:the\s+)?group)?$/.test(n)) return { type: 'send', name: '', text: '' };
-    if (/^(?:close|leave|exit|funga)\s+(?:this\s+)?(?:group|chat|kikundi)$/.test(n)) return { type: 'close' };
+    // "leave the group" really leaves (after a spoken yes AND the app's own confirmation). Closing the open group is only "close" / "exit" / "funga".
+    if ((m = /^(?:leave|ondoka(?:\s+kwenye)?|toka\s+kwenye)\s+(?:the\s+|this\s+)?(?:(.+?)\s+)?(?:group|kikundi)$/i.exec(s))) return { type: 'leave', name: /^(?:this|the)$/i.test(clean(m[1])) ? '' : strip(m[1]) };
+    if ((m = /^(?:ondoka|toka)\s+(?:kwenye|katika)\s+(?:kikundi|kundi)(?:\s+(.+))?$/i.exec(s))) return { type: 'leave', name: /^(?:hiki|hiki hapa|hicho)$/i.test(clean(m[1])) ? '' : strip(m[1]) };   // "ondoka kwenye kikundi hiki" / "toka kwenye kikundi Familia"
+    if ((m = /^(?:ongeza)\s+(.+?)\s+(?:kwenye|katika)\s+(?:kikundi|kundi)(?:\s+(.+))?$/i.exec(s))) return { type: 'add-member', name: strip(m[1]), group: /^(?:hiki|hiki hapa|hicho)$/i.test(clean(m[2])) ? '' : strip(m[2]) };
+    if (/^(?:close|exit|funga)\s+(?:this\s+)?(?:group|chat|kikundi)$/.test(n)) return { type: 'close' };
+    if ((m = /^(?:add|ongeza)\s+(.+?)\s+(?:to|in|into|kwenye|kwa)\s+(?:this\s+|the\s+)?(?:(.+?)\s+)?(?:group|kikundi)$/i.exec(s)) && !/\bas a friend\b/i.test(s)) return { type: 'add-member', name: strip(m[1]), group: /^(?:this|the)$/i.test(clean(m[2])) ? '' : strip(m[2]) };
+    if (/^(?:(?:show|open|fungua|nionyeshe)\s+)?(?:the\s+)?(?:group|kikundi)\s+(?:info|information|details|maelezo)$/.test(n) || /^(?:maelezo ya kikundi|group info)$/.test(n)) return { type: 'panel', panel: 'info' };
+    if (/^(?:(?:show|open|fungua|nionyeshe)\s+)?(?:the\s+)?pinned(?:\s+messages?)?(?:\s+(?:in|of)\s+(?:this\s+)?group)?$/.test(n) || /^(?:show|open|fungua|nionyeshe)\s+(?:the\s+)?ujumbe uliobandikwa$/.test(n)) return { type: 'panel', panel: 'pinned' };
+    if (/^(?:show|open|fungua|nionyeshe)\s+(?:the\s+)?(?:group\s+)?(?:media|files|files and media|photos and files|faili|picha na faili)(?:\s+(?:in|of)\s+(?:this\s+)?group)?$/.test(n)) return { type: 'panel', panel: 'media' };
     if (/^(?:refresh|reload|update|sasisha)(?:\s+(?:groups|the list))?$/.test(n)) return { type: 'refresh' };
     return null;
   }
@@ -86,6 +94,56 @@
     return true;
   }
 
+  async function confirmYes(title, yes) { var i = await UI.choose({ title: title, options: [{ label: yes }], voiceAnswer: ask(T('Say yes to confirm, or cancel.', 'Sema ndiyo kuthibitisha, au ghairi.')) }); return i === 0; }
+  // The group's own menu lives in the app header (chat.html), the same buttons a person taps. Clicking them keeps one source of truth.
+  function hga(action) { try { var b = root.parent && root.parent.document.querySelector('#hdrGroupMenu [data-hga="' + action + '"]'); if (b) { b.click(); return true; } } catch (_) {} return false; }
+
+  // "add Denis to this group": opens Add members, ticks the friend, asks for a yes, taps the screen's own "Add selected", then CHECKS the member count.
+  async function addMemberFlow(p) {
+    var h = H();
+    if (p.group) { var g0 = await openByName(p.group); if (!g0) return true; }
+    var c = current(); if (!c) { await say('Open a group first, or say its name.', 'Fungua kikundi kwanza, au sema jina lake.'); return true; }
+    var gn = gname(c) || T('this group', 'kikundi hiki');
+    if (!p.name) { await say('Say who to add, for example: add Denis to this group.', 'Taja unayemwongeza, mfano: ongeza Denis kwenye kikundi hiki.'); return true; }
+    if (!hga('info')) { await say('I could not open the group info.', 'Sikuweza kufungua maelezo ya kikundi.'); return true; }
+    var addRow = await waitFor(function () { return doc.getElementById('infoAdd'); }, 3500);
+    if (!addRow) { await say('You cannot add members to ' + gn + '. Only admins can, unless the group lets everyone invite.', 'Huwezi kuongeza wanachama kwenye ' + gn + '. Ni wasimamizi tu, isipokuwa kikundi kikiruhusu wote.'); return true; }
+    var box = doc.getElementById('addMembersBox'); if (!box || box.classList.contains('hidden')) addRow.click();
+    var rows = await waitFor(function () { var l = doc.querySelectorAll('#addList .member'); return l.length ? Array.prototype.slice.call(l) : null; }, 7000);
+    if (!rows) { var bt = clean(box && box.textContent); await say(/already in this group/i.test(bt) ? 'All your friends are already in ' + gn + '.' : 'I could not load your friends list.', /already in this group/i.test(bt) ? 'Marafiki zako wote tayari wako kwenye ' + gn + '.' : 'Sikuweza kupakia orodha ya marafiki.'); return true; }
+    var list = rows.map(function (r, i) { var b = r.querySelector('.who b'); return { id: i, name: clean(b && b.textContent), row: r }; }).filter(function (x) { return x.name; });
+    var vs = I.nameVariants(p.name), hit = null; for (var i = 0; i < vs.length && !hit; i++) { var r = I.matchContacts(vs[i], list); if (r.matches.length) hit = r; }
+    if (!hit) { await say('I could not find "' + p.name + '" among your friends who are not in ' + gn + '. You can only add friends.', 'Sikumpata "' + p.name + '" kwenye marafiki zako ambao hawako kwenye ' + gn + '. Unaweza kuongeza marafiki tu.'); return true; }
+    var who = hit.matches[0];
+    if (hit.matches.length > 1) { var idx = await UI.choose({ title: T('Which ' + p.name + '?', p.name + ' yupi?'), options: hit.matches.slice(0, 5).map(function (x) { return { label: x.name }; }), voiceAnswer: ask(T('Say the number or the full name.', 'Sema namba au jina kamili.')) }); if (idx < 0) return true; who = hit.matches[idx]; }
+    if (!(await confirmYes(T('Add ' + who.name + ' to ' + gn + '?', 'Mwongeze ' + who.name + ' kwenye ' + gn + '?'), T('Yes, add', 'Ndiyo, ongeza')))) { await say('Cancelled. Nobody was added.', 'Imeghairiwa. Hakuna aliyeongezwa.'); return true; }
+    var cb = who.row.querySelector('input[type="checkbox"]'), btn = doc.getElementById('addConfirm'); if (!cb || !btn) { await say('The add button is not available.', 'Kitufe cha kuongeza hakipo.'); return true; }
+    var before = ((current() || {}).participants || []).length; cb.checked = true; btn.click();
+    var added = await waitFor(function () { var cc = current(); return cc && (cc.participants || []).length > before; }, 6000);
+    V.audit('groups.add_member', { module: 'groups', outcome: added ? 'executed' : 'unconfirmed' });
+    if (added) await say(who.name + ' was added to ' + gn + '.', who.name + ' ameongezwa kwenye ' + gn + '.');
+    else await say('I could not confirm that ' + who.name + ' was added. Please check the member list.', 'Sikuweza kuthibitisha kwamba ' + who.name + ' ameongezwa. Tafadhali angalia orodha ya wanachama.');
+    return true;
+  }
+
+  // "leave the Family group": a spoken yes first, then the app's own Leave button (which shows its own prompt). Success is only claimed when the group really went.
+  async function leaveFlow(p) {
+    var h = H();
+    if (p.name) { var g0 = await openByName(p.name); if (!g0) return true; }
+    var c = current(); if (!c) { await say('Open a group first, or say its name.', 'Fungua kikundi kwanza, au sema jina lake.'); return true; }
+    var gn = gname(c) || T('this group', 'kikundi hiki'), id = c.id;
+    if (!(await confirmYes(T('Leave ' + gn + '? You will stop getting its messages.', 'Ondoka kwenye ' + gn + '? Hutapokea tena ujumbe wake.'), T('Yes, leave', 'Ndiyo, ondoka')))) { await say('Cancelled. You are still in ' + gn + '.', 'Imeghairiwa. Bado uko kwenye ' + gn + '.'); return true; }
+    if (!hga('leave')) { await say('I could not start leaving the group.', 'Sikuweza kuanza kuondoka kwenye kikundi.'); return true; }
+    await say('Please confirm on the screen to finish leaving.', 'Tafadhali thibitisha kwenye skrini ili kumaliza kuondoka.');
+    var gone = await waitFor(function () { var cur = current(); return !cur || String(cur.id) !== String(id); }, 25000);
+    if (gone) { try { await h.loadGroups(); } catch (_) {} }
+    var still = groups().some(function (x) { return String(x.id) === String(id); });
+    V.audit('groups.leave', { module: 'groups', outcome: gone && !still ? 'executed' : 'unconfirmed' });
+    if (gone && !still) await say('You left ' + gn + '.', 'Umeondoka kwenye ' + gn + '.');
+    else await say('I did not see the group leave, so nothing changed. If you tapped cancel, that is fine.', 'Sikuona kikundi kikiondoka, kwa hiyo hakuna kilichobadilika.');
+    return true;
+  }
+
   async function run(p, lang) {
     var h = H(); if (!h) return false;
     if (p.type === 'refresh') { await h.loadGroups(); await say('Groups updated.', 'Vikundi vimesasishwa.'); return true; }
@@ -103,8 +161,15 @@
     if (p.type === 'open') { if (!p.name) return false; var g = await openByName(p.name); if (g) { V.audit('groups.open', { module: 'groups', outcome: 'executed', lang: lang }); await say('Opened ' + g.name + '.', 'Imefungua ' + g.name + '.'); } return true; }
     if (p.type === 'close') { if (!current()) { await say('No group is open.', 'Hakuna kikundi kilichofunguliwa.'); return true; } h.close(); await say('Closed.', 'Imefungwa.'); return true; }
     if (p.type === 'send') return sendFlow(p.name, p.text);
+    if (p.type === 'add-member') return addMemberFlow(p);
+    if (p.type === 'leave') return leaveFlow(p);
     var c = current();
     if (!c) { await say('Open a group first. Say "open group" and its name.', 'Fungua kikundi kwanza. Sema "fungua kikundi" na jina lake.'); return true; }
+    if (p.type === 'panel') {
+      if (p.panel === 'info') { if (!hga('info')) return false; await say('Showing group info.', 'Inaonyesha maelezo ya kikundi.'); return true; }
+      var tg2 = doc.getElementById(p.panel === 'pinned' ? 'pinnedToggle' : 'mediaToggle'); if (!tg2) return false; tg2.click();
+      await say(p.panel === 'pinned' ? 'Showing pinned messages.' : 'Showing files and media.', p.panel === 'pinned' ? 'Inaonyesha ujumbe uliobandikwa.' : 'Inaonyesha faili na picha.'); return true;
+    }
     if (p.type === 'read') {
       await h.reload(); await new Promise(function (r) { setTimeout(r, 400); });
       var msgs = h.state().messages.filter(function (m) { return !m._optimistic && textOf(m); }).slice(-p.count);

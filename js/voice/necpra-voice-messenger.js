@@ -140,11 +140,59 @@
     return true;
   }
 
+  /* Chat-list actions by voice (archive, mute, favourite, mark unread, delete chat, block). The real work is done by message.html's own code paths
+   * (cfg.chatAction), so the result is exactly what the long-press menu does. Archive, delete and block always ask for a spoken or tapped yes first.
+   * Locked chats are never touched (contacts() leaves them out). Failures are reported honestly, never as success. */
+  var CA_ASK = { archive: 1, delete: 1, block: 1 };
+  async function confirmAction(action, nm) {
+    var q = {
+      archive: [T('Archive the chat with ' + nm + '? This archives it for both of you.', 'Hifadhi mazungumzo na ' + nm + '? Hii inayahifadhi kwa nyote wawili.'), T('Yes, archive', 'Ndiyo, hifadhi')],
+      delete: [T('Delete the chat with ' + nm + ' from your account? This cannot be undone. The other person keeps their copy.', 'Futa mazungumzo na ' + nm + ' kwenye akaunti yako? Haiwezi kurudishwa. Mwenzako anabaki na nakala yake.'), T('Yes, delete', 'Ndiyo, futa')],
+      block: [T('Block ' + nm + '? They will not be able to message you.', 'Mzuie ' + nm + '? Hataweza kukutumia ujumbe.'), T('Yes, block', 'Ndiyo, mzuie')]
+    }[action];
+    var i = await UI.choose({ title: q[0], options: [{ label: q[1] }], voiceAnswer: ask(T('Say yes to confirm, or cancel.', 'Sema ndiyo kuthibitisha, au ghairi.')) });
+    return i === 0;
+  }
+  var CA_DONE = {
+    archive: ['Archived the chat with ', 'Nimehifadhi mazungumzo na '], mute: ['Muted ', 'Nimenyamazisha '], unmute: ['Unmuted ', 'Nimerudisha sauti ya '],
+    fav: ['Added to favourites: ', 'Nimeweka kwenye vipendwa: '], unfav: ['Removed from favourites: ', 'Nimeondoa kwenye vipendwa: '], unread: ['Marked as unread: ', 'Nimeweka kama haijasomwa: '],
+    delete: ['Deleted the chat with ', 'Nimefuta mazungumzo na '], block: ['Blocked ', 'Nimemzuia ']
+  };
+  var CA_NOOP = { mute: [' is already muted.', ' tayari amenyamazishwa.'], unmute: [' is not muted.', ' hajanyamazishwa.'], fav: [' is already in your favourites.', ' tayari yupo kwenye vipendwa.'], unfav: [' is not in your favourites.', ' hayupo kwenye vipendwa.'] };
+  async function chatAction(ca) {
+    if (typeof cfg.chatAction !== 'function') { await say('That is not available on this screen yet.', 'Hilo bado halipatikani kwenye skrini hii.'); return; }
+    var list = contacts(); if (!list.length) { await waitConvs(8000); list = contacts(); }
+    var target = null;
+    if (!ca.name) {
+      var act = cfg.MM.getActiveChatId(); target = list.filter(function (x) { return String(x.id) === String(act); })[0];
+      if (!target) { await say('Which chat? Say it with a name, for example: mute Denis.', 'Mazungumzo gani? Sema pamoja na jina, mfano: nyamazisha Denis.'); return; }
+    } else {
+      var f = findMatches(ca.variants, list);
+      if (!f) { await say('I could not find "' + ca.name + '" in your chats. Nothing was changed.', 'Sikumpata "' + ca.name + '" kwenye mazungumzo yako. Hakuna kilichobadilishwa.'); return; }
+      target = await pickOne(f.matches, T('Which ' + ca.name + '?', ca.name + ' yupi?')); if (!target) return;
+    }
+    if (CA_ASK[ca.action] && !(await confirmAction(ca.action, target.name))) { V.audit('messenger.chat_action', { module: 'messenger', outcome: 'cancelled', action: ca.action }); await say('Cancelled. Nothing was changed.', 'Imeghairiwa. Hakuna kilichobadilishwa.'); return; }
+    var res; try { res = await cfg.chatAction(ca.action, target.id); } catch (e) { res = { ok: false, error: e && e.message }; }
+    if (res && res.ok) {
+      V.audit('messenger.chat_action', { module: 'messenger', outcome: res.noop ? 'noop' : 'executed', action: ca.action });
+      if (res.noop && CA_NOOP[ca.action]) { await say(target.name + CA_NOOP[ca.action][0], target.name + CA_NOOP[ca.action][1]); return; }
+      var d = CA_DONE[ca.action]; await say(d[0] + target.name + '.', d[1] + target.name + '.'); return;
+    }
+    V.audit('messenger.chat_action', { module: 'messenger', outcome: 'error', action: ca.action });
+    await say('That did not work' + (res && res.error ? ': ' + res.error : '') + '. Nothing was changed.', 'Haikufanikiwa' + (res && res.error ? ': ' + res.error : '') + '. Hakuna kilichobadilishwa.');
+  }
+
   // Right after the app opens, the chat list may still be loading. Matching a spoken name against an empty list made "open chat with Denis" miss, so wait a few seconds for it.
   function waitConvs(ms) { return new Promise(function (res) { var end = Date.now() + ms; (function poll() { var n = 0; try { n = cfg.MM.getConversations().length; } catch (_) {} if (n || Date.now() > end) return res(); setTimeout(poll, 150); })(); }); }
   async function handle(payload) {
     var probe = payload && payload.mode === 'probe', text = payload.transcript;
     var list = contacts();
+    var ca = (!probe && I.parseChatAction) ? I.parseChatAction(text) : null;   // archive / mute / favourite / unread / delete chat / block: checked first ("mute chat with Denis" must not be read as "chat with Denis")
+    if (ca) {
+      if (busy) { await say('I am still working on your last request.', 'Bado nashughulikia ombi lako la awali.'); return true; }
+      busy = true; try { await chatAction(ca); } finally { busy = false; }
+      return true;
+    }
     var it = I.parseMessengerIntent(text, list) || I.parseOpenChat(text), cmd = it ? null : I.parseComposerCommand(text);
     if (!it && !cmd) return false;
     if (!list.length) { await waitConvs(probe ? 3000 : 8000); list = contacts(); it = I.parseMessengerIntent(text, list) || I.parseOpenChat(text); }
@@ -192,5 +240,5 @@
     });
     return true;
   }
-  root.NecpraVoiceMessenger = { init: init, _handle: handle };
+  root.NecpraVoiceMessenger = { init: init, _handle: handle, _chatAction: chatAction };
 })(typeof window !== 'undefined' ? window : globalThis);

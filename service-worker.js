@@ -24,7 +24,7 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.57.0';
+const SW_VERSION = '19.60.0';
 // FIX: bumped so activate() drops every existing cache immediately on this
 // deploy — anyone with a stale pre-rebuild group.html (or the old, now-
 // deleted group-core-*/group-os-* files, or the misspelled necpra-* icons
@@ -101,10 +101,12 @@ const SW_VERSION = '19.57.0';
 // v120: voice answers questions (Duka counts/customers/sales, friend requests, unread messages, groups, status) and asks the module that owns the topic; duka.html + voice scripts changed.
 // v121: voice understands slightly misheard/plural/glued place words ("walet", "statuses", "dukasmart"), "is there a friend request" is answered by the screen instead of the how-to guide, and a command that was not understood retries the other language (English<->Kiswahili) once; engine/intents/knowledge changed.
 // v122: voice "understand anything": free in-app NLU (js/voice/necpra-voice-nlu.js: many wordings EN/SW/Sheng, asks when unsure) + optional AI fallback (AI picks a known action for any wording; js/voice/necpra-voice-understand.js, shell hook, settings toggle).
+// v127: Groups by voice (info, pinned, media, add member, leave) and Status (my status, who viewed it): voice groups + status + shell + guide.
+// v126: Messenger chat actions by voice (archive / mute / favourite / mark unread / delete chat / block): message.html, voice intents + messenger + shell + guide.
 // v125: Admin voice commands (necpra-voice-admin.js, admin.html, voice shell + guide) and Voice phrases screen ported into the Admin module (admin-module.js).
 // v124: Admin entry moved from the chat header into Settings (chat.html + settings.html).
 // v123: voice phase 2 (Messenger, Groups, Status, Settings, Games understood in-app) + admin-taught phrases (Tool > Admin > Voice phrases, synced to every user).
-const CACHE_NAME = 'necpra-static-v125';
+const CACHE_NAME = 'necpra-static-v128';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [

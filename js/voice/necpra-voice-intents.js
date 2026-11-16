@@ -89,6 +89,38 @@
     return null;
   }
 
+  /* Chat-list actions on ONE conversation: archive, mute / unmute, favourite / unfavourite, mark unread, delete chat, block.
+   * name = '' means "the chat that is open" ("mute this chat", "block him"). Only the exact wording below is claimed; anything else returns null,
+   * so game words ("block puzzle"), settings ("mute notifications") and group requests ("mute the Family group") stay with their own handlers. */
+  var CA_REJECT = /^(?:puzzle|blocks?|game|games|tetris|notifications?|sounds?|the sound|read receipts?|everything|all|all chats|chats|messages|my status|status|statuses|sauti|arifa|zote|mchezo|michezo)\b|\b(?:groups?|kikundi|vikundi)\b/i;
+  function chatTail(x) {
+    x = clean(x).replace(/^(?:(?:the|my|this|that|a)\s+)?(?:chat|conversation|mazungumzo)\b\s*(?:with|na|ya|za|kwa|from|of)?\s*/i, '').replace(/^(?:with|na|ya|za|kwa|from|of)\s+/i, '');
+    x = cleanName(x.replace(/(?:'s|’s)?\s+(?:chat|conversation|mazungumzo)$/i, ''));
+    if (!x || /^(?:this|that|it|him|her|them|this one|hii|huyu|huyo|hiyo|yeye)$/i.test(x)) return '';
+    return x;
+  }
+  function parseChatAction(input) {
+    var s = clean(input).replace(/[.!?,]+$/, ''), m, action = null, rest = null;
+    s = s.replace(LEAD2, '').replace(LEAD2, '');
+    var FAV = '(?:favou?rites?|favs?|vipendwa|kipendwa)';
+    if ((m = new RegExp('^(?:remove|ondoa|toa)\\s+(.+?)\\s+(?:from|kwenye|katika|kutoka)\\s+(?:my\\s+|the\\s+)?' + FAV + '$', 'i').exec(s))) { action = 'unfav'; rest = m[1]; }
+    else if ((m = /^(?:unfavou?rite|un-favou?rite)\s+(.+)$/i.exec(s))) { action = 'unfav'; rest = m[1]; }
+    else if ((m = new RegExp('^(?:add|put|weka)\\s+(.+?)\\s+(?:to|in|into|kwenye|katika|kwa)\\s+(?:my\\s+|the\\s+)?' + FAV + '$', 'i').exec(s))) { action = 'fav'; rest = m[1]; }
+    else if ((m = /^(?:favou?rite|make\s+.+\s+a\s+favou?rite)\s*(.*)$/i.exec(s)) && /^favou?rite/i.test(s)) { action = 'fav'; rest = m[1]; }
+    else if ((m = /^(?:mark|weka alama)\s+(.+?)\s+(?:as\s+|kama\s+)?(?:unread|haijasomwa|haijasomeka)$/i.exec(s)) || (m = /^weka\s+(.+?)\s+kama\s+(?:haijasomwa|haijasomeka)$/i.exec(s))) { action = 'unread'; rest = m[1]; }
+    else if ((m = /^(?:delete|remove|futa)\s+((?:the\s+|my\s+|this\s+)?(?:chat|conversation|mazungumzo)\b.*)$/i.exec(s))) { action = 'delete'; rest = m[1]; }
+    else if ((m = /^(?:unmute|un-mute|rudisha sauti ya|washa arifa (?:za|ya|kwa))\s+(.+)$/i.exec(s))) { action = 'unmute'; rest = m[1]; }
+    else if ((m = /^(?:mute|silence|nyamazisha|zima arifa (?:za|ya|kwa))\s+(.+)$/i.exec(s))) { action = 'mute'; rest = m[1]; }
+    else if ((m = /^archive\s+(.+)$/i.exec(s)) || (m = /^hifadhi\s+((?:mazungumzo)\b.*)$/i.exec(s))) { action = 'archive'; rest = m[1]; }
+    else if ((m = /^(?:block|zuia)\s+(?:the\s+)?(?:user\s+|contact\s+|mtumiaji\s+)?(.+)$/i.exec(s))) { action = 'block'; rest = m[1]; }
+    if (!action || rest == null) return null;
+    rest = clean(rest); if (CA_REJECT.test(rest)) return null;
+    var name = chatTail(rest);
+    if (name && name.split(' ').filter(Boolean).length > 4) return null;
+    if (!name && action !== 'unfav' && !/\b(?:this|that|him|her|them|it|hii|huyu|huyo|chat|conversation|mazungumzo)\b/i.test(rest) && rest) return null;   // "mute <something unclear>" is not a chat
+    return { type: 'chat-action', action: action, name: name, variants: name ? nameVariants(name) : [] };
+  }
+
   function parseMessengerIntent(input, contacts) {
     var s = clean(input).replace(/[.!?]+$/, ''), m; s = s.replace(LEAD, '').replace(LEAD, '');
     // A QUESTION about unread messages ("do I have new messages", "how many unread chats", "kuna ujumbe mpya") is answered, not treated as a command.
@@ -195,6 +227,6 @@
     if (/\b(status|statuses|stories|moments|hali)\b/.test(n)) return 'status';
     return null;
   }
-  var api = { topicOf: topicOf, normalizeUtterance: normalizeUtterance, parseOpenChat: parseOpenChat, parseComposerCommand: parseComposerCommand, nameVariants: nameVariants, isSaleStatement: isSaleStatement, norm: norm, matchContacts: matchContacts, splitRecipient: splitRecipient, parseMessengerIntent: parseMessengerIntent, parseNav: parseNav, parseChoice: parseChoice, parseConfirmAnswer: parseConfirmAnswer, toSecondPerson: toSecondPerson, PAGE_LABEL: LABEL };
+  var api = { topicOf: topicOf, normalizeUtterance: normalizeUtterance, parseOpenChat: parseOpenChat, parseComposerCommand: parseComposerCommand, parseChatAction: parseChatAction, nameVariants: nameVariants, isSaleStatement: isSaleStatement, norm: norm, matchContacts: matchContacts, splitRecipient: splitRecipient, parseMessengerIntent: parseMessengerIntent, parseNav: parseNav, parseChoice: parseChoice, parseConfirmAnswer: parseConfirmAnswer, toSecondPerson: toSecondPerson, PAGE_LABEL: LABEL };
   root.NecpraVoiceIntents = api; if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

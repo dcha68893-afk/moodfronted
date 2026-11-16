@@ -62,6 +62,21 @@
       V.audit('voice.nav', { module: 'shell', outcome: 'executed', lang: result.lang });
       return forward('messages', result);
     }
+    // Chat-list actions by voice from ANY screen when a person is NAMED ("archive chat with Denis", "mute Denis", "block Denis"): go to Messenger and hand the words
+    // over. Messenger asks for confirmation before archive / delete / block. Checked before Settings so "zima arifa za <name>" is never read as a setting.
+    var cact = I.parseChatAction ? I.parseChatAction(text) : null;
+    if (cact && cact.name && cfg.allowedPages.indexOf('messages') >= 0) {
+      if (cfg.getPage() !== 'messages') cfg.navigate('messages');
+      V.audit('voice.nav', { module: 'shell', outcome: 'executed', lang: result.lang });
+      return forward('messages', result);
+    }
+    // Leaving / adding someone to a NAMED group from any screen ("leave the Family group", "add Denis to the Family group"): go to Groups and hand the words over.
+    // Groups asks for a spoken yes first (and leaving also shows the app's own prompt).
+    if (cfg.allowedPages.indexOf('group') >= 0 && /^(?:please\s+|tafadhali\s+)?(?:(?:leave|ondoka kwenye|toka kwenye)\s+(?:the\s+)?.+?\s+(?:group|kikundi)|(?:add|ongeza)\s+.+?\s+(?:to|in|into|kwenye|kwa)\s+(?:the\s+)?.+?\s+(?:group|kikundi))$/i.test(clean(text)) && !/\bas a friend\b/i.test(text)) {
+      if (cfg.getPage() !== 'group') cfg.navigate('group');
+      V.audit('voice.nav', { module: 'shell', outcome: 'executed', lang: result.lang });
+      return forward('group', result);
+    }
     // Settings by voice from ANY screen: "open privacy settings", "turn off read receipts", "dark mode". Runs before parseNav, which would only open
     // the bare Settings page (or Messenger for "chat settings") and lose the request.
     if (cfg.allowedPages.indexOf('settings') >= 0 && (/^(?:please\s+|tafadhali\s+)?(?:open|go to|show|take me to|fungua|nenda kwa|nipeleke|nionyeshe)\s+(?:the\s+|my\s+)?(?:(?:profile|security|privacy|notifications?|appearance|storage|backup|advanced|danger)(?:\s+settings?)?|(?:chat|friends?|groups?|status|mood)\s+settings?|mipangilio ya .+)$/i.test(clean(text)) ||
