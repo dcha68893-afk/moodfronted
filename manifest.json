@@ -2,7 +2,7 @@
   "id": "/",
   "name": "Necpra",
   "short_name": "Necpra",
-  "description": "Necpra is a messaging and social platform for chats, friends, accommodation and marketplace services.",
+  "description": "Necpra is a private messaging and social app with friends, groups, Duka Smart for shops, accommodation and Necpra Money.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -27,7 +27,8 @@
   "categories": [
     "social",
     "communication",
-    "shopping"
+    "business",
+    "finance"
   ],
   "prefer_related_applications": false,
   "related_applications": [],

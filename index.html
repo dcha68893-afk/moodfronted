@@ -3,16 +3,16 @@
 <head>
 <script>
     (function(){try{var raw=localStorage.getItem("kynecta_auth"),a=raw?JSON.parse(raw):null,t=a&&a.token,v=false;if(t&&t.split(".").length===3){var p=t.split(".")[1].replace(/-/g,"+").replace(/_/g,"/"),x=JSON.parse(atob(p+"=".repeat((4-p.length%4)%4)));v=!x.exp||x.exp*1000>Date.now()}/* FIX (WEBSITE SKIPPED, APP OPENED DIRECTLY): the auto-launch below used to run for EVERY visit, including a plain browser tab, so
-       anyone who had ever logged in on that browser never saw the landing page (Install / Login / Sign up). The app-first launch now only
-       happens when the site is running as an installed app (home-screen PWA, Android app / TWA, Capacitor). In a normal browser tab the
+       anyone who had ever logged in on that browser never saw the landing page (Install / Login / Sign up). UPDATE: returning users now skip landing+login in the browser too. Previously the app-first launch only
+       happened when the site is running as an installed app (home-screen PWA, Android app / TWA, Capacitor). In a normal browser tab the
        landing page always shows; "Open app" / Login take a signed-in user into the app. */
     var inst=false;try{inst=(window.matchMedia&&(window.matchMedia("(display-mode: standalone)").matches||window.matchMedia("(display-mode: fullscreen)").matches||window.matchMedia("(display-mode: minimal-ui)").matches))||window.navigator.standalone===true||(document.referrer||"").indexOf("android-app://")===0||!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform())||/[?&]app=1(&|$)/.test(location.search)}catch(_){}
-    if(inst&&v&&a.user)document.documentElement.setAttribute("data-necpa-session","active");
+    if(v&&a.user)document.documentElement.setAttribute("data-necpa-session","active");
     /* WhatsApp-style launch: a returning user (saved token + user) goes straight to the app.
        Done here, before first paint, so the landing/login page never flashes. An expired
        access token is refreshed (or the user sent to login with ?reason=) inside chat.html.
        Login is only shown after logout, session invalidation (?reason=) or for new users. */
-    if(inst&&a&&a.user&&t&&!/[?&](reason|logout|force)=/.test(location.search)&&window.top===window.self){
+    if(a&&a.user&&t&&!/[?&](reason|logout|force)=/.test(location.search)&&window.top===window.self){
         document.documentElement.style.visibility="hidden";
         location.replace("chat.html");
     }
@@ -108,11 +108,11 @@
     <link rel="apple-touch-icon" href="icons/necpra-192.png">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Necpra - Messaging, Friends, Accommodation & Marketplace | Official Android App</title>
+    <title>Necpra - Messaging, Duka Smart, Accommodation &amp; Money | Official Android App</title>
 
     <!-- SEO: description + canonical -->
-    <meta name="description" content="Necpra is a messaging and social platform for private chats, group conversations, friends, Status and Vibes, games, accommodation discovery, and marketplace services. Explore Necpra online or download the official Android app.">
-    <meta name="keywords" content="Necpra app, Necpra, messaging app, group chat, friends, Status, Vibes, games, accommodation, marketplace, Android app">
+    <meta name="description" content="Necpra is a private messaging and social app with friends, groups, Status, games, Duka Smart for shop owners, accommodation listings and Necpra Money. Use it on Android or in your browser.">
+    <meta name="keywords" content="Necpra, messaging app, group chat, friends, Duka Smart, shop management, POS, accommodation, rentals Kenya, Necpra Money, M-PESA wallet, Android app">
     <meta name="referrer" content="strict-origin-when-cross-origin">
     <link rel="canonical" href="https://necpra.co.ke/">
     <meta name="robots" content="index, follow">
@@ -120,65 +120,131 @@
     <!-- Open Graph (Facebook, WhatsApp link previews, etc.) -->
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="Necpra">
-    <meta property="og:title" content="Necpra - Messaging, Friends, Accommodation & Marketplace | Official Android App">
-    <meta property="og:description" content="One app for messaging, friends, accommodation and marketplace. Fast, private, and free.">
+    <meta property="og:title" content="Necpra - Messaging, Duka Smart, Accommodation &amp; Money">
+    <meta property="og:description" content="Private messaging, Duka Smart for your shop, accommodation and Necpra Money in one fast app.">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Necpra: messaging, Duka Smart, accommodation and money in one app">
     <meta property="og:url" content="https://necpra.co.ke/">
-    <meta property="og:image" content="https://necpra.co.ke/icons/necpra-512.png">
+    <meta property="og:image" content="https://necpra.co.ke/icons/necpra-og.png">
 
     <!-- Twitter / X card -->
-    <meta name="twitter:card" content="summary">
-    <meta name="twitter:title" content="Necpra - Messaging, Friends, Accommodation & Marketplace">
-    <meta name="twitter:description" content="One app for messaging, friends, accommodation and marketplace.">
-    <meta name="twitter:image" content="https://necpra.co.ke/icons/necpra-512.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Necpra - Messaging, Duka Smart, Accommodation &amp; Money">
+    <meta name="twitter:description" content="Private messaging, Duka Smart for your shop, accommodation and Necpra Money in one fast app.">
+    <meta name="twitter:image" content="https://necpra.co.ke/icons/necpra-og.png">
 
     <!-- Search identity: keep Necpra as one consistent, machine-readable brand. -->
     <meta name="application-name" content="Necpra">
     <meta name="author" content="Necpra">
 
     <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
     {
-      "@context": "https://schema.org",
-      "@graph": [
+      "@type": [
+        "Organization",
+        "Brand"
+      ],
+      "@id": "https://necpra.co.ke/#organization",
+      "name": "Necpra",
+      "url": "https://necpra.co.ke/",
+      "logo": "https://necpra.co.ke/icons/necpra-512.png",
+      "email": "support@necpra.co.ke",
+      "description": "Necpra is a social and messaging platform with private chats, groups, friends, Status, games, Duka Smart for shop owners, accommodation listings and Necpra Money."
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://necpra.co.ke/#website",
+      "name": "Necpra",
+      "url": "https://necpra.co.ke/",
+      "publisher": {
+        "@id": "https://necpra.co.ke/#organization"
+      },
+      "inLanguage": "en"
+    },
+    {
+      "@type": [
+        "WebApplication",
+        "SoftwareApplication"
+      ],
+      "@id": "https://necpra.co.ke/#app",
+      "name": "Necpra",
+      "url": "https://necpra.co.ke/",
+      "downloadUrl": "https://necpra.co.ke/download/",
+      "description": "Necpra is a private messaging and social app with friends, groups, Status, games, Duka Smart for shop owners, accommodation listings and Necpra Money. Available on Android and the web.",
+      "applicationCategory": "SocialNetworkingApplication",
+      "operatingSystem": [
+        "Web",
+        "Android"
+      ],
+      "image": "https://necpra.co.ke/icons/necpra-og.png",
+      "brand": {
+        "@id": "https://necpra.co.ke/#organization"
+      },
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      }
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://necpra.co.ke/#faq",
+      "mainEntity": [
         {
-          "@type": ["Organization", "Brand"],
-          "@id": "https://necpra.co.ke/#organization",
-          "name": "Necpra",
-          "url": "https://necpra.co.ke/",
-          "logo": "https://necpra.co.ke/icons/necpra-512.png",
-          "description": "Necpra is a social and messaging platform for private communication, group conversations, friends, Status and Vibes, games, accommodation discovery and marketplace services.",
-          "email": "support@necpra.co.ke"
+          "@type": "Question",
+          "name": "Is Necpra free to use?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. Messaging, friends and groups are free. Some services, such as payments, may have their own fees, which are shown before you confirm."
+          }
         },
         {
-          "@type": ["WebSite"],
-          "@id": "https://necpra.co.ke/#website",
-          "name": "Necpra",
-          "url": "https://necpra.co.ke/",
-          "publisher": {
-            "@id": "https://necpra.co.ke/#organization"
-          },
-          "inLanguage": "en"
+          "@type": "Question",
+          "name": "Where can I use Necpra?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "On Android through the official app, and on any phone or computer in your browser. You can also install the web app from the Necpra home page."
+          }
         },
         {
-          "@type": ["WebApplication", "SoftwareApplication"],
-          "@id": "https://necpra.co.ke/#app",
-          "name": "Necpra",
-          "url": "https://necpra.co.ke/",
-          "downloadUrl": "https://necpra.co.ke/download/",
-          "description": "Necpra is a messaging and social platform for private chats, group conversations, friends, Status and Vibes, games, accommodation discovery and marketplace services. The official Android app can be downloaded from https://necpra.co.ke/download/.",
-          "applicationCategory": "SocialNetworkingApplication",
-          "operatingSystem": ["Web", "Android"],
-          "image": "https://necpra.co.ke/icons/necpra-512.png",
-          "brand": {
-            "@id": "https://necpra.co.ke/#organization"
-          },
-          "offers": {
-            "@type": "Offer",
-            "price": "0",
-            "priceCurrency": "USD"
+          "@type": "Question",
+          "name": "Are my chats private?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "One-to-one chats are end-to-end encrypted, so only you and the other person can read them."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Do I need a separate account for Duka Smart?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "No. Log in to Necpra, open Duka Smart and manage your shop with the same account."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How do I pay or top up?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Use Necpra Money. You can top up with M-PESA, buy airtime and data, and send or request payments. A payment is only marked as paid once it is confirmed."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Can I use Necpra with a weak connection?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. Necpra is built to keep working on slow or unstable networks and syncs when you are back online."
           }
         }
       ]
     }
+  ]
+}
     </script>
 
     <link rel="stylesheet" href="/css/vendor/font-awesome.min.css">
@@ -1977,7 +2043,7 @@
         .lp-ac-price { font-size: 0.55rem; color: #059669; font-weight: 700; padding: 1px 7px 5px; }
         .lp-ac-btn { margin: 0 7px 7px; text-align: center; font-size: 0.52rem; font-weight: 700; padding: 5px 4px; border-radius: 8px; background: #667eea; color: #fff; }
 
-        /* -- marketplace mini-screen -- */
+        /* -- (legacy mini-screen styles, unused) -- */
         .lp-market-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
         .lp-market-card { display: flex; flex-direction: column; gap: 4px; }
         .lp-market-thumb { height: 34px; border-radius: 8px; animation: lpMarketRotate 6s ease-in-out infinite; }
@@ -2407,262 +2473,329 @@
     </style>
 
     <style>.necpra-native-auth-pending #landingScreen,.necpra-native-auth-pending #authPanel{visibility:hidden}</style>
+<style id="necpraLandingStyles">
+#landingScreen.landing-screen{--nl-bg:#f6f8fc;--nl-surface:#fff;--nl-surface2:#eef2fb;--nl-text:#0f172a;--nl-muted:#475569;--nl-line:#e2e8f0;--nl-brand:#1a73e8;--nl-brand2:#5b3cc4;--nl-ok:#16a34a;--nl-shadow:0 10px 30px rgba(15,23,42,.08);background:var(--nl-bg);color:var(--nl-text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;line-height:1.55}
+html[data-theme="dark"] #landingScreen.landing-screen{--nl-bg:#0b1020;--nl-surface:#141b30;--nl-surface2:#1a2340;--nl-text:#e8ecf6;--nl-muted:#a3aec7;--nl-line:#263055;--nl-brand:#6ea8ff;--nl-brand2:#9b8cff;--nl-shadow:0 10px 30px rgba(0,0,0,.4)}
+@media (prefers-color-scheme:dark){html:not([data-theme="light"]) #landingScreen.landing-screen{--nl-bg:#0b1020;--nl-surface:#141b30;--nl-surface2:#1a2340;--nl-text:#e8ecf6;--nl-muted:#a3aec7;--nl-line:#263055;--nl-brand:#6ea8ff;--nl-brand2:#9b8cff;--nl-shadow:0 10px 30px rgba(0,0,0,.4)}}
+#landingScreen *{box-sizing:border-box}
+#landingScreen [hidden]{display:none!important}
+#landingScreen a{color:inherit}
+#landingScreen .nl-wrap{width:100%;max-width:1120px;margin:0 auto;padding:0 20px}
+#landingScreen .nl-top{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--nl-bg) 88%,transparent);backdrop-filter:saturate(1.4) blur(10px);-webkit-backdrop-filter:saturate(1.4) blur(10px);border-bottom:1px solid var(--nl-line);padding-top:env(safe-area-inset-top)}
+#landingScreen .nl-top .nl-wrap{display:flex;align-items:center;justify-content:space-between;height:60px;gap:12px}
+#landingScreen .nl-brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:1.15rem;text-decoration:none;letter-spacing:-.01em}
+#landingScreen .nl-brand img{width:34px;height:34px;border-radius:9px}
+#landingScreen .nl-nav{display:none;gap:22px}
+#landingScreen .nl-nav a{text-decoration:none;color:var(--nl-muted);font-weight:600;font-size:.92rem}
+#landingScreen .nl-nav a:hover{color:var(--nl-text)}
+#landingScreen .nl-actions{display:flex;gap:8px;align-items:center}
+#landingScreen .nl-btn{appearance:none;border:1px solid transparent;border-radius:12px;padding:11px 18px;font:inherit;font-weight:700;font-size:.95rem;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;line-height:1.2;transition:transform .15s,box-shadow .15s,background .15s}
+#landingScreen .nl-btn:active{transform:scale(.98)}
+#landingScreen .nl-btn:focus-visible,#landingScreen summary:focus-visible,#landingScreen a:focus-visible{outline:3px solid color-mix(in srgb,var(--nl-brand) 55%,transparent);outline-offset:2px}
+#landingScreen .nl-btn-primary{background:linear-gradient(135deg,#1a73e8,#5b3cc4);color:#fff;box-shadow:0 6px 18px rgba(26,115,232,.3)}
+#landingScreen .nl-btn-primary:hover{box-shadow:0 8px 22px rgba(26,115,232,.4)}
+#landingScreen .nl-btn-ghost{background:var(--nl-surface);color:var(--nl-text);border-color:var(--nl-line)}
+#landingScreen .nl-btn-ghost:hover{background:var(--nl-surface2)}
+#landingScreen .nl-btn-sm{padding:8px 14px;font-size:.88rem;border-radius:10px}
+#landingScreen .nl-hero{padding:44px 0 36px}
+#landingScreen .nl-hero-grid{display:grid;gap:36px;align-items:center}
+#landingScreen .nl-eyebrow{display:inline-flex;align-items:center;gap:8px;background:var(--nl-surface2);border:1px solid var(--nl-line);color:var(--nl-brand);font-weight:700;font-size:.8rem;padding:6px 12px;border-radius:999px;margin-bottom:16px}
+#landingScreen h1{font-size:clamp(2rem,6vw,3.3rem);line-height:1.1;letter-spacing:-.025em;margin:0 0 16px;font-weight:800}
+#landingScreen h1 span{background:linear-gradient(135deg,var(--nl-brand),var(--nl-brand2));-webkit-background-clip:text;background-clip:text;color:transparent}
+#landingScreen .nl-lead{font-size:1.08rem;color:var(--nl-muted);margin:0 0 24px;max-width:34em}
+#landingScreen .nl-cta{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px}
+#landingScreen .nl-cta .nl-btn{flex:1 1 150px}
+#landingScreen .nl-cta-2{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:10px}
+#landingScreen .nl-cta-2 .nl-btn{flex:1 1 190px}
+#landingScreen .pwa-status{display:flex;flex-wrap:wrap;gap:8px;align-items:center;width:100%;font-size:.85rem;color:var(--nl-muted)}
+#landingScreen .pwa-status-badge{color:var(--nl-ok);font-weight:700}
+#landingScreen .pwa-status-btn{border:1px solid var(--nl-line);background:var(--nl-surface);color:var(--nl-text);border-radius:8px;padding:6px 10px;font:inherit;font-size:.82rem;cursor:pointer}
+#landingScreen .pwa-install-hint{font-size:.85rem;color:var(--nl-muted);margin:6px 0 0;width:100%}
+#landingScreen .nl-note{font-size:.85rem;color:var(--nl-muted);margin:6px 0 0}
+#landingScreen .nl-note a{color:var(--nl-brand);font-weight:600}
+#landingScreen .nl-trust{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:18px;color:var(--nl-muted);font-size:.88rem;font-weight:600}
+#landingScreen .nl-trust i{color:var(--nl-ok);margin-right:6px}
+#landingScreen .nl-phone-wrap{display:flex;justify-content:center}
+#landingScreen .nl-phone{width:min(290px,78vw);aspect-ratio:9/18.5;border-radius:38px;background:var(--nl-surface);border:8px solid #111827;box-shadow:0 30px 60px rgba(15,23,42,.25);overflow:hidden;display:flex;flex-direction:column;position:relative}
+html[data-theme="dark"] #landingScreen .nl-phone{border-color:#2b3558}
+#landingScreen .nl-phone-bar{background:linear-gradient(135deg,var(--nl-brand),var(--nl-brand2));color:#fff;padding:22px 14px 12px;display:flex;align-items:center;gap:10px;font-weight:700;font-size:.92rem}
+#landingScreen .nl-avatar{width:30px;height:30px;border-radius:50%;background:rgba(255,255,255,.28);display:grid;place-items:center;font-size:.8rem}
+#landingScreen .nl-phone-bar small{display:block;font-weight:500;opacity:.85;font-size:.72rem}
+#landingScreen .nl-chat{flex:1;padding:14px 12px;display:flex;flex-direction:column;gap:9px;background:var(--nl-bg)}
+#landingScreen .nl-msg{max-width:78%;padding:9px 12px;border-radius:16px;font-size:.8rem;line-height:1.35}
+#landingScreen .nl-in{background:var(--nl-surface);border:1px solid var(--nl-line);border-bottom-left-radius:4px;align-self:flex-start}
+#landingScreen .nl-out{background:linear-gradient(135deg,var(--nl-brand),var(--nl-brand2));color:#fff;border-bottom-right-radius:4px;align-self:flex-end}
+#landingScreen .nl-lock{align-self:center;font-size:.68rem;color:var(--nl-muted);background:var(--nl-surface2);padding:4px 10px;border-radius:999px;margin-top:2px}
+#landingScreen .nl-card{align-self:flex-start;background:var(--nl-surface);border:1px solid var(--nl-line);border-radius:14px;padding:10px 12px;font-size:.76rem;width:84%}
+#landingScreen .nl-card b{display:block;font-size:.82rem}
+#landingScreen .nl-card span{color:var(--nl-muted)}
+#landingScreen .nl-tabs{display:flex;justify-content:space-around;padding:10px 6px 12px;border-top:1px solid var(--nl-line);background:var(--nl-surface);color:var(--nl-muted);font-size:1rem}
+#landingScreen .nl-tabs .on{color:var(--nl-brand)}
+#landingScreen section{padding:48px 0;scroll-margin-top:72px}
+#landingScreen .nl-h2{font-size:clamp(1.5rem,4vw,2.2rem);letter-spacing:-.02em;line-height:1.15;margin:0 0 10px;font-weight:800}
+#landingScreen .nl-sub{color:var(--nl-muted);margin:0 0 28px;max-width:40em}
+#landingScreen .nl-grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+#landingScreen .nl-feat{background:var(--nl-surface);border:1px solid var(--nl-line);border-radius:18px;padding:20px;box-shadow:var(--nl-shadow)}
+#landingScreen .nl-ico{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;color:#fff;font-size:1.1rem;margin-bottom:12px;background:linear-gradient(135deg,var(--nl-brand),var(--nl-brand2))}
+#landingScreen .nl-ico.g{background:linear-gradient(135deg,#16a34a,#0d9488)}
+#landingScreen .nl-ico.o{background:linear-gradient(135deg,#f59e0b,#ea580c)}
+#landingScreen .nl-ico.p{background:linear-gradient(135deg,#ec4899,#8b5cf6)}
+#landingScreen .nl-feat h3{margin:0 0 6px;font-size:1.05rem}
+#landingScreen .nl-feat p{margin:0;color:var(--nl-muted);font-size:.93rem}
+#landingScreen .nl-split{display:grid;gap:26px;align-items:center}
+#landingScreen .nl-panel{background:var(--nl-surface);border:1px solid var(--nl-line);border-radius:22px;padding:26px;box-shadow:var(--nl-shadow)}
+#landingScreen .nl-tag{display:inline-block;font-size:.75rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--nl-brand);margin-bottom:8px}
+#landingScreen .nl-list{list-style:none;margin:0 0 18px;padding:0;display:grid;gap:9px}
+#landingScreen .nl-list li{display:flex;gap:10px;align-items:flex-start;color:var(--nl-muted)}
+#landingScreen .nl-list i{color:var(--nl-ok);margin-top:5px;font-size:.85rem}
+#landingScreen .nl-mini{display:grid;gap:10px}
+#landingScreen .nl-row{display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--nl-surface2);border-radius:12px;padding:12px 14px;font-size:.9rem}
+#landingScreen .nl-row b{white-space:nowrap}
+#landingScreen .nl-band{background:var(--nl-surface2);border-top:1px solid var(--nl-line);border-bottom:1px solid var(--nl-line)}
+#landingScreen .nl-faq{display:grid;gap:10px;max-width:780px}
+#landingScreen details{background:var(--nl-surface);border:1px solid var(--nl-line);border-radius:14px;padding:0 16px}
+#landingScreen summary{cursor:pointer;font-weight:700;padding:15px 0;list-style:none;display:flex;justify-content:space-between;gap:12px}
+#landingScreen summary::-webkit-details-marker{display:none}
+#landingScreen summary::after{content:"+";color:var(--nl-brand);font-weight:800}
+#landingScreen details[open] summary::after{content:"\2212"}
+#landingScreen details p{margin:0 0 15px;color:var(--nl-muted)}
+#landingScreen .nl-final{text-align:center;background:linear-gradient(135deg,#1a73e8,#5b3cc4);color:#fff;border-radius:26px;padding:44px 22px;margin:0 auto}
+#landingScreen .nl-final h2{margin:0 0 10px;font-size:clamp(1.5rem,4vw,2.1rem);font-weight:800}
+#landingScreen .nl-final p{margin:0 auto 22px;opacity:.92;max-width:32em}
+#landingScreen .nl-final .nl-btn{background:#fff;color:#1a3fa8}
+#landingScreen .nl-final .nl-btn.nl-btn-outline{background:transparent;color:#fff;border-color:rgba(255,255,255,.6)}
+#landingScreen .nl-final .nl-row-btns{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}
+#landingScreen footer.nl-foot{padding:30px 0 calc(30px + env(safe-area-inset-bottom));border-top:1px solid var(--nl-line);color:var(--nl-muted);font-size:.88rem}
+#landingScreen .nl-foot .nl-wrap{display:flex;flex-wrap:wrap;gap:14px 24px;justify-content:space-between;align-items:center}
+#landingScreen .nl-foot nav{display:flex;flex-wrap:wrap;gap:8px 18px}
+#landingScreen .nl-foot a{text-decoration:none}
+#landingScreen .nl-foot a:hover{color:var(--nl-text);text-decoration:underline}
+@media (min-width:760px){#landingScreen .nl-nav{display:flex}#landingScreen .nl-hero{padding:72px 0 56px}#landingScreen .nl-hero-grid{grid-template-columns:1.15fr .85fr}#landingScreen .nl-split{grid-template-columns:1fr 1fr}#landingScreen .nl-split.rev>:first-child{order:2}#landingScreen section{padding:70px 0}}
+@media (prefers-reduced-motion:reduce){#landingScreen .nl-btn{transition:none}}
+</style>
+
     <div class="landing-screen" id="landingScreen" role="dialog" aria-label="Welcome to Necpra">
-        <button type="button" class="landing-skip" id="landingSkip" aria-label="Skip to login">Skip</button>
         <div class="landing-scroll">
-            <header class="landing-hero">
-                <div class="landing-hero-bg" aria-hidden="true"></div>
-                <div class="landing-hero-inner">
-                    <div class="landing-logo"><i class="fas fa-comments"></i><span>Necpra</span></div>
-
-                    <div class="landing-mockup" aria-hidden="true">
-                        <div class="landing-phone landing-phone-lg">
-                            <div class="landing-phone-notch"></div>
-                            <div class="landing-phone-tabs">
-                                <span class="landing-phone-tab active" data-screen="chat" title="Chat"><i class="fas fa-comment-dots"></i></span>
-                                <span class="landing-phone-tab" data-screen="friends" title="Friends"><i class="fas fa-user-plus"></i></span>
-                                <span class="landing-phone-tab" data-screen="accommodation" title="Accommodation"><i class="fas fa-bed"></i></span>
-                                <span class="landing-phone-tab" data-screen="market" title="Marketplace"><i class="fas fa-store"></i></span>
-                                <span class="landing-phone-tab" data-screen="community" title="Communities"><i class="fas fa-users"></i></span>
-                                <span class="landing-phone-tab" data-screen="wallet" title="Wallet"><i class="fas fa-wallet"></i></span>
-                                <span class="landing-phone-tab" data-screen="status" title="Status"><i class="fas fa-circle-play"></i></span>
-                            </div>
-                            <div class="landing-phone-screens">
-                                <div class="landing-phone-screen active" data-screen="chat">
-                                    <div class="lp-row"><div class="lp-avatar"></div><div class="lp-lines"><span class="lp-line w70"></span><span class="lp-line w40 dim"></span></div></div>
-                                    <div class="lp-bubble other lp-slide-in" style="animation-delay:.15s">Hey, join the group! <i class="fas fa-check-double lp-tick"></i></div>
-                                    <div class="lp-bubble mine lp-slide-in" style="animation-delay:.55s">On my way 🎉</div>
-                                    <div class="lp-bubble other lp-typing lp-slide-in" style="animation-delay:.95s"><span></span><span></span><span></span></div>
-                                </div>
-                                <div class="landing-phone-screen" data-screen="friends">
-                                    <div class="lp-fr-head"><i class="fas fa-user-plus"></i><span>Friend requests</span></div>
-                                    <div class="lp-fr-row"><span class="lp-avatar-chip a"></span><span class="lp-line w60"></span><span class="lp-fr-btn">Accept</span></div>
-                                    <div class="lp-fr-label">Suggested for you</div>
-                                    <div class="lp-fr-row"><span class="lp-avatar-chip b"></span><span class="lp-line w40"></span><span class="lp-fr-btn add">Add</span></div>
-                                    
-                                </div>
-                                <div class="landing-phone-screen" data-screen="accommodation">
-                                    <div class="lp-ac-search"><i class="fas fa-magnifying-glass"></i><span>Rooms near campus</span></div>
-                                    <div class="lp-ac-card">
-                                        <div class="lp-ac-photo"><i class="fas fa-bed"></i></div>
-                                        <div class="lp-ac-title">Browse rooms and rentals</div>
-                                                                                <div class="lp-ac-btn">Check availability &amp; book</div>
-                                    </div>
-                                </div>
-                                <div class="landing-phone-screen" data-screen="market">
-                                    <div class="lp-market-grid">
-                                        <div class="lp-market-card"><div class="lp-market-thumb a"></div><span class="lp-line w60"></span></div>
-                                        <div class="lp-market-card"><div class="lp-market-thumb b"></div><span class="lp-line w60"></span></div>
-                                        <div class="lp-market-card"><div class="lp-market-thumb c"></div><span class="lp-line w60"></span></div>
-                                        <div class="lp-market-card"><div class="lp-market-thumb d"></div><span class="lp-line w60"></span></div>
-                                    </div>
-                                </div>
-                                <div class="landing-phone-screen" data-screen="community">
-                                    <div class="lp-community-header"><i class="fas fa-users"></i><span class="lp-line w60"></span></div>
-                                    <div class="lp-avatar-cluster"><span class="lp-avatar-chip a"></span><span class="lp-avatar-chip b"></span><span class="lp-avatar-chip c"></span></div>
-                                    <div class="lp-bubble other lp-slide-in">Welcome to the group 👋</div>
-                                    
-                                </div>
-                                <div class="landing-phone-screen" data-screen="wallet">
-                                    <div class="lp-fr-head"><i class="fas fa-wallet"></i><span>NECPRA Money</span></div>
-                                    <div class="lp-ac-card"><div class="lp-ac-photo"><i class="fas fa-wallet"></i></div><div class="lp-ac-title">Chamas, contributions &amp; M-Pesa</div><div class="lp-ac-btn">Contribute</div></div>
-                                </div>
-                                <div class="landing-phone-screen" data-screen="status">
-                                    <div class="lp-status-row">
-                                        <span class="lp-status-ring a"><span class="lp-status-avatar"></span></span>
-                                        <span class="lp-status-ring b"><span class="lp-status-avatar"></span></span>
-                                        <span class="lp-status-ring c seen"><span class="lp-status-avatar"></span></span>
-                                    </div>
-                                    <div class="lp-line w70" style="margin:10px auto 4px"></div>
-                                    <div class="lp-status-caption"><i class="fas fa-circle-play"></i> Tap to view status</div>
-                                </div>
-                            </div>
-                        </div>
-                        <p class="landing-mockup-caption" id="landingMockupCaption" aria-live="polite">Chat</p>
-                    </div>
-
-                    <h1 class="landing-headline">One app for Messaging, Friends, Accommodation and Marketplace.</h1>
-                    <p class="landing-subtitle">Necpra brings your chats, friends, places to stay and shopping into one fast, secure app — on any device.</p>
-
-                    <div class="landing-stat-row" aria-label="Necpra by the numbers">
-                        <div class="landing-stat"><span class="landing-stat-num"><i class="fas fa-lock"></i></span><span class="landing-stat-label">End-to-end encrypted</span></div>
-                    </div>
-
-                    <div class="landing-trust-strip" aria-label="Why people trust Necpra">
-                        <span class="landing-trust-pill"><i class="fas fa-lock"></i> End-to-End Encrypted</span>
-                        <span class="landing-trust-pill"><i class="fas fa-shield-alt"></i> Fast &amp; Secure</span>
-                    </div>
-
-                    <div class="landing-badge-row" aria-label="Necpra highlights">
-                        <span class="landing-badge"><i class="fas fa-bolt"></i> Real-time</span>
-                        <span class="landing-badge"><i class="fas fa-users"></i> Communities</span>
-                        <span class="landing-badge"><i class="fas fa-wifi"></i> Offline-Ready</span>
-                        <span class="landing-badge"><i class="fas fa-sync-alt"></i> Cross-Device</span>
-                    </div>
-
-                    <div class="landing-cta-row">
-                        <button type="button" class="btn btn-primary landing-cta" id="landingRegisterBtn">Create Account</button>
-                        <button type="button" class="btn btn-secondary landing-cta" id="landingLoginBtn">Login</button>
-                    </div>
-                    <div class="landing-cta-row landing-cta-row-secondary">
-                        <button type="button" class="landing-ghost-btn" id="landingGoogleBtn"><i class="fab fa-google"></i> Continue with Google</button>
-                        <a class="landing-ghost-btn" id="landingAndroidDownloadBtn" href="/download/" aria-label="Download the official Necpra Android app"><i class="fab fa-android"></i> Download Android App</a>
-                        <button type="button" class="landing-ghost-btn" id="landingInstallBtn"><i class="fas fa-arrow-down"></i> Install Web App</button>
-                        <div class="pwa-status" id="landingPwaStatus" hidden>
-                            <span class="pwa-status-badge"><i class="fas fa-check-circle"></i> Installed</span>
-                            <button type="button" class="pwa-status-btn" id="landingOpenAppBtn"><i class="fas fa-external-link-alt"></i> Open App</button>
-                            <button type="button" class="pwa-status-btn" id="landingCheckUpdateBtn"><i class="fas fa-sync-alt"></i> Check for Updates</button>
-                            <span class="pwa-status-meta" id="landingPwaVersion"></span>
-                            <span class="pwa-status-meta" id="landingPwaOffline"></span>
-                        </div>
-                        <p class="pwa-install-hint" id="landingPwaHint" hidden></p>
-                        <p class="landing-download-note">Android users: <a href="/download/">download the official Necpra APK</a>.</p>
+            <header class="nl-top">
+                <div class="nl-wrap">
+                    <a class="nl-brand" href="/" aria-label="Necpra home"><img src="/icons/necpra-192.png" alt="" width="34" height="34"><span>Necpra</span></a>
+                    <nav class="nl-nav" aria-label="Sections">
+                        <a href="#nl-features">Features</a>
+                        <a href="#nl-duka">Duka Smart</a>
+                        <a href="#nl-stay">Accommodation</a>
+                        <a href="#nl-money">Money</a>
+                        <a href="#nl-faq">FAQ</a>
+                    </nav>
+                    <div class="nl-actions">
+                        <button type="button" class="nl-btn nl-btn-ghost nl-btn-sm" data-nl-go="login">Login</button>
+                        <button type="button" class="nl-btn nl-btn-primary nl-btn-sm" data-nl-go="register">Get started</button>
                     </div>
                 </div>
             </header>
 
-            <section class="landing-showcase" aria-label="What you can do on Necpra">
-
-                <div class="showcase-item reveal">
-                    <div class="showcase-art" aria-hidden="true">
-                        <svg viewBox="0 0 200 160" class="il-messaging">
-                            <rect x="14" y="18" width="120" height="72" rx="18" class="il-bubble il-bubble-a"/>
-                            <circle cx="38" cy="54" r="5" class="il-dot"/><circle cx="58" cy="54" r="5" class="il-dot"/><circle cx="78" cy="54" r="5" class="il-dot"/>
-                            <rect x="66" y="70" width="120" height="60" rx="16" class="il-bubble il-bubble-b"/>
-                            <rect x="82" y="88" width="70" height="8" rx="4" class="il-line"/>
-                            <rect x="82" y="102" width="46" height="8" rx="4" class="il-line"/>
-                            <circle cx="150" cy="34" r="14" class="il-accent-circle"/>
-                            <path d="M145 34l4 4 8-9" class="il-check"/>
-                        </svg>
-                    </div>
-                    <div class="showcase-copy">
-                        <h3>Instant Messaging</h3>
-                        <p>Real-time text, media and reactions that sync the moment you send them — read receipts and typing indicators included.</p>
-                    </div>
-                </div>
-
-                <div class="showcase-item reveal reverse">
-                    <div class="showcase-art" aria-hidden="true">
-                        <svg viewBox="0 0 200 160" class="il-friends">
-                            <circle cx="100" cy="80" r="46" class="il-ring il-ring-pulse"/>
-                            <circle cx="100" cy="80" r="46" class="il-ring"/>
-                            <circle cx="100" cy="68" r="14" class="il-avatar il-avatar-1"/>
-                            <path d="M74 104q26-26 52 0" class="il-arc"/>
-                            <circle cx="42" cy="124" r="12" class="il-avatar il-avatar-2"/>
-                            <circle cx="158" cy="124" r="12" class="il-avatar il-avatar-3"/>
-                        </svg>
-                    </div>
-                    <div class="showcase-copy">
-                        <h3>Friends</h3>
-                        <p>Send and accept friend requests, find people you may know from suggestions, and see who is nearby — all in one place.</p>
-                    </div>
-                </div>
-
-                <div class="showcase-item reveal">
-                    <div class="showcase-art" aria-hidden="true">
-                        <svg viewBox="0 0 200 160" class="il-accommodation">
-                            <path d="M40 84L100 36l60 48" class="il-bag-handle"/>
-                            <rect x="56" y="82" width="88" height="54" rx="6" class="il-tile"/>
-                            <rect x="88" y="104" width="24" height="32" rx="4" class="il-badge"/>
-                            <rect x="126" y="30" width="40" height="24" rx="6" class="il-tag"/>
-                            <circle cx="136" cy="42" r="3" class="il-tag-hole"/>
-                        </svg>
-                    </div>
-                    <div class="showcase-copy">
-                        <h3>Accommodation &amp; Rentals</h3>
-                        <p>Search rooms and rentals by area, check availability and book — or list your own place — without leaving the app.</p>
+            <main>
+                <div class="nl-hero">
+                    <div class="nl-wrap nl-hero-grid">
+                        <div>
+                            <span class="nl-eyebrow"><i class="fas fa-lock"></i> Private by design</span>
+                            <h1>Chat, run your shop, find a place to stay and <span>pay</span> &mdash; in one app.</h1>
+                            <p class="nl-lead">Necpra gives you private messaging, friends and groups, Duka Smart for your business, accommodation listings and Necpra Money. Fast on any phone, and it keeps working when the network drops.</p>
+                            <div class="nl-cta">
+                                <button type="button" class="nl-btn nl-btn-primary" id="landingRegisterBtn">Create free account</button>
+                                <button type="button" class="nl-btn nl-btn-ghost" id="landingLoginBtn">Login</button>
+                            </div>
+                            <div class="nl-cta-2">
+                                <button type="button" class="nl-btn nl-btn-ghost" id="landingGoogleBtn"><i class="fab fa-google"></i> Continue with Google</button>
+                                <a class="nl-btn nl-btn-ghost" id="landingAndroidDownloadBtn" href="/download/" aria-label="Download the official Necpra Android app"><i class="fab fa-android"></i> Download Android app</a>
+                                <button type="button" class="nl-btn nl-btn-ghost" id="landingInstallBtn"><i class="fas fa-arrow-down"></i> Install web app</button>
+                            </div>
+                            <div class="pwa-status" id="landingPwaStatus" hidden>
+                                <span class="pwa-status-badge"><i class="fas fa-check-circle"></i> Installed</span>
+                                <button type="button" class="pwa-status-btn" id="landingOpenAppBtn"><i class="fas fa-external-link-alt"></i> Open app</button>
+                                <button type="button" class="pwa-status-btn" id="landingCheckUpdateBtn"><i class="fas fa-sync-alt"></i> Check for updates</button>
+                                <span class="pwa-status-meta" id="landingPwaVersion"></span>
+                                <span class="pwa-status-meta" id="landingPwaOffline"></span>
+                            </div>
+                            <p class="pwa-install-hint" id="landingPwaHint" hidden></p>
+                            <p class="nl-note">Android users: <a href="/download/">download the official Necpra APK</a>.</p>
+                            <div class="nl-trust" aria-label="Why people trust Necpra">
+                                <span><i class="fas fa-lock"></i>End-to-end encrypted chats</span>
+                                <span><i class="fas fa-bolt"></i>Real-time</span>
+                                <span><i class="fas fa-wifi"></i>Offline-ready</span>
+                            </div>
+                        </div>
+                        <div class="nl-phone-wrap" aria-hidden="true">
+                            <div class="nl-phone">
+                                <div class="nl-phone-bar"><span class="nl-avatar"><i class="fas fa-user"></i></span><span>Amina<small>online</small></span></div>
+                                <div class="nl-chat">
+                                    <span class="nl-lock"><i class="fas fa-lock"></i> Messages are end-to-end encrypted</span>
+                                    <div class="nl-msg nl-in">Are the rooms in Kisumu still available this weekend?</div>
+                                    <div class="nl-msg nl-out">Yes! Two left. I will send you the listing.</div>
+                                    <div class="nl-card"><b>Bedsitter &middot; Milimani</b><span>Available &middot; Book in the app</span></div>
+                                    <div class="nl-msg nl-in">Perfect. I will send the deposit now.</div>
+                                    <div class="nl-msg nl-out">Done. See you Saturday!</div>
+                                </div>
+                                <div class="nl-tabs"><i class="fas fa-comment-dots on"></i><i class="fas fa-user-group"></i><i class="fas fa-store"></i><i class="fas fa-wallet"></i></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
-                <div class="showcase-item reveal reverse">
-                    <div class="showcase-art" aria-hidden="true">
-                        <svg viewBox="0 0 200 160" class="il-groups">
-                            <circle cx="76" cy="60" r="26" class="il-avatar il-avatar-1"/>
-                            <circle cx="124" cy="60" r="26" class="il-avatar il-avatar-2"/>
-                            <circle cx="100" cy="100" r="26" class="il-avatar il-avatar-3"/>
-                            <path d="M60 130q40-26 80 0" class="il-arc"/>
-                        </svg>
+                <section id="nl-features">
+                    <div class="nl-wrap">
+                        <h2 class="nl-h2">Everything you do every day, in one place</h2>
+                        <p class="nl-sub">No more switching between five apps. Start with a chat and go from there.</p>
+                        <div class="nl-grid">
+                            <article class="nl-feat"><div class="nl-ico"><i class="fas fa-comments"></i></div><h3>Private messaging</h3><p>One-to-one chats with end-to-end encryption, replies, reactions, stars and pinned messages.</p></article>
+                            <article class="nl-feat"><div class="nl-ico g"><i class="fas fa-users"></i></div><h3>Groups &amp; communities</h3><p>Group chats for family, chamas, classes and teams, with admin controls.</p></article>
+                            <article class="nl-feat"><div class="nl-ico o"><i class="fas fa-user-plus"></i></div><h3>Friends</h3><p>Find people, send requests and see who is online.</p></article>
+                            <article class="nl-feat"><div class="nl-ico p"><i class="fas fa-circle-play"></i></div><h3>Status &amp; Vibes</h3><p>Share moments with friends and reply straight into a private chat.</p></article>
+                            <article class="nl-feat"><div class="nl-ico"><i class="fas fa-gamepad"></i></div><h3>Games</h3><p>Chess, trivia, word puzzles and more in the Necpra Arcade.</p></article>
+                            <article class="nl-feat"><div class="nl-ico g"><i class="fas fa-wifi"></i></div><h3>Works on weak networks</h3><p>Install it as an app, keep reading your chats offline and sync when you are back online.</p></article>
+                        </div>
                     </div>
-                    <div class="showcase-copy">
-                        <h3>Groups &amp; Communities</h3>
-                        <p>Organize the people who matter into groups, or grow a whole community with roles, invites and shared spaces.</p>
+                </section>
+
+                <section id="nl-duka" class="nl-band">
+                    <div class="nl-wrap nl-split">
+                        <div>
+                            <span class="nl-tag">Duka Smart</span>
+                            <h2 class="nl-h2">Run your shop from your phone</h2>
+                            <p class="nl-sub">Duka Smart is the business tool built into Necpra. Log in with your normal account, open Duka Smart and manage your shop. There is no separate sign-up.</p>
+                            <ul class="nl-list">
+                                <li><i class="fas fa-check-circle"></i><span>Products and stock, including barcode scanning</span></li>
+                                <li><i class="fas fa-check-circle"></i><span>Point of sale for fast, accurate sales</span></li>
+                                <li><i class="fas fa-check-circle"></i><span>Expenses, suppliers, debts and customer credit</span></li>
+                                <li><i class="fas fa-check-circle"></i><span>Keep selling offline and sync later</span></li>
+                            </ul>
+                            <a class="nl-btn nl-btn-ghost" href="/features/duka/">Learn about Duka Smart</a>
+                        </div>
+                        <div class="nl-panel" aria-hidden="true">
+                            <div class="nl-mini">
+                                <div class="nl-row"><span><i class="fas fa-receipt"></i>&nbsp; Sale #1042</span><b>KSh 1,250</b></div>
+                                <div class="nl-row"><span><i class="fas fa-box"></i>&nbsp; Low stock: Sugar 2kg</span><b>4 left</b></div>
+                                <div class="nl-row"><span><i class="fas fa-handshake"></i>&nbsp; Customer credit</span><b>KSh 800</b></div>
+                                <div class="nl-row"><span><i class="fas fa-chart-line"></i>&nbsp; Today's sales</span><b>KSh 18,400</b></div>
+                            </div>
+                        </div>
                     </div>
+                </section>
+
+                <section id="nl-stay">
+                    <div class="nl-wrap nl-split rev">
+                        <div class="nl-panel" aria-hidden="true">
+                            <div class="nl-mini">
+                                <div class="nl-row"><span><i class="fas fa-bed"></i>&nbsp; Bedsitter, Milimani</span><b>Available</b></div>
+                                <div class="nl-row"><span><i class="fas fa-house"></i>&nbsp; 2-bedroom, Nyalenda</span><b>Available</b></div>
+                                <div class="nl-row"><span><i class="fas fa-calendar-check"></i>&nbsp; Your booking</span><b>Sat &ndash; Sun</b></div>
+                            </div>
+                        </div>
+                        <div>
+                            <span class="nl-tag">Accommodation</span>
+                            <h2 class="nl-h2">Find a place to stay, or list yours</h2>
+                            <p class="nl-sub">Browse rooms and rentals by region, check availability and book. Owners can publish listings and manage bookings from the same app.</p>
+                            <ul class="nl-list">
+                                <li><i class="fas fa-check-circle"></i><span>Search by region and drill down to the area</span></li>
+                                <li><i class="fas fa-check-circle"></i><span>See availability before you book</span></li>
+                                <li><i class="fas fa-check-circle"></i><span>Book and follow your bookings in the app</span></li>
+                            </ul>
+                            <a class="nl-btn nl-btn-ghost" href="/features/accommodation/">Learn about Accommodation</a>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="nl-money" class="nl-band">
+                    <div class="nl-wrap nl-split">
+                        <div>
+                            <span class="nl-tag">Necpra Money</span>
+                            <h2 class="nl-h2">Your wallet, savings and group money</h2>
+                            <p class="nl-sub">Top up with M-PESA, buy airtime and data, ask someone to pay you and run money circles for your chama or family.</p>
+                            <ul class="nl-list">
+                                <li><i class="fas fa-check-circle"></i><span>Wallet top-up and withdrawal with M-PESA</span></li>
+                                <li><i class="fas fa-check-circle"></i><span>Airtime and data bundles</span></li>
+                                <li><i class="fas fa-check-circle"></i><span>Savings goals and money circles</span></li>
+                                <li><i class="fas fa-check-circle"></i><span>Payment requests with a clear record of activity</span></li>
+                            </ul>
+                            <a class="nl-btn nl-btn-ghost" href="/features/money/">Learn about Necpra Money</a>
+                        </div>
+                        <div class="nl-panel" aria-hidden="true">
+                            <div class="nl-mini">
+                                <div class="nl-row"><span><i class="fas fa-wallet"></i>&nbsp; Wallet</span><b>KSh 4,500</b></div>
+                                <div class="nl-row"><span><i class="fas fa-mobile-screen"></i>&nbsp; Airtime &amp; Data</span><b>M-PESA</b></div>
+                                <div class="nl-row"><span><i class="fas fa-piggy-bank"></i>&nbsp; Savings goal</span><b>62%</b></div>
+                                <div class="nl-row"><span><i class="fas fa-people-group"></i>&nbsp; Chama circle</span><b>12 members</b></div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="nl-security">
+                    <div class="nl-wrap">
+                        <h2 class="nl-h2">Built to keep your conversations yours</h2>
+                        <p class="nl-sub">Privacy and security are part of how Necpra works, not an add-on.</p>
+                        <div class="nl-grid">
+                            <article class="nl-feat"><div class="nl-ico"><i class="fas fa-lock"></i></div><h3>End-to-end encryption</h3><p>Message content is encrypted on your device and only the people in the chat can read it.</p></article>
+                            <article class="nl-feat"><div class="nl-ico g"><i class="fas fa-shield-halved"></i></div><h3>Secure sign-in</h3><p>Sessions can expire and be revoked, and sensitive wallet actions ask for extra confirmation.</p></article>
+                            <article class="nl-feat"><div class="nl-ico o"><i class="fas fa-user-lock"></i></div><h3>You stay in control</h3><p>Report abusive messages, and read exactly how we handle data in our <a href="/legal/privacy.html">Privacy Policy</a>.</p></article>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="nl-faq" class="nl-band">
+                    <div class="nl-wrap">
+                        <h2 class="nl-h2">Frequently asked questions</h2>
+                        <p class="nl-sub">Short answers to what people ask us most.</p>
+                        <div class="nl-faq">
+                            <details><summary>Is Necpra free to use?</summary><p>Yes. Messaging, friends and groups are free. Some services, such as payments, may have their own fees, which are shown before you confirm.</p></details>
+                            <details><summary>Where can I use Necpra?</summary><p>On Android through the official app, and on any phone or computer in your browser. You can also install the web app from this page.</p></details>
+                            <details><summary>Are my chats private?</summary><p>One-to-one chats are end-to-end encrypted, so only you and the other person can read them.</p></details>
+                            <details><summary>Do I need a separate account for Duka Smart?</summary><p>No. Log in to Necpra, open Duka Smart and manage your shop with the same account.</p></details>
+                            <details><summary>How do I pay or top up?</summary><p>Use Necpra Money. You can top up with M-PESA, buy airtime and data, and send or request payments. A payment is only marked as paid once it is confirmed.</p></details>
+                            <details><summary>Can I use it with a weak connection?</summary><p>Yes. Necpra is built to keep working on slow or unstable networks and syncs when you are back online.</p></details>
+                        </div>
+                    </div>
+                </section>
+
+                <section>
+                    <div class="nl-wrap">
+                        <div class="nl-final">
+                            <h2>Ready to try Necpra?</h2>
+                            <p>Create your free account in a minute, or download the Android app.</p>
+                            <div class="nl-row-btns">
+                                <button type="button" class="nl-btn" data-nl-go="register">Create free account</button>
+                                <a class="nl-btn nl-btn-outline" href="/download/"><i class="fab fa-android"></i> Get the Android app</a>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </main>
+
+            <footer class="nl-foot">
+                <div class="nl-wrap">
+                    <span>&copy; <span id="landingYear"></span> Necpra</span>
+                    <nav aria-label="Footer">
+                        <a href="/features/">Features</a>
+                        <a href="/about/">About</a>
+                        <a href="/help/">Help</a>
+                        <a href="/contact/">Contact</a>
+                        <a href="/legal/privacy.html">Privacy</a>
+                        <a href="/legal/terms.html">Terms</a>
+                    </nav>
                 </div>
-
-                <div class="showcase-item reveal">
-                    <div class="showcase-art" aria-hidden="true">
-                        <svg viewBox="0 0 200 160" class="il-marketplace">
-                            <path d="M52 56h96l-8 68a10 10 0 01-10 9H70a10 10 0 01-10-9z" class="il-bag"/>
-                            <path d="M76 56v-8a24 24 0 0148 0v8" class="il-bag-handle"/>
-                            <circle cx="100" cy="90" r="4" class="il-dot"/>
-                            <rect x="126" y="30" width="40" height="24" rx="6" class="il-tag"/>
-                            <circle cx="136" cy="42" r="3" class="il-tag-hole"/>
-                        </svg>
-                    </div>
-                    <div class="showcase-copy">
-                        <h3>Marketplace</h3>
-                        <p>Buy, sell and browse listings from people you already trust — without leaving the app you chat in.</p>
-                    </div>
-                </div>
-
-                <div class="showcase-item reveal reverse">
-                    <div class="showcase-art" aria-hidden="true">
-                        <svg viewBox="0 0 200 160" class="il-status">
-                            <circle cx="70" cy="80" r="30" class="il-story-ring"/>
-                            <circle cx="70" cy="80" r="23" class="il-avatar il-avatar-1"/>
-                            <circle cx="130" cy="80" r="30" class="il-story-ring il-story-ring-b"/>
-                            <circle cx="130" cy="80" r="23" class="il-avatar il-avatar-2"/>
-                        </svg>
-                    </div>
-                    <div class="showcase-copy">
-                        <h3>Status &amp; Stories</h3>
-                        <p>Share what's happening in a 24-hour story that friends can react to — no separate app required.</p>
-                    </div>
-                </div>
-
-                <div class="showcase-item reveal">
-                    <div class="showcase-art" aria-hidden="true">
-                        <svg viewBox="0 0 200 160" class="il-security">
-                            <path d="M100 24l52 18v34c0 38-22 62-52 74-30-12-52-36-52-74V42z" class="il-shield"/>
-                            <path d="M78 84l16 16 28-32" class="il-check-big"/>
-                        </svg>
-                    </div>
-                    <div class="showcase-copy">
-                        <h3>Private by Design</h3>
-                        <p>End-to-end encrypted direct messages with forward secrecy, so conversations stay between you and the people in them.</p>
-                    </div>
-                </div>
-
-            </section>
-
-            <section class="landing-more-features" aria-label="More Necpra features">
-                <div class="landing-feature-chip reveal"><i class="fas fa-gamepad"></i><span>Games</span></div>
-                <div class="landing-feature-chip reveal"><i class="fas fa-wifi"></i><span>Offline Support</span></div>
-                <div class="landing-feature-chip reveal"><i class="fas fa-sync-alt"></i><span>Cross-Device Sync</span></div>
-                <div class="landing-feature-chip reveal"><i class="fas fa-bolt"></i><span>Fast Performance</span></div>
-            </section>
-
-            <section class="landing-trust" aria-label="Why people trust Necpra">
-                <div class="landing-trust-item reveal"><i class="fas fa-lock"></i><span>Secure authentication</span></div>
-                <div class="landing-trust-item reveal"><i class="fas fa-cloud"></i><span>Reliable cloud sync</span></div>
-                <div class="landing-trust-item reveal"><i class="fas fa-bolt"></i><span>Fast delivery</span></div>
-                <div class="landing-trust-item reveal"><i class="fas fa-layer-group"></i><span>Cross-platform</span></div>
-                <div class="landing-trust-item reveal"><i class="fas fa-mobile-alt"></i><span>Progressive Web App</span></div>
-                <div class="landing-trust-item reveal"><i class="fas fa-user-shield"></i><span>Private communication</span></div>
-            </section>
-
-            <footer class="landing-footer">
-                <div class="landing-footer-links">
-                    <a href="/legal/privacy.html" class="landing-footer-link">Privacy</a>
-                    <a href="/legal/terms.html" class="landing-footer-link">Terms</a>
-                    <a href="/contact/" class="landing-footer-link">Contact</a>
-                    <a href="/help/" class="landing-footer-link">Help</a>
-                    <a href="/about/" class="landing-footer-link">About</a>
-                </div>
-                <div class="landing-footer-meta">&copy; <span id="landingYear"></span> Necpra</div>
             </footer>
         </div>
     </div>
+    <script>
+    (function(){
+        function go(name){var b=document.getElementById(name==='register'?'landingRegisterBtn':'landingLoginBtn');if(b)b.click();}
+        document.addEventListener('click',function(e){
+            var t=e.target.closest&&e.target.closest('[data-nl-go]');
+            if(t){e.preventDefault();go(t.getAttribute('data-nl-go'));return;}
+            var a=e.target.closest&&e.target.closest('#landingScreen .nl-nav a[href^="#"]');
+            if(a){var el=document.getElementById(a.getAttribute('href').slice(1));if(el){e.preventDefault();el.scrollIntoView({behavior:'smooth',block:'start'});}}
+        });
+    })();
+    </script>
 
 
     <div id="app-container"></div>
@@ -2931,7 +3064,7 @@
                                 <h3>Premium Trial Activated!</h3>
                                 <p>Sign up today for exclusive features</p>
                                 <div class="premium-features">
-                                    <div class="premium-feature"><i class="fas fa-check-circle"></i><span>Priority accommodation &amp; marketplace listings</span></div>
+                                    <div class="premium-feature"><i class="fas fa-check-circle"></i><span>Priority accommodation listings</span></div>
                                     <div class="premium-feature"><i class="fas fa-check-circle"></i><span>AI chat assistant</span></div>
                                     <div class="premium-feature"><i class="fas fa-check-circle"></i><span>Custom themes & backgrounds</span></div>
                                 </div>
@@ -3169,7 +3302,7 @@
                         <div class="mmp-screen-card"><div class="mmp-screen-icon chat"><i class="fas fa-comment-dots"></i></div><span>Chat</span></div>
                         <div class="mmp-screen-card"><div class="mmp-screen-icon friends"><i class="fas fa-user-plus"></i></div><span>Friends</span></div>
                         <div class="mmp-screen-card"><div class="mmp-screen-icon accom"><i class="fas fa-bed"></i></div><span>Accommodation</span></div>
-                        <div class="mmp-screen-card"><div class="mmp-screen-icon market"><i class="fas fa-store"></i></div><span>Marketplace</span></div>
+                        <div class="mmp-screen-card"><div class="mmp-screen-icon market"><i class="fas fa-store"></i></div><span>Duka Smart</span></div>
                         <div class="mmp-screen-card"><div class="mmp-screen-icon community"><i class="fas fa-users"></i></div><span>Communities</span></div>
                         <div class="mmp-screen-card"><div class="mmp-screen-icon status"><i class="fas fa-circle-play"></i></div><span>Status</span></div>
                         <div class="mmp-screen-card"><div class="mmp-screen-icon games"><i class="fas fa-gamepad"></i></div><span>Games</span></div>
@@ -3180,7 +3313,7 @@
                     <h2><i class="fas fa-circle-question"></i> Frequently Asked Questions</h2>
                     <details class="mmp-faq-item">
                         <summary>Is Necpra free to use?</summary>
-                        <p>Yes — messaging, friends, groups and communities are free. Some marketplace and premium tools may have their own pricing.</p>
+                        <p>Yes — messaging, friends, groups and communities are free. Some services, such as payments, may have their own fees.</p>
                     </details>
                     <details class="mmp-faq-item">
                         <summary>Are my messages private?</summary>
@@ -5191,7 +5324,7 @@ document.addEventListener('click',function(e){
   });
 },true);
 
-/* ── FIX #13: Marketplace — image fallback + white screen prevention ── */
+/* ── FIX #13: image fallback (broken images get a neutral placeholder) ── */
 var PLACEHOLDER='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZjBmMGYwIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIiBmb250LXNpemU9IjE0IiBmaWxsPSIjOTk5IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkb21pbmFudC1iYXNlbGluZT0ibWlkZGxlIj5ObyBJbWFnZTwvdGV4dD48L3N2Zz4=';
 new MutationObserver(function(muts){
   muts.forEach(function(m){m.addedNodes.forEach(function(n){
@@ -5203,68 +5336,6 @@ new MutationObserver(function(muts){
     });
   });});
 }).observe(document.body,{childList:true,subtree:true});
-
-// White-screen recovery for marketplace/tools sections
-setTimeout(function(){
-  ['.tools-panel','.marketplace-panel','#marketplace','#tools-page'].forEach(function(sel){
-    var el=document.querySelector(sel);
-    if(!el)return;
-    if(!el.children.length||(el.innerHTML||'').trim()===''){
-      el.innerHTML='<div style="display:flex;flex-direction:column;align-items:center;padding:60px 20px;text-align:center;color:var(--text-secondary)"><i class="fas fa-store" style="font-size:3rem;color:var(--primary-color);margin-bottom:16px"></i><h3 style="margin:0 0 8px;color:var(--text-primary)">Marketplace</h3><p>Loading products…</p></div>';
-    }
-  });
-},3000);
-
-/* ── FIX #14: Cart / checkout pipeline connector ── */
-var _cart=(function(){
-  var KEY='necpa_cart_v1';var items=[];
-  try{items=JSON.parse(localStorage.getItem(KEY)||'[]');}catch(_){}
-  function save(){try{localStorage.setItem(KEY,JSON.stringify(items));}catch(_){}}
-  return{
-    add:function(p){var x=items.find(function(i){return i.id===String(p.id);});
-      if(x){x.qty=(x.qty||1)+1;}else{items.push(Object.assign({},p,{id:String(p.id),qty:1,addedAt:_ts()}));}
-      save();_dispatch('kyn:cart:updated',{count:items.length});},
-    get:function(){return items.slice();},
-    open:function(prod){
-      var list=Array.isArray(prod)?prod:(prod?[prod]:items);
-      if(!list.length)return;
-      var total=list.reduce(function(s,i){return s+((i.price||0)*(i.qty||1));},0);
-      var panel=document.getElementById('__mc_checkout')||document.createElement('div');
-      panel.id='__mc_checkout';
-      panel.style.cssText='position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;justify-content:center';
-      panel.innerHTML='<div style="background:var(--panel-bg,#fff);width:100%;max-width:520px;border-radius:20px 20px 0 0;padding:24px;max-height:85vh;overflow-y:auto">'
-        +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">'
-        +'<h3 style="margin:0;font-size:18px;font-weight:700"><i class="fas fa-shopping-cart" style="color:var(--primary-color);margin-right:8px"></i>Checkout</h3>'
-        +'<button onclick="document.getElementById(\'__mc_checkout\').remove()" style="background:var(--sidebar-bg);border:none;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:16px">✕</button></div>'
-        +'<div>'+list.map(function(i){return'<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border-color)">'
-          +'<div style="display:flex;align-items:center;gap:10px"><img src="'+(i.image||PLACEHOLDER)+'" style="width:46px;height:46px;border-radius:8px;object-fit:cover" onerror="this.src=\''+PLACEHOLDER+'\'">'
-          +'<div><div style="font-weight:600;font-size:14px">'+(i.name||'Product')+'</div><div style="font-size:12px;color:#888">Qty: '+(i.qty||1)+'</div></div></div>'
-          +'<b style="color:var(--primary-color)">$'+((i.price||0)*(i.qty||1)).toFixed(2)+'</b></div>'}).join('')+'</div>'
-        +'<div style="margin:14px 0;padding:12px;background:var(--sidebar-bg);border-radius:10px">'
-        +'<div style="display:flex;justify-content:space-between;font-weight:700;font-size:16px"><span>Total</span><span style="color:var(--primary-color)">$'+total.toFixed(2)+'</span></div></div>'
-        +'<div style="margin-bottom:12px"><label style="font-size:13px;font-weight:600;display:block;margin-bottom:4px">Delivery Address</label>'
-        +'<input type="text" placeholder="Enter address" style="width:100%;box-sizing:border-box;padding:10px;border:1.5px solid var(--border-color);border-radius:8px;font-size:14px;background:var(--bg-color);color:var(--text-primary)"></div>'
-        +'<div style="margin-bottom:14px"><label style="font-size:13px;font-weight:600;display:block;margin-bottom:4px">Payment</label>'
-        +'<select style="width:100%;box-sizing:border-box;padding:10px;border:1.5px solid var(--border-color);border-radius:8px;font-size:14px;background:var(--bg-color)">'
-        +'<option>M-Pesa</option><option>Credit Card</option><option>PayPal</option><option>Bank Transfer</option></select></div>'
-        +'<button onclick="window.__mcCart.placeOrder()" style="width:100%;padding:14px;background:var(--gradient-primary,linear-gradient(135deg,#667eea,#764ba2));color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer">'
-        +'<i class="fas fa-lock"></i> Place Order — $'+total.toFixed(2)+'</button></div>';
-      document.body.appendChild(panel);
-    },
-    placeOrder:function(){
-      _dispatch('kyn:order:placed',{items:items,total:items.reduce(function(s,i){return s+(i.price||0)*(i.qty||1);},0)});
-      if(window.CoreUtils&&window.CoreUtils.showNotification)window.CoreUtils.showNotification('Order Placed!','Your order was submitted successfully','success');
-      items=[];save();document.getElementById('__mc_checkout')&&document.getElementById('__mc_checkout').remove();
-    }
-  };
-})();
-window.__mcCart=_cart;
-
-document.addEventListener('click',function(e){
-  var addBtn=e.target.closest('[data-add-to-cart]');
-  if(addBtn){_cart.add({id:addBtn.dataset.productId||_ts(),name:addBtn.dataset.productName,price:parseFloat(addBtn.dataset.productPrice||0),image:addBtn.dataset.productImage});return;}
-  if(e.target.closest('[data-checkout],[data-open-checkout],.checkout-btn')){e.preventDefault();_cart.open();}
-});
 
 /* ── FIX #15/#16: Socket dedup + server-authoritative cache ── */
 // Canonical event alias map so duplicate-name events don't double-fire UI
@@ -5439,28 +5510,6 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
             if (focusTarget) setTimeout(function () { focusTarget.focus(); }, 350);
         }
 
-        // ---- Scroll reveal for illustrated showcase (Phase 17, Step 3) --------
-        // Cheap, dependency-free: IntersectionObserver adds .is-visible once
-        // per item and then stops observing it (no repeated fade in/out on
-        // scroll-up, which reads as jittery rather than premium).
-        var revealItems = document.querySelectorAll('.landing-showcase .reveal, .landing-more-features .reveal, .landing-trust .reveal');
-        if (revealItems.length) {
-            if ('IntersectionObserver' in window) {
-                var revealObserver = new IntersectionObserver(function (entries) {
-                    entries.forEach(function (entry) {
-                        if (entry.isIntersecting) {
-                            entry.target.classList.add('is-visible');
-                            revealObserver.unobserve(entry.target);
-                        }
-                    });
-                }, { threshold: 0.2, rootMargin: '0px 0px -60px 0px' });
-                revealItems.forEach(function (el) { revealObserver.observe(el); });
-            } else {
-                // No IntersectionObserver support — just show everything.
-                revealItems.forEach(function (el) { el.classList.add('is-visible'); });
-            }
-        }
-
         var registerBtn = document.getElementById('landingRegisterBtn');
         var loginBtn = document.getElementById('landingLoginBtn');
         var googleBtn = document.getElementById('landingGoogleBtn');
@@ -5474,102 +5523,6 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
         // #googleSignInLoginContainer) already lives — this avoids running a
         // second, competing GSI render pass from the landing screen itself.
         if (googleBtn) googleBtn.addEventListener('click', function () { goToForm('login'); });
-
-        // ---- landing phone: show REAL screenshots of each module when present (assets/landing/<screen>.png/.jpg/.webp).
-        // Falls back to the drawn placeholder for any screen whose image is missing, so nothing breaks before the images are added.
-        (function () {
-            var exts = ['png', 'jpg', 'webp'];
-            // Probe with fetch first: other scripts on this page swap any failed <img> for a generic "No Image"
-            // placeholder, which would otherwise look like a successful load and hide the drawn fallback.
-            function probe(scr, key, i) {
-                if (i >= exts.length) return;
-                var url = '/assets/landing/' + key + '.' + exts[i];
-                fetch(url, { method: 'GET', cache: 'force-cache' }).then(function (r) {
-                    var ct = r.headers.get('content-type') || '';
-                    if (!r.ok || ct.indexOf('image') !== 0) throw 0;
-                    var img = new Image();
-                    img.className = 'lp-shot'; img.alt = ''; img.decoding = 'async';
-                    img.onload = function () { scr.classList.add('has-shot'); };
-                    img.src = url;
-                    scr.appendChild(img);
-                }).catch(function () { probe(scr, key, i + 1); });
-            }
-            document.querySelectorAll('.landing-phone-screen').forEach(function (scr) {
-                if (scr.dataset.screen) probe(scr, scr.dataset.screen, 0);
-            });
-        })();
-
-        // ---- hero phone mockup: auto-cycle Chat -> Friends -> Accommodation -> Marketplace
-        // -> Communities -> Status, repeating. Runs identically on mobile and
-        // desktop (same DOM/JS, no viewport branching) so the hero always
-        // demonstrates what the app does instead of sitting on one screen.
-        //
-        // FIX (MOBILE-HERO-NOT-CYCLING): previously this returned immediately
-        // when prefers-reduced-motion was set, which never restarted the
-        // interval — so any device/browser reporting reduced motion (common
-        // default on mobile OSes) got a hero that visibly never changed.
-        // Reduced motion should only mean "skip the animated transition", not
-        // "never advance the slideshow" — the screen still needs to change
-        // for the hero to communicate the product. So the interval now always
-        // runs; only the CSS transition/animation gets suppressed.
-        (function () {
-            var order = ['chat', 'friends', 'accommodation', 'market', 'community', 'wallet', 'status'];
-            var labels = { chat: 'Chat', friends: 'Friends', accommodation: 'Accommodation', market: 'Marketplace', community: 'Communities', wallet: 'Wallet', status: 'Status' };
-            var tabs = document.querySelectorAll('.landing-phone-tab');
-            var screens = document.querySelectorAll('.landing-phone-screen');
-            var caption = document.getElementById('landingMockupCaption');
-            if (!tabs.length || !screens.length) return;
-            var idx = 0;
-            var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-            function show(name) {
-                tabs.forEach(function (t) { t.classList.toggle('active', t.dataset.screen === name); });
-                screens.forEach(function (s) {
-                    var isMatch = s.dataset.screen === name;
-                    s.classList.toggle('active', isMatch);
-                    if (isMatch) {
-                        // Re-trigger the chat bubble slide-in animation every
-                        // time this screen becomes active again, not just once.
-                        s.querySelectorAll('.lp-slide-in').forEach(function (el) {
-                            el.style.animation = 'none';
-                            void el.offsetWidth;
-                            el.style.animation = '';
-                        });
-                    }
-                });
-                if (caption && labels[name]) caption.textContent = labels[name];
-            }
-            tabs.forEach(function (t) {
-                t.addEventListener('click', function () {
-                    idx = order.indexOf(t.dataset.screen);
-                    show(t.dataset.screen);
-                });
-            });
-            var intervalMs = reduceMotion ? 3000 : 3000;
-            var timer = null;
-            function tick() {
-                idx = (idx + 1) % order.length;
-                show(order[idx]);
-            }
-            function startTimer() {
-                if (timer) return; // already running
-                timer = setInterval(tick, intervalMs);
-            }
-            function stopTimer() {
-                if (!timer) return;
-                clearInterval(timer);
-                timer = null;
-            }
-            // FIX (landing animation freezes for good): this used to
-            // clearInterval() on hidden and never set a new one back up, so
-            // once the tab was hidden even briefly — e.g. behind the Google
-            // sign-in popup — the slideshow stopped forever, even after the
-            // user returned to the tab. Now visibilitychange both stops AND
-            // restarts the same timer depending on the current state.
-            document.addEventListener('visibilitychange', function () {
-                if (document.hidden) stopTimer(); else startTimer();
-            });
-            startTimer();
-        })();
 
         // ---- returning-user shortcut -------------------------------------------
         // If a remembered session produces the Quick Login card or takes the

@@ -75,6 +75,8 @@ h4{margin:16px 0 4px;font-size:13px}
 .chip.completed,.chip.active{background:rgba(34,197,94,.15);color:#16a34a}.chip.processing,.chip.due{background:rgba(245,158,11,.16);color:#b45309}.chip.overdue{background:rgba(239,68,68,.14);color:#dc2626}
 .amt.pos{color:#16a34a}.ok-big{width:64px;height:64px;border-radius:50%;background:rgba(34,197,94,.15);color:#16a34a;display:flex;align-items:center;justify-content:center;font-size:28px;margin:6px auto 10px}
 details.rules{margin-top:10px;font-size:12px;color:var(--muted);line-height:1.5}details.rules summary{cursor:pointer;font-weight:700;color:var(--text)}
+/* keep the last cards clear of the bottom nav, centre button and voice mic */
+body{padding-bottom:calc(130px + env(safe-area-inset-bottom,0px))!important}
 </style>
 </head>
 <body>
@@ -97,7 +99,6 @@ details.rules{margin-top:10px;font-size:12px;color:var(--muted);line-height:1.5}
   <button class="action" data-act="newCircle" type="button"><i class="fas fa-users" style="background:#16a34a"></i><b>Money Circles</b><span>Chamas, family funds, trips and events.</span></button>
   <button class="action" data-act="newRequest" type="button"><i class="fas fa-hand-holding-heart" style="background:#2563eb"></i><b>Pay for Someone</b><span>Request money for family, friends or bills.</span></button>
   <button class="action" data-act="goto:airtime" type="button"><i class="fas fa-mobile-screen" style="background:#16a34a"></i><b>Airtime &amp; Data</b><span>Buy airtime or data bundles with M-PESA.</span></button>
-  <button class="action" data-act="goto:paylater" type="button"><i class="fas fa-calendar-check" style="background:#f59e0b"></i><b>Pay Later</b><span>Reserved marketplace orders to settle.</span></button>
   <button class="action" data-act="goto:activity" type="button"><i class="fas fa-receipt" style="background:#7c3aed"></i><b>Activity</b><span>Contributions, requests and records.</span></button>
 </div>
 <div class="tabs" role="tablist">
@@ -106,7 +107,6 @@ details.rules{margin-top:10px;font-size:12px;color:var(--muted);line-height:1.5}
   <button class="tab" data-tab="circles" type="button">Circles</button>
   <button class="tab" data-tab="requests" type="button">Requests<span class="dot" id="reqDot" style="display:none">0</span></button>
   <button class="tab" data-tab="airtime" type="button">Airtime &amp; Data</button>
-  <button class="tab" data-tab="paylater" type="button">Pay Later</button>
   <button class="tab" data-tab="activity" type="button">Activity</button>
 </div>
 <section id="pane"></section>
@@ -141,6 +141,7 @@ var savePhone=function(p){try{localStorage.setItem('necpra_money_phone',p)}catch
 
 var S={tab:'wallet',wallet:null,walletErr:'',goals:null,goalsErr:'',reqSeg:'in',overview:null,circles:[],incoming:[],outgoing:[],orders:null,loading:true,err:''};
 try{S.tab=sessionStorage.getItem('necpra_money_tab')||'wallet'}catch(_){}
+if(S.tab==='paylater')S.tab='wallet'; /* Pay Later was retired */
 
 /* ---------- in-app prompt (window.prompt is blocked/unreliable in installed apps & WebViews) ---------- */
 function ask(title,label,type,hint){return new Promise(function(res){
@@ -191,11 +192,6 @@ async function load(manual){
   }catch(e){S.err=e.message||'Money service is unavailable'}
   S.loading=false;rb.classList.remove('spin');header();render();try{window.parent.postMessage({type:'MONEY_CHANGED'},'*')}catch(_){}
 }
-async function loadOrders(){S.orders=null;render();
-  try{var d=await api('/marketplace/orders?limit=50');var orders=d.orders||(d.data&&d.data.orders)||[];
-    S.orders=orders.filter(function(o){return String(o.payment_method||o.paymentMethod||'').toLowerCase()==='paylater'&&String(o.status||'').toLowerCase()!=='paid'})}
-  catch(e){S.orders=[];S.ordersErr=e.message}
-  render()}
 function header(){var o=(S.overview&&S.overview.overview)||{};
   var w=S.wallet;$('balance').textContent=w?wm(w.balance):(S.walletErr?'—':'KSh 0');$('balCaption').textContent=w?(w.isFrozen?'Your wallet is frozen. Contact support.':'Your personal spendable NECPRA wallet balance'):(S.walletErr?'Wallet unavailable: '+S.walletErr:'Loading your wallet…');$('wPending').textContent=w?wm(w.pendingTotal):'—';$('wIn').textContent=w?wm(w.receivedThisMonth):'—';$('wOut').textContent=w?wm(w.spentThisMonth):'—';var un=(w&&w.username)||tokenUser(),dn=w&&w.displayName;$('wUser').textContent=un?(dn&&dn!==un?dn+' · @'+un:'@'+un):'';$('eyeBtn').innerHTML='<i class="fas fa-eye'+(BAL_SHOWN?'':'-slash')+'"></i>';$('eyeBtn').setAttribute('aria-label',BAL_SHOWN?'Hide balance':'Show balance');$('pCircles').textContent=o.circleCount!=null?o.circleCount:S.circles.length;
   var inc=S.incoming.filter(function(r){return r.status==='requested'}).length;$('pIncoming').textContent=o.pendingIncoming!=null?o.pendingIncoming:inc;
@@ -209,7 +205,7 @@ function render(){
   document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('on',t.dataset.tab===S.tab)});
   var p=$('pane');if(S.tab==='airtime'){if(!p.querySelector('.dsvc')){if(typeof window.__renderDigitalServices==='function'){p.innerHTML='';window.__renderDigitalServices(p,{tab:'airtime'})}else p.innerHTML='<div class="card"><div class="empty"><i class="fas fa-triangle-exclamation"></i>Airtime &amp; Data could not load. Refresh and try again.</div></div>'}return}if(S.tab==='wallet'){p.innerHTML=viewWallet();return}if(S.tab==='goals'){p.innerHTML=viewGoals();return}if(S.loading){p.innerHTML=skeleton();return}if(S.err&&!S.overview){p.innerHTML=errBox();return}
   if(S.tab==='circles')p.innerHTML=viewCircles();else if(S.tab==='requests')p.innerHTML=viewRequests();
-  else if(S.tab==='paylater')p.innerHTML=viewPayLater();else p.innerHTML=viewActivity()}
+  else p.innerHTML=viewActivity()}
 /* ================= WALLET: dashboard, add money, send, withdraw, receipts, savings goals ================= */
 var KT={topup:'Money added',transfer_in:'Money received',transfer_out:'Money sent',withdrawal:'Withdrawal to M-PESA',withdrawal_reversal:'Withdrawal refunded',order_payment:'Order payment',refund:'Refund',goal_deposit:'Saved to goal',goal_withdraw:'Moved from goal',admin_credit:'Credit from support',cashback:'Cashback',referral:'Referral bonus',reward:'Reward'};
 var KI={topup:'circle-plus',transfer_in:'circle-arrow-down',transfer_out:'paper-plane',withdrawal:'download',withdrawal_reversal:'rotate-left',order_payment:'bag-shopping',refund:'rotate-left',goal_deposit:'piggy-bank',goal_withdraw:'piggy-bank'};
@@ -362,35 +358,6 @@ function viewRequests(){
     return '<div class="row"><div class="ico" style="background:'+(S.reqSeg==='in'?'#2563eb':'#7c3aed')+'"><i class="fas fa-'+(S.reqSeg==='in'?'hand-holding-dollar':'paper-plane')+'"></i></div><div class="mid"><div class="row-title">'+esc(r.purpose||'Payment request')+'</div><div class="row-sub">'+(S.reqSeg==='in'?'From ':'To ')+esc(who)+' · '+chip(r.status)+(live?' · '+esc(left(r.expiresAt)):' · '+esc(ago(r.createdAt)))+'</div></div><div style="text-align:right"><div class="amt">'+money(r.amount)+'</div>'
     +(live&&S.reqSeg==='in'?'<button class="primary small" style="margin-top:6px" data-act="payReq" data-id="'+esc(r.id)+'" type="button">Pay</button>':'')
     +(live&&S.reqSeg==='out'?'<button class="danger small" style="margin-top:6px" data-act="cancelReq" data-id="'+esc(r.id)+'" type="button">Cancel</button>':'')+'</div></div>'}).join('')+'</div>'}
-/* ----- Pay Later as a payment product ----- */
-// Policy defaults. Orders can override with their own fields (payment_deadline / late_fee / ...). CONFIRM these with your business rules.
-var POL=window.NECPRA_PAYLATER_POLICY||{deadlineHours:72,lateRule:'If an order is not paid by its deadline it may be cancelled and the items released to other buyers. Any late fee shown on your order applies.',cancelRule:'You can cancel an unpaid Pay Later order before its deadline from your Orders. Any amount you already paid is refunded to your NECPRA wallet.'};
-function plNum(o,keys){for(var i=0;i<keys.length;i++){var v=o[keys[i]];if(v==null&&o.metadata)v=o.metadata[keys[i]];if(v!=null&&v!==''&&isFinite(Number(v)))return Number(v)}return null}
-function plDeadline(o){var d=o.payment_deadline||o.paylater_deadline||o.pay_by||(o.metadata&&(o.metadata.payment_deadline||o.metadata.paylater_deadline||o.metadata.pay_by));if(d)return{at:new Date(d),isDefault:false};var c=o.created_at||o.createdAt;return c?{at:new Date(new Date(c).getTime()+POL.deadlineHours*3600000),isDefault:true}:null}
-function plRemindKey(id){return'necpra_pl_remind_'+id}
-function plRemind(id){try{var k=plRemindKey(id);if(localStorage.getItem(k)){localStorage.removeItem(k);toast('Reminder off')}else{localStorage.setItem(k,'1');toast('Reminder on: you will see a notice here when this order is due within 24 hours')}}catch(_){}render()}
-function viewPayLater(){
-  if(S.orders===null)return skeleton();
-  if(!S.orders.length)return '<div class="card"><div class="empty"><i class="fas fa-calendar-check"></i>'+(S.ordersErr?esc(S.ordersErr):'No Pay Later orders yet.<br>Choose Pay Later at Marketplace checkout to reserve an order and settle it here.')+'</div></div>';
-  var alerts='',now=Date.now();
-  var cards=S.orders.map(function(o){
-    var tot=plNum(o,['total_price','totalPrice','total'])||0,paid=plNum(o,['amount_paid','paid_amount','amountPaid'])||0,rem=Math.max(0,tot-paid),fee=plNum(o,['late_fee','lateFee']),dl=plDeadline(o);
-    var ms=dl?dl.at-now:null,state=ms==null?'':(ms<0?'overdue':(ms<86400000?'due':'ok')),pct=tot>0?Math.min(100,Math.round(paid/tot*100)):0,rm=localStorage.getItem(plRemindKey(o.id))==='1';
-    if(rm&&state==='due')alerts+='<div class="notice warn"><b>Order #'+esc(String(o.id).slice(-8))+'</b> is due in less than 24 hours. Remaining: '+money(rem)+'.</div>';
-    if(state==='overdue')alerts+='<div class="notice warn"><b>Order #'+esc(String(o.id).slice(-8))+'</b> is past its payment deadline. Pay now or it may be cancelled.</div>';
-    var inst=Array.isArray(o.instalments)?o.instalments:(Array.isArray(o.installments)?o.installments:null);
-    var instHtml=inst&&inst.length?'<h4>Instalment schedule</h4><div class="card" style="padding:2px 12px">'+inst.map(function(x,i){var ip=!!(x.paid||x.status==='paid');return '<div class="kv"><span>#'+(i+1)+' · due '+esc(String(x.due_date||x.dueDate||'').slice(0,10))+'</span><b>'+money(x.amount)+' '+(ip?'<span class="chip paid">Paid</span>':'<span class="chip pending">Due</span>')+'</b></div>'}).join('')+'</div>':'';
-    return '<div class="card" style="padding:12px 14px"><div class="head" style="display:flex;gap:10px;align-items:center"><div class="ico" style="width:40px;height:40px;border-radius:12px;background:#f59e0b;display:flex;align-items:center;justify-content:center"><i class="fas fa-bag-shopping"></i></div><div style="flex:1;min-width:0"><div class="row-title">Order #'+esc(String(o.id).slice(-8))+'</div><div class="row-sub">'+(state?'<span class="chip '+state+'">'+(state==='overdue'?'Overdue':state==='due'?'Due soon':'On track')+'</span>':'Reserved')+'</div></div></div>'
-     +'<div class="bar"><i style="width:'+pct+'%"></i></div><div class="meta"><span>'+money(paid)+' paid</span><span>'+money(rem)+' remaining</span></div>'
-     +'<div class="card" style="padding:2px 12px;margin:10px 0 0"><div class="kv"><span>Order total</span><b>'+money(tot)+'</b></div><div class="kv"><span>Amount already paid</span><b>'+money(paid)+'</b></div><div class="kv"><span>Remaining balance</span><b>'+money(rem)+'</b></div>'
-     +(dl?'<div class="kv"><span>Payment deadline'+(dl.isDefault?' (default)':'')+'</span><b>'+esc(dt(dl.at))+'<br><span style="font-weight:600;color:var(--muted)">'+(ms<0?'passed':esc(left(dl.at)))+'</span></b></div>':'')
-     +(fee!=null?'<div class="kv"><span>Late fee</span><b>'+(fee>0?money(fee):'None')+'</b></div>':'')+'</div>'
-     +instHtml
-     +'<details class="rules"><summary>Late-payment, cancellation &amp; refund rules</summary><p><b>Late payment:</b> '+esc(POL.lateRule)+'</p><p><b>Cancellation &amp; refunds:</b> '+esc(POL.cancelRule)+'</p></details>'
-     +'<div class="btns"><button class="primary" style="flex:1" data-act="payOrder" data-id="'+esc(o.id)+'" type="button">Pay '+money(rem||tot)+'</button><button class="secondary" data-act="plRemind" data-id="'+esc(o.id)+'" type="button">'+(rm?'Reminder on':'Remind me')+'</button></div>'
-     +'<div class="row-sub" style="margin-top:8px">Reminders show here in the app when an order is within 24 hours of its deadline.'+(inst?'':' Instalments are not enabled for this order: it is paid in full.')+'</div></div>'}).join('');
-  return alerts+cards}
-
 function viewActivity(){var a=(S.overview&&S.overview.activity)||[];
   if(!a.length)return '<div class="card"><div class="empty"><i class="fas fa-receipt"></i>No money activity yet.</div></div>';
   return '<div class="card">'+a.map(function(x){var c=x.kind==='contribution';
@@ -427,9 +394,6 @@ function contribute(id){var f=fixedFor(id);mpesaForm('Contribute with M-Pesa','Y
 function payReq(id){var r=S.incoming.find(function(x){return String(x.id)===String(id)});if(!r)return;
   mpesaForm('Pay '+money(r.amount),'<b>'+esc(r.purpose||'Payment request')+'</b><br>From '+esc((r.requester&&(r.requester.displayName||r.requester.username))||'Someone')+'. Pay only if you know this person and agree with the purpose.',false,'Pay '+money(r.amount),async function(phone){
     return await api('/money/requests/'+encodeURIComponent(id)+'/pay',{method:'POST',body:JSON.stringify({phone:phone})})})}
-function payOrder(id){mpesaForm('Pay your Pay Later order','You will receive an M-Pesa prompt for the full order amount.',false,'Pay with M-Pesa',async function(phone){
-  var r=await api('/marketplace/payment/mpesa',{method:'POST',body:JSON.stringify({phone:phone,order_id:id,order_ids:[id],description:'NECPRA Pay Later order'})});
-  var cid=r.checkoutRequestId||(r.data&&r.data.checkoutRequestId)||r.CheckoutRequestID||(r.data&&r.data.CheckoutRequestID);if(!cid)throw Error(r.message||'M-Pesa prompt could not be started')})}
 async function cancelReq(id){if(!confirm('Cancel this payment request?'))return;try{await api('/money/requests/'+encodeURIComponent(id)+'/cancel',{method:'POST'});toast('Request cancelled');load()}catch(e){toast(e.message,true)}}
 /* ---------- Circle full-screen panel (details) + Settings ---------- */
 var P={id:null,d:null,view:'main'};
@@ -542,28 +506,27 @@ var pollTimer=null;function pollSoon(){var n=0;clearInterval(pollTimer);pollTime
 /* ---------- events (one delegated handler: nothing depends on inline onclick) ---------- */
 document.addEventListener('click',function(e){
   if(e.target.closest&&e.target.closest('.dsvc'))return;var t=e.target.closest('[data-tab],[data-act]');if(!t){if(e.target.id==='modal')closeModal();return}
-  if(t.dataset.tab){S.tab=t.dataset.tab;try{sessionStorage.setItem('necpra_money_tab',S.tab)}catch(_){}if(S.tab==='paylater'&&S.orders===null)loadOrders();if(S.tab==='goals'&&S.goals===null)loadGoals();render();return}
+  if(t.dataset.tab){S.tab=t.dataset.tab;try{sessionStorage.setItem('necpra_money_tab',S.tab)}catch(_){}if(S.tab==='goals'&&S.goals===null)loadGoals();render();return}
   var a=t.dataset.act,id=t.dataset.id;
   if(a==='addMoney')addMoney();else if(a==='sendMoney')sendMoney();else if(a==='withdraw')withdrawMoney();else if(a==='receive')receiveMoney();else if(a==='receipt')showReceipt(id);else if(a==='newGoal')newGoal();else if(a==='goalDep')goalMove(id,'deposit');else if(a==='goalWd')goalMove(id,'withdraw');else if(a==='goalClose')goalClose(id);else if(a==='plRemind')plRemind(id);else if(a==='retryWallet'){loadWallet(true)}else if(a==='retryGoals'){loadGoals()}
   else if(a==='newCircle')newCircle();else if(a==='newRequest')newRequest();else if(a==='close')closeModal();
   else if(a==='retry')load(true);else if(a==='contribute')contribute(id);else if(a==='circle')circleDetail(id);else if(a==='closePanel')closePanel();else if(a==='panelMain'){P.view='main';drawPanel()}
-  else if(a==='payReq')payReq(id);else if(a==='payOrder')payOrder(id);else if(a==='cancelReq')cancelReq(id);
+  else if(a==='payReq')payReq(id);else if(a==='cancelReq')cancelReq(id);
   else if(a&&a.indexOf('seg:')===0){S.reqSeg=a.slice(4);render()}
-  else if(a&&a.indexOf('goto:')===0){S.tab=a.slice(5);try{sessionStorage.setItem('necpra_money_tab',S.tab)}catch(_){}if(S.tab==='paylater'&&S.orders===null)loadOrders();render();var tb=document.querySelector('.tabs');if(tb)tb.scrollIntoView({behavior:'smooth',block:'start'})}
+  else if(a&&a.indexOf('goto:')===0){S.tab=a.slice(5);try{sessionStorage.setItem('necpra_money_tab',S.tab)}catch(_){}render();var tb=document.querySelector('.tabs');if(tb)tb.scrollIntoView({behavior:'smooth',block:'start'})}
 });
 $('eyeBtn').addEventListener('click',function(){BAL_SHOWN=!BAL_SHOWN;try{sessionStorage.setItem(SHOW_KEY,BAL_SHOWN?'1':'0')}catch(_){}header();render()});
-$('refreshBtn').addEventListener('click',function(){S.orders=null;load(true);loadWallet(true);if(S.tab==='goals')loadGoals();if(S.tab==='paylater')loadOrders()});
+$('refreshBtn').addEventListener('click',function(){load(true);loadWallet(true);if(S.tab==='goals')loadGoals();});
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeModal()});
 // back button inside this module: close an open sheet first (hardware back is handled by the shell)
 window.__moneyCloseTopLayer=function(){if($('modal').classList.contains('open')){closeModal();return true}if($('panel').classList.contains('open')){if(P.view==='settings'){P.view='main';drawPanel()}else closePanel();return true}return false};
-if(S.tab==='paylater')loadOrders(); if(S.tab==='goals')loadGoals(); adultCheck().then(function(ok){if(!ok)adultGate()}); if(cacheHydrate()){try{header()}catch(_){}render()} /* NECPRA voice adapter. Read access + tab switching + PRE-FILLING the Send-money screen only. Nothing here sends money. */
+ if(S.tab==='goals')loadGoals(); adultCheck().then(function(ok){if(!ok)adultGate()}); if(cacheHydrate()){try{header()}catch(_){}render()} /* NECPRA voice adapter. Read access + tab switching + PRE-FILLING the Send-money screen only. Nothing here sends money. */
 window.__necpraMoneyVoice={
-  state:function(){return{wallet:S.wallet,circles:S.circles,overview:S.overview,incoming:S.incoming,outgoing:S.outgoing,orders:S.orders,stale:!!S.walletErr}},
+  state:function(){return{wallet:S.wallet,circles:S.circles,overview:S.overview,incoming:S.incoming,outgoing:S.outgoing,stale:!!S.walletErr}},
   refresh:async function(){await loadWallet();try{await load()}catch(_){}},
   setTab:function(t){var b=document.querySelector('.tab[data-tab="'+t+'"]');if(b)b.click()},
   reveal:function(){if(!BAL_SHOWN&&$('eyeBtn'))$('eyeBtn').click()},
   toast:function(m){toast(m)},
-  loadOrders:async function(){await loadOrders();return S.orders||[]},
   prepareTransfer:function(o){sendMoney();var t=$('smTo'),a=$('smAmt');if(t&&o.to){t.value=o.to;t.dispatchEvent(new Event('input'))}if(a&&o.amount>0)a.value=String(o.amount);var go=$('smGo');if(go)go.focus()}
 };
 load(); })();
