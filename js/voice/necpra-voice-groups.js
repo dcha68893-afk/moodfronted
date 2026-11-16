@@ -18,10 +18,33 @@
   function sender(m) { var s = m.sender || m.user || {}; return clean(s.displayName || s.username || m.senderName || m.username || ''); }
   function textOf(m) { var t = clean(m.content != null ? m.content : m.displayContent); return !t || PLACEHOLDER.test(t) ? '' : t; }
 
+  function splitNames(t) { return clean(t).split(/\s*(?:,|\band\b|\bna\b|&)\s*/i).map(function (x) { return clean(x.replace(/^(?:and|na)\s+/i, '')); }).filter(Boolean); }
+  function pName(p) { var u = p.user || p; return clean(u.displayName || [u.firstName, u.lastName].filter(Boolean).join(' ') || u.username); }
+  // members of the open group (other than you and the owner) that a spoken name can be matched against
+  function memberList(h, c) {
+    var me = h.me(), owner = h.ownerId(c);
+    return (c.participants || []).map(function (p) { var id = h.memberId(p), u = p.user || p; return { id: id, name: pName(p), alt: [clean(u.username)].filter(Boolean), isAdmin: id === owner || /^(admin|owner)$/i.test(String(p.role || '')), isMe: id === me, isOwner: id === owner }; }).filter(function (x) { return x.id && x.name; });
+  }
+  async function pickMember(h, c, spoken, wantFn) {
+    var list = memberList(h, c).filter(wantFn || function () { return true; }), vs = I.nameVariants(spoken), hit = null;
+    for (var i = 0; i < vs.length && !hit; i++) { var r = I.matchContacts(vs[i], list); if (r.matches.length) hit = r; }
+    if (!hit) return null;
+    if (hit.matches.length === 1) return hit.matches[0];
+    var idx = await UI.choose({ title: T('Which ' + spoken + '?', spoken + ' yupi?'), options: hit.matches.slice(0, 5).map(function (x) { return { label: x.name }; }), voiceAnswer: ask(T('Say the number or the full name.', 'Sema namba au jina kamili.')) });
+    return idx >= 0 ? hit.matches[idx] : false;
+  }
+
   /* ───────── understanding (pure) ───────── */
   function parse(input) {
     var s = clean(input).replace(/[.!?,]+$/, ''), n = I.norm(s), m;
     s = s.replace(/^(?:(?:hey|hi|ok|okay|so|now)\s+)?(?:please\s+|tafadhali\s+)?(?:can you\s+|could you\s+|would you\s+)?(?:please\s+)?(?:i\s+(?:want|wanna|need|would like)\s+to\s+|let me\s+|nataka\s+|naomba\s+)?/i, ''); n = I.norm(s);
+    // Group admin by voice: rename, make / dismiss an admin, remove a member, create a group WITH members. Each one asks for a yes first.
+    if ((m = /^(?:create|make|start|new|unda|anzisha)\s+(?:a\s+|new\s+)*(?:group|kikundi)(?:\s+(?:called|named|iitwayo))?\s+(.+?)\s+(?:with|and add|including|na wanachama|pamoja na)\s+(.+)$/i.exec(s))) return { type: 'create', name: strip(m[1]), members: splitNames(m[2]) };
+    if ((m = /^(?:rename|change the name of|badilisha jina la)\s+(?:this\s+|the\s+)?(?:group|kikundi)(?:\s+(?:name|jina))?\s*(?:to|as|into|kuwa)\s+(.+)$/i.exec(s)) || (m = /^(?:change|set|badilisha)\s+(?:the\s+)?(?:group(?:'s)?\s+name|jina la kikundi)\s*(?:to|as|into|kuwa)\s+(.+)$/i.exec(s))) return { type: 'rename', name: clean(m[1].replace(/^["“']|["”']$/g, '')) };
+    if (/^(?:rename|change the name of)\s+(?:this\s+|the\s+)?(?:group|kikundi)$/i.test(s) || /^(?:change|badilisha)\s+(?:the\s+)?(?:group(?:'s)?\s+name|jina la kikundi)$/i.test(s)) return { type: 'rename', name: '' };
+    if ((m = /^(?:make|promote|set|appoint)\s+(.+?)\s+(?:to\s+|an?\s+|the\s+)?(?:group\s+)?admin(?:istrator)?(?:\s+(?:in|of|for)\s+(?:this\s+|the\s+)?(?:group|kikundi)?)?$/i.exec(s)) || (m = /^(?:mfanye|mpandishe|mteue)\s+(.+?)\s+(?:kuwa\s+)?(?:msimamizi|admin)(?:\s+(?:wa|kwenye)\s+(?:kikundi))?$/i.exec(s))) return { type: 'role', name: strip(m[1]), role: 'admin' };
+    if ((m = /^(?:dismiss|demote|remove)\s+(.+?)\s+as\s+(?:an?\s+|the\s+)?(?:group\s+)?admin(?:istrator)?$/i.exec(s)) || (m = /^(?:demote|dismiss)\s+(.+?)$/i.exec(s)) || (m = /^(?:mwondoe|mshushe)\s+(.+?)\s+(?:kama\s+|kwenye\s+)?(?:msimamizi|usimamizi|admin)(?:\s+(?:wa|kwenye)\s+kikundi)?$/i.exec(s))) { if (!/\b(friend|chat|message)\b/i.test(m[1])) return { type: 'role', name: strip(m[1]), role: 'member' }; }
+    if ((m = /^(?:remove|kick(?:\s+out)?|take|ondoa|mfukuze)\s+(.+?)\s+(?:from|out of|off|kwenye|katika)\s+(?:this\s+|the\s+)?(?:(.+?)\s+)?(?:group|kikundi)(?:\s+(?:hiki|hicho))?$/i.exec(s)) && !/\b(friend|message|star)\b/i.test(m[1])) return { type: 'remove-member', name: strip(m[1]), group: /^(?:this|the|hiki|hicho)$/i.test(clean(m[2])) ? '' : strip(m[2]) };
     if ((m = /^(?:create|make|start|new|unda|anzisha)\s+(?:a\s+|new\s+)*(?:group|kikundi)(?:\s+(?:called|named|iitwayo))?\s*(.*)$/i.exec(s))) return { type: 'create', name: strip(m[1]) };
     if ((m = /^(?:open|go to|show|fungua|nenda kwa|take me to|nipeleke)\s+(?:to\s+)?(?:the\s+|my\s+)?(?:group|kikundi)\s+(?:chat\s+)?(.+)$/i.exec(s)) && !/^(?:list|s|settings|info|information|details|media|files|pinned|members?)$/i.test(m[1])) return { type: 'open', name: strip(m[1]) };
     if ((m = /^(?:open|go to|fungua|nenda kwa)\s+(?:the\s+|my\s+)?(.+?)\s+(?:group|kikundi)$/i.exec(s))) return { type: 'open', name: strip(m[1]) };
@@ -144,6 +167,77 @@
     return true;
   }
 
+  async function needGroup(p) { if (p.group) { var g0 = await openByName(p.group); if (!g0) return null; } var c = current(); if (!c) { await say('Open a group first, or say its name.', 'Fungua kikundi kwanza, au sema jina lake.'); return null; } return c; }
+  function failMsg(e) { return ((e && e.message) || 'unknown error'); }
+
+  async function renameFlow(p) {
+    var h = H(), c = current(); if (!c) { await say('Open a group first, then say rename the group to a new name.', 'Fungua kikundi kwanza, kisha sema badilisha jina la kikundi kuwa jina jipya.'); return true; }
+    if (!h.isOwner(c)) { await say('Only the person who created the group can rename it.', 'Ni aliyeunda kikundi tu anayeweza kubadilisha jina lake.'); return true; }
+    var nn = p.name; if (!nn) { var r = await R.capture({ mode: 'dictation', title: T('New group name', 'Jina jipya la kikundi'), prompt: T('What should the group be called?', 'Kikundi kiitwe nini?') }); if (!r || r.cancelled || !r.transcript) return true; nn = clean(r.transcript).replace(/[.!?]+$/, ''); }
+    if (nn.length > 100) { await say('That name is too long. Please use a shorter one.', 'Jina hilo ni refu mno. Tafadhali tumia fupi zaidi.'); return true; }
+    var old = gname(c);
+    if (!(await confirmYes(T('Rename “' + old + '” to “' + nn + '”? Everyone in the group will see the new name.', 'Badilisha “' + old + '” kuwa “' + nn + '”? Wote kwenye kikundi wataona jina jipya.'), T('Yes, rename', 'Ndiyo, badilisha')))) { await say('Cancelled. The name was not changed.', 'Imeghairiwa. Jina halikubadilishwa.'); return true; }
+    try { await h.rename(nn); try { await h.loadGroups(); } catch (_) {} V.audit('groups.rename', { module: 'groups', outcome: 'executed' }); await say('The group is now called ' + nn + '.', 'Kikundi sasa kinaitwa ' + nn + '.'); }
+    catch (e) { V.audit('groups.rename', { module: 'groups', outcome: 'error' }); await say('The name was NOT changed: ' + failMsg(e) + '.', 'Jina HALIKUBADILISHWA: ' + failMsg(e) + '.'); }
+    return true;
+  }
+
+  async function roleFlow(p) {
+    var h = H(), c = await needGroup(p); if (!c) return true;
+    if (!h.isManager(c)) { await say('Only group admins can change who is an admin.', 'Ni wasimamizi wa kikundi tu wanaoweza kubadilisha wasimamizi.'); return true; }
+    var making = p.role === 'admin', gn = gname(c);
+    var who = await pickMember(h, c, p.name, function (x) { return !x.isMe && !x.isOwner && (making ? !x.isAdmin : x.isAdmin); });
+    if (who === false) return true;
+    if (!who) { var any = await pickMember(h, c, p.name); await say(any ? (any.isOwner ? 'The group owner cannot be changed.' : any.isMe ? 'You cannot change your own role.' : any.name + (making ? ' is already an admin.' : ' is not an admin.')) : 'I could not find "' + p.name + '" in ' + gn + '.', any ? (any.isOwner ? 'Mmiliki wa kikundi hawezi kubadilishwa.' : any.isMe ? 'Huwezi kubadilisha cheo chako.' : any.name + (making ? ' tayari ni msimamizi.' : ' si msimamizi.')) : 'Sikumpata "' + p.name + '" kwenye ' + gn + '.'); return true; }
+    if (!(await confirmYes(making ? T('Make ' + who.name + ' an admin of ' + gn + '? Admins can add and remove members.', 'Mfanye ' + who.name + ' msimamizi wa ' + gn + '? Wasimamizi wanaweza kuongeza na kuondoa wanachama.') : T('Dismiss ' + who.name + ' as admin of ' + gn + '?', 'Mwondoe ' + who.name + ' usimamizi wa ' + gn + '?'), making ? T('Yes, make admin', 'Ndiyo, mfanye msimamizi') : T('Yes, dismiss', 'Ndiyo, mwondoe')))) { await say('Cancelled. Nothing was changed.', 'Imeghairiwa. Hakuna kilichobadilishwa.'); return true; }
+    try { await h.setRole(who.id, making ? 'admin' : 'member'); await h.refreshMembers(); V.audit('groups.role', { module: 'groups', outcome: 'executed', role: p.role }); await say(making ? who.name + ' is now an admin of ' + gn + '.' : who.name + ' is no longer an admin of ' + gn + '.', making ? who.name + ' sasa ni msimamizi wa ' + gn + '.' : who.name + ' si msimamizi tena wa ' + gn + '.'); }
+    catch (e) { V.audit('groups.role', { module: 'groups', outcome: 'error' }); await say('That did not work: ' + failMsg(e) + '. Nothing was changed.', 'Haikufanikiwa: ' + failMsg(e) + '. Hakuna kilichobadilishwa.'); }
+    return true;
+  }
+
+  async function removeMemberFlow(p) {
+    var h = H(), c = await needGroup(p); if (!c) return true;
+    if (!h.isManager(c)) { await say('Only group admins can remove members. To leave yourself, say leave the group.', 'Ni wasimamizi wa kikundi tu wanaoweza kuondoa wanachama. Kuondoka mwenyewe, sema ondoka kwenye kikundi.'); return true; }
+    var gn = gname(c), who = await pickMember(h, c, p.name, function (x) { return !x.isMe && !x.isOwner; });
+    if (who === false) return true;
+    if (!who) { var any = await pickMember(h, c, p.name); await say(any ? (any.isOwner ? 'The group owner cannot be removed.' : 'To remove yourself, say leave the group.') : 'I could not find "' + p.name + '" in ' + gn + '.', any ? (any.isOwner ? 'Mmiliki wa kikundi hawezi kuondolewa.' : 'Kujiondoa mwenyewe, sema ondoka kwenye kikundi.') : 'Sikumpata "' + p.name + '" kwenye ' + gn + '.'); return true; }
+    if (!(await confirmYes(T('Remove ' + who.name + ' from ' + gn + '? They will stop getting its messages.', 'Mwondoe ' + who.name + ' kwenye ' + gn + '? Hatapokea tena ujumbe wake.'), T('Yes, remove', 'Ndiyo, mwondoe')))) { await say('Cancelled. Nobody was removed.', 'Imeghairiwa. Hakuna aliyeondolewa.'); return true; }
+    var before = (c.participants || []).length;
+    try { await h.removeMember(who.id); await h.refreshMembers(); var cc = current(), now = cc ? (cc.participants || []).length : before; var gone = !cc || !(cc.participants || []).some(function (x) { return h.memberId(x) === who.id; });
+      V.audit('groups.remove_member', { module: 'groups', outcome: gone ? 'executed' : 'unconfirmed' });
+      if (gone) await say(who.name + ' was removed from ' + gn + '.', who.name + ' ameondolewa kwenye ' + gn + '.'); else await say('I could not confirm that ' + who.name + ' was removed. Please check the member list.', 'Sikuweza kuthibitisha kwamba ' + who.name + ' ameondolewa. Tafadhali angalia orodha ya wanachama.'); }
+    catch (e) { V.audit('groups.remove_member', { module: 'groups', outcome: 'error' }); await say('That did not work: ' + failMsg(e) + '. Nobody was removed.', 'Haikufanikiwa: ' + failMsg(e) + '. Hakuna aliyeondolewa.'); }
+    return true;
+  }
+
+  // "create a group Family with Denis and Mary": opens the Create screen, ticks the friends it can match (never guesses between two), asks a yes, then taps the screen's own Create button.
+  async function createWithMembers(p) {
+    var b = doc.getElementById('createGroupBtn'); if (!b) return false; b.click();
+    var nm = await waitFor(function () { return doc.getElementById('gname'); }, 2500); if (!nm) { await say('I could not open the Create screen.', 'Sikuweza kufungua skrini ya kuunda.'); return true; }
+    var rows = await waitFor(function () { var l = doc.querySelectorAll('#friends .fr-row'); return l.length ? Array.prototype.slice.call(l) : null; }, 7000);
+    if (!rows) { await say('I could not load your friends list, so I opened the Create screen for you to finish.', 'Sikuweza kupakia marafiki, kwa hiyo nimefungua skrini ya kuunda ili umalize.'); return true; }
+    nm.value = p.name; nm.dispatchEvent(new Event('input', { bubbles: true }));
+    var list = rows.map(function (r, i) { return { id: i, name: clean(r.dataset.name), row: r }; }), chosen = [], missing = [];
+    for (var k = 0; k < p.members.length; k++) {
+      var vs = I.nameVariants(p.members[k]), hit = null; for (var i = 0; i < vs.length && !hit; i++) { var r0 = I.matchContacts(vs[i], list); if (r0.matches.length) hit = r0; }
+      if (!hit) { missing.push(p.members[k]); continue; }
+      var one = hit.matches[0];
+      if (hit.matches.length > 1) { var ix = await UI.choose({ title: T('Which ' + p.members[k] + '?', p.members[k] + ' yupi?'), options: hit.matches.slice(0, 5).map(function (x) { return { label: x.name }; }), voiceAnswer: ask(T('Say the number or the full name.', 'Sema namba au jina kamili.')) }); if (ix < 0) { missing.push(p.members[k]); continue; } one = hit.matches[ix]; }
+      if (chosen.indexOf(one) < 0) chosen.push(one);
+    }
+    if (!chosen.length) { await say('I could not match any of those names to your friends, so I opened the Create screen for you to pick the members. You can only add friends.', 'Sikuweza kulinganisha majina hayo na marafiki zako, kwa hiyo nimefungua skrini ya kuunda ili uchague wanachama. Unaweza kuongeza marafiki tu.'); return true; }
+    chosen.forEach(function (x) { var cb = x.row.querySelector('input[type="checkbox"]'); if (cb) { cb.checked = true; cb.dispatchEvent(new Event('change', { bubbles: true })); } });
+    var names = chosen.map(function (x) { return x.name; }).join(', ');
+    if (!(await confirmYes(T('Create the group “' + p.name + '” with ' + names + '?' + (missing.length ? ' (Not found: ' + missing.join(', ') + ')' : ''), 'Unda kikundi “' + p.name + '” na ' + names + '?' + (missing.length ? ' (Hawakupatikana: ' + missing.join(', ') + ')' : '')), T('Yes, create', 'Ndiyo, unda')))) { await say('Cancelled. The Create screen is still open if you want to change something.', 'Imeghairiwa. Skrini ya kuunda bado iko wazi ukitaka kubadilisha kitu.'); return true; }
+    var h = H(), before = h.state().groups.length, sb = doc.getElementById('createSubmit'); if (!sb) { await say('The Create button is not available.', 'Kitufe cha kuunda hakipo.'); return true; }
+    sb.click();
+    var made = await waitFor(function () { var cur = current(); return cur && gname(cur) === p.name ? cur : (h.state().groups.length > before ? true : null); }, 9000);
+    V.audit('groups.create', { module: 'groups', outcome: made ? 'executed' : 'unconfirmed', members: chosen.length });
+    if (made) await say('Created ' + p.name + ' with ' + chosen.length + (chosen.length === 1 ? ' member.' : ' members.') + (missing.length ? ' I could not find ' + missing.join(', ') + '.' : ''), 'Nimeunda ' + p.name + ' na wanachama ' + chosen.length + '.' + (missing.length ? ' Sikuwapata ' + missing.join(', ') + '.' : ''));
+    else await say('I could not confirm the group was created. Please check your groups list.', 'Sikuweza kuthibitisha kwamba kikundi kimeundwa. Tafadhali angalia orodha ya vikundi.');
+    return true;
+  }
+
   async function run(p, lang) {
     var h = H(); if (!h) return false;
     if (p.type === 'refresh') { await h.loadGroups(); await say('Groups updated.', 'Vikundi vimesasishwa.'); return true; }
@@ -152,6 +246,10 @@
       var gn = gl.slice(0, 5).map(function (x) { return x.name; }).join(', ');
       await say('You are in ' + gc + (gc === 1 ? ' group' : ' groups') + ': ' + gn + (gc > 5 ? ', and ' + (gc - 5) + ' more' : '') + '.', 'Uko kwenye vikundi ' + gc + ': ' + gn + (gc > 5 ? ', na vingine ' + (gc - 5) : '') + '.'); return true;
     }
+    if (p.type === 'create' && p.members && p.members.length) return createWithMembers(p);
+    if (p.type === 'rename') return renameFlow(p);
+    if (p.type === 'role') return roleFlow(p);
+    if (p.type === 'remove-member') return removeMemberFlow(p);
     if (p.type === 'create') {
       var b = doc.getElementById('createGroupBtn'); if (!b) return false; b.click();
       var nm = await waitFor(function () { return doc.getElementById('gname'); }, 2000); if (nm && p.name) { nm.value = p.name; nm.dispatchEvent(new Event('input', { bubbles: true })); }
@@ -174,6 +272,7 @@
       await h.reload(); await new Promise(function (r) { setTimeout(r, 400); });
       var msgs = h.state().messages.filter(function (m) { return !m._optimistic && textOf(m); }).slice(-p.count);
       if (!msgs.length) { await say('There are no readable messages yet. If they are still decrypting, try again in a moment.', 'Hakuna ujumbe unaoweza kusomwa bado. Kama bado unafunguliwa, jaribu tena baadaye.'); return true; }
+      if (!(await allowRead())) { await say('Okay, I will not read the messages aloud. You can read them on the screen.', 'Sawa, sitasoma ujumbe kwa sauti. Unaweza kuusoma kwenye skrini.'); return true; }
       var out = msgs.map(function (m) { var who = sender(m); return (who ? who + ': ' : '') + textOf(m); }).join('. '); V.audit('groups.read', { module: 'groups', outcome: 'executed', lang: lang }); UI.announce(out); await V.speak(out, { force: true }); return true;
     }
     if (p.type === 'search') {
@@ -189,6 +288,12 @@
     return false;
   }
 
+  // Same privacy rule as the messenger: group messages are read aloud only on headphones, or after a spoken yes on the speaker.
+  async function allowRead() {
+    if (V.getSettings().readHeadphonesOnly === false) return true;
+    var priv = V.privateAudio ? await V.privateAudio() : null; if (priv === true) return true;
+    return confirmYes(T(priv === false ? 'No headphones found. Reading group messages aloud on the speaker lets others hear them.' : 'I cannot tell if headphones are connected. Reading group messages aloud on the speaker lets others hear them.', priv === false ? 'Hakuna vipokea sauti. Kusoma ujumbe wa kikundi kwa sauti kwenye spika kunaweza kuwasikizisha wengine.' : 'Siwezi kujua kama vipokea sauti vimeunganishwa. Kusoma ujumbe wa kikundi kwa sauti kwenye spika kunaweza kuwasikizisha wengine.'), T('Read aloud anyway', 'Soma kwa sauti hata hivyo'));
+  }
   function onIntent(payload) {
     if (!payload || payload.mode === 'probe') return false;
     var p = parse(payload.transcript); if (!p) return false;

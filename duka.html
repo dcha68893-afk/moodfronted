@@ -2490,6 +2490,50 @@ window.__duka = { parse: vParse, norm: vNorm, S: S, syncNow: syncNow, obMine: ob
 /* NECPRA voice: adapter between the shared voice-sales flow and DUKA's own cart/checkout. Voice never saves a sale itself:
    it fills S.cart (same model as camera/barcode/manual) and opens the normal checkout, where stock, offline, credit-customer
    and M-PESA verification rules apply and the trader taps Confirm sale. */
+/* VOICE extras (held bills, barcode scan, receive stock, device financing). Voice only holds / resumes bills and OPENS screens: it never records stock,
+   pays an instalment or discards a bill. Those stay a tap on the screen. Returns true when the words were handled here. */
+function vExtra(text) {
+  var n = String(text || '').toLowerCase().replace(/[.!?,]+/g, ' ').replace(/\s+/g, ' ').trim(), m;
+  function say(en, sw) { var msg = T(en, sw); try { toast(msg); } catch (_) {} vSay(msg); return true; }
+  if (/^(?:please |tafadhali )?(?:hold|park|put on hold|shikilia|weka pembeni)\s+(?:this |the |current |my )?(?:bill|sale|cart|customer|order|bili|mauzo)\b/.test(n)) {
+    if (!S.cart.length) return say('The cart is empty, so there is nothing to hold.', 'Kikapu ni tupu, hakuna cha kushikilia.');
+    S.tab = 'pos'; var before = loadParked().length; parkBill();
+    return loadParked().length > before ? say('Bill held. You can serve the next customer. Say show held bills to see it.', 'Bili imeshikiliwa. Unaweza kumhudumia mteja mwingine.') : true;
+  }
+  if ((m = /^(?:please |tafadhali )?(?:resume|continue|restore|bring back|open|rudisha|endelea na)\s+(?:the |my )?(?:held |parked )?(?:bill|customer|bili|mteja)\s*(?:number |no |ya |wa |#)?\s*(\d+)$/.exec(n))) {
+    var a = loadParked(), want = Number(m[1]), i = -1; a.forEach(function (b, k) { if (b.n === want && i < 0) i = k; });
+    if (!a.length) return say('You have no held bills.', 'Huna bili zilizoshikiliwa.');
+    if (i < 0) return say('I could not find held bill ' + want + '. You have ' + a.length + ' held ' + (a.length === 1 ? 'bill' : 'bills') + '. Say show held bills.', 'Sikupata bili ' + want + '. Una bili ' + a.length + ' zilizoshikiliwa. Sema onyesha bili zilizoshikiliwa.');
+    S.tab = 'pos'; resumeBill(i); return say('Resumed ' + a[i].label + '. Nothing is recorded until you confirm the sale.', 'Nimerudisha ' + a[i].label + '. Hakuna kinachorekodiwa hadi uthibitishe mauzo.');
+  }
+  if (/^(?:please |tafadhali )?(?:discard|delete|remove|cancel|futa|tupa)\s+(?:the |my |a )?(?:held|parked)\s+(?:bill|sale|cart|bili)/.test(n)) {
+    vGoTab('pos'); return say('I opened your held bills. Discarding cannot be undone, so tap Discard yourself on the bill you want to remove.', 'Nimefungua bili zilizoshikiliwa. Kufuta hakurudishwi, kwa hiyo bonyeza Futa mwenyewe kwenye bili unayotaka kuondoa.');
+  }
+  if (/\b(?:held|parked|on hold|zilizoshikiliwa|zilizowekwa pembeni)\b/.test(n) && /\b(?:bills?|sales?|carts?|bili|mauzo)\b/.test(n) && /\b(?:show|list|how many|open|view|see|nionyeshe|onyesha|ngapi|angalia|kuna)\b/.test(n)) {
+    var h = loadParked(); vGoTab('pos');
+    if (!h.length) return say('You have no held bills.', 'Huna bili zilizoshikiliwa.');
+    return say('You have ' + h.length + ' held ' + (h.length === 1 ? 'bill' : 'bills') + ': ' + h.slice(0, 5).map(function (b) { return b.label + ' with ' + b.cart.length + (b.cart.length === 1 ? ' item' : ' items'); }).join(', ') + '. Say resume bill, then the number.', 'Una bili ' + h.length + ' zilizoshikiliwa: ' + h.slice(0, 5).map(function (b) { return b.label + ' yenye bidhaa ' + b.cart.length; }).join(', ') + '. Sema rudisha bili, kisha namba.');
+  }
+  if (/^(?:please |tafadhali )?(?:scan|changanua|skani)\b(?:\s+(?:a |an |the |new )?(?:barcode|bar code|item|product|code|msimbo|bidhaa))?$/.test(n) || /\b(?:scan|changanua|skani)\b.*\b(?:barcode|bar code|msimbo)\b/.test(n)) {
+    if (!scanSupported()) { vGoTab('pos'); return say('Camera scanning is not available on this phone. Type the code in the search box, or use a Bluetooth scanner.', 'Kuchanganua kwa kamera hakupatikani kwenye simu hii. Andika msimbo kwenye kisanduku cha kutafuta, au tumia skana ya Bluetooth.'); }
+    vGoTab('pos'); openScan(); return say('Scanner opened. Hold the barcode in front of the camera. Items are added to the cart, and nothing is recorded until you confirm the sale.', 'Skana imefunguliwa. Shikilia msimbo mbele ya kamera. Bidhaa zinaongezwa kwenye kikapu, hakuna kinachorekodiwa hadi uthibitishe mauzo.');
+  }
+  if ((m = /^(?:please |tafadhali )?(?:receive|pokea|ingiza)\s+(?:new\s+)?(?:(\d+(?:\.\d+)?)\s+)?(?:stock|packs?|crates?|trays?|sacks?|goods|stoku|bidhaa|vifurushi|kreti|trei|gunia)(?:\s+(?:of|for|ya|za))?\s*(.*)$/.exec(n))) {
+    if (!S.products || !S.products.length) { vGoTab('stock'); return say('Your products are still loading. Try again in a moment.', 'Bidhaa zako bado zinapakia. Jaribu tena baadaye.'); }
+    wsBatch();
+    var pick = String(m[2] || '').trim(), prod = null;
+    if (pick) { var hits = S.products.filter(function (p) { return String(p.name || '').toLowerCase().indexOf(pick) >= 0 || (pick.length > 2 && pick.indexOf(String(p.name || '').toLowerCase()) >= 0); }); if (hits.length === 1) prod = hits[0]; }
+    try { if (prod && $('wbProd')) $('wbProd').value = prod.id; if (m[1] && $('wbQty')) $('wbQty').value = m[1]; if (/pack|crate|tray|sack|kreti|trei|gunia|vifurushi/.test(n) && $('wbMode')) { $('wbMode').value = 'pack'; $('wbMode').dispatchEvent(new Event('change', { bubbles: true })); } } catch (_) {}
+    return say('Receive stock is open' + (prod ? ' for ' + prod.name : '') + '. Check the product, quantity and cost, then tap Save. Stock is only added when you save.', 'Pokea stoku imefunguliwa' + (prod ? ' kwa ' + prod.name : '') + '. Angalia bidhaa, kiasi na gharama, kisha bonyeza Hifadhi. Stoku inaongezwa ukihifadhi tu.');
+  }
+  if (/\b(?:device financing|financing|instal?ments?|installments?|scale loan|loan on my scale|mkopo wa kifaa|malipo ya wiki|deni la skana|deni la mizani)\b/.test(n) && !/\b(?:apply|pay|lipa|omba)\b/.test(n) || /^(?:open|show|fungua|nionyeshe)\s+(?:my\s+)?(?:device\s+)?(?:financing|instal?ments?)$/.test(n)) {
+    fnOpen(); return say('Opening device financing. I do not read your balance aloud. Paying and applying are done by you on the screen.', 'Inafungua mkopo wa kifaa. Sisomi salio lako kwa sauti. Kulipa na kuomba unafanya mwenyewe kwenye skrini.');
+  }
+  if (/\b(?:apply|omba)\b.*\b(?:financing|device|scale|mkopo|kifaa)\b|\b(?:pay|lipa)\b.*\b(?:instal?ments?|installments?|financing|mkopo|kifaa)\b/.test(n)) {
+    fnOpen(); return say('I opened device financing. Applying and paying are money actions, so please do them yourself on the screen.', 'Nimefungua mkopo wa kifaa. Kuomba na kulipa ni miamala ya pesa, tafadhali fanya mwenyewe kwenye skrini.');
+  }
+  return false;
+}
 window.__necpraDukaVoice = {
   adapter: {
     getProducts: async function () {
@@ -2524,6 +2568,7 @@ window.__necpraDukaVoice = {
   },
   // a spoken request forwarded by the app shell while this screen is open
   onIntent: function (text) {
+    if (S.shopId) { try { if (vExtra(text)) return true; } catch (e) { try { toast('That did not work: ' + (e && e.message || 'error'), true); } catch (_) {} return true; } }
     if (!S.shopId || !window.NecpraVoiceSalesNLU) return false;
     var cmd = vParse(text, S.va.lang), known = cmd.intent && ['unknown', 'confirmWord', 'cancelWord'].indexOf(cmd.intent) < 0;   // (an unknown phrase returns false so the shell can offer it to the screen that owns the topic)
     if (!known && !NecpraVoiceSalesNLU.looksLikeSaleStatement(text)) return false;

@@ -106,7 +106,8 @@ const SW_VERSION = '19.60.0';
 // v125: Admin voice commands (necpra-voice-admin.js, admin.html, voice shell + guide) and Voice phrases screen ported into the Admin module (admin-module.js).
 // v124: Admin entry moved from the chat header into Settings (chat.html + settings.html).
 // v123: voice phase 2 (Messenger, Groups, Status, Settings, Games understood in-app) + admin-taught phrases (Tool > Admin > Voice phrases, synced to every user).
-const CACHE_NAME = 'necpra-static-v128';
+// v129: marketplace admin tools hidden in admin-module.js; chama reminder time limit setting in money.html.
+const CACHE_NAME = 'necpra-static-v131';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [

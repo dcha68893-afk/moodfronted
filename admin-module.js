@@ -356,8 +356,15 @@ function _noAccess() {
     </div>`;
 }
 
+// ─── TEMPORARILY HIDDEN: marketplace admin tools ──────────────────────────────
+// Set to false to bring the marketplace admin pages (products, sellers, buyers, orders, returns, payouts, coupons, flash sales,
+// reviews, support, notify, analytics, settings, audit log) back. Nothing was deleted; they are only removed from the menu/routes.
+const HIDE_MARKETPLACE_ADMIN = true;
+const MARKETPLACE_ADMIN_PAGES = ['admin-products', 'admin-approval', 'admin-reviews', 'admin-tickets', 'admin-support', 'admin-sellers', 'admin-buyers',
+    'admin-orders', 'admin-returns', 'admin-payouts', 'admin-coupons', 'admin-flash', 'admin-notify', 'admin-analytics', 'admin-settings', 'admin-audit'];
+
 // ─── Feature map (single source of truth for the dashboard + quick-nav strip) ──
-const ADMIN_GROUPS = [
+const ADMIN_GROUPS_ALL = [
     { title: 'Moderation', items: [
         ['admin-modules',  '🧩', 'Reports by Module'],
         ['admin-products', '📦', 'Products',  'products'],
@@ -383,8 +390,12 @@ const ADMIN_GROUPS = [
         ['admin-settings', '⚙️', 'Settings'],
         ['admin-audit',    '📋', 'Audit Log'],
         ['admin-voice',    '🎙️', 'Voice phrases'],
+        ['admin-receiving','📲', 'Chama numbers'],
     ]},
 ];
+const ADMIN_GROUPS = HIDE_MARKETPLACE_ADMIN
+    ? ADMIN_GROUPS_ALL.map(g => ({ title: g.title, items: g.items.filter(it => !MARKETPLACE_ADMIN_PAGES.includes(it[0])) })).filter(g => g.items.length)
+    : ADMIN_GROUPS_ALL;
 
 function _groupsHtml(badges) {
     badges = badges || {};
@@ -408,6 +419,10 @@ function _groupsHtml(badges) {
 // ══════════════════════════════════════════════════════════════════════════════
 async function renderAdminDashboard(container) {
     if (!_isAdmin()) { container.innerHTML = _pageShell('Admin Panel', _noAccess()); return; }
+    if (HIDE_MARKETPLACE_ADMIN) { // marketplace KPIs/revenue are hidden for now: just the remaining admin tools
+        container.innerHTML = _pageShell('Admin Panel', _groupsHtml({}));
+        return;
+    }
     container.innerHTML = _pageShell('Command Center', `<div style="padding:20px;text-align:center">⏳ Loading…</div>`);
 
     const r = await _api('GET', '/marketplace/admin/stats/full');
@@ -1378,6 +1393,37 @@ window._admMsgReportSet = async (id, status) => {
 };
 
 
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CHAMA RECEIVING NUMBERS — approve/reject M-Pesa numbers chamas want to receive on (not the owner's own number)
+// ══════════════════════════════════════════════════════════════════════════════
+async function renderAdminReceiving(container) {
+    if (!_isAdmin()) { container.innerHTML = _pageShell('Chama numbers', _noAccess()); return; }
+    container.innerHTML = _pageShell('Chama numbers', `<div style="padding:20px;text-align:center">⏳</div>`);
+    const r = await _api('GET', '/money/admin/receiving-accounts?status=pending');
+    if (r?._error) { container.innerHTML = _pageShell('Chama numbers', `<div style="padding:20px;text-align:center;color:#b91c1c">${_esc(r._error)}</div>`); return; }
+    const list = r?.accounts || [];
+    container.innerHTML = _pageShell('Chama numbers', list.length ? list.map(a => `
+        <div class="adm-section" style="padding:12px">
+            <div style="font-weight:800">${_esc(a.circleName || 'Chama')}</div>
+            <div style="font-size:13px;margin:4px 0">M-Pesa <b>${_esc(a.accountNumber || '')}</b> · registered name: <b>${_esc(a.accountName || '')}</b></div>
+            <div style="font-size:12px;color:#6b7280">Owner user #${_esc(a.ownerUserId)} · requested ${_esc(String(a.submittedAt || '').slice(0, 10))}</div>
+            <div style="display:flex;gap:8px;margin-top:10px">
+                <button class="adm-btn adm-btn-primary" onclick="window._admRecvDecide('${_esc(a.id)}',true)">Approve</button>
+                <button class="adm-btn" onclick="window._admRecvDecide('${_esc(a.id)}',false)">Reject</button>
+            </div>
+        </div>`).join('') : `<div style="padding:24px;text-align:center;color:#6b7280">No numbers waiting for approval.</div>`);
+}
+window._admRecvDecide = async (id, approve) => {
+    let body = {};
+    if (!approve) { const reason = prompt('Reason for rejecting (the chama owner will see this):'); if (!reason) return; body = { reason }; }
+    else if (!confirm('Approve this number to receive the chama\'s money? Check that the name matches the owner or the group.')) return;
+    const r = await _api('POST', '/money/admin/receiving-accounts/' + encodeURIComponent(id) + (approve ? '/approve' : '/reject'), body);
+    if (r?._error) { _toast(r._error, 'error', '⚠️'); return; }
+    _toast(approve ? 'Number approved' : 'Number rejected', 'success', approve ? '✅' : '❌');
+    window.__admNav('admin-receiving');
+};
+
 // ══════════════════════════════════════════════════════════════════════════════
 // ROUTER — standalone admin module (no dependency on the Tool module)
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1401,9 +1447,11 @@ const ADMIN_ROUTES = {
     'admin-settings':   renderAdminSettings,
     'admin-audit':      renderAdminAudit,
     'admin-voice':      renderAdminVoice,
+    'admin-receiving':  renderAdminReceiving,
     'admin-modules':    renderAdminModules,
     'admin-module':     renderAdminModule,
 };
+if (HIDE_MARKETPLACE_ADMIN) MARKETPLACE_ADMIN_PAGES.forEach(k => { delete ADMIN_ROUTES[k]; }); // __admNav falls back to the dashboard for any removed page
 const BACK_OF = { 'admin-module': 'admin-modules' };
 const STRIP_ACTIVE = { 'admin-module': 'admin-modules', 'admin-approval': 'admin-products', 'admin-support': 'admin-tickets' };
 

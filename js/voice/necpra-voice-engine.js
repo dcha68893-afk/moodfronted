@@ -10,7 +10,7 @@
 
   var SETTINGS_KEY = 'necpra_voice_settings_v1';
   var RECOVERY_KEY = 'necpra_voice_recovery_v1';
-  var DEFAULTS = { lang: 'auto', speak: true, speakSensitive: false, readIncoming: false, rate: 1, voiceURI: '', pauseMs: 3500, handsFree: false, smart: true, logUnheard: false };
+  var DEFAULTS = { lang: 'auto', speak: true, speakSensitive: false, readIncoming: false, readHeadphonesOnly: true, rate: 1, voiceURI: '', pauseMs: 3500, handsFree: false, smart: true, logUnheard: false };
   var FINISH_RE = /(?:^|[\s,.!?])(finish recording|stop recording|end recording|nimemaliza kurekodi|maliza kurekodi)[\s.!?]*$/i;
   var MAX_RESTARTS = 400, IDLE_MS_DICTATION = 60000, IDLE_MS_COMMAND = 15000, DUP_WINDOW_MS = 1500;
 
@@ -331,6 +331,17 @@
       })();
     });
   }
+  // Is the sound going somewhere private? true = headphones / earpiece-type output found, false = only speaker-type outputs, null = cannot tell
+  // (browsers hide device names until the mic is allowed). Callers FAIL CLOSED on false/null: private text is never read out automatically.
+  function privateAudio() {
+    var md = root.navigator && root.navigator.mediaDevices;
+    if (!md || !md.enumerateDevices) return Promise.resolve(null);
+    return md.enumerateDevices().then(function (list) {
+      var outs = list.filter(function (d) { return d.kind === 'audiooutput'; });
+      if (!outs.length || !outs.some(function (d) { return d.label; })) return null;
+      return outs.some(function (d) { return /head(?:phone|set)|ear(?:phone|bud|piece)|buds|airpods|bluetooth|a2dp|wired|usb audio|bt[ -]/i.test(d.label); });
+    }, function () { return null; });
+  }
   function cancelSpeech() { speaking = null; try { root.speechSynthesis && root.speechSynthesis.cancel(); } catch (_) {} }
   function repeatLast() { return lastSpoken ? speak(lastSpoken, { force: true }) : Promise.resolve(false); }
   function isSpeaking() { return !!speaking; }
@@ -378,7 +389,7 @@
 
   var api = {
     version: '1.0.0', start: start, finish: finish, cancel: cancel, state: state, isListening: isListening, isSupported: isSupported,
-    on: on, off: off, getSettings: getSettings, setSettings: setSettings, resolveLang: resolveLang, message: msg,
+    on: on, off: off, getSettings: getSettings, setSettings: setSettings, privateAudio: privateAudio, resolveLang: resolveLang, message: msg,
     getRecovery: getRecovery, clearRecovery: clearRecovery, speak: speak, cancelSpeech: cancelSpeech, repeatLast: repeatLast, isSpeaking: isSpeaking, getVoices: getVoices,
     registerProvider: registerProvider, registerHandler: registerHandler, dispatch: dispatch, configure: configure, audit: audit, _cfg: function () { return cfg; },
     _internals: { stripFinish: stripFinish, chunk: chunk, stripReplay: stripReplay }

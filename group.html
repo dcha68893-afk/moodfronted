@@ -915,7 +915,13 @@ window.addEventListener('message',e=>{
   if(d.type==='PARENT_GROUP_ACTION'){const action=d.payload&&d.payload.action;if(action==='members'||action==='info')showInfo();else if(action==='settings')showSettings();else if(action==='purpose')showPurpose();return}
 });
 window.__GROUP_LOAD_GROUPS=loadGroups;window.__GROUP_REFRESH_MESSAGES=loadMessages;loadUnread();loadGroups();
-window.__kynGroupsVoice={state:()=>S,open:openGroup,close:closeGroup,reload:loadMessages,loadGroups:loadGroups,send:sendGroupPayload,members:showMembers};
+window.__kynGroupsVoice={state:()=>S,open:openGroup,close:closeGroup,reload:loadMessages,loadGroups:loadGroups,send:sendGroupPayload,members:showMembers,
+ /* VOICE (necpra-voice-groups.js): the same checks and endpoints the Members / Info buttons use, without their confirm() popups (the voice layer asks first). */
+ me:uid,isOwner:g=>!!g&&groupOwnerId(g)===uid(),isManager:amGroupManager,ownerId:groupOwnerId,memberId:memberIdOf,
+ refreshMembers:async()=>{const g=S.current;if(g)try{await refreshCurrentGroupMembers(g.id)}catch(_){}},
+ setRole:async(userId,role)=>{const g=S.current;if(!g)throw new Error('No group is open');return api('/group-admin/'+encodeURIComponent(g.id)+'/members/'+encodeURIComponent(userId)+'/role',{method:'PATCH',body:JSON.stringify({role})})},
+ removeMember:async userId=>{const g=S.current;if(!g)throw new Error('No group is open');return api('/group-admin/'+encodeURIComponent(g.id)+'/members/'+encodeURIComponent(userId),{method:'DELETE'})},
+ rename:async name=>{const g=S.current;if(!g)throw new Error('No group is open');const r=await api('/chats/'+encodeURIComponent(g.id),{method:'PATCH',body:JSON.stringify({name})});g.name=name;g.groupName=name;return r}};
 })();
 </script>
 <!-- FIX: this module's own modals (membersModal, purposeModal, settingsModal

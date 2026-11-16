@@ -53,12 +53,12 @@
     return { contact: who, fuzzy: rc.fuzzy ? rc.name : null };
   }
 
-  async function doSend(contact, text) {
-    var key = contact.id + '|' + text;
+  async function doSend(contact, text, replyToId) {
+    var key = contact.id + '|' + text + '|' + (replyToId || '');
     if (lastSent && lastSent.key === key && Date.now() - lastSent.t < 8000) { await say('That exact message was just sent.', 'Ujumbe huo huo umetumwa sasa hivi.'); return true; } // duplicate guard
     lastSent = { key: key, t: Date.now() };
     var res;
-    try { res = await Promise.race([cfg.MM.sendMessage({ chatId: contact.id, content: text }), new Promise(function (r) { setTimeout(function () { r({ timeout: true }); }, 20000); })]); }
+    try { res = await Promise.race([cfg.MM.sendMessage(replyToId ? { chatId: contact.id, content: text, replyToId: replyToId } : { chatId: contact.id, content: text }), new Promise(function (r) { setTimeout(function () { r({ timeout: true }); }, 20000); })]); }
     catch (e) { res = { success: false, error: e && e.message }; }
     if (res && res.timeout) { V.audit('messenger.send', { module: 'messenger', outcome: 'executed', chars: text.length }); await say('Still sending to ' + contact.name + '. Check the chat for its delivery status.', 'Bado inatuma kwa ' + contact.name + '. Angalia mazungumzo kuona hali.'); return true; }
     if (res && res.success === false) {
@@ -72,7 +72,7 @@
   }
 
   // capture -> read back -> corrections -> explicit confirmation -> send
-  async function compose(contact, text, note) {
+  async function compose(contact, text, note, replyToId) {
     try { await cfg.MM.openChat({ conversationId: Number(contact.id) }); } catch (_) {}
     for (var round = 0; round < 8; round++) {
       if (!text) {
@@ -82,7 +82,7 @@
       }
       var a = await UI.confirmMessage({ to: contact.name, text: text, note: note, voiceAnswer: ask(T('Say send, add, change it to, start again, or cancel.', 'Sema tuma, ongeza, badilisha iwe, anza upya, au ghairi.')) });
       note = '';
-      if (a.action === 'send') { if (!a.text) { text = ''; continue; } return doSend(contact, a.text); }
+      if (a.action === 'send') { if (!a.text) { text = ''; continue; } return doSend(contact, a.text, replyToId); }
       if (a.action === 'cancel') { V.audit('messenger.send', { module: 'messenger', outcome: 'cancelled' }); await say('Cancelled. Nothing was sent.', 'Imeghairiwa. Hakuna kilichotumwa.'); return false; }
       if (a.action === 'redo') { text = ''; continue; }
       if (a.action === 'append') {
@@ -134,6 +134,7 @@
     if (from) { var m = I.matchContacts(from, conv.map(function (c) { return { id: c.chatId, name: name(c), conv: c }; })); if (!m.matches.length) return say('I could not find "' + from + '".', 'Sikumpata "' + from + '".'); items = m.matches.map(function (x) { return x.conv; }); }
     else items = conv.filter(function (c) { return c.unreadCount > 0; }).sort(function (a, b) { return ts(b) - ts(a); });
     if (!items.length) return say('You have no new messages.', 'Huna ujumbe mpya.');
+    if (!(await allowReadAloud(true))) { V.audit('messenger.read', { module: 'messenger', outcome: 'declined' }); return say('Okay, I will not read your messages aloud. You can read them on the screen.', 'Sawa, sitasoma ujumbe wako kwa sauti. Unaweza kuusoma kwenye skrini.'); }
     items = items.slice(0, 5); V.audit('messenger.read', { module: 'messenger', outcome: 'executed' });
     await say('You have ' + items.length + (items.length === 1 ? ' chat' : ' chats') + ' to read.', 'Una mazungumzo ' + items.length + ' ya kusoma.', true);
     for (var i = 0; i < items.length; i++) { var t = previewOf(items[i]); await V.speak(name(items[i]) + ': ' + (t || T('a message I cannot read yet', 'ujumbe ambao siwezi kusoma bado')), { force: true }); } // explicit request = permission to read aloud
@@ -182,11 +183,166 @@
     await say('That did not work' + (res && res.error ? ': ' + res.error : '') + '. Nothing was changed.', 'Haikufanikiwa' + (res && res.error ? ': ' + res.error : '') + '. Hakuna kilichobadilishwa.');
   }
 
+  /* ───────── Per-message actions by voice: star / unstar, reply, forward, edit, delete a SINGLE message ─────────
+   * Uses the same MessageModule calls as the bubble menu in message.html (starMessage, editMessage, deleteMessage, sendMessage with replyToId).
+   * Rules: locked chats are never touched; the message text is shown on screen but never spoken by these flows; reply, forward, edit and
+   * delete always ask first; editing and "delete for everyone" are only offered for YOUR OWN messages; errors are reported, never hidden. */
+  var MSGWORD = /\b(messages?|msgs?|texts?|ujumbe|meseji)\b/i;
+  function parseSelector(t) {
+    var n = ' ' + String(t || '').toLowerCase() + ' ', sel = { own: null, from: '', q: '' }, m;
+    if (/\b(my|mine|i sent|i wrote|yangu|wangu|nilio(?:tuma|andika)|nilituma)\b/.test(n)) sel.own = true;
+    else if (/\b(their|his|her|theirs|they sent|he sent|she sent|wake|yake|aliyotuma|alinitumia)\b/.test(n)) sel.own = false;
+    if ((m = /\b(?:from|by)\s+(.+?)(?:\s+(?:saying|about|containing|that says)\b.*)?$/i.exec(t)) && !/^(?:me|myself)$/i.test(clean(m[1]))) { sel.from = clean(m[1].replace(/^(?:the\s+)/i, '')); sel.own = false; }
+    else if ((m = /\bkutoka\s+kwa\s+(.+?)(?:\s+(?:kuhusu|inayosema)\b.*)?$/i.exec(t))) { sel.from = clean(m[1]); sel.own = false; }
+    if ((m = /\b(?:about|containing|that says|which says|with the words|that mentions|mentioning|kuhusu|inayosema|yenye maneno)\s+(.+)$/i.exec(t))) sel.q = clean(m[1].replace(/^["“']|["”']$/g, '').replace(/^(?:the|a|an)\s+/i, ''));
+    return sel;
+  }
+  function parseMsgAction(input) {
+    var s = clean(input).replace(/[.!?,]+$/, '');
+    s = s.replace(/^(?:(?:hey|hi|ok|okay|so|now)\s+)?(?:please\s+|tafadhali\s+)?(?:can you\s+|could you\s+|would you\s+)?(?:please\s+)?(?:i\s+(?:want|wanna|need|would like)\s+to\s+|let me\s+|nataka\s+|naomba\s+)?/i, '');
+    if (!MSGWORD.test(s)) return null;
+    var n = s.toLowerCase(), verb = null, m, rest = '', payload = '', to = '';
+    if (/^(?:unstar|remove (?:the |a )?star|take (?:the )?star off|ondoa nyota)\b/.test(n)) { verb = 'unstar'; rest = s.replace(/^(?:unstar|remove (?:the |a )?star(?: from| on| off)?|take (?:the )?star off|ondoa nyota(?: kwenye| kwa)?)\s*/i, ''); }
+    else if (/^(?:star|add (?:a )?star|put (?:a )?star|weka nyota)\b/.test(n)) { verb = 'star'; rest = s.replace(/^(?:star|add (?:a )?star(?: to| on)?|put (?:a )?star(?: on| to)?|weka nyota(?: kwenye| kwa)?)\s*/i, ''); }
+    else if (/^(?:forward|sambaza|peleka mbele)\b/.test(n)) {
+      verb = 'forward'; rest = s.replace(/^(?:forward|sambaza|peleka mbele)\s*/i, '');
+      if ((m = /^(.*?)\s+(?:to|kwa)\s+(.+)$/i.exec(rest))) { rest = m[1]; to = clean(m[2]); }
+    }
+    else if (/^(?:reply to|respond to|answer|jibu)\b/.test(n)) {
+      verb = 'reply'; rest = s.replace(/^(?:reply to|respond to|answer|jibu)\s*/i, '');
+      if ((m = /^(.*?)\s*(?:,|\b(?:saying|and say|and tell (?:him|her|them)|with|kwamba|na useme))\s+(.+)$/i.exec(rest)) && m[2]) { rest = m[1]; payload = clean(m[2]); }
+    }
+    else if (/^(?:edit|change|correct|fix|badilisha|hariri|rekebisha)\b/.test(n)) {
+      verb = 'edit'; rest = s.replace(/^(?:edit|change|correct|fix|badilisha|hariri|rekebisha)\s*/i, '');
+      if ((m = /^(.*?)\s+(?:to say|to read|to|into|saying|kuwa|iwe)\s+(.+)$/i.exec(rest)) && m[2]) { rest = m[1]; payload = clean(m[2].replace(/^["“']|["”']$/g, '')); }
+    }
+    else if (/^(?:delete|erase|remove|futa|ondoa)\b/.test(n)) { verb = 'delete'; rest = s.replace(/^(?:delete|erase|remove|futa|ondoa)\s*/i, ''); }
+    if (!verb) return null;
+    // the rest must really talk about one message ("the last message", "my message about the rent"), not a chat or a person
+    if (!MSGWORD.test(rest) && verb !== 'reply') return null;
+    if (MSGWORD.test(rest) === false && verb === 'reply' && !MSGWORD.test(s)) return null;
+    // "delete all messages" / "delete messages with Denis" are NOT single-message commands: leave them to the chat actions and say nothing here.
+    if (/\ball\b|\bevery\b|\bmessages\b|\bzote\b|\bjumbe zote\b/i.test(rest) && !/\blast|latest|mwisho\b/i.test(rest)) return null;
+    var sel = parseSelector(rest);
+    return { verb: verb, sel: sel, payload: payload, to: to };
+  }
+
+  function msgText(m) { var t = clean(m && m.displayContent); if (PLACEHOLDER.test(t)) return ''; if (t) return t; var a = m && m.metadata && m.metadata.attachment; return a ? '📎 ' + (a.originalName || a.name || T('Attachment', 'Kiambatisho')) : ''; }
+  function chronological(list) {
+    var arr = list.slice(); var ok = arr.every(function (m) { return m && m.createdAt; });
+    if (ok) arr.sort(function (a, b) { return new Date(a.createdAt) - new Date(b.createdAt); });
+    return arr;
+  }
+  function usable(m) { return m && m.id != null && typeof m.id !== 'undefined' && !m._optimistic && m.status !== 'sending' && m.status !== 'failed' && !m.deleted && !m.isDeleted && msgText(m); }
+  async function msgChat(sel) {
+    var list = contacts();
+    if (sel.from) {
+      var f = findMatches(I.nameVariants(sel.from), list);
+      if (f) { var who = await pickOne(f.matches, T('Which ' + sel.from + '?', sel.from + ' yupi?')); if (!who) return null; try { await cfg.MM.openChat({ conversationId: Number(who.id) }); } catch (_) {} return who; }
+      var a1 = cfg.MM.getActiveChatId(), cur1 = list.filter(function (x) { return String(x.id) === String(a1); })[0];
+      if (cur1 && I.matchContacts(sel.from, [cur1]).matches.length) return cur1;
+      await say('I could not find a chat with \"' + sel.from + '\". Nothing was changed.', 'Sikumpata mazungumzo na \"' + sel.from + '\". Hakuna kilichobadilishwa.'); return null;
+    }
+    var act = cfg.MM.getActiveChatId(), cur = list.filter(function (x) { return String(x.id) === String(act); })[0];
+    if (cur) return cur;
+    if (act != null && cfg.isLocked(act)) { await say('That chat is locked, so I cannot act on its messages. Unlock it in the app first.', 'Mazungumzo hayo yamefungwa kwa kufuli, siwezi kushughulikia ujumbe wake. Yafungue kwenye programu kwanza.'); return null; }
+    await say('Open the chat first, or say it with a name, for example: star my last message to Denis.', 'Fungua mazungumzo kwanza, au sema pamoja na jina, mfano: weka nyota ujumbe wangu wa mwisho kwa Denis.'); return null;
+  }
+  async function pickMessage(sel, chat, verb) {
+    var me = root._kynCurrentUserId, all = chronological((cfg.MM.getMessages ? cfg.MM.getMessages(chat.id) : []) || []).filter(usable);
+    if (sel.own === true) all = all.filter(function (m) { return String(m.senderId) === String(me); });
+    else if (sel.own === false) all = all.filter(function (m) { return String(m.senderId) !== String(me); });
+    if ((verb === 'edit') && sel.own === null) all = all.filter(function (m) { return String(m.senderId) === String(me); });   // only your own messages can be edited
+    if (sel.q) { var q = sel.q.toLowerCase(); all = all.filter(function (m) { return msgText(m).toLowerCase().indexOf(q) >= 0; }); }
+    if (!all.length) { await say(sel.q ? 'I could not find a message about \"' + sel.q + '\" in this chat.' : 'I could not find that message in this chat.', sel.q ? 'Sikupata ujumbe kuhusu \"' + sel.q + '\" kwenye mazungumzo haya.' : 'Sikupata ujumbe huo kwenye mazungumzo haya.'); return null; }
+    if (!sel.q || all.length === 1) return all[all.length - 1];
+    var cands = all.slice(-4).reverse();
+    var idx = await UI.choose({ title: T('Which message?', 'Ujumbe upi?'), options: cands.map(function (m) { return { label: msgText(m).slice(0, 70), sub: String(m.senderId) === String(me) ? T('You', 'Wewe') : chat.name }; }), voiceAnswer: ask(T('Say the number.', 'Sema namba.')) });
+    return idx >= 0 ? cands[idx] : null;
+  }
+  function failed(res) { return res && (res.success === false || res.ok === false || res.error); }
+  function errText(res) { return clean((res && (res.error && (res.error.message || res.error) || res.message)) || ''); }
+
+  async function messageAction(p) {
+    if (typeof cfg.MM.getMessages !== 'function') { await say('That is not available on this screen yet.', 'Hilo bado halipatikani kwenye skrini hii.'); return; }
+    var chat = await msgChat(p.sel); if (!chat) return;
+    if (cfg.isLocked(chat.id)) { await say('That chat is locked, so I cannot act on its messages.', 'Mazungumzo hayo yamefungwa kwa kufuli, siwezi kushughulikia ujumbe wake.'); return; }
+    var m = await pickMessage(p.sel, chat, p.verb); if (!m) return;
+    var me = root._kynCurrentUserId, mine = String(m.senderId) === String(me), shown = msgText(m).slice(0, 140), id = m.id, mm = cfg.MM, res, aud = 'messenger.msg_' + p.verb;
+    function done(en, sw) { V.audit(aud, { module: 'messenger', outcome: 'executed' }); return say(en, sw); }
+    function fail(res2) { V.audit(aud, { module: 'messenger', outcome: 'error' }); return say('That did not work' + (errText(res2) ? ': ' + errText(res2) : '') + '. Nothing was changed.', 'Haikufanikiwa' + (errText(res2) ? ': ' + errText(res2) : '') + '. Hakuna kilichobadilishwa.'); }
+    function cancelled() { V.audit(aud, { module: 'messenger', outcome: 'cancelled' }); return say('Cancelled. Nothing was changed.', 'Imeghairiwa. Hakuna kilichobadilishwa.'); }
+
+    if (p.verb === 'star' || p.verb === 'unstar') {
+      if (p.verb === 'star' && m.starred) return say('That message is already starred.', 'Ujumbe huo tayari una nyota.');
+      if (p.verb === 'unstar' && !m.starred) return say('That message is not starred.', 'Ujumbe huo hauna nyota.');
+      try { res = p.verb === 'star' ? await mm.starMessage(chat.id, id) : await mm.unstarMessage(chat.id, id); } catch (e) { res = { ok: false, error: e && e.message }; }
+      if (failed(res)) return fail(res);
+      return done(p.verb === 'star' ? 'Starred.' : 'Star removed.', p.verb === 'star' ? 'Imewekwa nyota.' : 'Nyota imeondolewa.');
+    }
+    if (p.verb === 'delete') {
+      var opts = [{ label: T('Delete for me', 'Futa kwangu') }]; if (mine) opts.push({ label: T('Delete for everyone', 'Futa kwa wote') });
+      var di = await UI.choose({ title: T('Delete this message? “' + shown + '”', 'Futa ujumbe huu? “' + shown + '”') + (mine ? T(' “Delete for everyone” removes it for them too.', ' “Futa kwa wote” unauondoa kwao pia.') : ''), options: opts, voiceAnswer: ask(T(mine ? 'Say delete for me, delete for everyone, or cancel.' : 'Say yes to delete it for you, or cancel.', mine ? 'Sema futa kwangu, futa kwa wote, au ghairi.' : 'Sema ndiyo kuifuta kwako, au ghairi.')) });
+      if (di < 0) return cancelled();
+      try { res = await mm.deleteMessage(chat.id, id, { forEveryone: mine && di === 1 }); } catch (e) { res = { ok: false, error: e && e.message }; }
+      if (failed(res)) return fail(res);
+      return done(mine && di === 1 ? 'Deleted for everyone.' : 'Deleted for you.', mine && di === 1 ? 'Imefutwa kwa wote.' : 'Imefutwa kwako.');
+    }
+    if (p.verb === 'edit') {
+      if (!mine) return say('You can only edit your own messages.', 'Unaweza kuhariri ujumbe wako mwenyewe tu.');
+      if (m.metadata && m.metadata.attachment && !clean(m.displayContent)) return say('That message is a file, so there is no text to edit.', 'Ujumbe huo ni faili, hakuna maandishi ya kuhariri.');
+      var nt = p.payload;
+      for (var r0 = 0; r0 < 4; r0++) {
+        if (!nt) { var cr = await R.capture({ mode: 'dictation', title: T('Edit message', 'Hariri ujumbe'), prompt: T('What should the message say now?', 'Ujumbe usomeke nini sasa?') }); if (!cr || cr.cancelled || !cr.transcript) return cancelled(); nt = clean(cr.transcript); }
+        var ei = await UI.choose({ title: T('Change “' + shown + '” to “' + nt.slice(0, 140) + '”?', 'Badilisha “' + shown + '” kuwa “' + nt.slice(0, 140) + '”?'), options: [{ label: T('Yes, change it', 'Ndiyo, badilisha') }, { label: T('Say it again', 'Sema tena') }], voiceAnswer: ask(T('Say yes to change it, say it again, or cancel.', 'Sema ndiyo kubadilisha, sema tena, au ghairi.')) });
+        if (ei === 1) { nt = ''; continue; } if (ei !== 0) return cancelled();
+        try { res = await mm.editMessage(chat.id, id, nt); } catch (e) { res = { ok: false, error: e && e.message }; }
+        if (failed(res)) return fail(res); return done('The message was changed.', 'Ujumbe umebadilishwa.');
+      }
+      return cancelled();
+    }
+    if (p.verb === 'reply') {
+      V.audit(aud, { module: 'messenger', outcome: 'started' });
+      await compose(chat, p.payload, T('Replying to: “' + shown.slice(0, 80) + '”', 'Unajibu: “' + shown.slice(0, 80) + '”'), id); return;
+    }
+    if (p.verb === 'forward') {
+      var all = await allContacts(), nm = p.to;
+      if (!nm) { var sp = await ask(T('Who should I forward it to? Say the name.', 'Nimpelekee nani? Sema jina.'))(); if (!sp) return cancelled(); nm = clean(sp); }
+      var hit = findMatches(I.nameVariants(nm), all); if (!hit) return say('I could not find \"' + nm + '\" in your chats or friends. Nothing was forwarded.', 'Sikumpata \"' + nm + '\" kwenye mazungumzo au marafiki zako. Hakuna kilichopelekwa.');
+      var target = await pickOne(hit.matches, T('Which ' + nm + '?', nm + ' yupi?')); if (!target) return cancelled();
+      if (String(target.id) === String(chat.id)) return say('That message is already in this chat.', 'Ujumbe huo tayari upo kwenye mazungumzo haya.');
+      var fi = await UI.choose({ title: T('Forward “' + shown + '” to ' + target.name + '?', 'Pelekea ' + target.name + ' “' + shown + '”?'), options: [{ label: T('Yes, forward', 'Ndiyo, peleka') }], voiceAnswer: ask(T('Say yes to forward, or cancel.', 'Sema ndiyo kupeleka, au ghairi.')) });
+      if (fi !== 0) return cancelled();
+      var payload = { receiverId: target.userId, content: clean(m.displayContent) || '', attachment: (m.metadata && m.metadata.attachment) || null };
+      try { res = await mm.sendMessage(payload); } catch (e) { res = { ok: false, error: e && e.message }; }
+      if (failed(res)) { V.audit(aud, { module: 'messenger', outcome: 'error' }); return say('The message was NOT forwarded' + (errText(res) ? ': ' + errText(res) : '') + '.', 'Ujumbe HAUKUPELEKWA' + (errText(res) ? ': ' + errText(res) : '') + '.'); }
+      return done('Forwarded to ' + target.name + '.', 'Umepelekwa kwa ' + target.name + '.');
+    }
+  }
+
+  /* ───────── Read-aloud privacy gate ─────────
+   * Private text is read out loud only when it is safe: never from locked chats, never while the mic is listening, and (unless the person
+   * turned it off) only when headphones are detected. If the app cannot tell where the sound goes, it assumes the speaker and stays quiet
+   * for automatic reading; for a spoken "read my messages" it asks once first. */
+  async function allowReadAloud(explicit) {
+    var s = V.getSettings(); if (s.readHeadphonesOnly === false) return true;
+    var priv = V.privateAudio ? await V.privateAudio() : null; if (priv === true) return true;
+    if (!explicit) return false;
+    var i = await UI.choose({ title: T(priv === false ? 'No headphones found. Reading messages aloud on the speaker lets others hear them.' : 'I cannot tell if headphones are connected. Reading messages aloud on the speaker lets others hear them.', priv === false ? 'Hakuna vipokea sauti. Kusoma ujumbe kwa sauti kwenye spika kunaweza kuwasikizisha wengine.' : 'Siwezi kujua kama vipokea sauti vimeunganishwa. Kusoma ujumbe kwa sauti kwenye spika kunaweza kuwasikizisha wengine.'), options: [{ label: T('Read aloud anyway', 'Soma kwa sauti hata hivyo') }], voiceAnswer: ask(T('Say yes to read aloud, or cancel.', 'Sema ndiyo kusoma kwa sauti, au ghairi.')) });
+    return i === 0;
+  }
+
   // Right after the app opens, the chat list may still be loading. Matching a spoken name against an empty list made "open chat with Denis" miss, so wait a few seconds for it.
   function waitConvs(ms) { return new Promise(function (res) { var end = Date.now() + ms; (function poll() { var n = 0; try { n = cfg.MM.getConversations().length; } catch (_) {} if (n || Date.now() > end) return res(); setTimeout(poll, 150); })(); }); }
   async function handle(payload) {
     var probe = payload && payload.mode === 'probe', text = payload.transcript;
     var list = contacts();
+    var ma = !probe ? parseMsgAction(text) : null;   // one message: star / reply / forward / edit / delete (checked before whole-chat actions)
+    if (ma) {
+      if (busy) { await say('I am still working on your last request.', 'Bado nashughulikia ombi lako la awali.'); return true; }
+      busy = true; try { await messageAction(ma); } catch (e) { await say('That did not work: ' + ((e && e.message) || 'unknown error') + '. Nothing was changed.', 'Haikufanikiwa: ' + ((e && e.message) || 'hitilafu') + '. Hakuna kilichobadilishwa.'); } finally { busy = false; }
+      return true;
+    }
     var ca = (!probe && I.parseChatAction) ? I.parseChatAction(text) : null;   // archive / mute / favourite / unread / delete chat / block: checked first ("mute chat with Denis" must not be read as "chat with Denis")
     if (ca) {
       if (busy) { await say('I am still working on your last request.', 'Bado nashughulikia ombi lako la awali.'); return true; }
@@ -235,10 +391,10 @@
         var m = d.message, me = root._kynCurrentUserId; if (!me || String(m.senderId) === String(me) || m.status === 'sending' || cfg.isLocked(d.chatId) || V.isListening()) return;
         var id = String(m.id); if (spokenIn[id]) return; spokenIn[id] = 1; var txt = clean(m.displayContent); if (!txt || PLACEHOLDER.test(txt) || txt.length > 400) return;
         var cv = cfg.MM.getConversations().filter(function (x) { return String(x.chatId) === String(d.chatId); })[0];
-        V.speak(T('New message from ', 'Ujumbe mpya kutoka kwa ') + (cv ? name(cv) : T('someone', 'mtu')) + ': ' + txt, { sensitive: true });
+        allowReadAloud(false).then(function (ok) { if (ok && !V.isListening()) V.speak(T('New message from ', 'Ujumbe mpya kutoka kwa ') + (cv ? name(cv) : T('someone', 'mtu')) + ': ' + txt, { sensitive: true }); });
       } catch (_) {}
     });
     return true;
   }
-  root.NecpraVoiceMessenger = { init: init, _handle: handle, _chatAction: chatAction };
+  root.NecpraVoiceMessenger = { init: init, _handle: handle, _chatAction: chatAction, parseMsgAction: parseMsgAction };
 })(typeof window !== 'undefined' ? window : globalThis);

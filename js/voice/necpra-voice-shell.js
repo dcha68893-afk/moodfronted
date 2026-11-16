@@ -77,6 +77,13 @@
       V.audit('voice.nav', { module: 'shell', outcome: 'executed', lang: result.lang });
       return forward('group', result);
     }
+    // Group admin by voice from ANY screen when the group is NAMED or the words carry everything needed: "create a group Family with Denis and Mary",
+    // "remove Denis from the Family group", "rename the Family group to Crew". Groups asks for a spoken yes before it changes anything.
+    if (cfg.allowedPages.indexOf('group') >= 0 && !/\bas a friend\b/i.test(text) && /^(?:please\s+|tafadhali\s+)?(?:(?:create|make|start|unda|anzisha)\s+(?:a\s+|new\s+)*(?:group|kikundi)\s+(?:(?:called|named|iitwayo)\s+)?.+?\s+(?:with|and add|na wanachama|pamoja na)\s+.+|(?:remove|kick(?:\s+out)?|ondoa|mfukuze)\s+.+?\s+(?:from|out of|kwenye|katika)\s+(?:the\s+)?.+?\s+(?:group|kikundi)|(?:make|promote|mfanye)\s+.+?\s+(?:to\s+|an?\s+)?(?:group\s+)?(?:admin|msimamizi)\s+(?:in|of|wa|kwenye)\s+(?:the\s+)?.+?\s+(?:group|kikundi))$/i.test(clean(text))) {
+      if (cfg.getPage() !== 'group') cfg.navigate('group');
+      V.audit('voice.nav', { module: 'shell', outcome: 'executed', lang: result.lang });
+      return forward('group', result);
+    }
     // Settings by voice from ANY screen: "open privacy settings", "turn off read receipts", "dark mode". Runs before parseNav, which would only open
     // the bare Settings page (or Messenger for "chat settings") and lose the request.
     if (cfg.allowedPages.indexOf('settings') >= 0 && (/^(?:please\s+|tafadhali\s+)?(?:open|go to|show|take me to|fungua|nenda kwa|nipeleke|nionyeshe)\s+(?:the\s+|my\s+)?(?:(?:profile|security|privacy|notifications?|appearance|storage|backup|advanced|danger)(?:\s+settings?)?|(?:chat|friends?|groups?|status|mood)\s+settings?|mipangilio ya .+)$/i.test(clean(text)) ||
