@@ -6,6 +6,9 @@
 (function (root) {
   'use strict';
   var V = root.NecpraVoice; if (!V) return;
+  /* FREE MODE: the paid AI fallback is OFF. Understanding is done by the built-in matcher (necpra-voice-nlu.js): offline, no key, no cost.
+   * Set AI_FALLBACK = true only if you ever add ANTHROPIC_API_KEY on the backend. */
+  var AI_FALLBACK = false;
   var CLIENT_TIMEOUT_MS = 6500, flags = { checkedAt: 0, on: false }, fails = 0, pausedUntil = 0, inflight = null;
 
   function settingOn() { try { return V.getSettings().smart !== false; } catch (_) { return true; } }
@@ -28,6 +31,7 @@
   /* result = the engine's capture result ({transcript, alternatives, lang, ...}). Resolves to { phrase, module } (module = which screen owns the action: friends|money|tools|shell), or null. */
   function rewrite(result, page) {
     try {
+      if (!AI_FALLBACK) return Promise.resolve(null);
       if (!result || !result.transcript || !settingOn() || Date.now() < pausedUntil || (root.navigator && root.navigator.onLine === false)) return Promise.resolve(null);
       var text = String(result.transcript).trim(); if (!text || text.length > 300) return Promise.resolve(null);
       return backendOn().then(function (on) {

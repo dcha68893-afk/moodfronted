@@ -55,6 +55,7 @@
     OWE: ['outstanding', 'owe', 'owing', 'owes', 'unpaid', 'not paid', 'hasnt paid', 'havent paid', 'hawajalipa', 'hajalipa', 'bado hawajalipa', 'haijalipwa', 'defaulters', 'wanadaiwa', 'deni', 'madeni'],
     AIRTIME: ['airtime', 'recharge', 'top up', 'topup', 'credo', 'bundles', 'data bundles', 'buy airtime', 'nunua airtime', 'bundles za data'],
     GOALS: ['savings', 'saving goals', 'savings goals', 'goals', 'akiba', 'malengo', 'malengo ya akiba'],
+    PAYLATER: ['pay later', 'lipa baadaye', 'paylater'],
     PAYREQ: ['payment requests', 'payment request', 'money requests', 'maombi ya malipo'],
     ACTIVITY: ['activity', 'shughuli'],
     WALLET: ['wallet', 'pochi', 'mkoba', 'money', 'pesa'],
@@ -149,23 +150,6 @@
   addWords('STATUSW', ['stori', 'hadithi zangu', 'hali zangu', 'hali za marafiki']);
   addWords('SETTINGSW', ['mipangilio yangu', 'sehemu ya settings', 'setting za', 'settings za']);
 
-
-  // Duka: remaining features (held bills, scanner, receive stock, financing, chama, supplier mode, group orders, losses, sync)
-  GROUPS.BILLW = ['bill', 'bills', 'sale', 'sales', 'cart', 'customer', 'order', 'bili', 'mauzo', 'mteja', 'kikapu', 'oda'];
-  GROUPS.HOLDW = ['hold', 'park', 'put on hold', 'shikilia', 'weka pembeni', 'pause', 'sitisha', 'nimeacha', 'wait for', 'ngoja'];
-  GROUPS.HELDW = ['held', 'parked', 'on hold', 'zilizoshikiliwa', 'zilizowekwa pembeni', 'zilizositishwa', 'iliyoshikiliwa', 'iliyowekwa pembeni', 'waiting'];
-  GROUPS.RESUMEV = ['resume', 'continue', 'restore', 'bring back', 'rudisha', 'endelea na', 'endelea', 'rejea', 'reopen', 'fungua tena'];
-  GROUPS.DISCARDV = ['discard', 'delete', 'remove', 'futa', 'tupa', 'ondoa', 'throw away', 'cancel'];
-  GROUPS.SCANW = ['scan', 'scanner', 'scanning', 'changanua', 'skani', 'skana', 'barcode', 'bar code', 'msimbo', 'qr code'];
-  GROUPS.RECEIVEV = ['receive', 'receiving', 'received', 'pokea', 'ingiza', 'new delivery', 'delivery', 'mzigo mpya', 'nimeletewa', 'stoku mpya', 'stock mpya', 'zimefika', 'imefika', 'supplier delivered', 'amenileta', 'wameniletea', 'add stock', 'ongeza stoku', 'ongeza stock', 'ongeza mzigo'];
-  GROUPS.STOCKISH = ['stock', 'stoku', 'goods', 'mzigo', 'mizigo', 'bidhaa', 'packs', 'pack', 'crates', 'crate', 'sacks', 'sack', 'trays', 'tray', 'kreti', 'gunia', 'trei', 'vifurushi', 'cartons', 'carton', 'boxes', 'box'];
-  GROUPS.FINW = ['financing', 'device financing', 'instalment', 'instalments', 'installment', 'installments', 'scale loan', 'loan on my scale', 'mkopo wa kifaa', 'malipo ya wiki', 'deni la skana', 'deni la mizani', 'smart scale', 'mizani', 'kifaa', 'lipa kifaa', 'necpra scale'];
-  GROUPS.SUPMODE = ['i am a supplier', 'mimi ni msambazaji', 'become a supplier', 'register as supplier', 'register as a supplier', 'supplier sign up', 'supplier signup', 'sajili kama msambazaji', 'nataka kuwa msambazaji', 'kuwa msambazaji', 'supplier mode', 'sell to traders', 'i supply'];
-  GROUPS.GORDER = ['start a group order', 'create a group order', 'new group order', 'start group buy', 'new group buy', 'create group buy', 'anzisha oda ya pamoja', 'unda oda ya pamoja', 'oda mpya ya pamoja', 'anzisha ununuzi wa pamoja', 'start buying together', 'organise a group order', 'organize a group order'];
-  GROUPS.LOSSW = ['record spoiled', 'record loss', 'record a loss', 'record waste', 'record wastage', 'spoiled stock', 'stock loss', 'rekodi hasara', 'rekodi iliyoharibika', 'rekodi upotevu', 'andika hasara', 'andika upotevu', 'nimepoteza', 'write off', 'write-off', 'writeoff', 'imeharibika nataka kurekodi', 'ongeza hasara', 'weka hasara', 'weka upotevu'];
-  GROUPS.SYNCW = ['sync', 'sync now', 'sawazisha', 'sasisha duka', 'synchronise', 'synchronize', 'upload pending', 'tuma zilizobaki', 'sawazisha sasa'];
-  GROUPS.SYNCSTAT = ['sync status', 'hali ya usawazishaji', 'hali ya sync', 'pending uploads', 'zilizosubiri', 'offline queue', 'what is pending', 'nini kinasubiri', 'kuna kinachosubiri', 'is everything synced', 'imesawazishwa', 'zimesawazishwa'];
-
   /* ───────────── compile ───────────── */
   var RE = {}, VOCAB = [], seenV = {};
   Object.keys(GROUPS).forEach(function (k) {
@@ -221,10 +205,10 @@
 
   /* ───────────── actions: spoken label (for "Did you mean...") + canonical phrase. Mirrors moodchat/src/services/voiceActions.js ───────────── */
   var FRIEND_TAB = { friends: 'show my friends list', discover: 'show discover', requests: 'show requests', sent: 'show sent requests', groups: 'show discover groups', nearby: 'show nearby' };
-  var MONEY_TAB = { wallet: 'open wallet', circles: 'open chama', goals: 'open savings goals', requests: 'open payment requests', airtime: 'open airtime', activity: 'open activity' };
+  var MONEY_TAB = { wallet: 'open wallet', circles: 'open chama', goals: 'open savings goals', requests: 'open payment requests', paylater: 'open pay later', airtime: 'open airtime', activity: 'open activity' };
   var MODMAP = { nav: 'shell', friends: 'friends', money: 'money', duka: 'tools', messages: 'messages', groups: 'group', status: 'status', settings: 'settings', games: 'games' };
   var NAV_WORD = { messages: 'messenger', money: 'wallet', friends: 'friends', tools: 'duka smart', group: 'groups', status: 'status', settings: 'settings', games: 'games' };
-  var DUKA_TAB = { dashboard: 'dashboard', sell: 'sell', sales: 'sales', products: 'products', group: 'buy together', money: 'money', expenses: 'expenses', debts: 'debts', reports: 'reports', settings: 'settings', admin: 'admin' };
+  var DUKA_TAB = { dashboard: 'dashboard', sell: 'sell', sales: 'sales', products: 'products', money: 'money', expenses: 'expenses', debts: 'debts', reports: 'reports', settings: 'settings' };
   var GAME_WORD = { block: 'block puzzle', trivia: 'trivia', crossword: 'crossword', chess: 'chess' };
   var PHRASE = {
     'nav.open': function (s) { return 'open ' + NAV_WORD[s.page]; }, 'nav.back': function () { return 'go back'; },
@@ -247,7 +231,7 @@
     'friends.cancel': function (s) { return 'cancel my request to ' + s.name; }, 'friends.add': function (s) { return 'add ' + s.name + ' as a friend'; },
     'friends.remove': function (s) { return 'remove ' + s.name + ' from my friends'; }, 'friends.search': function (s) { return 'search for ' + s.query; }, 'friends.refresh': function () { return 'refresh friends'; },
     'money.balance': function () { return 'what is my balance'; }, 'money.transactions': function () { return 'show my latest transactions'; }, 'money.received': function () { return 'how much have i received'; },
-    'money.spent': function (s) { return 'how much did i spend ' + (s.period === 'month' ? 'this month' : 'today'); },
+    'money.spent': function (s) { return 'how much did i spend ' + (s.period === 'month' ? 'this month' : 'today'); }, 'money.orders': function () { return 'show my pending orders'; },
     'money.chama_month': function () { return 'chama contributions this month'; }, 'money.chama_outstanding': function () { return 'outstanding chama contributions'; },
     'money.open_tab': function (s) { return MONEY_TAB[s.tab]; }, 'money.prepare_transfer': function (s) { return 'send ' + s.amount + ' to ' + s.to; },
     'duka.sale': function (s) { return 'i sold ' + s.items_text + (s.payment === 'mpesa' ? ' by mpesa' : s.payment === 'credit' ? ' on credit' : s.payment === 'cash' ? ' for cash' : ''); },
@@ -256,10 +240,6 @@
     'duka.report': function (s) { return 'how much did we sell ' + (s.period === 'week' ? 'this week' : s.period === 'month' ? 'this month' : 'today'); },
     'duka.debts': function (s) { return s.who ? 'how much does ' + s.who + ' owe me' : 'who owes me'; },
     'duka.expense': function (s) { return 'i spent ' + s.amount + (s.description ? ' on ' + s.description : ''); },
-    'duka.hold_bill': function () { return 'hold this bill'; }, 'duka.resume_bill': function (s) { return 'resume bill ' + s.n; }, 'duka.held_bills': function () { return 'show held bills'; }, 'duka.discard_bill': function () { return 'discard held bill'; },
-    'duka.scan': function () { return 'scan barcode'; }, 'duka.receive_stock': function (s) { return 'receive ' + (s.qty ? s.qty + ' ' : '') + 'stock' + (s.product ? ' of ' + s.product : ''); },
-    'duka.financing': function () { return 'open device financing'; }, 'duka.chama': function () { return 'open my chamas'; }, 'duka.supplier_mode': function () { return 'open supplier mode'; },
-    'duka.group_order': function () { return 'start a group order'; }, 'duka.record_loss': function () { return 'record spoiled stock'; }, 'duka.sync_status': function () { return 'show sync status'; }, 'duka.sync_now': function () { return 'sync now'; },
     'duka.open_tab': function (s) { return 'open ' + DUKA_TAB[s.tab]; }, 'duka.suppliers': function () { return 'show my suppliers'; }, 'duka.waste': function () { return 'show waste'; },
     'duka.group_buy': function () { return 'group buying'; }, 'duka.refund': function () { return 'refund a sale'; },
     'duka.add_product': function (s) { return 'add new product ' + s.name + (s.buy != null ? ' buying price ' + s.buy : '') + (s.sell != null ? ' selling price ' + s.sell : '') + (s.stock != null ? ' stock ' + s.stock : ''); }
@@ -280,11 +260,8 @@
     'friends.accept': ['accept a request', 'kubali ombi'], 'friends.decline': ['decline a request', 'kataa ombi'], 'friends.cancel': ['cancel a request you sent', 'ghairi ombi ulilotuma'],
     'friends.add': ['add a friend', 'ongeza rafiki'], 'friends.remove': ['remove a friend', 'ondoa rafiki'], 'friends.search': ['search people', 'tafuta watu'], 'friends.refresh': ['refresh friends', 'sasisha marafiki'],
     'money.balance': ['check your balance', 'angalia salio'], 'money.transactions': ['show your transactions', 'onyesha miamala'], 'money.received': ['see what you received', 'angalia ulichopokea'],
-    'money.spent': ['see what you spent', 'angalia ulichotumia'], 'money.chama_month': ['chama contributions this month', 'michango ya chama ya mwezi huu'],
+    'money.spent': ['see what you spent', 'angalia ulichotumia'], 'money.orders': ['show your pending orders', 'onyesha oda zinazosubiri'], 'money.chama_month': ['chama contributions this month', 'michango ya chama ya mwezi huu'],
     'money.chama_outstanding': ['outstanding chama contributions', 'michango ya chama ambayo haijalipwa'], 'money.open_tab': ['open a Money tab', 'fungua ukurasa wa Pesa'], 'money.prepare_transfer': ['prepare a payment', 'tayarisha malipo'],
-    'duka.hold_bill': ['hold this bill', 'shikilia bili hii'], 'duka.resume_bill': ['resume a held bill', 'rudisha bili iliyoshikiliwa'], 'duka.held_bills': ['see held bills', 'angalia bili zilizoshikiliwa'], 'duka.discard_bill': ['open held bills to discard one', 'fungua bili zilizoshikiliwa kufuta'],
-    'duka.scan': ['scan a barcode', 'changanua msimbo'], 'duka.receive_stock': ['receive new stock', 'pokea stoku mpya'], 'duka.financing': ['open device financing', 'fungua mkopo wa kifaa'], 'duka.chama': ['open your chamas', 'fungua chama zako'],
-    'duka.supplier_mode': ['register as a supplier', 'jisajili kama msambazaji'], 'duka.group_order': ['start a group order', 'anzisha oda ya pamoja'], 'duka.record_loss': ['record spoiled stock', 'rekodi iliyoharibika'], 'duka.sync_status': ['see sync status', 'angalia hali ya usawazishaji'], 'duka.sync_now': ['sync now', 'sawazisha sasa'],
     'duka.open_tab': ['open a Duka screen', 'fungua ukurasa wa duka'], 'duka.suppliers': ['see your suppliers', 'angalia wasambazaji'], 'duka.waste': ['see wasted or expiring stock', 'angalia upotevu'],
     'duka.group_buy': ['open group buying', 'fungua ununuzi wa pamoja'], 'duka.refund': ['refund a sale', 'rudisha pesa ya mauzo'],
     'duka.sale': ['record a sale', 'andika mauzo'], 'duka.stock': ['check stock of a product', 'angalia stoku ya bidhaa'], 'duka.products_count': ['count products', 'hesabu bidhaa'], 'duka.low_stock': ['see low stock', 'angalia stoku inayoisha'],
@@ -299,7 +276,6 @@
     'friends.remove': ['Say the name, for example: remove Denis from my friends.', 'Taja jina, mfano: ondoa Denis kwa marafiki.'], 'friends.search': ['Say who to search for, for example: search for Denis.', 'Taja unayemtafuta, mfano: tafuta Denis.'],
     'money.prepare_transfer': ['Say the amount and who, for example: send 500 to John.', 'Taja kiasi na nani, mfano: tuma 500 kwa John.'], 'duka.stock': ['Say the product, for example: how much sugar do we have.', 'Taja bidhaa, mfano: sukari imebaki ngapi.'],
     'duka.expense': ['Say the amount, for example: I spent 500 on transport.', 'Taja kiasi, mfano: nimetumia 500 kwa usafiri.'], 'duka.add_product': ['Say the product name, for example: add new product sugar.', 'Taja jina la bidhaa, mfano: ongeza bidhaa mpya sukari.'],
-    'duka.resume_bill': ['Say the held bill number, for example: resume bill 2.', 'Taja namba ya bili, mfano: rudisha bili 2.'],
     'duka.sale': ['Say what you sold, for example: I sold 2 sugar for cash.', 'Taja uliyouza, mfano: nimeuza sukari 2 cash.']
   };
 
@@ -319,10 +295,8 @@
     ['reports', /\b(?:reports?|ripoti|summary|muhtasari)\b/],
     ['products', /\b(?:products?|bidhaa|inventory|stock|stoku|stoo|items)\b/],
     ['money', /\b(?:duka money|shop money|money tab|finance|fedha|pesa za duka|fedha za duka)\b/],
-    ['settings', /\b(?:duka settings|shop settings|mipangilio ya duka|my shop|duka langu|shop details)\b/],
-    ['group', /\b(?:buy together|buying together|group buying tab|nunua pamoja|ununuzi wa pamoja)\b/],
-    ['admin', /\b(?:admin|msimamizi)\b/],
-    ['dashboard', /\b(?:dashboard|dashibodi|duka home|home screen|overview|main screen)\b/]
+    ['settings', /\b(?:duka settings|shop settings|mipangilio ya duka)\b/],
+    ['dashboard', /\b(?:dashboard|dashibodi|duka home|home screen|overview|my shop|duka langu|main screen)\b/]
   ];
   var DUKA_TABS_STRICT = { expenses: 1, dashboard: 1, sell: 1, sales: 1, money: 1, settings: 1 };
   function dukaTabOf(t, strict) { var s = ' ' + t.trim() + ' '; for (var i = 0; i < DUKA_TABS.length; i++) if (DUKA_TABS[i][1].test(s) && (!strict || DUKA_TABS_STRICT[DUKA_TABS[i][0]])) return DUKA_TABS[i][0]; return null; }
@@ -364,14 +338,16 @@
     R('money.transactions', ['TXN'], { cue: true, not: ['CHAMA', 'ORD'], boost: ['SHOWV', 'READV', 'WALLET'], w: 1.7 }),
     R('money.received', ['RECV'], { cue: true, not: ['REQLIKE', 'SALEV', 'CUST', 'ADDV'], boost: ['MONEYQ', 'WALLET'], w: 1.6 }),
     R('money.spent', ['SPENT', 'MONEYQ'], { not: ['PAST', 'REPORTW', 'PRODUCTW', 'STOCKW', 'CUST', 'SENDV'], slots: function (t) { return { period: period(t, 'today') }; }, w: 2.4 }),
+    R('money.orders', ['ORD'], { cue: true, not: ['REPORTW', 'SALEV', 'CUST', 'STOCKW', 'PAYREQ'], boost: ['SHOWV', 'READV', 'PAYLATER'], w: 1.6 }),
     R('money.chama_month', ['CHAMA', 'MONTH'], { not: ['OWE'], w: 2.3 }),
     R('money.chama_month', ['CHAMA', 'DUE'], { not: ['OWE'], w: 2.2 }),
     R('money.chama_outstanding', ['CHAMA', 'OWE'], { w: 2.4 }),
     R('money.chama_outstanding', ['WHO', 'CHAMA'], { not: ['MONTH'], boost: ['OWE'], w: 2.1 }),
-    R('money.open_tab', ['WALLET', 'SHOWV'], { not: ['BAL', 'SENDV', 'AIRTIME', 'GOALS', 'CHAMA', 'PAYREQ', 'ACTIVITY', 'TXN', 'RECV', 'SPENT', 'MONEYQ'], fixed: { tab: 'wallet' }, w: 1.8 }),
+    R('money.open_tab', ['WALLET', 'SHOWV'], { not: ['BAL', 'SENDV', 'AIRTIME', 'GOALS', 'CHAMA', 'PAYREQ', 'PAYLATER', 'ACTIVITY', 'TXN', 'RECV', 'SPENT', 'MONEYQ'], fixed: { tab: 'wallet' }, w: 1.8 }),
     R('money.open_tab', ['CHAMA', 'SHOWV'], { not: ['MONTH', 'OWE', 'WHO', 'GROUPW'], fixed: { tab: 'circles' }, w: 2 }),
     R('money.open_tab', ['GOALS'], { cue: true, boost: ['SHOWV', 'WALLET'], not: ['SENDV'], fixed: { tab: 'goals' }, w: 1.6 }),
     R('money.open_tab', ['PAYREQ'], { boost: ['SHOWV'], fixed: { tab: 'requests' }, w: 1.9 }),
+    R('money.open_tab', ['PAYLATER'], { not: ['ORD'], boost: ['SHOWV'], fixed: { tab: 'paylater' }, w: 1.7 }),
     R('money.open_tab', ['AIRTIME'], { boost: ['SHOWV', 'SENDV'], fixed: { tab: 'airtime' }, w: 1.7 }),
     R('money.open_tab', ['ACTIVITY'], { boost: ['SHOWV', 'WALLET'], not: ['FRIEND'], fixed: { tab: 'activity' }, w: 1.5 }),
     R('money.prepare_transfer', ['SENDV'], { needCue: ['MONEYW'], not: ['FRIEND', 'REQLIKE', 'AIRTIME', 'SALEV', 'PRODUCTW', 'ADDV', 'SEARCHV'], w: 1.7,
@@ -440,25 +416,10 @@
     R('games.sound', ['UNMUTE'], { onlyPage: 'games', fixed: { state: 'on' }, w: 1.8 }),
     R('games.question', ['READV', 'QUESTIONW'], { onlyPage: 'games', w: 2 }),
     // ── DUKA SMART: screens and features added later ──
-    R('duka.suppliers', ['SUPPLIERW'], { not: ['FRIEND', 'SENDV', 'SUPMODE'], w: 2.3 }),
-    R('duka.waste', ['WASTEW'], { not: ['FRIEND', 'SENDV', 'LOSSW'], w: 2.3 }),
-    R('duka.group_buy', ['GROUPBUYW'], { not: ['GORDER'], w: 2.5 }),
+    R('duka.suppliers', ['SUPPLIERW'], { not: ['FRIEND', 'SENDV'], w: 2.3 }),
+    R('duka.waste', ['WASTEW'], { not: ['FRIEND', 'SENDV'], w: 2.3 }),
+    R('duka.group_buy', ['GROUPBUYW'], { w: 2.5 }),
     R('duka.refund', ['REFUNDW'], { not: ['SENDV', 'FRIEND'], w: 2.5 }),
-    R('duka.hold_bill', ['HOLDW', 'BILLW'], { onlyPage: 'tools', not: ['HELDW', 'RESUMEV', 'DISCARDV', 'FRIEND'], w: 2.4 }),
-    R('duka.held_bills', ['HELDW', 'BILLW'], { onlyPage: 'tools', not: ['RESUMEV', 'DISCARDV'], w: 2.4 }),
-    R('duka.discard_bill', ['DISCARDV', 'HELDW', 'BILLW'], { onlyPage: 'tools', w: 2.9 }),
-    R('duka.resume_bill', ['RESUMEV', 'BILLW'], { onlyPage: 'tools', not: ['DISCARDV', 'HOLDW'], w: 2.5, slots: function (t) { var n = numAfter(t, /\b(\d{1,3})\b/); return n ? { n: n } : null; } }),
-    R('duka.scan', ['SCANW'], { onlyPage: 'tools', not: ['FRIEND', 'MSGW'], w: 2.4 }),
-    R('duka.receive_stock', ['RECEIVEV', 'STOCKISH'], { onlyPage: 'tools', not: ['FRIEND', 'BAL', 'SENDV', 'REFUNDW'], w: 2.5, slots: function (t) {
-      var q = numAfter(t, /\b(\d+(?:\.\d+)?)\b/), m = /\b(?:of|for|ya|za|wa)\s+([a-z][a-z ]{1,30})$/.exec(t.trim()), pr = m ? words(strip(' ' + m[1] + ' ', ['STOCKISH', 'STOP', 'RECEIVEV'])) : '', o = {};
-      if (q) o.qty = q; if (pr) o.product = pr; return o; } }),
-    R('duka.financing', ['FINW'], { onlyPage: 'tools', w: 2.6 }),
-    R('duka.chama', ['CHAMA'], { onlyPage: 'tools', not: ['MONTH', 'OWE', 'RECV', 'SPENT'], w: 2.6 }),
-    R('duka.supplier_mode', ['SUPMODE'], { onlyPage: 'tools', w: 3.0 }),
-    R('duka.group_order', ['GORDER'], { onlyPage: 'tools', w: 3.0 }),
-    R('duka.record_loss', ['LOSSW'], { onlyPage: 'tools', w: 3.0 }),
-    R('duka.sync_status', ['SYNCSTAT'], { onlyPage: 'tools', w: 3.0 }),
-    R('duka.sync_now', ['SYNCW'], { onlyPage: 'tools', not: ['SYNCSTAT', 'FRIEND'], w: 2.4 }),
     R('duka.open_tab', ['SALESHIST'], { onlyPage: 'tools', w: 2.8, fixed: { tab: 'sales' } }),
     R('duka.open_tab', ['SHOWV', 'SCREENW'], { not: ['FRIEND', 'MSGW', 'SETTINGSW', 'GAMEW', 'STATUSW'], w: 2.9, slots: function (t) { var k = dukaTabOf(t); return k ? { tab: k } : null; } }),
     R('duka.open_tab', ['SHOWV'], { not: ['FRIEND', 'MSGW', 'SETTINGSW', 'GAMEW', 'STATUSW', 'DEBT', 'REPORTW', 'STOCKW', 'LOW', 'COUNTQ', 'MONEYQ', 'SPENT'], w: 1.6, slots: function (t) { if (amountOf(t)) return null; var k = dukaTabOf(t, true); return k ? { tab: k } : null; } }),
