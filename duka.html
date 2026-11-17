@@ -62,12 +62,9 @@ h3{margin:16px 0 8px;font-size:14px}
 .toast{background:#1f2c34;color:#fff;border-radius:10px;padding:10px 14px;font-size:13.5px;max-width:92%;box-shadow:0 6px 18px rgba(0,0,0,.3)}.toast.err{background:#b3261e}
 .spin{text-align:center;padding:30px;color:var(--kyn-text-secondary,#54656f)}
 .tabs{overflow-x:auto;scrollbar-width:none}.tabs::-webkit-scrollbar{display:none}.tab{white-space:nowrap}
-/* Sections: one swipeable row of pills (no wrapping into 2 uneven rows); active pill is scrolled into view */
-.tabs{display:flex!important;flex-wrap:nowrap;gap:8px;overflow-x:auto!important;overflow-y:hidden;-webkit-overflow-scrolling:touch;scroll-snap-type:x proximity;border-bottom:0!important;padding:2px 2px 8px;margin-inline:-2px}
-.tab{flex:0 0 auto;scroll-snap-align:center;white-space:nowrap!important;text-align:center;min-height:42px;padding:9px 16px!important;border-radius:999px;border:1px solid var(--kyn-border,#e3e7ea)!important;font-size:14px!important;font-weight:700;line-height:1.1;display:flex;align-items:center;justify-content:center}
-.tab.on{background:color-mix(in srgb,var(--kyn-accent-primary,#0a8f5b) 16%,transparent);border-color:var(--kyn-accent-primary,#0a8f5b)!important}
-/* keep the last cards clear of the bottom nav, centre button and voice mic */
-body{padding-bottom:calc(130px + env(safe-area-inset-bottom,0px))!important}
+/* NECPRA REDESIGN: every section visible as a big button, nothing runs off screen */
+.tabs{display:grid!important;grid-template-columns:repeat(auto-fit,minmax(76px,1fr));gap:8px;overflow:visible!important;border-bottom:0!important;padding-bottom:6px}
+.tab{white-space:normal!important;text-align:center;min-height:48px;padding:8px 4px!important;border-radius:12px;font-size:13px!important;font-weight:700;line-height:1.15;display:flex;align-items:center;justify-content:center}
 .item.off{opacity:.55;cursor:default}
 .cl{display:grid;grid-template-columns:1fr auto;gap:6px 10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--kyn-border-light,#eef0f2)}
 .cl .ctl{display:flex;gap:6px;align-items:center;grid-column:1 / -1}
@@ -279,7 +276,6 @@ function render(keepFocus) {
   else if (!S.shops.length) html = viewOnboarding();
   else html = header() + syncBar() + (S.err ? '<div class="note err">' + esc(S.err) + ' <a href="#" data-act="retry">Retry</a></div>' : '') + (S.tab === 'products' ? viewProducts() : S.tab === 'money' ? viewMoney() : S.tab === 'settings' ? viewSettings() : S.tab === 'pos' ? viewPos() : S.tab === 'sales' ? viewSales() : S.tab === 'group' ? viewGroup() : S.tab === 'waste' ? viewWaste() : S.tab === 'admin' ? viewAdmin() : viewDash()) + vaFab();
   app.innerHTML = html;
-  try { var _t = app.querySelector('.tab.on'); if (_t && _t.scrollIntoView) _t.scrollIntoView({ inline: 'center', block: 'nearest' }); } catch (_) {}
   if (fid && $(fid)) { $(fid).focus(); try { $(fid).setSelectionRange(pos, pos); } catch (_) {} }
 }
 
