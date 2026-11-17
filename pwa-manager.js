@@ -70,7 +70,7 @@
         window.matchMedia('(display-mode: fullscreen)').matches ||
         window.matchMedia('(display-mode: minimal-ui)').matches ||
         window.navigator.standalone === true ||
-        (document.referrer || '').indexOf('android-app://') === 0;
+        (document.referrer || '').indexOf('android-app://com.necpa') === 0;
     } catch (_) { return false; }
   }
 

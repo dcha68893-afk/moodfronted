@@ -109,7 +109,8 @@ const SW_VERSION = '19.60.0';
 // v129: marketplace admin tools hidden in admin-module.js; chama reminder time limit setting in money.html.
 // v132: new landing page (index.html), Pay Later tab removed from money.html, Tools.html is now a redirect to /duka.html.
 // v133: mode separation — browser always shows landing page; installed app skips it when signed in; no browser->app / app->browser redirects (index.html, manifest.json, AndroidManifest.xml).
-const CACHE_NAME = 'necpra-static-v133';
+const CACHE_NAME = 'necpra-static-v134';
+// v134: landing page (/ and /index.html) is network-first; browser never auto-skips the landing page; android-app:// referrer only counts for com.necpa.
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [
@@ -290,6 +291,18 @@ async function navigation(request,event){
   const cache=await caches.open(CACHE_NAME);
   const key=navKey(request.url);
   const frame=isFrameRequest(request);
+  // LANDING PAGE IS NETWORK-FIRST: a cached copy must never decide what a browser visitor sees (an old cached
+  // index.html kept running the old 'skip landing' script after a deploy). Falls back to the cache only when offline/slow.
+  if(!frame){
+    const lp=new URL(request.url).pathname;
+    if(lp==='/'||lp==='/index.html'){
+      const netFirst=refreshNav(request,cache).catch(()=>null);
+      const t=new Promise(res=>setTimeout(()=>res('timeout'),4000));
+      const got=await Promise.race([netFirst,t]);
+      if(got&&got!=='timeout')return got;
+      if(got==='timeout'&&event&&event.waitUntil)event.waitUntil(netFirst);
+    }
+  }
   // INSTANT OPEN: answer from the cached page when there is one, then refresh it in the background.
   let cachedNav=await cache.match(key);
   if(cachedNav){

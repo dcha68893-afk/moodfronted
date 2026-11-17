@@ -6,7 +6,7 @@
        anyone who had ever logged in on that browser never saw the landing page (Install / Login / Sign up). UPDATE (mode separation): browser tabs ALWAYS show the landing page (Login / Sign up), logged in before or not; only the installed app (PWA standalone / Capacitor / TWA) skips it for a signed-in user. Previously the app-first launch only
        happened when the site is running as an installed app (home-screen PWA, Android app / TWA, Capacitor). In a normal browser tab the
        landing page always shows; "Open app" / Login take a signed-in user into the app. */
-    var inst=false;try{inst=(window.matchMedia&&(window.matchMedia("(display-mode: standalone)").matches||window.matchMedia("(display-mode: fullscreen)").matches||window.matchMedia("(display-mode: minimal-ui)").matches))||window.navigator.standalone===true||(document.referrer||"").indexOf("android-app://")===0||!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform())||/[?&]app=1(&|$)/.test(location.search)}catch(_){}
+    var inst=false;try{inst=(window.matchMedia&&(window.matchMedia("(display-mode: standalone)").matches||window.matchMedia("(display-mode: fullscreen)").matches||window.matchMedia("(display-mode: minimal-ui)").matches))||window.navigator.standalone===true||(document.referrer||"").indexOf("android-app://com.necpa")===0||!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform())||/[?&]app=1(&|$)/.test(location.search)}catch(_){}
     if(inst&&v&&a&&a.user)document.documentElement.setAttribute("data-necpa-session","active");
     /* WhatsApp-style launch: a returning user (saved token + user) goes straight to the app.
        Done here, before first paint, so the landing/login page never flashes. An expired
@@ -5497,7 +5497,17 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
         // the marketing landing first — auto-dismiss it once that state shows.
         var quickCard = document.getElementById('quickLoginCard');
         var dashboardPanel = document.getElementById('dashboardPanel');
+        // MODE SEPARATION: in a browser tab the landing page ALWAYS stays until the visitor taps Login / Get started
+        // (the saved account then shows in the Quick Login card). Only the installed app jumps past it.
+        var __runningAsApp = false;
+        try {
+            __runningAsApp = !!(window.matchMedia && (window.matchMedia('(display-mode: standalone)').matches || window.matchMedia('(display-mode: fullscreen)').matches || window.matchMedia('(display-mode: minimal-ui)').matches)) ||
+                window.navigator.standalone === true ||
+                (document.referrer || '').indexOf('android-app://com.necpa') === 0 ||
+                !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+        } catch (_) {}
         var autoSkipObserver = new MutationObserver(function () {
+            if (!__runningAsApp) return;
             var quickVisible = quickCard && quickCard.classList.contains('visible');
             var dashboardActive = dashboardPanel && dashboardPanel.classList.contains('active');
             if (quickVisible || dashboardActive) {
@@ -5505,8 +5515,8 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
                 autoSkipObserver.disconnect();
             }
         });
-        if (quickCard) autoSkipObserver.observe(quickCard, { attributes: true, attributeFilter: ['class'] });
-        if (dashboardPanel) autoSkipObserver.observe(dashboardPanel, { attributes: true, attributeFilter: ['class'] });
+        if (__runningAsApp && quickCard) autoSkipObserver.observe(quickCard, { attributes: true, attributeFilter: ['class'] });
+        if (__runningAsApp && dashboardPanel) autoSkipObserver.observe(dashboardPanel, { attributes: true, attributeFilter: ['class'] });
 
         // ---- Service worker registration -----------------------------------------
         // Removed: /pwa-manager.js (loaded in <head>) is the single owner of
@@ -5556,7 +5566,7 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
         function isRunningInstalled() {
             return window.matchMedia('(display-mode: standalone)').matches ||
                 window.navigator.standalone === true ||
-                document.referrer.startsWith('android-app://');
+                document.referrer.startsWith('android-app://com.necpa');
         }
         function isIOS() {
             return /iphone|ipad|ipod/i.test(navigator.userAgent) ||
