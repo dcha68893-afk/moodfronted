@@ -2035,10 +2035,33 @@
             try {
                 var a = JSON.parse(localStorage.getItem('kynecta_auth') || 'null');
                 var u = a && a.user, id = u && (u.id != null ? u.id : (u.userId != null ? u.userId : u._id));
-                return id != null ? String(id) : null;
-            } catch (_) { return null; }
+                if (id != null && id !== '') return String(id);
+            } catch (_) {}
+            // Android keeps auth tokens in native secure storage, not WebView localStorage.
+            // Use only the non-secret account-id hint written by native-init.js so cached
+            // screen snapshots remain private to the signed-in account on APK cold starts.
+            try {
+                var hint = JSON.parse(localStorage.getItem('necpa_user') || 'null');
+                var hintId = hint && (hint.id != null ? hint.id : hint.userId);
+                if (hintId != null && hintId !== '') return String(hintId);
+            } catch (_) {}
+            try {
+                var fallbackId = localStorage.getItem('userId') || localStorage.getItem('currentUserId');
+                if (fallbackId) return String(fallbackId);
+            } catch (_) {}
+            return null;
         }
         function key(m) { var u = uid(); return u ? '/__snapshot/' + u + '/' + m : null; }
+        function lastModule() {
+            var u = uid();
+            if (!u) return 'messages';
+            try {
+                var saved = localStorage.getItem('necpra:last-module:' + u);
+                var aliases = { friend: 'friends', groups: 'group', tool: 'tools', marketplace: 'tools', game: 'games' };
+                saved = aliases[String(saved || '').toLowerCase()] || String(saved || '').toLowerCase();
+                return MODS[saved] ? saved : 'messages';
+            } catch (_) { return 'messages'; }
+        }
         function open() { return window.caches ? caches.open(CACHE) : Promise.reject(new Error('no cache api')); }
         function modOfPage(page) {
             page = String(page || '').toLowerCase();
@@ -2190,8 +2213,12 @@
         window.addEventListener('kyn:accountSwitchWipe', clearAll);
         window.addEventListener('storage', function (e) { if (e.key === 'kynecta_auth' && !e.newValue) clearAll(); });
 
-        // App open: paint the last Messages screen instantly (skip when a specific chat is being opened).
-        try { if (!sessionStorage.getItem('pending_chat')) show('messages'); } catch (_) { show('messages'); }
+        // App open / Android process recreation: paint the last-used module instantly
+        // from its per-account snapshot, instead of always showing Messages while the
+        // requested module has to boot again.
+        try {
+            if (!sessionStorage.getItem('pending_chat')) show(lastModule());
+        } catch (_) { show(lastModule()); }
     })();
     </script>
 
@@ -3306,6 +3333,26 @@
                 console.warn('[Navigation] No page provided to navigateToPage');
                 return;
             }
+            // Remember the last top-level module per account. This survives Android
+            // WebView process recreation; the paired Cache API snapshot paints the
+            // previous screen immediately while that module restores its live state.
+            try {
+                var _resumeUserId = (function () {
+                    try {
+                        var _a = JSON.parse(localStorage.getItem('kynecta_auth') || 'null');
+                        var _u = _a && _a.user;
+                        var _id = _u && (_u.id != null ? _u.id : (_u.userId != null ? _u.userId : _u._id));
+                        if (_id != null && _id !== '') return String(_id);
+                    } catch (_) {}
+                    try {
+                        var _h = JSON.parse(localStorage.getItem('necpa_user') || 'null');
+                        var _hid = _h && (_h.id != null ? _h.id : _h.userId);
+                        if (_hid != null && _hid !== '') return String(_hid);
+                    } catch (_) {}
+                    return String(localStorage.getItem('userId') || localStorage.getItem('currentUserId') || '');
+                })();
+                if (_resumeUserId) localStorage.setItem('necpra:last-module:' + _resumeUserId, String(page));
+            } catch (_) {}
             // ── FAB visibility: show only on the messages module ──
             var _fab = document.getElementById('fabAddFriend');
             if (_fab) {
@@ -3672,6 +3719,30 @@
             attachNavigationListeners();
         }
 
+        // Restore the last top-level module after all navigation helpers and module
+        // maps exist. The cached screen overlay is already visible from __kynSnap.show().
+        try {
+            var _resumeId = '';
+            try {
+                var _ra = JSON.parse(localStorage.getItem('kynecta_auth') || 'null');
+                var _ru = _ra && _ra.user;
+                var _rid = _ru && (_ru.id != null ? _ru.id : (_ru.userId != null ? _ru.userId : _ru._id));
+                if (_rid != null && _rid !== '') _resumeId = String(_rid);
+            } catch (_) {}
+            if (!_resumeId) {
+                try {
+                    var _rh = JSON.parse(localStorage.getItem('necpa_user') || 'null');
+                    var _rhid = _rh && (_rh.id != null ? _rh.id : _rh.userId);
+                    if (_rhid != null && _rhid !== '') _resumeId = String(_rhid);
+                } catch (_) {}
+            }
+            if (!_resumeId) _resumeId = String(localStorage.getItem('userId') || localStorage.getItem('currentUserId') || '');
+            var _resumePage = _resumeId ? localStorage.getItem('necpra:last-module:' + _resumeId) : '';
+            var _validResumePages = ['messages','status','group','friends','settings','tools','money','games'];
+            if (_validResumePages.indexOf(String(_resumePage || '').toLowerCase()) >= 0 && _resumePage !== 'messages') {
+                navigateToPage(_resumePage, { fromHistory: true });
+            }
+        } catch (e) { console.warn('[Necpra] Could not restore last module:', e); }
         syncBrowserHistoryState(window.__currentPage || 'messages', true);
         // FIX (Log Out button did nothing at the app-shell level): every
         // module iframe (Settings, Status, etc.) calls its own local logout
