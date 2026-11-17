@@ -55,7 +55,6 @@
     OWE: ['outstanding', 'owe', 'owing', 'owes', 'unpaid', 'not paid', 'hasnt paid', 'havent paid', 'hawajalipa', 'hajalipa', 'bado hawajalipa', 'haijalipwa', 'defaulters', 'wanadaiwa', 'deni', 'madeni'],
     AIRTIME: ['airtime', 'recharge', 'top up', 'topup', 'credo', 'bundles', 'data bundles', 'buy airtime', 'nunua airtime', 'bundles za data'],
     GOALS: ['savings', 'saving goals', 'savings goals', 'goals', 'akiba', 'malengo', 'malengo ya akiba'],
-    PAYLATER: ['pay later', 'lipa baadaye', 'paylater'],
     PAYREQ: ['payment requests', 'payment request', 'money requests', 'maombi ya malipo'],
     ACTIVITY: ['activity', 'shughuli'],
     WALLET: ['wallet', 'pochi', 'mkoba', 'money', 'pesa'],
@@ -222,7 +221,7 @@
 
   /* ───────────── actions: spoken label (for "Did you mean...") + canonical phrase. Mirrors moodchat/src/services/voiceActions.js ───────────── */
   var FRIEND_TAB = { friends: 'show my friends list', discover: 'show discover', requests: 'show requests', sent: 'show sent requests', groups: 'show discover groups', nearby: 'show nearby' };
-  var MONEY_TAB = { wallet: 'open wallet', circles: 'open chama', goals: 'open savings goals', requests: 'open payment requests', paylater: 'open pay later', airtime: 'open airtime', activity: 'open activity' };
+  var MONEY_TAB = { wallet: 'open wallet', circles: 'open chama', goals: 'open savings goals', requests: 'open payment requests', airtime: 'open airtime', activity: 'open activity' };
   var MODMAP = { nav: 'shell', friends: 'friends', money: 'money', duka: 'tools', messages: 'messages', groups: 'group', status: 'status', settings: 'settings', games: 'games' };
   var NAV_WORD = { messages: 'messenger', money: 'wallet', friends: 'friends', tools: 'duka smart', group: 'groups', status: 'status', settings: 'settings', games: 'games' };
   var DUKA_TAB = { dashboard: 'dashboard', sell: 'sell', sales: 'sales', products: 'products', group: 'buy together', money: 'money', expenses: 'expenses', debts: 'debts', reports: 'reports', settings: 'settings', admin: 'admin' };
@@ -248,7 +247,7 @@
     'friends.cancel': function (s) { return 'cancel my request to ' + s.name; }, 'friends.add': function (s) { return 'add ' + s.name + ' as a friend'; },
     'friends.remove': function (s) { return 'remove ' + s.name + ' from my friends'; }, 'friends.search': function (s) { return 'search for ' + s.query; }, 'friends.refresh': function () { return 'refresh friends'; },
     'money.balance': function () { return 'what is my balance'; }, 'money.transactions': function () { return 'show my latest transactions'; }, 'money.received': function () { return 'how much have i received'; },
-    'money.spent': function (s) { return 'how much did i spend ' + (s.period === 'month' ? 'this month' : 'today'); }, 'money.orders': function () { return 'show my pending orders'; },
+    'money.spent': function (s) { return 'how much did i spend ' + (s.period === 'month' ? 'this month' : 'today'); },
     'money.chama_month': function () { return 'chama contributions this month'; }, 'money.chama_outstanding': function () { return 'outstanding chama contributions'; },
     'money.open_tab': function (s) { return MONEY_TAB[s.tab]; }, 'money.prepare_transfer': function (s) { return 'send ' + s.amount + ' to ' + s.to; },
     'duka.sale': function (s) { return 'i sold ' + s.items_text + (s.payment === 'mpesa' ? ' by mpesa' : s.payment === 'credit' ? ' on credit' : s.payment === 'cash' ? ' for cash' : ''); },
@@ -281,7 +280,7 @@
     'friends.accept': ['accept a request', 'kubali ombi'], 'friends.decline': ['decline a request', 'kataa ombi'], 'friends.cancel': ['cancel a request you sent', 'ghairi ombi ulilotuma'],
     'friends.add': ['add a friend', 'ongeza rafiki'], 'friends.remove': ['remove a friend', 'ondoa rafiki'], 'friends.search': ['search people', 'tafuta watu'], 'friends.refresh': ['refresh friends', 'sasisha marafiki'],
     'money.balance': ['check your balance', 'angalia salio'], 'money.transactions': ['show your transactions', 'onyesha miamala'], 'money.received': ['see what you received', 'angalia ulichopokea'],
-    'money.spent': ['see what you spent', 'angalia ulichotumia'], 'money.orders': ['show your pending orders', 'onyesha oda zinazosubiri'], 'money.chama_month': ['chama contributions this month', 'michango ya chama ya mwezi huu'],
+    'money.spent': ['see what you spent', 'angalia ulichotumia'], 'money.chama_month': ['chama contributions this month', 'michango ya chama ya mwezi huu'],
     'money.chama_outstanding': ['outstanding chama contributions', 'michango ya chama ambayo haijalipwa'], 'money.open_tab': ['open a Money tab', 'fungua ukurasa wa Pesa'], 'money.prepare_transfer': ['prepare a payment', 'tayarisha malipo'],
     'duka.hold_bill': ['hold this bill', 'shikilia bili hii'], 'duka.resume_bill': ['resume a held bill', 'rudisha bili iliyoshikiliwa'], 'duka.held_bills': ['see held bills', 'angalia bili zilizoshikiliwa'], 'duka.discard_bill': ['open held bills to discard one', 'fungua bili zilizoshikiliwa kufuta'],
     'duka.scan': ['scan a barcode', 'changanua msimbo'], 'duka.receive_stock': ['receive new stock', 'pokea stoku mpya'], 'duka.financing': ['open device financing', 'fungua mkopo wa kifaa'], 'duka.chama': ['open your chamas', 'fungua chama zako'],
@@ -365,16 +364,14 @@
     R('money.transactions', ['TXN'], { cue: true, not: ['CHAMA', 'ORD'], boost: ['SHOWV', 'READV', 'WALLET'], w: 1.7 }),
     R('money.received', ['RECV'], { cue: true, not: ['REQLIKE', 'SALEV', 'CUST', 'ADDV'], boost: ['MONEYQ', 'WALLET'], w: 1.6 }),
     R('money.spent', ['SPENT', 'MONEYQ'], { not: ['PAST', 'REPORTW', 'PRODUCTW', 'STOCKW', 'CUST', 'SENDV'], slots: function (t) { return { period: period(t, 'today') }; }, w: 2.4 }),
-    R('money.orders', ['ORD'], { cue: true, not: ['REPORTW', 'SALEV', 'CUST', 'STOCKW', 'PAYREQ'], boost: ['SHOWV', 'READV', 'PAYLATER'], w: 1.6 }),
     R('money.chama_month', ['CHAMA', 'MONTH'], { not: ['OWE'], w: 2.3 }),
     R('money.chama_month', ['CHAMA', 'DUE'], { not: ['OWE'], w: 2.2 }),
     R('money.chama_outstanding', ['CHAMA', 'OWE'], { w: 2.4 }),
     R('money.chama_outstanding', ['WHO', 'CHAMA'], { not: ['MONTH'], boost: ['OWE'], w: 2.1 }),
-    R('money.open_tab', ['WALLET', 'SHOWV'], { not: ['BAL', 'SENDV', 'AIRTIME', 'GOALS', 'CHAMA', 'PAYREQ', 'PAYLATER', 'ACTIVITY', 'TXN', 'RECV', 'SPENT', 'MONEYQ'], fixed: { tab: 'wallet' }, w: 1.8 }),
+    R('money.open_tab', ['WALLET', 'SHOWV'], { not: ['BAL', 'SENDV', 'AIRTIME', 'GOALS', 'CHAMA', 'PAYREQ', 'ACTIVITY', 'TXN', 'RECV', 'SPENT', 'MONEYQ'], fixed: { tab: 'wallet' }, w: 1.8 }),
     R('money.open_tab', ['CHAMA', 'SHOWV'], { not: ['MONTH', 'OWE', 'WHO', 'GROUPW'], fixed: { tab: 'circles' }, w: 2 }),
     R('money.open_tab', ['GOALS'], { cue: true, boost: ['SHOWV', 'WALLET'], not: ['SENDV'], fixed: { tab: 'goals' }, w: 1.6 }),
     R('money.open_tab', ['PAYREQ'], { boost: ['SHOWV'], fixed: { tab: 'requests' }, w: 1.9 }),
-    R('money.open_tab', ['PAYLATER'], { not: ['ORD'], boost: ['SHOWV'], fixed: { tab: 'paylater' }, w: 1.7 }),
     R('money.open_tab', ['AIRTIME'], { boost: ['SHOWV', 'SENDV'], fixed: { tab: 'airtime' }, w: 1.7 }),
     R('money.open_tab', ['ACTIVITY'], { boost: ['SHOWV', 'WALLET'], not: ['FRIEND'], fixed: { tab: 'activity' }, w: 1.5 }),
     R('money.prepare_transfer', ['SENDV'], { needCue: ['MONEYW'], not: ['FRIEND', 'REQLIKE', 'AIRTIME', 'SALEV', 'PRODUCTW', 'ADDV', 'SEARCHV'], w: 1.7,
