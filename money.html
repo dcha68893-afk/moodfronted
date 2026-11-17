@@ -527,6 +527,14 @@ window.__necpraMoneyVoice={
   setTab:function(t){var b=document.querySelector('.tab[data-tab="'+t+'"]');if(b)b.click()},
   reveal:function(){if(!BAL_SHOWN&&$('eyeBtn'))$('eyeBtn').click()},
   toast:function(m){toast(m)},
+  openAction:function(action){
+    var map={addMoney:'addMoney',sendMoney:'sendMoney',withdraw:'withdraw',receive:'receive',newGoal:'newGoal',newCircle:'newCircle',newRequest:'newRequest'};
+    var act=map[action];if(!act)return false;
+    // Receive and new-goal controls live inside the Wallet pane, so reveal it first.
+    if(action==='receive'||action==='newGoal')this.setTab('wallet');
+    var btn=document.querySelector('[data-act="'+act+'"]');if(!btn)return false;
+    btn.click();return true;
+  },
   prepareTransfer:function(o){sendMoney();var t=$('smTo'),a=$('smAmt');if(t&&o.to){t.value=o.to;t.dispatchEvent(new Event('input'))}if(a&&o.amount>0)a.value=String(o.amount);var go=$('smGo');if(go)go.focus()}
 };
 load(); })();

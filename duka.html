@@ -1283,6 +1283,7 @@ function vParse(raw, fallbackLang) {
     var w = m[1], MAP = { dashboard: ['dash'], home: ['dash'], dashibodi: ['dash'], sell: ['pos'], pos: ['pos'], 'new sale': ['pos'], sales: ['sales'], mauzo: ['sales'], product: ['products'], products: ['products'], stock: ['products'], bidhaa: ['products'], 'buy together': ['group'], 'group buy': ['group'], 'group buying': ['group'], waste: ['waste'], upotevu: ['waste'], money: ['money'], pesa: ['money'], expenses: ['money', 'expenses'], gharama: ['money', 'expenses'], debts: ['money', 'debts'], madeni: ['money', 'debts'], supplier: ['money', 'suppliers'], suppliers: ['money', 'suppliers'], wasambazaji: ['money', 'suppliers'], report: ['money', 'reports'], reports: ['money', 'reports'], ripoti: ['money', 'reports'], settings: ['settings'], mipangilio: ['settings'], 'my shop': ['settings'], admin: ['admin'] };
     return Object.assign(out, { intent: 'openTab', tab: (MAP[w] || ['dash'])[0], fin: (MAP[w] || [])[1] || null, label: w });
   }
+  if ((m = /^(?:please |tafadhali )?(?:collect|receive|record|pokea|kusanya)\s+(?:(?:a|the)\s+)?(?:(?:payment|debt|money|deni|malipo)\s+)?(?:from|for|kwa)\s+(.+)$/.exec(s))) return Object.assign(out, { intent: 'collectDebt', who: m[1].trim() });
   if (/\b(refund|refunds|void|cancel (?:a |the |that |this )?sale|undo (?:a |the |that )?sale|rudisha pesa|rejesha pesa|kurejesha pesa|futa mauzo|ghairi mauzo)\b/.test(s)) return Object.assign(out, { intent: 'refund' });
   if (/\b(group buy|group buying|group orders?|buy together|buying together|ununuzi wa pamoja|nunua pamoja|oda za pamoja|oda ya pamoja)\b/.test(s)) return Object.assign(out, { intent: 'groupbuy' });
   if (/\b(waste|wastage|spoil|spoiled|spoilt|spoilage|expiry|expiring|expire|expired|perishables?|at risk|upotevu|kuharibika|imeharibika|zinaharibika)\b/.test(s)) return Object.assign(out, { intent: 'waste', record: /\b(record|add|rekodi|weka|ongeza|received?|pokea)\b/.test(s) });
@@ -1353,6 +1354,7 @@ async function vHandle(raw) {
     if (cmd.intent === 'stock') await vStock(cmd);
     else if (cmd.intent === 'openTab') await vOpenTab(cmd);
     else if (cmd.intent === 'refund') await vRefund();
+    else if (cmd.intent === 'collectDebt') await vCollectDebt(cmd);
     else if (cmd.intent === 'groupbuy') await vGroupBuy();
     else if (cmd.intent === 'waste') await vWaste(cmd);
     else if (cmd.intent === 'suppliers') await vSuppliers(cmd);
@@ -1363,7 +1365,7 @@ async function vHandle(raw) {
     else if (cmd.intent === 'expense') vExpenseCard(cmd);
     else if (cmd.intent === 'addProduct') vProductCard(cmd);
     else if (cmd.intent === 'sale') await vSaleCard(cmd);
-    else vSay(T('Sorry, I did not understand. Try: "sell 3 sugar", "add expense 500 transport", "how much sugar is left", "who owes me", "open suppliers", "show waste" or "today\'s report".', 'Samahani, sijaelewa. Jaribu: "uza sukari 3", "nimetumia 500 usafiri", "sukari imebaki ngapi", "nani ananidai", au "ripoti ya leo".'));
+    else vSay(T('Sorry, I did not understand. Try: "sell 3 sugar", "add expense 500 transport", "how much sugar is left", "who owes me", "collect payment from Mary", "open suppliers", "show waste" or "today\'s report".', 'Samahani, sijaelewa. Jaribu: "uza sukari 3", "nimetumia 500 usafiri", "sukari imebaki ngapi", "nani ananidai", au "ripoti ya leo".'));
   } catch (e) { vSay(e.message || T('Something went wrong.', 'Hitilafu imetokea.')); }
   vRender();
 }
@@ -1426,6 +1428,22 @@ async function vCustomers() {
 async function vLow() {
   var low = (await vProducts()).filter(function (p) { return p.isLowStock; });
   vSay(low.length ? T('Low or out of stock: ', 'Zinazokaribia kuisha au zimeisha: ') + low.slice(0, 8).map(function (p) { return p.name + ' (' + QTY(p.stockQty) + ')'; }).join(', ') : T('Nothing is low on stock.', 'Hakuna bidhaa inayokaribia kuisha.'));
+}
+async function vCollectDebt(cmd) {
+  var query = String(cmd.who || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!query) return vSay(T('Say the customer name, for example: collect payment from Mary.', 'Sema jina la mteja, kwa mfano: kusanya malipo kutoka kwa Mary.'));
+  var d = await api('GET', '/shops/' + S.shopId + '/debts'), customers = (d.customersOweYou && d.customersOweYou.customers) || [];
+  var exact = customers.filter(function (x) { return String(x.name || '').toLowerCase().trim() === query; });
+  var hits = exact.length ? exact : customers.filter(function (x) {
+    var name = String(x.name || '').toLowerCase();
+    return name.indexOf(query) >= 0 || query.indexOf(name) >= 0;
+  });
+  if (!hits.length) return vSay(T('I could not find a customer named ' + cmd.who + ' with an outstanding balance.', 'Sikumpata mteja anayeitwa ' + cmd.who + ' mwenye deni linalosubiri.'));
+  if (hits.length > 1) return vSay(T('More than one customer matches ' + cmd.who + ': ' + hits.slice(0, 5).map(function (x) { return x.name; }).join(', ') + '. Please say the full customer name.', 'Wateja zaidi ya mmoja wanafanana na ' + cmd.who + ': ' + hits.slice(0, 5).map(function (x) { return x.name; }).join(', ') + '. Tafadhali sema jina kamili.'));
+  var customer = hits[0];
+  vGoTab('money', 'debts');
+  openCollect(customer.id, customer.name, Number(customer.owed || 0));
+  vSay(T('I opened the collection form for ' + customer.name + '. Check the amount actually received and the payment method. Nothing is recorded until you tap Record payment received.', 'Nimefungua fomu ya kukusanya deni la ' + customer.name + '. Hakiki kiasi ulichopokea na njia ya malipo. Hakuna kinachorekodiwa hadi ubonyeze Rekodi malipo yaliyopokelewa.'));
 }
 async function vDebts(cmd) {
   var d = await api('GET', '/shops/' + S.shopId + '/debts'), c = d.customersOweYou, s = d.youOweSuppliers;

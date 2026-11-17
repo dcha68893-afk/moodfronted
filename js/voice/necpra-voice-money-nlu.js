@@ -1,5 +1,5 @@
-/*! NECPRA Voice Money NLU (pure). Wallet / Chama(circles) / Pay Later orders / prepared transfer. English + Kiswahili.
- *  Understanding only. There is deliberately NO "execute payment" intent: voice can only open the normal Send-money screen pre-filled. */
+/*! NECPRA Voice Money NLU (pure). Matches current Wallet, Savings Goals, Circles, Requests, Airtime & Data and Activity.
+ *  Understanding only. Commands open existing screens/forms; transfers are prepared for on-screen review and never executed by voice. */
 (function (root) {
   'use strict';
   var S = root.NecpraVoiceSalesNLU || (typeof require === 'function' ? (function () { try { return require('./necpra-voice-sales-nlu.js'); } catch (_) { return null; } })() : null);
@@ -25,14 +25,24 @@
         return { type: 'prepare_transfer', amount: amt, to: phone || (role ? '' : who.replace(/^@/, '').replace(/\s+/g, '').length ? (/^@/.test(who) ? who : who) : ''), toLabel: who, needsRecipient: !phone && role };
       }
     }
+    // Current Money-screen actions. These only open existing forms; they never submit a payment.
+    var ACTIONS = [
+      ['addMoney', /^(?:(?:please )?(?:open|start|show|go to|fungua|nionyeshe) )?(?:add money|top up(?: my)? wallet|top up|deposit money|ongeza pesa|weka pesa)(?: screen| page)?$/],
+      ['sendMoney', /^(?:(?:please )?(?:open|start|show|go to|fungua|nionyeshe) )?(?:send money|transfer money|tuma pesa)(?: screen| page)?$/],
+      ['withdraw', /^(?:(?:please )?(?:open|start|show|go to|fungua|nionyeshe) )?(?:withdraw money|withdraw|toa pesa)(?: screen| page)?$/],
+      ['receive', /^(?:(?:please )?(?:open|start|show|go to|fungua|nionyeshe) )?(?:receive money|get payment details|show my receive details|pokea pesa)(?: screen| page)?$/],
+      ['newGoal', /^(?:(?:please )?(?:open|start|show|create|new|fungua|anza|unda) )?(?:a )?(?:new )?(?:savings goal|saving goal|goal|lengo la akiba)(?: screen| page)?$/],
+      ['newCircle', /^(?:(?:please )?(?:open|start|show|create|new|fungua|anza|unda) )?(?:a )?(?:new )?(?:money circle|circle|chama)(?: screen| page)?$/],
+      ['newRequest', /^(?:(?:please )?(?:open|start|show|create|new|fungua|anza|unda) )?(?:a )?(?:new )?(?:payment request|money request|request money|pay for someone|ask someone to pay|omba pesa)(?: screen| page)?$/]
+    ];
+    for (var ai = 0; ai < ACTIONS.length; ai++) if (ACTIONS[ai][1].test(s)) return { type: 'action', action: ACTIONS[ai][0] };
     if (/(outstanding|still owe|balance due|remaining|bado|deni la chama|nadaiwa|unpaid)/.test(s) && /(chama|circle|contribution|michango|mchango|kikundi)/.test(s)) return { type: 'chama_outstanding' };
     if (/(contribut|michango|mchango)/.test(s) && /(month|mwezi|this month)/.test(s)) return { type: 'chama_month' };
-    if (/(pending|unpaid|my|show|read|soma|ona|zangu).*(orders?|oda)/.test(s) || /(orders?|oda).*(pending|unpaid|pay later)/.test(s)) return { type: 'orders' };
     if (/(how much|kiasi gani|ni kiasi|nimetumia).*(spen[dt]|used|nimetumia|matumizi)|(spent|spending|matumizi)/.test(s) && /(today|leo|month|mwezi|spen|matumizi|nimetumia)/.test(s)) return { type: 'spent', period: /(month|mwezi)/.test(s) ? 'month' : 'today' };
     if (/(how much|kiasi).*(received|got|came in|nimepokea|nimepata)/.test(s)) return { type: 'received' };
     if (/(latest|recent|last|new|yangu|za hivi karibuni|za mwisho)?.*(transactions?|miamala|muamala)/.test(s) && /(transactions?|miamala|muamala)/.test(s)) return { type: 'transactions' };
     if (/(balance|salio|how much (do i have|money do i have|is in my (wallet|account))|nina pesa ngapi)/.test(s) || /^(?:show|open|go to|fungua|nionyeshe)\s+(?:my\s+)?(?:wallet|pochi)$/.test(s)) return /^(?:open|go to|fungua)\s+(?:my\s+)?(?:wallet|pochi)$/.test(s) ? { type: 'tab', tab: 'wallet' } : { type: 'balance' };
-    var TAB = [['circles', /\b(chama|circles?|kikundi|michango)\b/], ['goals', /\b(savings?( goals?)?|goals?|akiba|malengo)\b/], ['requests', /\b(payment requests?|requests?|maombi)\b/], ['paylater', /\b(pay later|lipa baadaye)\b/], ['airtime', /\b(airtime|data|bundles?|muda wa maongezi)\b/], ['activity', /\b(activity|shughuli)\b/], ['wallet', /\b(wallet|pochi)\b/]];
+    var TAB = [['circles', /\b(chama|circles?|kikundi|michango)\b/], ['goals', /\b(savings?( goals?)?|goals?|akiba|malengo)\b/], ['requests', /\b(payment requests?|requests?|maombi)\b/], ['airtime', /\b(airtime|data|bundles?|muda wa maongezi)\b/], ['activity', /\b(activity|shughuli)\b/], ['wallet', /\b(wallet|pochi)\b/]];
     if ((m = /^(?:open|go to|show|show me|fungua|nionyeshe|nenda kwa)\s+(?:my\s+)?(.+)$/.exec(s)) && m[1].split(' ').length <= 4) for (var i = 0; i < TAB.length; i++) if (TAB[i][1].test(m[1])) return { type: 'tab', tab: TAB[i][0] };
     return null;
   }

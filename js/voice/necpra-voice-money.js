@@ -1,4 +1,4 @@
-/*! NECPRA Voice Money (money.html: Wallet, Chama = "Circles", Pay Later orders). Answers questions and can PREPARE a transfer.
+/*! NECPRA Voice Money (money.html: Wallet, Savings Goals, Circles, Requests, Airtime & Data and Activity). Answers questions and can PREPARE a transfer.
  *  Hard rule: this file has no code that moves money. It never calls transfer/withdraw/contribute endpoints and never touches the
  *  step-up password. "Prepare a payment" only opens the normal Send-money screen pre-filled; the user reviews the recipient and fee,
  *  confirms, and passes the existing password step-up there. Private figures are spoken only if the user allowed reading them aloud. */
@@ -9,7 +9,7 @@
   function ksh(n) { n = Number(n || 0); return 'KSh ' + n.toLocaleString('en-KE', { maximumFractionDigits: 2 }); }
   function nairobiDay(d) { try { return new Date(d).toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' }); } catch (_) { return ''; } }
   function nairobiMonth(d) { return nairobiDay(d).slice(0, 7); }
-  function label(tab) { return ({ wallet: ['Wallet', 'Pochi'], goals: ['Savings goals', 'Akiba'], circles: ['Chama', 'Chama'], requests: ['Payment requests', 'Maombi ya malipo'], airtime: ['Airtime and data', 'Muda wa maongezi'], paylater: ['Pay Later orders', 'Oda za Lipa Baadaye'], activity: ['Activity', 'Shughuli'] })[tab]; }
+  function label(tab) { return ({ wallet: ['Wallet', 'Pochi'], goals: ['Savings goals', 'Akiba'], circles: ['Chama', 'Chama'], requests: ['Payment requests', 'Maombi ya malipo'], airtime: ['Airtime and data', 'Muda wa maongezi'], activity: ['Activity', 'Shughuli'] })[tab]; }
 
   // Private figures: always shown on screen; spoken only if the user enabled "Allow reading private info aloud".
   async function tell(en, sw) {
@@ -27,6 +27,23 @@
     busy = true;
     try {
       if (it.type === 'tab') { A.setTab(it.tab); await plain('Opening ' + label(it.tab)[0] + '.', 'Inafungua ' + label(it.tab)[1] + '.'); return true; }
+      if (it.type === 'action') {
+        var actionNames = {
+          addMoney: ['Add money', 'Ongeza pesa'], sendMoney: ['Send money', 'Tuma pesa'],
+          withdraw: ['Withdraw money', 'Toa pesa'], receive: ['Receive money', 'Pokea pesa'],
+          newGoal: ['Create a savings goal', 'Unda lengo la akiba'],
+          newCircle: ['Create a Money Circle', 'Unda Chama'],
+          newRequest: ['Create a payment request', 'Unda ombi la malipo']
+        };
+        if (!A.openAction || !A.openAction(it.action)) {
+          await plain('I could not open that Money form. Please open it from the Money screen.', 'Sikuweza kufungua fomu hiyo. Tafadhali ifungue kwenye skrini ya Pesa.');
+          return true;
+        }
+        V.audit('money.open_form', { module: 'wallet', action: it.action, outcome: 'opened' });
+        var nm = actionNames[it.action] || ['Money form', 'Fomu ya pesa'];
+        await plain(nm[0] + ' is open. Review the details and complete it on screen. I have not submitted anything.', nm[1] + ' imefunguliwa. Hakiki taarifa na ukamilishe kwenye skrini. Sijawasilisha chochote.');
+        return true;
+      }
       if (it.type === 'balance') {
         A.setTab('wallet'); A.reveal(); var s = await ready(), w = s.wallet;
         if (!w) { await plain('I could not load your wallet. Check your connection and try again.', 'Sikuweza kupakia pochi yako. Angalia mtandao kisha jaribu tena.'); return true; }
@@ -59,12 +76,6 @@
         var dues = ((so.overview && so.overview.dues) || []).map(function (d) { return T('You owe ', 'Unadaiwa ') + ksh(d.amount) + T(' for ', ' kwa ') + d.name; });
         if (!parts.length && !dues.length) { await plain('None of your chamas has a target or a contribution due.', 'Hakuna chama yenye lengo au mchango unaodaiwa.'); return true; }
         await tell('Still outstanding: ' + parts.concat(dues).join('; ') + '.', 'Bado kinadaiwa: ' + parts.concat(dues).join('; ') + '.'); return true;
-      }
-      if (it.type === 'orders') {
-        A.setTab('paylater'); var orders = await A.loadOrders(); orders = orders || [];
-        if (!orders.length) { await plain('You have no pending Pay Later orders.', 'Huna oda za Lipa Baadaye zinazosubiri.'); return true; }
-        var lines = orders.slice(0, 5).map(function (o) { var tot = Number(o.total_price || o.totalPrice || o.total || 0), paid = Number(o.amount_paid || o.paid_amount || o.amountPaid || 0); return T('Order ending ', 'Oda inayoishia ') + String(o.id).slice(-4) + ': ' + ksh(Math.max(0, tot - paid)) + T(' still to pay', ' bado kulipa'); });
-        await tell('You have ' + orders.length + ' pending Pay Later ' + (orders.length === 1 ? 'order' : 'orders') + '. ' + lines.join('; ') + '.', 'Una oda ' + orders.length + ' za Lipa Baadaye zinazosubiri. ' + lines.join('; ') + '.'); return true;
       }
       if (it.type === 'prepare_transfer') {
         var to = it.to;
