@@ -108,7 +108,8 @@ const SW_VERSION = '19.60.0';
 // v123: voice phase 2 (Messenger, Groups, Status, Settings, Games understood in-app) + admin-taught phrases (Tool > Admin > Voice phrases, synced to every user).
 // v129: marketplace admin tools hidden in admin-module.js; chama reminder time limit setting in money.html.
 // v132: new landing page (index.html), Pay Later tab removed from money.html, Tools.html is now a redirect to /duka.html.
-const CACHE_NAME = 'necpra-static-v132';
+// v133: mode separation — browser always shows landing page; installed app skips it when signed in; no browser->app / app->browser redirects (index.html, manifest.json, AndroidManifest.xml).
+const CACHE_NAME = 'necpra-static-v133';
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 const CORE_STATIC_ASSETS = [

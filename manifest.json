@@ -2,7 +2,7 @@
   "id": "/",
   "name": "Necpra",
   "short_name": "Necpra",
-  "description": "Necpra is a private messaging and social app with friends, groups, Duka Smart for shops, accommodation and Necpra Money.",
+  "description": "Necpra is a private messaging and social app with friends, groups, Duka Smart for shops and Necpra Money.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -36,10 +36,5 @@
     "standalone",
     "minimal-ui"
   ],
-  "launch_handler": {
-    "client_mode": [
-      "focus-existing",
-      "auto"
-    ]
-  }
+  "handle_links": "not-preferred"
 }

@@ -3,16 +3,16 @@
 <head>
 <script>
     (function(){try{var raw=localStorage.getItem("kynecta_auth"),a=raw?JSON.parse(raw):null,t=a&&a.token,v=false;if(t&&t.split(".").length===3){var p=t.split(".")[1].replace(/-/g,"+").replace(/_/g,"/"),x=JSON.parse(atob(p+"=".repeat((4-p.length%4)%4)));v=!x.exp||x.exp*1000>Date.now()}/* FIX (WEBSITE SKIPPED, APP OPENED DIRECTLY): the auto-launch below used to run for EVERY visit, including a plain browser tab, so
-       anyone who had ever logged in on that browser never saw the landing page (Install / Login / Sign up). UPDATE: returning users now skip landing+login in the browser too. Previously the app-first launch only
+       anyone who had ever logged in on that browser never saw the landing page (Install / Login / Sign up). UPDATE (mode separation): browser tabs ALWAYS show the landing page (Login / Sign up), logged in before or not; only the installed app (PWA standalone / Capacitor / TWA) skips it for a signed-in user. Previously the app-first launch only
        happened when the site is running as an installed app (home-screen PWA, Android app / TWA, Capacitor). In a normal browser tab the
        landing page always shows; "Open app" / Login take a signed-in user into the app. */
     var inst=false;try{inst=(window.matchMedia&&(window.matchMedia("(display-mode: standalone)").matches||window.matchMedia("(display-mode: fullscreen)").matches||window.matchMedia("(display-mode: minimal-ui)").matches))||window.navigator.standalone===true||(document.referrer||"").indexOf("android-app://")===0||!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform())||/[?&]app=1(&|$)/.test(location.search)}catch(_){}
-    if(v&&a.user)document.documentElement.setAttribute("data-necpa-session","active");
+    if(inst&&v&&a&&a.user)document.documentElement.setAttribute("data-necpa-session","active");
     /* WhatsApp-style launch: a returning user (saved token + user) goes straight to the app.
        Done here, before first paint, so the landing/login page never flashes. An expired
        access token is refreshed (or the user sent to login with ?reason=) inside chat.html.
        Login is only shown after logout, session invalidation (?reason=) or for new users. */
-    if(a&&a.user&&t&&!/[?&](reason|logout|force)=/.test(location.search)&&window.top===window.self){
+    if(inst&&a&&a.user&&t&&!/[?&](reason|logout|force)=/.test(location.search)&&window.top===window.self){
         document.documentElement.style.visibility="hidden";
         location.replace("chat.html");
     }
@@ -108,11 +108,11 @@
     <link rel="apple-touch-icon" href="icons/necpra-192.png">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Necpra - Messaging, Duka Smart, Accommodation &amp; Money | Official Android App</title>
+    <title>Necpra - Messaging, Duka Smart &amp; Money | Official Android App</title>
 
     <!-- SEO: description + canonical -->
-    <meta name="description" content="Necpra is a private messaging and social app with friends, groups, Status, games, Duka Smart for shop owners, accommodation listings and Necpra Money. Use it on Android or in your browser.">
-    <meta name="keywords" content="Necpra, messaging app, group chat, friends, Duka Smart, shop management, POS, accommodation, rentals Kenya, Necpra Money, M-PESA wallet, Android app">
+    <meta name="description" content="Necpra is a private messaging and social app with friends, groups, Status, games, Duka Smart for shop owners and Necpra Money. Use it on Android or in your browser.">
+    <meta name="keywords" content="Necpra, messaging app, group chat, friends, Duka Smart, shop management, POS, rentals Kenya, Necpra Money, M-PESA wallet, Android app">
     <meta name="referrer" content="strict-origin-when-cross-origin">
     <link rel="canonical" href="https://necpra.co.ke/">
     <meta name="robots" content="index, follow">
@@ -120,18 +120,18 @@
     <!-- Open Graph (Facebook, WhatsApp link previews, etc.) -->
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="Necpra">
-    <meta property="og:title" content="Necpra - Messaging, Duka Smart, Accommodation &amp; Money">
-    <meta property="og:description" content="Private messaging, Duka Smart for your shop, accommodation and Necpra Money in one fast app.">
+    <meta property="og:title" content="Necpra - Messaging, Duka Smart &amp; Money">
+    <meta property="og:description" content="Private messaging, Duka Smart for your shop and Necpra Money in one fast app.">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
-    <meta property="og:image:alt" content="Necpra: messaging, Duka Smart, accommodation and money in one app">
+    <meta property="og:image:alt" content="Necpra: messaging, Duka Smart and money in one app">
     <meta property="og:url" content="https://necpra.co.ke/">
     <meta property="og:image" content="https://necpra.co.ke/icons/necpra-og.png">
 
     <!-- Twitter / X card -->
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Necpra - Messaging, Duka Smart, Accommodation &amp; Money">
-    <meta name="twitter:description" content="Private messaging, Duka Smart for your shop, accommodation and Necpra Money in one fast app.">
+    <meta name="twitter:title" content="Necpra - Messaging, Duka Smart &amp; Money">
+    <meta name="twitter:description" content="Private messaging, Duka Smart for your shop and Necpra Money in one fast app.">
     <meta name="twitter:image" content="https://necpra.co.ke/icons/necpra-og.png">
 
     <!-- Search identity: keep Necpra as one consistent, machine-readable brand. -->
@@ -152,7 +152,7 @@
       "url": "https://necpra.co.ke/",
       "logo": "https://necpra.co.ke/icons/necpra-512.png",
       "email": "support@necpra.co.ke",
-      "description": "Necpra is a social and messaging platform with private chats, groups, friends, Status, games, Duka Smart for shop owners, accommodation listings and Necpra Money."
+      "description": "Necpra is a social and messaging platform with private chats, groups, friends, Status, games, Duka Smart for shop owners and Necpra Money."
     },
     {
       "@type": "WebSite",
@@ -173,7 +173,7 @@
       "name": "Necpra",
       "url": "https://necpra.co.ke/",
       "downloadUrl": "https://necpra.co.ke/download/",
-      "description": "Necpra is a private messaging and social app with friends, groups, Status, games, Duka Smart for shop owners, accommodation listings and Necpra Money. Available on Android and the web.",
+      "description": "Necpra is a private messaging and social app with friends, groups, Status, games, Duka Smart for shop owners and Necpra Money. Available on Android and the web.",
       "applicationCategory": "SocialNetworkingApplication",
       "operatingSystem": [
         "Web",
@@ -2518,6 +2518,14 @@ html[data-theme="dark"] #landingScreen.landing-screen{--nl-bg:#0b1020;--nl-surfa
 #landingScreen .nl-phone-wrap{display:flex;justify-content:center}
 #landingScreen .nl-phone{width:min(290px,78vw);aspect-ratio:9/18.5;border-radius:38px;background:var(--nl-surface);border:8px solid #111827;box-shadow:0 30px 60px rgba(15,23,42,.25);overflow:hidden;display:flex;flex-direction:column;position:relative}
 html[data-theme="dark"] #landingScreen .nl-phone{border-color:#2b3558}
+#landingScreen .nl-phone-shot{background:#0b1220}
+#landingScreen .nl-phone-shot img{width:100%;height:100%;object-fit:cover;object-position:top center;display:block}
+#landingScreen .nl-shots{display:flex;gap:18px;overflow-x:auto;padding:6px 4px 18px;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch}
+#landingScreen .nl-shots figure{flex:0 0 auto;width:min(220px,62vw);margin:0;scroll-snap-align:center;text-align:center}
+#landingScreen .nl-shots img{width:100%;height:auto;aspect-ratio:480/989;object-fit:cover;border-radius:26px;border:6px solid #111827;box-shadow:0 18px 40px rgba(15,23,42,.22);background:#0b1220;display:block}
+html[data-theme="dark"] #landingScreen .nl-shots img{border-color:#2b3558}
+#landingScreen .nl-shots figcaption{margin-top:10px;font-weight:700;font-size:.85rem;color:var(--nl-muted,inherit)}
+
 #landingScreen .nl-phone-bar{background:linear-gradient(135deg,var(--nl-brand),var(--nl-brand2));color:#fff;padding:22px 14px 12px;display:flex;align-items:center;gap:10px;font-weight:700;font-size:.92rem}
 #landingScreen .nl-avatar{width:30px;height:30px;border-radius:50%;background:rgba(255,255,255,.28);display:grid;place-items:center;font-size:.8rem}
 #landingScreen .nl-phone-bar small{display:block;font-weight:500;opacity:.85;font-size:.72rem}
@@ -2582,7 +2590,6 @@ html[data-theme="dark"] #landingScreen .nl-phone{border-color:#2b3558}
                     <nav class="nl-nav" aria-label="Sections">
                         <a href="#nl-features">Features</a>
                         <a href="#nl-duka">Duka Smart</a>
-                        <a href="#nl-stay">Accommodation</a>
                         <a href="#nl-money">Money</a>
                         <a href="#nl-faq">FAQ</a>
                     </nav>
@@ -2599,7 +2606,7 @@ html[data-theme="dark"] #landingScreen .nl-phone{border-color:#2b3558}
                         <div>
                             <span class="nl-eyebrow"><i class="fas fa-lock"></i> Private by design</span>
                             <h1>Chat, run your shop, find a place to stay and <span>pay</span> &mdash; in one app.</h1>
-                            <p class="nl-lead">Necpra gives you private messaging, friends and groups, Duka Smart for your business, accommodation listings and Necpra Money. Fast on any phone, and it keeps working when the network drops.</p>
+                            <p class="nl-lead">Necpra gives you private messaging, friends and groups, Duka Smart for your business and Necpra Money. Fast on any phone, and it keeps working when the network drops.</p>
                             <div class="nl-cta">
                                 <button type="button" class="nl-btn nl-btn-primary" id="landingRegisterBtn">Create free account</button>
                                 <button type="button" class="nl-btn nl-btn-ghost" id="landingLoginBtn">Login</button>
@@ -2624,20 +2631,7 @@ html[data-theme="dark"] #landingScreen .nl-phone{border-color:#2b3558}
                                 <span><i class="fas fa-wifi"></i>Offline-ready</span>
                             </div>
                         </div>
-                        <div class="nl-phone-wrap" aria-hidden="true">
-                            <div class="nl-phone">
-                                <div class="nl-phone-bar"><span class="nl-avatar"><i class="fas fa-user"></i></span><span>Amina<small>online</small></span></div>
-                                <div class="nl-chat">
-                                    <span class="nl-lock"><i class="fas fa-lock"></i> Messages are end-to-end encrypted</span>
-                                    <div class="nl-msg nl-in">Are the rooms in Kisumu still available this weekend?</div>
-                                    <div class="nl-msg nl-out">Yes! Two left. I will send you the listing.</div>
-                                    <div class="nl-card"><b>Bedsitter &middot; Milimani</b><span>Available &middot; Book in the app</span></div>
-                                    <div class="nl-msg nl-in">Perfect. I will send the deposit now.</div>
-                                    <div class="nl-msg nl-out">Done. See you Saturday!</div>
-                                </div>
-                                <div class="nl-tabs"><i class="fas fa-comment-dots on"></i><i class="fas fa-user-group"></i><i class="fas fa-store"></i><i class="fas fa-wallet"></i></div>
-                            </div>
-                        </div>
+                        <div class="nl-phone-wrap"><div class="nl-phone nl-phone-shot"><img src="/assets/landing/chat.jpg" alt="Necpra Messages screen with private chats" width="480" height="989" decoding="async"></div></div>
                     </div>
                 </div>
 
@@ -2656,6 +2650,21 @@ html[data-theme="dark"] #landingScreen .nl-phone{border-color:#2b3558}
                     </div>
                 </section>
 
+                                <section id="nl-screens" class="nl-band">
+                    <div class="nl-wrap">
+                        <h2 class="nl-h2">See Necpra in action</h2>
+                        <p class="nl-sub">Real screens from the app.</p>
+                        <div class="nl-shots">
+                            <figure><img src="/assets/landing/chat.jpg" alt="Necpra Messages" width="480" height="989" loading="lazy" decoding="async"><figcaption>Messages</figcaption></figure>
+                            <figure><img src="/assets/landing/friends.jpg" alt="Necpra Friends" width="480" height="989" loading="lazy" decoding="async"><figcaption>Friends</figcaption></figure>
+                            <figure><img src="/assets/landing/groups.jpg" alt="Necpra Groups" width="480" height="989" loading="lazy" decoding="async"><figcaption>Groups</figcaption></figure>
+                            <figure><img src="/assets/landing/games.jpg" alt="Necpra Arcade games" width="480" height="989" loading="lazy" decoding="async"><figcaption>Games</figcaption></figure>
+                            <figure><img src="/assets/landing/money.jpg" alt="Necpra Money wallet" width="480" height="989" loading="lazy" decoding="async"><figcaption>Money</figcaption></figure>
+                            <figure><img src="/assets/landing/duka.jpg" alt="Necpra Duka Smart" width="480" height="989" loading="lazy" decoding="async"><figcaption>Duka Smart</figcaption></figure>
+                        </div>
+                    </div>
+                </section>
+
                 <section id="nl-duka" class="nl-band">
                     <div class="nl-wrap nl-split">
                         <div>
@@ -2670,41 +2679,11 @@ html[data-theme="dark"] #landingScreen .nl-phone{border-color:#2b3558}
                             </ul>
                             <a class="nl-btn nl-btn-ghost" href="/features/duka/">Learn about Duka Smart</a>
                         </div>
-                        <div class="nl-panel" aria-hidden="true">
-                            <div class="nl-mini">
-                                <div class="nl-row"><span><i class="fas fa-receipt"></i>&nbsp; Sale #1042</span><b>KSh 1,250</b></div>
-                                <div class="nl-row"><span><i class="fas fa-box"></i>&nbsp; Low stock: Sugar 2kg</span><b>4 left</b></div>
-                                <div class="nl-row"><span><i class="fas fa-handshake"></i>&nbsp; Customer credit</span><b>KSh 800</b></div>
-                                <div class="nl-row"><span><i class="fas fa-chart-line"></i>&nbsp; Today's sales</span><b>KSh 18,400</b></div>
-                            </div>
-                        </div>
+                        <div class="nl-phone-wrap"><div class="nl-phone nl-phone-shot"><img src="/assets/landing/duka.jpg" alt="Necpra Duka Smart shop dashboard" width="480" height="989" decoding="async"></div></div>
                     </div>
                 </section>
 
-                <section id="nl-stay">
-                    <div class="nl-wrap nl-split rev">
-                        <div class="nl-panel" aria-hidden="true">
-                            <div class="nl-mini">
-                                <div class="nl-row"><span><i class="fas fa-bed"></i>&nbsp; Bedsitter, Milimani</span><b>Available</b></div>
-                                <div class="nl-row"><span><i class="fas fa-house"></i>&nbsp; 2-bedroom, Nyalenda</span><b>Available</b></div>
-                                <div class="nl-row"><span><i class="fas fa-calendar-check"></i>&nbsp; Your booking</span><b>Sat &ndash; Sun</b></div>
-                            </div>
-                        </div>
-                        <div>
-                            <span class="nl-tag">Accommodation</span>
-                            <h2 class="nl-h2">Find a place to stay, or list yours</h2>
-                            <p class="nl-sub">Browse rooms and rentals by region, check availability and book. Owners can publish listings and manage bookings from the same app.</p>
-                            <ul class="nl-list">
-                                <li><i class="fas fa-check-circle"></i><span>Search by region and drill down to the area</span></li>
-                                <li><i class="fas fa-check-circle"></i><span>See availability before you book</span></li>
-                                <li><i class="fas fa-check-circle"></i><span>Book and follow your bookings in the app</span></li>
-                            </ul>
-                            <a class="nl-btn nl-btn-ghost" href="/features/accommodation/">Learn about Accommodation</a>
-                        </div>
-                    </div>
-                </section>
-
-                <section id="nl-money" class="nl-band">
+                                <section id="nl-money" class="nl-band">
                     <div class="nl-wrap nl-split">
                         <div>
                             <span class="nl-tag">Necpra Money</span>
@@ -2718,14 +2697,7 @@ html[data-theme="dark"] #landingScreen .nl-phone{border-color:#2b3558}
                             </ul>
                             <a class="nl-btn nl-btn-ghost" href="/features/money/">Learn about Necpra Money</a>
                         </div>
-                        <div class="nl-panel" aria-hidden="true">
-                            <div class="nl-mini">
-                                <div class="nl-row"><span><i class="fas fa-wallet"></i>&nbsp; Wallet</span><b>KSh 4,500</b></div>
-                                <div class="nl-row"><span><i class="fas fa-mobile-screen"></i>&nbsp; Airtime &amp; Data</span><b>M-PESA</b></div>
-                                <div class="nl-row"><span><i class="fas fa-piggy-bank"></i>&nbsp; Savings goal</span><b>62%</b></div>
-                                <div class="nl-row"><span><i class="fas fa-people-group"></i>&nbsp; Chama circle</span><b>12 members</b></div>
-                            </div>
-                        </div>
+                        <div class="nl-phone-wrap"><div class="nl-phone nl-phone-shot"><img src="/assets/landing/money.jpg" alt="Necpra Money wallet screen" width="480" height="989" decoding="async"></div></div>
                     </div>
                 </section>
 
@@ -2893,7 +2865,6 @@ html[data-theme="dark"] #landingScreen .nl-phone{border-color:#2b3558}
                 <div class="feature-grid">
                     <div class="feature-card"><div class="feature-icon"><i class="fas fa-globe-americas"></i></div><div class="feature-content"><h3>Global Chat Rooms</h3><p>Join topic-based rooms worldwide</p></div></div>
                     <div class="feature-card"><div class="feature-icon"><i class="fas fa-language"></i></div><div class="feature-content"><h3>Real-time Translation</h3><p>AI-powered multilingual chat</p></div></div>
-                    <div class="feature-card"><div class="feature-icon"><i class="fas fa-bed"></i></div><div class="feature-content"><h3>Accommodation &amp; Rentals</h3><p>Search rooms, check availability &amp; book</p></div></div>
                 </div>
             </div>
             
@@ -3064,7 +3035,6 @@ html[data-theme="dark"] #landingScreen .nl-phone{border-color:#2b3558}
                                 <h3>Premium Trial Activated!</h3>
                                 <p>Sign up today for exclusive features</p>
                                 <div class="premium-features">
-                                    <div class="premium-feature"><i class="fas fa-check-circle"></i><span>Priority accommodation listings</span></div>
                                     <div class="premium-feature"><i class="fas fa-check-circle"></i><span>AI chat assistant</span></div>
                                     <div class="premium-feature"><i class="fas fa-check-circle"></i><span>Custom themes & backgrounds</span></div>
                                 </div>
@@ -3253,7 +3223,6 @@ html[data-theme="dark"] #landingScreen .nl-phone{border-color:#2b3558}
                 <div class="feature-grid">
                     <div class="feature-card"><div class="feature-icon"><i class="fas fa-lock"></i></div><div class="feature-content"><h3>End-to-End Encrypted</h3><p>Your messages stay private, always</p></div></div>
                     <div class="feature-card"><div class="feature-icon"><i class="fas fa-user-plus"></i></div><div class="feature-content"><h3>Friends</h3><p>Requests, suggestions &amp; people nearby</p></div></div>
-                    <div class="feature-card"><div class="feature-icon"><i class="fas fa-bed"></i></div><div class="feature-content"><h3>Accommodation &amp; Rentals</h3><p>Find a room, check availability &amp; book</p></div></div>
                     <div class="feature-card"><div class="feature-icon"><i class="fas fa-users"></i></div><div class="feature-content"><h3>Group &amp; Community Chats</h3><p>Stay close with everyone that matters</p></div></div>
                     <div class="feature-card"><div class="feature-icon"><i class="fas fa-language"></i></div><div class="feature-content"><h3>Real-time Translation</h3><p>AI-powered multilingual chat</p></div></div>
                 </div>
@@ -3281,7 +3250,6 @@ html[data-theme="dark"] #landingScreen .nl-phone{border-color:#2b3558}
                 <div class="feature-grid">
                     <div class="feature-card"><div class="feature-icon"><i class="fas fa-lock"></i></div><div class="feature-content"><h3>End-to-End Encrypted</h3><p>Your messages stay private, always</p></div></div>
                     <div class="feature-card"><div class="feature-icon"><i class="fas fa-user-plus"></i></div><div class="feature-content"><h3>Friends</h3><p>Requests, suggestions &amp; people nearby</p></div></div>
-                    <div class="feature-card"><div class="feature-icon"><i class="fas fa-bed"></i></div><div class="feature-content"><h3>Accommodation &amp; Rentals</h3><p>Find a room, check availability &amp; book</p></div></div>
                     <div class="feature-card"><div class="feature-icon"><i class="fas fa-users"></i></div><div class="feature-content"><h3>Group &amp; Community Chats</h3><p>Stay close with everyone that matters</p></div></div>
                     <div class="feature-card"><div class="feature-icon"><i class="fas fa-language"></i></div><div class="feature-content"><h3>Real-time Translation</h3><p>AI-powered multilingual chat</p></div></div>
                 </div>
@@ -3301,7 +3269,6 @@ html[data-theme="dark"] #landingScreen .nl-phone{border-color:#2b3558}
                     <div class="mmp-screens-strip">
                         <div class="mmp-screen-card"><div class="mmp-screen-icon chat"><i class="fas fa-comment-dots"></i></div><span>Chat</span></div>
                         <div class="mmp-screen-card"><div class="mmp-screen-icon friends"><i class="fas fa-user-plus"></i></div><span>Friends</span></div>
-                        <div class="mmp-screen-card"><div class="mmp-screen-icon accom"><i class="fas fa-bed"></i></div><span>Accommodation</span></div>
                         <div class="mmp-screen-card"><div class="mmp-screen-icon market"><i class="fas fa-store"></i></div><span>Duka Smart</span></div>
                         <div class="mmp-screen-card"><div class="mmp-screen-icon community"><i class="fas fa-users"></i></div><span>Communities</span></div>
                         <div class="mmp-screen-card"><div class="mmp-screen-icon status"><i class="fas fa-circle-play"></i></div><span>Status</span></div>
