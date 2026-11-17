@@ -120,6 +120,53 @@
     STOP: ['please', 'pls', 'plz', 'can', 'you', 'could', 'would', 'will', 'kindly', 'tafadhali', 'naomba', 'nataka', 'tafadhal', 'hey', 'ok', 'okay', 'now', 'sasa', 'chochote', 'yoyote', 'kipya', 'kingine', 'kinaitwa', 'let', 'see', 'posted', 'as', 'what', 'called', 'named', 'iitwayo', 'jina', 'want', 'wanna', 'need', 'nahitaji', 'the', 'a', 'an', 'my', 'me', 'i', 'we', 'our', 'is', 'are', 'was', 'were', 'do', 'does', 'did', 'have', 'has', 'got', 'to', 'for', 'from', 'of', 'in', 'on', 'at', 'and', 'it', 'this', 'that', 'there', 'as', 'with', 'be', 'by', 'about', 'some', 'yangu', 'zangu', 'wangu', 'langu', 'ya', 'wa', 'za', 'la', 'kwa', 'na', 'kutoka', 'huyu', 'huu', 'hii', 'hizi', 'hizo', 'ile', 'yule', 'moja', 'tu', 'basi', 'sasa hivi', 'wa', 'cha', 'kwenye', 'ndani', 'ya', 'ni', 'si', 'je']
   };
 
+
+  /* ───────────── EXTRA WORDING (free, offline). One line per group; add more words here any time. ───────────── */
+  function addWords(g, list) { GROUPS[g] = GROUPS[g] || []; list.forEach(function (w) { if (GROUPS[g].indexOf(w) < 0) GROUPS[g].push(w); }); }
+  // Duka: more ways to say the same things (English / Kiswahili / Sheng)
+  addWords('PRODUCTW', ['inventory', 'catalogue', 'catalog', 'bidhaa zangu', 'mali', 'mzigo', 'mizigo', 'stock items', 'vitu vyangu', 'bidhaa dukani']);
+  addWords('STOCKW', ['inventory', 'stocks', 'stock level', 'stock levels', 'zilizopo', 'iliyopo', 'zipo', 'ipo', 'bado zipo', 'bado ipo', 'stoo', 'bado imebaki', 'bado zimebaki', 'imesalia', 'zimesalia', 'iliyosalia', 'zilizosalia', 'zimebakia', 'kiasi kilichosalia']);
+  addWords('LOW', ['inaisha', 'inakwisha', 'zimebaki chache', 'chache', 'few left', 'almost out', 'nearly out', 'running short', 'short of', 'low stock', 'stock ndogo', 'stoku ndogo', 'zinakaribia kwisha', 'karibu kuisha', 'karibia kuisha', 'hazipo', 'haipo', 'haziko', 'hakuna tena', 'need to restock', 'nahitaji kuagiza', 'ninahitaji kuagiza', 'za kuagiza', 'order more', 'agiza zaidi']);
+  addWords('CUST', ['wateja wangu', 'mteja wangu', 'buyers', 'wanunuzi', 'mnunuzi', 'customer list', 'orodha ya wateja', 'wateja wote']);
+  addWords('REPORTW', ['summary', 'muhtasari', 'turnover', 'nimeingiza', 'tumeingiza', 'biashara', 'business', 'sales report', 'ripoti ya mauzo', 'mauzo ya leo', 'mauzo ya wiki', 'mauzo ya mwezi', 'how is business', 'vipi biashara', 'biashara imeendeleaje', 'pesa ya mauzo', 'jumla ya mauzo', 'total sales']);
+  addWords('DEBT', ['wanaodaiwa', 'wanaonidai', 'wamekopa', 'amekopa', 'wakopaji', 'mkopaji', 'wakopaji wangu', 'nilimkopesha', 'nimewakopesha', 'nimekopesha', 'kukopesha', 'wateja wanaodaiwa', 'who borrowed', 'borrowed', 'on tab', 'wanadaiwa pesa', 'madeni ya wateja', 'deni la wateja', 'receivables', 'unpaid customers', 'wateja ambao hawajalipa', 'bado hawajalipa']);
+  addWords('EXPV', ['expenditure', 'record expense', 'add expense', 'rekodi gharama', 'rekodi matumizi', 'andika matumizi', 'weka gharama', 'weka matumizi', 'paid out', 'paid for', 'nimelipa bill', 'nimelipia bill', 'matumizi ya duka', 'gharama za duka', 'ongeza gharama', 'ongeza matumizi']);
+  addWords('ADDP', ['rekodi bidhaa', 'weka bidhaa', 'sajili bidhaa', 'ingiza bidhaa', 'new item', 'add item', 'bidhaa mpya', 'ongeza kitu']);
+  addWords('SALEV', ['nimemuuzia', 'tumemuuzia', 'niliuzia', 'nimeuzia', 'sold out', 'we sold', 'i sold', 'wamenunua', 'amenunua', 'mteja amenunua', 'customer bought', 'nimepiga mauzo', 'nimeuza leo', 'nimeuziwa']);
+  // Duka: NEW groups (screens and features that used to be missed)
+  GROUPS.SUPPLIERW = ['supplier', 'suppliers', 'msambazaji', 'wasambazaji', 'wauzaji wangu', 'wauzaji', 'muuzaji wa jumla', 'wauzaji wa jumla', 'wa jumla', 'vendor', 'vendors', 'wholesaler', 'wholesalers', 'wholesale', 'who supplies', 'wanaonisambazia', 'wanaoniuzia', 'wasambazaji wangu', 'wasambaji', 'msambaji'];
+  GROUPS.WASTEW = ['waste', 'wastage', 'wasted', 'spoilt', 'spoiled', 'spoil', 'spoilage', 'expired', 'expiry', 'expiring', 'expire', 'perishable', 'perishables', 'upotevu', 'imeharibika', 'zimeharibika', 'zinaharibika', 'zilizoharibika', 'kuharibika', 'zimeoza', 'imeoza', 'kuoza', 'zimeexpire', 'imeexpire', 'zinakaribia kuharibika', 'zilizopita muda', 'imepita muda', 'zimepita muda', 'damaged goods', 'bidhaa zilizoharibika', 'bidhaa mbovu', 'mbovu', 'zimevunjika', 'imevunjika', 'broken goods', 'throw away', 'tupa', 'kutupa'];
+  GROUPS.GROUPBUYW = ['group buy', 'group buying', 'group order', 'group orders', 'buy together', 'buying together', 'ununuzi wa pamoja', 'nunua pamoja', 'kununua pamoja', 'oda za pamoja', 'oda ya pamoja', 'manunuzi ya pamoja', 'bulk buy', 'bulk buying', 'bulk order', 'kuagiza pamoja', 'agiza pamoja', 'pool order'];
+  GROUPS.REFUNDW = ['refund', 'refunds', 'refunded', 'void', 'void sale', 'rudisha pesa', 'rejesha pesa', 'kurejesha pesa', 'kurudisha pesa', 'nirudishie pesa', 'futa mauzo', 'ghairi mauzo', 'cancel sale', 'cancel the sale', 'cancel a sale', 'undo sale', 'undo the sale', 'undo a sale', 'reverse sale', 'reverse the sale', 'customer returned', 'mteja amerudisha', 'amerudisha', 'wamerudisha', 'rudisha bidhaa', 'kurudisha bidhaa', 'return item', 'returned item', 'return goods', 'returns', 'makosa ya mauzo', 'sale mistake', 'wrong sale', 'nimekosea mauzo', 'mauzo yamekosewa'];
+  GROUPS.SALESHIST = ['sales history', 'past sales', 'sales list', 'all sales', 'historia ya mauzo', 'orodha ya mauzo', 'mauzo yote', 'mauzo ya zamani', 'old sales', 'previous sales'];
+  GROUPS.SCREENW = ['tab', 'screen', 'page', 'section', 'ukurasa', 'sehemu', 'skrini', 'kichupo', 'dirisha', 'menu', 'orodha'];
+  // Other modules: a few more everyday ways of speaking
+  addWords('SHOWV', ['let me see', 'nipe ona', 'niangalie', 'niletee', 'leta', 'toa', 'bring up', 'switch to', 'badilisha hadi', 'nenda kwa', 'enda kwa', 'nifungulie', 'nifungulie ukurasa', 'pita kwa', 'nionyeshe tafadhali']);
+  addWords('BAL', ['pochi yangu', 'salio la pochi', 'salio langu', 'wallet balance', 'how much is in my wallet', 'cash i have', 'kiasi cha pesa', 'nina bei gani', 'pesa ziko ngapi', 'pesa zimebaki ngapi', 'hela zangu', 'hela zimebaki', 'nina hela ngapi', 'nina bob ngapi']);
+  addWords('FRIEND', ['jamaa', 'wandani', 'ndugu', 'bro', 'mpenzi wangu']);
+  addWords('MSGW', ['textu', 'maandishi', 'ujumbe mpya', 'mesej', 'dm', 'dms', 'inbox yangu']);
+  addWords('GROUPW', ['group chat', 'group chats', 'kundi', 'makundi', 'jamii']);
+  addWords('GAMEW', ['games', 'michezo yangu', 'mchezo wa', 'game za', 'michezo ya kucheza']);
+  addWords('STATUSW', ['stori', 'hadithi zangu', 'hali zangu', 'hali za marafiki']);
+  addWords('SETTINGSW', ['mipangilio yangu', 'sehemu ya settings', 'setting za', 'settings za']);
+
+
+  // Duka: remaining features (held bills, scanner, receive stock, financing, chama, supplier mode, group orders, losses, sync)
+  GROUPS.BILLW = ['bill', 'bills', 'sale', 'sales', 'cart', 'customer', 'order', 'bili', 'mauzo', 'mteja', 'kikapu', 'oda'];
+  GROUPS.HOLDW = ['hold', 'park', 'put on hold', 'shikilia', 'weka pembeni', 'pause', 'sitisha', 'nimeacha', 'wait for', 'ngoja'];
+  GROUPS.HELDW = ['held', 'parked', 'on hold', 'zilizoshikiliwa', 'zilizowekwa pembeni', 'zilizositishwa', 'iliyoshikiliwa', 'iliyowekwa pembeni', 'waiting'];
+  GROUPS.RESUMEV = ['resume', 'continue', 'restore', 'bring back', 'rudisha', 'endelea na', 'endelea', 'rejea', 'reopen', 'fungua tena'];
+  GROUPS.DISCARDV = ['discard', 'delete', 'remove', 'futa', 'tupa', 'ondoa', 'throw away', 'cancel'];
+  GROUPS.SCANW = ['scan', 'scanner', 'scanning', 'changanua', 'skani', 'skana', 'barcode', 'bar code', 'msimbo', 'qr code'];
+  GROUPS.RECEIVEV = ['receive', 'receiving', 'received', 'pokea', 'ingiza', 'new delivery', 'delivery', 'mzigo mpya', 'nimeletewa', 'stoku mpya', 'stock mpya', 'zimefika', 'imefika', 'supplier delivered', 'amenileta', 'wameniletea', 'add stock', 'ongeza stoku', 'ongeza stock', 'ongeza mzigo'];
+  GROUPS.STOCKISH = ['stock', 'stoku', 'goods', 'mzigo', 'mizigo', 'bidhaa', 'packs', 'pack', 'crates', 'crate', 'sacks', 'sack', 'trays', 'tray', 'kreti', 'gunia', 'trei', 'vifurushi', 'cartons', 'carton', 'boxes', 'box'];
+  GROUPS.FINW = ['financing', 'device financing', 'instalment', 'instalments', 'installment', 'installments', 'scale loan', 'loan on my scale', 'mkopo wa kifaa', 'malipo ya wiki', 'deni la skana', 'deni la mizani', 'smart scale', 'mizani', 'kifaa', 'lipa kifaa', 'necpra scale'];
+  GROUPS.SUPMODE = ['i am a supplier', 'mimi ni msambazaji', 'become a supplier', 'register as supplier', 'register as a supplier', 'supplier sign up', 'supplier signup', 'sajili kama msambazaji', 'nataka kuwa msambazaji', 'kuwa msambazaji', 'supplier mode', 'sell to traders', 'i supply'];
+  GROUPS.GORDER = ['start a group order', 'create a group order', 'new group order', 'start group buy', 'new group buy', 'create group buy', 'anzisha oda ya pamoja', 'unda oda ya pamoja', 'oda mpya ya pamoja', 'anzisha ununuzi wa pamoja', 'start buying together', 'organise a group order', 'organize a group order'];
+  GROUPS.LOSSW = ['record spoiled', 'record loss', 'record a loss', 'record waste', 'record wastage', 'spoiled stock', 'stock loss', 'rekodi hasara', 'rekodi iliyoharibika', 'rekodi upotevu', 'andika hasara', 'andika upotevu', 'nimepoteza', 'write off', 'write-off', 'writeoff', 'imeharibika nataka kurekodi', 'ongeza hasara', 'weka hasara', 'weka upotevu'];
+  GROUPS.SYNCW = ['sync', 'sync now', 'sawazisha', 'sasisha duka', 'synchronise', 'synchronize', 'upload pending', 'tuma zilizobaki', 'sawazisha sasa'];
+  GROUPS.SYNCSTAT = ['sync status', 'hali ya usawazishaji', 'hali ya sync', 'pending uploads', 'zilizosubiri', 'offline queue', 'what is pending', 'nini kinasubiri', 'kuna kinachosubiri', 'is everything synced', 'imesawazishwa', 'zimesawazishwa'];
+
   /* ───────────── compile ───────────── */
   var RE = {}, VOCAB = [], seenV = {};
   Object.keys(GROUPS).forEach(function (k) {
@@ -128,6 +175,7 @@
     w.forEach(function (x) { if (/^[a-z]{5,}$/.test(x) && !seenV[x]) { seenV[x] = 1; if (k !== 'STOP') VOCAB.push(x); } });
   });
   function esc(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+  var TOKSET = {}; Object.keys(GROUPS).forEach(function (k) { GROUPS[k].forEach(function (ph) { String(ph).split(' ').forEach(function (w) { if (w) TOKSET[w] = 1; }); }); });   // words we already know, even inside longer phrases, are never 'repaired' into another word
 
   function lev(a, b) {
     if (a === b) return 0; if (Math.abs(a.length - b.length) > 1) return 2;
@@ -141,7 +189,7 @@
   /* Repair mis-heard words against OUR vocabulary. Capitalised words after the first are left alone (likely names). */
   function repair(raw) {
     return String(raw || '').split(/\s+/).map(function (w, i) {
-      var k = w.toLowerCase().replace(/[^a-z]/g, ''); if (k.length < 5 || seenV[k] || (i > 0 && /^[A-Z]/.test(w))) return w;
+      var k = w.toLowerCase().replace(/[^a-z]/g, ''); if (k.length < 5 || seenV[k] || TOKSET[k] || (i > 0 && /^[A-Z]/.test(w))) return w;
       var hit = null;
       for (var j = 0; j < VOCAB.length; j++) { var v = VOCAB[j]; if (lev(k, v) === 1 || swapped(k, v)) { if (hit && hit !== v) return w; hit = v; } }
       return hit || w;
@@ -177,6 +225,7 @@
   var MONEY_TAB = { wallet: 'open wallet', circles: 'open chama', goals: 'open savings goals', requests: 'open payment requests', paylater: 'open pay later', airtime: 'open airtime', activity: 'open activity' };
   var MODMAP = { nav: 'shell', friends: 'friends', money: 'money', duka: 'tools', messages: 'messages', groups: 'group', status: 'status', settings: 'settings', games: 'games' };
   var NAV_WORD = { messages: 'messenger', money: 'wallet', friends: 'friends', tools: 'duka smart', group: 'groups', status: 'status', settings: 'settings', games: 'games' };
+  var DUKA_TAB = { dashboard: 'dashboard', sell: 'sell', sales: 'sales', products: 'products', group: 'buy together', money: 'money', expenses: 'expenses', debts: 'debts', reports: 'reports', settings: 'settings', admin: 'admin' };
   var GAME_WORD = { block: 'block puzzle', trivia: 'trivia', crossword: 'crossword', chess: 'chess' };
   var PHRASE = {
     'nav.open': function (s) { return 'open ' + NAV_WORD[s.page]; }, 'nav.back': function () { return 'go back'; },
@@ -208,6 +257,12 @@
     'duka.report': function (s) { return 'how much did we sell ' + (s.period === 'week' ? 'this week' : s.period === 'month' ? 'this month' : 'today'); },
     'duka.debts': function (s) { return s.who ? 'how much does ' + s.who + ' owe me' : 'who owes me'; },
     'duka.expense': function (s) { return 'i spent ' + s.amount + (s.description ? ' on ' + s.description : ''); },
+    'duka.hold_bill': function () { return 'hold this bill'; }, 'duka.resume_bill': function (s) { return 'resume bill ' + s.n; }, 'duka.held_bills': function () { return 'show held bills'; }, 'duka.discard_bill': function () { return 'discard held bill'; },
+    'duka.scan': function () { return 'scan barcode'; }, 'duka.receive_stock': function (s) { return 'receive ' + (s.qty ? s.qty + ' ' : '') + 'stock' + (s.product ? ' of ' + s.product : ''); },
+    'duka.financing': function () { return 'open device financing'; }, 'duka.chama': function () { return 'open my chamas'; }, 'duka.supplier_mode': function () { return 'open supplier mode'; },
+    'duka.group_order': function () { return 'start a group order'; }, 'duka.record_loss': function () { return 'record spoiled stock'; }, 'duka.sync_status': function () { return 'show sync status'; }, 'duka.sync_now': function () { return 'sync now'; },
+    'duka.open_tab': function (s) { return 'open ' + DUKA_TAB[s.tab]; }, 'duka.suppliers': function () { return 'show my suppliers'; }, 'duka.waste': function () { return 'show waste'; },
+    'duka.group_buy': function () { return 'group buying'; }, 'duka.refund': function () { return 'refund a sale'; },
     'duka.add_product': function (s) { return 'add new product ' + s.name + (s.buy != null ? ' buying price ' + s.buy : '') + (s.sell != null ? ' selling price ' + s.sell : '') + (s.stock != null ? ' stock ' + s.stock : ''); }
   };
   var LABEL = {
@@ -228,6 +283,11 @@
     'money.balance': ['check your balance', 'angalia salio'], 'money.transactions': ['show your transactions', 'onyesha miamala'], 'money.received': ['see what you received', 'angalia ulichopokea'],
     'money.spent': ['see what you spent', 'angalia ulichotumia'], 'money.orders': ['show your pending orders', 'onyesha oda zinazosubiri'], 'money.chama_month': ['chama contributions this month', 'michango ya chama ya mwezi huu'],
     'money.chama_outstanding': ['outstanding chama contributions', 'michango ya chama ambayo haijalipwa'], 'money.open_tab': ['open a Money tab', 'fungua ukurasa wa Pesa'], 'money.prepare_transfer': ['prepare a payment', 'tayarisha malipo'],
+    'duka.hold_bill': ['hold this bill', 'shikilia bili hii'], 'duka.resume_bill': ['resume a held bill', 'rudisha bili iliyoshikiliwa'], 'duka.held_bills': ['see held bills', 'angalia bili zilizoshikiliwa'], 'duka.discard_bill': ['open held bills to discard one', 'fungua bili zilizoshikiliwa kufuta'],
+    'duka.scan': ['scan a barcode', 'changanua msimbo'], 'duka.receive_stock': ['receive new stock', 'pokea stoku mpya'], 'duka.financing': ['open device financing', 'fungua mkopo wa kifaa'], 'duka.chama': ['open your chamas', 'fungua chama zako'],
+    'duka.supplier_mode': ['register as a supplier', 'jisajili kama msambazaji'], 'duka.group_order': ['start a group order', 'anzisha oda ya pamoja'], 'duka.record_loss': ['record spoiled stock', 'rekodi iliyoharibika'], 'duka.sync_status': ['see sync status', 'angalia hali ya usawazishaji'], 'duka.sync_now': ['sync now', 'sawazisha sasa'],
+    'duka.open_tab': ['open a Duka screen', 'fungua ukurasa wa duka'], 'duka.suppliers': ['see your suppliers', 'angalia wasambazaji'], 'duka.waste': ['see wasted or expiring stock', 'angalia upotevu'],
+    'duka.group_buy': ['open group buying', 'fungua ununuzi wa pamoja'], 'duka.refund': ['refund a sale', 'rudisha pesa ya mauzo'],
     'duka.sale': ['record a sale', 'andika mauzo'], 'duka.stock': ['check stock of a product', 'angalia stoku ya bidhaa'], 'duka.products_count': ['count products', 'hesabu bidhaa'], 'duka.low_stock': ['see low stock', 'angalia stoku inayoisha'],
     'duka.customers_count': ['count customers', 'hesabu wateja'], 'duka.report': ['see sales', 'angalia mauzo'], 'duka.debts': ['see who owes the shop', 'angalia wanaodaiwa'], 'duka.expense': ['record an expense', 'andika gharama'], 'duka.add_product': ['add a product', 'ongeza bidhaa']
   };
@@ -240,6 +300,7 @@
     'friends.remove': ['Say the name, for example: remove Denis from my friends.', 'Taja jina, mfano: ondoa Denis kwa marafiki.'], 'friends.search': ['Say who to search for, for example: search for Denis.', 'Taja unayemtafuta, mfano: tafuta Denis.'],
     'money.prepare_transfer': ['Say the amount and who, for example: send 500 to John.', 'Taja kiasi na nani, mfano: tuma 500 kwa John.'], 'duka.stock': ['Say the product, for example: how much sugar do we have.', 'Taja bidhaa, mfano: sukari imebaki ngapi.'],
     'duka.expense': ['Say the amount, for example: I spent 500 on transport.', 'Taja kiasi, mfano: nimetumia 500 kwa usafiri.'], 'duka.add_product': ['Say the product name, for example: add new product sugar.', 'Taja jina la bidhaa, mfano: ongeza bidhaa mpya sukari.'],
+    'duka.resume_bill': ['Say the held bill number, for example: resume bill 2.', 'Taja namba ya bili, mfano: rudisha bili 2.'],
     'duka.sale': ['Say what you sold, for example: I sold 2 sugar for cash.', 'Taja uliyouza, mfano: nimeuza sukari 2 cash.']
   };
 
@@ -248,6 +309,24 @@
   function nameFrom(t, gs, max) { var l = leftover(t, (gs || []).concat(NAME_STRIP)).replace(/\b\d+\b/g, ' ').replace(/\s+/g, ' ').trim(); if (!l) return null; return l.split(' ').slice(0, max || 4).join(' ').replace(/\b([a-z])/g, function (m) { return m.toUpperCase(); }); }
   var withName = function (key, gs) { return function (t) { var n = nameFrom(t, gs); if (!n) return null; var o = {}; o[key || 'name'] = n; return o; }; };
   function toggleName(t, gs) { var l = leftover(t, gs.concat(['SETTINGSW', 'SHOWV'])).replace(/\s+/g, ' ').trim(); return l ? l : null; }
+
+
+  /* Which Duka screen was named? Order matters (most specific first). strict=true: only words that cannot mean anything else. */
+  var DUKA_TABS = [
+    ['sales', /\b(?:sales history|past sales|sales list|all sales|historia ya mauzo|orodha ya mauzo|mauzo yote|mauzo ya zamani|sales screen|sales tab)\b/],
+    ['sell', /\b(?:point of sale|pos|sell screen|selling screen|till|cashier|checkout|new sale|kaunta|counter|skrini ya mauzo|sehemu ya kuuza|sell tab|uza tab|sell page)\b/],
+    ['expenses', /\b(?:expenses?|gharama|matumizi|expenditure)\b/],
+    ['debts', /\b(?:debts?|madeni|deni|wadeni|credit customers)\b/],
+    ['reports', /\b(?:reports?|ripoti|summary|muhtasari)\b/],
+    ['products', /\b(?:products?|bidhaa|inventory|stock|stoku|stoo|items)\b/],
+    ['money', /\b(?:duka money|shop money|money tab|finance|fedha|pesa za duka|fedha za duka)\b/],
+    ['settings', /\b(?:duka settings|shop settings|mipangilio ya duka|my shop|duka langu|shop details)\b/],
+    ['group', /\b(?:buy together|buying together|group buying tab|nunua pamoja|ununuzi wa pamoja)\b/],
+    ['admin', /\b(?:admin|msimamizi)\b/],
+    ['dashboard', /\b(?:dashboard|dashibodi|duka home|home screen|overview|main screen)\b/]
+  ];
+  var DUKA_TABS_STRICT = { expenses: 1, dashboard: 1, sell: 1, sales: 1, money: 1, settings: 1 };
+  function dukaTabOf(t, strict) { var s = ' ' + t.trim() + ' '; for (var i = 0; i < DUKA_TABS.length; i++) if (DUKA_TABS[i][1].test(s) && (!strict || DUKA_TABS_STRICT[DUKA_TABS[i][0]])) return DUKA_TABS[i][0]; return null; }
 
   /* ───────────── RULES ─────────────
    * all: groups that must ALL be present · not: groups that must be ABSENT · boost: extra groups (+0.25 each) · w: specificity
@@ -363,6 +442,29 @@
     R('games.sound', ['MUTE'], { onlyPage: 'games', fixed: { state: 'off' }, w: 1.8 }),
     R('games.sound', ['UNMUTE'], { onlyPage: 'games', fixed: { state: 'on' }, w: 1.8 }),
     R('games.question', ['READV', 'QUESTIONW'], { onlyPage: 'games', w: 2 }),
+    // ── DUKA SMART: screens and features added later ──
+    R('duka.suppliers', ['SUPPLIERW'], { not: ['FRIEND', 'SENDV', 'SUPMODE'], w: 2.3 }),
+    R('duka.waste', ['WASTEW'], { not: ['FRIEND', 'SENDV', 'LOSSW'], w: 2.3 }),
+    R('duka.group_buy', ['GROUPBUYW'], { not: ['GORDER'], w: 2.5 }),
+    R('duka.refund', ['REFUNDW'], { not: ['SENDV', 'FRIEND'], w: 2.5 }),
+    R('duka.hold_bill', ['HOLDW', 'BILLW'], { onlyPage: 'tools', not: ['HELDW', 'RESUMEV', 'DISCARDV', 'FRIEND'], w: 2.4 }),
+    R('duka.held_bills', ['HELDW', 'BILLW'], { onlyPage: 'tools', not: ['RESUMEV', 'DISCARDV'], w: 2.4 }),
+    R('duka.discard_bill', ['DISCARDV', 'HELDW', 'BILLW'], { onlyPage: 'tools', w: 2.9 }),
+    R('duka.resume_bill', ['RESUMEV', 'BILLW'], { onlyPage: 'tools', not: ['DISCARDV', 'HOLDW'], w: 2.5, slots: function (t) { var n = numAfter(t, /\b(\d{1,3})\b/); return n ? { n: n } : null; } }),
+    R('duka.scan', ['SCANW'], { onlyPage: 'tools', not: ['FRIEND', 'MSGW'], w: 2.4 }),
+    R('duka.receive_stock', ['RECEIVEV', 'STOCKISH'], { onlyPage: 'tools', not: ['FRIEND', 'BAL', 'SENDV', 'REFUNDW'], w: 2.5, slots: function (t) {
+      var q = numAfter(t, /\b(\d+(?:\.\d+)?)\b/), m = /\b(?:of|for|ya|za|wa)\s+([a-z][a-z ]{1,30})$/.exec(t.trim()), pr = m ? words(strip(' ' + m[1] + ' ', ['STOCKISH', 'STOP', 'RECEIVEV'])) : '', o = {};
+      if (q) o.qty = q; if (pr) o.product = pr; return o; } }),
+    R('duka.financing', ['FINW'], { onlyPage: 'tools', w: 2.6 }),
+    R('duka.chama', ['CHAMA'], { onlyPage: 'tools', not: ['MONTH', 'OWE', 'RECV', 'SPENT'], w: 2.6 }),
+    R('duka.supplier_mode', ['SUPMODE'], { onlyPage: 'tools', w: 3.0 }),
+    R('duka.group_order', ['GORDER'], { onlyPage: 'tools', w: 3.0 }),
+    R('duka.record_loss', ['LOSSW'], { onlyPage: 'tools', w: 3.0 }),
+    R('duka.sync_status', ['SYNCSTAT'], { onlyPage: 'tools', w: 3.0 }),
+    R('duka.sync_now', ['SYNCW'], { onlyPage: 'tools', not: ['SYNCSTAT', 'FRIEND'], w: 2.4 }),
+    R('duka.open_tab', ['SALESHIST'], { onlyPage: 'tools', w: 2.8, fixed: { tab: 'sales' } }),
+    R('duka.open_tab', ['SHOWV', 'SCREENW'], { not: ['FRIEND', 'MSGW', 'SETTINGSW', 'GAMEW', 'STATUSW'], w: 2.9, slots: function (t) { var k = dukaTabOf(t); return k ? { tab: k } : null; } }),
+    R('duka.open_tab', ['SHOWV'], { not: ['FRIEND', 'MSGW', 'SETTINGSW', 'GAMEW', 'STATUSW', 'DEBT', 'REPORTW', 'STOCKW', 'LOW', 'COUNTQ', 'MONEYQ', 'SPENT'], w: 1.6, slots: function (t) { if (amountOf(t)) return null; var k = dukaTabOf(t, true); return k ? { tab: k } : null; } }),
     // ── DUKA SMART ──
     R('duka.sale', ['SALEV'], { not: ['MONEYQ'], boost: ['PRODUCTW'], w: 1.8, slots: function (t) {
       var pay = /\b(?:mpesa|lipa na mpesa)\b/.test(t) ? 'mpesa' : /\b(?:credit|on credit|mkopo|deni|kwa deni)\b/.test(t) ? 'credit' : /\b(?:cash|taslimu|pesa taslimu)\b/.test(t) ? 'cash' : null;

@@ -1279,7 +1279,7 @@ function vParse(raw, fallbackLang) {
     return Object.assign(out, { intent: 'addProduct', name: name, buy: res.buy, sell: res.sell, stock: res.stock });
   }
   // DUKA screens, suppliers, waste, group buying, refunds: read-only answers or navigation. Nothing here changes money or stock.
-  if ((m = /^(?:open|go to|take me to|fungua|nenda(?: kwa)?|nipeleke)\s+(?:the |my |ukurasa wa |sehemu ya )?(dashboard|home|sell|pos|new sale|sales|products?|stock|buy together|group buy(?:ing)?|waste|money|expenses|debts|suppliers?|reports?|settings|my shop|admin|dashibodi|mauzo|bidhaa|taka|upotevu|pesa|gharama|madeni|wasambazaji|ripoti|mipangilio)(?: tab| screen| page)?$/.exec(s))) {
+  if ((m = /^(?:please |tafadhali )?(?:open|go to|go back to|take me to|bring up|fungua|nenda(?: kwa)?|nipeleke|nifungulie|enda(?: kwa)?)\s+(?:the |my |ukurasa wa |sehemu ya )?(dashboard|home|sell|pos|new sale|sales|products?|stock|buy together|group buy(?:ing)?|waste|money|expenses|debts|suppliers?|reports?|settings|my shop|admin|dashibodi|mauzo|bidhaa|taka|upotevu|pesa|gharama|madeni|wasambazaji|ripoti|mipangilio)(?: tab| screen| page)?$/.exec(s))) {
     var w = m[1], MAP = { dashboard: ['dash'], home: ['dash'], dashibodi: ['dash'], sell: ['pos'], pos: ['pos'], 'new sale': ['pos'], sales: ['sales'], mauzo: ['sales'], product: ['products'], products: ['products'], stock: ['products'], bidhaa: ['products'], 'buy together': ['group'], 'group buy': ['group'], 'group buying': ['group'], waste: ['waste'], upotevu: ['waste'], money: ['money'], pesa: ['money'], expenses: ['money', 'expenses'], gharama: ['money', 'expenses'], debts: ['money', 'debts'], madeni: ['money', 'debts'], supplier: ['money', 'suppliers'], suppliers: ['money', 'suppliers'], wasambazaji: ['money', 'suppliers'], report: ['money', 'reports'], reports: ['money', 'reports'], ripoti: ['money', 'reports'], settings: ['settings'], mipangilio: ['settings'], 'my shop': ['settings'], admin: ['admin'] };
     return Object.assign(out, { intent: 'openTab', tab: (MAP[w] || ['dash'])[0], fin: (MAP[w] || [])[1] || null, label: w });
   }
@@ -1363,7 +1363,7 @@ async function vHandle(raw) {
     else if (cmd.intent === 'expense') vExpenseCard(cmd);
     else if (cmd.intent === 'addProduct') vProductCard(cmd);
     else if (cmd.intent === 'sale') await vSaleCard(cmd);
-    else vSay(T('Sorry, I did not understand. Try: "sell 3 sugar", "add expense 500 transport", "how much sugar is left", "who owes me", or "today\'s report".', 'Samahani, sijaelewa. Jaribu: "uza sukari 3", "nimetumia 500 usafiri", "sukari imebaki ngapi", "nani ananidai", au "ripoti ya leo".'));
+    else vSay(T('Sorry, I did not understand. Try: "sell 3 sugar", "add expense 500 transport", "how much sugar is left", "who owes me", "open suppliers", "show waste" or "today\'s report".', 'Samahani, sijaelewa. Jaribu: "uza sukari 3", "nimetumia 500 usafiri", "sukari imebaki ngapi", "nani ananidai", au "ripoti ya leo".'));
   } catch (e) { vSay(e.message || T('Something went wrong.', 'Hitilafu imetokea.')); }
   vRender();
 }
@@ -1488,7 +1488,7 @@ function vRender(thinking) {
     '<div class="note">' + T('Anything that changes stock or money waits for you to tap Confirm.', 'Chochote kinachobadilisha stoku au pesa kinasubiri ubonyeze Thibitisha.', S.va.lang) + '</div>';
   var lg = $('vaLog'); if (lg) lg.scrollTop = lg.scrollHeight;
 }
-function vaFab() { return S.shopId ? '<button class="vafab" data-act="vaOpen" type="button" aria-label="Voice assistant" title="Voice assistant"><i class="fas fa-microphone"></i></button>' : ''; }
+function vaFab() { var emb = false; try { emb = window.parent !== window; } catch (_) { emb = true; } return (S.shopId && !emb) ? '<button class="vafab" data-act="vaOpen" type="button" aria-label="Voice assistant" title="Voice assistant"><i class="fas fa-microphone"></i></button>' : ''; }
 function openAssistant() {
   S.va.rl = S.va.rl || S.va.lang;
   openModal(S.va.lang === 'sw' ? 'Msaidizi wa Duka' : 'Duka assistant', '<div id="vaPanel"></div>');
@@ -2531,6 +2531,25 @@ function vExtra(text) {
   }
   if (/\b(?:apply|omba)\b.*\b(?:financing|device|scale|mkopo|kifaa)\b|\b(?:pay|lipa)\b.*\b(?:instal?ments?|installments?|financing|mkopo|kifaa)\b/.test(n)) {
     fnOpen(); return say('I opened device financing. Applying and paying are money actions, so please do them yourself on the screen.', 'Nimefungua mkopo wa kifaa. Kuomba na kulipa ni miamala ya pesa, tafadhali fanya mwenyewe kwenye skrini.');
+  }
+  // ---- more screens by voice (open only; the trader still taps Save / Confirm / Pay) ----
+  if (/^(?:please |tafadhali )?(?:open|show|fungua|nionyeshe)\s+(?:my\s+|the\s+)?(?:duka\s+)?chamas?(?:\s+(?:list|screen|page))?$/.test(n)) {
+    vGoTab('group'); chList(); return say('Opening your Chamas. Voting, funding and paying are done by you on the screen.', 'Inafungua Chama zako. Kupiga kura, kuchangia na kulipa unafanya mwenyewe kwenye skrini.');
+  }
+  if (/^(?:please |tafadhali )?(?:open|show|fungua|nionyeshe)\s+(?:the\s+)?(?:supplier mode|supplier sign ?up|i am a supplier|mimi ni msambazaji)$/.test(n)) {
+    vGoTab('group'); gbSupplier(); return say('Opening supplier registration. Check the details, then tap Save yourself.', 'Inafungua usajili wa msambazaji. Hakiki taarifa kisha bonyeza Hifadhi mwenyewe.');
+  }
+  if (/^(?:please |tafadhali )?(?:start|create|new|anzisha|unda)\s+(?:a\s+|new\s+)?(?:group order|group buy|oda ya pamoja)$/.test(n)) {
+    vGoTab('group'); gbNew(); return say('Start a group order is open. Fill in the product and quantity, then tap Create yourself.', 'Oda ya pamoja imefunguliwa. Jaza bidhaa na kiasi kisha bonyeza Unda mwenyewe.');
+  }
+  if (/^(?:please |tafadhali )?(?:record|add|rekodi|andika)\s+(?:spoiled stock|spoilt stock|a loss|stock loss|waste|hasara|iliyoharibika)$/.test(n)) {
+    vGoTab('waste'); wsLoss(); return say('Record spoiled stock is open. Choose the product and quantity, then tap Save yourself.', 'Rekodi iliyoharibika imefunguliwa. Chagua bidhaa na kiasi kisha bonyeza Hifadhi mwenyewe.');
+  }
+  if (/^(?:please |tafadhali )?(?:show|open|fungua|nionyeshe)\s+(?:the\s+)?sync status$/.test(n)) {
+    openSyncStatus(); return say('Here is your sync status.', 'Hii ndiyo hali ya usawazishaji.');
+  }
+  if (/^(?:please |tafadhali )?sync now$/.test(n)) {
+    syncNow(); return say('Syncing now.', 'Inasawazisha sasa.');
   }
   return false;
 }

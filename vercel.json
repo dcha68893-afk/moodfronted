@@ -43,6 +43,37 @@
           "value": "no-store, no-cache, must-revalidate, proxy-revalidate"
         }
       ]
+    },
+    {
+      "source": "/assets/landing/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=86400, must-revalidate"
+        }
+      ]
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/features/accommodation",
+      "destination": "/features/duka/",
+      "permanent": true
+    },
+    {
+      "source": "/features/accommodation/",
+      "destination": "/features/duka/",
+      "permanent": true
+    },
+    {
+      "source": "/features/marketplace",
+      "destination": "/features/duka/",
+      "permanent": true
+    },
+    {
+      "source": "/features/marketplace/",
+      "destination": "/features/duka/",
+      "permanent": true
     }
   ]
 }
