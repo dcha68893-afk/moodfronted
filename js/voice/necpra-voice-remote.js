@@ -48,6 +48,14 @@
       else V.registerHandler(id, function (r) { return fn({ transcript: r.transcript, lang: r.lang }); });
     });
   }
-  root.NecpraVoiceRemote = { capture: capture, onIntent: onIntent, mode: function () { return mode; }, ready: ensure };
+  function speak(text, opts) {
+    return ensure().then(function (m) {
+      var safe = String(text == null ? '' : text).slice(0, 300);
+      if (!safe) return false;
+      if (m === 'bridge' && client && typeof client.speak === 'function') return client.speak(safe);
+      return V.speak(safe, opts || { force: true });
+    });
+  }
+  root.NecpraVoiceRemote = { capture: capture, speak: speak, onIntent: onIntent, mode: function () { return mode; }, ready: ensure };
   if (embedded) ensure();
 })(typeof window !== 'undefined' ? window : globalThis);

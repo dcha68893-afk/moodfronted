@@ -1648,30 +1648,7 @@
 
         <div id="headerActions" class="header-actions hidden" aria-label="Module actions"></div>
 
-        <!-- TOOLS NAV TABS — shown only when tools page is active -->
-        <div id="toolsHeaderNav" class="hidden" aria-label="Tools navigation">
-            <button class="jm-parent-nav-tab" data-tools-page="home" title="Home" onclick="toolsNavTo('home')">
-                <i class="fas fa-home" style="font-size:15px"></i>
-                <span style="font-size:10px;line-height:1">Home</span>
-            </button>
-            <button class="jm-parent-nav-tab" data-tools-page="categories" title="Categories" onclick="toolsNavTo('categories')">
-                <i class="fas fa-th-list" style="font-size:15px"></i>
-                <span style="font-size:10px;line-height:1">Categories</span>
-            </button>
-            <button class="jm-parent-nav-tab" data-tools-page="cart" title="Cart" onclick="toolsNavTo('cart')" style="position:relative">
-                <i class="fas fa-shopping-cart" style="font-size:15px"></i>
-                <span id="parentCartBadge" style="display:none;position:absolute;top:-4px;right:-4px;background:#f97316;color:#fff;font-size:8px;font-weight:800;border-radius:10px;padding:1px 5px;min-width:14px;text-align:center;line-height:1.4">0</span>
-                <span style="font-size:10px;line-height:1">Cart</span>
-            </button>
-            <button class="jm-parent-nav-tab" data-tools-page="wishlist" title="Wishlist" onclick="toolsNavTo('wishlist')">
-                <i class="fas fa-heart" style="font-size:15px"></i>
-                <span style="font-size:10px;line-height:1">Wishlist</span>
-            </button>
-            <button class="jm-parent-nav-tab" data-tools-page="account" title="Account" onclick="toolsNavTo('account')">
-                <i class="fas fa-user-circle" style="font-size:15px"></i>
-                <span style="font-size:10px;line-height:1">Account</span>
-            </button>
-        </div>
+        <!-- DUKA has its own shop navigation; legacy Marketplace tabs are intentionally not shown here. -->
 
         <!-- FRIENDS NAV TABS — shown only when friends page is active. Replaces
              the Friends/Discover/Requests/Sent/Nearby tab row that used to live
@@ -3017,11 +2994,12 @@
             if (!headerActionsEl) return;
 
             if (page === 'tools') {
-                if (toolsNavEl) toolsNavEl.classList.remove('hidden');
+                // DUKA owns its navigation inside the module. Do not show the old
+                // Marketplace Home/Categories/Cart/Wishlist/Account header tabs.
+                if (toolsNavEl) toolsNavEl.classList.add('hidden');
                 if (friendsNavEl) friendsNavEl.classList.add('hidden');
                 headerActionsEl.innerHTML = '';
-                headerActionsEl.classList.remove('hidden');
-                renderHeaderActionButtons(headerActionsEl, headerActionConfigByPage.tools, page);
+                headerActionsEl.classList.add('hidden');
                 return;
             }
             // Hide tools nav for every other page

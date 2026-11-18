@@ -220,11 +220,16 @@
   /* Which screen owns a question? Used by the shell when the screen you are on could not answer ("is there a friend request" while in DUKA). */
   function topicOf(text) {
     var n = norm(text);
-    if (/\b(unread|new messages?|ujumbe mpya|my messages|inbox|meseji mpya)\b/.test(n)) return 'messages';
-    if (/\b(friends?|friend requests?|marafiki|rafiki|maombi ya urafiki)\b/.test(n) || (/\b(requests?|maombi)\b/.test(n) && !/\b(payment|pay|money|pesa|malipo|chama)\b/.test(n))) return 'friends';
-    if (/\b(duka|products?|stock|inventory|customers?|wateja|bidhaa|sales|sold|mauzo|debts?|owe|owes|expenses?|profit|faida|shop|low stock)\b/.test(n)) return 'tools';
-    if (/\b(groups?|vikundi|kikundi)\b/.test(n)) return 'group';
-    if (/\b(status|statuses|stories|moments|hali)\b/.test(n)) return 'status';
+    // Route natural questions by the data they ask for. The destination module
+    // remains responsible for querying the signed-in user's actual records.
+    if (/\b(unread|new messages?|ujumbe mpya|my messages|inbox|meseji mpya|latest messages?|recent chats?|chat history|conversation history)\b/.test(n)) return 'messages';
+    if (/\b(friends?|friend requests?|marafiki|rafiki|maombi ya urafiki|contacts?|contacts list)\b/.test(n) || (/\b(requests?|maombi)\b/.test(n) && !/\b(payment|pay|money|pesa|malipo|chama)\b/.test(n))) return 'friends';
+    if (/\b(duka|products?|stock|inventory|customers?|wateja|bidhaa|sales|sold|mauzo|debts?|owe|owes|expenses?|profit|faida|shop|low stock|held bills?|parked bills?|barcode|bar code|scanner|receive stock|supplier registration|add supplier|group order|group buying|buy together|stock loss|spoiled stock|record spoilage|sync now|sync status|pending changes|offline changes|supplier balance)\b/.test(n)) return 'tools';
+    if (/\b(wallet|balance|salio|pesa|money|transactions?|miamala|spending|spent|received|income|withdraw|deposit|airtime|data bundles?|pay later|payment requests?|chama|chamas|circle|circles|contribution|contributions|michango|mchango|savings? goals?|akiba|malengo|orders? due|who has not paid|defaulters)\b/.test(n)) return 'money';
+    if (/\b(coins?|sarafu|game score|scores?|high score|best score|chess|chesi|trivia|crossword|block puzzle|arcade|games?|michezo|mchezo)\b/.test(n)) return 'games';
+    if (/\b(group members?|members? in (?:my |the )?group|people in (?:my |the )?group|wanachama|watu wangapi|vikundi|kikundi|groups?)\b/.test(n)) return 'group';
+    if (/\b(status|statuses|stories|moments|hali|vibes?|who viewed|views? on my status)\b/.test(n)) return 'status';
+    if (/\b(settings?|privacy|security|notifications?|dark mode|light mode|theme|backup|storage|read receipts|last seen|mipangilio|faragha|usalama|arifa)\b/.test(n)) return 'settings';
     return null;
   }
   var api = { topicOf: topicOf, normalizeUtterance: normalizeUtterance, parseOpenChat: parseOpenChat, parseComposerCommand: parseComposerCommand, parseChatAction: parseChatAction, nameVariants: nameVariants, isSaleStatement: isSaleStatement, norm: norm, matchContacts: matchContacts, splitRecipient: splitRecipient, parseMessengerIntent: parseMessengerIntent, parseNav: parseNav, parseChoice: parseChoice, parseConfirmAnswer: parseConfirmAnswer, toSecondPerson: toSecondPerson, PAGE_LABEL: LABEL };
