@@ -116,6 +116,25 @@
       V.audit('voice.nav', { module: 'shell', outcome: 'executed', lang: result.lang });
       return forward('group', result);
     }
+    // Inventory questions must always reach DUKA, even when the user is speaking
+    // from another module. Treat singular/plural and common shop wording as live data
+    // questions, not as generic help text or an unrecognised command.
+    var dukaInventoryQuestion = /\\b(?:how many|number of|count|total|idadi ya|bidhaa ngapi|ngapi)\\b.*\\b(?:products?|items?|goods|bidhaa)\\b|\\b(?:products?|items?|goods|bidhaa)\\b.*\\b(?:do we have|do i have|have we got|in (?:my |our |the )?(?:shop|store|duka|inventory)|available)\\b/i.test(clean(text));
+    if (dukaInventoryQuestion && cfg.allowedPages.indexOf('tools') >= 0) {
+      var inventoryPreviousPage = cfg.getPage();
+      if (inventoryPreviousPage !== 'tools') cfg.navigate('tools');
+      if (await forward('tools', result)) { V.audit('voice.nav', { module: 'tools', outcome: 'answered-inventory', lang: result.lang }); return true; }
+      if (inventoryPreviousPage && inventoryPreviousPage !== 'tools') cfg.navigate(inventoryPreviousPage);
+    }
+    // DUKA operations are routed to the shop module with the original words intact. The module opens a form or screen;
+    // the universal assistant remains the only microphone and money/stock changes still need on-screen confirmation.
+    var dukaOperation = /\b(?:held bills?|parked bills?|hold this bill|resume bill|discard held|barcode|bar code|scan (?:a )?(?:product|item|code)|receive stock|stock receiving|register supplier|add supplier|supplier registration|create group order|start group order|group order|group buying|buy together|stock loss|spoiled stock|record spoilage|sync now|sync status|pending changes|offline changes)\b/i.test(clean(text));
+    if (dukaOperation && cfg.allowedPages.indexOf('tools') >= 0) {
+      var previousPage = cfg.getPage();
+      if (previousPage !== 'tools') cfg.navigate('tools');
+      if (await forward('tools', result)) { V.audit('voice.nav', { module: 'tools', outcome: 'executed', lang: result.lang }); return true; }
+      if (previousPage && previousPage !== 'tools') cfg.navigate(previousPage);
+    }
     var nav = I.parseNav(text);
     if (nav && nav.type === 'back') { V.audit('voice.nav', { module: 'shell', outcome: 'executed', lang: result.lang }); (cfg.back || function () { root.history.back(); })(); return true; }
     if (nav && nav.type === 'navigate') {

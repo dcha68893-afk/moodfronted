@@ -222,7 +222,7 @@
     var n = norm(text);
     if (/\b(unread|new messages?|ujumbe mpya|my messages|inbox|meseji mpya)\b/.test(n)) return 'messages';
     if (/\b(friends?|friend requests?|marafiki|rafiki|maombi ya urafiki)\b/.test(n) || (/\b(requests?|maombi)\b/.test(n) && !/\b(payment|pay|money|pesa|malipo|chama)\b/.test(n))) return 'friends';
-    if (/\b(duka|products?|stock|inventory|customers?|wateja|bidhaa|sales|sold|mauzo|debts?|owe|owes|expenses?|profit|faida|shop|low stock)\b/.test(n)) return 'tools';
+    if (/\b(duka|products?|stock|inventory|customers?|wateja|bidhaa|sales|sold|mauzo|debts?|owe|owes|expenses?|profit|faida|shop|low stock|held bills?|parked bills?|barcode|bar code|scanner|receive stock|supplier registration|add supplier|group order|group buying|buy together|stock loss|spoiled stock|record spoilage|sync now|sync status|pending changes|offline changes)\b/.test(n)) return 'tools';
     if (/\b(groups?|vikundi|kikundi)\b/.test(n)) return 'group';
     if (/\b(status|statuses|stories|moments|hali)\b/.test(n)) return 'status';
     return null;

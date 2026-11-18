@@ -1,0 +1,2555 @@
+(function () {
+'use strict';
+var $ = function (id) { return document.getElementById(id); };
+var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+var KSH = function (n) { return 'KSh ' + Number(n || 0).toLocaleString('en-KE', { maximumFractionDigits: 2 }); };
+var QTY = function (n) { return Number(n || 0).toLocaleString('en-KE', { maximumFractionDigits: 3 }); };
+function uuid() {
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  var b = new Uint8Array(16); (window.crypto || {}).getRandomValues ? crypto.getRandomValues(b) : b.forEach(function (_, i) { b[i] = Math.floor(Math.random() * 256); });
+  b[6] = (b[6] & 15) | 64; b[8] = (b[8] & 63) | 128;
+  var h = Array.prototype.map.call(b, function (x) { return ('0' + x.toString(16)).slice(-2); }).join('');
+  return h.slice(0, 8) + '-' + h.slice(8, 12) + '-' + h.slice(12, 16) + '-' + h.slice(16, 20) + '-' + h.slice(20);
+}
+
+/* ───── auth + API (same sources every other NECPRA module uses) ───── */
+function token() {
+  try { var a = window.getAuthSession && window.getAuthSession(); if (a && a.token) return a.token; } catch (_) {}
+  try { var raw = localStorage.getItem('kynecta_auth'); if (raw) { var o = JSON.parse(raw); if (o && typeof o.token === 'string' && o.token) return o.token; } } catch (_) {}
+  var p = window.parent && window.parent !== window ? window.parent : null;
+  return window.__kynToken || window.__accessToken || localStorage.getItem('authToken') || localStorage.getItem('token') ||
+    localStorage.getItem('necpa_token') || localStorage.getItem('accessToken') || (p && (p.__kynToken || p.__accessToken)) || '';
+}
+function apiBase() {
+  var p = window.parent && window.parent !== window ? window.parent : null;
+  var b = (window.__getApiBase && window.__getApiBase()) || (window.__kynAPI && window.__kynAPI.baseUrl) || window.API_BASE_URL ||
+    (p && p.__getApiBase && p.__getApiBase()) || (p && p.API_BASE_URL) || '';
+  return String(b).replace(/\/api\/?$/, '').replace(/\/$/, '');
+}
+var API_TIMEOUT = 20000;
+function offlineErr(m) { return Object.assign(new Error(m), { status: 0, offline: true }); }
+async function api(method, path, body, opt) {
+  var base = apiBase();
+  if (base === '' && !/^(localhost|127\.)/.test(location.hostname)) throw Object.assign(new Error('The app is not connected to the server yet. Please reopen NECPRA.'), { status: 0 });
+  var r, ac = typeof AbortController === 'function' ? new AbortController() : null, tm = ac ? setTimeout(function () { ac.abort(); }, API_TIMEOUT) : 0;
+  try {
+    r = await fetch(base + '/api/duka' + path, { method: method, headers: Object.assign({ 'Content-Type': 'application/json' }, token() ? { Authorization: 'Bearer ' + token() } : {}), body: body ? JSON.stringify(body) : undefined, signal: ac ? ac.signal : undefined });
+  } catch (e) {
+    return fromCacheOrThrow(method, path, opt, offlineErr('No internet connection.'));
+  } finally { if (tm) clearTimeout(tm); }
+  if (r.status === 502 || r.status === 503 || r.status === 504) return fromCacheOrThrow(method, path, opt, offlineErr('The server is not reachable right now.'));
+  var d = await r.json().catch(function () { return {}; });
+  if (!r.ok) throw Object.assign(new Error(r.status === 401 ? 'Your session has expired. Please log in again.' : (d.message || 'Request failed (' + r.status + ')')), { status: r.status, code: d.errorCode || '' });
+  if (method === 'GET' && !(opt && opt.noCache)) cacheSet(path, d.data || {});
+  return d.data || {};
+}
+
+/* ───── state ───── */
+var UNITS = ['piece', 'kg', 'g', 'litre', 'ml', 'packet', 'bottle', 'carton', 'dozen', 'bundle', 'tray', 'sack', 'metre'];
+var TYPES = ['Duka / Grocery', 'Wholesale', 'Hardware', 'Chemist', 'Butchery', 'Cereals & Produce', 'Salon / Barber', 'Electronics', 'Clothing', 'Mama Mboga', 'Other'];
+var S = { loading: true, err: '', shops: [], maxShops: 5, shopId: null, tab: 'dash', dash: null, products: [], total: 0, categories: [], q: '', cat: '', low: false, busy: false, draftId: null, opId: null,
+  cart: [], saleId: null, disc: { type: 'amount', value: '' }, posQ: '', customers: [], coId: null, sales: [], salesSummary: null, range: 'today' };
+try { S.shopId = localStorage.getItem(dukaStorageKey('necpra_duka_shop')); S.tab = sessionStorage.getItem('necpra_duka_tab') || 'dash'; } catch (_) {}
+var shop = function () { return S.shops.filter(function (s) { return s.id === S.shopId; })[0] || null; };
+
+function toast(m, bad) { var t = document.createElement('div'); t.className = 'toast' + (bad ? ' err' : ''); t.textContent = m; $('toasts').appendChild(t); setTimeout(function () { t.remove(); }, 4200); }
+function openModal(title, html) { $('mTitle').textContent = title; $('mBody').innerHTML = html; $('modal').classList.add('open'); }
+function closeModal() { stopScan(); $('modal').classList.remove('open'); $('mBody').innerHTML = ''; }
+function busy(btn, on, txt) { if (!btn) return; btn.disabled = on; if (on) { btn.dataset.t = btn.textContent; btn.textContent = txt || 'Please wait…'; } else if (btn.dataset.t) btn.textContent = btn.dataset.t; }
+function opt(list, sel) { return list.map(function (u) { return '<option' + (u === sel ? ' selected' : '') + '>' + esc(u) + '</option>'; }).join(''); }
+var val = function (id) { var e = $(id); return e ? e.value.trim() : ''; };
+var numOrNull = function (id) { var v = val(id); return v === '' ? null : Number(v); };
+
+/* ───── loaders ───── */
+async function loadShops() {
+  var d = await api('GET', '/shops');
+  S.shops = d.shops; S.maxShops = d.maxShops;
+  if (!shop()) S.shopId = S.shops[0] ? S.shops[0].id : null;
+  try { S.shopId ? localStorage.setItem(dukaStorageKey('necpra_duka_shop'), S.shopId) : localStorage.removeItem(dukaStorageKey('necpra_duka_shop')); } catch (_) {}
+  if (S.shopId && S.cartLoadedFor !== S.shopId) loadCart();
+}
+async function loadTab() {
+  if (!S.shopId) return;
+  S.staleAt = 0;
+  if (S.tab === 'dash') S.dash = await api('GET', '/shops/' + S.shopId + '/dashboard');
+  if (S.tab === 'products') {
+    var qs = '?limit=500' + (S.q ? '&search=' + encodeURIComponent(S.q) : '') + (S.cat ? '&category=' + encodeURIComponent(S.cat) : '') + (S.low ? '&lowStock=true' : '');
+    var d;
+    try { d = await api('GET', '/shops/' + S.shopId + '/products' + qs); }
+    catch (e) {
+      if (!(e.offline && qs !== '?limit=500')) throw e;       // offline search/filter: filter the saved list on the phone
+      d = await api('GET', '/shops/' + S.shopId + '/products?limit=500'); var qq = S.q.toLowerCase();
+      d = { products: d.products.filter(function (p) { return (!qq || (p.name + ' ' + (p.barcode || '')).toLowerCase().indexOf(qq) >= 0) && (!S.cat || p.category === S.cat) && (!S.low || p.isLowStock); }), categories: d.categories };
+    }
+    S.products = applyPending(d.products.slice()); S.total = d.total != null ? d.total : S.products.length; S.categories = d.categories;
+  }
+  if (S.tab === 'pos') {
+    var pd = await api('GET', '/shops/' + S.shopId + '/products?limit=500');
+    var savedLow = S.low; S.low = false; S.products = applyPending(pd.products.slice()); S.low = savedLow; S.categories = pd.categories;
+    if (!S.cartLoadedFor || S.cartLoadedFor !== S.shopId) loadCart();
+    syncCart();
+  }
+  if (S.tab === 'group') { var gp = await api('GET', '/shops/' + S.shopId + '/products?limit=500'); S.products = applyPending(gp.products.slice()); S.gb = { orders: (await api('GET', '/group-buy/orders')).orders, dash: await api('GET', '/group-buy/dashboard') }; }
+  if (S.tab === 'waste') { var wp = await api('GET', '/shops/' + S.shopId + '/products?limit=500'); S.products = applyPending(wp.products.slice()); S.waste = await api('GET', '/shops/' + S.shopId + '/waste'); }
+  if (S.tab === 'money') await loadMoney();
+  if (S.tab === 'admin' && S.isAdmin) await loadAdmin();
+  if (S.tab === 'sales') {
+    var from = S.range === 'today' ? ymd(0) : S.range === '7' ? ymd(6) : S.range === '30' ? ymd(29) : '';
+    var sd = await api('GET', '/shops/' + S.shopId + '/sales?limit=100' + (from ? '&from=' + from : ''));
+    S.sales = sd.sales; S.salesSummary = sd.summary;
+  }
+}
+async function refresh(keepFocus) {
+  try { S.err = ''; await loadTab(); } catch (e) { S.err = e.message; }
+  S.loading = false; render(keepFocus);
+}
+/* No registration: first open silently creates a default shop for the logged-in user (renamable in Settings).
+   The id is kept in localStorage so a retry after a dropped connection can never create a second shop. */
+async function ensureDefaultShop() {
+  if (S.shops && S.shops.length) return;
+  var id = ''; try { id = localStorage.getItem(dukaStorageKey('necpra_duka_autoshop')) || ''; } catch (_) {}
+  if (!id) { id = uuid(); try { localStorage.setItem(dukaStorageKey('necpra_duka_autoshop'), id); } catch (_) {} }
+  var d = await api('POST', '/shops', { id: id, name: 'My Duka' });
+  S.shopId = d.shop.id; await loadShops();
+}
+async function boot() {
+  try { await loadShops(); if (!S.shops.length) await ensureDefaultShop(); await checkAdmin(); await loadTab(); } catch (e) { S.err = e.message; }
+  S.loading = false; render(); setTimeout(syncNow, 500);
+}
+
+/* ───── views ───── */
+function stockBadge(p) { return p.isOutOfStock ? '<span class="badge out">Out of stock</span>' : p.isLowStock ? '<span class="badge low">Low</span>' : '<span class="badge">In stock</span>'; }
+function productRow(p) {
+  return '<div class="item" data-act="openProduct" data-id="' + esc(p.id) + '"><div class="grow"><div class="t">' + esc(p.name) + (p.pending ? ' <span class="badge low">Not synced</span>' : '') + '</div><div class="s">' +
+    esc(p.category || 'No category') + ' · Buy ' + KSH(p.buyingPrice) + ' → Sell ' + KSH(p.sellingPrice) + '</div></div><div style="text-align:right"><b>' +
+    QTY(p.stockQty) + '</b> <span class="s">' + esc(p.unit) + '</span><div>' + stockBadge(p) + '</div></div></div>';
+}
+
+function viewOnboarding() {
+  return '<div class="hero"><h1>NECPRA DUKA SMART</h1><p>Your shop. Your stock. Your money. Your assistant.</p></div>' +
+    '<div class="card"><b>Set up your shop</b><div class="note">Create your shop to start adding products and tracking stock. You can add more shops later.</div>' + shopForm({}) +
+    '<div class="actions"><button class="btn" data-act="createShop" type="button">Create shop</button></div></div>';
+}
+function shopForm(s) {
+  return '<label>Shop name *</label><input id="fName" maxlength="120" value="' + esc(s.name) + '" placeholder="e.g. Mama Njeri Duka">' +
+    '<label>Type of business</label><select id="fType"><option value="">Select…</option>' + opt(TYPES, s.businessType) + '</select>' +
+    '<div class="two"><div><label>Shop phone</label><input id="fPhone" inputmode="tel" value="' + esc(s.phone) + '" placeholder="07XX XXX XXX"></div>' +
+    '<div><label>Location</label><input id="fLoc" maxlength="160" value="' + esc(s.location) + '" placeholder="e.g. Kawangware"></div></div>' +
+    '<div class="two"><div><label>KRA PIN (optional)</label><input id="fKra" maxlength="20" value="' + esc(s.kraPin) + '"></div>' +
+    '<div><label>Receipt footer</label><input id="fFoot" maxlength="200" value="' + esc(s.receiptFooter) + '" placeholder="Thank you!"></div></div>';
+}
+function shopPayload() {
+  return { name: val('fName'), businessType: val('fType') || null, phone: val('fPhone') || null, location: val('fLoc') || null, kraPin: val('fKra') || null, receiptFooter: val('fFoot') || null };
+}
+function header() {
+  var sw = S.shops.length > 1 ? '<select id="shopSel" class="grow" aria-label="Choose shop">' + S.shops.map(function (s) { return '<option value="' + esc(s.id) + '"' + (s.id === S.shopId ? ' selected' : '') + '>' + esc(s.name) + '</option>'; }).join('') + '</select>' : '<div class="grow"><b>' + esc(shop().name) + '</b><div class="s" style="font-size:12px;opacity:.8">' + esc(shop().location || shop().businessType || '') + '</div></div>';
+  return '<div class="hero"><h1>NECPRA DUKA SMART</h1><p>Your shop. Your stock. Your money. Your assistant.</p></div>' +
+    '<div class="bar">' + sw + (S.shops.length < S.maxShops ? '<button class="btn2" type="button" data-act="newShop" title="Add another shop"><i class="fas fa-plus"></i> Shop</button>' : '') + '</div>' +
+    '<div class="tabs">' + [['dash', 'Dashboard'], ['pos', 'Sell'], ['sales', 'Sales'], ['products', 'Products'], ['group', 'Buy together'], ['waste', 'Waste'], ['money', 'Money'], ['settings', 'My shop']].concat(S.isAdmin ? [['admin', 'Admin']] : []).map(function (t) {
+      return '<button class="tab' + (S.tab === t[0] ? ' on' : '') + '" data-act="tab" data-tab="' + t[0] + '" type="button">' + t[1] + (t[0] === 'pos' && S.cart.length ? ' (' + S.cart.length + ')' : '') + '</button>';
+    }).join('') + '</div>';
+}
+function viewDash() {
+  var d = S.dash; if (!d) return '<div class="spin">Loading…</div>';
+  var st = d.stock, ts = d.todaySales, cd = d.customerDebts;
+  var money = '<div class="grid"><div class="card stat"><small>Today\'s sales</small><b>' + KSH(ts.total) + '</b><div class="s">' + ts.count + ' sale' + (ts.count === 1 ? '' : 's') + '</div></div>' +
+    '<div class="card stat"><small>' + (d.netProfit != null ? 'Net profit today' : 'Est. profit today') + '</small><b>' + KSH(d.netProfit != null ? d.netProfit : d.estimatedProfit) + '</b><div class="s">' + (d.netProfit != null ? 'Gross ' + KSH(d.estimatedProfit) + ' − expenses ' + KSH(d.totalExpenses) + (d.stockLossesToday ? ' − spoiled stock ' + KSH(d.stockLossesToday) : '') : 'Before expenses') + '</div></div>' +
+    '<div class="card stat ' + (cd.total > 0 ? 'warn' : '') + '"><small>Customer debts</small><b>' + KSH(cd.total) + '</b><div class="s">' + cd.openSales + ' unpaid sale' + (cd.openSales === 1 ? '' : 's') + '</div></div>' +
+    '<div class="card stat"><small>Cash received today</small><b>' + KSH(ts.cashReceived) + '</b><div class="s">+ M-PESA ' + KSH(ts.mpesaReceived) + (ts.mpesaPending ? ' · pending ' + KSH(ts.mpesaPending) : '') + '</div></div></div>' +
+    '<div class="note">Credit given today: <b>' + KSH(ts.creditGiven) + '</b> (not cash).' + (d.debtCollectedToday ? ' Debts collected today: <b>' + KSH(d.debtCollectedToday) + '</b>.' : '') + (d.supplierDebts ? ' You owe suppliers <b>' + KSH(d.supplierDebts) + '</b>.' : '') + ' ' + (ts.mpesaReceived > ts.mpesaVerified ? 'M-PESA entered from receipt codes: ' + KSH(ts.mpesaReceived - ts.mpesaVerified) + ' — not independently verified.' : '') + '</div>' +
+    '<div class="actions" style="margin:0 0 12px"><button class="btn" data-act="tab" data-tab="pos" type="button"><i class="fas fa-cash-register"></i> New sale</button></div>';
+  var recentSales = d.recentSales.length ? '<h3>Recent sales</h3>' + d.recentSales.map(saleRow).join('') : '';
+  var cards = money + '<div class="grid"><div class="card stat"><small>Products</small><b>' + st.productCount + '</b></div>' +
+    '<div class="card stat"><small>Stock value (cost)</small><b>' + KSH(st.valueAtCost) + '</b></div>' +
+    '<div class="card stat"><small>Stock value (selling)</small><b>' + KSH(st.valueAtRetail) + '</b></div>' +
+    '<div class="card stat ' + (st.outOfStockCount ? 'bad' : st.lowStockCount ? 'warn' : '') + '"><small>Needs restock</small><b>' + (st.outOfStockCount + st.lowStockCount) + '</b></div></div>';
+  var low = d.lowStockProducts.length ? '<h3>Low and out-of-stock products</h3>' + d.lowStockProducts.map(productRow).join('') : (st.productCount ? '<div class="note">All your products are above their minimum stock.</div>' : '');
+  var mv = d.recentStockMovements.length ? '<h3>Recent stock changes</h3><div class="card">' + d.recentStockMovements.map(function (m) {
+    return '<div class="mv"><span>' + esc(m.productName) + ' <span class="s">· ' + esc(m.type) + '</span></span><span class="' + (m.qtyChange >= 0 ? 'pos' : 'neg') + '">' + (m.qtyChange >= 0 ? '+' : '') + QTY(m.qtyChange) + '</span></div>';
+  }).join('') + '</div>' : '';
+  var empty = !st.productCount ? '<div class="empty"><i class="fas fa-boxes-stacked"></i>No products yet.<br>Add your first product to start tracking stock.<div class="actions" style="justify-content:center"><button class="btn" data-act="addProduct" type="button" style="flex:0 0 auto">Add product</button></div></div>' : '';
+  return cards + empty + recentSales + low + mv + '<div class="note">Detailed expenses, supplier balances and profit breakdowns are available under Money → Reports. Nothing on this screen is sample data.</div>';
+}
+function viewProducts() {
+  var cats = '<option value="">All categories</option>' + S.categories.map(function (c) { return '<option' + (c === S.cat ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('');
+  var f = '<div class="bar"><input id="qBox" class="grow" type="search" placeholder="Search products" value="' + esc(S.q) + '"></div>' +
+    '<div class="bar"><select id="catSel" class="grow">' + cats + '</select><button class="' + (S.low ? 'btn' : 'btn2') + '" data-act="toggleLow" type="button">Low stock</button></div>';
+  var list = S.products.length ? S.products.map(productRow).join('') : '<div class="empty"><i class="fas fa-box-open"></i>' + (S.q || S.cat || S.low ? 'No products match.' : 'No products yet. Tap “Add product”.') + '</div>';
+  return f + '<div class="s" style="margin-bottom:8px;color:var(--kyn-text-secondary)">' + S.total + ' product' + (S.total === 1 ? '' : 's') + '</div>' + list + '<button class="btn fab" data-act="addProduct" type="button"><i class="fas fa-plus"></i> Add product</button>';
+}
+function viewSettings() {
+  return '<div class="card"><b>Shop details</b>' + shopForm(shop()) + '<div class="actions"><button class="btn" data-act="saveShop" type="button">Save changes</button></div></div>' +
+    '<div class="card" style="margin-top:12px"><b>Device financing</b><div class="note">Apply for a NECPRA Smart Scale on weekly instalments, see your balance and record repayments. This is separate from your shop sales and profit.</div><div class="actions"><button class="btn" data-act="fnOpen" type="button">Open device financing</button></div></div>' +
+    '<div class="card" style="margin-top:12px"><b>Archive this shop</b><div class="note">Archiving hides the shop but keeps all its records safe. It does not delete any history.</div><div class="actions"><button class="btnd" data-act="archiveShop" type="button">Archive shop</button></div></div>';
+}
+function render(keepFocus) {
+  var app = $('app'), fid = keepFocus && document.activeElement && document.activeElement.id, pos = fid && $(fid) && $(fid).selectionStart;
+  if (S.loading) return;
+  var html;
+  if (S.err && !S.shops.length) html = '<div class="hero"><h1>NECPRA DUKA SMART</h1></div><div class="note err">' + esc(S.err) + '</div><div class="actions"><button class="btn" data-act="retry" type="button">Try again</button></div>';
+  else if (!S.shops.length) html = viewOnboarding();
+  else html = header() + syncBar() + (S.err ? '<div class="note err">' + esc(S.err) + ' <a href="#" data-act="retry">Retry</a></div>' : '') + (S.tab === 'products' ? viewProducts() : S.tab === 'money' ? viewMoney() : S.tab === 'settings' ? viewSettings() : S.tab === 'pos' ? viewPos() : S.tab === 'sales' ? viewSales() : S.tab === 'group' ? viewGroup() : S.tab === 'waste' ? viewWaste() : S.tab === 'admin' ? viewAdmin() : viewDash());
+  app.innerHTML = html;
+  if (fid && $(fid)) { $(fid).focus(); try { $(fid).setSelectionRange(pos, pos); } catch (_) {} }
+}
+
+/* ───── product modal ───── */
+function productForm(p) {
+  p = p || {};
+  var isNew = !p.id;
+  return '<label>Product name *</label><input id="pName" maxlength="160" value="' + esc(p.name) + '" placeholder="e.g. Sugar 1kg">' +
+    '<div class="two"><div><label>Category</label><input id="pCat" list="catList" maxlength="80" value="' + esc(p.category) + '" placeholder="e.g. Foodstuff"><datalist id="catList">' + S.categories.map(function (c) { return '<option value="' + esc(c) + '">'; }).join('') + '</datalist></div>' +
+    '<div><label>Unit</label><select id="pUnit">' + opt(UNITS, p.unit || 'piece') + '</select></div></div>' +
+    '<div class="two"><div><label>Buying price (KSh) *</label><input id="pBuy" inputmode="decimal" value="' + (p.buyingPrice != null ? p.buyingPrice : '') + '"></div>' +
+    '<div><label>Selling price (KSh) *</label><input id="pSell" inputmode="decimal" value="' + (p.sellingPrice != null ? p.sellingPrice : '') + '"></div></div>' +
+    '<div class="two">' + (isNew ? '<div><label>Available stock</label><input id="pStock" inputmode="decimal" value="0"></div>' : '<div><label>Current stock</label><input value="' + QTY(p.stockQty) + '" disabled></div>') +
+    '<div><label>Minimum stock (alert level)</label><input id="pMin" inputmode="decimal" value="' + (p.minStock != null ? p.minStock : 0) + '"></div></div>' +
+    '<label>Description (optional)</label><textarea id="pDesc" maxlength="500" rows="2" placeholder="e.g. 2kg packet, brand, size">' + esc(p.description) + '</textarea>' +
+    '<label>Barcode (optional)</label><input id="pBar" maxlength="64" value="' + esc(p.barcode) + '">' +
+    '<label>Buy in packs? (optional)</label><div class="two"><div><input id="pPackUnit" maxlength="20" list="packList" value="' + esc(p.packUnit) + '" placeholder="e.g. crate, tray, sack"><datalist id="packList"><option value="crate"><option value="tray"><option value="sack"><option value="carton"><option value="box"></datalist></div>' +
+    '<div><input id="pPackSize" inputmode="decimal" value="' + (p.packSize != null ? p.packSize : '') + '" placeholder="how many ' + esc(p.unit || 'units') + ' in one"></div></div>' +
+    '<div class="s">Example: crate + 30 for eggs. When you receive 2 crates, the shop adds 60 eggs at the right cost per egg.</div>';
+}
+function productPayload(isNew) {
+  var o = { name: val('pName'), category: val('pCat') || null, unit: val('pUnit') || 'piece', buyingPrice: numOrNull('pBuy'), sellingPrice: numOrNull('pSell'), minStock: numOrNull('pMin') || 0, barcode: val('pBar') || null, description: val('pDesc') || null, packUnit: val('pPackUnit') || null, packSize: numOrNull('pPackSize') };
+  if (isNew) o.stockQty = numOrNull('pStock') || 0;
+  return o;
+}
+function clientCheck(o) {
+  if (!o.name) return 'Enter the product name';
+  if (o.buyingPrice == null || isNaN(o.buyingPrice)) return 'Enter the buying price';
+  if (o.sellingPrice == null || isNaN(o.sellingPrice)) return 'Enter the selling price';
+  if (!!o.packUnit !== !!o.packSize) return 'For a pack, enter both its name (e.g. crate) and how many units it holds (e.g. 30)';
+  if (o.sellingPrice < o.buyingPrice && !confirmedLoss) { confirmedLoss = true; return 'Selling price is lower than buying price — you would lose money on each sale. Tap Save again if this is intended.'; }
+  return '';
+}
+var confirmedLoss = false;
+function openAddProduct() { S.draftId = uuid(); confirmedLoss = false; openModal('Add product', productForm() + '<div class="actions"><button class="btn2" data-act="closeModal" type="button">Cancel</button><button class="btn" data-act="saveNewProduct" type="button">Save product</button></div>'); setTimeout(function () { var e = $('pName'); e && e.focus(); }, 50); }
+async function saveNewProduct(btn) {
+  var o = productPayload(true), m = clientCheck(o); if (m) return toast(m, true);
+  o.id = S.draftId; o.clientOpId = uuid();
+  busy(btn, true, 'Saving…');
+  try {
+    var w = await write({ type: 'product.create', id: o.id, path: '/shops/' + S.shopId + '/products', body: o, label: 'Add product: ' + o.name, offlineOk: true });
+    closeModal(); toast(w.queued ? 'Saved on this phone — it will sync when you are online' : 'Product added'); S.draftId = null; await refresh();
+  } catch (e) { toast(e.message, true); } finally { busy(btn, false); }
+}
+async function openProduct(id) {
+  var p = S.products.filter(function (x) { return x.id === id; })[0] || (S.dash && S.dash.lowStockProducts.filter(function (x) { return x.id === id; })[0]);
+  if (!p) return;
+  S.opId = uuid(); confirmedLoss = false;
+  openModal(p.name, productForm(p) + '<div class="actions"><button class="btn" data-act="saveProduct" data-id="' + esc(id) + '" type="button">Save changes</button></div>' +
+    '<h3>Stock: <span id="curStock">' + QTY(p.stockQty) + '</span> ' + esc(p.unit) + '</h3>' +
+    '<div class="two"><div><label>Quantity</label><input id="adjQty" inputmode="decimal" placeholder="e.g. 12"></div><div><label>Reason</label><select id="adjWhy"><option>Restock</option><option>Stock count correction</option><option>Damaged</option><option>Expired</option><option>Own use</option></select></div></div>' +
+    '<div class="actions"><button class="btn" data-act="adjust" data-sign="1" data-id="' + esc(id) + '" type="button">Add stock</button><button class="btn2" data-act="adjust" data-sign="-1" data-id="' + esc(id) + '" type="button">Remove stock</button></div>' +
+    '<h3>History</h3><div id="mvList" class="card"><div class="s">Loading…</div></div>' +
+    '<div class="actions" style="margin-top:18px"><button class="btnd" data-act="confirmDelete" data-id="' + esc(id) + '" type="button">Delete product</button></div>');
+  loadMovements(id);
+}
+async function loadMovements(id) {
+  try {
+    var d = await api('GET', '/shops/' + S.shopId + '/products/' + id + '/movements?limit=15');
+    var el = $('mvList'); if (!el) return;
+    el.innerHTML = d.movements.length ? d.movements.map(function (m) { return '<div class="mv"><span>' + esc(m.type) + (m.note ? ' · ' + esc(m.note) : '') + '<div class="s">' + new Date(m.createdAt).toLocaleString('en-KE') + '</div></div><span class="' + (m.qtyChange >= 0 ? 'pos' : 'neg') + '">' + (m.qtyChange >= 0 ? '+' : '') + QTY(m.qtyChange) + ' → ' + QTY(m.balanceAfter) + '</span></div>'; }).join('') : '<div class="s">No stock changes yet.</div>';
+  } catch (e) { var el2 = $('mvList'); if (el2) el2.innerHTML = '<div class="s">' + (e.offline ? 'Stock history needs internet. Changes you make now are saved and will sync.' : esc(e.message)) + '</div>'; }
+}
+async function saveProduct(btn, id) {
+  var o = productPayload(false), m = clientCheck(o); if (m) return toast(m, true);
+  busy(btn, true, 'Saving…');
+  try { await api('PATCH', '/shops/' + S.shopId + '/products/' + id, o); closeModal(); toast('Product updated'); await refresh(); } catch (e) { toast(e.message, true); } finally { busy(btn, false); }
+}
+async function adjust(btn, id, sign) {
+  var q = Number(val('adjQty')); if (!q || q <= 0) return toast('Enter a quantity greater than zero', true);
+  var why = val('adjWhy'), dmg = why === 'Damaged' || why === 'Expired';
+  if (dmg && sign > 0) return toast(why + ' stock can only be removed', true);
+  busy(btn, true, 'Saving…');
+  try {
+    var cur = S.products.filter(function (x) { return x.id === id; })[0], nm = cur ? cur.name : 'product';
+    var w = await write({ type: 'stock.adjust', id: S.opId, path: '/shops/' + S.shopId + '/products/' + id + '/stock', body: { qtyChange: sign * q, type: dmg ? 'damage' : 'adjustment', note: why, clientOpId: S.opId }, label: 'Stock ' + (sign > 0 ? '+' : '−') + QTY(q) + ': ' + nm, offlineOk: true,
+      precheck: function () { if (sign < 0 && cur && q > cur.stockQty) throw new Error('Not enough stock: only ' + QTY(cur.stockQty) + ' ' + cur.unit + ' available'); } });
+    S.opId = uuid(); if ($('adjQty')) $('adjQty').value = '';
+    if (w.queued) { await loadTab(); var np = S.products.filter(function (x) { return x.id === id; })[0]; var cs = $('curStock'); if (np && cs) cs.textContent = QTY(np.stockQty); toast('Saved on this phone — stock will sync when you are online'); }
+    else { var cs2 = $('curStock'); if (cs2) cs2.textContent = QTY(w.data.product.stockQty); toast('Stock updated'); loadMovements(id); loadTab().then(function () { render(); }).catch(function () {}); }
+  } catch (e) { toast(e.message, true); } finally { busy(btn, false); }
+}
+function confirmDelete(id) {
+  var p = S.products.filter(function (x) { return x.id === id; })[0] || (S.dash && S.dash.lowStockProducts.filter(function (x) { return x.id === id; })[0]) || {};
+  openModal('Delete product?', '<div class="note">“' + esc(p.name) + '” will be removed. If it already has stock history it will be archived instead, so your records stay correct.</div><div class="actions"><button class="btn2" data-act="closeModal" type="button">Cancel</button><button class="btnd" data-act="doDelete" data-id="' + esc(id) + '" type="button">Delete</button></div>');
+}
+async function doDelete(btn, id) {
+  busy(btn, true, 'Deleting…');
+  try { var r = await api('DELETE', '/shops/' + S.shopId + '/products/' + id); closeModal(); toast(r.archived ? 'Product has history — archived instead' : 'Product deleted'); await refresh(); } catch (e) { toast(e.message, true); } finally { busy(btn, false); }
+}
+
+/* ───── POS / sales (Phase 2) ─────
+   The sale id is created when the first item is added and kept (with the cart, in localStorage) until the server confirms.
+   If the connection drops mid-confirm, tapping Confirm again re-sends the SAME id, so the server can never record it twice. */
+var NAIROBI_MS = 3 * 3600 * 1000; // Kenya is UTC+3, no daylight saving
+function ymd(daysAgo) { return new Date(Date.now() - daysAgo * 864e5 + NAIROBI_MS).toISOString().slice(0, 10); }
+function fmtWhen(iso) { try { return new Date(iso).toLocaleString('en-KE', { timeZone: 'Africa/Nairobi', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch (_) { return ''; } }
+var cartKey = function () { return 'necpra_duka_cart_' + S.shopId; };
+function loadCart() {
+  S.cart = []; S.saleId = null; S.disc = { type: 'amount', value: '' }; S.cartLoadedFor = S.shopId;
+  try { var o = JSON.parse(localStorage.getItem(cartKey()) || 'null'); if (o && Array.isArray(o.cart)) { S.cart = o.cart; S.saleId = o.saleId || null; S.disc = o.disc || S.disc; } } catch (_) {}
+}
+function saveCart() {
+  try { if (!S.cart.length) localStorage.removeItem(cartKey()); else localStorage.setItem(cartKey(), JSON.stringify({ cart: S.cart, saleId: S.saleId, disc: S.disc })); } catch (_) {}
+}
+// Refresh stock levels from the server list and drop products that no longer exist / were archived.
+function syncCart() {
+  var byId = {}; S.products.forEach(function (p) { byId[p.id] = p; });
+  var before = S.cart.length;
+  S.cart = S.cart.filter(function (l) { return byId[l.productId]; });
+  S.cart.forEach(function (l) { l.stock = byId[l.productId].stockQty; l.name = byId[l.productId].name; l.unit = byId[l.productId].unit; });
+  if (S.cart.length !== before) toast('Some products in your cart are no longer available and were removed', true);
+  saveCart();
+}
+// Same integer maths as the server (qty in milli-units x price in cents, rounded half-up).
+var cents = function (v) { return Math.round(Number(v) * 100); };
+function calc() {
+  var sub = 0, bad = '';
+  S.cart.forEach(function (l) {
+    var q = Number(l.qty), p = Number(l.price);
+    l.err = '';
+    if (!(q > 0) || !isFinite(q)) l.err = 'Enter a quantity';
+    else if (!isFinite(p) || p < 0) l.err = 'Enter a valid price';
+    else if (q > l.stock) l.err = 'Only ' + QTY(l.stock) + ' ' + l.unit + ' in stock';
+    l.lineTotal = l.err ? 0 : Math.round(Math.round(q * 1000) * cents(p) / 1000);
+    if (l.err && !bad) bad = l.name + ': ' + l.err;
+    sub += l.lineTotal;
+  });
+  var dv = Number(S.disc.value || 0), disc = 0;
+  if (S.disc.value !== '' && (!isFinite(dv) || dv < 0)) bad = bad || 'Enter a valid discount';
+  else if (S.disc.type === 'percent') { if (dv > 100) bad = bad || 'Discount cannot be more than 100%'; else disc = Math.round(sub * Math.round(dv * 100) / 10000); }
+  else disc = cents(dv);
+  if (disc > sub) bad = bad || 'Discount is more than the sale';
+  var total = sub - disc;
+  if (S.cart.length && !bad && total <= 0) bad = 'The sale total must be more than zero';
+  return { sub: sub, disc: disc, total: total, bad: bad };
+}
+var KC = function (c) { return KSH(c / 100); };
+
+function posResults() {
+  var q = S.posQ.toLowerCase(), list = S.products.filter(function (p) {
+    return !q || p.name.toLowerCase().indexOf(q) > -1 || (p.barcode || '').toLowerCase() === q || (p.category || '').toLowerCase().indexOf(q) > -1;
+  });
+  if (!S.products.length) return '<div class="empty"><i class="fas fa-box-open"></i>Add products first (Products tab), then sell them here.</div>';
+  if (!list.length) return '<div class="empty">No product matches “' + esc(S.posQ) + '”.</div>';
+  return list.slice(0, 12).map(function (p) {
+    var out = p.stockQty <= 0;
+    return '<div class="item' + (out ? ' off' : '') + '"' + (out ? '' : ' data-act="addToCart" data-id="' + esc(p.id) + '"') + '><div class="grow"><div class="t">' + esc(p.name) + '</div><div class="s">' + KSH(p.sellingPrice) + ' / ' + esc(p.unit) + '</div></div><div style="text-align:right"><b>' + QTY(p.stockQty) + '</b> <span class="s">' + esc(p.unit) + '</span><div>' + stockBadge(p) + '</div></div></div>';
+  }).join('') + (list.length > 12 ? '<div class="s" style="text-align:center">Showing 12 of ' + list.length + ' — type to narrow down</div>' : '');
+}
+function cartHtml() {
+  var c = calc();
+  if (!S.cart.length) return '<div class="empty"><i class="fas fa-cart-shopping"></i>No items yet. Tap a product above to add it.</div>';
+  var lines = S.cart.map(function (l, i) {
+    return '<div class="cl"><div><div class="t" style="font-weight:700">' + esc(l.name) + '</div><div class="s">' + esc(l.unit) + ' · ' + QTY(l.stock) + ' in stock</div>' + (l.err ? '<div class="warn" id="le' + i + '">' + esc(l.err) + '</div>' : '<div class="warn" id="le' + i + '"></div>') + '</div>' +
+      '<button class="rm" type="button" data-act="rmLine" data-i="' + i + '" aria-label="Remove ' + esc(l.name) + '"><i class="fas fa-trash"></i></button>' +
+      '<div class="ctl"><input class="cq" data-i="' + i + '" inputmode="decimal" value="' + esc(l.qty) + '" aria-label="Quantity"> × <input class="cp" data-i="' + i + '" inputmode="decimal" value="' + esc(l.price) + '" aria-label="Price"><span class="lt" id="lt' + i + '">' + KC(l.lineTotal) + '</span></div></div>';
+  }).join('');
+  return '<div class="card">' + lines + '<div class="tot"><span>Subtotal</span><span id="posSub">' + KC(c.sub) + '</span></div>' +
+    '<div class="tot" id="posDiscRow"' + (c.disc ? '' : ' style="display:none"') + '><span>Discount</span><span id="posDisc">− ' + KC(c.disc) + '</span></div>' +
+    '<div class="tot big"><span>Total</span><span id="posTotal">' + KC(c.total) + '</span></div></div>' +
+    '<div class="actions"><button class="btn2" data-act="clearCart" type="button">Clear</button><button class="btn2" data-act="parkBill" type="button">Hold bill</button><button class="btn" data-act="checkout" type="button" id="posGo">Checkout</button></div>';
+}
+function viewPos() {
+  return '<div class="bar"><input id="posQ" class="grow" type="search" placeholder="Search product or scan barcode" value="' + esc(S.posQ) + '" autocomplete="off"><button class="btn2" data-act="openScan" type="button" aria-label="Scan barcode" style="flex:0 0 auto"><i class="fas fa-barcode"></i> Scan</button><button class="btn2" data-act="openCam" type="button" aria-label="Camera sell" style="flex:0 0 auto"><i class="fas fa-camera"></i> Camera</button></div>' + parkedHtml() +
+    '<div id="posResults">' + posResults() + '</div><h3>Current sale</h3><div id="posCart">' + cartHtml() + '</div>';
+}
+// Typing in qty/price/discount must not rebuild the DOM (focus would be lost) — patch the numbers in place.
+function updatePosTotals() {
+  var c = calc();
+  S.cart.forEach(function (l, i) { var a = $('lt' + i), e = $('le' + i); if (a) a.textContent = KC(l.lineTotal); if (e) e.textContent = l.err; });
+  if ($('posSub')) { $('posSub').textContent = KC(c.sub); $('posTotal').textContent = KC(c.total); $('posDisc').textContent = '− ' + KC(c.disc); $('posDiscRow').style.display = c.disc ? '' : 'none'; }
+  saveCart();
+}
+function addToCart(id) {
+  var p = S.products.filter(function (x) { return x.id === id; })[0]; if (!p) return;
+  var ex = S.cart.filter(function (l) { return l.productId === id; })[0];
+  if (ex) { if (Number(ex.qty) + 1 > p.stockQty) return toast('Only ' + QTY(p.stockQty) + ' ' + p.unit + ' of ' + p.name + ' in stock', true); ex.qty = Number(ex.qty) + 1; }
+  else { if (p.stockQty <= 0) return toast(p.name + ' is out of stock', true); S.cart.push({ productId: p.id, name: p.name, unit: p.unit, price: p.sellingPrice, qty: Math.min(1, p.stockQty), stock: p.stockQty }); }
+  if (!S.saleId) S.saleId = uuid();
+  S.posQ = ''; saveCart(); render(); var q = $('posQ'); if (q) q.focus();
+}
+function clearCart() { S.cart = []; S.saleId = null; S.coId = null; S.disc = { type: 'amount', value: '' }; saveCart(); render(); }
+
+/* ───── Customer sessions: hold a bill while serving the next customer ─────
+   A held bill is a whole cart (its own sale id, discount and prices) kept in localStorage per shop, so it survives the app
+   closing or the phone restarting. Each held bill keeps its own sale id, so resuming and confirming one can never double-record
+   another. Stock is re-checked against the server list when a bill is resumed. */
+var MAX_PARKED = 10;
+var parkKey = function () { return 'necpra_duka_parked_' + S.shopId; };
+function loadParked() { try { var a = JSON.parse(localStorage.getItem(parkKey()) || '[]'); return Array.isArray(a) ? a.filter(function (b) { return b && Array.isArray(b.cart) && b.cart.length; }) : []; } catch (_) { return []; } }
+function saveParked(a) { try { a.length ? localStorage.setItem(parkKey(), JSON.stringify(a)) : localStorage.removeItem(parkKey()); return true; } catch (_) { return false; } }
+function billSum(b) { return b.cart.reduce(function (t, l) { var q = Number(l.qty), pr = Number(l.price); return t + (q > 0 && pr >= 0 ? q * pr : 0); }, 0); }
+function parkCurrent() {
+  var a = loadParked();
+  if (a.length >= MAX_PARKED) { toast('You can hold up to ' + MAX_PARKED + ' bills. Finish or discard one first.', true); return false; }
+  var n = a.reduce(function (m, b) { return Math.max(m, b.n || 0); }, 0) + 1;
+  a.push({ n: n, label: 'Customer ' + n, cart: S.cart, saleId: S.saleId || uuid(), disc: S.disc, at: Date.now() });
+  if (!saveParked(a)) { toast('Could not hold the bill (phone storage is full). Your cart is kept.', true); return false; }
+  return true;
+}
+function parkBill() {
+  if (!S.cart.length) return toast('Add items before holding a bill', true);
+  if (!parkCurrent()) return;
+  S.cart = []; S.saleId = null; S.coId = null; S.disc = { type: 'amount', value: '' }; saveCart(); render();
+  toast('Bill held. You can serve the next customer.');
+}
+function resumeBill(i) {
+  var a = loadParked(), b = a[i]; if (!b) return;
+  a.splice(i, 1);
+  if (S.cart.length) {
+    // Swap: the bill on screen goes onto the held list so nothing is ever lost.
+    var n = a.reduce(function (m, x) { return Math.max(m, x.n || 0); }, b.n || 0) + 1;
+    a.push({ n: n, label: 'Customer ' + n, cart: S.cart, saleId: S.saleId || uuid(), disc: S.disc, at: Date.now() });
+  }
+  if (!saveParked(a)) return toast('Could not switch bills (phone storage is full).', true);
+  S.cart = b.cart; S.saleId = b.saleId; S.disc = b.disc || { type: 'amount', value: '' }; S.coId = null;
+  syncCart(); render();
+}
+function discardBill(i) {
+  var a = loadParked(), b = a[i]; if (!b) return;
+  if (!window.confirm('Discard ' + b.label + '\u2019s held bill (' + b.cart.length + ' item' + (b.cart.length === 1 ? '' : 's') + ')? This cannot be undone.')) return;
+  a.splice(i, 1); saveParked(a); render();
+}
+function parkedHtml() {
+  var a = loadParked(); if (!a.length) return '';
+  return '<h3>Held bills (' + a.length + ')</h3>' + a.map(function (b, i) {
+    return '<div class="card" style="margin-bottom:8px"><div class="t" style="font-weight:700">' + esc(b.label) + ' · ' + KSH(billSum(b)) + '</div><div class="s">' + b.cart.length + ' item' + (b.cart.length === 1 ? '' : 's') + ' · held ' + esc(fmtWhen(new Date(b.at).toISOString())) + '</div>' +
+      '<div class="actions"><button class="btn2" data-act="discardBill" data-i="' + i + '" type="button">Discard</button><button class="btn" data-act="resumeBill" data-i="' + i + '" type="button">Resume</button></div></div>';
+  }).join('');
+}
+
+/* ───── Barcode scanner (phone camera) ─────
+   Uses the browser's built-in BarcodeDetector. Where the phone does not have it, nothing is faked: the seller is told, and the
+   search box still takes a typed code or a Bluetooth/USB scanner. A barcode in view is added ONCE; it is added again only after it
+   has left the camera for a moment, so holding a pack in front of the lens cannot add it twice. Prices come from the seller's own
+   catalogue; a code that is not in it is never guessed. */
+var SCAN = { stream: null, timer: null, det: null, seen: {}, lastAdd: 0, busy: false };
+function scanSupported() { return !!(window.BarcodeDetector && navigator.mediaDevices && navigator.mediaDevices.getUserMedia); }
+function scanLog(msg, bad, code) {
+  var el = $('scanLog'); if (!el) return;
+  var d = document.createElement('div'); d.className = 's'; if (bad) d.style.color = 'var(--kyn-accent-danger,#d93025)';
+  d.textContent = msg;
+  if (code) { var b = document.createElement('button'); b.className = 'btn2'; b.type = 'button'; b.dataset.act = 'scanNew'; b.dataset.code = code; b.textContent = 'Add as new product'; b.style.marginLeft = '8px'; d.appendChild(b); }
+  el.insertBefore(d, el.firstChild); while (el.childNodes.length > 6) el.removeChild(el.lastChild);
+}
+function stopScan() {
+  if (SCAN.timer) { clearInterval(SCAN.timer); SCAN.timer = null; }
+  if (SCAN.stream) { try { SCAN.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (_) {} SCAN.stream = null; }
+  SCAN.det = null; SCAN.seen = {}; SCAN.busy = false;
+  if (typeof stopCam === 'function') stopCam();
+}
+async function openScan() {
+  if (!scanSupported()) return toast('Camera barcode scanning is not available on this phone. Type the code in the search box, or use a Bluetooth scanner.', true);
+  stopScan();
+  openModal('Scan barcode', '<video id="scanVid" playsinline muted autoplay style="width:100%;border-radius:12px;background:#000;max-height:50vh"></video><div class="s" id="scanMsg">Starting camera…</div>' +
+    '<div class="card" id="scanLog" style="margin-top:8px;min-height:48px"></div><div class="actions"><button class="btn" data-act="closeModal" type="button">Done</button></div>');
+  try {
+    SCAN.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+    var v = $('scanVid'); if (!v) { stopScan(); return; }
+    v.srcObject = SCAN.stream; await v.play();
+    SCAN.det = new window.BarcodeDetector();
+    if ($('scanMsg')) $('scanMsg').textContent = 'Point the camera at a barcode. Each product is added once.';
+    SCAN.timer = setInterval(scanTick, 300);
+  } catch (e) {
+    stopScan();
+    var m = $('scanMsg'); if (m) m.textContent = e && e.name === 'NotAllowedError' ? 'Camera permission was refused. Allow the camera for NECPRA in your phone settings.' : 'Could not start the camera: ' + ((e && e.message) || 'unknown error');
+  }
+}
+// True only the first time a code appears; it can count again once it has been out of view for 1.5 s. A short global gap stops
+// two different codes from being added in the same instant.
+function scanAccept(code, now) {
+  var prev = SCAN.seen[code]; SCAN.seen[code] = now;
+  if (prev && now - prev < 1500) return false;
+  if (now - SCAN.lastAdd < 700) return false;
+  SCAN.lastAdd = now; return true;
+}
+async function scanTick() {
+  var v = $('scanVid'); if (!SCAN.det || SCAN.busy || !v || v.readyState < 2) return;
+  SCAN.busy = true;
+  try {
+    var found = await SCAN.det.detect(v), now = Date.now();
+    for (var k = 0; k < found.length; k++) {
+      var code = String(found[k].rawValue || '').trim(); if (!code) continue;
+      if (scanAccept(code, now)) scanHandle(code);
+    }
+  } catch (_) {} finally { SCAN.busy = false; }
+}
+function scanHandle(code) {
+  var q = code.toLowerCase();
+  var p = S.products.filter(function (x) { return x.isActive !== false && x.barcode && String(x.barcode).toLowerCase() === q; })[0];
+  if (!p) { scanLog('Not in your products: ' + code, true, code); try { navigator.vibrate && navigator.vibrate([40, 60, 40]); } catch (_) {} return; }
+  if (p.stockQty <= 0) { scanLog(p.name + ' is out of stock', true); return; }
+  var ex = S.cart.filter(function (l) { return l.productId === p.id; })[0];
+  if (ex && Number(ex.qty) + 1 > p.stockQty) { scanLog('Only ' + QTY(p.stockQty) + ' ' + p.unit + ' of ' + p.name + ' in stock', true); return; }
+  addToCart(p.id);
+  scanLog('Added ' + p.name + ' · ' + KSH(p.sellingPrice));
+  try { navigator.vibrate && navigator.vibrate(50); } catch (_) {}
+}
+function scanNew(code) { stopScan(); closeModal(); openAddProduct(); setTimeout(function () { var e = $('pBar'); if (e) e.value = code; }, 60); }
+
+/* ───── Camera product recognition (matches against the seller's OWN catalogue) ─────
+   How it works, honestly: the seller "teaches" each product once or a few times by showing it to the camera. The phone stores a small
+   colour/layout signature per photo (on the phone, per shop, usable offline). While the camera is open each frame is compared with
+   those signatures. A product is added only when the SAME product is the clear best match for 3 frames in a row; a doubtful match
+   asks the seller to confirm instead. After an add, that product cannot be added again until it has left the view (or another product
+   was added), and there is a 1.5 s gap between adds, so one item in front of the lens is never added twice.
+   Limits: this is colour matching, not weight or counting. Products that look alike (e.g. tomatoes vs red apples) may be confused, so
+   keep confirmation on and teach 2-3 views per product in your usual lighting. Loose products sold by weight always ask for the
+   quantity; a phone camera cannot read weight. Thresholds below are starting values and need tuning on real phones and produce. */
+var CAM = { stream: null, timer: null, cv: null, busy: false, streak: { id: null, n: 0 }, armed: {}, lastAdd: 0, lostAt: 0, asked: {}, sig: null };
+var CAM_LOW = 0.88, CAM_HIGH = 0.93, CAM_MARGIN = 0.02, CAM_NEED = 3, CAM_GAP = 1500, CAM_MAXREF = 6;
+var CAM_WEIGHT_UNITS = ['kg', 'g', 'l', 'ml', 'litre', 'liter', 'litres', 'liters', 'lb'];
+function camKey() { return 'duka_vis_' + S.shopId; }
+function camLoad() { try { return JSON.parse(localStorage.getItem(camKey()) || '{}') || {}; } catch (_) { return {}; } }
+function camSave(m) { try { localStorage.setItem(camKey(), JSON.stringify(m)); return true; } catch (_) { toast('Phone storage is full, could not save the product photo', true); return false; } }
+function camIsWeight(p) { return CAM_WEIGHT_UNITS.indexOf(String(p.unit || '').toLowerCase()) >= 0; }
+function camSig(v) {
+  var W = 64, G = 4, B = 8, vw = v.videoWidth, vh = v.videoHeight; if (!vw || !vh) return null;
+  var cv = CAM.cv || (CAM.cv = document.createElement('canvas')); cv.width = cv.height = W;
+  var cx = cv.getContext('2d', { willReadFrequently: true }), side = Math.min(vw, vh) * 0.7;
+  cx.drawImage(v, (vw - side) / 2, (vh - side) / 2, side, side, 0, 0, W, W);
+  var d = cx.getImageData(0, 0, W, W).data, per = B + 2, sig = new Float32Array(G * G * per + B), cs = new Float32Array(G * G), cv2 = new Float32Array(G * G), cn = new Float32Array(G * G), gv = 0, gh = G * G * per, cell = W / G;
+  for (var y = 0; y < W; y++) for (var x = 0; x < W; x++) {
+    var i = (y * W + x) * 4, r = d[i] / 255, g = d[i + 1] / 255, b = d[i + 2] / 255, mx = Math.max(r, g, b), mn = Math.min(r, g, b), dl = mx - mn, s = mx ? dl / mx : 0, h = 0;
+    if (dl) { if (mx === r) h = ((g - b) / dl) % 6; else if (mx === g) h = (b - r) / dl + 2; else h = (r - g) / dl + 4; h *= 60; if (h < 0) h += 360; }
+    var c = Math.floor(y / cell) * G + Math.floor(x / cell); cs[c] += s; cv2[c] += mx; cn[c]++; gv += mx;
+    if (s > 0.2 && mx > 0.15) { var bn = Math.floor(h / 360 * B) % B; sig[c * per + bn] += s * mx; sig[gh + bn] += s * mx; }
+  }
+  gv = gv / (W * W) || 1;
+  for (var k = 0; k < G * G; k++) { var n = cn[k] || 1; for (var j = 0; j < B; j++) sig[k * per + j] /= n; sig[k * per + B] = cs[k] / n; sig[k * per + B + 1] = Math.min(2, (cv2[k] / n) / gv) / 2; }
+  var ss = 0, t; for (t = 0; t < sig.length; t++) ss += sig[t] * sig[t]; ss = Math.sqrt(ss) || 1; for (t = 0; t < sig.length; t++) sig[t] /= ss;
+  return sig;
+}
+function camDot(a, b) { var s = 0, n = Math.min(a.length, b.length); for (var i = 0; i < n; i++) s += a[i] * b[i]; return s; }
+function camMatch(sig) {
+  var refs = camLoad(), out = [];
+  S.products.forEach(function (p) {
+    if (p.isActive === false || !refs[p.id] || !refs[p.id].length) return;
+    var best = 0; refs[p.id].forEach(function (r) { var d = camDot(sig, r); if (d > best) best = d; });
+    out.push({ id: p.id, p: p, sim: best });
+  });
+  out.sort(function (a, b) { return b.sim - a.sim; }); return out;
+}
+function camLog(html, bad) {
+  var el = $('camLog'); if (!el) return;
+  var d = document.createElement('div'); d.className = 's'; d.style.margin = '4px 0'; if (bad) d.style.color = 'var(--kyn-accent-danger,#d93025)';
+  d.innerHTML = html; el.insertBefore(d, el.firstChild); while (el.childNodes.length > 6) el.removeChild(el.lastChild);
+}
+function camStatus(msg) { var m = $('camMsg'); if (m) m.textContent = msg; }
+function camTotal() { try { return 'Bill: ' + KC(calc().total); } catch (_) { return ''; } }
+function stopCam() {
+  if (CAM.timer) { clearInterval(CAM.timer); CAM.timer = null; }
+  if (CAM.stream) { try { CAM.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (_) {} CAM.stream = null; }
+  CAM.busy = false; CAM.streak = { id: null, n: 0 }; CAM.armed = {}; CAM.asked = {}; CAM.lostAt = 0;
+}
+function camPickOpts() {
+  var refs = camLoad();
+  return '<option value="">— Choose product to teach —</option>' + S.products.filter(function (p) { return p.isActive !== false; }).map(function (p) {
+    var n = (refs[p.id] || []).length; return '<option value="' + esc(p.id) + '">' + esc(p.name) + ' (' + n + ' photo' + (n === 1 ? '' : 's') + ')</option>';
+  }).join('');
+}
+async function openCam() {
+  if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) return toast('This phone or browser cannot open the camera here.', true);
+  stopScan();
+  openModal('Camera sell', '<video id="camVid" playsinline muted autoplay style="width:100%;border-radius:12px;background:#000;max-height:42vh"></video><div class="s" id="camMsg">Starting camera…</div>' +
+    '<div class="card" id="camLog" style="margin-top:8px;min-height:48px"></div>' +
+    '<label>Teach the camera a product <span class="s">(hold it in the middle of the view)</span></label><select id="camPick">' + camPickOpts() + '</select>' +
+    '<div class="actions"><button class="btn2" data-act="camForget" type="button">Forget photos</button><button class="btn2" data-act="camNew" type="button">New product</button><button class="btn" data-act="camTeach" type="button">Save photo</button></div>' +
+    '<div class="actions"><button class="btn" data-act="closeModal" type="button">Done</button></div>');
+  try {
+    CAM.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+    var v = $('camVid'); if (!v) { stopCam(); return; }
+    v.srcObject = CAM.stream; await v.play();
+    camStatus(Object.keys(camLoad()).length ? 'Show a product. A clear match is added to the bill.' : 'No products taught yet. Choose a product below, hold it in view and tap Save photo.');
+    CAM.timer = setInterval(camTick, 400);
+  } catch (e) {
+    stopCam(); camStatus(e && e.name === 'NotAllowedError' ? 'Camera permission was refused. Allow the camera for NECPRA in your phone settings.' : 'Could not start the camera: ' + ((e && e.message) || 'unknown error'));
+  }
+}
+function camTick() {
+  var v = $('camVid'); if (CAM.busy || !v || v.readyState < 2) return;
+  CAM.busy = true;
+  try {
+    var sig = camSig(v); if (!sig) return; CAM.sig = sig;
+    var m = camMatch(sig), now = Date.now();
+    if (!m.length) { camStatus('No products taught yet. Choose a product below and tap Save photo.'); return; }
+    var top = m[0], second = m[1] || null;
+    if (top.sim < CAM_LOW) {
+      CAM.streak = { id: null, n: 0 };
+      if (!CAM.lostAt) CAM.lostAt = now; else if (now - CAM.lostAt > 1200) CAM.armed = {};
+      camStatus('Looking for a product… ' + camTotal()); return;
+    }
+    CAM.lostAt = 0;
+    if (CAM.armed[top.id]) { camStatus(top.p.name + ' already added. Move it away to add another. ' + camTotal()); return; }
+    if (CAM.streak.id === top.id) CAM.streak.n++; else CAM.streak = { id: top.id, n: 1 };
+    if (CAM.streak.n < CAM_NEED || now - CAM.lastAdd < CAM_GAP) { camStatus('Checking ' + top.p.name + '… ' + camTotal()); return; }
+    var margin = top.sim - (second ? second.sim : 0);
+    if (top.sim >= CAM_HIGH && margin >= CAM_MARGIN) camAdd(top.p);
+    else if (!CAM.asked[top.id] || now - CAM.asked[top.id] > 5000) {
+      CAM.asked[top.id] = now;
+      camLog('Is this <b>' + esc(top.p.name) + '</b>? <button class="btn2" type="button" data-act="camYes" data-id="' + esc(top.id) + '" style="margin-left:6px">Yes, add</button>');
+    }
+  } catch (_) {} finally { CAM.busy = false; }
+}
+function camPutLine(p, q) {
+  var ex = S.cart.filter(function (l) { return l.productId === p.id; })[0], have = ex ? Number(ex.qty) : 0;
+  if (p.stockQty <= 0) { camLog(esc(p.name) + ' is out of stock', true); return false; }
+  if (have + q > p.stockQty) { camLog('Only ' + QTY(p.stockQty) + ' ' + esc(p.unit) + ' of ' + esc(p.name) + ' in stock', true); return false; }
+  if (ex) ex.qty = have + q; else S.cart.push({ productId: p.id, name: p.name, unit: p.unit, price: p.sellingPrice, qty: q, stock: p.stockQty });
+  if (!S.saleId) S.saleId = uuid();
+  S.posQ = ''; saveCart(); render();
+  try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (_) {}
+  CAM.armed = {}; CAM.armed[p.id] = true; CAM.lastAdd = Date.now(); CAM.streak = { id: null, n: 0 };
+  try { navigator.vibrate && navigator.vibrate(50); } catch (_) {}
+  return true;
+}
+function camAdd(p) {
+  if (camIsWeight(p)) {
+    CAM.armed[p.id] = true; CAM.lastAdd = Date.now(); CAM.streak = { id: null, n: 0 };
+    camLog('<b>' + esc(p.name) + '</b> is sold by ' + esc(p.unit) + ' at ' + KSH(p.sellingPrice) + '. Enter the weighed amount: <input id="camQ_' + esc(p.id) + '" inputmode="decimal" style="width:70px"> <button class="btn2" type="button" data-act="camQty" data-id="' + esc(p.id) + '">Add</button>');
+    return;
+  }
+  if (camPutLine(p, 1)) camLog('Added <b>' + esc(p.name) + '</b> · ' + KSH(p.sellingPrice) + ' <button class="btn2" type="button" data-act="camPlus" data-id="' + esc(p.id) + '">+1</button> <button class="btn2" type="button" data-act="camUndo" data-id="' + esc(p.id) + '">Undo</button> · ' + camTotal());
+}
+function camYes(id) { var p = S.products.filter(function (x) { return x.id === id; })[0]; if (p) camAdd(p); }
+function camQty(id) {
+  var p = S.products.filter(function (x) { return x.id === id; })[0], e = $('camQ_' + id); if (!p || !e) return;
+  var q = Number(String(e.value).replace(',', '.')); if (!(q > 0)) return toast('Enter the amount weighed', true);
+  if (camPutLine(p, q)) camLog('Added <b>' + esc(p.name) + '</b> · ' + QTY(q) + ' ' + esc(p.unit) + ' · ' + camTotal());
+}
+function camPlus(id) { var p = S.products.filter(function (x) { return x.id === id; })[0]; if (p && camPutLine(p, 1)) camLog('<b>' + esc(p.name) + '</b> +1 · ' + camTotal()); }
+function camUndo(id) {
+  var i = -1; S.cart.forEach(function (l, k) { if (l.productId === id) i = k; }); if (i < 0) return;
+  if (Number(S.cart[i].qty) > 1) S.cart[i].qty = Number(S.cart[i].qty) - 1; else S.cart.splice(i, 1);
+  if (!S.cart.length) S.saleId = null; saveCart(); render(); camLog('Removed one · ' + camTotal());
+}
+function camTeach() {
+  var pid = val('camPick'); if (!pid) return toast('Choose the product first', true);
+  var v = $('camVid'); var sig = v && camSig(v); if (!sig) return toast('Camera is not ready yet', true);
+  var refs = camLoad(); refs[pid] = (refs[pid] || []).concat([Array.prototype.slice.call(sig)]).slice(-CAM_MAXREF);
+  if (!camSave(refs)) return;
+  var sel = $('camPick'); if (sel) { sel.innerHTML = camPickOpts(); sel.value = pid; }
+  CAM.armed[pid] = true; camLog('Saved photo ' + refs[pid].length + ' of up to ' + CAM_MAXREF + '. Teach 2-3 different views for best results.');
+}
+function camForget() {
+  var pid = val('camPick'); if (!pid) return toast('Choose the product first', true);
+  var refs = camLoad(); delete refs[pid]; camSave(refs);
+  var sel = $('camPick'); if (sel) { sel.innerHTML = camPickOpts(); sel.value = pid; } camLog('Photos for this product removed.');
+}
+function camNew() { stopCam(); closeModal(); openAddProduct(); toast('Save the product, then open Camera and teach it'); }
+
+/* checkout */
+function payState() {
+  var c = calc(), cash = cents(val('payCash') || 0), mp = cents(val('payMp') || 0);
+  var mpApplied = Math.min(mp, c.total), cashApplied = Math.max(0, Math.min(cash, c.total - mpApplied));
+  var paid = mpApplied + cashApplied;
+  return { c: c, cash: cash, mp: mp, cashApplied: cashApplied, mpApplied: mpApplied, paid: paid, balance: c.total - paid, change: Math.max(0, cash - cashApplied), mpOver: mp > c.total };
+}
+function updateCheckout() {
+  var s = payState(), external = val('mpMode') === 'external';
+  if ($('coTotal')) $('coTotal').textContent = KC(s.c.total);
+  if ($('mpBox')) $('mpBox').classList.toggle('hid', !(s.mp > 0));
+  if ($('mpExternal')) $('mpExternal').classList.toggle('hid', !external || !(s.mp > 0));
+  if ($('mpHelp')) $('mpHelp').textContent = external ? 'This payment remains pending until you check the receipt in your M-PESA account and confirm it.' : 'Enter the 10-character receipt code. NECPRA verifies payments made through its own M-PESA prompt.';
+  if ($('newCust')) $('newCust').classList.toggle('hid', val('coCust') !== '__new');
+  var received = s.cashApplied + (external ? 0 : s.mpApplied), pending = external ? s.mpApplied : 0, h = '';
+  h += 'Confirmed received now: <b>' + KC(received) + '</b>';
+  if (pending > 0) h += '<br>M-PESA awaiting your manual confirmation: <b>' + KC(pending) + '</b>. It is not counted as received yet.';
+  if (s.balance > 0) h += '<br>Additional unpaid balance: <b style="color:var(--kyn-accent-danger,#d93025)">' + KC(s.balance) + '</b> — choose the customer who owes it.';
+  if (s.change > 0) h += '<br>Change to give: <b>' + KC(s.change) + '</b>';
+  if (s.mpOver) h += '<br><span class="warn" style="color:var(--kyn-accent-danger,#d93025)">M-PESA amount is more than the total.</span>';
+  if ($('coSum')) $('coSum').innerHTML = h;
+}
+async function openCheckout() {
+  var c = calc(); if (!S.cart.length) return; if (c.bad) return toast(c.bad, true);
+  S.coId = S.coId || uuid();
+  openModal('Checkout', '<div class="spin">Loading…</div>');
+  try { S.customers = (await api('GET', '/shops/' + S.shopId + '/customers?limit=500')).customers; } catch (e) { S.customers = []; }
+  var custOpts = '<option value="">— No customer —</option>' + S.customers.map(function (x) { return '<option value="' + esc(x.id) + '">' + esc(x.name) + (x.outstandingBalance > 0 ? ' (owes ' + KSH(x.outstandingBalance) + ')' : '') + '</option>'; }).join('') + '<option value="__new">+ Add new customer…</option>';
+  $('mBody').innerHTML = '<div class="tot big" style="border:0;margin:0"><span>Total to pay</span><span id="coTotal">' + KC(c.total) + '</span></div>' +
+    '<label>Discount (optional)</label><div class="two"><select id="dType"><option value="amount"' + (S.disc.type === 'amount' ? ' selected' : '') + '>KSh</option><option value="percent"' + (S.disc.type === 'percent' ? ' selected' : '') + '>%</option></select><input id="dVal" inputmode="decimal" value="' + esc(S.disc.value) + '" placeholder="0"></div>' +
+    '<h3>Payment</h3><label>Cash received (KSh)</label><div class="row"><input id="payCash" class="grow" inputmode="decimal" placeholder="0"><button class="btn2" type="button" data-act="fullCash">Full cash</button></div>' +
+    '<label>M-PESA amount (KSh)</label><input id="payMp" inputmode="decimal" placeholder="0">' +
+    '<div id="mpBox" class="hid"><label>How was M-PESA received?</label><select id="mpMode"><option value="necpra">NECPRA M-PESA prompt</option><option value="external">My own Till, Paybill or phone number</option></select><div class="note" id="mpHelp">Enter the 10-character receipt code. NECPRA verifies payments made through its own M-PESA prompt.</div><div id="mpExternal" class="hid"><div class="note">Payments sent to your own number or Till cannot be checked automatically by NECPRA. They remain pending until you check your M-PESA message or statement and confirm receipt.</div><label>Where did the customer pay?</label><select id="mpChannel"><option value="till">My Till</option><option value="paybill">My Paybill</option><option value="phone">My M-PESA phone number</option></select><label>Your Till, Paybill or phone number *</label><input id="payRecipient" maxlength="24" placeholder="Till / Paybill / 07XX XXX XXX"></div><div id="mpErr" class="note hid" style="color:var(--kyn-accent-danger,#d93025);font-weight:700"></div><label>M-PESA receipt code *</label><input id="payCode" maxlength="10" autocapitalize="characters" placeholder="e.g. SGH7K2L9QX"><label>Customer phone (optional)</label><input id="payPh" inputmode="tel" placeholder="07XX XXX XXX"></div>' +
+    '<div class="note" id="coSum"></div>' +
+    '<label>Customer <span class="s">(required if any balance is left unpaid)</span></label><select id="coCust">' + custOpts + '</select>' +
+    '<div id="newCust" class="hid two"><div><label>Name *</label><input id="ncName" maxlength="120"></div><div><label>Phone</label><input id="ncPhone" inputmode="tel" placeholder="07XX XXX XXX"></div></div>' +
+    '<label>Note (optional)</label><input id="coNote" maxlength="240">' +
+    '<div class="actions"><button class="btn2" data-act="closeModal" type="button">Back</button><button class="btn" data-act="confirmSale" type="button">Confirm sale</button></div>';
+  updateCheckout();
+}
+async function confirmSale(btn) {
+  var s = payState(), c = s.c;
+  if (c.bad) return toast(c.bad, true);
+  if (s.mpOver) return toast('M-PESA amount is more than the total', true);
+  var code = val('payCode').toUpperCase().replace(/\s/g, ''), externalMpesa = val('mpMode') === 'external';
+  if (s.mp > 0 && !/^[A-Z0-9]{10}$/.test(code)) return toast('Enter the 10-character M-PESA receipt code, or clear the M-PESA amount', true);
+  if (s.mp > 0 && externalMpesa && !val('payRecipient')) return toast('Enter the Till, Paybill or phone number that received the money', true);
+  var cust = val('coCust'), ncName = val('ncName');
+  if (s.balance > 0 && !cust) return toast('Choose the customer who owes the balance of ' + KC(s.balance), true);
+  if (cust === '__new' && !ncName) return toast('Enter the new customer\'s name', true);
+  var payments = [], pendingPayments = [];
+  if (s.cashApplied > 0) payments.push({ method: 'cash', amount: s.cashApplied / 100 });
+  if (s.mp > 0 && externalMpesa) pendingPayments.push({ method: 'mpesa', amount: s.mp / 100, mpesaReceipt: code, payerPhone: val('payPh') || null, channel: val('mpChannel'), recipient: val('payRecipient') });
+  else if (s.mp > 0) payments.push({ method: 'mpesa', amount: s.mp / 100, mpesaReceipt: code, payerPhone: val('payPh') || null });
+  busy(btn, true, 'Saving…');
+  try {
+    var customerId = cust || null;
+    if (cust === '__new') customerId = (await api('POST', '/shops/' + S.shopId + '/customers', { id: S.coId, name: ncName, phone: val('ncPhone') || null })).customer.id;
+    var body = {
+      id: S.saleId, customerId: customerId, payments: payments, pendingPayments: pendingPayments, note: val('coNote') || null,
+      items: S.cart.map(function (l) { return { productId: l.productId, qty: Number(l.qty), unitPrice: Number(l.price) }; })
+    };
+    if (S.disc.value !== '' && Number(S.disc.value) > 0) body.discount = { type: S.disc.type, value: Number(S.disc.value) };
+    var canQueue = s.mp === 0 && pendingPayments.length === 0 && s.balance === 0 && cust !== '__new';
+    var w = await write({ type: 'sale.create', id: S.saleId, path: '/shops/' + S.shopId + '/sales', body: body, label: 'Cash sale ' + KC(c.total), meta: { total: c.total / 100 }, offlineOk: canQueue,
+      offlineMsg: 'No internet. M-PESA and credit sales cannot be recorded offline because the payment cannot be confirmed. Nothing was saved and your cart is kept. Take the full amount in cash, or try again when you are online.' });
+    var d = w.queued ? provisionalReceipt(c, payments, customerId) : w.data;
+    var expected = c.total / 100;
+    S.cart = []; S.saleId = null; S.coId = null; S.disc = { type: 'amount', value: '' }; saveCart();
+    var warn = w.queued ? 'Saved on this phone only. It gets its official receipt number when it syncs — keep the goods/receipt note until then.' : d.idempotent ? (Math.abs(d.sale.total - expected) > 0.005 ? 'This sale had already been saved earlier with a different total (' + KSH(d.sale.total) + '). Please check this receipt.' : 'This sale was already saved — nothing was recorded twice.') : '';
+    openReceipt(d, warn);
+    refresh();
+  } catch (e) {
+    if (e.offline || e.status === 0) toast(e.nosave ? e.message : 'No internet — the sale was NOT saved. Your cart is kept: tap Confirm sale again.', true);
+    else if (e.code === 'MPESA_NOT_VERIFIED' || e.code === 'MPESA_RECEIPT_USED') { var me = $('mpErr'); if (me) { me.textContent = e.message; me.classList.remove('hid'); } toast('M-PESA payment not confirmed — sale not saved', true); }
+    else { toast(e.message, true); if (e.code === 'INSUFFICIENT_STOCK' || e.code === 'PRODUCT_NOT_FOUND' || e.code === 'PRODUCT_INACTIVE') { try { await loadTab(); syncCart(); } catch (_) {} } }
+  } finally { busy(btn, false); }
+}
+
+/* receipt */
+function receiptText(d) {
+  var s = d.sale, sh = d.shop, L = [];
+  L.push(sh.name); if (sh.location) L.push(sh.location); if (sh.phone) L.push('Tel ' + sh.phone); if (sh.kraPin) L.push('PIN ' + sh.kraPin);
+  L.push('Receipt #' + s.receiptNo + ' · ' + fmtWhen(s.soldAt)); if (s.status === 'voided') L.push('*** CANCELLED' + (s.voidReason ? ': ' + s.voidReason : '') + ' ***'); if (s.customerName) L.push('Customer: ' + s.customerName); L.push('');
+  d.items.forEach(function (i) { L.push(QTY(i.qty) + ' ' + i.unit + ' ' + i.name + ' @ ' + KSH(i.unitPrice) + ' = ' + KSH(i.lineTotal)); });
+  L.push(''); L.push('Subtotal: ' + KSH(s.subtotal)); if (s.discountAmount > 0) L.push('Discount: -' + KSH(s.discountAmount)); L.push('TOTAL: ' + KSH(s.total));
+  d.payments.forEach(function (p) { L.push(p.method === 'mpesa' ? 'M-PESA ' + p.mpesaReceipt + ': ' + KSH(p.amount) + (p.verification === 'pending_manual' ? ' — PENDING OWNER CONFIRMATION' : p.verification === 'manual_confirmed' ? ' — CONFIRMED BY SHOP OWNER' : p.verification === 'verified' ? ' — NECPRA VERIFIED' : '') : 'Cash: ' + KSH(p.amount)); });
+  if (s.balanceDue > 0) L.push('BALANCE DUE: ' + KSH(s.balanceDue));
+  if (sh.receiptFooter) { L.push(''); L.push(sh.receiptFooter); }
+  return L.join('\n');
+}
+function receiptHtml(d) {
+  var s = d.sale, sh = d.shop;
+  var rows = d.items.map(function (i) { return '<div>' + esc(i.name) + '</div><div class="r"><span>' + QTY(i.qty) + ' ' + esc(i.unit) + ' × ' + KSH(i.unitPrice) + '</span><span>' + KSH(i.lineTotal) + '</span></div>'; }).join('');
+  var pays = (d.payments || []).map(function (p) { var label = p.method === 'mpesa' ? 'M-PESA ' + esc(p.mpesaReceipt) + (p.verification === 'verified' ? ' · NECPRA verified' : p.verification === 'manual_confirmed' ? ' · Owner confirmed' : p.verification === 'pending_manual' ? ' · PENDING confirmation' : '') + (p.channel ? ' · ' + esc(p.channel) + ' ' + esc(p.recipientPhone || '') : '') : 'Cash'; return '<div class="r"><span>' + label + '</span><span>' + KSH(p.amount) + '</span></div>'; }).join('');
+  return '<div class="rcpt"><div class="c"><b>' + esc(sh.name) + '</b>' + (sh.location ? '<br>' + esc(sh.location) : '') + (sh.phone ? '<br>Tel ' + esc(sh.phone) : '') + (sh.kraPin ? '<br>PIN ' + esc(sh.kraPin) : '') + '</div><hr>' +
+    '<div class="r"><span>Receipt #' + s.receiptNo + '</span><span>' + esc(fmtWhen(s.soldAt)) + '</span></div>' + (s.status === 'voided' ? '<div class="void">CANCELLED' + (s.voidReason ? '<br><small>' + esc(s.voidReason) + '</small>' : '') + '</div>' : '') + (s.customerName ? '<div>Customer: ' + esc(s.customerName) + '</div>' : '') + '<hr>' + rows + '<hr>' +
+    '<div class="r"><span>Subtotal</span><span>' + KSH(s.subtotal) + '</span></div>' + (s.discountAmount > 0 ? '<div class="r"><span>Discount</span><span>− ' + KSH(s.discountAmount) + '</span></div>' : '') +
+    '<div class="r"><b>TOTAL</b><b>' + KSH(s.total) + '</b></div><hr>' + (pays || '<div>No payment received</div>') +
+    (s.balanceDue > 0 ? '<div class="r due"><span>BALANCE DUE (credit)</span><span>' + KSH(s.balanceDue) + '</span></div>' : '') +
+    (sh.receiptFooter ? '<hr><div class="c">' + esc(sh.receiptFooter) + '</div>' : '') + '</div>';
+}
+var lastReceipt = null;
+function openReceipt(d, warn) {
+  lastReceipt = d;
+  var pending = (d.payments || []).filter(function (p) { return p.verification === 'pending_manual'; });
+  var pendingActions = pending.map(function (p) { return '<div class="actions noprint"><button class="btn" data-act="confirmManualMpesa" data-id="' + esc(p.id) + '" data-sale="' + esc(d.sale.id) + '" type="button">Confirm M-PESA received · ' + KSH(p.amount) + '</button></div>'; }).join('');
+  openModal('Receipt', (warn ? '<div class="note noprint">' + esc(warn) + '</div>' : '') + receiptHtml(d) + pendingActions +
+    (d.sale && d.sale.id && d.sale.status === 'completed' ? '<div class="actions noprint"><button class="btnd" data-act="voidSale" data-id="' + esc(d.sale.id) + '" type="button">Cancel this sale</button></div>' : '') +
+    '<div class="actions"><button class="btn2" data-act="shareReceipt" type="button"><i class="fas fa-share-nodes"></i> Share</button><button class="btn2" data-act="printReceipt" type="button"><i class="fas fa-print"></i> Print</button><button class="btn" data-act="closeModal" type="button">Done</button></div>');
+}
+/* Cancel (void) a sale: server restores the stock and reports how much money must be handed back. Needs internet — it is never queued offline. */
+function openManualMpesaConfirm(paymentId, saleId) {
+  var p = (lastReceipt && lastReceipt.payments || []).filter(function (x) { return x.id === paymentId; })[0];
+  if (!p || p.verification !== 'pending_manual') return toast('This M-PESA payment is no longer awaiting confirmation.', true);
+  openModal('Confirm M-PESA received?', '<div class="note"><b>' + KSH(p.amount) + '</b> was reported as paid to ' + esc(p.channel || 'your M-PESA account') + ' ' + esc(p.recipientPhone || '') + ' (receipt ' + esc(p.mpesaReceipt) + ').<br><br>Only continue after checking the actual M-PESA message or statement in your own account. NECPRA cannot independently verify this external payment.</div><div class="actions"><button class="btn2" data-act="closeModal" type="button">Not yet</button><button class="btn" data-act="confirmManualMpesaSave" data-id="' + esc(paymentId) + '" data-sale="' + esc(saleId) + '" type="button">I checked — confirm received</button></div>');
+}
+async function confirmManualMpesaSave(btn, paymentId, saleId) {
+  busy(btn, true, 'Confirming…');
+  try {
+    var d = await api('POST', '/shops/' + S.shopId + '/sales/' + saleId + '/payments/' + paymentId + '/confirm-manual', { confirm: true });
+    openReceipt(d, 'You confirmed this external M-PESA payment after checking your own account. It is not an automatic Safaricom verification.'); refresh();
+  } catch (e) { toast(e.message, true); } finally { busy(btn, false); }
+}
+function openVoidSale(id) {
+  var d = lastReceipt, paid = d && d.sale ? Number(d.sale.amountPaid || 0) : 0;
+  openModal('Cancel this sale?', '<div class="note">The goods go back into stock and the sale stops counting in your totals and customer debts. The receipt is kept and marked CANCELLED. This cannot be undone.' +
+    (paid > 0 ? '<br><b>You received ' + KSH(paid) + ' for this sale — hand it back to the customer yourself. NECPRA does not send money back.</b>' : '') + '</div>' +
+    '<label>Reason *</label><input id="voidWhy" maxlength="240" placeholder="e.g. Customer returned the goods">' +
+    '<div class="actions"><button class="btn2" data-act="closeModal" type="button">Keep sale</button><button class="btnd" data-act="doVoidSale" data-id="' + esc(id) + '" type="button">Cancel sale</button></div>');
+  setTimeout(function () { var e = $('voidWhy'); e && e.focus(); }, 50);
+}
+async function doVoidSale(btn, id) {
+  var why = val('voidWhy');
+  if (why.length < 3) return toast('Please give a short reason', true);
+  busy(btn, true, 'Cancelling…');
+  try {
+    var d = await api('POST', '/shops/' + S.shopId + '/sales/' + id + '/void', { reason: why });
+    var due = Number(d.refundDue || 0);
+    openReceipt(d, due > 0 ? 'Sale cancelled. Hand back ' + KSH(due) + ' to the customer.' : 'Sale cancelled. Stock has been restored.');
+    toast('Sale cancelled'); refresh();
+  } catch (e) {
+    toast(e.offline || e.status === 0 ? 'You need internet to cancel a sale. Nothing was changed.' : e.message, true);
+  } finally { busy(btn, false); }
+}
+async function shareReceipt() {
+  if (!lastReceipt) return; var t = receiptText(lastReceipt);
+  try { if (navigator.share) { await navigator.share({ text: t }); return; } } catch (e) { if (e && e.name === 'AbortError') return; }
+  try { await navigator.clipboard.writeText(t); toast('Receipt copied — paste it into WhatsApp or SMS'); } catch (_) { toast('Could not share the receipt on this device', true); }
+}
+async function openSale(id) {
+  try { openReceipt(await api('GET', '/shops/' + S.shopId + '/sales/' + id)); } catch (e) { toast(e.message, true); }
+}
+
+/* sales list */
+function saleRow(s) {
+  var b = s.status === 'voided' ? '<span class="badge void">Cancelled</span>' : s.paymentStatus === 'paid' ? '<span class="badge">Paid</span>' : s.paymentStatus === 'pending' ? '<span class="badge low">M-PESA pending</span>' : s.paymentStatus === 'partial' ? '<span class="badge low">Part-paid</span>' : '<span class="badge out">Credit</span>';
+  return '<div class="item" data-act="openSale" data-id="' + esc(s.id) + '"><div class="grow"><div class="t">#' + s.receiptNo + (s.customerName ? ' · ' + esc(s.customerName) : '') + '</div><div class="s">' + esc(fmtWhen(s.soldAt)) + (s.balanceDue > 0 && s.status !== 'voided' ? ' · owes ' + KSH(s.balanceDue) : '') + '</div></div><div style="text-align:right' + (s.status === 'voided' ? ';text-decoration:line-through;opacity:.6' : '') + '"><b>' + KSH(s.total) + '</b><div>' + b + '</div></div></div>';
+}
+function viewSales() {
+  var m = S.salesSummary;
+  var f = '<div class="bar"><select id="rangeSel" class="grow">' + [['today', 'Today'], ['7', 'Last 7 days'], ['30', 'Last 30 days'], ['all', 'All time']].map(function (r) { return '<option value="' + r[0] + '"' + (S.range === r[0] ? ' selected' : '') + '>' + r[1] + '</option>'; }).join('') + '</select></div>';
+  var sum = m ? '<div class="grid"><div class="card stat"><small>Sales</small><b>' + KSH(m.total) + '</b><div class="s">' + m.count + ' sale' + (m.count === 1 ? '' : 's') + '</div></div>' +
+    '<div class="card stat"><small>Money received</small><b>' + KSH(m.amountPaid) + '</b></div>' +
+    '<div class="card stat ' + (m.balanceDue > 0 ? 'warn' : '') + '"><small>Unpaid (credit)</small><b>' + KSH(m.balanceDue) + '</b></div>' +
+    '<div class="card stat"><small>Gross profit</small><b>' + KSH(m.grossProfit) + '</b><div class="s">Sales − cost of goods</div></div></div>' : '';
+  return f + sum + (S.sales.length ? exBar('sales') + S.sales.map(saleRow).join('') : '<div class="empty"><i class="fas fa-receipt"></i>No sales in this period.</div>');
+}
+
+/* ───── shop actions ───── */
+async function createShop(btn) {
+  var o = shopPayload(); if (!o.name) return toast('Enter your shop name', true);
+  o.id = S.draftId = S.draftId || uuid();
+  busy(btn, true, 'Creating…');
+  try { var d = await api('POST', '/shops', o); S.draftId = null; S.shopId = d.shop.id; S.tab = 'dash'; closeModal(); await loadShops(); S.shopId = d.shop.id; try { localStorage.setItem(dukaStorageKey('necpra_duka_shop'), S.shopId); } catch (_) {} await refresh(); toast('Shop created'); }
+  catch (e) { toast(e.message, true); } finally { busy(btn, false); }
+}
+function newShop() { S.draftId = uuid(); openModal('Add another shop', shopForm({}) + '<div class="actions"><button class="btn2" data-act="closeModal" type="button">Cancel</button><button class="btn" data-act="createShop" type="button">Create shop</button></div>'); }
+async function saveShop(btn) {
+  var o = shopPayload(); if (!o.name) return toast('Shop name is required', true);
+  busy(btn, true, 'Saving…');
+  try { await api('PATCH', '/shops/' + S.shopId, o); await loadShops(); toast('Shop updated'); render(); } catch (e) { toast(e.message, true); } finally { busy(btn, false); }
+}
+function archiveShop() { openModal('Archive this shop?', '<div class="note">“' + esc(shop().name) + '” will be hidden. Its records are kept.</div><div class="actions"><button class="btn2" data-act="closeModal" type="button">Cancel</button><button class="btnd" data-act="doArchive" type="button">Archive</button></div>'); }
+async function doArchive(btn) {
+  busy(btn, true, 'Archiving…');
+  try { await api('DELETE', '/shops/' + S.shopId); closeModal(); S.shopId = null; S.dash = null; await loadShops(); S.tab = 'dash'; await refresh(); toast('Shop archived'); } catch (e) { toast(e.message, true); } finally { busy(btn, false); }
+}
+
+/* ───── Money (Phase 5): expenses, debts, suppliers, reports ─────
+   Revenue, cash received, credit, expenses, supplier payments and NET profit are always shown as separate figures. */
+var FIN = [['expenses', 'Expenses'], ['debts', 'Debts'], ['suppliers', 'Suppliers'], ['reports', 'Reports']];
+var EXP_CATS = ['rent', 'transport', 'electricity', 'wages', 'packaging', 'airtime', 'licence', 'repairs', 'other'];
+S.fin = 'expenses'; S.rp = 'daily'; S.fd = {};
+try { S.fin = sessionStorage.getItem('necpra_duka_fin') || 'expenses'; } catch (_) {}
+async function loadMoney() {
+  var b = '/shops/' + S.shopId;
+  if (S.fin === 'expenses') {
+    try { S.fd.exp = await api('GET', b + '/expenses?from=' + ymd(29)); }
+    catch (e) { if (!e.offline) throw e; S.fd.exp = { expenses: [], total: 0, byCategory: [], offlineEmpty: true }; }   // can still ADD expenses offline
+  }
+  else if (S.fin === 'debts') S.fd.debts = await api('GET', b + '/debts');
+  else if (S.fin === 'suppliers') S.fd.sup = await api('GET', b + '/suppliers');
+  else S.fd.rep = await api('GET', b + '/reports?period=' + S.rp);
+}
+function viewMoney() {
+  var nav = '<div class="tabs">' + FIN.map(function (f) { return '<button class="tab' + (S.fin === f[0] ? ' on' : '') + '" data-act="fin" data-f="' + f[0] + '" type="button">' + f[1] + '</button>'; }).join('') + '</div>';
+  return nav + (S.fin === 'expenses' ? viewExpenses() : S.fin === 'debts' ? viewDebts() : S.fin === 'suppliers' ? viewSuppliers() : viewReports());
+}
+function typed(id, label, extra) { return '<label>' + label + '</label><input id="' + id + '" ' + (extra || '') + '>'; }
+/* Expenses */
+function viewExpenses() {
+  var d = S.fd.exp; if (!d) return '<div class="spin">Loading…</div>';
+  var cats = d.byCategory.map(function (c) { return '<span class="badge">' + esc(c.category) + ' ' + KSH(c.total) + '</span>'; }).join(' ');
+  return '<div class="grid"><div class="card stat"><small>Expenses (30 days)</small><b>' + KSH(d.total) + '</b><div class="s">Reduce your profit</div></div></div>' +
+    '<div class="actions" style="margin:0 0 12px"><button class="btn" data-act="addExpense" type="button"><i class="fas fa-plus"></i> Add expense</button></div>' + (d.offlineEmpty ? '<div class="note">Your saved expenses are not on this phone yet. You can still add new ones — they are sent when you are back online.</div>' : '') +
+    (cats ? '<div class="note">' + cats + '</div>' : '') + (d.expenses.length ? exBar('exp') : '') +
+    (d.expenses.length ? d.expenses.map(function (e) {
+      var v = e.status === 'voided';
+      return '<div class="item"' + (v ? ' style="opacity:.55"' : '') + '><div class="grow"><div class="t">' + esc(e.category) + ' · ' + KSH(e.amount) + (v ? ' <span class="badge out">Voided</span>' : '') + '</div><div class="s">' + esc(e.expenseDate) + ' · ' + esc(e.method) + (e.description ? ' · ' + esc(e.description) : '') + (v && e.voidReason ? ' · ' + esc(e.voidReason) : '') + '</div></div>' +
+        (v ? '' : '<button class="btn2" data-act="voidExpense" data-id="' + esc(e.id) + '" type="button">Void</button>') + '</div>';
+    }).join('') : '<div class="note">No expenses recorded in the last 30 days.</div>');
+}
+function openAddExpense() {
+  S.draftId = uuid();
+  openModal('Add expense', typed('xAmt', 'Amount (KSh) *', 'inputmode="decimal" placeholder="0"') +
+    '<label>Category</label><select id="xCat">' + opt(EXP_CATS, 'other') + '</select>' +
+    typed('xDesc', 'Description', 'maxlength="200" placeholder="e.g. November rent"') +
+    '<div class="two"><div><label>Paid by</label><select id="xMeth"><option value="cash">Cash</option><option value="mpesa">M-PESA</option><option value="other">Other</option></select></div>' +
+    '<div><label>Date</label><input id="xDate" type="date" value="' + ymd(0) + '" max="' + ymd(0) + '"></div></div>' +
+    '<div class="actions"><button class="btn2" data-act="closeModal" type="button">Cancel</button><button class="btn" data-act="saveExpense" type="button">Save expense</button></div>');
+}
+async function saveExpense(btn) {
+  var amt = Number(val('xAmt').replace(',', '.')); if (!(amt > 0)) return toast('Enter the amount spent', true);
+  busy(btn, true, 'Saving…');
+  try {
+    var w = await write({ type: 'expense.create', id: S.draftId, path: '/shops/' + S.shopId + '/expenses', body: { id: S.draftId, amount: amt, category: val('xCat'), description: val('xDesc') || null, method: val('xMeth'), expenseDate: val('xDate') || undefined }, label: 'Expense: ' + val('xCat') + ' ' + KSH(amt), meta: { amount: amt }, offlineOk: true });
+    S.draftId = null; closeModal(); toast(w.queued ? 'Saved on this phone — it will sync when you are online' : 'Expense saved'); refresh();
+  }
+  catch (e) { toast(e.message, true); } finally { busy(btn, false); }
+}
+function openVoidExpense(id) {
+  openModal('Void this expense?', '<div class="note">The expense stays in your records marked as voided and no longer reduces your profit.</div>' + typed('vWhy', 'Reason (optional)', 'maxlength="200"') +
+    '<div class="actions"><button class="btn2" data-act="closeModal" type="button">Keep it</button><button class="btnd" data-act="doVoid" data-id="' + esc(id) + '" type="button">Void expense</button></div>');
+}
+async function doVoid(btn, id) {
+  busy(btn, true, 'Voiding…');
+  try { await api('POST', '/shops/' + S.shopId + '/expenses/' + id + '/void', { reason: val('vWhy') || null }); closeModal(); toast('Expense voided'); refresh(); }
+  catch (e) { toast(e.message, true); } finally { busy(btn, false); }
+}
+/* Debts: customers who owe you + suppliers you owe */
+function viewDebts() {
+  var d = S.fd.debts; if (!d) return '<div class="spin">Loading…</div>';
+  var c = d.customersOweYou, s = d.youOweSuppliers;
+  return '<div class="grid"><div class="card stat ' + (c.total > 0 ? 'warn' : '') + '"><small>Customers owe you</small><b>' + KSH(c.total) + '</b></div><div class="card stat ' + (s.total > 0 ? 'warn' : '') + '"><small>You owe suppliers</small><b>' + KSH(s.total) + '</b></div></div>' +
+    exBar('debts') + '<h3>Customer credit</h3>' + (c.customers.length ? c.customers.map(function (x) {
+      return '<div class="item"><div class="grow"><div class="t">' + esc(x.name) + ' · ' + KSH(x.owed) + '</div><div class="s">' + x.unpaidSales + ' unpaid sale' + (x.unpaidSales === 1 ? '' : 's') + ' · since ' + esc(fmtWhen(x.oldestSaleAt)) + (x.phone ? ' · ' + esc(x.phone) : '') + '</div></div><button class="btn" data-act="collect" data-id="' + esc(x.id) + '" data-name="' + esc(x.name) + '" data-owed="' + x.owed + '" type="button">Collect</button></div>';
+    }).join('') : '<div class="note">No customer owes you anything.</div>') +
+    '<h3>Suppliers you owe</h3>' + (s.suppliers.length ? s.suppliers.map(function (x) {
+      return '<div class="item" data-act="supplier" data-id="' + esc(x.id) + '"><div class="grow"><div class="t">' + esc(x.name) + '</div><div class="s">You owe ' + KSH(x.owed) + '</div></div><span class="badge low">Pay</span></div>';
+    }).join('') : '<div class="note">You do not owe any supplier.</div>') +
+    '<div class="note">Customer credit is not cash until it is collected, and it is not extra profit.</div>';
+}
+function openCollect(id, name, owed) {
+  S.draftId = uuid(); S.collectId = id;
+  openModal('Collect from ' + name, '<div class="note">Owes <b>' + KSH(owed) + '</b>. The money is applied to the oldest unpaid sales first.</div>' +
+    typed('cAmt', 'Amount received (KSh) *', 'inputmode="decimal" value="' + owed + '"') +
+    '<label>Received by</label><select id="cMeth"><option value="cash">Cash</option><option value="mpesa">M-PESA</option></select>' +
+    typed('cCode', 'M-PESA receipt code (required for M-PESA)', 'maxlength="20" placeholder="e.g. SGH7K2L9QX" autocapitalize="characters"') +
+    typed('cNote', 'Note', 'maxlength="240"') +
+    '<div class="note">M-PESA is recorded from the receipt code. It is marked “verified” only when it matches a paid NECPRA payment.</div>' +
+    '<div class="actions"><button class="btn2" data-act="closeModal" type="button">Cancel</button><button class="btn" data-act="doCollect" type="button">Record payment received</button></div>');
+}
+async function doCollect(btn) {
+  var amt = Number(val('cAmt').replace(',', '.')); if (!(amt > 0)) return toast('Enter the amount received', true);
+  var m = val('cMeth'); if (m === 'mpesa' && !val('cCode')) return toast('Enter the M-PESA receipt code', true);
+  busy(btn, true, 'Saving…');
+  try {
+    var d = await api('POST', '/shops/' + S.shopId + '/customers/' + S.collectId + '/payments', { id: S.draftId, amount: amt, method: m, mpesaReceipt: m === 'mpesa' ? val('cCode') : undefined, note: val('cNote') || null });
+    S.draftId = null; closeModal(); toast('Received ' + KSH(d.payment.amount) + '. Still owed: ' + KSH(d.remainingBalance)); refresh();
+  } catch (e) { toast(e.message, true); } finally { busy(btn, false); }
+}
+/* Suppliers */
+function viewSuppliers() {
+  var d = S.fd.sup; if (!d) return '<div class="spin">Loading…</div>';
+  return '<div class="grid"><div class="card stat ' + (d.totalOwed > 0 ? 'warn' : '') + '"><small>You owe suppliers</small><b>' + KSH(d.totalOwed) + '</b></div></div>' +
+    '<div class="actions" style="margin:0 0 12px"><button class="btn" data-act="addSupplier" type="button"><i class="fas fa-plus"></i> Add supplier</button></div>' +
+    (d.suppliers.length ? d.suppliers.map(function (x) {
+      return '<div class="item" data-act="supplier" data-id="' + esc(x.id) + '"><div class="grow"><div class="t">' + esc(x.name) + '</div><div class="s">' + (x.owed > 0 ? 'You owe ' + KSH(x.owed) : 'Nothing owed') + (x.phone ? ' · ' + esc(x.phone) : '') + '</div></div></div>';
+    }).join('') : '<div class="note">No suppliers yet. Add the people you buy stock from to track what you owe them.</div>');
+}
+function openAddSupplier() {
+  S.draftId = uuid();
+  openModal('Add supplier', typed('sName', 'Supplier name *', 'maxlength="120"') + typed('sPhone', 'Phone', 'inputmode="tel" placeholder="07XX XXX XXX"') + typed('sNotes', 'Notes', 'maxlength="240"') +
+    '<div class="actions"><button class="btn2" data-act="closeModal" type="button">Cancel</button><button class="btn" data-act="saveSupplier" type="button">Save supplier</button></div>');
+}
+async function saveSupplier(btn) {
+  if (!val('sName')) return toast('Enter the supplier name', true);
+  busy(btn, true, 'Saving…');
+  try { await api('POST', '/shops/' + S.shopId + '/suppliers', { id: S.draftId, name: val('sName'), phone: val('sPhone') || null, notes: val('sNotes') || null }); S.draftId = null; closeModal(); toast('Supplier added'); refresh(); }
+  catch (e) { toast(e.message, true); } finally { busy(btn, false); }
+}
+async function openSupplier(id) {
+  try {
+    var d = await api('GET', '/shops/' + S.shopId + '/suppliers/' + id + '/ledger');
+    S.supId = id; S.billId = uuid(); S.payId = uuid();
+    var rows = d.entries.slice(0, 12).map(function (e) { return '<div class="item"><div class="grow"><div class="t">' + (e.type === 'bill' ? 'Bill' : 'Paid') + ' · ' + KSH(e.amount) + '</div><div class="s">' + esc(e.entryDate) + (e.reference ? ' · ' + esc(e.reference) : '') + (e.dueDate ? ' · due ' + esc(e.dueDate) : '') + ' · balance ' + KSH(e.balanceAfter) + '</div></div></div>'; }).join('');
+    openModal(d.supplier.name, '<div class="note">You owe this supplier <b>' + KSH(d.owed) + '</b>. Stock bought on credit is recorded as a bill; it only affects profit when the stock is sold.</div>' +
+      '<div class="card"><b>Stock bought on credit</b>' + typed('bAmt', 'Bill amount (KSh)', 'inputmode="decimal"') + '<div class="two"><div>' + typed('bRef', 'Invoice no.', 'maxlength="40"') + '</div><div><label>Due date</label><input id="bDue" type="date"></div></div><div class="actions"><button class="btn" data-act="addBill" type="button">Add bill</button></div></div>' +
+      '<div class="card" style="margin-top:10px"><b>Pay supplier</b>' + typed('pAmt', 'Amount paid (KSh)', 'inputmode="decimal" value="' + (d.owed > 0 ? d.owed : '') + '"') + '<label>Paid by</label><select id="pMeth"><option value="cash">Cash</option><option value="mpesa">M-PESA</option><option value="other">Other</option></select>' + typed('pRef', 'Reference (M-PESA code, optional)', 'maxlength="40"') + '<div class="actions"><button class="btn" data-act="paySupplier" type="button">Record payment</button></div></div>' +
+      (rows ? '<h3>History</h3>' + rows : '') + '<div class="actions"><button class="btn2" data-act="closeModal" type="button">Close</button></div>');
+  } catch (e) { toast(e.message, true); }
+}
+async function supEntry(btn, kind) {
+  var amt = Number(val(kind === 'bill' ? 'bAmt' : 'pAmt').replace(',', '.')); if (!(amt > 0)) return toast('Enter the amount', true);
+  var body = kind === 'bill' ? { id: S.billId, amount: amt, reference: val('bRef') || null, dueDate: val('bDue') || undefined } : { id: S.payId, amount: amt, method: val('pMeth'), reference: val('pRef') || null };
+  busy(btn, true, 'Saving…');
+  try { var d = await api('POST', '/shops/' + S.shopId + '/suppliers/' + S.supId + '/' + (kind === 'bill' ? 'bills' : 'payments'), body); toast((kind === 'bill' ? 'Bill added' : 'Payment recorded') + '. You owe ' + KSH(d.owed)); closeModal(); refresh(); }
+  catch (e) { toast(e.message, true); busy(btn, false); }
+}
+/* Reports */
+function periodLabel(p, b) { return p === 'monthly' ? b.slice(0, 7) : p === 'weekly' ? 'Week of ' + b.slice(5) : b.slice(5); }
+function viewReports() {
+  var d = S.fd.rep; var seg = '<div class="tabs">' + [['daily', 'Daily'], ['weekly', 'Weekly'], ['monthly', 'Monthly']].map(function (x) { return '<button class="tab' + (S.rp === x[0] ? ' on' : '') + '" data-act="rp" data-p="' + x[0] + '" type="button">' + x[1] + '</button>'; }).join('') + '</div>';
+  if (!d) return seg + '<div class="spin">Loading…</div>';
+  var t = d.totals, ps = d.position;
+  function st(l, v, s, c) { return '<div class="card stat ' + (c || '') + '"><small>' + l + '</small><b>' + KSH(v) + '</b>' + (s ? '<div class="s">' + s + '</div>' : '') + '</div>'; }
+  var rows = d.rows.slice().reverse().filter(function (r) { return r.salesCount || r.expenses || r.totalCashReceived || r.supplierPayments; }).map(function (r) {
+    return '<div class="item"><div class="grow"><div class="t">' + esc(periodLabel(d.period, r.periodStart)) + ' · profit ' + KSH(r.netProfit) + '</div><div class="s">Sales ' + KSH(r.revenue) + ' (' + r.salesCount + ') · expenses ' + KSH(r.expenses) + (r.stockLosses ? ' · spoiled stock ' + KSH(r.stockLosses) : '') + ' · cash in ' + KSH(r.totalCashReceived) + (r.creditGiven ? ' · credit ' + KSH(r.creditGiven) : '') + '</div></div></div>';
+  }).join('');
+  return seg + exBar('rep') + '<div class="note">' + esc(d.from) + ' to ' + esc(d.to) + '</div>' +
+    '<div class="grid">' + st('Revenue (sales)', t.revenue, t.salesCount + ' sales') + st('Cost of goods sold', t.costOfGoodsSold, 'Buying cost of what you sold') + st('Gross profit', t.grossProfit, 'Revenue − cost') + st('Expenses', t.expenses, 'Rent, transport…') + '</div>' +
+    '<div class="grid">' + st('Net profit', t.netProfit, 'Gross profit − expenses' + (t.stockLosses ? ' − spoiled stock ' + KSH(t.stockLosses) : ''), t.netProfit < 0 ? 'bad' : '') + st('Cash received', t.totalCashReceived, 'Cash ' + KSH(t.cashFromSales) + ' · M-PESA ' + KSH(t.mpesaFromSales) + ' · debts collected ' + KSH(t.debtCollected)) + st('Credit given', t.creditGiven, 'Not cash', t.creditGiven > 0 ? 'warn' : '') + st('Paid to suppliers', t.supplierPayments, 'Not an expense') + '</div>' +
+    '<div class="grid">' + st('Customers owe you', ps.customersOweYou, 'Right now') + st('You owe suppliers', ps.youOweSuppliers, 'Right now') + st('Stock at cost', ps.stockAtCost, 'Right now') + '</div>' +
+    (rows ? '<h3>By ' + (d.period === 'daily' ? 'day' : d.period === 'weekly' ? 'week' : 'month') + '</h3>' + rows : '<div class="note">No activity in this period.</div>') +
+    '<div class="note">Net profit is your actual profit. Cash received and credit are money movements, not profit. Paying a supplier is not an expense — stock cost is counted when the stock is sold.</div>';
+}
+
+/* ───── Offline-first (Phase 6) ─────
+   Works offline: add products, stock changes, FULLY PAID CASH sales, expenses; last-saved screens/reports are shown.
+   Needs internet (never faked offline): M-PESA payments, credit sales, new customers, editing/deleting products, suppliers, debt collection.
+   Every queued change keeps ONE fixed id (the server's idempotency key), so a retry after a lost response can never double-record. */
+var OBK = 'necpra_duka_outbox_v1:' + (curUid() || 'unknown'), CK = 'necpra_duka_cache_v1:', CIDX = 'necpra_duka_cache_idx:' + (curUid() || 'unknown'), NOTEK = 'necpra_duka_syncnotes:' + (curUid() || 'unknown'), LEASEK = 'necpra_duka_sync_lease:' + (curUid() || 'unknown');
+var syncing = false, MAX_TRIES = 5;
+function lsGet(k, d) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (_) { return d; } }
+function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (_) { return false; } }
+function curUid() { try { var o = JSON.parse(atob(token().split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); return String(o.id || o.userId || o.sub || ''); } catch (_) { return ''; } }
+function dukaStorageKey(base) { return base + ':' + (curUid() || 'unknown'); }
+/* cache of the last successful GET answers (per user) so screens and reports still open offline */
+function cKey(path) { return CK + curUid() + ':' + path; }
+function cacheSet(path, data) {
+  if (/[?&]search=/.test(path)) return;
+  var k = cKey(path), rec = { at: Date.now(), data: data }, idx = lsGet(CIDX, []).filter(function (x) { return x !== k; });
+  if (!lsSet(k, rec)) { idx.slice(0, 6).forEach(function (x) { try { localStorage.removeItem(x); } catch (_) {} }); idx = idx.slice(6); if (!lsSet(k, rec)) return; }
+  idx.push(k); while (idx.length > 30) { try { localStorage.removeItem(idx.shift()); } catch (_) {} } lsSet(CIDX, idx);
+}
+function cacheGet(path) { return lsGet(cKey(path), null); }
+function fromCacheOrThrow(method, path, opt, err) {
+  if (method === 'GET' && !(opt && opt.noCache)) { var c = cacheGet(path); if (c) { S.staleAt = S.staleAt ? Math.min(S.staleAt, c.at) : c.at; return c.data; } }
+  throw err;
+}
+/* outbox */
+function obAll() { return lsGet(OBK, []); }
+function obSave(l) { if (!lsSet(OBK, l)) { toast('Phone storage is full — this change was NOT saved. Free some space and try again.', true); return false; } return true; }
+function obMine() { var u = curUid(); return obAll().filter(function (o) { return o.userId === u; }); }
+function obPending() { return obMine().filter(function (o) { return o.status === 'pending'; }); }
+function obFailed() { return obMine().filter(function (o) { return o.status === 'failed'; }); }
+function obUpdate(opId, patch) { var l = obAll(); l.forEach(function (o) { if (o.opId === opId) for (var k in patch) o[k] = patch[k]; }); return obSave(l); }
+function obRemove(opId) { obSave(obAll().filter(function (o) { return o.opId !== opId; })); }
+function note(text, warn) { var n = lsGet(NOTEK, []); n.unshift({ at: Date.now(), text: text, warn: !!warn }); lsSet(NOTEK, n.slice(0, 15)); }
+function enqueue(spec) {
+  var l = obAll();
+  if (l.some(function (o) { return o.opId === spec.id; })) return true;           // same id twice = same change
+  l.push({ opId: spec.id, userId: curUid(), shopId: S.shopId, type: spec.type, method: spec.method || 'POST', path: spec.path, body: spec.body, label: spec.label, meta: spec.meta || {}, createdAt: Date.now(), status: 'pending', attempts: 0, err: '' });
+  return obSave(l);
+}
+/* Record a change: straight to the server when online and nothing is waiting, otherwise (if allowed) on this phone. Order is always kept. */
+async function write(spec) {
+  var waiting = obPending().some(function (o) { return o.shopId === S.shopId; });
+  if (waiting && navigator.onLine !== false) { await syncNow(); waiting = obPending().some(function (o) { return o.shopId === S.shopId; }); }
+  if (!waiting && navigator.onLine !== false) {
+    try { return { data: await api(spec.method || 'POST', spec.path, spec.body, { noCache: true }), queued: false }; }
+    catch (e) { if (!e.offline) throw e; }
+  }
+  if (!spec.offlineOk) throw Object.assign(new Error(spec.offlineMsg || 'No internet connection. This needs internet — please try again when you are back online.'), { status: 0, offline: true, nosave: true });
+  if (spec.precheck) spec.precheck();
+  if (!enqueue(spec)) throw new Error('Could not save on this phone (storage full).');
+  render(); setTimeout(syncNow, 800);
+  return { queued: true };
+}
+/* what is waiting to sync, applied on top of the server's numbers so stock and POS stay correct offline */
+function pendingDelta(o) {
+  var m = /\/products\/([^/]+)\/stock$/.exec(o.path || '');
+  if (o.type === 'stock.adjust' && m) return [[m[1], Number(o.body.qtyChange) || 0]];
+  if (o.type === 'sale.create') return (o.body.items || []).map(function (i) { return [i.productId, -Number(i.qty)]; });
+  if (o.type === 'stock.batch' && o.meta && o.meta.productId) return [[o.meta.productId, Number(o.meta.qty) || 0]];
+  if (o.type === 'stock.loss' && o.body && o.body.productId) return [[o.body.productId, -(Number(o.body.qty) || 0)]];
+  return [];
+}
+function applyPending(list) {
+  var ops = obPending().filter(function (o) { return o.shopId === S.shopId; }), byId = {};
+  list.forEach(function (p) { byId[p.id] = p; });
+  ops.forEach(function (o) {
+    if (o.type === 'product.create' && !byId[o.body.id]) {
+      var b = o.body, p = { id: b.id, name: b.name, barcode: b.barcode, category: b.category, unit: b.unit || 'piece', buyingPrice: Number(b.buyingPrice) || 0, sellingPrice: Number(b.sellingPrice) || 0, stockQty: Number(b.stockQty) || 0, minStock: Number(b.minStock) || 0, isActive: true, pending: true };
+      if ((S.q && (p.name + ' ' + (p.barcode || '')).toLowerCase().indexOf(S.q.toLowerCase()) < 0) || (S.cat && p.category !== S.cat)) return;
+      byId[p.id] = p; list.push(p);
+    }
+  });
+  ops.forEach(function (o) { pendingDelta(o).forEach(function (d) { var p = byId[d[0]]; if (p) p.stockQty = Math.round((p.stockQty + d[1]) * 1000) / 1000; }); });
+  list.forEach(function (p) { if (p.pending || ops.length) { p.isOutOfStock = p.stockQty <= 0; p.isLowStock = p.stockQty <= 0 || (p.minStock > 0 && p.stockQty <= p.minStock); } });
+  return S.low ? list.filter(function (p) { return p.isLowStock; }) : list;
+}
+/* sync engine: one at a time, oldest first, never in two tabs at once */
+function leaseTake() { var l = lsGet(LEASEK, null), now = Date.now(); if (l && l.exp > now && l.id !== S.leaseId) return false; S.leaseId = S.leaseId || uuid(); lsSet(LEASEK, { id: S.leaseId, exp: now + 90000 }); return (lsGet(LEASEK, {}) || {}).id === S.leaseId; }
+function leaseDrop() { var l = lsGet(LEASEK, null); if (l && l.id === S.leaseId) try { localStorage.removeItem(LEASEK); } catch (_) {} }
+async function syncNow() {
+  if (syncing || navigator.onLine === false || !token() || !obPending().length) return;
+  if (!leaseTake()) return;
+  syncing = true; S.syncState = 'syncing'; render(true);
+  var done = 0, stop = '';
+  try {
+    for (;;) {
+      var op = obPending()[0]; if (!op) break;
+      lsSet(LEASEK, { id: S.leaseId, exp: Date.now() + 90000 });
+      try {
+        var d = await api(op.method, op.path, op.body, { noCache: true });
+        obRemove(op.opId); done++; syncedNote(op, d);
+      } catch (e) {
+        if (e.offline) { obUpdate(op.opId, { attempts: op.attempts + 1 }); stop = 'offline'; break; }
+        if (e.status === 401) { stop = 'auth'; break; }
+        if (e.status >= 500) { if (op.attempts + 1 >= MAX_TRIES) obUpdate(op.opId, { status: 'failed', err: e.message, attempts: op.attempts + 1 }); else { obUpdate(op.opId, { attempts: op.attempts + 1, err: e.message }); stop = 'server'; break; } }
+        else { obUpdate(op.opId, { status: 'failed', err: e.message, code: e.code || '', attempts: op.attempts + 1 }); note('Could not save: ' + op.label + ' — ' + e.message, true); }
+      }
+    }
+  } finally { syncing = false; leaseDrop(); S.syncState = ''; }
+  if (done) { toast(done + ' change' + (done === 1 ? '' : 's') + ' synced'); try { S.staleAt = 0; await loadTab(); } catch (_) {} }
+  if (stop === 'auth') toast('Your session has expired. Log in again — your offline changes are kept and will sync after.', true);
+  render();
+  if (stop === 'offline' || stop === 'server') setTimeout(syncNow, 30000);
+}
+function syncedNote(op, d) {
+  if (op.type === 'sale.create' && d && d.sale) {
+    var exp = Number(op.meta.total), warn = d.idempotent || Math.abs(d.sale.total - exp) > 0.005;
+    note(d.idempotent ? 'Sale was already saved earlier (receipt #' + d.sale.receiptNo + '). Nothing was recorded twice.' : 'Sale synced as receipt #' + d.sale.receiptNo + ' (' + KSH(d.sale.total) + ')' + (Math.abs(d.sale.total - exp) > 0.005 ? ' — the total differs from the ' + KSH(exp) + ' shown on this phone. Please check it.' : '.'), warn && !d.idempotent);
+  }
+}
+function pendingSummary(list) {
+  var s = list.filter(function (o) { return o.type === 'sale.create'; }), e = list.filter(function (o) { return o.type === 'expense.create'; }), p = list.length - s.length - e.length, out = [];
+  if (s.length) out.push(s.length + ' sale' + (s.length === 1 ? '' : 's') + ' (' + KSH(s.reduce(function (a, o) { return a + Number(o.meta.total || 0); }, 0)) + ')');
+  if (e.length) out.push(e.length + ' expense' + (e.length === 1 ? '' : 's') + ' (' + KSH(e.reduce(function (a, o) { return a + Number(o.meta.amount || 0); }, 0)) + ')');
+  if (p) out.push(p + ' product/stock/loss update' + (p === 1 ? '' : 's'));
+  return out.length ? ': ' + out.join(', ') + '. Not in your sales history or reports until synced.' : '';
+}
+function syncBar() {
+  var pend = obPending(), fail = obFailed(), h = '';
+  if (navigator.onLine === false) h += '<div class="note"><b>You are offline.</b> You can still add products, change stock, receive stock, record spoiled stock, fully paid cash sales and expenses. They are kept on this phone and sent when you are back online. M-PESA, credit sales and customer payments need internet.</div>';
+  if (S.staleAt) h += '<div class="note">Showing information saved on this phone (' + esc(fmtWhen(new Date(S.staleAt).toISOString())) + '). It may be out of date.</div>';
+  if (pend.length) h += '<div class="note" data-act="syncStatus" style="cursor:pointer">' + (S.syncState === 'syncing' ? 'Syncing… ' : '') + '<b>' + pend.length + ' change' + (pend.length === 1 ? '' : 's') + ' waiting to sync</b>' + esc(pendingSummary(pend)) + ' <u>Details</u></div>';
+  if (fail.length) h += '<div class="note err" data-act="syncStatus" style="cursor:pointer"><b>' + fail.length + ' change' + (fail.length === 1 ? '' : 's') + ' need attention</b> — the server did not accept ' + (fail.length === 1 ? 'it' : 'them') + '. <u>Review</u></div>';
+  return h;
+}
+function openSyncStatus() {
+  var l = obMine(), notes = lsGet(NOTEK, []);
+  var rows = l.map(function (o) {
+    return '<div class="item"><div class="grow"><div class="t">' + esc(o.label) + '</div><div class="s">' + esc(fmtWhen(new Date(o.createdAt).toISOString())) + ' · ' + (o.status === 'failed' ? '<b style="color:#b42318">Needs attention</b>' : 'Waiting to sync' + (o.attempts ? ' (tried ' + o.attempts + '×)' : '')) + '</div>' + (o.err ? '<div class="s">' + esc(o.err) + '</div>' : '') + '</div>' +
+      (o.status === 'failed' ? '<div><button class="btn2" data-act="retryOp" data-id="' + esc(o.opId) + '" type="button">Retry</button> <button class="btn2" data-act="discardOp" data-id="' + esc(o.opId) + '" type="button">Discard</button></div>' : '') + '</div>';
+  }).join('');
+  openModal('Sync status', (navigator.onLine === false ? '<div class="note">You are offline.</div>' : '') + (rows || '<div class="note">Everything is synced. Nothing is waiting.</div>') +
+    (notes.length ? '<h3>Recent results</h3>' + notes.slice(0, 8).map(function (n) { return '<div class="note' + (n.warn ? ' err' : '') + '">' + esc(n.text) + '</div>'; }).join('') : '') +
+    '<div class="actions"><button class="btn2" data-act="closeModal" type="button">Close</button>' + (obPending().length ? '<button class="btn" data-act="syncNow" type="button">Sync now</button>' : '') + '</div>');
+}
+function openDiscard(id) {
+  var o = obAll().filter(function (x) { return x.opId === id; })[0]; if (!o) return;
+  openModal('Discard this change?', '<div class="note err"><b>' + esc(o.label) + '</b><br>' + esc(o.err || '') + '</div><div class="note">' + (o.type === 'sale.create' ? 'This sale will be removed from this phone and will NOT be recorded on the server. If the customer already took the goods, fix the stock and use Retry instead.' : 'This change will be removed from this phone and will NOT be recorded on the server.') + ' This cannot be undone.</div>' +
+    '<div class="actions"><button class="btn2" data-act="syncStatus" type="button">Keep it</button><button class="btnd" data-act="doDiscard" data-id="' + esc(id) + '" type="button">Discard</button></div>');
+}
+window.addEventListener('online', function () { setTimeout(syncNow, 1000); render(true); });
+window.addEventListener('offline', function () { render(true); });
+document.addEventListener('visibilitychange', function () { if (!document.hidden) syncNow(); });
+setInterval(function () { if (obPending().length) syncNow(); }, 30000);
+function provisionalReceipt(c, payments, custId) {
+  var cu = (S.customers || []).filter(function (x) { return x.id === custId; })[0];
+  return { shop: shop() || { name: 'My Duka' }, sale: { receiptNo: 'PENDING SYNC', soldAt: new Date().toISOString(), customerName: cu ? cu.name : null, subtotal: c.sub / 100, discountAmount: c.disc / 100, total: c.total / 100, balanceDue: 0 },
+    items: S.cart.map(function (l) { return { name: l.name, unit: l.unit, qty: Number(l.qty), unitPrice: Number(l.price), lineTotal: l.lineTotal / 100 }; }), payments: payments };
+}
+
+/* ───── Voice assistant (Phase 7): English + Kiswahili, by voice or typing ─────
+   Understanding is rule-based and runs on the phone (no audio or text leaves the device except through the normal DUKA API).
+   READS (stock, debts, reports) answer straight away. EVERY WRITE (add product, cash sale, expense) only ever shows a
+   confirmation card: nothing changes until the owner TAPS Confirm. Saying "yes" never confirms. */
+var VNUM = { zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90,
+  moja: 1, mbili: 2, tatu: 3, nne: 4, tano: 5, sita: 6, saba: 7, nane: 8, tisa: 9, kumi: 10, ishirini: 20, thelathini: 30, arobaini: 40, hamsini: 50, sitini: 60, sabini: 70, themanini: 80, tisini: 90 };
+var VUNIT = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, moja: 1, mbili: 2, tatu: 3, nne: 4, tano: 5, sita: 6, saba: 7, nane: 8, tisa: 9 };
+var VMULT = { hundred: 1, thousand: 1, mia: 1, elfu: 1 };
+function isNumWord(t) { return Object.prototype.hasOwnProperty.call(VNUM, t) || Object.prototype.hasOwnProperty.call(VMULT, t); }
+function wordsToNumber(tk) {
+  var total = 0, run = 0, i = 0;
+  while (i < tk.length) {
+    var t = tk[i], nx = tk[i + 1];
+    if (t === 'na' || t === 'and') { i++; continue; }
+    if (t === 'a') { i++; continue; }
+    if (t === 'hundred') { run = (run || 1) * 100; i++; continue; }
+    if (t === 'thousand') { total += (run || 1) * 1000; run = 0; i++; continue; }
+    if (t === 'mia' || t === 'elfu') { var k = 1; if (nx && Object.prototype.hasOwnProperty.call(VUNIT, nx)) { k = VUNIT[nx]; i++; } if (t === 'mia') run += k * 100; else { total += k * 1000; } i++; continue; }
+    run += VNUM[t]; i++;
+  }
+  return total + run;
+}
+function vNorm(text) {
+  var s = String(text || '').toLowerCase().replace(/[“”‘’"']/g, '').replace(/(\d),(\d{3})/g, '$1$2').replace(/(\d+(?:\.\d+)?)\s*k\b/g, function (m, n) { return String(Number(n) * 1000); });
+  s = s.replace(/\b(ksh|kshs|kes|shillings?|shilingi|bob)\b|\/=/g, ' ').replace(/[?!;:,()]/g, ' ').replace(/\.(?!\d)/g, ' ').replace(/\s+/g, ' ').trim();
+  var tk = s.split(' '), out = [], i = 0;
+  while (i < tk.length) {
+    var t = tk[i], startRun = isNumWord(t) || (t === 'a' && (tk[i + 1] === 'hundred' || tk[i + 1] === 'thousand'));
+    if (!startRun) { out.push(t); i++; continue; }
+    var run = [t], j = i + 1;
+    while (j < tk.length) {
+      if (isNumWord(tk[j]) || (tk[j] === 'a' && isNumWord(tk[j + 1]))) { run.push(tk[j]); j++; }
+      else if ((tk[j] === 'na' || tk[j] === 'and') && tk[j + 1] && isNumWord(tk[j + 1])) { run.push(tk[j]); j++; }
+      else break;
+    }
+    // "one" / "a" alone before a word are left as words only when not part of a quantity; here every run is a number
+    out.push(String(wordsToNumber(run))); i = j;
+  }
+  return out.join(' ');
+}
+var SW_HINT = /\b(ongeza|bidhaa|uza|nimeuza|niliuza|mauzo|gharama|matumizi|nimetumia|nimelipa|ngapi|kiasi|deni|madeni|ananidai|anadaiwa|ripoti|leo|wiki|mwezi|nina|angalia|stoku|baki|imebaki|kilichobaki|faida|kwa|ya|weka|rekodi|nani|bei|kununua|kuuza|idadi|sukari|unga|maziwa|mkate)\b/g;
+var EN_HINT = /\b(add|product|sell|sold|sale|expense|spent|how|much|many|debt|debts|owe|owes|report|today|week|month|have|check|stock|left|profit|record|who|buying|selling|quantity)\b/g;
+function vLang(text, fallback) { var s = String(text).toLowerCase(), a = (s.match(SW_HINT) || []).length, b = (s.match(EN_HINT) || []).length; return a > b ? 'sw' : b > a ? 'en' : fallback; }
+var VCATS = { rent: ['rent', 'kodi'], transport: ['transport', 'usafiri', 'nauli', 'fare', 'fuel', 'petrol', 'mafuta ya gari'], electricity: ['electricity', 'umeme', 'kplc', 'stima', 'power'], wages: ['wages', 'wage', 'salary', 'salaries', 'mshahara', 'mishahara'], packaging: ['packaging', 'vifungashio', 'paper bags'], airtime: ['airtime', 'muda wa maongezi'], licence: ['licence', 'license', 'leseni', 'permit'], repairs: ['repairs', 'repair', 'ukarabati', 'matengenezo'] };
+var VALIAS = { sukari: 'sugar', unga: 'flour', maziwa: 'milk', mkate: 'bread', mchele: 'rice', mafuta: 'oil', chumvi: 'salt', chai: 'tea', sabuni: 'soap', maji: 'water', mayai: 'eggs', nyama: 'meat', nyanya: 'tomatoes', vitunguu: 'onions', maharagwe: 'beans', mahindi: 'maize', soda: 'soda' };
+function vToks(s) { return vNorm(s).split(' ').filter(Boolean).map(function (w) { return w.length > 3 && w.slice(-1) === 's' ? w.slice(0, -1) : w; }); }
+function vAlias(tk) {
+  var en = tk.map(function (w) { return VALIAS[w] || w; }), sw = tk.map(function (w) { for (var k in VALIAS) if (VALIAS[k] === w) return k; return w; });
+  return [tk, en, sw];
+}
+function vMatch(query, list) {
+  var qv = vAlias(vToks(query)).filter(function (t) { return t.length; }), scored = [];
+  list.forEach(function (p) {
+    var pt = vToks(p.name), best = 0;
+    qv.forEach(function (q) {
+      if (q.every(function (a) { return pt.some(function (b) { return b === a || (a.length > 2 && b.indexOf(a) === 0); }); })) best = Math.max(best, vToks(p.name).join(' ') === q.join(' ') ? 3 : 2);
+    });
+    if (best) scored.push({ p: p, s: best });
+  });
+  scored.sort(function (a, b) { return b.s - a.s; });
+  if (!scored.length) return [];
+  if (scored[0].s === 3) return [scored[0].p];
+  return scored.map(function (x) { return x.p; });
+}
+var STOCK_STOP = /\b(we|our|ours|us|any|there|kuna|tunayo|available|products?|items?|goods|bidhaa|tunazo|zipo|how|much|many|of|is|are|left|remaining|remain|do|i|have|check|stock|stocks|the|in|my|what|for|me|show|tell|about|nina|ngapi|kiasi|cha|ya|kilichobaki|imebaki|zimebaki|baki|angalia|stoku|je|la|kwa|bado|iliyobaki|nimebakiwa|na|shop|duka|inventory|level|quantity)\b/g;
+function vParse(raw, fallbackLang) {
+  var lang = vLang(raw, fallbackLang || 'en'), s = vNorm(raw), num = /(^| )\d+(\.\d+)?( |$)/.test(s), out = { lang: lang, text: s };
+  if (/^(yes|yeah|yep|confirm|confirmed|ok|okay|ndio|sawa|thibitisha|haya|fanya)$/.test(s)) return Object.assign(out, { intent: 'confirmWord' });
+  if (/^(no|cancel|stop|hapana|acha|ghairi|sitaki)$/.test(s)) return Object.assign(out, { intent: 'cancelWord' });
+  var m;
+  if (/\b(add|new|create|ongeza|weka)\b.*\b(product|products|item|items|bidhaa)\b/.test(s)) {
+    var rest = s.replace(/^.*?\b(product|products|item|items|bidhaa)\b/, '').trim();
+    var KW = [['buy', /\b(?:bei ya )?(?:buying|buy|bought|cost|kununua|nunua|ununuzi)(?: price| bei)?(?: ya| of| is| at)?\s*(\d+(?:\.\d+)?)/], ['stock', /\b(?:stock|quantity|qty|units|pieces|idadi|stoku|kiasi|opening)(?: ya| of| is| at)?\s*(\d+(?:\.\d+)?)/], ['sell', /\b(?:bei ya )?(?:selling|sell|kuuza|uza|price|bei)(?: price)?(?: ya| of| is| at)?\s*(\d+(?:\.\d+)?)/]];
+    var res = { buy: null, sell: null, stock: null }, work = rest, firstIdx = rest.length;
+    KW.forEach(function (k) {   // each keyword consumes its own words, so "buying price 100 selling price 150" is read correctly
+      var mm = k[1].exec(work);
+      if (mm) { res[k[0]] = Number(mm[1]); firstIdx = Math.min(firstIdx, mm.index); work = work.slice(0, mm.index) + ' '.repeat(mm[0].length) + work.slice(mm.index + mm[0].length); }
+    });
+    if (res.buy == null && res.sell == null && res.stock == null) { var nums = rest.match(/(?:^| )(\d+(?:\.\d+)?)(?= |$)/g); if (nums && nums.length) { firstIdx = rest.search(/(?:^| )\d+(?:\.\d+)?(?= |$)/); nums = nums.map(function (x) { return Number(x); }); res.buy = nums[0]; res.sell = nums[1] != null ? nums[1] : null; res.stock = nums[2] != null ? nums[2] : null; } }
+    name = rest.slice(0, firstIdx).replace(/\b(called|named|inaitwa|jina|la|ya|a|an|new|mpya)\b/g, ' ').replace(/\s+/g, ' ').trim();
+    return Object.assign(out, { intent: 'addProduct', name: name, buy: res.buy, sell: res.sell, stock: res.stock });
+  }
+  // DUKA screens, suppliers, waste, group buying, refunds: read-only answers or navigation. Nothing here changes money or stock.
+  if ((m = /^(?:please |tafadhali )?(?:open|go to|go back to|take me to|bring up|fungua|nenda(?: kwa)?|nipeleke|nifungulie|enda(?: kwa)?)\s+(?:the |my |ukurasa wa |sehemu ya )?(dashboard|home|sell|pos|new sale|sales|products?|stock|buy together|group buy(?:ing)?|waste|money|expenses|debts|suppliers?|reports?|settings|my shop|admin|dashibodi|mauzo|bidhaa|taka|upotevu|pesa|gharama|madeni|wasambazaji|ripoti|mipangilio)(?: tab| screen| page)?$/.exec(s))) {
+    var w = m[1], MAP = { dashboard: ['dash'], home: ['dash'], dashibodi: ['dash'], sell: ['pos'], pos: ['pos'], 'new sale': ['pos'], sales: ['sales'], mauzo: ['sales'], product: ['products'], products: ['products'], stock: ['products'], bidhaa: ['products'], 'buy together': ['group'], 'group buy': ['group'], 'group buying': ['group'], waste: ['waste'], upotevu: ['waste'], money: ['money'], pesa: ['money'], expenses: ['money', 'expenses'], gharama: ['money', 'expenses'], debts: ['money', 'debts'], madeni: ['money', 'debts'], supplier: ['money', 'suppliers'], suppliers: ['money', 'suppliers'], wasambazaji: ['money', 'suppliers'], report: ['money', 'reports'], reports: ['money', 'reports'], ripoti: ['money', 'reports'], settings: ['settings'], mipangilio: ['settings'], 'my shop': ['settings'], admin: ['admin'] };
+    return Object.assign(out, { intent: 'openTab', tab: (MAP[w] || ['dash'])[0], fin: (MAP[w] || [])[1] || null, label: w });
+  }
+  if (/\b(refund|refunds|void|cancel (?:a |the |that |this )?sale|undo (?:a |the |that )?sale|rudisha pesa|rejesha pesa|kurejesha pesa|futa mauzo|ghairi mauzo)\b/.test(s)) return Object.assign(out, { intent: 'refund' });
+  if (/\b(group buy|group buying|group orders?|buy together|buying together|ununuzi wa pamoja|nunua pamoja|oda za pamoja|oda ya pamoja)\b/.test(s)) return Object.assign(out, { intent: 'groupbuy' });
+  if (/\b(waste|wastage|spoil|spoiled|spoilt|spoilage|expiry|expiring|expire|expired|perishables?|at risk|upotevu|kuharibika|imeharibika|zinaharibika)\b/.test(s)) return Object.assign(out, { intent: 'waste', record: /\b(record|add|rekodi|weka|ongeza|received?|pokea)\b/.test(s) });
+  if (/\b(suppliers?|wasambazaji|msambazaji|wauzaji wangu)\b/.test(s)) return Object.assign(out, { intent: 'suppliers', manage: /\b(add|new|pay|paid|bill|record|ongeza|lipa|nimelipa|rekodi)\b/.test(s) });
+  var expTrig = /\b(expense|expenses|spent|spend|gharama|matumizi|nimetumia|nimelipa|nilitumia|nililipa)\b/.test(s);
+  if (expTrig && (num || !/\b(report|ripoti|summary|muhtasari|today|leo|week|wiki|month|mwezi)\b/.test(s))) {
+    var amt = (/(^| )(\d+(?:\.\d+)?)( |$)/.exec(s) || [])[2], cat = 'other';
+    for (var c in VCATS) if (VCATS[c].some(function (w) { return new RegExp('\\b' + w + '\\b').test(s); })) { cat = c; break; }
+    var desc = ''; if ((m = /\b(?:on|for|kwa|ya)\s+(?:the\s+)?([a-z ]+?)\s*$/.exec(s.replace(/\d+(\.\d+)?/g, ' ').replace(/\s+/g, ' ').trim()))) desc = m[1].trim();
+    return Object.assign(out, { intent: 'expense', amount: amt ? Number(amt) : null, category: cat, description: desc && !/^(expense|gharama)$/.test(desc) ? desc : '' });
+  }
+  if (/^(sell|sold|record (a )?sale|record sales|sale of|uza|nimeuza|niliuza|nimeuzia|rekodi (mauzo|uuzaji)|weka mauzo)\b/.test(s) && num) {
+    var body = s.replace(/^(sell|sold|record (a )?sale|record sales|sale of|uza|nimeuza|niliuza|nimeuzia|rekodi (mauzo|uuzaji)|weka mauzo)( of| ya| za| ni)?/, '').replace(/\b(cash|taslimu|pesa taslimu|for cash|kwa pesa taslimu|please|tafadhali|of|ya|za)\b/g, ' ').trim();
+    var items = body.split(/\s+(?:and|na|plus)\s+|\s*\+\s*/).map(function (seg) {
+      seg = seg.trim(); if (!seg) return null;
+      var q = 1, nm = seg, mm;
+      if ((mm = /^(\d+(?:\.\d+)?)\s+(?:(?:pieces?|pcs|packets?|pakiti|vipande|kipande|kg|bottles?|chupa|loaves|units?)\s+)?(?:of\s+)?(.+)$/.exec(seg))) { q = Number(mm[1]); nm = mm[2]; }
+      else if ((mm = /^(.+?)\s+(\d+(?:\.\d+)?)(?:\s+(?:pieces?|pcs|packets?|pakiti|vipande|kg))?$/.exec(seg))) { q = Number(mm[2]); nm = mm[1]; }
+      return { qty: q, name: nm.replace(/\s+/g, ' ').trim() };
+    }).filter(Boolean);
+    return Object.assign(out, { intent: 'sale', items: items });
+  }
+  // Questions about the shop itself: "how many products do we have in duka", "idadi ya bidhaa", "how many customers", "how much did we sell today"
+  if (/\b(how many|number of|count|total|idadi ya|ngapi)\b/.test(s) && /\b(customers?|wateja|mteja)\b/.test(s) && !/\b(owe|owes|debt|debts|deni|madeni|anadaiwa|ananidai)\b/.test(s)) return Object.assign(out, { intent: 'customers' });
+  if ((/\b(how many|number of|count|total|idadi ya|bidhaa ngapi|ngapi)\b/.test(s) && /\b(products?|items?|goods|bidhaa)\b/.test(s)) || (/\b(products?|items?|bidhaa)\b/.test(s) && /\b(do (we|i) have|have we|have i|nina|tunazo|are there|in (the |my |our )?(duka|shop|store|inventory|catalogue|catalog)|available)\b/.test(s) && !/\b(low|out of|finished|imeisha|zinakwisha|sell|sold|add|new)\b/.test(s))) return Object.assign(out, { intent: 'stock', query: '' });
+  if (/\b(how much|kiasi gani|ngapi|total)\b/.test(s) && /\b(sold|sell|made|earned|nimeuza|tumeuza|niliuza|tuliuza|mapato)\b/.test(s) && !/\b(sell|sold|uza|nimeuza)\s+\d/.test(s)) return Object.assign(out, { intent: 'report', days: /\b(week|wiki)\b/.test(s) ? 7 : /\b(month|mwezi)\b/.test(s) ? 30 : 1 });
+  if (/\b(owe|owes|owed|debt|debts|deni|madeni|anadaiwa|ananidai|wanadaiwa|wadeni|wanaodaiwa|credit customers)\b/.test(s)) {
+    var who = s.replace(/\b(who|how|much|does|do|owe|owes|owed|me|my|debt|debts|deni|madeni|anadaiwa|ananidai|wanadaiwa|wadeni|check|show|kiasi|gani|nani|angalia|the|customer|customers|wateja|mteja|is|are|what|kwa|ya|la|credit|total|jumla)\b/g, ' ').replace(/\s+/g, ' ').trim();
+    return Object.assign(out, { intent: 'debts', who: who });
+  }
+  if (/\b(report|ripoti|summary|muhtasari|profit|faida|mauzo|sales|takings|income|revenue|mapato|expenses|gharama)\b/.test(s) && !/^(sell|sold|uza|nimeuza)\b/.test(s)) {
+    var days = /\b(week|wiki)\b/.test(s) ? 7 : /\b(month|mwezi)\b/.test(s) ? 30 : 1;
+    return Object.assign(out, { intent: 'report', days: days });
+  }
+  if (/\b(low|running out|zinazoisha|zinakwisha|ndogo|finished|imeisha|zimeisha|out of)\b/.test(s) && /\b(stock|stoku|bidhaa|items|products)\b|running out|zinazoisha|zinakwisha/.test(s)) return Object.assign(out, { intent: 'lowstock' });
+  if (/\b(stock|stoku|left|remaining|baki|imebaki|zimebaki|kilichobaki|iliyobaki|ngapi|do i have|do we have|have we|is there|are there|kuna|tunayo|how much|how many|inventory|nina|angalia|check)\b/.test(s)) {
+    return Object.assign(out, { intent: 'stock', query: s.replace(STOCK_STOP, ' ').replace(/\s+/g, ' ').trim() });
+  }
+  return Object.assign(out, { intent: 'unknown' });
+}
+/* ── assistant UI and actions ── */
+S.va = { lang: (navigator.language || '').toLowerCase().indexOf('sw') === 0 ? 'sw' : 'en', speak: true, log: [], pending: null, listening: false };
+var VSR = window.SpeechRecognition || window.webkitSpeechRecognition, vRec = null;
+function T(en, sw, l) { return (l || S.va.rl) === 'sw' ? sw : en; }
+function vSay(text, who) {
+  S.va.log.push({ who: who || 'bot', text: text }); if (S.va.log.length > 30) S.va.log.shift();
+  if ((who || 'bot') !== 'bot') return;
+  try { toast(String(text)); } catch (_) {}
+  if (!S.va.speak || !(S.va.remote || S.va.spoke)) return;
+  var spoken = String(text).replace(/<[^>]+>/g, '').replace(/KSh\s?/g, T('shillings ', 'shilingi ')).slice(0, 300);
+  try {
+    if (window.NecpraVoiceRemote && typeof window.NecpraVoiceRemote.speak === 'function') window.NecpraVoiceRemote.speak(spoken).catch(function () {});
+    else if (window.NecpraVoice && typeof NecpraVoice.speak === 'function') NecpraVoice.speak(spoken, { force: true });
+  } catch (_) {}
+}
+function vProducts() {
+  return api('GET', '/shops/' + S.shopId + '/products?limit=500').then(function (d) {
+    var sq = S.q, sc = S.cat, sl = S.low; S.q = ''; S.cat = ''; S.low = false;
+    try { return applyPending((d.products || []).slice()); } finally { S.q = sq; S.cat = sc; S.low = sl; }
+  });
+}
+function vPct(n) { return String(Math.round(n * 100) / 100); }
+async function vHandle(raw) {
+  raw = String(raw || '').trim(); if (!raw) return;
+  var cmd = vParse(raw, S.va.lang); S.va.rl = cmd.lang;
+  vSay(raw, 'me');
+  if (cmd.intent === 'confirmWord') { vSay(T('For your safety I cannot confirm by voice. Please tap the green Confirm button on the card.', 'Kwa usalama wako siwezi kuthibitisha kwa sauti. Tafadhali bonyeza kitufe cha Thibitisha kwenye kadi.')); return vRender(); }
+  if (cmd.intent === 'cancelWord') { S.va.pending = null; vSay(T('Cancelled. Nothing was changed.', 'Imeghairiwa. Hakuna kilichobadilishwa.')); return vRender(); }
+  if (S.va.pending && !S.va.pending.done) { S.va.pending = null; vSay(T('Earlier request cancelled — nothing was changed.', 'Ombi la awali limeghairiwa — hakuna kilichobadilishwa.')); }
+  vRender(true);
+  try {
+    if (window.NecpraVoiceSales && window.__necpraDukaVoice && ['stock', 'lowstock', 'debts', 'report', 'expense', 'addProduct', 'openTab', 'refund', 'groupbuy', 'waste', 'suppliers'].indexOf(cmd.intent) < 0) {   // natural-language sales on the trader's own catalogue
+      if (await NecpraVoiceSales.start(raw, window.__necpraDukaVoice.adapter, { force: cmd.intent === 'sale' })) { vRender(); return; }
+    }
+    if (cmd.intent === 'stock') await vStock(cmd);
+    else if (cmd.intent === 'openTab') await vOpenTab(cmd);
+    else if (cmd.intent === 'refund') await vRefund();
+    else if (cmd.intent === 'groupbuy') await vGroupBuy();
+    else if (cmd.intent === 'waste') await vWaste(cmd);
+    else if (cmd.intent === 'suppliers') await vSuppliers(cmd);
+    else if (cmd.intent === 'lowstock') await vLow();
+    else if (cmd.intent === 'customers') await vCustomers();
+    else if (cmd.intent === 'debts') await vDebts(cmd);
+    else if (cmd.intent === 'report') await vReport(cmd);
+    else if (cmd.intent === 'expense') vExpenseCard(cmd);
+    else if (cmd.intent === 'addProduct') vProductCard(cmd);
+    else if (cmd.intent === 'sale') await vSaleCard(cmd);
+    else vSay(T('Sorry, I did not understand. Try: "sell 3 sugar", "add expense 500 transport", "how much sugar is left", "who owes me", "open suppliers", "show waste" or "today\'s report".', 'Samahani, sijaelewa. Jaribu: "uza sukari 3", "nimetumia 500 usafiri", "sukari imebaki ngapi", "nani ananidai", au "ripoti ya leo".'));
+  } catch (e) { vSay(e.message || T('Something went wrong.', 'Hitilafu imetokea.')); }
+  if (S.va.pending && !$('vaPanel')) openAssistant();
+  vRender();
+}
+function vGoTab(tab, fin) {
+  S.tab = tab; if (fin) S.fin = fin;
+  try { sessionStorage.setItem('necpra_duka_tab', S.tab); if (fin) sessionStorage.setItem('necpra_duka_fin', fin); } catch (_) {}
+  render(); refresh();
+}
+async function vOpenTab(cmd) {
+  if (cmd.tab === 'admin' && !S.isAdmin) return vSay(T('Admin is not available for your account.', 'Admin haipatikani kwa akaunti yako.'));
+  vGoTab(cmd.tab, cmd.fin);
+  vSay(T('Opening ' + cmd.label + '.', 'Inafungua ' + cmd.label + '.'));
+}
+async function vRefund() {
+  vGoTab('sales');
+  vSay(T('I cannot cancel a sale or hand back money by voice. I opened Sales: tap the sale, choose cancel, and give a short reason. Stock is restored and the app tells you how much to hand back.',
+    'Siwezi kughairi mauzo wala kurudisha pesa kwa sauti. Nimefungua Mauzo: bonyeza mauzo husika, chagua ghairi, kisha andika sababu fupi. Stoku hurudishwa na programu inakuambia kiasi cha kurudisha.'));
+}
+async function vSuppliers(cmd) {
+  if (cmd.manage) {
+    vGoTab('money', 'suppliers');
+    return vSay(T('Adding suppliers and recording payments is done on screen so you can check the amounts. I opened Suppliers.', 'Kuongeza wasambazaji na kurekodi malipo hufanywa kwenye skrini ili uhakiki kiasi. Nimefungua Wasambazaji.'));
+  }
+  var d = await api('GET', '/shops/' + S.shopId + '/suppliers'), list = d.suppliers || [];
+  if (!list.length) return vSay(T('You have no suppliers saved yet.', 'Bado huna wasambazaji waliohifadhiwa.'));
+  var owed = list.filter(function (x) { return x.owed > 0; });
+  vSay(T('You have ' + list.length + ' supplier' + (list.length === 1 ? '' : 's') + '. ' + (owed.length ? 'You owe ' + KSH(d.totalOwed) + ': ' + owed.slice(0, 4).map(function (x) { return x.name + ' ' + KSH(x.owed); }).join(', ') + '.' : 'You owe none of them anything.'),
+    'Una wasambazaji ' + list.length + '. ' + (owed.length ? 'Unadaiwa ' + KSH(d.totalOwed) + ': ' + owed.slice(0, 4).map(function (x) { return x.name + ' ' + KSH(x.owed); }).join(', ') + '.' : 'Huna deni kwa yeyote.')));
+}
+async function vWaste(cmd) {
+  if (cmd.record) {
+    vGoTab('waste');
+    return vSay(T('Receiving stock and recording spoiled stock are done on screen so you can check the quantities. I opened Waste.', 'Kupokea stoku na kurekodi iliyoharibika hufanywa kwenye skrini ili uhakiki idadi. Nimefungua Upotevu.'));
+  }
+  var w = await api('GET', '/shops/' + S.shopId + '/waste'), sm = w.summary || {}, items = w.items || [];
+  var risky = items.filter(function (it) { return (it.batches || []).some(function (b) { return b.freshness === 'at_risk' || b.freshness === 'sell_soon'; }); });
+  if (!items.length) return vSay(T('You have no perishable stock tracked yet. Mark a product as perishable and add stock with its shelf life.', 'Bado hakuna bidhaa zinazoharibika zinazofuatiliwa.'));
+  vSay(T('Stock at risk is about ' + KSH(sm.stockAtRiskValue) + ' (an estimate). Spoilage losses in the last 30 days: ' + KSH(sm.lossesLast30Days) + '. ' + (risky.length ? 'Sell soon: ' + risky.slice(0, 4).map(function (x) { return x.name; }).join(', ') + '.' : 'Nothing needs selling urgently.'),
+    'Stoku hatarini ni takriban ' + KSH(sm.stockAtRiskValue) + ' (makadirio). Hasara ya kuharibika siku 30: ' + KSH(sm.lossesLast30Days) + '. ' + (risky.length ? 'Uza haraka: ' + risky.slice(0, 4).map(function (x) { return x.name; }).join(', ') + '.' : 'Hakuna cha kuuza haraka.')));
+}
+async function vGroupBuy() {
+  var dash = await api('GET', '/group-buy/dashboard', null, GB_NOCACHE), m = dash.mine || {}, mk = dash.marketplace || {};
+  vSay(T(mk.openOrders + ' open group order' + (mk.openOrders === 1 ? '' : 's') + ' near you. Yours: ' + (m.awaitingPayment || 0) + ' awaiting your payment, ' + (m.pendingDeliveries || 0) + ' pending delivery. Verified savings: ' + KSH((dash.verifiedSavings || {}).amount || 0) + '. Joining and paying are done on screen.',
+    'Oda ' + mk.openOrders + ' za pamoja zipo karibu nawe. Zako: ' + (m.awaitingPayment || 0) + ' zinasubiri malipo yako, ' + (m.pendingDeliveries || 0) + ' zinasubiri kuletwa. Akiba iliyothibitishwa: ' + KSH((dash.verifiedSavings || {}).amount || 0) + '. Kujiunga na kulipa hufanywa kwenye skrini.'));
+}
+async function vStock(cmd) {
+  var list = await vProducts();
+  if (!cmd.query) {
+    var low = list.filter(function (p) { return p.isLowStock; });
+    return vSay(T('You have ' + list.length + ' products. ' + (low.length ? low.length + ' are low or out of stock.' : 'None are low.'), 'Una bidhaa ' + list.length + '. ' + (low.length ? low.length + ' zinakaribia kuisha au zimeisha.' : 'Hakuna inayokaribia kuisha.')));
+  }
+  var hits = vMatch(cmd.query, list);
+  if (!hits.length) return vSay(T('I could not find a product like "' + cmd.query + '".', 'Sikupata bidhaa kama "' + cmd.query + '".'));
+  vSay(hits.slice(0, 4).map(function (p) { return p.name + ': ' + QTY(p.stockQty) + ' ' + p.unit + (p.isOutOfStock ? T(' (out of stock)', ' (imeisha)') : p.isLowStock ? T(' (low)', ' (inakaribia kuisha)') : ''); }).join('; '));
+}
+async function vCustomers() {
+  var d = await api('GET', '/shops/' + S.shopId + '/customers?limit=500'), n = (d.customers || []).length;
+  vSay(n ? T('You have ' + n + ' customer' + (n === 1 ? '' : 's') + ' saved.', 'Una wateja ' + n + ' waliohifadhiwa.') : T('You have no saved customers yet.', 'Bado huna wateja waliohifadhiwa.'));
+}
+async function vLow() {
+  var low = (await vProducts()).filter(function (p) { return p.isLowStock; });
+  vSay(low.length ? T('Low or out of stock: ', 'Zinazokaribia kuisha au zimeisha: ') + low.slice(0, 8).map(function (p) { return p.name + ' (' + QTY(p.stockQty) + ')'; }).join(', ') : T('Nothing is low on stock.', 'Hakuna bidhaa inayokaribia kuisha.'));
+}
+async function vDebts(cmd) {
+  var d = await api('GET', '/shops/' + S.shopId + '/debts'), c = d.customersOweYou, s = d.youOweSuppliers;
+  if (cmd.who) {
+    var q = cmd.who.toLowerCase(), hit = c.customers.filter(function (x) { return x.name.toLowerCase().indexOf(q) >= 0 || q.indexOf(x.name.toLowerCase()) >= 0; });
+    return vSay(hit.length ? hit.map(function (x) { return x.name + T(' owes ', ' anadaiwa ') + KSH(x.owed); }).join('; ') : T('No customer named "' + cmd.who + '" owes you anything.', 'Hakuna mteja aitwaye "' + cmd.who + '" anayekudai.'));
+  }
+  vSay(T('Customers owe you ' + KSH(c.total) + (c.customers.length ? ': ' + c.customers.slice(0, 3).map(function (x) { return x.name + ' ' + KSH(x.owed); }).join(', ') : '') + '. You owe suppliers ' + KSH(s.total) + '.',
+    'Wateja wanakudai ' + KSH(c.total) + (c.customers.length ? ': ' + c.customers.slice(0, 3).map(function (x) { return x.name + ' ' + KSH(x.owed); }).join(', ') : '') + '. Wewe unadaiwa na wasambazaji ' + KSH(s.total) + '.'));
+}
+async function vReport(cmd) {
+  var d = await api('GET', '/shops/' + S.shopId + '/reports?period=daily&from=' + ymd(cmd.days - 1) + '&to=' + ymd(0)), t = d.totals;
+  var label = cmd.days === 1 ? T('today', 'leo') : cmd.days === 7 ? T('the last 7 days', 'siku 7 zilizopita') : T('the last 30 days', 'siku 30 zilizopita');
+  vSay(T('For ' + label + ': sales ' + KSH(t.revenue) + ' (' + t.salesCount + '), expenses ' + KSH(t.expenses) + ', net profit ' + KSH(t.netProfit) + '. Cash received ' + KSH(t.totalCashReceived) + ', credit given ' + KSH(t.creditGiven) + '.',
+    'Kwa ' + label + ': mauzo ' + KSH(t.revenue) + ' (' + t.salesCount + '), gharama ' + KSH(t.expenses) + ', faida halisi ' + KSH(t.netProfit) + '. Pesa taslimu iliyopokelewa ' + KSH(t.totalCashReceived) + ', mkopo uliotolewa ' + KSH(t.creditGiven) + '.'));
+}
+function vExpenseCard(cmd) {
+  S.va.pending = { kind: 'expense', id: uuid(), done: false, d: { amount: cmd.amount, category: cmd.category, description: cmd.description } };
+  vSay(T('Please check this expense and tap Confirm.', 'Tafadhali angalia gharama hii kisha bonyeza Thibitisha.'));
+}
+function vProductCard(cmd) {
+  S.va.pending = { kind: 'product', id: uuid(), done: false, d: { name: cmd.name, buy: cmd.buy, sell: cmd.sell, stock: cmd.stock } };
+  vSay(T('Please check this new product and tap Confirm.', 'Tafadhali angalia bidhaa hii mpya kisha bonyeza Thibitisha.'));
+}
+async function vSaleCard(cmd) {
+  var list = await vProducts(), lines = [], ask = null;
+  for (var i = 0; i < cmd.items.length; i++) {
+    var it = cmd.items[i], hits = vMatch(it.name, list);
+    if (!hits.length) return vSay(T('I could not find "' + it.name + '" in your products. Nothing was recorded.', 'Sikupata "' + it.name + '" kwenye bidhaa zako. Hakuna kilichorekodiwa.'));
+    if (hits.length > 1 && !ask) ask = { idx: i, opts: hits.slice(0, 5) };
+    lines.push({ qty: it.qty, name: it.name, productId: hits.length === 1 ? hits[0].id : null });
+  }
+  S.va.pending = { kind: 'sale', id: uuid(), done: false, d: { lines: lines }, ask: ask, list: list };
+  vSay(ask ? T('Which "' + cmd.items[ask.idx].name + '" do you mean?', 'Unamaanisha "' + cmd.items[ask.idx].name + '" ipi?') : T('Please check this cash sale and tap Confirm.', 'Tafadhali angalia mauzo haya ya pesa taslimu kisha bonyeza Thibitisha.'));
+}
+function vCard() {
+  var P = S.va.pending; if (!P) return ''; var d = P.d, h = '';
+  if (P.done) return '';
+  var btns = '<div class="actions"><button class="btn2" data-act="vaCancel" type="button">' + T('Cancel', 'Ghairi') + '</button><button class="btn" data-act="vaConfirm" type="button">' + T('Confirm', 'Thibitisha') + '</button></div>';
+  if (P.kind === 'expense') h = '<b>' + T('Record expense', 'Rekodi gharama') + '</b>' + typed('vaAmt', T('Amount (KSh) *', 'Kiasi (KSh) *'), 'inputmode="decimal" value="' + (d.amount == null ? '' : d.amount) + '"') + '<label>' + T('Category', 'Aina') + '</label><select id="vaCat">' + opt(EXP_CATS, d.category) + '</select>' + typed('vaDesc', T('Description', 'Maelezo'), 'maxlength="200" value="' + esc(d.description) + '"') + '<div class="note">' + T('This will reduce your profit. Paid in cash.', 'Hii itapunguza faida yako. Imelipwa taslimu.') + '</div>' + btns;
+  else if (P.kind === 'product') h = '<b>' + T('Add new product', 'Ongeza bidhaa mpya') + '</b>' + typed('vaName', T('Name *', 'Jina *'), 'maxlength="120" value="' + esc(d.name) + '"') + '<div class="two"><div>' + typed('vaBuy', T('Buying price *', 'Bei ya kununua *'), 'inputmode="decimal" value="' + (d.buy == null ? '' : d.buy) + '"') + '</div><div>' + typed('vaSell', T('Selling price *', 'Bei ya kuuza *'), 'inputmode="decimal" value="' + (d.sell == null ? '' : d.sell) + '"') + '</div></div>' + typed('vaStock', T('Opening stock', 'Idadi ya kuanzia'), 'inputmode="decimal" value="' + (d.stock == null ? '' : d.stock) + '"') + btns;
+  else if (P.kind === 'sale') {
+    if (P.ask) return '<b>' + T('Choose the product', 'Chagua bidhaa') + '</b>' + P.ask.opts.map(function (p) { return '<div class="item" data-act="vaPick" data-id="' + esc(p.id) + '"><div class="grow"><div class="t">' + esc(p.name) + '</div><div class="s">' + KSH(p.sellingPrice) + ' · ' + T('stock ', 'stoku ') + QTY(p.stockQty) + '</div></div></div>'; }).join('') + '<div class="actions"><button class="btn2" data-act="vaCancel" type="button">' + T('Cancel', 'Ghairi') + '</button></div>';
+    var tot = 0; h = '<b>' + T('Cash sale', 'Mauzo ya pesa taslimu') + '</b>' + d.lines.map(function (l, i) {
+      var p = P.list.filter(function (x) { return x.id === l.productId; })[0], line = Math.round(Math.round(Number(l.qty) * 1000) * cents(p.sellingPrice) / 1000); tot += line;
+      return '<div class="item"><div class="grow"><div class="t">' + esc(p.name) + '</div><div class="s">' + KSH(p.sellingPrice) + ' × <input id="vaQ' + i + '" value="' + l.qty + '" inputmode="decimal" style="width:70px;display:inline-block"> · ' + T('in stock ', 'stoku ') + QTY(p.stockQty) + '</div></div><b>' + KC(line) + '</b></div>';
+    }).join('') + '<div class="note"><b>' + T('Total to receive in cash: ', 'Jumla ya kupokea taslimu: ') + KC(tot) + '</b><br>' + T('This will deduct the stock and record a fully paid cash sale.', 'Hii itapunguza stoku na kurekodi mauzo yaliyolipwa kikamilifu taslimu.') + '</div>' + btns;
+  }
+  return '<div class="card" style="margin-top:10px">' + h + '</div>';
+}
+function vRender(thinking) {
+  var el = $('vaPanel'); if (!el) return;
+  var log = S.va.log.map(function (m) {
+    return '<div class="note" style="' + (m.who === 'me' ? 'text-align:right;background:#eef6ff' : '') + '">' + esc(m.text) + '</div>';
+  }).join('');
+  el.innerHTML = '<div id="vaLog" style="max-height:24vh;overflow:auto">' + log + (thinking ? '<div class="note">…</div>' : '') + '</div>' +
+    vCard() + '<div class="note">NECPRA Universal Voice Assistant handles voice input. Check every amount and item here; money and stock changes require a tap on Confirm.</div>';
+  var lg = $('vaLog'); if (lg) lg.scrollTop = lg.scrollHeight;
+}
+function openAssistant() {
+  openModal(S.va.lang === 'sw' ? 'Kagua hatua ya Duka' : 'Review Duka action', '<div id="vaPanel"></div>');
+  vRender();
+}
+function vaMic() {
+  // Shared NECPRA Voice Engine: continuous, interim results, pause-tolerant, full transcript preserved (replaces the single-result recogniser).
+  if (!window.NecpraVoiceUI) return;
+  if (S.va.listening) { if (!window.NecpraVoiceRemote || NecpraVoiceRemote.mode() !== 'bridge') { try { NecpraVoice.finish('manual'); } catch (_) {} } return; } // in the app shell the parent's voice sheet has the Finish button
+  S.va.listening = true; vRender();
+  (window.NecpraVoiceRemote ? NecpraVoiceRemote.capture : NecpraVoiceUI.capture)({ mode: 'dictation', lang: S.va.lang, title: T('Duka assistant', 'Msaidizi wa Duka'), prompt: T('Tell me what to do. Take your time, then tap Finish or say "finish recording".', 'Niambie unachotaka. Chukua muda, kisha bonyeza Maliza au sema "maliza kurekodi".') })
+    .then(function (r) {
+      S.va.listening = false;
+      if (r && r.ok && r.transcript) {
+        S.va.spoke = true;
+        try { NecpraVoice.audit('duka.voice', { module: 'duka', outcome: 'captured', lang: r.lang, durationMs: r.durationMs, chars: r.transcript.length }); } catch (_) {}
+        return vHandle(r.transcript);
+      }
+      vRender();
+    }, function () { S.va.listening = false; vRender(); });
+}
+async function vaConfirm(btn) {
+  var P = S.va.pending; if (!P || P.done || P.busy) return;
+  P.busy = true; busy(btn, true, T('Saving…', 'Inahifadhi…'));
+  try {
+    var msg = '';
+    if (P.kind === 'expense') {
+      var amt = Number(val('vaAmt').replace(',', '.')); if (!(amt > 0)) throw new Error(T('Enter the amount spent.', 'Weka kiasi kilichotumika.'));
+      var w = await write({ type: 'expense.create', id: P.id, path: '/shops/' + S.shopId + '/expenses', body: { id: P.id, amount: amt, category: val('vaCat'), description: val('vaDesc') || null, method: 'cash' }, label: 'Expense: ' + val('vaCat') + ' ' + KSH(amt), meta: { amount: amt }, offlineOk: true });
+      msg = w.queued ? T('Saved on this phone. Expense ' + KSH(amt) + ' will sync when you are online.', 'Imehifadhiwa kwenye simu. Gharama ' + KSH(amt) + ' itatumwa ukiwa mtandaoni.') : T('Expense of ' + KSH(amt) + ' recorded.', 'Gharama ya ' + KSH(amt) + ' imerekodiwa.');
+    } else if (P.kind === 'product') {
+      var o = { id: P.id, name: val('vaName'), category: null, unit: 'piece', buyingPrice: val('vaBuy') === '' ? null : Number(val('vaBuy')), sellingPrice: val('vaSell') === '' ? null : Number(val('vaSell')), minStock: 0, stockQty: val('vaStock') === '' ? 0 : Number(val('vaStock')), barcode: null, clientOpId: uuid() };
+      confirmedLoss = true; var bad = clientCheck(o); if (bad) throw new Error(bad); if (!(o.stockQty >= 0)) throw new Error(T('Stock cannot be negative.', 'Stoku haiwezi kuwa hasi.'));
+      var w2 = await write({ type: 'product.create', id: P.id, path: '/shops/' + S.shopId + '/products', body: o, label: 'Add product: ' + o.name, offlineOk: true });
+      msg = w2.queued ? T('Saved on this phone. "' + o.name + '" will sync when you are online.', 'Imehifadhiwa kwenye simu. "' + o.name + '" itatumwa ukiwa mtandaoni.') : T('"' + o.name + '" added.', '"' + o.name + '" imeongezwa.');
+    } else if (P.kind === 'sale') {
+      var items = [], tot = 0;
+      P.d.lines.forEach(function (l, i) {
+        var q = Number(String(val('vaQ' + i)).replace(',', '.')), p = P.list.filter(function (x) { return x.id === l.productId; })[0];
+        if (!(q > 0)) throw new Error(T('Enter a quantity above zero for ' + p.name + '.', 'Weka idadi zaidi ya sifuri kwa ' + p.name + '.'));
+        if (q > p.stockQty) throw new Error(T('Only ' + QTY(p.stockQty) + ' ' + p.unit + ' of ' + p.name + ' in stock.', p.name + ' imebaki ' + QTY(p.stockQty) + ' tu.'));
+        items.push({ productId: p.id, qty: q, unitPrice: p.sellingPrice }); tot += Math.round(Math.round(q * 1000) * cents(p.sellingPrice) / 1000);
+      });
+      var body = { id: P.id, items: items, payments: [{ method: 'cash', amount: tot / 100 }] };
+      var w3 = await write({ type: 'sale.create', id: P.id, path: '/shops/' + S.shopId + '/sales', body: body, label: 'Cash sale ' + KC(tot), meta: { total: tot / 100 }, offlineOk: true });
+      msg = w3.queued ? T('Saved on this phone. Cash sale of ' + KC(tot) + ' will sync when you are online.', 'Imehifadhiwa kwenye simu. Mauzo ya ' + KC(tot) + ' yatatumwa ukiwa mtandaoni.') : T('Sale recorded: ' + KC(tot) + ' cash (receipt #' + w3.data.sale.receiptNo + ').', 'Mauzo yamerekodiwa: ' + KC(tot) + ' taslimu (risiti #' + w3.data.sale.receiptNo + ').');
+    }
+    P.done = true; S.va.pending = null; vSay(msg); S.va.spoke = S.va.spoke; vRender();
+    try { await loadTab(); render(); vRender(); } catch (_) {}
+  } catch (e) { P.busy = false; vSay(e.message); vRender(); }
+}
+function vaPick(id) {
+  var P = S.va.pending; if (!P || !P.ask) return;
+  P.d.lines[P.ask.idx].productId = id; P.ask = null;
+  for (var i = 0; i < P.d.lines.length; i++) if (!P.d.lines[i].productId) { var hits = vMatch(P.d.lines[i].name, P.list); if (hits.length === 1) P.d.lines[i].productId = hits[0].id; else { P.ask = { idx: i, opts: hits.slice(0, 5) }; break; } }
+  vSay(P.ask ? T('Which "' + P.d.lines[P.ask.idx].name + '" do you mean?', 'Unamaanisha "' + P.d.lines[P.ask.idx].name + '" ipi?') : T('Please check this cash sale and tap Confirm.', 'Tafadhali angalia mauzo haya kisha bonyeza Thibitisha.'));
+  vRender();
+}
+
+/* ───── events ───── */
+/* ───── NECPRA Group Buying ("Buy together") + Smart Waste Prevention ─────
+   Both need a live connection (quotes, payment checks and stock changes are never faked offline).
+   All figures come from the server; estimates are labelled as estimates. */
+var GB_NOCACHE = { noCache: true };
+var gbBad = function (e) { toast(e.message || 'Something went wrong', true); };
+function gbHours(h) { return new Date(Date.now() + Number(h) * 3600000).toISOString(); }
+function gbStatusLabel(s) { return { open: T('Open', 'Wazi'), locked: T('Awaiting payment', 'Inasubiri malipo'), confirmed: T('Confirmed', 'Imethibitishwa'), delivered: T('Delivered', 'Imewasili'), completed: T('Completed', 'Imekamilika'), cancelled: T('Cancelled', 'Imeghairiwa'), disputed: T('Disputed', 'Ina mgogoro') }[s] || s; }
+function viewGroup() {
+  var g = S.gb; if (!g) return S.loading ? '<div class="note">' + T('Loading…', 'Inapakia…') + '</div>' : '<h3>' + T('Buy stock together', 'Nunua bidhaa pamoja') + '</h3><div class="note">' + T('Group buying needs internet for live supplier quotes. You can still save a draft order below.', 'Ununuzi wa pamoja unahitaji mtandao. Unaweza kuhifadhi rasimu.') + '</div><div class="actions"><button class="btn" data-act="gbNew" type="button"><i class="fas fa-users"></i> ' + T('Start a group order', 'Anzisha oda ya pamoja') + '</button></div>' + gbDraftsView();
+  var d = g.dash, m = d.mine;
+  var cards = '<div class="two"><div class="card"><div class="s">' + T('Open group orders', 'Oda za pamoja zilizo wazi') + '</div><b>' + d.marketplace.openOrders + '</b></div>' +
+    '<div class="card"><div class="s">' + T('Awaiting my payment', 'Zinasubiri malipo yangu') + '</div><b>' + m.awaitingPayment + '</b></div></div>' +
+    '<div class="two"><div class="card"><div class="s">' + T('Pending deliveries', 'Zinazosubiri kuletwa') + '</div><b>' + m.pendingDeliveries + '</b></div>' +
+    '<div class="card"><div class="s">' + T('Verified savings', 'Akiba iliyothibitishwa') + '</div><b>' + KSH(d.verifiedSavings.amount) + '</b><div class="s">' + T('vs the price you entered, on completed orders', 'ukilinganisha na bei uliyoweka, oda zilizokamilika') + '</div></div></div>';
+  var list = g.orders.length ? g.orders.map(function (o) {
+    return '<div class="item" data-act="gbOpen" data-id="' + esc(o.id) + '"><div class="grow"><div class="t">' + esc(o.productName) + ' · ' + esc(o.market) + '</div>' +
+      '<div class="s">' + QTY(o.combinedQty) + ' ' + esc(o.unit) + ' · ' + o.participants + ' ' + T('traders', 'wafanyabiashara') + (o.needsMoreQty > 0 ? ' · ' + T('needs ', 'inahitaji ') + QTY(o.needsMoreQty) + ' ' + T('more', 'zaidi') : '') +
+      (o.bestQuotedPrice != null ? ' · ' + T('best quote ', 'bei bora ') + KSH(o.bestQuotedPrice) + '/' + esc(o.unit) : ' · ' + T('no supplier quote yet', 'bado hakuna bei ya msambazaji')) + '</div>' +
+      '<div class="s">' + T('Closes ', 'Inafungwa ') + new Date(o.closesAt).toLocaleString('en-KE') + (o.joinedByMe ? ' · ' + T('you joined', 'umejiunga') : '') + '</div></div></div>';
+  }).join('') : '<div class="s">' + T('No open group orders in your area yet. Start one!', 'Hakuna oda za pamoja bado. Anzisha moja!') + '</div>';
+  var mine = m.orders.length ? '<h3>' + T('My group purchases', 'Manunuzi yangu ya pamoja') + '</h3>' + m.orders.map(function (o) {
+    return '<div class="item" data-act="gbOpen" data-id="' + esc(o.orderId) + '"><div class="grow"><div class="t">' + esc(o.product) + ' · ' + QTY(o.qty) + ' ' + esc(o.unit) + '</div><div class="s">' + gbStatusLabel(o.orderStatus) +
+      (o.amountDue != null ? ' · ' + T('due ', 'deni ') + KSH(o.amountDue) + ' · ' + T('paid ', 'umelipa ') + KSH(o.amountPaid) : '') + '</div></div></div>';
+  }).join('') : '';
+  return '<h3>' + T('Buy stock together', 'Nunua bidhaa pamoja') + '</h3>' + cards +
+    '<div class="actions"><button class="btn" data-act="gbNew" type="button"><i class="fas fa-users"></i> ' + T('Start a group order', 'Anzisha oda ya pamoja') + '</button>' +
+    '<button class="btn2" data-act="gbSupplier" type="button">' + T('I am a supplier', 'Mimi ni msambazaji') + '</button><button class="btn2" data-act="gbChamas" type="button"><i class="fas fa-people-group"></i> ' + T('My Chamas', 'Chama zangu') + '</button></div>' +
+    gbDraftsView() + '<h3>' + T('Open orders', 'Oda zilizo wazi') + '</h3><div class="card">' + list + '</div>' + mine + (m.orders.length ? exBar('gb') : '') +
+    '<div class="note">' + T('Prices shown come only from suppliers NECPRA has verified. No saving is shown unless a real quote exists.', 'Bei zinatoka kwa wasambazaji waliothibitishwa na NECPRA pekee. Hakuna akiba inayoonyeshwa bila bei halisi.') + '</div>';
+}
+/* ───── Group-buy drafts (offline) ─────
+   A draft is only a note kept on this phone: it is NOT an order, NOT a join and NOT a payment. Group buying needs live supplier quotes and
+   NECPRA payment checks, so nothing is sent until the trader taps Send while online. When sent, the server re-checks everything
+   (order still open? still before closing time?) and may refuse; the reason is then shown on the draft. Each order draft keeps ONE fixed id,
+   which the server uses to make a retry harmless (a lost response can never create two orders). Closing times are saved as "hours after you send",
+   so a draft written yesterday never carries a closing time that has already passed. */
+var GBDK = 'necpra_duka_gbdrafts_v1';
+function gbDrafts() { var a = lsGet(GBDK, []); return Array.isArray(a) ? a.filter(function (d) { return d && d.id && d.shopId === S.shopId; }) : []; }
+function gbDraftsAll() { var a = lsGet(GBDK, []); return Array.isArray(a) ? a : []; }
+function gbDraftSave(d) {
+  var a = gbDraftsAll().filter(function (x) { return x.id !== d.id && !(d.kind === 'join' && x.kind === 'join' && x.shopId === d.shopId && x.orderId === d.orderId); });
+  a.push(d); if (!lsSet(GBDK, a)) { toast(T('Could not save the draft — the phone storage is full.', 'Imeshindwa kuhifadhi — nafasi imejaa.'), true); return false; } return true;
+}
+function gbDraftDel(id) { lsSet(GBDK, gbDraftsAll().filter(function (x) { return x.id !== id; })); }
+function gbDraftFromForm() {
+  var close = Number(val('gbClose')) || 24, pay = Number(val('gbPay')) || 24;
+  return { id: S.gbDraftId || uuid(), kind: 'order', shopId: S.shopId, savedAt: new Date().toISOString(), productName: val('gbName'), unit: val('gbUnit'), market: val('gbMarket'),
+    qty: numOrNull('gbQty'), minQty: numOrNull('gbMin') || 0, closeH: close, payH: pay, referencePrice: numOrNull('gbRef') };
+}
+function gbDraftOk(d) {
+  if (!d.productName) { toast(T('Enter the product name', 'Weka jina la bidhaa'), true); return false; }
+  if (!d.market) { toast(T('Enter the market or delivery place', 'Weka soko au mahali'), true); return false; }
+  if (d.qty != null && !(d.qty > 0)) { toast(T('Your quantity must be more than zero', 'Kiasi lazima kiwe zaidi ya sifuri'), true); return false; }
+  return true;
+}
+function gbSaveDraft() {
+  var d = gbDraftFromForm(); if (!gbDraftOk(d)) return;
+  if (!gbDraftSave(d)) return; S.gbDraftId = null; closeModal(); toast(T('Draft saved on this phone. It is not sent yet.', 'Rasimu imehifadhiwa. Haijatumwa bado.')); render();
+}
+function gbDraftSaveJoin() {
+  var s = S.gbOff; if (!s) return; var q = numOrNull('gbJQty'); if (!(q > 0)) return toast(T('Enter the quantity you want', 'Weka kiasi unachotaka'), true);
+  var d = { id: uuid(), kind: 'join', shopId: S.shopId, savedAt: new Date().toISOString(), orderId: s.id, productName: s.productName, unit: s.unit, market: s.market, closesAt: s.closesAt, qty: q, referencePrice: numOrNull('gbJRef') };
+  if (!gbDraftSave(d)) return; S.gbOff = null; closeModal(); toast(T('Draft saved on this phone. You have NOT joined yet.', 'Rasimu imehifadhiwa. Bado hujajiunga.')); render();
+}
+/* Offline: no live order details are available, so only the saved list row is shown — never invented quotes, prices or savings. */
+function gbOfflineOpen(id) {
+  var o = (S.gb && S.gb.orders || []).filter(function (x) { return x.id === id; })[0];
+  if (!o) return toast(T('No internet connection.', 'Hakuna mtandao.'), true);
+  S.gbOff = o;
+  var ex = gbDrafts().filter(function (d) { return d.kind === 'join' && d.orderId === id; })[0];
+  openModal(esc(o.productName), '<div class="note"><b>' + T('You are offline.', 'Hauko mtandaoni.') + '</b> ' + T('Supplier quotes, prices and payments are live and cannot be shown or confirmed now. You can save a draft and send it when you are back online.', 'Bei na malipo ni za moja kwa moja. Unaweza kuhifadhi rasimu na kuituma ukiwa mtandaoni.') + '</div>' +
+    '<div class="s">' + esc(o.market) + ' · ' + QTY(o.combinedQty) + ' ' + esc(o.unit) + ' · ' + T('closes ', 'inafungwa ') + esc(fmtWhen(o.closesAt)) + ' · ' + T('as last saved on this phone', 'kama ilivyohifadhiwa mwisho') + '</div>' +
+    '<label>' + T('Your quantity', 'Kiasi chako') + ' (' + esc(o.unit) + ')</label><input id="gbJQty" type="number" min="0" step="any" inputmode="decimal" value="' + (ex ? ex.qty : '') + '">' +
+    '<label>' + T('What you usually pay per unit (optional)', 'Bei unayolipa kawaida (si lazima)') + '</label><input id="gbJRef" type="number" min="0" step="any" inputmode="decimal" value="' + (ex && ex.referencePrice != null ? ex.referencePrice : '') + '">' +
+    '<div class="actions"><button class="btn2" data-act="closeModal" type="button">' + T('Close', 'Funga') + '</button><button class="btn" data-act="gbDraftJoin" type="button">' + T('Save join draft', 'Hifadhi rasimu ya kujiunga') + '</button></div>');
+}
+async function gbSendDraft(btn, id, quiet) {
+  var d = gbDraftsAll().filter(function (x) { return x.id === id; })[0]; if (!d) return false;
+  if (navigator.onLine === false) { toast(T('Still offline. Draft kept.', 'Bado uko nje ya mtandao. Rasimu imehifadhiwa.'), true); return false; }
+  busy(btn, true, T('Sending…', 'Inatuma…'));
+  try {
+    if (d.kind === 'order') {
+      var body = { id: d.id, shopId: d.shopId, productName: d.productName, unit: d.unit, market: d.market, minQty: d.minQty || 0, closesAt: gbHours(d.closeH), paymentDeadline: gbHours(d.closeH + d.payH) };
+      if (d.qty != null) body.qty = d.qty; if (d.referencePrice != null) body.referencePrice = d.referencePrice;
+      await api('POST', '/group-buy/orders', body);
+    } else await api('POST', '/group-buy/orders/' + d.orderId + '/join', { shopId: d.shopId, qty: d.qty, referencePrice: d.referencePrice });
+    gbDraftDel(id); if (!quiet) { toast(d.kind === 'order' ? T('Group order created', 'Oda imeundwa') : T('You joined the order', 'Umejiunga na oda')); refresh(); }
+    return true;
+  } catch (e) {
+    if (e.offline) { if (!quiet) toast(T('Could not reach the server. Draft kept.', 'Seva haipatikani. Rasimu imehifadhiwa.'), true); return false; }
+    var all = gbDraftsAll(); all.forEach(function (x) { if (x.id === id) x.error = e.message || 'Rejected'; }); lsSet(GBDK, all);
+    if (!quiet) { toast(e.message || 'Rejected', true); render(true); }
+    return false;
+  } finally { busy(btn, false); }
+}
+async function gbSendAllDrafts(btn) {
+  var list = gbDrafts(), ok = 0; if (!list.length) return;
+  busy(btn, true, T('Sending…', 'Inatuma…'));
+  for (var i = 0; i < list.length; i++) { if (await gbSendDraft(null, list[i].id, true)) ok++; }
+  busy(btn, false); toast(ok + ' / ' + list.length + T(' sent. Any that were refused stay as drafts with the reason.', ' zimetumwa. Zilizokataliwa zinabaki na sababu.'), ok !== list.length); refresh();
+}
+function gbDraftsView() {
+  var l = gbDrafts(); if (!l.length) return '';
+  return '<h3>' + T('My drafts (not sent)', 'Rasimu zangu (hazijatumwa)') + '</h3><div class="card">' + l.map(function (d) {
+    var title = d.kind === 'order' ? T('New group order: ', 'Oda mpya: ') + esc(d.productName) : T('Join: ', 'Jiunge: ') + esc(d.productName);
+    var sub = d.kind === 'order' ? esc(d.market) + (d.qty != null ? ' · ' + QTY(d.qty) + ' ' + esc(d.unit) : '') + ' · ' + T('closes ', 'inafungwa ') + d.closeH + T(' h after you send', ' saa baada ya kutuma') : QTY(d.qty) + ' ' + esc(d.unit) + ' · ' + esc(d.market);
+    return '<div class="item"><div class="grow"><div class="t">' + title + '</div><div class="s">' + sub + ' · ' + T('saved ', 'imehifadhiwa ') + esc(fmtWhen(d.savedAt)) + '</div>' + (d.error ? '<div class="s" style="color:#b3261e">' + T('Not accepted: ', 'Haikukubaliwa: ') + esc(d.error) + '</div>' : '') + '</div>' +
+      '<button class="btn2" data-act="gbDraftSend" data-id="' + esc(d.id) + '" type="button">' + T('Send', 'Tuma') + '</button><button class="btn2" data-act="gbDraftDel" data-id="' + esc(d.id) + '" type="button" aria-label="' + T('Delete draft', 'Futa rasimu') + '"><i class="fas fa-trash"></i></button></div>';
+  }).join('') + (l.length > 1 ? '<div class="actions"><button class="btn" data-act="gbDraftSendAll" type="button">' + T('Send all drafts', 'Tuma zote') + '</button></div>' : '') + '</div>' +
+    '<div class="note">' + T('A draft is only a note on this phone. Nothing is ordered, joined or paid until you send it.', 'Rasimu ni kumbukumbu tu kwenye simu hii. Hakuna kinachoagizwa au kulipwa hadi uitume.') + '</div>';
+}
+window.addEventListener('online', function () { var n = gbDrafts().length; if (n) { toast(n + T(' group-buy draft(s) waiting. Open Group buy to send them.', ' rasimu za ununuzi wa pamoja zinasubiri. Fungua Ununuzi wa pamoja kuzituma.')); } });
+
+/* ───── Export to Excel (.xlsx) and PDF ─────
+   Built on the phone from the figures already loaded on screen, so it also works offline (it exports the last information shown —
+   if the screen says "saved on this phone", the file carries that older information, and the file says so). No server call, no third-party library. */
+var EX = (function () {
+  var CRC = (function () { var t = [], c, n, k; for (n = 0; n < 256; n++) { c = n; for (k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+  function crc32(u) { var c = 0xFFFFFFFF; for (var i = 0; i < u.length; i++) c = CRC[(c ^ u[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+  function utf8(s) { return new TextEncoder().encode(s); }
+  function concat(list) { var n = 0, o = 0, r; list.forEach(function (p) { n += p.length; }); r = new Uint8Array(n); list.forEach(function (p) { r.set(p, o); o += p.length; }); return r; }
+  /* ZIP (stored, no compression) — an .xlsx is a zip of XML files */
+  function zip(files) {
+    var d = new Date(), dt = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate(), tm = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+    var parts = [], cen = [], off = 0;
+    files.forEach(function (f) {
+      var nm = utf8(f.name), c = crc32(f.data), h = new DataView(new ArrayBuffer(30)), e = new DataView(new ArrayBuffer(46));
+      h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true); h.setUint16(10, tm, true); h.setUint16(12, dt, true);
+      h.setUint32(14, c, true); h.setUint32(18, f.data.length, true); h.setUint32(22, f.data.length, true); h.setUint16(26, nm.length, true);
+      parts.push(new Uint8Array(h.buffer), nm, f.data);
+      e.setUint32(0, 0x02014b50, true); e.setUint16(4, 20, true); e.setUint16(6, 20, true); e.setUint16(8, 0x0800, true); e.setUint16(12, tm, true); e.setUint16(14, dt, true);
+      e.setUint32(16, c, true); e.setUint32(20, f.data.length, true); e.setUint32(24, f.data.length, true); e.setUint16(28, nm.length, true); e.setUint32(42, off, true);
+      cen.push(new Uint8Array(e.buffer), nm);
+      off += 30 + nm.length + f.data.length;
+    });
+    var csz = 0, end = new DataView(new ArrayBuffer(22));
+    cen.forEach(function (p) { csz += p.length; });
+    end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true); end.setUint32(12, csz, true); end.setUint32(16, off, true);
+    return concat(parts.concat(cen, [new Uint8Array(end.buffer)]));
+  }
+  function xe(s) { return String(s).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+  function colL(i) { var s = ''; i++; while (i > 0) { var m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; }
+  function sheetName(n, used) { var b = String(n || 'Sheet').replace(/[\[\]:*?\/\\]/g, ' ').trim().slice(0, 31) || 'Sheet', nm = b, i = 2; while (used.indexOf(nm.toLowerCase()) >= 0) nm = b.slice(0, 28) + ' ' + (i++); used.push(nm.toLowerCase()); return nm; }
+  function sheetXml(sh) {
+    var all = [sh.cols.map(function (c) { return c.h; })].concat(sh.rows), x = '';
+    all.forEach(function (row, ri) {
+      var cells = '';
+      row.forEach(function (v, ci) {
+        var ref = colL(ci) + (ri + 1), col = sh.cols[ci] || {};
+        if (v == null || v === '') return;
+        if (ri === 0) cells += '<c r="' + ref + '" s="1" t="inlineStr"><is><t xml:space="preserve">' + xe(v) + '</t></is></c>';
+        else if (typeof v === 'number' && isFinite(v)) cells += '<c r="' + ref + '"' + (col.t === 'money' ? ' s="2"' : '') + '><v>' + v + '</v></c>';
+        else cells += '<c r="' + ref + '" t="inlineStr"><is><t xml:space="preserve">' + xe(v) + '</t></is></c>';
+      });
+      x += '<row r="' + (ri + 1) + '">' + cells + '</row>';
+    });
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>' +
+      sh.cols.map(function (c, i) { return '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + Math.max(10, Math.min(48, (c.w || 14) + 2)) + '" customWidth="1"/>'; }).join('') + '</cols><sheetData>' + x + '</sheetData></worksheet>';
+  }
+  function xlsx(doc) {
+    var used = [], names = doc.sheets.map(function (s) { return sheetName(s.name, used); });
+    var f = [
+      { name: '[Content_Types].xml', x: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' + doc.sheets.map(function (s, i) { return '<Override PartName="/xl/worksheets/sheet' + (i + 1) + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'; }).join('') + '</Types>' },
+      { name: '_rels/.rels', x: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>' },
+      { name: 'xl/workbook.xml', x: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>' + names.map(function (n, i) { return '<sheet name="' + xe(n) + '" sheetId="' + (i + 1) + '" r:id="rId' + (i + 1) + '"/>'; }).join('') + '</sheets></workbook>' },
+      { name: 'xl/_rels/workbook.xml.rels', x: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' + names.map(function (n, i) { return '<Relationship Id="rId' + (i + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' + (i + 1) + '.xml"/>'; }).join('') + '<Relationship Id="rId' + (names.length + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>' },
+      { name: 'xl/styles.xml', x: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="4" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>' }
+    ];
+    doc.sheets.forEach(function (s, i) { f.push({ name: 'xl/worksheets/sheet' + (i + 1) + '.xml', x: sheetXml(s) }); });
+    return zip(f.map(function (o) { return { name: o.name, data: utf8(o.x) }; }));
+  }
+  /* PDF — plain A4 pages, Courier tables (fixed-width so columns always line up) */
+  function money(n) { var v = Number(n); if (!isFinite(v)) return ''; var p = v.toFixed(2).split('.'); return p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + p[1]; }
+  function qtyS(n) { var v = Number(n); return isFinite(v) ? String(Math.round(v * 1000) / 1000) : ''; }
+  function clean(s) { return String(s == null ? '' : s).replace(/[–—]/g, '-').replace(/→/g, '>').replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[^\x20-\x7E -ÿ]/g, '?'); }
+  function pe(s) { return clean(s).replace(/[\\()]/g, '\\$&'); }
+  function pdf(doc) {
+    var W = 595, H = 842, M = 40, FS = 8, CW = FS * 0.6, LH = 12, maxc = Math.floor((W - 2 * M) / CW), pages = [], cur, y;
+    function np() { cur = []; pages.push(cur); y = H - M; }
+    function txt(font, size, x, yy, s) { cur.push('BT /' + font + ' ' + size + ' Tf ' + x.toFixed(1) + ' ' + yy.toFixed(1) + ' Td (' + pe(s) + ') Tj ET'); }
+    function need(h) { if (y - h < M + 18) np(); }
+    np();
+    txt('F1', 15, M, y, doc.title); y -= 17;
+    (doc.lines || []).forEach(function (l) { need(12); txt('F4', 9, M, y, l); y -= 12; });
+    y -= 6;
+    doc.sheets.forEach(function (sh) {
+      var gap = 2, w = sh.cols.map(function (c) { return Math.max(4, c.w || 12); }), tot = w.reduce(function (a, b) { return a + b; }, 0) + gap * (w.length - 1);
+      if (tot > maxc) { var k = (maxc - gap * (w.length - 1)) / (tot - gap * (w.length - 1)); w = w.map(function (x) { return Math.max(4, Math.floor(x * k)); }); }
+      function fit(v, i) {
+        var c = sh.cols[i], s = typeof v === 'number' ? (c.t === 'money' ? money(v) : qtyS(v)) : clean(v), n = w[i];
+        if (s.length > n) s = s.slice(0, n - 1) + '.';
+        return typeof v === 'number' ? s.padStart(n) : s.padEnd(n);
+      }
+      function line(row) { return sh.cols.map(function (c, i) { return fit(row[i], i); }).join('  '); }
+      function head() { need(LH * 3); txt('F3', FS, M, y, line(sh.cols.map(function (c) { return c.h; }).map(function (h) { return String(h); }))); cur.push(M + ' ' + (y - 3).toFixed(1) + ' m ' + (W - M) + ' ' + (y - 3).toFixed(1) + ' l S'); y -= LH + 2; }
+      need(LH * 4); txt('F1', 10, M, y, sh.name); y -= LH + 2;
+      head();
+      if (!sh.rows.length) { txt('F4', 9, M, y, 'Nothing to show for this period.'); y -= LH; }
+      sh.rows.forEach(function (r) { if (y - LH < M + 18) { np(); head(); } txt('F2', FS, M, y, line(r)); y -= LH; });
+      y -= 10;
+    });
+    pages.forEach(function (p, i) { y = M - 8; cur = p; txt('F4', 7, M, y, 'NECPRA Duka Smart  |  ' + doc.stamp + '  |  Page ' + (i + 1) + ' of ' + pages.length); });
+    var objs = [null, '<< /Type /Catalog /Pages 2 0 R >>', '', '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>', '<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>', '<< /Type /Font /Subtype /Type1 /BaseFont /Courier-Bold /Encoding /WinAnsiEncoding >>', '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>'], kids = [];
+    pages.forEach(function (p, i) {
+      var pn = 7 + i * 2, s = p.join('\n');
+      kids.push(pn + ' 0 R');
+      objs[pn] = '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + W + ' ' + H + '] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R /F4 6 0 R >> >> /Contents ' + (pn + 1) + ' 0 R >>';
+      objs[pn + 1] = '<< /Length ' + s.length + ' >>\nstream\n' + s + '\nendstream';
+    });
+    objs[2] = '<< /Type /Pages /Kids [' + kids.join(' ') + '] /Count ' + pages.length + ' >>';
+    var out = '%PDF-1.4\n', offs = [];
+    for (var i = 1; i < objs.length; i++) { offs[i] = out.length; out += i + ' 0 obj\n' + objs[i] + '\nendobj\n'; }
+    var xr = out.length; out += 'xref\n0 ' + objs.length + '\n0000000000 65535 f \n';
+    for (i = 1; i < objs.length; i++) out += String(offs[i]).padStart(10, '0') + ' 00000 n \n';
+    out += 'trailer\n<< /Size ' + objs.length + ' /Root 1 0 R >>\nstartxref\n' + xr + '\n%%EOF';
+    var u = new Uint8Array(out.length); for (i = 0; i < out.length; i++) u[i] = out.charCodeAt(i) & 255;
+    return u;
+  }
+  return { xlsx: xlsx, pdf: pdf, crc32: crc32 };
+})();
+async function exSave(name, mime, bytes) {
+  try {
+    var f = new File([bytes], name, { type: mime });
+    if (navigator.canShare && navigator.canShare({ files: [f] })) { await navigator.share({ files: [f], title: name }); return true; }
+  } catch (e) { if (e && e.name === 'AbortError') return false; }
+  var u = URL.createObjectURL(new Blob([bytes], { type: mime })), a = document.createElement('a');
+  a.href = u; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(u); }, 4000);
+  return true;
+}
+function exStamp() { return 'Generated ' + new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }); }
+/* The figures for each export come only from what is already loaded from real records; nothing is estimated or invented here. */
+function exDoc(kind) {
+  var sh = shop(), sn = sh ? sh.name : 'Shop', M = 'money', doc = { stamp: exStamp(), lines: [sn], sheets: [] };
+  if (S.staleAt) doc.lines.push('Note: these figures were saved on this phone on ' + fmtWhen(new Date(S.staleAt).toISOString()) + ' and may be out of date.');
+  if (kind === 'rep') {
+    var d = S.fd && S.fd.rep; if (!d) return null; var t = d.totals, ps = d.position;
+    doc.title = 'Profit and loss report (' + d.period + ')'; doc.lines.push(d.from + ' to ' + d.to);
+    doc.sheets.push({ name: 'Summary', cols: [{ h: 'Item', w: 34 }, { h: 'Amount (KSh)', w: 16, t: M }], rows: [
+      ['Revenue (sales)', t.revenue], ['Cost of goods sold', t.costOfGoodsSold], ['Gross profit', t.grossProfit], ['Expenses', t.expenses], ['Spoiled stock (inventory loss)', t.stockLosses || 0], ['Net profit', t.netProfit],
+      ['Cash received', t.totalCashReceived], ['  of which cash sales', t.cashFromSales], ['  of which M-PESA sales', t.mpesaFromSales], ['  of which debts collected', t.debtCollected], ['Credit given (not cash)', t.creditGiven], ['Paid to suppliers (not an expense)', t.supplierPayments],
+      ['Customers owe you (now)', ps.customersOweYou], ['You owe suppliers (now)', ps.youOweSuppliers], ['Stock at cost (now)', ps.stockAtCost]] });
+    doc.sheets.push({ name: 'By ' + (d.period === 'daily' ? 'day' : d.period === 'weekly' ? 'week' : 'month'), cols: [{ h: 'Period', w: 11 }, { h: 'Sales', w: 6 }, { h: 'Revenue', w: 12, t: M }, { h: 'Expenses', w: 11, t: M }, { h: 'Spoiled', w: 10, t: M }, { h: 'Net profit', w: 12, t: M }, { h: 'Cash in', w: 12, t: M }, { h: 'Credit', w: 10, t: M }, { h: 'Paid suppl.', w: 11, t: M }],
+      rows: d.rows.map(function (r) { return [r.periodStart, r.salesCount, r.revenue, r.expenses, r.stockLosses || 0, r.netProfit, r.totalCashReceived, r.creditGiven || 0, r.supplierPayments || 0]; }) });
+    return { doc: doc, file: 'profit-report-' + d.period };
+  }
+  if (kind === 'debts') {
+    var g = S.fd && S.fd.debts; if (!g) return null; doc.title = 'Debts';
+    doc.sheets.push({ name: 'Customers owe you', cols: [{ h: 'Customer', w: 26 }, { h: 'Phone', w: 14 }, { h: 'Unpaid sales', w: 12 }, { h: 'Since', w: 14 }, { h: 'Owed (KSh)', w: 14, t: M }], rows: g.customersOweYou.customers.map(function (x) { return [x.name, x.phone || '', x.unpaidSales, fmtWhen(x.oldestSaleAt), x.owed]; }) });
+    doc.sheets.push({ name: 'You owe suppliers', cols: [{ h: 'Supplier', w: 30 }, { h: 'Owed (KSh)', w: 14, t: M }], rows: g.youOweSuppliers.suppliers.map(function (x) { return [x.name, x.owed]; }) });
+    return { doc: doc, file: 'debts' };
+  }
+  if (kind === 'exp') {
+    var e = S.fd && S.fd.exp; if (!e) return null; doc.title = 'Expenses (last 30 days)'; doc.lines.push('Total (not voided): KSh ' + money(e.total));
+    doc.sheets.push({ name: 'Expenses', cols: [{ h: 'Date', w: 11 }, { h: 'Category', w: 16 }, { h: 'Method', w: 8 }, { h: 'Amount (KSh)', w: 13, t: M }, { h: 'Status', w: 8 }, { h: 'Note', w: 30 }], rows: e.expenses.map(function (x) { return [x.expenseDate, x.category, x.method, x.amount, x.status === 'voided' ? 'voided' : 'ok', x.description || '']; }) });
+    return { doc: doc, file: 'expenses' };
+  }
+  if (kind === 'sales') {
+    doc.title = 'Sales (' + ({ today: 'today', '7': 'last 7 days', '30': 'last 30 days', all: 'all time' }[S.range] || S.range) + ')';
+    var m = S.salesSummary; if (m) doc.lines.push('Sales KSh ' + money(m.total) + ' (' + m.count + ')  |  received KSh ' + money(m.amountPaid) + '  |  unpaid KSh ' + money(m.balanceDue) + '  |  gross profit KSh ' + money(m.grossProfit));
+    doc.sheets.push({ name: 'Sales', cols: [{ h: 'Receipt', w: 8 }, { h: 'Date', w: 15 }, { h: 'Customer', w: 20 }, { h: 'Total (KSh)', w: 13, t: M }, { h: 'Balance due', w: 12, t: M }, { h: 'Payment', w: 9 }, { h: 'Status', w: 10 }],
+      rows: S.sales.map(function (s) { return [String(s.receiptNo), fmtWhen(s.soldAt), s.customerName || '', s.total, s.balanceDue || 0, s.paymentStatus, s.status === 'voided' ? 'cancelled' : 'completed']; }) });
+    return { doc: doc, file: 'sales' };
+  }
+  if (kind === 'waste') {
+    var w = S.waste; if (!w) return null; doc.title = 'Waste and stock at risk'; var sm = w.summary;
+    doc.lines.push('Stock at risk (estimate): KSh ' + money(sm.stockAtRiskValue) + '  |  Spoilage losses, last 30 days: KSh ' + money(sm.lossesLast30Days) + '  |  previous 30 days: KSh ' + money(sm.lossesPrevious30Days));
+    doc.lines.push('Risk figures are estimates from your own sales and stock records, not confirmed spoilage.');
+    var br = []; w.items.forEach(function (it) { it.batches.forEach(function (b) { br.push([it.name, it.unit, b.qtyOnHandEstimate, b.ageDays, b.freshness, b.estimatedAtRiskQty || 0]); }); });
+    doc.sheets.push({ name: 'Perishable stock by batch', cols: [{ h: 'Product', w: 22 }, { h: 'Unit', w: 8 }, { h: 'Qty (est.)', w: 11 }, { h: 'Age (days)', w: 10 }, { h: 'Freshness', w: 11 }, { h: 'May not sell', w: 12 }], rows: br });
+    doc.sheets.push({ name: 'Selling speed and next purchase', cols: [{ h: 'Product', w: 22 }, { h: 'In stock', w: 10 }, { h: 'Avg/day', w: 9 }, { h: 'Days left', w: 9 }, { h: 'Basis', w: 11 }, { h: 'Next buy (est.)', w: 14 }],
+      rows: w.items.map(function (it) { return [it.name, it.stockQty, it.sales.avgDailyQty, it.sales.daysOfStockLeft == null ? '' : it.sales.daysOfStockLeft, it.sales.confidence === 'preliminary' ? 'preliminary' : 'your sales', it.reorder ? it.reorder.suggestedQty : '']; }) });
+    return { doc: doc, file: 'waste-report' };
+  }
+  if (kind === 'gb') {
+    var gb = S.gb; if (!gb) return null; doc.title = 'Group purchases'; var mine = gb.dash.mine;
+    doc.lines.push('Verified savings on completed orders: KSh ' + money(gb.dash.verifiedSavings.amount) + ' (only counted where a real supplier quote exists)');
+    doc.sheets.push({ name: 'My group purchases', cols: [{ h: 'Product', w: 22 }, { h: 'Qty', w: 9 }, { h: 'Unit', w: 8 }, { h: 'Order status', w: 14 }, { h: 'Amount due', w: 12, t: M }, { h: 'Paid', w: 12, t: M }],
+      rows: mine.orders.map(function (o) { return [o.product, o.qty, o.unit, o.orderStatus, o.amountDue == null ? '' : o.amountDue, o.amountPaid == null ? '' : o.amountPaid]; }) });
+    return { doc: doc, file: 'group-purchases' };
+  }
+  return null;
+}
+async function exRun(btn, kind, fmt) {
+  var x = exDoc(kind); if (!x) return toast('Nothing loaded to export yet. Open the screen first.', true);
+  var d = x.doc, base = x.file + '-' + ymd(0);
+  busy(btn, true, 'Preparing…');
+  try {
+    if (fmt === 'pdf') await exSave(base + '.pdf', 'application/pdf', EX.pdf(d));
+    else await exSave(base + '.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', EX.xlsx(d));
+  } catch (e) { toast('Could not create the file: ' + (e && e.message || e), true); } finally { busy(btn, false); }
+}
+function exBar(kind) {
+  return '<div class="actions noprint" style="margin:10px 0"><button class="btn2" data-act="exRun" data-k="' + kind + '" data-f="pdf" type="button"><i class="fas fa-file-pdf"></i> PDF</button>' +
+    '<button class="btn2" data-act="exRun" data-k="' + kind + '" data-f="xlsx" type="button"><i class="fas fa-file-excel"></i> Excel</button></div>';
+}
+
+function gbNew() {
+  S.gbNewId = uuid(); S.gbDraftId = S.gbNewId;
+  openModal(T('Start a group order', 'Anzisha oda ya pamoja'),
+    '<label>' + T('Product', 'Bidhaa') + '</label><input id="gbName" maxlength="160" placeholder="Tomatoes">' +
+    '<div class="two"><div><label>' + T('Unit', 'Kipimo') + '</label><select id="gbUnit">' + opt(UNITS, 'kg') + '</select></div><div><label>' + T('Market / delivery place', 'Soko / mahali') + '</label><input id="gbMarket" maxlength="160"></div></div>' +
+    '<div class="two"><div><label>' + T('Your quantity', 'Kiasi chako') + '</label><input id="gbQty" type="number" min="0" step="any" inputmode="decimal"></div><div><label>' + T('Minimum for the group', 'Kiwango cha chini cha kikundi') + '</label><input id="gbMin" type="number" min="0" step="any" inputmode="decimal"></div></div>' +
+    '<div class="two"><div><label>' + T('Closes in (hours)', 'Inafungwa baada ya (saa)') + '</label><input id="gbClose" type="number" min="1" value="24"></div><div><label>' + T('Pay within (hours of closing)', 'Lipa ndani ya (saa)') + '</label><input id="gbPay" type="number" min="1" value="24"></div></div>' +
+    '<label>' + T('What you usually pay per unit (optional, only used to show YOUR saving)', 'Bei unayolipa kawaida (si lazima)') + '</label><input id="gbRef" type="number" min="0" step="any" inputmode="decimal">' +
+    '<div class="actions"><button class="btn2" data-act="closeModal" type="button">' + T('Cancel', 'Ghairi') + '</button><button class="btn2" data-act="gbSaveDraft" type="button">' + T('Save draft', 'Hifadhi rasimu') + '</button><button class="btn" data-act="gbCreate" type="button">' + T('Create', 'Unda') + '</button></div>' +
+    '<div class="s">' + T('No internet? Save a draft and send it later. A draft is not an order.', 'Hakuna mtandao? Hifadhi rasimu utume baadaye.') + '</div>');
+}
+async function gbCreate(btn) {
+  var close = Number(val('gbClose')) || 24, pay = Number(val('gbPay')) || 24;
+  var body = { id: S.gbNewId || (S.gbNewId = uuid()), shopId: S.shopId, productName: val('gbName'), unit: val('gbUnit'), market: val('gbMarket'), minQty: numOrNull('gbMin') || 0,
+    closesAt: gbHours(close), paymentDeadline: gbHours(close + pay) };
+  if (numOrNull('gbQty')) body.qty = numOrNull('gbQty'); if (numOrNull('gbRef') != null) body.referencePrice = numOrNull('gbRef');
+  busy(btn, true);
+  try { await api('POST', '/group-buy/orders', body); S.gbNewId = S.gbDraftId = null; closeModal(); toast(T('Group order created', 'Oda imeundwa')); refresh(); }
+  catch (e) {
+    if (e.offline) { var dr = gbDraftFromForm(); if (gbDraftOk(dr) && gbDraftSave(dr)) { S.gbNewId = S.gbDraftId = null; closeModal(); toast(T('No internet — saved as a draft. Nothing was ordered yet.', 'Hakuna mtandao — imehifadhiwa kama rasimu. Hakuna kilichoagizwa.')); render(); } }
+    else gbBad(e);
+  } finally { busy(btn, false); }
+}
+function gbSupplier() {
+  openModal(T('Supplier registration', 'Usajili wa msambazaji'),
+    '<div class="note">' + T('NECPRA must verify your business before you can send price quotes.', 'NECPRA lazima ithibitishe biashara yako kabla ya kutuma bei.') + '</div>' +
+    '<label>' + T('Business name', 'Jina la biashara') + '</label><input id="gsName" maxlength="140"><label>' + T('Phone', 'Simu') + '</label><input id="gsPhone" inputmode="tel" placeholder="07…">' +
+    '<label>' + T('Location', 'Mahali') + '</label><input id="gsLoc" maxlength="160"><label>' + T('What you supply', 'Unachosambaza') + '</label><input id="gsProd" maxlength="300">' +
+    '<div class="actions"><button class="btn2" data-act="closeModal" type="button">' + T('Cancel', 'Ghairi') + '</button><button class="btn" data-act="gbSupReg" type="button">' + T('Register', 'Jisajili') + '</button></div>');
+}
+async function gbSupReg(btn) {
+  busy(btn, true);
+  try { var r = await api('POST', '/group-buy/suppliers', { id: uuid(), businessName: val('gsName'), phone: val('gsPhone'), location: val('gsLoc'), products: val('gsProd') }); closeModal(); toast(r.note || 'Registered'); } catch (e) { gbBad(e); } finally { busy(btn, false); }
+}
+async function gbOpen(id) {
+  try {
+    var d = await api('GET', '/group-buy/orders/' + id, null, GB_NOCACHE), rec = null;
+    try { rec = await api('GET', '/group-buy/orders/' + id + '/recommendation?shopId=' + S.shopId, null, GB_NOCACHE); } catch (_) {}
+    S.gbSel = { id: id, d: d, rec: rec }; gbModal();
+  } catch (e) { if (e.offline) gbOfflineOpen(id); else gbBad(e); }
+}
+function gbModal() {
+  var s = S.gbSel, d = s.d, o = d.order, you = d.you, h = '';
+  h += '<div class="s">' + esc(o.market) + ' · ' + gbStatusLabel(o.status) + ' · ' + T('combined ', 'jumla ') + QTY(o.combinedQty) + ' ' + esc(o.unit) + (o.minQty ? ' · ' + T('minimum ', 'chini ') + QTY(o.minQty) : '') + '</div>';
+  if (o.cancelReason) h += '<div class="note err">' + esc(o.cancelReason) + '</div>';
+  if (d.quotes.length) {
+    h += '<h3>' + T('Supplier quotes', 'Bei za wasambazaji') + '</h3>' + d.quotes.map(function (q) {
+      var p = q.yourCostPreview, pr = '';
+      if (p) pr = '<div class="s">' + T('Your cost: ', 'Gharama yako: ') + T('goods ', 'bidhaa ') + KSH(p.goods) + ' + ' + T('transport ', 'usafiri ') + KSH(p.transportShare) + (p.platformFee ? ' + ' + T('platform fee ', 'ada ya jukwaa ') + KSH(p.platformFee) : '') + ' = <b>' + KSH(p.totalPayable) + '</b>' +
+        (p.savingVsYourReferencePrice != null ? '<br>' + T('Estimated saving vs your price: ', 'Akiba inayokadiriwa: ') + KSH(p.savingVsYourReferencePrice) : '') + (p.meetsMinimum ? '' : '<br>' + T('Group is below the minimum', 'Kikundi kiko chini ya kiwango')) + '</div>';
+      var pick = o.isOrganiser && o.status === 'open' ? '<button class="btn2" data-act="gbLock" data-id="' + esc(q.id) + '" type="button">' + T('Choose this supplier', 'Chagua msambazaji huyu') + '</button>' : '';
+      return '<div class="item"><div class="grow"><div class="t">' + esc(q.supplierName) + ' · ' + KSH(q.unitPrice) + '/' + esc(o.unit) + '</div><div class="s">' + T('transport ', 'usafiri ') + KSH(q.transportFee) + ' · ' + T('available ', 'inapatikana ') + QTY(q.availableQty) + (q.terms ? ' · ' + esc(q.terms) : '') + '</div>' + pr + '</div>' + pick + '</div>';
+    }).join('');
+  } else h += '<div class="note">' + T('No supplier quote yet — so no price and no saving is shown.', 'Hakuna bei ya msambazaji bado — kwa hivyo hakuna bei wala akiba.') + '</div>';
+  var rc = s.rec && s.rec.recommendedQty != null ? '<div class="note">' + T('Suggested for you: ', 'Tunapendekeza: ') + QTY(s.rec.recommendedQty) + ' ' + esc(o.unit) + ' — ' + esc(s.rec.reason) + ' (' + T('estimate; you can choose any amount', 'makadirio; unaweza kuchagua kiasi chochote') + ')</div>' : (s.rec && s.rec.message ? '<div class="s">' + esc(s.rec.message) + '</div>' : '');
+  if (o.status === 'open') {
+    h += rc + '<label>' + T('Your quantity', 'Kiasi chako') + ' (' + esc(o.unit) + ')</label><input id="gbJQty" type="number" min="0" step="any" inputmode="decimal" value="' + (you ? you.qty : '') + '">' +
+      '<label>' + T('What you usually pay per unit (optional)', 'Bei unayolipa kawaida (si lazima)') + '</label><input id="gbJRef" type="number" min="0" step="any" inputmode="decimal" value="' + (you && you.referencePrice != null ? you.referencePrice : '') + '">' +
+      '<div class="actions"><button class="btn" data-act="gbJoin" type="button">' + (you ? T('Update my quantity', 'Badilisha kiasi') : T('Join', 'Jiunge')) + '</button>' + (you ? '<button class="btn2" data-act="gbWithdraw" type="button">' + T('Withdraw', 'Jiondoe') + '</button>' : '') + '</div>';
+  }
+  if (you && o.status === 'locked') {
+    if (you.status === 'joined') h += '<div class="note">' + T('Your amount to pay: ', 'Kiasi cha kulipa: ') + '<b>' + KSH(you.amountDue) + '</b></div><div class="actions"><button class="btn" data-act="gbConfirm" type="button">' + T('Confirm ', 'Thibitisha ') + KSH(you.amountDue) + '</button><button class="btn2" data-act="gbWithdraw" type="button">' + T('Withdraw', 'Jiondoe') + '</button></div>';
+    else if (you.status === 'confirmed') h += '<div class="note">' + T('Pay ', 'Lipa ') + KSH(you.amountDue) + T(' with M-PESA (paybill/till per your NECPRA payment), then enter the receipt code. It only counts once NECPRA verifies it.', ' kwa M-PESA, kisha weka nambari ya risiti. Inahesabiwa baada ya NECPRA kuthibitisha.') + '</div>' +
+      '<div class="two"><div><label>M-PESA ' + T('receipt code', 'nambari ya risiti') + '</label><input id="gbCode" maxlength="10" style="text-transform:uppercase"></div><div><label>' + T('Amount', 'Kiasi') + '</label><input id="gbAmt" type="number" step="any" value="' + you.amountDue + '"></div></div>' +
+      '<div class="actions"><button class="btn" data-act="gbPay" type="button">' + T('Submit payment', 'Tuma malipo') + '</button><button class="btn2" data-act="gbWithdraw" type="button">' + T('Withdraw', 'Jiondoe') + '</button></div>';
+    else if (you.status === 'paid') h += '<div class="note">' + T('Paid in full. Waiting for the other traders.', 'Umelipa kamili. Tunasubiri wengine.') + '</div>';
+  }
+  if (you && ['delivered', 'disputed'].indexOf(o.status) >= 0 && you.status === 'paid' && you.allocatedQty != null)
+    h += '<div class="note">' + T('Your share received: ', 'Sehemu yako: ') + QTY(you.allocatedQty) + ' ' + esc(o.unit) + '</div><label>' + T('Add to which product?', 'Weka kwa bidhaa gani?') + '</label><select id="gbProd">' + S.products.map(function (p) { return '<option value="' + esc(p.id) + '">' + esc(p.name) + '</option>'; }).join('') + '</select>' +
+      '<div class="actions"><button class="btn" data-act="gbReceive" type="button">' + T('Add to my stock', 'Weka kwenye stoku yangu') + '</button></div>';
+  if (you && you.status === 'received') h += '<div class="note">' + T('Stock added to your shop.', 'Stoku imeongezwa.') + '</div>';
+  if (o.isOrganiser) {
+    h += '<h3>' + T('Organiser', 'Mratibu') + '</h3>' + (d.participants || []).map(function (p) { return '<div class="s">' + esc(p.shopName) + ' · ' + QTY(p.qty) + ' ' + esc(o.unit) + ' · ' + esc(p.status) + '</div>'; }).join('') + '<div class="actions">';
+    if (o.status === 'locked') h += '<button class="btn" data-act="gbOrgConfirm" type="button">' + T('Confirm order (all paid)', 'Thibitisha oda (wote wamelipa)') + '</button><button class="btn2" data-act="gbExpire" type="button">' + T('Remove late payers', 'Ondoa wasiolipa') + '</button>';
+    if (o.status === 'confirmed') h += '<input id="gbRecv" type="number" step="any" placeholder="' + T('Quantity received', 'Kiasi kilichopokelewa') + '"><button class="btn" data-act="gbDelivery" type="button">' + T('Record delivery', 'Rekodi uwasilishaji') + '</button>';
+    if (['open', 'locked'].indexOf(o.status) >= 0) h += '<button class="btn2" data-act="gbCancel" type="button">' + T('Cancel order', 'Ghairi oda') + '</button>';
+    h += '</div>';
+  }
+  if (you && ['confirmed', 'delivered'].indexOf(o.status) >= 0) h += '<div class="actions"><button class="btn2" data-act="gbDispute" type="button">' + T('Report a problem', 'Ripoti tatizo') + '</button></div>';
+  h += '<div class="note"><b>' + T('Chama funding:', 'Ufadhili wa Chama:') + '</b> ' + T('A Chama request records approval and a payout made by the circle owner; NECPRA does not move money from the circle automatically. The order payment to the supplier is a separate step and must still be completed and verified.', 'Ombi la Chama hurekodi idhini na malipo yaliyofanywa na mwenyekiti; NECPRA haitoi pesa kwenye chama moja kwa moja. Malipo ya oda kwa msambazaji ni hatua tofauti na lazima yakamilishwe na kuthibitishwa.') + '</div>';
+  if (o.isOrganiser && ['open', 'locked'].indexOf(o.status) >= 0) h += '<div class="actions"><button class="btn2" data-act="gbChamaLink" type="button">' + T('Share with a Chama', 'Shiriki na Chama') + '</button></div>';
+  if (you && o.status === 'locked' && ['joined', 'confirmed'].indexOf(you.status) >= 0 && you.amountDue != null) h += '<div class="actions"><button class="btn2" data-act="gbChamaAsk" type="button">' + T('Ask my Chama to fund my share', 'Omba Chama yangu ifadhili sehemu yangu') + '</button></div>';
+  openModal(esc(o.productName), h);
+}
+/* ───── Chama (money circle) + Group Buying ─────
+   Uses the existing NECPRA Chama (money circles). Nothing here moves Chama money: a trader ASKS the circle to fund their share,
+   the owner and a majority of members approve, and the owner then RECORDS the payout they made through the Money module. That
+   record is shown as "recorded by the circle owner, not verified by NECPRA". The trader's own order payment is a separate step
+   that still needs a verified M-PESA receipt. Joining a linked order and paying for it stay each member's own decision. */
+var CH = { circleId: null, role: null, fundId: null };
+function chStatus(s) { return { requested: T('Waiting for votes', 'Inasubiri kura'), approved: T('Approved', 'Imeidhinishwa'), rejected: T('Rejected', 'Imekataliwa'), settled: T('Payout recorded', 'Malipo yamerekodiwa'), cancelled: T('Cancelled', 'Imeghairiwa') }[s] || s; }
+async function chList() {
+  openModal(T('My Chamas', 'Chama zangu'), '<div class="spin">Loading…</div>');
+  try {
+    var r = await api('GET', '/group-buy/chama/circles', null, GB_NOCACHE), cs = r.circles || [];
+    $('mBody').innerHTML = cs.length ? cs.map(function (c) {
+      return '<div class="item" data-act="gbChamaOpen" data-id="' + esc(c.id) + '"><div class="grow"><div class="t">' + esc(c.name) + '</div><div class="s">' + c.members + ' ' + T('members', 'wanachama') + ' · ' + (c.role === 'owner' ? T('you are the owner', 'wewe ni mmiliki') : T('member', 'mwanachama')) + '</div></div></div>';
+    }).join('') + '<div class="actions"><button class="btn" data-act="closeModal" type="button">' + T('Close', 'Funga') + '</button></div>'
+      : '<div class="note">' + T('You are not in an active Chama yet. Join or start one in NECPRA Money, then come back here.', 'Bado hujajiunga na Chama. Jiunge au anzisha kwenye NECPRA Money kisha urudi hapa.') + '</div><div class="actions"><button class="btn" data-act="closeModal" type="button">' + T('Close', 'Funga') + '</button></div>';
+    S.chCircles = cs;
+  } catch (e) { closeModal(); gbBad(e); }
+}
+async function chOpen(circleId) {
+  openModal(T('Chama', 'Chama'), '<div class="spin">Loading…</div>');
+  try {
+    var res = await Promise.all([api('GET', '/group-buy/chama/circles/' + circleId + '/orders', null, GB_NOCACHE), api('GET', '/group-buy/chama/circles/' + circleId + '/funding', null, GB_NOCACHE)]);
+    var c = (S.chCircles || []).filter(function (x) { return x.id === circleId; })[0] || { name: 'Chama', role: 'member' };
+    CH.circleId = circleId; CH.role = c.role; $('mTitle').textContent = c.name;
+    var h = '<h3>' + T('Orders shared with this Chama', 'Oda zilizoshirikiwa na Chama hii') + '</h3>';
+    var os = res[0].orders || [];
+    h += os.length ? os.map(function (o) {
+      return '<div class="item" data-act="gbOpen" data-id="' + esc(o.id) + '"><div class="grow"><div class="t">' + esc(o.productName) + ' · ' + esc(o.market) + '</div><div class="s">' + gbStatusLabel(o.status) + ' · ' + T('closes ', 'inafungwa ') + new Date(o.closesAt).toLocaleString('en-KE') + '</div>' +
+        '<div class="s">' + (o.circleParticipants.length ? o.circleParticipants.map(function (p) { return esc(p.shopName) + ' ' + QTY(p.qty) + ' ' + esc(o.unit); }).join(' · ') : T('No Chama member has joined yet', 'Hakuna mwanachama aliyejiunga bado')) + '</div></div></div>';
+    }).join('') : '<div class="s">' + T('No orders shared yet. The organiser of a group order can share it from the order screen.', 'Hakuna oda zilizoshirikiwa. Mratibu anaweza kuishiriki kutoka kwenye oda.') + '</div>';
+    h += '<h3>' + T('Funding requests', 'Maombi ya ufadhili') + '</h3>';
+    var fs = res[1].funding || [];
+    h += fs.length ? fs.map(function (f) {
+      var v = f.voting, vt = v ? '<div class="s">' + T('Approvals ', 'Ndiyo ') + v.approvals + '/' + v.approvalsNeeded + ' · ' + T('rejections ', 'Hapana ') + v.rejections + (v.ownerApprovalNeeded ? ' · ' + T('owner ', 'mmiliki ') + (v.ownerApproved ? T('approved', 'ameidhinisha') : T('has not approved yet', 'bado')) : '') + '</div>' : '';
+      var acts = '';
+      if (f.status === 'requested' && !f.mine) acts += '<button class="btn' + (f.myVote === 'approve' ? '' : '2') + '" data-act="gbChamaVote" data-id="' + esc(f.id) + '" data-v="approve" type="button">' + T('Approve', 'Idhinisha') + '</button><button class="btn' + (f.myVote === 'reject' ? '' : '2') + '" data-act="gbChamaVote" data-id="' + esc(f.id) + '" data-v="reject" type="button">' + T('Reject', 'Kataa') + '</button>';
+      if (f.status === 'approved' && CH.role === 'owner') acts += '<button class="btn" data-act="gbChamaSettle" data-id="' + esc(f.id) + '" type="button">' + T('Record payout', 'Rekodi malipo') + '</button>';
+      if (f.mine && (f.status === 'requested' || f.status === 'approved')) acts += '<button class="btn2" data-act="gbChamaCancel" data-id="' + esc(f.id) + '" type="button">' + T('Cancel my request', 'Ghairi ombi langu') + '</button>';
+      return '<div class="card" style="margin-bottom:8px"><div class="t" style="font-weight:700">' + esc(f.shopName) + ' · ' + esc(f.productName) + ' · ' + KSH(f.amount) + '</div><div class="s">' + chStatus(f.status) + (f.mine ? ' · ' + T('your request', 'ombi lako') : '') + '</div>' + vt +
+        (f.settlement ? '<div class="s">' + T('Payout ref ', 'Kumbukumbu ') + esc(f.settlement.payoutRef) + ' · ' + esc(f.settlement.label) + '</div>' : '') +
+        (f.status === 'approved' && CH.role !== 'owner' ? '<div class="s">' + T('Waiting for the Chama owner to record the payout.', 'Inasubiri mmiliki kurekodi malipo.') + '</div>' : '') + (acts ? '<div class="actions">' + acts + '</div>' : '') + '</div>';
+    }).join('') : '<div class="s">' + T('No funding requests.', 'Hakuna maombi.') + '</div>';
+    h += '<div class="note">' + T('Chama money is not moved from here. An approved request is paid out by the Chama owner through NECPRA Money. Your order payment still needs a verified M-PESA receipt.', 'Pesa za Chama hazihamishwi hapa. Ombi lililoidhinishwa hulipwa na mmiliki kupitia NECPRA Money. Malipo ya oda bado yanahitaji risiti ya M-PESA iliyothibitishwa.') + '</div>' +
+      '<div class="actions"><button class="btn" data-act="closeModal" type="button">' + T('Close', 'Funga') + '</button></div>';
+    $('mBody').innerHTML = h;
+  } catch (e) { closeModal(); gbBad(e); }
+}
+async function chLinkForm() {
+  try {
+    var cs = (await api('GET', '/group-buy/chama/circles', null, GB_NOCACHE)).circles || []; S.chCircles = cs;
+    if (!cs.length) return toast(T('You are not in an active Chama.', 'Hujajiunga na Chama yoyote.'), true);
+    openModal(T('Share with a Chama', 'Shiriki na Chama'), '<div class="note">' + T('Members of the Chama will see this order and can join with their own shop. Each member pays for their own share.', 'Wanachama wataona oda hii na wanaweza kujiunga. Kila mmoja hulipia sehemu yake.') + '</div>' +
+      '<label>' + T('Chama', 'Chama') + '</label><select id="chPick">' + cs.map(function (c) { return '<option value="' + esc(c.id) + '">' + esc(c.name) + '</option>'; }).join('') + '</select>' +
+      '<div class="actions"><button class="btn2" data-act="gbChamaBack" type="button">' + T('Back', 'Rudi') + '</button><button class="btn" data-act="gbChamaLinkGo" type="button">' + T('Share', 'Shiriki') + '</button></div>');
+  } catch (e) { gbBad(e); }
+}
+async function chFundForm() {
+  var you = S.gbSel && S.gbSel.d.you; if (!you || you.amountDue == null) return;
+  try {
+    var cs = (await api('GET', '/group-buy/chama/circles', null, GB_NOCACHE)).circles || []; S.chCircles = cs;
+    if (!cs.length) return toast(T('You are not in an active Chama.', 'Hujajiunga na Chama yoyote.'), true);
+    CH.fundId = CH.fundId || uuid();
+    openModal(T('Ask my Chama to fund my share', 'Omba Chama yangu ifadhili sehemu yangu'), '<div class="note">' + T('This is only a request. The Chama owner and a majority of members must approve it, and the order must already be shared with that Chama.', 'Hili ni ombi tu. Mmiliki na wengi wa wanachama lazima waidhinishe, na oda lazima iwe imeshirikiwa na Chama hiyo.') + '</div>' +
+      '<label>Chama</label><select id="chPick">' + cs.map(function (c) { return '<option value="' + esc(c.id) + '">' + esc(c.name) + '</option>'; }).join('') + '</select>' +
+      '<label>' + T('Amount (KSh) — at most your amount due ', 'Kiasi (KSh) — kisichozidi deni lako ') + KSH(you.amountDue) + '</label><input id="chAmt" type="number" step="any" inputmode="decimal" value="' + esc(you.amountDue) + '">' +
+      '<div class="actions"><button class="btn2" data-act="gbChamaBack" type="button">' + T('Back', 'Rudi') + '</button><button class="btn" data-act="gbChamaFundGo" type="button">' + T('Send request', 'Tuma ombi') + '</button></div>');
+  } catch (e) { gbBad(e); }
+}
+async function chAct(a, t, id) {
+  if (a === 'gbChamas') return chList();
+  if (a === 'gbChamaOpen') return chOpen(id);
+  if (a === 'gbChamaBack') return S.gbSel ? gbModal() : closeModal();
+  if (a === 'gbChamaLink') return chLinkForm();
+  if (a === 'gbChamaAsk') return chFundForm();
+  if (a === 'gbChamaLinkGo') {
+    busy(t, true);
+    try { var r = await api('POST', '/group-buy/orders/' + S.gbSel.id + '/chama/link', { circleId: val('chPick') }); toast(T('Shared with the Chama', 'Imeshirikiwa na Chama')); gbModal(); } catch (e) { gbBad(e); } finally { busy(t, false); }
+    return;
+  }
+  if (a === 'gbChamaFundGo') {
+    var amt = numOrNull('chAmt'); if (!(amt > 0)) return toast(T('Enter the amount', 'Weka kiasi'), true);
+    busy(t, true);
+    try { await api('POST', '/group-buy/orders/' + S.gbSel.id + '/chama/funding', { id: CH.fundId, circleId: val('chPick'), amount: amt }); CH.fundId = null; toast(T('Request sent to your Chama', 'Ombi limetumwa kwa Chama')); chOpen(val('chPick')); } catch (e) { gbBad(e); } finally { busy(t, false); }
+    return;
+  }
+  if (a === 'gbChamaVote') {
+    busy(t, true);
+    try { await api('POST', '/group-buy/chama/funding/' + id + '/vote', { vote: t.dataset.v }); toast(T('Vote saved', 'Kura imehifadhiwa')); chOpen(CH.circleId); } catch (e) { gbBad(e); } finally { busy(t, false); }
+    return;
+  }
+  if (a === 'gbChamaCancel') {
+    if (!confirm(T('Cancel this request?', 'Ghairi ombi hili?'))) return;
+    busy(t, true);
+    try { await api('POST', '/group-buy/chama/funding/' + id + '/cancel', {}); toast(T('Request cancelled', 'Ombi limeghairiwa')); chOpen(CH.circleId); } catch (e) { gbBad(e); } finally { busy(t, false); }
+    return;
+  }
+  if (a === 'gbChamaSettle') {
+    var ref = prompt(T('Enter the reference of the payout you made through NECPRA Money', 'Weka kumbukumbu ya malipo uliyofanya kupitia NECPRA Money'));
+    if (!ref || !ref.trim()) return;
+    busy(t, true);
+    try { await api('POST', '/group-buy/chama/funding/' + id + '/settle', { payoutRef: ref.trim(), note: null }); toast(T('Payout recorded', 'Malipo yamerekodiwa')); chOpen(CH.circleId); } catch (e) { gbBad(e); } finally { busy(t, false); }
+  }
+}
+/* ───── Device financing (NECPRA Smart Scale on instalments) ─────
+   Kept apart from sales and shop profit. NECPRA sets the price, deposit and weekly amount when it approves an application; nothing is
+   invented here. A repayment counts only when NECPRA confirms the M-PESA receipt was a paid NECPRA payment of that amount. Starting an
+   M-PESA prompt for repayments is not available yet (needs a financing receiving account in mpesaStkService), so the trader pays
+   through NECPRA and enters the receipt code. Late payment never disables the scale or blocks sales; it only produces reminders. */
+var FN = { appId: null, payId: null, repId: null, planId: null, stkId: null, stkTimer: null };
+function fnStatus(s) { return { applied: T('Waiting for NECPRA', 'Inasubiri NECPRA'), approved: T('Approved: pay the deposit', 'Imeidhinishwa: lipa amana'), active: T('Active', 'Inaendelea'), completed: T('Fully paid', 'Imelipwa yote'), rejected: T('Not approved', 'Haikuidhinishwa'), cancelled: T('Cancelled', 'Imeghairiwa') }[s] || s; }
+function fnBack(btn) { return '<button class="btn2" data-act="fnOpen" type="button">' + T('Back', 'Rudi') + '</button>'; }
+function fnProgress(pg) {
+  if (!pg) return '';
+  return '<div class="s">' + T('Price ', 'Bei ') + KSH(pg.priceTotal) + ' · ' + T('paid ', 'umelipa ') + KSH(pg.paid) + ' · ' + T('balance ', 'salio ') + '<b>' + KSH(pg.balance) + '</b></div>' +
+    (pg.depositOutstanding > 0 ? '<div class="s">' + T('Deposit still to pay: ', 'Amana inayobaki: ') + KSH(pg.depositOutstanding) + '</div>' : '') +
+    (pg.arrears > 0 ? '<div class="s" style="color:var(--kyn-accent-danger,#d93025)">' + T('Overdue: ', 'Iliyochelewa: ') + KSH(pg.arrears) + '</div>' : '') +
+    (pg.nextInstalment ? '<div class="s">' + T('Next: ', 'Inayofuata: ') + KSH(pg.nextInstalment.amountLeft) + ' ' + T('by ', 'kufikia ') + esc(pg.nextInstalment.dueDate) + '</div>' : '');
+}
+async function fnOpen() {
+  openModal(T('Device financing', 'Mkopo wa kifaa'), '<div class="spin">Loading…</div>');
+  try {
+    var r = await api('GET', '/shops/' + S.shopId + '/financing', null, GB_NOCACHE), rem = [];
+    try { rem = (await api('GET', '/shops/' + S.shopId + '/financing/reminders', null, GB_NOCACHE)).reminders || []; } catch (_) {}
+    var plans = r.plans || [], openPlan = plans.some(function (p) { return ['applied', 'approved', 'active'].indexOf(p.status) >= 0; });
+    var h = rem.map(function (x) { return '<div class="note' + (x.kind === 'overdue' ? ' err' : '') + '">' + esc(x.message) + '</div>'; }).join('');
+    h += plans.length ? plans.map(function (p) {
+      return '<div class="item" data-act="fnPlan" data-id="' + esc(p.id) + '"><div class="grow"><div class="t">' + esc(p.deviceModel) + ' · ' + fnStatus(p.status) + '</div>' +
+        (p.terms ? '<div class="s">' + T('Deposit ', 'Amana ') + KSH(p.terms.deposit) + ' · ' + KSH(p.terms.weeklyAmount) + T(' weekly for ', ' kwa wiki kwa ') + p.terms.weeks + T(' weeks', ' wiki') + '</div>' : '') + fnProgress(p.progress) +
+        (p.rejectReason ? '<div class="s">' + esc(p.rejectReason) + '</div>' : '') + '</div></div>';
+    }).join('') : '<div class="s">' + T('No device application yet.', 'Bado hujaomba kifaa.') + '</div>';
+    h += '<div class="note">' + T('A late instalment never switches off your scale or stops you selling. You will only get reminders.', 'Kuchelewa kulipa hakuzimi mizani yako wala kukuzuia kuuza. Utapata vikumbusho tu.') + '</div>' +
+      '<div class="actions">' + (openPlan ? '' : '<button class="btn" data-act="fnApply" type="button">' + T('Apply for a Smart Scale', 'Omba Smart Scale') + '</button>') + (plans.length ? '<button class="btn2" data-act="fnRem" type="button">' + T('Reminders', 'Vikumbusho') + '</button>' : '') + '<button class="btn2" data-act="closeModal" type="button">' + T('Close', 'Funga') + '</button></div>';
+    $('mBody').innerHTML = h;
+  } catch (e) { closeModal(); gbBad(e); }
+}
+async function fnApplyForm() {
+  try {
+    var el = await api('GET', '/shops/' + S.shopId + '/financing/eligibility', null, GB_NOCACHE);
+    FN.appId = FN.appId || uuid();
+    openModal(T('Apply for a Smart Scale', 'Omba Smart Scale'), '<div class="note">' + esc(el.note) + '</div>' +
+      el.checks.map(function (c) { return '<div class="s">' + (c.ok ? '✔ ' : '✖ ') + esc(c.detail) + '</div>'; }).join('') +
+      '<div class="note">' + T('NECPRA sets the price, deposit and weekly amount when it approves. You will see them here before you pay anything.', 'NECPRA huweka bei, amana na kiasi cha wiki inapoidhinisha. Utaviona hapa kabla ya kulipa chochote.') + '</div>' +
+      '<label>' + T('Note (optional)', 'Maelezo (si lazima)') + '</label><input id="fnNote" maxlength="300">' +
+      '<label style="display:flex;gap:8px;align-items:flex-start"><input id="fnConsent" type="checkbox" style="width:auto;margin-top:3px"> <span>' + T('I agree to share the shop figures above with NECPRA for this application.', 'Nakubali kushiriki takwimu za duka hapo juu na NECPRA kwa ombi hili.') + '</span></label>' +
+      '<div class="actions">' + fnBack() + '<button class="btn" data-act="fnApplyGo" type="button">' + T('Send application', 'Tuma ombi') + '</button></div>');
+  } catch (e) { gbBad(e); }
+}
+async function fnPlan(planId) {
+  openModal(T('Device plan', 'Mpango wa kifaa'), '<div class="spin">Loading…</div>');
+  try {
+    var d = await api('GET', '/shops/' + S.shopId + '/financing/' + planId + '/statement', null, GB_NOCACHE), p = d.plan, stkOn = false; FN.planId = planId;
+    try { stkOn = (await api('GET', '/shops/' + S.shopId + '/financing/pay-stk/enabled', null, GB_NOCACHE)).enabled === true; } catch (_) {}
+    FN.stkTimer && clearTimeout(FN.stkTimer); FN.payId = FN.payId || uuid(); FN.repId = FN.repId || uuid();
+    var h = '<div class="t" style="font-weight:700">' + esc(p.deviceModel) + ' · ' + fnStatus(p.status) + '</div>' + fnProgress(p.progress) +
+      (p.warrantyUntil ? '<div class="s">' + T('Warranty until ', 'Dhamana hadi ') + esc(String(p.warrantyUntil).slice(0, 10)) + '</div>' : '') +
+      '<div class="s">' + T('Ownership: ', 'Umiliki: ') + esc(p.ownership || '—') + '</div>';
+    if (d.schedule.length) h += '<h3>' + T('Instalments', 'Malipo ya wiki') + '</h3>' + d.schedule.map(function (s) { return '<div class="s">' + s.no + '. ' + esc(s.dueDate) + ' · ' + KSH(s.amount) + ' · ' + (s.status === 'paid' ? T('paid', 'imelipwa') : s.status === 'overdue' ? '<b style="color:var(--kyn-accent-danger,#d93025)">' + T('overdue', 'imechelewa') + '</b>' : T('upcoming', 'inakuja')) + (s.paid > 0 && s.status !== 'paid' ? ' (' + KSH(s.paid) + ')' : '') + '</div>'; }).join('');
+    h += '<h3>' + T('Payments', 'Malipo') + '</h3>' + (d.payments.length ? d.payments.map(function (x) { return '<div class="s">' + new Date(x.recordedAt).toLocaleDateString('en-KE') + ' · ' + KSH(x.amount) + ' · ' + esc(x.mpesaReceipt) + '</div>'; }).join('') : '<div class="s">' + T('No payments yet.', 'Hakuna malipo bado.') + '</div>');
+    if (stkOn && ['approved', 'active'].indexOf(p.status) >= 0) h += '<h3>' + T('Pay with an M-PESA prompt', 'Lipa kwa ombi la M-PESA') + '</h3><div class="note">' + T('We send a prompt to your phone. Enter your M-PESA PIN. The payment is recorded only after M-PESA confirms it.', 'Tunatuma ombi kwenye simu yako. Weka PIN ya M-PESA. Malipo yanarekodiwa baada ya M-PESA kuthibitisha.') + '</div>' +
+      '<div class="two"><div><label>' + T('M-PESA phone', 'Simu ya M-PESA') + '</label><input id="fnPh" inputmode="tel" placeholder="07XX XXX XXX"></div><div><label>' + T('Amount (whole KSh)', 'Kiasi (KSh nzima)') + '</label><input id="fnStkAmt" type="number" step="1" inputmode="numeric" value="' + esc(Math.ceil(p.progress && p.progress.depositOutstanding > 0 ? p.progress.depositOutstanding : (p.progress && p.progress.nextInstalment ? p.progress.nextInstalment.amountLeft : 0)) || '') + '"></div></div>' +
+      '<div class="s" id="fnStkMsg"></div><div class="actions"><button class="btn" data-act="fnStk" type="button">' + T('Send M-PESA prompt', 'Tuma ombi la M-PESA') + '</button></div>';
+    if (['approved', 'active'].indexOf(p.status) >= 0) h += '<h3>' + T('Record a repayment', 'Rekodi malipo') + '</h3><div class="note">' + T('Pay through NECPRA, then enter the M-PESA receipt code here. It counts only after NECPRA confirms that receipt was paid in full. If it cannot confirm, nothing is recorded.', 'Lipa kupitia NECPRA, kisha weka nambari ya risiti ya M-PESA hapa. Inahesabiwa baada ya NECPRA kuthibitisha. Isipothibitishwa, hakuna kinachorekodiwa.') + '</div>' +
+      '<div class="two"><div><label>M-PESA ' + T('receipt code', 'nambari ya risiti') + '</label><input id="fnCode" maxlength="10" autocapitalize="characters" style="text-transform:uppercase"></div><div><label>' + T('Amount (KSh)', 'Kiasi (KSh)') + '</label><input id="fnAmt" type="number" step="any" inputmode="decimal" value="' + esc(p.progress && p.progress.depositOutstanding > 0 ? p.progress.depositOutstanding : (p.progress && p.progress.nextInstalment ? p.progress.nextInstalment.amountLeft : '')) + '"></div></div>' +
+      '<div class="actions"><button class="btn" data-act="fnPay" type="button">' + T('Submit repayment', 'Tuma malipo') + '</button></div>';
+    if (d.repairs.length) h += '<h3>' + T('Repair & warranty', 'Matengenezo na dhamana') + '</h3>' + d.repairs.map(function (r) { return '<div class="s">' + esc(r.kind) + ' · ' + esc(r.status) + ' · ' + esc(r.details) + (r.resolution ? ' → ' + esc(r.resolution) : '') + '</div>'; }).join('');
+    if (['active', 'completed'].indexOf(p.status) >= 0) h += '<h3>' + T('Report a problem with the device', 'Ripoti tatizo la kifaa') + '</h3><select id="fnKind"><option value="warranty">' + T('Warranty claim', 'Dai la dhamana') + '</option><option value="repair">' + T('Repair', 'Matengenezo') + '</option></select><input id="fnDet" maxlength="400" placeholder="' + T('What is wrong?', 'Tatizo ni nini?') + '"><div class="actions"><button class="btn2" data-act="fnRepair" type="button">' + T('Send request', 'Tuma ombi') + '</button></div>';
+    h += '<div class="actions">' + fnBack() + '</div>';
+    $('mBody').innerHTML = h;
+  } catch (e) { closeModal(); gbBad(e); }
+}
+function fnStkMsg(m, bad) { var e = $('fnStkMsg'); if (e) { e.textContent = m; e.style.color = bad ? 'var(--kyn-accent-danger,#d93025)' : ''; } }
+// Asks the server every 4 s (up to ~2 minutes) whether M-PESA confirmed this attempt. Nothing is shown as paid until the server has recorded it.
+async function fnPoll(planId, attempt, n) {
+  if (FN.planId !== planId || FN.stkId !== attempt || !$('fnStkMsg')) return;
+  try {
+    var r = await api('GET', '/shops/' + S.shopId + '/financing/' + planId + '/pay-stk?id=' + attempt, null, GB_NOCACHE);
+    if (r.state === 'recorded') { toast(T('Payment confirmed and recorded', 'Malipo yamethibitishwa na kurekodiwa')); return fnPlan(planId); }
+    if (r.state === 'not_paid') return fnStkMsg(r.detail || T('The payment was not completed.', 'Malipo hayakukamilika.'), true);
+    fnStkMsg(r.state === 'confirming' ? T('M-PESA confirmed. Recording your payment…', 'M-PESA imethibitisha. Inarekodi…') : T('Waiting for you to enter your M-PESA PIN…', 'Inasubiri uweke PIN ya M-PESA…'));
+  } catch (_) {}
+  if (n >= 30) return fnStkMsg(T('Still waiting. If you paid, it will appear here once M-PESA confirms. You can also enter the receipt code below.', 'Bado inasubiri. Ukilipa, itaonekana hapa M-PESA ikithibitisha. Unaweza pia kuweka nambari ya risiti hapa chini.'));
+  FN.stkTimer = setTimeout(function () { fnPoll(planId, attempt, n + 1); }, 4000);
+}
+/* Instalment reminders: push is on by default, SMS only after the trader agrees (it costs NECPRA per message). Reminders never affect the scale or selling. */
+async function fnRemForm() {
+  openModal(T('Instalment reminders', 'Vikumbusho vya malipo'), '<div class="spin">Loading…</div>');
+  try {
+    var d = await api('GET', '/shops/' + S.shopId + '/financing/reminder-settings', null, GB_NOCACHE), c = d.settings, log = [];
+    try { log = (await api('GET', '/shops/' + S.shopId + '/financing/reminder-log', null, GB_NOCACHE)).reminders || []; } catch (_) {}
+    var kindTxt = { deposit: T('Deposit', 'Amana'), upcoming: T('Due soon', 'Inakaribia'), overdue: T('Overdue', 'Imechelewa') };
+    var stTxt = { sent: T('sent', 'imetumwa'), failed: T('failed', 'imeshindwa'), skipped: T('not delivered', 'haikufikishwa'), sending: T('sending', 'inatumwa') };
+    var h = '<div class="note">' + T('We remind you before an instalment is due, and once a week if one is overdue. Messages are sent between 8am and 8pm. Reminders never switch off your scale or stop you selling.', 'Tunakukumbusha kabla ya malipo ya awamu, na mara moja kwa wiki ikiwa yamechelewa. Ujumbe hutumwa kati ya saa 2 asubuhi na saa 2 usiku. Vikumbusho havizimi mizani wala kukuzuia kuuza.') + '</div>' +
+      '<label style="display:flex;gap:8px;align-items:center"><input id="fnRemPush" type="checkbox" style="width:auto"' + (c.pushEnabled ? ' checked' : '') + '> <span>' + T('App notifications', 'Arifa za programu') + '</span></label>' +
+      '<label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px"><input id="fnRemSms" type="checkbox" style="width:auto;margin-top:3px"' + (c.smsEnabled ? ' checked' : '') + (d.smsAvailable ? '' : ' disabled') + '> <span>' + T('Also send me SMS reminders', 'Nitumie pia vikumbusho kwa SMS') + '</span></label>' +
+      (d.smsAvailable ? '' : '<div class="s">' + T('SMS reminders are not switched on yet. App notifications still work.', 'Vikumbusho vya SMS bado havijawashwa. Arifa za programu zinaendelea kufanya kazi.') + '</div>') +
+      '<label>' + T('Phone for SMS', 'Simu ya SMS') + '</label><input id="fnRemPh" inputmode="tel" placeholder="07XX XXX XXX" value="' + esc(c.smsPhone || d.shopPhone || '') + '">' +
+      '<label style="display:flex;gap:8px;align-items:flex-start"><input id="fnRemCons" type="checkbox" style="width:auto;margin-top:3px"' + (c.smsConsent ? ' checked' : '') + '> <span>' + T('I agree to receive SMS reminders about my Smart Scale instalments on this number.', 'Nakubali kupokea vikumbusho vya SMS kuhusu malipo ya awamu ya Smart Scale yangu kwenye nambari hii.') + '</span></label>' +
+      '<label>' + T('Message language', 'Lugha ya ujumbe') + '</label><select id="fnRemLang"><option value="en"' + (c.language === 'en' ? ' selected' : '') + '>English</option><option value="sw"' + (c.language === 'sw' ? ' selected' : '') + '>Kiswahili</option></select>' +
+      '<div class="actions">' + fnBack() + '<button class="btn" data-act="fnRemSave" type="button">' + T('Save', 'Hifadhi') + '</button></div>';
+    if (log.length) h += '<h3>' + T('Recent reminders', 'Vikumbusho vya hivi karibuni') + '</h3>' + log.slice(0, 8).map(function (x) { return '<div class="s">' + new Date(x.at).toLocaleDateString('en-KE') + ' · ' + (kindTxt[x.kind] || esc(x.kind)) + ' · ' + (x.channel === 'sms' ? 'SMS' : T('app', 'programu')) + ' · ' + (stTxt[x.status] || esc(x.status)) + '</div>'; }).join('');
+    $('mBody').innerHTML = h;
+  } catch (e) { closeModal(); gbBad(e); }
+}
+async function fnAct(a, t, id) {
+  if (a === 'fnOpen') return fnOpen();
+  if (a === 'fnApply') return fnApplyForm();
+  if (a === 'fnPlan') return fnPlan(id);
+  if (a === 'fnRem') return fnRemForm();
+  var base = '/shops/' + S.shopId + '/financing';
+  if (a === 'fnRemSave') {
+    var wantSms = $('fnRemSms').checked, body = { pushEnabled: $('fnRemPush').checked, language: val('fnRemLang') || 'en' };
+    if (wantSms) {
+      if (!$('fnRemCons').checked) return toast(T('Please tick the box to agree to SMS reminders', 'Tafadhali kubali kupokea vikumbusho vya SMS'), true);
+      if (!val('fnRemPh')) return toast(T('Enter the phone number for SMS', 'Weka nambari ya simu ya SMS'), true);
+      body.smsEnabled = true; body.smsConsent = true; body.smsPhone = val('fnRemPh');
+    } else if (!$('fnRemSms').disabled) body.smsEnabled = false;
+    busy(t, true);
+    try { await api('PUT', base + '/reminder-settings', body); toast(T('Reminder settings saved', 'Mipangilio ya vikumbusho imehifadhiwa')); fnRemForm(); } catch (e) { gbBad(e); } finally { busy(t, false); }
+    return;
+  }
+  if (a === 'fnApplyGo') {
+    if (!$('fnConsent').checked) return toast(T('Please tick the box to agree to share your shop figures', 'Tafadhali kubali kushiriki takwimu za duka'), true);
+    busy(t, true);
+    try { var r = await api('POST', base + '/applications', { id: FN.appId, consentShareData: true, note: val('fnNote') || null }); FN.appId = null; toast(T('Application sent', 'Ombi limetumwa')); fnOpen(); } catch (e) { gbBad(e); } finally { busy(t, false); }
+    return;
+  }
+  if (a === 'fnStk') {
+    var sph = val('fnPh'), samt = numOrNull('fnStkAmt'); if (!sph) return toast(T('Enter the M-PESA phone number', 'Weka nambari ya simu ya M-PESA'), true);
+    if (!(samt >= 1) || Math.floor(samt) !== samt) return toast(T('Enter a whole amount in shillings', 'Weka kiasi kamili cha shilingi'), true);
+    FN.stkId = uuid(); busy(t, true);
+    try { var sr = await api('POST', base + '/' + FN.planId + '/pay-stk', { id: FN.stkId, amount: samt, phone: sph }); fnStkMsg(sr.message || T('Check your phone and enter your M-PESA PIN.', 'Angalia simu yako uweke PIN ya M-PESA.')); fnPoll(FN.planId, FN.stkId, 0); } catch (e) { gbBad(e); } finally { busy(t, false); }
+    return;
+  }
+  if (a === 'fnPay') {
+    var code = val('fnCode').toUpperCase().replace(/\s/g, ''), amt = numOrNull('fnAmt');
+    if (!/^[A-Z0-9]{10}$/.test(code)) return toast(T('Enter the 10-character M-PESA receipt code', 'Weka nambari ya risiti yenye herufi 10'), true);
+    if (!(amt > 0)) return toast(T('Enter the amount', 'Weka kiasi'), true);
+    busy(t, true);
+    try { await api('POST', base + '/' + FN.planId + '/payments', { id: FN.payId, amount: amt, mpesaReceipt: code }); FN.payId = null; toast(T('Repayment recorded', 'Malipo yamerekodiwa')); fnPlan(FN.planId); } catch (e) { gbBad(e); } finally { busy(t, false); }
+    return;
+  }
+  if (a === 'fnRepair') {
+    var det = val('fnDet'); if (!det) return toast(T('Describe the problem', 'Eleza tatizo'), true);
+    busy(t, true);
+    try { await api('POST', base + '/' + FN.planId + '/repairs', { id: FN.repId, kind: val('fnKind'), details: det }); FN.repId = null; toast(T('Request sent', 'Ombi limetumwa')); fnPlan(FN.planId); } catch (e) { gbBad(e); } finally { busy(t, false); }
+  }
+}
+/* ───── Admin console (only for accounts listed as admin in the server .env: DUKA_ADMIN_IDS) ─────
+   The server decides who is an admin (GET /admin/me) and enforces it on every admin route; this tab is simply not shown to anyone
+   else. Covers: device-financing applications, supplier verification, group-buy disputes, refunds to pay out, and repair requests.
+   Marketplace admin is not part of DUKA SMART here. */
+var ADM_SECS = [['fin', 'Financing', 'financingApplications'], ['sup', 'Suppliers', 'suppliersPending'], ['disp', 'Disputes', 'openDisputes'], ['ref', 'Refunds', 'pendingRefunds'], ['rep', 'Repairs', 'openRepairs']];
+var ADM_ST = { fin: [['applied', 'New'], ['approved', 'Approved'], ['active', 'Active'], ['completed', 'Completed'], ['rejected', 'Rejected']], sup: [['pending', 'Pending'], ['verified', 'Verified'], ['suspended', 'Suspended']], disp: [['open', 'Open'], ['resolved', 'Resolved']], ref: [['pending', 'To pay out'], ['paid_out', 'Paid out']], rep: [['open', 'Open'], ['in_repair', 'In repair'], ['resolved', 'Resolved'], ['rejected', 'Rejected']] };
+var ADM_DEF = { fin: 'applied', sup: 'pending', disp: 'open', ref: 'pending', rep: 'open' };
+S.adm = { sec: 'fin', st: 'applied', rows: [], ov: null, id: null };
+async function checkAdmin() { try { S.isAdmin = (await api('GET', '/admin/me', null, GB_NOCACHE)).isAdmin === true; } catch (_) { S.isAdmin = false; } if (!S.isAdmin && S.tab === 'admin') S.tab = 'dash'; }
+async function loadAdmin() {
+  var A = S.adm, path = { fin: '/financing/admin/applications?status=', sup: '/admin/suppliers?status=', disp: '/admin/disputes?status=', ref: '/admin/refunds?status=', rep: '/admin/repairs?status=' }[A.sec], key = { fin: 'applications', sup: 'suppliers', disp: 'disputes', ref: 'refunds', rep: 'repairs' }[A.sec];
+  var r = await Promise.all([api('GET', '/admin/overview', null, GB_NOCACHE), api('GET', path + A.st, null, GB_NOCACHE)]);
+  A.ov = r[0]; A.rows = r[1][key] || [];
+}
+function admRow(id) { return S.adm.rows.filter(function (x) { return x.id === id; })[0]; }
+function viewAdmin() {
+  var A = S.adm; if (!S.isAdmin) return '<div class="note err">Not allowed.</div>';
+  var h = '<h3>Admin</h3><div class="grid">' + ADM_SECS.map(function (x) { return '<div class="card stat' + (A.sec === x[0] ? ' on' : '') + '" data-act="admSec" data-id="' + x[0] + '" style="cursor:pointer"><small>' + x[1] + '</small><b>' + (A.ov ? A.ov[x[2]] : '…') + '</b><div class="s">waiting</div></div>'; }).join('') + '</div>';
+  h += '<div class="bar">' + ADM_ST[A.sec].map(function (x) { return '<button class="' + (A.st === x[0] ? 'btn' : 'btn2') + '" data-act="admSt" data-id="' + x[0] + '" type="button">' + x[1] + '</button>'; }).join('') + '</div>';
+  if (!A.rows.length) return h + '<div class="card"><div class="s">Nothing here.</div></div>';
+  return h + A.rows.map(function (r) {
+    var t = '', s = '', b = '';
+    if (A.sec === 'fin') {
+      t = esc(r.shopName) + ' · ' + esc(r.deviceModel); s = esc(r.shopPhone || '') + (r.terms ? ' · price ' + KSH(r.terms.devicePrice) + ', deposit ' + KSH(r.terms.deposit) + ', ' + KSH(r.terms.weeklyAmount) + '/week × ' + r.terms.weeks : '') + (r.progress ? ' · balance ' + KSH(r.progress.balance) : '') + (r.note ? '<br>Note: ' + esc(r.note) : '');
+      if (r.status === 'applied') b = '<button class="btn" data-act="admReview" data-id="' + esc(r.id) + '" type="button">Review</button>';
+      else if (['approved', 'active'].indexOf(r.status) >= 0) b = '<button class="btn2" data-act="admLink" data-id="' + esc(r.id) + '" type="button">' + (r.deviceId ? 'Change device' : 'Link device') + '</button>';
+      if (r.deviceId) s += '<br>Device linked';
+    } else if (A.sec === 'sup') {
+      t = esc(r.businessName); s = esc(r.phone) + (r.location ? ' · ' + esc(r.location) : '') + (r.products ? '<br>' + esc(r.products) : '');
+      if (r.status !== 'verified') b += '<button class="btn" data-act="admSup" data-id="' + esc(r.id) + '" data-v="verify" type="button">Verify</button>';
+      if (r.status !== 'suspended') b += '<button class="btn2" data-act="admSup" data-id="' + esc(r.id) + '" data-v="suspend" type="button">Suspend</button>';
+    } else if (A.sec === 'disp') {
+      t = esc(r.product) + ' · ' + esc(r.kind); s = esc(r.details) + '<br>Order ' + esc(r.orderStatus) + ' · ' + new Date(r.createdAt).toLocaleString('en-KE');
+      b = '<button class="btn2" data-act="admTrail" data-id="' + esc(r.orderId) + '" type="button">Order trail</button>' + (r.status === 'open' ? '<button class="btn" data-act="admResolve" data-id="' + esc(r.id) + '" type="button">Mark resolved</button>' : '');
+    } else if (A.sec === 'ref') {
+      t = esc(r.shopName) + ' · ' + KSH(r.amount); s = esc(r.product) + ' · ' + esc(r.reason) + (r.shopPhone ? '<br>' + esc(r.shopPhone) : '') + (r.payoutRef ? '<br>Ref ' + esc(r.payoutRef) : '');
+      if (r.status === 'pending') b = '<button class="btn" data-act="admPaid" data-id="' + esc(r.id) + '" type="button">Mark paid out</button>';
+    } else {
+      t = esc(r.shopName) + ' · ' + esc(r.kind) + ' · ' + esc(r.deviceModel); s = esc(r.details) + (r.resolution ? '<br>→ ' + esc(r.resolution) : '') + (r.shopPhone ? '<br>' + esc(r.shopPhone) : '');
+      b = '<button class="btn2" data-act="admRepair" data-id="' + esc(r.id) + '" type="button">Update</button>';
+    }
+    return '<div class="card" style="margin-bottom:8px"><div class="t" style="font-weight:700">' + t + '</div><div class="s">' + s + '</div>' + (b ? '<div class="actions">' + b + '</div>' : '') + '</div>';
+  }).join('');
+}
+function admReviewModal(r) {
+  var el = r.eligibility || {}, f = el.figures || {};
+  openModal('Review application', '<div class="t" style="font-weight:700">' + esc(r.shopName) + ' · ' + esc(r.shopPhone || '') + '</div><div class="s">' + esc(r.deviceModel) + '</div>' +
+    '<div class="note">Indicative figures from the shop\'s recorded sales (shared with the trader\'s consent): ' + (f.shopAgeDays != null ? f.shopAgeDays + ' days recorded, ' + f.sales28d + ' sales in 28 days, average weekly gross profit ' + KSH(f.avgWeeklyGrossProfit) : 'not available') + '.</div>' +
+    (el.checks || []).map(function (c) { return '<div class="s">' + (c.ok ? '✔ ' : '✖ ') + esc(c.detail) + '</div>'; }).join('') +
+    '<h3>Terms you offer</h3><div class="two"><div><label>Device price (KSh)</label><input id="adPrice" type="number" step="any" inputmode="decimal"></div><div><label>Deposit (KSh)</label><input id="adDep" type="number" step="any" inputmode="decimal"></div></div>' +
+    '<div class="two"><div><label>Weekly amount (KSh)</label><input id="adWeek" type="number" step="any" inputmode="decimal"></div><div><label>Warranty (months)</label><input id="adWar" type="number" inputmode="numeric" value="12"></div></div>' +
+    '<div class="actions"><button class="btn" data-act="admApprove" data-id="' + esc(r.id) + '" type="button">Approve</button></div>' +
+    '<label>Or reject — reason the trader will see</label><input id="adRej" maxlength="240"><div class="actions"><button class="btnd" data-act="admReject" data-id="' + esc(r.id) + '" type="button">Reject</button><button class="btn2" data-act="closeModal" type="button">Close</button></div>');
+}
+async function admDone(msg) { closeModal(); toast(msg); try { await loadAdmin(); } catch (e) { gbBad(e); } render(); }
+async function admAct(a, t, id) {
+  var A = S.adm;
+  try {
+    if (a === 'admSec') { A.sec = id; A.st = ADM_DEF[id]; busy(t, true); await loadAdmin(); return render(); }
+    if (a === 'admSt') { A.st = id; await loadAdmin(); return render(); }
+    if (a === 'admReview') { var r0 = admRow(id); if (r0) admReviewModal(r0); return; }
+    if (a === 'admApprove') {
+      var price = numOrNull('adPrice'), dep = numOrNull('adDep'), wk = numOrNull('adWeek'); if (!(price > 0) || !(wk > 0) || dep == null || dep < 0) return toast('Enter the price, deposit and weekly amount', true);
+      busy(t, true); await api('POST', '/financing/admin/' + id + '/approve', { devicePrice: price, deposit: dep, weeklyAmount: wk, warrantyMonths: numOrNull('adWar') || 0 }); return admDone('Approved');
+    }
+    if (a === 'admReject') { var why = val('adRej'); if (!why) return toast('Enter the reason for the trader', true); busy(t, true); await api('POST', '/financing/admin/' + id + '/reject', { reason: why }); return admDone('Rejected'); }
+    if (a === 'admLink') {
+      var r1 = admRow(id); if (!r1) return; var ds = (await api('GET', '/admin/shops/' + r1.shopId + '/devices', null, GB_NOCACHE)).devices || [];
+      if (!ds.length) return toast('Register the device on this trader\'s shop first (Smart Scale devices)', true);
+      return openModal('Link device', '<div class="s">' + esc(r1.shopName) + '</div><label>Device</label><select id="adDev">' + ds.map(function (d) { return '<option value="' + esc(d.id) + '">' + esc(d.serialNo) + (d.label ? ' · ' + esc(d.label) : '') + (d.status !== 'active' ? ' (' + esc(d.status) + ')' : '') + '</option>'; }).join('') + '</select><div class="actions"><button class="btn2" data-act="closeModal" type="button">Cancel</button><button class="btn" data-act="admLinkGo" data-id="' + esc(id) + '" type="button">Link</button></div>');
+    }
+    if (a === 'admLinkGo') { busy(t, true); await api('POST', '/financing/admin/' + id + '/link-device', { deviceId: val('adDev') }); return admDone('Device linked'); }
+    if (a === 'admSup') { if (!confirm((t.dataset.v === 'verify' ? 'Verify' : 'Suspend') + ' this supplier?')) return; busy(t, true); await api('POST', '/group-buy/suppliers/' + id + '/' + t.dataset.v, {}); return admDone(t.dataset.v === 'verify' ? 'Supplier verified' : 'Supplier suspended'); }
+    if (a === 'admResolve') { if (!confirm('Mark this dispute as resolved?')) return; busy(t, true); await api('POST', '/group-buy/disputes/' + id + '/resolve', {}); return admDone('Dispute resolved'); }
+    if (a === 'admTrail') {
+      var tr = (await api('GET', '/group-buy/orders/' + id + '/audit', null, GB_NOCACHE)).entries || [];
+      return openModal('Order trail', (tr.length ? tr.map(function (e) { return '<div class="s">' + new Date(e.at).toLocaleString('en-KE') + ' · user ' + esc(e.userId) + ' · <b>' + esc(e.action) + '</b>' + (e.data ? ' ' + esc(JSON.stringify(e.data)) : '') + '</div>'; }).join('') : '<div class="s">No entries.</div>') + '<div class="actions"><button class="btn" data-act="closeModal" type="button">Close</button></div>');
+    }
+    if (a === 'admPaid') { var ref = prompt('Enter the reference of the refund you paid out'); if (!ref || !ref.trim()) return; busy(t, true); await api('POST', '/group-buy/refunds/' + id + '/paid-out', { payoutRef: ref.trim() }); return admDone('Refund marked as paid out'); }
+    if (a === 'admRepair') {
+      return openModal('Update request', '<label>Status</label><select id="adRst"><option value="in_repair">In repair</option><option value="resolved">Resolved</option><option value="rejected">Rejected</option></select><label>Note for the trader</label><input id="adRes" maxlength="300"><div class="actions"><button class="btn2" data-act="closeModal" type="button">Cancel</button><button class="btn" data-act="admRepairGo" data-id="' + esc(id) + '" type="button">Save</button></div>');
+    }
+    if (a === 'admRepairGo') { busy(t, true); await api('POST', '/financing/admin/repairs/' + id + '/status', { status: val('adRst'), resolution: val('adRes') || null }); return admDone('Saved'); }
+  } catch (e) { gbBad(e); busy(t, false); }
+}
+async function gbDo(btn, method, path, body, msg) {
+  busy(btn, true);
+  try { var r = await api(method, '/group-buy/orders/' + S.gbSel.id + path, body); toast(msg || T('Done', 'Imekamilika')); await gbOpen(S.gbSel.id); refresh(); return r; } catch (e) { gbBad(e); } finally { busy(btn, false); }
+}
+function gbAct(a, t, id) {
+  var s = S.gbSel, you = s && s.d.you;
+  if (a.indexOf('gbChama') === 0) return chAct(a, t, id);
+  if (a === 'gbOpen') gbOpen(id);
+  else if (a === 'gbSaveDraft') gbSaveDraft(); else if (a === 'gbDraftJoin') gbDraftSaveJoin(); else if (a === 'gbDraftSend') gbSendDraft(t, id);
+  else if (a === 'gbDraftSendAll') gbSendAllDrafts(t); else if (a === 'gbDraftDel') { if (confirm(T('Delete this draft?', 'Futa rasimu hii?'))) { gbDraftDel(id); render(true); } }
+  else if (a === 'gbNew') gbNew(); else if (a === 'gbCreate') gbCreate(t); else if (a === 'gbSupplier') gbSupplier(); else if (a === 'gbSupReg') gbSupReg(t);
+  else if (a === 'gbJoin') gbDo(t, 'POST', '/join', { shopId: S.shopId, qty: numOrNull('gbJQty'), referencePrice: numOrNull('gbJRef') }, T('Saved', 'Imehifadhiwa'));
+  else if (a === 'gbWithdraw') { if (confirm(T('Withdraw from this order? Anything you paid will be queued for refund.', 'Ujiondoe? Ulicholipa kitarejeshwa.'))) gbDo(t, 'POST', '/withdraw', {}); }
+  else if (a === 'gbLock') gbDo(t, 'POST', '/lock', { quoteId: id }, T('Order locked. Traders can now confirm and pay.', 'Oda imefungwa. Sasa thibitisha na ulipe.'));
+  else if (a === 'gbConfirm') gbDo(t, 'POST', '/participants/me/confirm', { amountDue: you.amountDue });
+  else if (a === 'gbPay') gbDo(t, 'POST', '/pay', { id: uuid(), amount: numOrNull('gbAmt'), mpesaReceipt: val('gbCode').toUpperCase() }, T('Payment verified', 'Malipo yamethibitishwa'));
+  else if (a === 'gbOrgConfirm') gbDo(t, 'POST', '/confirm', {});
+  else if (a === 'gbExpire') gbDo(t, 'POST', '/expire-unpaid', {});
+  else if (a === 'gbCancel') { if (confirm(T('Cancel this order for everyone?', 'Ghairi oda kwa wote?'))) gbDo(t, 'POST', '/cancel', { reason: 'Cancelled by the organiser' }); }
+  else if (a === 'gbDelivery') gbDo(t, 'POST', '/delivery', { receivedQty: numOrNull('gbRecv') }, T('Delivery recorded', 'Uwasilishaji umerekodiwa'));
+  else if (a === 'gbReceive') gbDo(t, 'POST', '/receive', { id: uuid(), productId: val('gbProd') }, T('Stock added', 'Stoku imeongezwa'));
+  else if (a === 'gbDispute') { var det = prompt(T('Describe the problem (shortage, damaged, quality, late…)', 'Eleza tatizo')); if (det) gbDo(t, 'POST', '/disputes', { id: uuid(), kind: 'other', details: det }, T('Problem reported', 'Tatizo limeripotiwa')); }
+}
+
+var FRESH = { fresh: ['Fresh', 'Safi'], monitor: ['Monitor', 'Angalia'], sell_soon: ['Sell soon', 'Uza haraka'], at_risk: ['At risk', 'Hatarini'], unknown: ['No shelf life set', 'Haijawekwa'] };
+function viewWaste() {
+  var w = S.waste; if (!w) return '<div class="note">' + T('Loading…', 'Inapakia…') + '</div>';
+  var sm = w.summary;
+  var head = '<div class="two"><div class="card"><div class="s">' + T('Stock at risk (estimate)', 'Stoku hatarini (makadirio)') + '</div><b>' + KSH(sm.stockAtRiskValue) + '</b></div>' +
+    '<div class="card"><div class="s">' + T('Spoilage losses, 30 days', 'Hasara ya kuharibika, siku 30') + '</div><b>' + KSH(sm.lossesLast30Days) + '</b><div class="s">' + T('before: ', 'kabla: ') + KSH(sm.lossesPrevious30Days) + '</div></div></div>';
+  var items = w.items.length ? w.items.map(function (it) {
+    var b = it.batches.map(function (x) { return '<div class="s"><span class="badge' + (x.freshness === 'at_risk' || x.freshness === 'sell_soon' ? ' low' : '') + '">' + FRESH[x.freshness][S.va.rl === 'sw' ? 1 : 0] + '</span> ' + QTY(x.qtyOnHandEstimate) + ' ' + esc(it.unit) + ' · ' + x.ageDays + ' ' + T('days old', 'siku') + (x.estimatedAtRiskQty > 0 ? ' · ' + T('may not sell in time: ', 'huenda isiuzwe: ') + QTY(x.estimatedAtRiskQty) : '') + '</div>'; }).join('');
+    var sg = it.discountSuggestion, sug = '';
+    if (sg) sug = '<div class="note">' + T('Suggestion (you decide): ', 'Pendekezo (wewe unaamua): ') + KSH(sg.originalPrice) + ' → <b>' + KSH(sg.suggestedPrice) + '</b> · ' + T('expected ', 'mapato ') + KSH(sg.expectedRevenue) + ' · ' + T('margin/unit ', 'faida/kipimo ') + KSH(sg.marginPerUnitAfter) +
+      (sg.warning ? '<br><b>' + esc(sg.warning) + '</b>' : '') + '<div class="actions"><button class="btn2" data-act="wsApply" data-id="' + esc(it.productId) + '" data-p="' + sg.suggestedPrice + '" data-warn="' + (sg.warning ? 1 : 0) + '" type="button">' + T('Approve this price', 'Kubali bei hii') + '</button></div></div>';
+    var rd = it.reorder, rec = '<div class="s">' + T('Next purchase (estimate, ', 'Ununuzi ujao (makadirio, ') + (rd.confidence === 'preliminary' ? T('preliminary — little sales history', 'awali — mauzo machache') : T('from your sales', 'kutoka mauzo yako')) + '): <b>' + QTY(rd.suggestedQty) + ' ' + esc(it.unit) + '</b> — ' + esc(rd.reason) + '</div>';
+    return '<div class="card"><div class="t">' + esc(it.name) + ' · ' + T('in stock ', 'stoku ') + QTY(it.stockQty) + ' ' + esc(it.unit) + '</div><div class="s">' + T('Selling about ', 'Inauzwa takriban ') + QTY(it.sales.avgDailyQty) + '/' + T('day', 'siku') + (it.sales.daysOfStockLeft != null ? ' · ' + it.sales.daysOfStockLeft + ' ' + T('days of stock left', 'siku za stoku') : '') + (it.sales.confidence === 'preliminary' ? ' · ' + T('preliminary', 'awali') : '') + '</div>' + b + sug + rec + '</div>';
+  }).join('') : '<div class="s">' + T('No perishable stock yet. Mark a product as perishable and add stock with its shelf life.', 'Hakuna bidhaa zinazoharibika bado.') + '</div>';
+  return '<h3>' + T('Waste prevention', 'Kuzuia upotevu') + '</h3>' + head +
+    '<div class="actions"><button class="btn" data-act="wsBatch" type="button">' + T('Receive stock', 'Pokea stoku') + '</button><button class="btn2" data-act="wsLoss" type="button">' + T('Record spoiled stock', 'Rekodi iliyoharibika') + '</button></div>' + (w.items.length ? exBar('waste') : '') + items +
+    '<div class="note">' + esc(w.disclaimer) + ' ' + T('Prices never change unless you approve.', 'Bei hazibadiliki bila idhini yako.') + '</div>';
+}
+function wsProductSel(id) { return '<select id="' + id + '">' + S.products.map(function (p) { return '<option value="' + esc(p.id) + '">' + esc(p.name) + ' (' + esc(p.unit) + ')</option>'; }).join('') + '</select>'; }
+// A change just queued on the phone: show its effect on stock now (a later reload re-applies every queued change from the server numbers).
+function bumpLocal(pid, d) { var p = S.products.filter(function (x) { return x.id === pid; })[0]; if (!p) return; p.stockQty = Math.round((p.stockQty + d) * 1000) / 1000; p.isOutOfStock = p.stockQty <= 0; p.isLowStock = p.stockQty <= 0 || (p.minStock > 0 && p.stockQty <= p.minStock); }
+function wsBatch() {
+  S.batchId = uuid(); S.batchPerId = uuid();
+  openModal(T('Receive stock', 'Pokea stoku'), '<label>' + T('Product', 'Bidhaa') + '</label>' + wsProductSel('wbProd') +
+    '<label>' + T('Count stock by', 'Hesabu stoku kwa') + '</label><select id="wbMode"><option value="unit">' + T('Single units', 'Vipimo vya kuuza') + '</option><option value="pack">' + T('Packs (crate, tray, sack)', 'Vifurushi (kreti, trei, gunia)') + '</option></select>' +
+    '<div class="two"><div><label id="wbQtyL">' + T('Quantity', 'Kiasi') + '</label><input id="wbQty" type="number" step="any" inputmode="decimal"></div><div><label id="wbCostL">' + T('Cost per unit', 'Gharama kwa kipimo') + '</label><input id="wbCost" type="number" step="any" inputmode="decimal"></div></div><div class="s" id="wbConv"></div>' +
+    '<div class="two"><div><label>' + T('Stays fresh about (days)', 'Hukaa safi (siku)') + '</label><input id="wbShelf" type="number" step="any" placeholder="3"></div><div><label>' + T('Condition (optional)', 'Hali (si lazima)') + '</label><input id="wbCond" maxlength="160"></div></div>' +
+    '<div class="actions"><button class="btn2" data-act="closeModal" type="button">' + T('Cancel', 'Ghairi') + '</button><button class="btn" data-act="wsBatchSave" type="button">' + T('Save', 'Hifadhi') + '</button></div>');
+}
+function wbUpdate() {
+  var pr = S.products.filter(function (x) { return x.id === val('wbProd'); })[0], pack = val('wbMode') === 'pack';
+  if ($('wbQtyL')) $('wbQtyL').textContent = pack ? T('Number of ', 'Idadi ya ') + ((pr && pr.packUnit) || 'packs') : T('Quantity', 'Kiasi');
+  if ($('wbCostL')) $('wbCostL').textContent = pack ? T('Price of one ', 'Bei ya ') + ((pr && pr.packUnit) || 'pack') : T('Cost per unit', 'Gharama kwa kipimo');
+  var h = '';
+  if (pack) {
+    if (!pr || !pr.packSize) h = T('This product has no pack set yet.', 'Bidhaa hii haina kifurushi bado.');
+    else { var n = numOrNull('wbQty'), c = numOrNull('wbCost'); h = '1 ' + pr.packUnit + ' = ' + QTY(pr.packSize) + ' ' + pr.unit + (n > 0 ? ' → ' + QTY(n * pr.packSize) + ' ' + pr.unit + ' ' + T('added to stock', 'zinaongezwa') : '') + (c > 0 ? ' · ' + KSH(Math.round(c / pr.packSize * 100) / 100) + ' ' + T('each', 'kila moja') : ''); }
+  }
+  if ($('wbConv')) $('wbConv').textContent = h;
+}
+async function wsBatchSave(btn) {
+  busy(btn, true);
+  try {
+    var pid = val('wbProd'), shelf = numOrNull('wbShelf'), packMode = val('wbMode') === 'pack', n = numOrNull('wbQty'), c = numOrNull('wbCost');
+    var pr = S.products.filter(function (x) { return x.id === pid; })[0]; if (!pr) throw new Error(T('Choose a product', 'Chagua bidhaa'));
+    if (!(n > 0)) throw new Error(T('Enter a quantity greater than zero', 'Weka kiasi kinachozidi sifuri'));
+    if (c == null || isNaN(c) || c < 0) throw new Error(T('Enter the cost', 'Weka gharama'));
+    if (packMode && !pr.packSize) throw new Error(T('Set this product\'s pack first (Products → edit → Buy in packs).', 'Weka kifurushi cha bidhaa hii kwanza.'));
+    var units = packMode ? Math.round(n * pr.packSize * 1000) / 1000 : n;
+    if (!S.batchId) { S.batchId = uuid(); S.batchPerId = uuid(); }
+    // Both writes go straight to the server when online and are kept on the phone (in order) when offline.
+    // Each has a fixed id, so a retry or a lost response can never record the stock twice.
+    if (shelf) await write({ type: 'product.perishable', id: S.batchPerId, method: 'PATCH', path: '/shops/' + S.shopId + '/products/' + pid + '/perishable', body: { isPerishable: true, shelfLifeDays: shelf }, label: 'Freshness: ' + pr.name, offlineOk: true });
+    var body = Object.assign({ id: S.batchId, shelfLifeDays: shelf || undefined, condition: val('wbCond') || undefined }, packMode ? { packs: n, packCost: c } : { qty: n, unitCost: c });
+    var w = await write({ type: 'stock.batch', id: S.batchId, path: '/shops/' + S.shopId + '/products/' + pid + '/batches', body: body, label: 'Receive ' + QTY(units) + ' ' + pr.unit + ': ' + pr.name, meta: { productId: pid, qty: units }, offlineOk: true });
+    S.batchId = null; S.batchPerId = null;
+    closeModal(); toast(w.queued ? T('Saved on this phone — it will sync when you are online', 'Imehifadhiwa kwenye simu — itatumwa ukiwa mtandaoni') : T('Stock added', 'Stoku imeongezwa')); if (!w.queued) refresh(); else { bumpLocal(pid, units); render(); }
+  } catch (e) { gbBad(e); } finally { busy(btn, false); }
+}
+function wsLoss() {
+  S.lossId = uuid();
+  openModal(T('Record spoiled stock', 'Rekodi iliyoharibika'), '<div class="note">' + T('This is recorded as a loss at cost. It is not a sale.', 'Hii inarekodiwa kama hasara. Si mauzo.') + '</div><label>' + T('Product', 'Bidhaa') + '</label>' + wsProductSel('wlProd') +
+    '<div class="two"><div><label>' + T('Quantity lost', 'Kiasi kilichopotea') + '</label><input id="wlQty" type="number" step="any" inputmode="decimal"></div><div><label>' + T('Reason', 'Sababu') + '</label><select id="wlReason"><option value="spoiled">' + T('Spoiled', 'Imeharibika') + '</option><option value="damaged">' + T('Damaged', 'Imeumia') + '</option><option value="expired">' + T('Expired', 'Imeisha muda') + '</option><option value="theft">' + T('Theft', 'Wizi') + '</option><option value="other">' + T('Other', 'Nyingine') + '</option></select></div></div>' +
+    '<label>' + T('What did you do with it?', 'Ulifanya nini nayo?') + '</label><select id="wlHandling"><option value="disposed">' + T('Threw away', 'Nilitupa') + '</option><option value="discounted">' + T('Sold cheaply', 'Niliuza kwa bei ndogo') + '</option><option value="returned">' + T('Returned to supplier', 'Nilirudisha') + '</option><option value="other">' + T('Other', 'Nyingine') + '</option></select>' +
+    '<label>' + T('Condition (optional)', 'Hali (si lazima)') + '</label><input id="wlCond" maxlength="200">' +
+    '<div class="actions"><button class="btn2" data-act="closeModal" type="button">' + T('Cancel', 'Ghairi') + '</button><button class="btn" data-act="wsLossSave" type="button">' + T('Record loss', 'Rekodi hasara') + '</button></div>');
+}
+async function wsLossSave(btn) {
+  busy(btn, true);
+  try {
+    var pid = val('wlProd'), q = numOrNull('wlQty'), pr = S.products.filter(function (x) { return x.id === pid; })[0];
+    if (!pr) throw new Error(T('Choose a product', 'Chagua bidhaa'));
+    if (!(q > 0)) throw new Error(T('Enter the quantity lost', 'Weka kiasi kilichopotea'));
+    if (!S.lossId) S.lossId = uuid();
+    var w = await write({ type: 'stock.loss', id: S.lossId, path: '/shops/' + S.shopId + '/losses', label: 'Loss ' + QTY(q) + ' ' + pr.unit + ': ' + pr.name + ' (' + val('wlReason') + ')', offlineOk: true,
+      body: { id: S.lossId, productId: pid, qty: q, reason: val('wlReason'), handling: val('wlHandling'), condition: val('wlCond') || undefined },
+      precheck: function () { if (q > pr.stockQty) throw new Error(T('You only have ', 'Una tu ') + QTY(pr.stockQty) + ' ' + pr.unit + T(' of ', ' ya ') + pr.name); } });
+    S.lossId = null;
+    closeModal(); toast(w.queued ? T('Saved on this phone — it will sync when you are online', 'Imehifadhiwa kwenye simu — itatumwa ukiwa mtandaoni') : T('Loss recorded', 'Hasara imerekodiwa')); if (!w.queued) refresh(); else { bumpLocal(pid, -q); render(); }
+  } catch (e) { gbBad(e); } finally { busy(btn, false); }
+}
+async function wsApply(btn, id, price, warn) {
+  var p = S.products.filter(function (x) { return x.id === id; })[0], nm = p ? p.name : '';
+  if (!confirm(T('Change the price of ', 'Badilisha bei ya ') + nm + T(' to ', ' kuwa ') + KSH(price) + '?')) return;
+  if (warn && !confirm(T('This is at or below your cost. Do you really want to sell at a loss?', 'Hii ni sawa au chini ya gharama yako. Una uhakika?'))) return;
+  busy(btn, true);
+  try { await api('PATCH', '/shops/' + S.shopId + '/products/' + id, { sellingPrice: Number(price) }); toast(T('Price updated', 'Bei imebadilishwa')); refresh(); } catch (e) { gbBad(e); } finally { busy(btn, false); }
+}
+function extraAct(a, t, id) {
+  if (a.indexOf('fn') === 0) return fnAct(a, t, id);
+  if (a.indexOf('adm') === 0) return admAct(a, t, id);
+  if (a.indexOf('gb') === 0) return gbAct(a, t, id);
+  if (a === 'wsBatch') wsBatch(); else if (a === 'wsBatchSave') wsBatchSave(t); else if (a === 'wsLoss') wsLoss(); else if (a === 'wsLossSave') wsLossSave(t);
+  else if (a === 'wsApply') wsApply(t, id, t.dataset.p, t.dataset.warn === '1');
+}
+
+document.addEventListener('click', function (ev) {
+  var t = ev.target.closest && ev.target.closest('[data-act]'); if (!t) return;
+  var a = t.dataset.act, id = t.dataset.id;
+  if (t.tagName === 'A') ev.preventDefault();
+  if (a === 'closeModal') { closeModal(); if (S.tab === 'pos') render(); }
+  else if (a === 'addToCart') addToCart(id);
+  else if (a === 'rmLine') { S.cart.splice(Number(t.dataset.i), 1); if (!S.cart.length) S.saleId = null; saveCart(); render(); }
+  else if (a === 'clearCart') clearCart();
+  else if (a === 'parkBill') parkBill();
+  else if (a === 'resumeBill') resumeBill(Number(t.dataset.i));
+  else if (a === 'discardBill') discardBill(Number(t.dataset.i));
+  else if (a === 'openScan') openScan();
+  else if (a === 'scanNew') scanNew(t.dataset.code);
+  else if (a === 'openCam') openCam();
+  else if (a === 'camYes') camYes(id);
+  else if (a === 'camQty') camQty(id);
+  else if (a === 'camPlus') camPlus(id);
+  else if (a === 'camUndo') camUndo(id);
+  else if (a === 'camTeach') camTeach();
+  else if (a === 'camForget') camForget();
+  else if (a === 'camNew') camNew();
+  else if (a === 'checkout') openCheckout();
+  else if (a === 'fullCash') { var s0 = payState(); $('payCash').value = (s0.c.total - s0.mpApplied) / 100; updateCheckout(); }
+  else if (a === 'confirmSale') confirmSale(t);
+  else if (a === 'shareReceipt') shareReceipt();
+  else if (a === 'printReceipt') window.print();
+  else if (a === 'openSale') openSale(id);
+  else if (a === 'confirmManualMpesa') openManualMpesaConfirm(id, t.dataset.sale);
+  else if (a === 'confirmManualMpesaSave') confirmManualMpesaSave(t, id, t.dataset.sale);
+  else if (a === 'voidSale') openVoidSale(id);
+  else if (a === 'doVoidSale') doVoidSale(t, id);
+  else if (a === 'exRun') exRun(t, t.dataset.k, t.dataset.f);
+  else if (/^(gb|ws|fn|adm)[A-Z]/.test(a)) extraAct(a, t, id);
+  else if (a === 'retry') { S.loading = true; boot(); }
+  else if (a === 'tab') { S.tab = t.dataset.tab; try { sessionStorage.setItem('necpra_duka_tab', S.tab); } catch (_) {} render(); refresh(); }
+  else if (a === 'toggleLow') { S.low = !S.low; refresh(); }
+  else if (a === 'addProduct') openAddProduct();
+  else if (a === 'saveNewProduct') saveNewProduct(t);
+  else if (a === 'openProduct') openProduct(id);
+  else if (a === 'saveProduct') saveProduct(t, id);
+  else if (a === 'adjust') adjust(t, id, Number(t.dataset.sign));
+  else if (a === 'confirmDelete') confirmDelete(id);
+  else if (a === 'doDelete') doDelete(t, id);
+  else if (a === 'createShop') createShop(t);
+  else if (a === 'newShop') newShop();
+  else if (a === 'saveShop') saveShop(t);
+  else if (a === 'archiveShop') archiveShop();
+  else if (a === 'doArchive') doArchive(t);
+  else if (a === 'vaOpen') openAssistant();
+  else if (a === 'vaMic') vaMic();
+  else if (a === 'vaSend') { var vi = $('vaText'); if (vi && vi.value.trim()) { var vt = vi.value; vi.value = ''; S.va.spoke = false; vHandle(vt); } }
+  else if (a === 'vaChip') { S.va.spoke = false; vHandle(t.dataset.q); }
+  else if (a === 'vaConfirm') vaConfirm(t);
+  else if (a === 'vaCancel') { S.va.pending = null; vSay(T('Cancelled. Nothing was changed.', 'Imeghairiwa. Hakuna kilichobadilishwa.')); vRender(); }
+  else if (a === 'vaPick') vaPick(id);
+  else if (a === 'syncStatus') openSyncStatus();
+  else if (a === 'syncNow') { closeModal(); syncNow(); }
+  else if (a === 'retryOp') { obUpdate(id, { status: 'pending', attempts: 0, err: '' }); closeModal(); render(); syncNow(); }
+  else if (a === 'discardOp') openDiscard(id);
+  else if (a === 'doDiscard') { obRemove(id); note('Discarded a change that could not be saved.', true); closeModal(); render(); }
+  else if (a === 'fin') { S.fin = t.dataset.f; try { sessionStorage.setItem('necpra_duka_fin', S.fin); } catch (_) {} render(); refresh(); }
+  else if (a === 'rp') { S.rp = t.dataset.p; S.fd.rep = null; render(); refresh(); }
+  else if (a === 'addExpense') openAddExpense();
+  else if (a === 'saveExpense') saveExpense(t);
+  else if (a === 'voidExpense') openVoidExpense(id);
+  else if (a === 'doVoid') doVoid(t, id);
+  else if (a === 'collect') openCollect(id, t.dataset.name, Number(t.dataset.owed));
+  else if (a === 'doCollect') doCollect(t);
+  else if (a === 'supplier') openSupplier(id);
+  else if (a === 'addSupplier') openAddSupplier();
+  else if (a === 'saveSupplier') saveSupplier(t);
+  else if (a === 'addBill') supEntry(t, 'bill');
+  else if (a === 'paySupplier') supEntry(t, 'payment');
+});
+document.addEventListener('change', function (ev) {
+  if (ev.target.id === 'shopSel') { S.shopId = ev.target.value; try { localStorage.setItem(dukaStorageKey('necpra_duka_shop'), S.shopId); } catch (_) {} S.dash = null; S.coId = null; loadCart(); refresh(); }
+  else if (ev.target.id === 'catSel') { S.cat = ev.target.value; refresh(); }
+  else if (ev.target.id === 'rangeSel') { S.range = ev.target.value; refresh(); }
+  else if (ev.target.id === 'dType') { S.disc.type = ev.target.value; saveCart(); updateCheckout(); }
+  else if (ev.target.id === 'coCust' || ev.target.id === 'mpMode') updateCheckout();
+  else if (ev.target.id === 'vaLang') { S.va.lang = ev.target.value; S.va.rl = S.va.lang; var mt = $('mTitle'); if (mt) mt.textContent = S.va.lang === 'sw' ? 'Msaidizi wa Duka' : 'Duka assistant'; vRender(); }
+  else if (ev.target.id === 'vaSpeak') { S.va.speak = ev.target.checked; try { if (!S.va.speak && window.speechSynthesis) speechSynthesis.cancel(); } catch (_) {} }
+});
+var qTimer; document.addEventListener('input', function (ev) {
+  var id = ev.target.id, cl = ev.target.classList;
+  if (id === 'qBox') { S.q = ev.target.value.trim(); clearTimeout(qTimer); qTimer = setTimeout(function () { refresh(true); }, 300); }
+  else if (id === 'posQ') { S.posQ = ev.target.value.trim(); $('posResults').innerHTML = posResults(); }
+  else if (cl && cl.contains('cq')) { S.cart[Number(ev.target.dataset.i)].qty = ev.target.value.replace(',', '.'); updatePosTotals(); }
+  else if (cl && cl.contains('cp')) { S.cart[Number(ev.target.dataset.i)].price = ev.target.value.replace(',', '.'); updatePosTotals(); }
+  else if (id === 'dVal') { S.disc.value = ev.target.value.replace(',', '.'); saveCart(); updateCheckout(); }
+  else if (id === 'payCash' || id === 'payMp') updateCheckout();
+});
+document.addEventListener('input', function (ev) { if (ev.target && (ev.target.id === 'wbQty' || ev.target.id === 'wbCost')) wbUpdate(); });
+document.addEventListener('change', function (ev) { if (ev.target && (ev.target.id === 'wbMode' || ev.target.id === 'wbProd')) wbUpdate(); });
+// Enter in the search box adds the product when exactly one matches (barcode scanners type the code then press Enter).
+document.addEventListener('keydown', function (ev) {
+  if (ev.key === 'Enter' && ev.target.id === 'vaText' && ev.target.value.trim()) { ev.preventDefault(); var vt = ev.target.value; ev.target.value = ''; S.va.spoke = false; vHandle(vt); return; }
+  if (ev.key === 'Enter' && ev.target.id === 'posQ') {
+    var q = S.posQ.toLowerCase(), m = S.products.filter(function (p) { return p.stockQty > 0 && (p.barcode && p.barcode.toLowerCase() === q || p.name.toLowerCase().indexOf(q) > -1); });
+    if (q && m.length === 1) { ev.preventDefault(); addToCart(m[0].id); }
+  }
+});
+$('modal').addEventListener('click', function (ev) { if (ev.target === $('modal')) closeModal(); });
+
+window.addEventListener('message', function (ev) { if (ev && ev.data && ev.data.type === 'MODULE_VISIBLE' && S.shopId && !S.loading) refresh(); });
+window.__DUKA_BOOT__ = boot;
+/* handle for the automated end-to-end tests (read/act only; no secrets) */
+window.__duka = { parse: vParse, norm: vNorm, S: S, syncNow: syncNow, obMine: obMine, cacheGet: cacheGet, updateCheckout: updateCheckout, saveCart: saveCart, scanAccept: scanAccept, scanHandle: scanHandle, wbUpdate: wbUpdate };
+/* NECPRA voice: adapter between the shared voice-sales flow and DUKA's own cart/checkout. Voice never saves a sale itself:
+   it fills S.cart (same model as camera/barcode/manual) and opens the normal checkout, where stock, offline, credit-customer
+   and M-PESA verification rules apply and the trader taps Confirm sale. */
+/* VOICE extras (held bills, barcode scan, receive stock, device financing). Voice only holds / resumes bills and OPENS screens: it never records stock,
+   pays an instalment or discards a bill. Those stay a tap on the screen. Returns true when the words were handled here. */
+async function vExtra(text) {
+  var n = String(text || '').toLowerCase().replace(/[.!?,]+/g, ' ').replace(/\s+/g, ' ').trim(), m;
+  function say(en, sw) { vSay(T(en, sw)); return true; }
+  async function openTabReady(tab, fin) {
+    S.tab = tab; if (fin) S.fin = fin;
+    try { sessionStorage.setItem('necpra_duka_tab', tab); if (fin) sessionStorage.setItem('necpra_duka_fin', fin); } catch (_) {}
+    await refresh();
+  }
+  if (/^(?:please |tafadhali )?(?:sync now|sync pending changes|synchronize now|tuma mabadiliko|sawazisha sasa)$/.test(n)) {
+    if (navigator.onLine === false) return say('You are offline. Your changes remain safely on this phone and will sync when you reconnect.', 'Huna mtandao. Mabadiliko yako yamehifadhiwa kwenye simu na yatatumwa mtandao ukirudi.');
+    await syncNow(); return say('I checked the sync queue. Any saved changes that can be sent have now been processed.', 'Nimeangalia foleni ya usawazishaji. Mabadiliko yanayoweza kutumwa yameshughulikiwa.');
+  }
+  if (/^(?:please |tafadhali )?(?:show|open|check|view|status of)\s+(?:the |my )?(?:sync|synchronisation|synchronization|pending changes|offline changes)(?: status)?$/.test(n) || /^(?:sync status|hali ya usawazishaji)$/.test(n)) {
+    openSyncStatus(); return say('Sync status is open. You can review pending changes, retry failed items or sync now.', 'Hali ya usawazishaji imefunguliwa. Unaweza kuona mabadiliko yanayosubiri, kujaribu tena yaliyoshindwa au kusawazisha sasa.');
+  }
+  if (/^(?:please |tafadhali )?(?:create|start|make|new|open|anzisha|unda)\s+(?:a\s+)?(?:group order|group buying order|group buy|oda ya pamoja|oda za pamoja)(?:\s+for\s+.+)?$/.test(n)) {
+    await openTabReady('group'); gbNew();
+    var gm = /\b(?:for|ya)\s+(.+?)(?:\s+(?:qty|quantity|kiasi)\s+(\d+(?:\.\d+)?))?$/.exec(n);
+    try { if (gm && gm[1] && $('gbName')) $('gbName').value = gm[1].trim(); if (gm && gm[2] && $('gbQty')) $('gbQty').value = gm[2]; } catch (_) {}
+    return say('The group-order form is open. Check the product, quantities, location and deadlines, then tap Create. Nothing has been ordered yet.', 'Fomu ya oda ya pamoja imefunguliwa. Hakiki bidhaa, kiasi, mahali na muda, kisha bonyeza Unda. Bado hakuna oda iliyotumwa.');
+  }
+  if (/^(?:please |tafadhali )?(?:add|register|create|new|ongeza|sajili)\s+(?:a\s+|new\s+)?(?:supplier|vendor|msambazaji|muuzaji)(?:\s+.*)?$/.test(n) || /^(?:supplier registration|register supplier|usajili wa msambazaji)$/.test(n)) {
+    await openTabReady('money', 'suppliers'); openAddSupplier();
+    return say('Supplier registration is open. Enter the supplier details and tap Save supplier when they are correct.', 'Usajili wa msambazaji umefunguliwa. Weka taarifa zake kisha bonyeza Hifadhi msambazaji.');
+  }
+  if (/^(?:please |tafadhali )?(?:record|log|add|rekodi|weka)\s+(?:a\s+)?(?:stock loss|spoiled stock|wastage|waste|expired stock|damaged stock|hasara ya stoku|bidhaa zilizoharibika)(?:\s+.*)?$/.test(n) || /^(?:record spoilage|record stock loss|rekodi hasara)$/.test(n)) {
+    await openTabReady('waste'); wsLoss();
+    return say('The stock-loss form is open. Select the product, quantity and reason, then tap Record loss. No stock has been changed yet.', 'Fomu ya hasara ya stoku imefunguliwa. Chagua bidhaa, kiasi na sababu, kisha bonyeza Rekodi hasara. Bado hakuna stoku iliyobadilishwa.');
+  }
+  if (/^(?:please |tafadhali )?(?:hold|park|put on hold|shikilia|weka pembeni)\s+(?:this |the |current |my )?(?:bill|sale|cart|customer|order|bili|mauzo)\b/.test(n)) {
+    if (!S.cart.length) return say('The cart is empty, so there is nothing to hold.', 'Kikapu ni tupu, hakuna cha kushikilia.');
+    S.tab = 'pos'; var before = loadParked().length; parkBill();
+    return loadParked().length > before ? say('Bill held. You can serve the next customer. Say show held bills to see it.', 'Bili imeshikiliwa. Unaweza kumhudumia mteja mwingine.') : true;
+  }
+  if ((m = /^(?:please |tafadhali )?(?:resume|continue|restore|bring back|open|rudisha|endelea na)\s+(?:the |my )?(?:held |parked )?(?:bill|customer|bili|mteja)\s*(?:number |no |ya |wa |#)?\s*(\d+)$/.exec(n))) {
+    var a = loadParked(), want = Number(m[1]), ix = -1; a.forEach(function (b, k) { if (b.n === want && ix < 0) ix = k; });
+    if (!a.length) return say('You have no held bills.', 'Huna bili zilizoshikiliwa.');
+    if (ix < 0) return say('I could not find held bill ' + want + '. Say show held bills.', 'Sikupata bili ' + want + '. Sema onyesha bili zilizoshikiliwa.');
+    await openTabReady('pos'); resumeBill(ix);
+    return say('Resumed ' + a[ix].label + '. Nothing is recorded until you confirm the sale.', 'Nimerudisha ' + a[ix].label + '. Hakuna kinachorekodiwa hadi uthibitishe mauzo.');
+  }
+  if (/^(?:please |tafadhali )?(?:discard|delete|remove|cancel|futa|tupa)\s+(?:the |my |a )?(?:held|parked)\s+(?:bill|sale|cart|bili)/.test(n)) {
+    await openTabReady('pos'); return say('Your held bills are open. Discarding cannot be undone, so tap Discard yourself on the bill you want to remove.', 'Bili zako zilizoshikiliwa zimefunguliwa. Kufuta hakurudishwi, kwa hiyo bonyeza Futa mwenyewe kwenye bili husika.');
+  }
+  if (/\b(?:held|parked|on hold|zilizoshikiliwa|zilizowekwa pembeni)\b/.test(n) && /\b(?:bills?|sales?|carts?|bili|mauzo)\b/.test(n) && /\b(?:show|list|how many|open|view|see|nionyeshe|onyesha|ngapi|angalia|kuna)\b/.test(n)) {
+    var h = loadParked(); await openTabReady('pos');
+    if (!h.length) return say('You have no held bills.', 'Huna bili zilizoshikiliwa.');
+    return say('You have ' + h.length + ' held ' + (h.length === 1 ? 'bill' : 'bills') + ': ' + h.slice(0, 5).map(function (b) { return b.label + ' with ' + b.cart.length + (b.cart.length === 1 ? ' item' : ' items'); }).join(', ') + '. Say resume bill, then the number.', 'Una bili ' + h.length + ' zilizoshikiliwa: ' + h.slice(0, 5).map(function (b) { return b.label + ' yenye bidhaa ' + b.cart.length; }).join(', ') + '. Sema rudisha bili, kisha namba.');
+  }
+  if (/^(?:please |tafadhali )?(?:scan|changanua|skani)\b(?:\s+(?:a |an |the |new )?(?:barcode|bar code|item|product|code|msimbo|bidhaa))?$/.test(n) || /\b(?:scan|changanua|skani)\b.*\b(?:barcode|bar code|msimbo)\b/.test(n)) {
+    await openTabReady('pos');
+    if (!scanSupported()) return say('Camera scanning is not available on this phone. Type the code in the search box, or use a Bluetooth scanner.', 'Kuchanganua kwa kamera hakupatikani kwenye simu hii. Andika msimbo kwenye kisanduku cha kutafuta, au tumia skana ya Bluetooth.');
+    openScan(); return say('Scanner opened. Hold the barcode in front of the camera. Items go into the cart; nothing is recorded until you confirm the sale.', 'Skana imefunguliwa. Shikilia msimbo mbele ya kamera. Bidhaa zinaingia kwenye kikapu; hakuna kinachorekodiwa hadi uthibitishe mauzo.');
+  }
+  if ((m = /^(?:please |tafadhali )?(?:receive|pokea|ingiza)\s+(?:new\s+)?(?:(\d+(?:\.\d+)?)\s+)?(?:stock|packs?|crates?|trays?|sacks?|goods|stoku|bidhaa|vifurushi|kreti|trei|gunia)(?:\s+(?:of|for|ya|za))?\s*(.*)$/.exec(n))) {
+    await openTabReady('waste'); wsBatch();
+    var pick = String(m[2] || '').trim(), prod = null;
+    if (pick) { var hits = S.products.filter(function (p) { return String(p.name || '').toLowerCase().indexOf(pick) >= 0 || (pick.length > 2 && pick.indexOf(String(p.name || '').toLowerCase()) >= 0); }); if (hits.length === 1) prod = hits[0]; }
+    try { if (prod && $('wbProd')) $('wbProd').value = prod.id; if (m[1] && $('wbQty')) $('wbQty').value = m[1]; if (/pack|crate|tray|sack|kreti|trei|gunia|vifurushi/.test(n) && $('wbMode')) { $('wbMode').value = 'pack'; $('wbMode').dispatchEvent(new Event('change', { bubbles: true })); } } catch (_) {}
+    return say('Receive stock is open' + (prod ? ' for ' + prod.name : '') + '. Check the product, quantity and cost, then tap Save. Stock is only added when you save.', 'Pokea stoku imefunguliwa' + (prod ? ' kwa ' + prod.name : '') + '. Angalia bidhaa, kiasi na gharama, kisha bonyeza Hifadhi. Stoku inaongezwa ukihifadhi tu.');
+  }
+  if (/\b(?:device financing|financing|instal?ments?|installments?|scale loan|loan on my scale|mkopo wa kifaa|malipo ya wiki|deni la skana|deni la mizani)\b/.test(n) && !/\b(?:apply|pay|lipa|omba)\b/.test(n) || /^(?:open|show|fungua|nionyeshe)\s+(?:my\s+)?(?:device\s+)?(?:financing|instal?ments?)$/.test(n)) {
+    fnOpen(); return say('Opening device financing. I do not read your balance aloud. Paying and applying are done by you on the screen.', 'Inafungua mkopo wa kifaa. Sisomi salio lako kwa sauti. Kulipa na kuomba unafanya mwenyewe kwenye skrini.');
+  }
+  if (/\b(?:apply|omba)\b.*\b(?:financing|device|scale|mkopo|kifaa)\b|\b(?:pay|lipa)\b.*\b(?:instal?ments?|installments?|financing|mkopo|kifaa)\b/.test(n)) {
+    fnOpen(); return say('I opened device financing. Applying and paying are money actions, so please do them yourself on the screen.', 'Nimefungua mkopo wa kifaa. Kuomba na kulipa ni miamala ya pesa, tafadhali fanya mwenyewe kwenye skrini.');
+  }
+  return false;
+}
+window.__necpraDukaVoice = {
+  adapter: {
+    getProducts: async function () {
+      if (!S.shopId) return []; var list; try { list = await vProducts(); } catch (e) { list = S.products || []; }
+      return list.filter(function (p) { return p && p.id && p.isActive !== false && !p.archived; }).map(function (p) { return { id: p.id, name: p.name, unit: p.unit, sellingPrice: Number(p.sellingPrice), stockQty: Number(p.stockQty) }; });
+    },
+    getCustomers: async function () { try { return (await api('GET', '/shops/' + S.shopId + '/customers?limit=500')).customers || []; } catch (e) { return []; } },
+    wasApplied: function (id) { try { return JSON.parse(sessionStorage.getItem('necpra_voice_applied') || '[]').indexOf(id) >= 0; } catch (_) { return false; } },
+    applyLines: function (lines, disc, id) {
+      try { var done = JSON.parse(sessionStorage.getItem('necpra_voice_applied') || '[]'); done.push(id); sessionStorage.setItem('necpra_voice_applied', JSON.stringify(done.slice(-30))); } catch (_) {}
+      var merged = 0;
+      lines.forEach(function (l) {
+        var ex = S.cart.filter(function (c) { return c.productId === l.productId; })[0];   // same product -> same line, never a duplicate line
+        if (ex) { ex.qty = Math.round((Number(ex.qty) + l.qty) * 1000) / 1000; ex.stock = l.stock; merged++; }
+        else S.cart.push({ productId: l.productId, name: l.name, unit: l.unit, price: l.price, qty: l.qty, stock: l.stock });
+      });
+      if (!S.saleId) S.saleId = uuid();
+      if (disc && disc.value > 0 && !(S.disc.value !== '' && Number(S.disc.value) > 0)) S.disc = { type: disc.type, value: String(disc.value) };
+      S.tab = 'pos'; try { sessionStorage.setItem('necpra_duka_tab', 'pos'); } catch (_) {}
+      saveCart(); return { merged: merged };
+    },
+    closeAssistant: function () { closeModal(); },
+    checkout: async function (o) {
+      render(); await openCheckout();
+      try {
+        var c = calc();
+        if (o.method === 'mpesa' && $('payMp')) $('payMp').value = c.total / 100; else if (o.method === 'cash' && $('payCash')) $('payCash').value = c.total / 100;
+        if (o.customerId && $('coCust')) $('coCust').value = o.customerId;
+        updateCheckout(); if (o.method === 'mpesa' && $('payCode')) $('payCode').focus();
+      } catch (_) {}
+    }
+  },
+  // a spoken request forwarded by the app shell while this screen is open
+  onIntent: async function (text) {
+    if (!S.shopId) return false;
+    S.va.remote = true; S.va.spoke = true;
+    // Answer inventory totals directly from this signed-in shop's live product
+    // endpoint. Do not depend on the local assistant's action-label vocabulary.
+    var inventoryQuestion = String(text || '').toLowerCase().replace(/[?!.,]+/g, ' ').replace(/\\s+/g, ' ').trim();
+    if (/\\b(?:how many|number of|count|total|idadi ya|bidhaa ngapi|ngapi)\\b.*\\b(?:products?|items?|goods|bidhaa)\\b|\\b(?:products?|items?|goods|bidhaa)\\b.*\\b(?:do we have|do i have|have we got|in (?:my |our |the )?(?:shop|store|duka|inventory)|available)\\b/.test(inventoryQuestion)) {
+      try { await vStock({ query: '' }); }
+      catch (e) { vSay(T('I could not retrieve the product count right now: ' + (e.message || 'please try again.'), 'Sikuweza kupata idadi ya bidhaa sasa: ' + (e.message || 'jaribu tena.'))); }
+      return true;
+    }
+    try { if (await vExtra(text)) return true; }
+    catch (e) { vSay('That Duka request could not be completed: ' + (e && e.message || 'please try again.')); return true; }
+    if (!window.NecpraVoiceSalesNLU) return false;
+    var cmd = vParse(text, S.va.lang), known = cmd.intent && ['unknown', 'confirmWord', 'cancelWord'].indexOf(cmd.intent) < 0;
+    if (!known && !NecpraVoiceSalesNLU.looksLikeSaleStatement(text)) return false;
+    await vHandle(text); return true;
+  }
+};
+boot();
+})();
