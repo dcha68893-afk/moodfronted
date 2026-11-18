@@ -116,6 +116,25 @@
       V.audit('voice.nav', { module: 'shell', outcome: 'executed', lang: result.lang });
       return forward('group', result);
     }
+    // Inventory questions must always reach DUKA, even when the user is speaking
+    // from another module. Treat singular/plural and common shop wording as live data
+    // questions, not as generic help text or an unrecognised command.
+    var dukaInventoryQuestion = /\b(?:how many|number of|count|total|idadi ya|bidhaa ngapi|ngapi)\b.*\b(?:products?|items?|goods|bidhaa)\b|\b(?:products?|items?|goods|bidhaa)\b.*\b(?:do we have|do i have|have we got|in (?:my |our |the )?(?:shop|store|duka|inventory)|available)\b/i.test(clean(text));
+    if (dukaInventoryQuestion && cfg.allowedPages.indexOf('tools') >= 0) {
+      var inventoryPreviousPage = cfg.getPage();
+      if (inventoryPreviousPage !== 'tools') cfg.navigate('tools');
+      if (await forward('tools', result)) { V.audit('voice.nav', { module: 'tools', outcome: 'answered-inventory', lang: result.lang }); return true; }
+      if (inventoryPreviousPage && inventoryPreviousPage !== 'tools') cfg.navigate(inventoryPreviousPage);
+    }
+    // DUKA operations are routed to the shop module with the original words intact. The module opens a form or screen;
+    // the universal assistant remains the only microphone and money/stock changes still need on-screen confirmation.
+    var dukaOperation = /\b(?:held bills?|parked bills?|hold this bill|resume bill|discard held|barcode|bar code|scan (?:a )?(?:product|item|code)|receive stock|stock receiving|register supplier|add supplier|supplier registration|create group order|start group order|group order|group buying|buy together|stock loss|spoiled stock|record spoilage|sync now|sync status|pending changes|offline changes)\b/i.test(clean(text));
+    if (dukaOperation && cfg.allowedPages.indexOf('tools') >= 0) {
+      var previousPage = cfg.getPage();
+      if (previousPage !== 'tools') cfg.navigate('tools');
+      if (await forward('tools', result)) { V.audit('voice.nav', { module: 'tools', outcome: 'executed', lang: result.lang }); return true; }
+      if (previousPage && previousPage !== 'tools') cfg.navigate(previousPage);
+    }
     var nav = I.parseNav(text);
     if (nav && nav.type === 'back') { V.audit('voice.nav', { module: 'shell', outcome: 'executed', lang: result.lang }); (cfg.back || function () { root.history.back(); })(); return true; }
     if (nav && nav.type === 'navigate') {
@@ -158,12 +177,16 @@
       if (u && u.phrase && (await runUnderstood(u, result, page))) return true;
     }
     if (!result.__understood && !result.usedAlternative && NLU && V.getSettings().logUnheard) NLU.logUnheard(result.transcript);   // opt-in, stays on the phone
-    // A question about ANOTHER module ("is there a friend request?" while in DUKA, "how many products do we have" while in Friends): ask the screen that owns the topic.
+    // Natural data questions ("how many friends?", "what is my balance?",
+    // "who viewed my status?", "how many members are in this group?") go to
+    // the module that owns the data. Preserve the words so its own handler can
+    // query the authenticated account and speak the result.
     var topic = I.topicOf ? I.topicOf(text) : null;
     if (topic && topic !== page && cfg.allowedPages.indexOf(topic) >= 0) {
+      var questionPreviousPage = page;
       cfg.navigate(topic);
-      if (await forward(topic, result)) { V.audit('voice.nav', { module: 'shell', outcome: 'executed', lang: result.lang }); return true; }
-      if (page) cfg.navigate(page);   // that screen could not answer either: stay where the user was
+      if (await forward(topic, result)) { V.audit('voice.nav', { module: topic, outcome: 'answered-natural-question', lang: result.lang }); return true; }
+      if (questionPreviousPage && cfg.getPage() !== questionPreviousPage) cfg.navigate(questionPreviousPage);
     }
     return false; // not something any screen could do: the caller says so honestly and points to "what can you do" (never a made-up answer)
   }
