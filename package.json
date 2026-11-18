@@ -5,7 +5,8 @@
   "private": true,
   "scripts": {
     "build": "node scripts/build-config.js",
-    "start": "npx http-server dist -p 5500"
+    "start": "npx http-server dist -p 5500",
+    "test": "node --test tests/duka-smart-regression.test.js"
   },
   "devDependencies": {
     "http-server": "^14.1.1"
