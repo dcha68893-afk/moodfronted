@@ -393,8 +393,25 @@
         emit(payload.online ? 'SYSTEM_NETWORK_ONLINE' : 'SYSTEM_NETWORK_OFFLINE', payload);
     }
 
+    // MODE SEPARATION: same detection index.html's head script uses. A plain browser tab must stay a
+    // browser tab (landing page shown, user opens the app themselves); only the installed PWA / Android
+    // app / TWA is auto-forwarded to the app screen.
+    function isInstalledShell() {
+        try {
+            const mm = window.matchMedia;
+            return !!((mm && (mm('(display-mode: standalone)').matches ||
+                mm('(display-mode: fullscreen)').matches ||
+                mm('(display-mode: minimal-ui)').matches)) ||
+                window.navigator.standalone === true ||
+                (document.referrer || '').indexOf('android-app://com.necpa') === 0 ||
+                (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) ||
+                /[?&]app=1(&|$)/.test(location.search));
+        } catch (_) { return false; }
+    }
+
     function redirectToChat() {
         if (!isLoginPage()) return;
+        if (!isInstalledShell()) return;
         window.location.replace(CHAT_ENTRY);
     }
 

@@ -1861,8 +1861,8 @@
         //    TIME, each freeing the slot on load (4s cap) so a slow module cannot stall the rest;
         //  - tapping a tab loads that module IMMEDIATELY and pauses the queue until it has
         //    loaded (6s cap), so the module the user is waiting for gets the full bandwidth.
-        var QUEUE = ['statusIframe','groupIframe','friendsIframe','settingsIframe','toolsIframe','moneyIframe','gamesIframe'];
-        var SLOTS = 2, running = 0, queueOn = false, urgent = 0;   // two modules boot at a time (was one) so the tail of the queue is reached sooner
+        var QUEUE = ['toolsIframe','moneyIframe','gamesIframe','statusIframe','groupIframe','friendsIframe','settingsIframe'];   // DUKA, Wallet and Games first: they are the screens people open straight away
+        var SLOTS = 4, running = 0, queueOn = false, urgent = 0;   // 4 modules boot together so every screen is ready (and answers voice commands) within seconds of opening
 
         function pump() {
             if (!queueOn) return;
@@ -1934,7 +1934,7 @@
             };
             var msg = document.getElementById('messagesIframe');
             var started = false;
-            function once() { if (started) return; started = true; setTimeout(begin, 200); }
+            function once() { if (started) return; started = true; setTimeout(begin, 50); }
             // NO RACING: the other modules boot ONE AT A TIME, and only after the messages
             // iframe has finished loading, so they never compete with it. (Until a module's turn
             // comes, tapping its tab shows its last saved screen instantly - see __kynSnap.)
@@ -1945,7 +1945,7 @@
                 } catch (_) {}
                 msg.addEventListener('load', once, { once: true });
             }
-            setTimeout(once, 6000);   // safety net if the messages iframe never reports load
+            setTimeout(once, 1500);   // safety net: do not wait long for messages before warming the other modules
         }
 
         if (document.readyState === 'loading') {

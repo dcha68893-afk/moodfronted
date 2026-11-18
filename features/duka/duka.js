@@ -28,7 +28,12 @@ function apiBase() {
 }
 var API_TIMEOUT = 20000;
 function offlineErr(m) { return Object.assign(new Error(m), { status: 0, offline: true }); }
+var CACHE_ONLY = false;   // boot phase 1: answer GETs from the phone's saved copy only, never wait on the network
 async function api(method, path, body, opt) {
+  if (CACHE_ONLY && method === 'GET' && !(opt && opt.noCache)) {
+    var cc = cacheGet(path); if (cc) { S.staleAt = S.staleAt ? Math.min(S.staleAt, cc.at) : cc.at; return cc.data; }
+    throw offlineErr('Nothing saved yet.');
+  }
   var base = apiBase();
   if (base === '' && !/^(localhost|127\.)/.test(location.hostname)) throw Object.assign(new Error('The app is not connected to the server yet. Please reopen NECPRA.'), { status: 0 });
   var r, ac = typeof AbortController === 'function' ? new AbortController() : null, tm = ac ? setTimeout(function () { ac.abort(); }, API_TIMEOUT) : 0;
@@ -112,9 +117,24 @@ async function ensureDefaultShop() {
   var d = await api('POST', '/shops', { id: id, name: 'My Duka' });
   S.shopId = d.shop.id; await loadShops();
 }
+function userIsEditing() {
+  try { var a = document.activeElement; if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return true; var m = $('modal'); return !!(m && m.classList.contains('open')); } catch (_) { return false; }
+}
 async function boot() {
-  try { await loadShops(); if (!S.shops.length) await ensureDefaultShop(); await checkAdmin(); await loadTab(); } catch (e) { S.err = e.message; }
-  S.loading = false; render(); setTimeout(syncNow, 500);
+  /* Phase 1 (instant): paint from the saved copy of this shop, no network wait, no "Loading your duka…" screen.
+     Phase 2 (background): fetch fresh data, then quietly redraw (unless the user is typing / a form is open). */
+  var painted = false;
+  try {
+    CACHE_ONLY = true;
+    await loadShops();
+    if (S.shops.length) { try { await checkAdmin(); } catch (_) {} await loadTab(); painted = true; }
+  } catch (_) {} finally { CACHE_ONLY = false; }
+  if (painted) { S.loading = false; S.err = ''; render(); }
+  try { await loadShops(); if (!S.shops.length) await ensureDefaultShop(); await checkAdmin(); await loadTab(); S.err = ''; }
+  catch (e) { if (!painted) S.err = e.message; }
+  S.loading = false;
+  if (!painted || !userIsEditing()) render();
+  setTimeout(syncNow, 500);
 }
 
 /* ───── views ───── */

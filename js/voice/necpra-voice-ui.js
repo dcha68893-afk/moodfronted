@@ -207,7 +207,13 @@
       .then(function (r) {
         if (!r.ok || !r.transcript) return r;
         V.audit('voice.transcript', { module: 'global', outcome: 'captured', lang: r.lang, durationMs: r.durationMs, chars: r.transcript.length });
-        return V.dispatch(r).then(function (d) {
+        // If screens are still booting, a command can fail only because its screen is not ready yet. Wait for the warm-up
+        // (max ~15s) and try once more before ever saying "could not match".
+        var waitWarm = function () { return new Promise(function (res) { var end = Date.now() + 15000; (function poll() { if (root.__modulesWarmed === true || Date.now() > end) return res(); setTimeout(poll, 300); })(); }); };
+        return V.dispatch(r).then(function (d0) {
+          if (d0.handled || root.__modulesWarmed === true || root.__modulesWarmed === undefined && !root.__modulesWarmupStarted) return d0;
+          return waitWarm().then(function () { return V.dispatch(Object.assign({}, r, { __understood: false })); });
+        }).then(function (d) {
           if (!d.handled) { var m = T('I heard you, but I could not match that to something I can do. You can say things like “open wallet”, “open chama”, “open duka” or “what can you do”.', 'Nimekusikia, lakini sijapata ninachoweza kufanya hapo. Unaweza kusema “fungua pochi”, “fungua chama”, “fungua duka” au “unaweza kufanya nini”.'); announce(m + ' ' + r.transcript); V.speak(m); }
           offerHandsFree();
           if (d.handled) offerHandsFree();
