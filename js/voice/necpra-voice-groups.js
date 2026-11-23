@@ -46,7 +46,7 @@
     if ((m = /^(?:dismiss|demote|remove)\s+(.+?)\s+as\s+(?:an?\s+|the\s+)?(?:group\s+)?admin(?:istrator)?$/i.exec(s)) || (m = /^(?:demote|dismiss)\s+(.+?)$/i.exec(s)) || (m = /^(?:mwondoe|mshushe)\s+(.+?)\s+(?:kama\s+|kwenye\s+)?(?:msimamizi|usimamizi|admin)(?:\s+(?:wa|kwenye)\s+kikundi)?$/i.exec(s))) { if (!/\b(friend|chat|message)\b/i.test(m[1])) return { type: 'role', name: strip(m[1]), role: 'member' }; }
     if ((m = /^(?:remove|kick(?:\s+out)?|take|ondoa|mfukuze)\s+(.+?)\s+(?:from|out of|off|kwenye|katika)\s+(?:this\s+|the\s+)?(?:(.+?)\s+)?(?:group|kikundi)(?:\s+(?:hiki|hicho))?$/i.exec(s)) && !/\b(friend|message|star)\b/i.test(m[1])) return { type: 'remove-member', name: strip(m[1]), group: /^(?:this|the|hiki|hicho)$/i.test(clean(m[2])) ? '' : strip(m[2]) };
     if ((m = /^(?:create|make|start|new|unda|anzisha)\s+(?:a\s+|new\s+)*(?:group|kikundi)(?:\s+(?:called|named|iitwayo))?\s*(.*)$/i.exec(s))) return { type: 'create', name: strip(m[1]) };
-    if ((m = /^(?:open|go to|show|fungua|nenda kwa|take me to|nipeleke)\s+(?:to\s+)?(?:the\s+|my\s+)?(?:group|kikundi)\s+(?:chat\s+)?(.+)$/i.exec(s)) && !/^(?:list|s|settings|info|information|details|media|files|pinned|members?)$/i.test(m[1])) return { type: 'open', name: strip(m[1]) };
+    if ((m = /^(?:open|go to|show|fungua|nenda kwa|take me to|nipeleke)\s+(?:to\s+)?(?:the\s+|my\s+)?(?:group|kikundi)\s+(?:chat\s+)?(.+)$/i.exec(s)) && !/^(?:list|s|settings|purpose|description|about|info|information|details|media|files|pinned|members?)$/i.test(m[1])) return { type: 'open', name: strip(m[1]) };
     if ((m = /^(?:open|go to|fungua|nenda kwa)\s+(?:the\s+|my\s+)?(.+?)\s+(?:group|kikundi)$/i.exec(s))) return { type: 'open', name: strip(m[1]) };
     if ((m = /^(?:read|soma|nisomee)\s+(?:out\s+)?(?:(?:me\s+)?(?:the\s+|my\s+)?(?:last|latest|recent|new|mpya|za mwisho)\s+)?(?:(\d+|one|two|three|five|ten)\s+)?(?:group\s+)?(?:messages?|ujumbe|texts?)(?:\s+(?:here|in this group|kwenye kikundi hiki))?$/i.exec(s))) return { type: 'read', count: ({ one: 1, two: 2, three: 3, five: 5, ten: 10 })[String(m[1] || '').toLowerCase()] || Number(m[1]) || 5 };
     if ((m = /^(?:search|find|look for|tafuta)\s+(?:for\s+)?(.+?)\s+(?:in|within|kwenye|ndani ya)\s+(?:this\s+|the\s+)?(?:group|chat|kikundi)(?:\s+.*)?$/i.exec(s))) return { type: 'search', query: clean(m[1]) };
@@ -67,6 +67,9 @@
     if (/^(?:(?:show|open|fungua|nionyeshe)\s+)?(?:the\s+)?(?:group|kikundi)\s+(?:info|information|details|maelezo)$/.test(n) || /^(?:maelezo ya kikundi|group info)$/.test(n)) return { type: 'panel', panel: 'info' };
     if (/^(?:(?:show|open|fungua|nionyeshe)\s+)?(?:the\s+)?pinned(?:\s+messages?)?(?:\s+(?:in|of)\s+(?:this\s+)?group)?$/.test(n) || /^(?:show|open|fungua|nionyeshe)\s+(?:the\s+)?ujumbe uliobandikwa$/.test(n)) return { type: 'panel', panel: 'pinned' };
     if (/^(?:show|open|fungua|nionyeshe)\s+(?:the\s+)?(?:group\s+)?(?:media|files|files and media|photos and files|faili|picha na faili)(?:\s+(?:in|of)\s+(?:this\s+)?group)?$/.test(n)) return { type: 'panel', panel: 'media' };
+    if (/^(?:(?:show|open|fungua|nionyeshe)\s+)?(?:the\s+)?(?:group\s+)?settings(?:\s+(?:of|for)\s+(?:this\s+)?group)?$/.test(n) && /\bgroup\b/.test(n) || /^(?:group settings|mipangilio ya kikundi|fungua mipangilio ya kikundi)$/.test(n)) return { type: 'panel', panel: 'settings' };
+    if (/^(?:(?:show|open|fungua|nionyeshe|edit|change|badilisha)\s+)?(?:the\s+)?group\s+(?:purpose|description|about)$/.test(n) || /^(?:madhumuni ya kikundi|fungua madhumuni ya kikundi|badilisha madhumuni ya kikundi)$/.test(n)) return { type: 'panel', panel: 'purpose' };
+    if (/^(?:delete|remove|futa)\s+(?:this\s+|the\s+)?(?:whole\s+)?(?:group|kikundi)(?:\s+(?:hiki|hicho))?$/.test(n)) return { type: 'delete-refuse' };
     if (/^(?:refresh|reload|update|sasisha)(?:\s+(?:groups|the list))?$/.test(n)) return { type: 'refresh' };
     return null;
   }
@@ -263,7 +266,9 @@
     if (p.type === 'leave') return leaveFlow(p);
     var c = current();
     if (!c) { await say('Open a group first. Say "open group" and its name.', 'Fungua kikundi kwanza. Sema "fungua kikundi" na jina lake.'); return true; }
+    if (p.type === 'delete-refuse') { V.audit('groups.delete', { module: 'groups', outcome: 'refused' }); await say('For safety, deleting a group is not done by voice. Open the group menu on the screen and choose Delete group. I can leave the group for you if you like.', 'Kwa usalama, kufuta kikundi hakufanywi kwa sauti. Fungua menyu ya kikundi kwenye skrini kisha chagua Futa kikundi. Naweza kukuondoa kwenye kikundi kama unataka.'); return true; }
     if (p.type === 'panel') {
+      if (p.panel === 'settings' || p.panel === 'purpose') { if (!hga(p.panel)) { await say('Only a group admin can open that, or the group menu is not available.', 'Msimamizi wa kikundi pekee anaweza kufungua hilo, au menyu ya kikundi haipatikani.'); return true; } await say(p.panel === 'settings' ? 'Opening group settings.' : 'Opening the group purpose.', p.panel === 'settings' ? 'Nafungua mipangilio ya kikundi.' : 'Nafungua madhumuni ya kikundi.'); return true; }
       if (p.panel === 'info') { if (!hga('info')) return false; await say('Showing group info.', 'Inaonyesha maelezo ya kikundi.'); return true; }
       var tg2 = doc.getElementById(p.panel === 'pinned' ? 'pinnedToggle' : 'mediaToggle'); if (!tg2) return false; tg2.click();
       await say(p.panel === 'pinned' ? 'Showing pinned messages.' : 'Showing files and media.', p.panel === 'pinned' ? 'Inaonyesha ujumbe uliobandikwa.' : 'Inaonyesha faili na picha.'); return true;

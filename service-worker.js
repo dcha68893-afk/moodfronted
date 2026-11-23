@@ -24,7 +24,7 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.60.0';
+const SW_VERSION = '19.61.0';
 // FIX: bumped so activate() drops every existing cache immediately on this
 // deploy — anyone with a stale pre-rebuild group.html (or the old, now-
 // deleted group-core-*/group-os-* files, or the misspelled necpra-* icons
@@ -110,7 +110,7 @@ const SW_VERSION = '19.60.0';
 // v132: new landing page (index.html), Pay Later tab removed from money.html, Tools.html is now a redirect to /duka.html.
 // v133: mode separation — browser always shows landing page; installed app skips it when signed in; no browser->app / app->browser redirects (index.html, manifest.json, AndroidManifest.xml).
 // v135: instant-open (DUKA cache-first, Wallet saved balance, faster module warm-up), browser tab no longer auto-forwarded into the app, group settings redesign, DUKA visual polish; chat.html, money.html, group.html, duka.css/js changed.
-const CACHE_NAME = 'necpra-static-v135';
+const CACHE_NAME = 'necpra-static-v136';
 // v134: landing page (/ and /index.html) is network-first; browser never auto-skips the landing page; android-app:// referrer only counts for com.necpa.
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 

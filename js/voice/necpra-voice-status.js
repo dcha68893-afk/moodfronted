@@ -33,6 +33,11 @@
     if (/^(?:(?:show|open|view|watch|play|see|fungua|nionyeshe|angalia)\s+)?(?:my|yangu)\s+(?:own\s+)?(?:status|statuses|moment|moments|story|stories|hali)$/.test(n) || /^(?:fungua|angalia|nionyeshe)\s+hali\s+yangu$/.test(n)) return { type: 'mine' };
     if ((m = /^(?:show|open|view|watch|play|see|fungua|nionyeshe|angalia)\s+(?:me\s+)?(.+?)(?:'s|s'|’s)?\s+(?:status|statuses|moment|moments|story|stories|hali)$/i.exec(s))) return { type: 'view', name: clean(m[1].replace(/^(?:the|my)\s+/i, '')) };
     if ((m = /^(?:show|open|view|watch|play|fungua|angalia)\s+(?:the\s+)?(?:status|moment|story|hali)\s+(?:of|from|ya|kutoka kwa)\s+(.+)$/i.exec(s))) return { type: 'view', name: clean(m[1]) };
+    if (/^(?:follow|follow (?:this )?(?:creator|account)|mfuate|mfuatilie)$/.test(n)) return { type: 'vibe-follow', on: true };
+    if (/^(?:unfollow|unfollow (?:this )?(?:creator|account)|acha kumfuata)$/.test(n)) return { type: 'vibe-follow', on: false };
+    if (/^(?:save|save (?:this )?(?:vibe|video)|hifadhi|hifadhi vibe)$/.test(n)) return { type: 'vibe-save' };
+    if (/^(?:open |show |read )?(?:the )?comments?$/.test(n) || /^(?:fungua|onyesha) maoni$/.test(n)) return { type: 'vibe-comments' };
+    if (/^(?:(?:open|show|change|choose|edit|fungua|badilisha)\s+)?(?:my\s+)?(?:interests?|topics|mapendeleo)$/.test(n) || /^(?:change|edit|choose) (?:my )?interests?$/.test(n)) return { type: 'interests' };
     if (/^(?:next|next status|skip|inayofuata|mbele)$/.test(n)) return { type: 'next' };
     if (/^(?:previous|previous status|go back one|last status|iliyopita|nyuma kidogo)$/.test(n)) return { type: 'prev' };
     if (/^(?:close|exit|stop|funga|toka)(?:\s+(?:the\s+)?(?:status|viewer|vibes?|story|moment))?$/.test(n)) return { type: 'close' };
@@ -59,6 +64,17 @@
     if (p.type === 'vibes') { if (!click(q('[data-open-vibes]'))) return false; await say('Opening Vibes.', 'Inafungua Vibes.'); return true; }
     if (p.type === 'vibe-tab') { if (!vibesOpen()) click(q('[data-open-vibes]')); var vt = await waitFor(function () { return q('[data-vibe-tab="' + p.tab + '"]'); }, 3000); if (!vt) { await say('Vibes are not ready yet.', 'Vibes bado hazijawa tayari.'); return true; } vt.click(); await say('Showing ' + p.tab.replace('forYou', 'For You') + ' vibes.', 'Inaonyesha vibes.'); return true; }
     if (p.type === 'close') { var c = q('[data-vclose]') || q('[data-rclose]') || q('[data-cclose]') || q('[data-iclose]'); if (!click(c)) { await say('Nothing to close.', 'Hakuna cha kufunga.'); return true; } return true; }
+    if (p.type === 'next' || p.type === 'prev') { if (vibesOpen()) { doc.dispatchEvent(new KeyboardEvent('keydown', { key: p.type === 'next' ? 'ArrowDown' : 'ArrowUp', bubbles: true })); await sleep(400); return true; } }
+    if (p.type === 'vibe-follow' || p.type === 'vibe-save' || p.type === 'vibe-comments') {
+      if (!vibesOpen()) { await say('Open Vibes first. Say open vibes.', 'Fungua Vibes kwanza. Sema fungua vibes.'); return true; }
+      if (p.type === 'vibe-comments') { if (!click(q('[data-rcomment]'))) return false; await say('Opening comments.', 'Nafungua maoni.'); return true; }
+      if (p.type === 'vibe-save') { if (!click(q('[data-rsave]'))) return false; await sleep(200); await say(toastText() || 'Done.', toastText() || 'Imekamilika.'); return true; }
+      var fb = q('[data-rfollow]'); if (!fb) { await say('There is no creator to follow here.', 'Hakuna mtayarishaji wa kumfuata hapa.'); return true; }
+      var isF = fb.classList.contains('following'); if (isF === p.on) { await say(p.on ? 'You already follow this creator.' : 'You do not follow this creator.', p.on ? 'Tayari unamfuata mtayarishaji huyu.' : 'Humfuati mtayarishaji huyu.'); return true; }
+      fb.click(); await sleep(300); await say(p.on ? 'Following.' : 'Unfollowed.', p.on ? 'Unamfuata.' : 'Umeacha kumfuata.'); return true;
+    }
+    if (p.type === 'interests') { if (!click(q('[data-open-interests]'))) return false; await say('Opening your interests.', 'Nafungua mapendeleo yako.'); return true; }
+    if (p.type === 'react' && vibesOpen() && p.emoji === '❤️') { if (!click(q('[data-rlike]'))) return false; await sleep(200); await say('Done.', 'Imekamilika.'); return true; }
     if (p.type === 'next' || p.type === 'prev') { var nb = q(p.type === 'next' ? '[data-next]' : '[data-prev]'); if (!viewerOpen() || !nb) { await say('Open a status first.', 'Fungua hali kwanza.'); return true; } nb.click(); return true; }
     if (p.type === 'search') { var si = q('.ns-search'); if (!si) return false; setVal(si, p.query); await sleep(600); var cards = qa('[data-feed] > *').length; await say(cards ? 'Showing results for ' + p.query + '.' : 'No moments found for ' + p.query + '.', cards ? 'Matokeo ya ' + p.query + '.' : 'Hakuna hali zilizopatikana kwa ' + p.query + '.'); return true; }
     if (p.type === 'filter') { var f = q('.ns-filter'); if (!f) return false; setVal(f, p.kind); await say('Filter applied.', 'Kichujio kimewekwa.'); return true; }

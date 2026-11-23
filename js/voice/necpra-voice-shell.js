@@ -86,7 +86,7 @@
     }
     // Settings by voice from ANY screen: "open privacy settings", "turn off read receipts", "dark mode". Runs before parseNav, which would only open
     // the bare Settings page (or Messenger for "chat settings") and lose the request.
-    if (cfg.allowedPages.indexOf('settings') >= 0 && (/^(?:please\s+|tafadhali\s+)?(?:open|go to|show|take me to|fungua|nenda kwa|nipeleke|nionyeshe)\s+(?:the\s+|my\s+)?(?:(?:profile|security|privacy|notifications?|appearance|storage|backup|advanced|danger)(?:\s+settings?)?|(?:chat|friends?|groups?|status|mood)\s+settings?|mipangilio ya .+)$/i.test(clean(text)) ||
+    if (cfg.allowedPages.indexOf('settings') >= 0 && (/^(?:please\s+|tafadhali\s+)?(?:open|go to|show|take me to|fungua|nenda kwa|nipeleke|nionyeshe)\s+(?:the\s+|my\s+)?(?:(?:profile|security|privacy|notifications?|appearance|storage|backup|advanced|danger)(?:\s+settings?)?|(?:help|contact us|terms(?: of service| and conditions)?)|(?:chat|friends?|groups?|status|mood)\s+settings?|mipangilio ya .+)$/i.test(clean(text)) ||
         (/^(?:please\s+)?(?:(?:turn|switch|set)\s+(?:on|off)\s+|(?:enable|disable|washa|zima)\s+)/i.test(clean(text)) && /(receipts?|last seen|typing|online status|profile photo|notifications?|sounds?|vibrat|previews?|dark mode|light mode|theme|wallpaper|auto.?download|enter|suggestions?|discovery|read)/i.test(text)) || /^(?:dark mode|light mode|use dark mode|use light mode)$/i.test(clean(text)))) {
       if (cfg.getPage() !== 'settings') cfg.navigate('settings');
       V.audit('voice.nav', { module: 'shell', outcome: 'executed', lang: result.lang });

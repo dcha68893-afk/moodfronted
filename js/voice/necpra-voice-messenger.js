@@ -216,6 +216,12 @@
       verb = 'edit'; rest = s.replace(/^(?:edit|change|correct|fix|badilisha|hariri|rekebisha)\s*/i, '');
       if ((m = /^(.*?)\s+(?:to say|to read|to|into|saying|kuwa|iwe)\s+(.+)$/i.exec(rest)) && m[2]) { rest = m[1]; payload = clean(m[2].replace(/^["“']|["”']$/g, '')); }
     }
+    else if (/^(?:react(?: to| on)?|weka hisia(?: kwenye| kwa)?)\b/.test(n)) {
+      verb = 'react'; rest = s.replace(/^(?:react(?: to| on)?|weka hisia(?: kwenye| kwa)?)\s*/i, '');
+      if ((m = /^(?:with\s+|na\s+)?(.+?)\s+(?:to|on|kwenye|kwa)\s+(.+)$/i.exec(rest)) && /^(?:with|na)\s/i.test(rest)) { payload = clean(m[1]); rest = m[2]; }
+      else if ((m = /^(.*?)\s+(?:with|using|na)\s+(.+)$/i.exec(rest)) && m[2]) { rest = m[1]; payload = clean(m[2]); }
+    }
+    else if (/^(?:copy|nakili)\b/.test(n)) { verb = 'copy'; rest = s.replace(/^(?:copy|nakili)\s*/i, ''); }
     else if (/^(?:delete|erase|remove|futa|ondoa)\b/.test(n)) { verb = 'delete'; rest = s.replace(/^(?:delete|erase|remove|futa|ondoa)\s*/i, ''); }
     if (!verb) return null;
     // the rest must really talk about one message ("the last message", "my message about the rent"), not a chat or a person
@@ -260,6 +266,8 @@
     var idx = await UI.choose({ title: T('Which message?', 'Ujumbe upi?'), options: cands.map(function (m) { return { label: msgText(m).slice(0, 70), sub: String(m.senderId) === String(me) ? T('You', 'Wewe') : chat.name }; }), voiceAnswer: ask(T('Say the number.', 'Sema namba.')) });
     return idx >= 0 ? cands[idx] : null;
   }
+  var EMOJI = [[/thumbs?\s*up|like|good|gumba|sawa|👍/i, '👍'], [/heart|love|moyo|❤/i, '❤️'], [/laugh|haha|funny|lol|cheka|😂/i, '😂'], [/sad|cry|huzuni|lia|😢/i, '😢'], [/wow|surpris|shangaa|😮/i, '😮'], [/pray|thank|omba|asante|🙏/i, '🙏'], [/fire|moto|🔥/i, '🔥'], [/clap|makofi|👏/i, '👏']];
+  function emojiOf(w) { w = String(w || ''); var lit = /[\u{1F300}-\u{1FAFF}❤]/u.exec(w); if (lit) return lit[0] === '❤' ? '❤️' : lit[0]; for (var i = 0; i < EMOJI.length; i++) if (EMOJI[i][0].test(w)) return EMOJI[i][1]; return ''; }
   function failed(res) { return res && (res.success === false || res.ok === false || res.error); }
   function errText(res) { return clean((res && (res.error && (res.error.message || res.error) || res.message)) || ''); }
 
@@ -279,6 +287,20 @@
       try { res = p.verb === 'star' ? await mm.starMessage(chat.id, id) : await mm.unstarMessage(chat.id, id); } catch (e) { res = { ok: false, error: e && e.message }; }
       if (failed(res)) return fail(res);
       return done(p.verb === 'star' ? 'Starred.' : 'Star removed.', p.verb === 'star' ? 'Imewekwa nyota.' : 'Nyota imeondolewa.');
+    }
+    if (p.verb === 'copy') {   // same as the bubble menu's Copy: to the clipboard only, nothing is sent or read aloud
+      var ctext = clean(m.displayContent); if (!ctext) return say('That message has no text to copy.', 'Ujumbe huo hauna maandishi ya kunakili.');
+      try { await root.navigator.clipboard.writeText(ctext); } catch (e) { return fail({ error: T('the browser did not allow copying', 'kivinjari hakikuruhusu kunakili') }); }
+      return done('Copied.', 'Imenakiliwa.');
+    }
+    if (p.verb === 'react') {
+      var em = emojiOf(p.payload);
+      if (!p.payload) { var rr0 = await R.capture({ mode: 'command', title: T('React', 'Hisia'), prompt: T('Which reaction? For example: thumbs up, heart, laugh.', 'Hisia gani? Mfano: kidole gumba, moyo, cheka.') }); if (!rr0 || rr0.cancelled || !rr0.transcript) return cancelled(); em = emojiOf(rr0.transcript); }
+      if (!em) return say('I do not know that reaction. Try thumbs up, heart, laugh, sad, wow, pray, fire or clap.', 'Sijui hisia hiyo. Jaribu kidole gumba, moyo, cheka, huzuni, wow, omba, moto au piga makofi.');
+      if (typeof mm.reactToMessage !== 'function') return say('That is not available on this screen yet.', 'Hilo bado halipatikani kwenye skrini hii.');
+      try { res = await mm.reactToMessage(chat.id, id, em); } catch (e) { res = { ok: false, error: e && e.message }; }
+      if (failed(res)) return fail(res);
+      return done('Reacted ' + em + '.', 'Nimeweka ' + em + '.');
     }
     if (p.verb === 'delete') {
       var opts = [{ label: T('Delete for me', 'Futa kwangu') }]; if (mine) opts.push({ label: T('Delete for everyone', 'Futa kwa wote') });
@@ -332,6 +354,68 @@
     return i === 0;
   }
 
+  /* ───────── Screen controls by voice: search in chat, select, clear chat, archived, new chat, chat info, older messages, back to list ─────────
+   * Each one presses the same button a person taps (or the same MessageModule calls the screen's own handler makes), so the screen's rules apply.
+   * Clear chat always asks first and only clears YOUR copy. Locked chats are never touched. Nothing here reads message text aloud. */
+  var UIPRE = /^(?:(?:hey|hi|ok|okay|so|now)\s+)?(?:please\s+|tafadhali\s+)?(?:can you\s+|could you\s+)?(?:please\s+)?/i;
+  function parseUi(input) {
+    var s = clean(input).replace(/[.!?,]+$/, '').replace(UIPRE, ''), m;
+    if ((m = /^(?:search|find|look for|tafuta)\s+(?:for\s+)?(.+?)\s+(?:in|within|inside|kwenye|ndani ya)\s+(?:this|the current|hii|haya)\s*(?:chat|conversation|mazungumzo)?$/i.exec(s)) || (m = /^(?:tafuta)\s+(.+?)\s+kwenye mazungumzo haya$/i.exec(s))) return { type: 'search', q: clean(m[1].replace(/^(?:the|a|an|for)\s+/i, '')) };
+    if (/^(?:search|find|tafuta)\s+(?:in|within|kwenye)\s+(?:this|the|haya)?\s*(?:chat|conversation|mazungumzo)(?:\s+haya)?$/i.test(s) || /^(?:open|start)\s+(?:chat\s+)?search$/i.test(s)) return { type: 'search', q: '' };
+    if (/^(?:close|hide|clear|funga)\s+(?:the\s+)?(?:chat\s+)?(?:search|utafutaji)$/i.test(s)) return { type: 'search-close' };
+    if (/^(?:select|choose|start selecting)\s+(?:some\s+)?messages$/i.test(s) || /^chagua\s+ujumbe$/i.test(s)) return { type: 'select' };
+    if (/^(?:cancel|stop|exit|end)\s+(?:message\s+)?selection$/i.test(s) || /^ghairi\s+uchaguzi$/i.test(s)) return { type: 'select-cancel' };
+    if (/^(?:clear|empty|wipe)\s+(?:this|the current)\s+(?:chat|conversation)$/i.test(s) || /^(?:safisha|futa\s+ujumbe\s+wote\s+wa)\s+(?:mazungumzo\s+haya|mazungumzo\s+hapa)$/i.test(s)) return { type: 'clear' };
+    if (/^(?:open|show|view|go to|fungua|onyesha)\s+(?:my\s+|the\s+)?archived(?:\s+chats?|\s+conversations?)?$/i.test(s) || /^(?:fungua|onyesha)\s+mazungumzo\s+yaliyohifadhiwa$/i.test(s)) return { type: 'archived' };
+    if (/^(?:start|create|open|begin)\s+(?:a\s+)?new\s+(?:chat|conversation)$/i.test(s) || /^(?:anzisha|fungua)\s+mazungumzo\s+mapya$/i.test(s)) return { type: 'newchat' };
+    if (/^(?:open|show|view)\s+(?:this\s+)?(?:chat|contact)\s+info(?:rmation)?$/i.test(s) || /^(?:chat|contact)\s+info$/i.test(s) || /^onyesha\s+taarifa\s+za\s+mazungumzo$/i.test(s)) return { type: 'info' };
+    if (/^(?:load|show)\s+(?:older|earlier|previous)\s+messages$/i.test(s) || /^pakia\s+ujumbe\s+wa\s+zamani$/i.test(s)) return { type: 'older' };
+    if (/^(?:go\s+|get\s+)?back\s+to\s+(?:my\s+|the\s+)?(?:chats|chat list|conversations|conversation list)$/i.test(s) || /^rudi\s+kwenye\s+(?:orodha\s+ya\s+)?mazungumzo$/i.test(s)) return { type: 'back' };
+    return null;
+  }
+  function pressById(id) { var d = root.document, b = d && d.getElementById(id); if (!b || b.disabled) return false; b.click(); return true; }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function activeOpen() { var a = cfg.MM.getActiveChatId(); return a != null && !/^pending:/.test(String(a)) ? a : null; }
+  async function uiAction(p) {
+    var d = root.document, act = activeOpen(), needChat = { search: 1, 'search-close': 0, select: 1, clear: 1, info: 1, older: 1 }[p.type];
+    if (needChat && act == null) { await say('Open a chat first.', 'Fungua mazungumzo kwanza.'); return; }
+    if (needChat && cfg.isLocked(act)) { await say('That chat is locked, so I cannot do that. Unlock it in the app first.', 'Mazungumzo hayo yamefungwa kwa kufuli, siwezi kufanya hivyo. Yafungue kwenye programu kwanza.'); return; }
+    var aud = 'messenger.ui_' + p.type;
+    function ok(en, sw) { V.audit(aud, { module: 'messenger', outcome: 'executed' }); return say(en, sw); }
+    function no(en, sw) { V.audit(aud, { module: 'messenger', outcome: 'error' }); return say(en, sw); }
+    if (p.type === 'search') {
+      var bar = d.getElementById('chatSearchBar'), inp = d.getElementById('chatSearchInput');
+      if (!bar || !inp) return no('Chat search is not available here.', 'Utafutaji wa mazungumzo haupatikani hapa.');
+      if (bar.classList.contains('hidden')) pressById('searchInChatBtn');
+      if (!p.q) return ok('Search is open. Say what to search for, for example: search rent in this chat.', 'Utafutaji umefunguliwa. Sema unachotafuta, mfano: tafuta kodi kwenye mazungumzo haya.');
+      inp.value = p.q; inp.dispatchEvent(new Event('input', { bubbles: true })); await sleep(250);
+      var cnt = clean((d.getElementById('chatSearchCount') || {}).textContent), n = /^(\d+)/.exec(cnt);
+      if (!n) return ok('Searching for ' + p.q + '.', 'Natafuta ' + p.q + '.');
+      return ok(n[1] === '0' ? 'No messages found for ' + p.q + ' in this chat.' : n[1] + (n[1] === '1' ? ' message' : ' messages') + ' found for ' + p.q + '. They are highlighted on the screen.', n[1] === '0' ? 'Hakuna ujumbe uliopatikana kwa ' + p.q + ' kwenye mazungumzo haya.' : 'Ujumbe ' + n[1] + ' umepatikana kwa ' + p.q + '. Umewekwa alama kwenye skrini.');
+    }
+    if (p.type === 'search-close') { return pressById('closeChatSearchBtn') ? ok('Search closed.', 'Utafutaji umefungwa.') : no('Search is not open.', 'Utafutaji haujafunguliwa.'); }
+    if (p.type === 'select') {
+      if (!pressById('chatMoreBtn')) return no('I could not open the chat menu.', 'Sikuweza kufungua menyu ya mazungumzo.');
+      await sleep(80); var sb = d.querySelector('#chatMoreMenu button[data-more-action="select"]');
+      if (!sb) return no('I could not find the select option.', 'Sikuona chaguo la kuchagua.');
+      sb.click(); return ok('Select mode is on. Tap the messages you want. Say cancel selection to stop.', 'Hali ya kuchagua imewashwa. Gusa ujumbe unaotaka. Sema ghairi uchaguzi kuacha.');
+    }
+    if (p.type === 'select-cancel') { return pressById('cancelSelectBtn') ? ok('Selection cancelled.', 'Uchaguzi umeghairiwa.') : no('You are not selecting messages.', 'Hujachagua ujumbe.'); }
+    if (p.type === 'clear') {
+      var cid = act, mm = cfg.MM, mine = (mm.getMessages ? mm.getMessages(cid) : []).filter(function (m) { return typeof m.id === 'number'; });
+      if (!mine.length) return say('There is nothing to clear in this chat.', 'Hakuna cha kusafisha kwenye mazungumzo haya.');
+      var ci = await UI.choose({ title: T('Clear this whole conversation from your side? This cannot be undone. The other person keeps their copy.', 'Safisha mazungumzo yote upande wako? Haiwezi kurudishwa. Mwenzako anabaki na nakala yake.'), options: [{ label: T('Yes, clear it', 'Ndiyo, safisha') }], voiceAnswer: ask(T('Say yes to clear, or cancel.', 'Sema ndiyo kusafisha, au ghairi.')) });
+      if (ci !== 0) { V.audit(aud, { module: 'messenger', outcome: 'cancelled' }); return say('Cancelled. Nothing was changed.', 'Imeghairiwa. Hakuna kilichobadilishwa.'); }
+      var bad = 0; for (var i = 0; i < mine.length; i++) { try { var r = await mm.deleteMessage(cid, mine[i].id, { forEveryone: false }); if (failed(r)) bad++; } catch (_) { bad++; } }
+      return bad ? no('I cleared ' + (mine.length - bad) + ' messages, but ' + bad + ' failed.', 'Nimesafisha ujumbe ' + (mine.length - bad) + ', lakini ' + bad + ' umeshindwa.') : ok('Conversation cleared for you.', 'Mazungumzo yamesafishwa upande wako.');
+    }
+    if (p.type === 'archived') { return pressById('archivedLinkBtn') ? ok('Opening archived chats.', 'Nafungua mazungumzo yaliyohifadhiwa.') : no('I could not open archived chats here.', 'Sikuweza kufungua mazungumzo yaliyohifadhiwa hapa.'); }
+    if (p.type === 'newchat') { return pressById('newChatBtn') ? ok('Starting a new chat. Say or pick who to message.', 'Naanzisha mazungumzo mapya. Sema au chagua nani wa kumtumia.') : no('I could not start a new chat here.', 'Sikuweza kuanzisha mazungumzo mapya hapa.'); }
+    if (p.type === 'info') { var h = d.getElementById('chatHeaderName'); if (!h) return no('I could not open chat info.', 'Sikuweza kufungua taarifa za mazungumzo.'); h.click(); return ok('Opening chat info.', 'Nafungua taarifa za mazungumzo.'); }
+    if (p.type === 'older') { return pressById('loadOlderBtn') ? ok('Loading older messages.', 'Napakia ujumbe wa zamani.') : no('There are no older messages to load.', 'Hakuna ujumbe wa zamani wa kupakia.'); }
+    if (p.type === 'back') { return pressById('backBtn') ? ok('Back to your chats.', 'Nimerudi kwenye mazungumzo yako.') : no('You are already on the chat list.', 'Tayari upo kwenye orodha ya mazungumzo.'); }
+  }
+
   // Right after the app opens, the chat list may still be loading. Matching a spoken name against an empty list made "open chat with Denis" miss, so wait a few seconds for it.
   function waitConvs(ms) { return new Promise(function (res) { var end = Date.now() + ms; (function poll() { var n = 0; try { n = cfg.MM.getConversations().length; } catch (_) {} if (n || Date.now() > end) return res(); setTimeout(poll, 150); })(); }); }
   async function handle(payload) {
@@ -341,6 +425,12 @@
     if (ma) {
       if (busy) { await say('I am still working on your last request.', 'Bado nashughulikia ombi lako la awali.'); return true; }
       busy = true; try { await messageAction(ma); } catch (e) { await say('That did not work: ' + ((e && e.message) || 'unknown error') + '. Nothing was changed.', 'Haikufanikiwa: ' + ((e && e.message) || 'hitilafu') + '. Hakuna kilichobadilishwa.'); } finally { busy = false; }
+      return true;
+    }
+    var ui = !probe ? parseUi(text) : null;   // screen controls: search in chat, select, clear chat, archived, new chat, info (exact phrases only)
+    if (ui) {
+      if (busy) { await say('I am still working on your last request.', 'Bado nashughulikia ombi lako la awali.'); return true; }
+      busy = true; try { await uiAction(ui); } catch (e) { await say('That did not work: ' + ((e && e.message) || 'unknown error') + '.', 'Haikufanikiwa: ' + ((e && e.message) || 'hitilafu') + '.'); } finally { busy = false; }
       return true;
     }
     var ca = (!probe && I.parseChatAction) ? I.parseChatAction(text) : null;   // archive / mute / favourite / unread / delete chat / block: checked first ("mute chat with Denis" must not be read as "chat with Denis")
@@ -396,5 +486,5 @@
     });
     return true;
   }
-  root.NecpraVoiceMessenger = { init: init, _handle: handle, _chatAction: chatAction, parseMsgAction: parseMsgAction };
+  root.NecpraVoiceMessenger = { init: init, _handle: handle, _chatAction: chatAction, parseMsgAction: parseMsgAction, parseUi: parseUi };
 })(typeof window !== 'undefined' ? window : globalThis);

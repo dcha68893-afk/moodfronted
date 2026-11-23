@@ -36,6 +36,10 @@
     var s = clean(input).replace(/[.!?,]+$/, ''), n = I.norm(s), m;
     s = s.replace(/^(?:(?:hey|hi|ok|okay|so|now)\s+)?(?:please\s+|tafadhali\s+)?(?:can you\s+|could you\s+|would you\s+)?(?:please\s+)?(?:i\s+(?:want|wanna|need|would like)\s+to\s+|let me\s+|nataka\s+|naomba\s+)?/i, '');
     n = I.norm(s);
+    if (/^(?:accept|approve|kubali|kubalia)\s+(?:all|everyone|yote|zote)(?:\s+(?:friend\s+)?(?:requests?|maombi(?:\s+ya\s+urafiki)?))?$/i.test(s)) return { type: 'accept-all' };
+    if ((m = /^(?:join|jiunge\s+na)\s+(?:the\s+)?(?:(?:group|kikundi)\s+(.+?)|(.+?)\s+(?:group|kikundi))$/i.exec(s))) return { type: 'join-group', name: strip(m[1] || m[2]) };
+    if (/^(?:show|open|fungua|onyesha)\s+(?:the\s+)?(?:suggested|suggestions|pendekezo)(?:\s+(?:people|friends|chip))?$/i.test(s)) return { type: 'chip', chip: 'suggest' };
+    if (/^(?:browse|show|open|fungua)\s+(?:all\s+)?(?:users|people|watu\s+wote)$/i.test(s)) return { type: 'chip', chip: 'browse' };
     if ((m = /^(?:accept|approve|kubali|kubalia)\s+(?:(?:the\s+)?(?:friend\s+)?(?:request|ombi)\s+(?:from|ya|kutoka kwa)\s+)?(.+)$/i.exec(s)) && !/^(?:all|yote|zote)$/i.test(m[1])) return { type: 'accept', name: strip(m[1]) };
     if ((m = /^(?:decline|reject|deny|kataa|kataa ombi la)\s+(?:(?:the\s+)?(?:friend\s+)?(?:request|ombi)\s+(?:from|ya|kutoka kwa)\s+)?(.+)$/i.exec(s))) return { type: 'decline', name: strip(m[1]) };
     if ((m = /^(?:cancel|withdraw|ghairi|futa)\s+(?:my\s+|the\s+)?(?:friend\s+)?(?:request|ombi)\s+(?:to|for|kwa|la)\s+(.+)$/i.exec(s))) return { type: 'cancel', name: strip(m[1]) };
@@ -105,6 +109,24 @@
       if (!(await confirmYes(T('Send a friend request to ', 'Tuma ombi la urafiki kwa ') + u.name + '?', T('Yes, send', 'Ndiyo, tuma')))) { await say('Cancelled. Nothing was sent.', 'Imeghairiwa. Hakuna kilichotumwa.'); return true; }
       try { await S.send(u.id); V.audit('friends.add', Object.assign({ outcome: 'executed' }, meta)); await say('Friend request sent to ' + u.name + '.', 'Ombi la urafiki limetumwa kwa ' + u.name + '.'); } catch (e) { V.audit('friends.add', Object.assign({ outcome: 'error' }, meta)); await fail(e); }
       return true;
+    }
+    if (p.type === 'accept-all') {
+      await load('requests'); var rl = pool('requests').filter(function (u) { return u && u.relationship && u.relationship.requestId; });
+      if (!rl.length) { await say('You have no pending friend requests.', 'Huna maombi ya urafiki yanayosubiri.'); return true; }
+      if (!(await confirmYes(T('Accept all ' + rl.length + ' friend request' + (rl.length === 1 ? '' : 's') + '?', 'Kubali maombi yote ' + rl.length + ' ya urafiki?'), T('Yes, accept all', 'Ndiyo, kubali yote')))) { await say('Cancelled. Nothing was accepted.', 'Imeghairiwa. Hakuna kilichokubaliwa.'); return true; }
+      var okN = 0, badN = 0; for (var ai = 0; ai < rl.length; ai++) { try { await S.accept(rl[ai].relationship.requestId); okN++; } catch (_) { badN++; } }
+      V.audit('friends.accept-all', Object.assign({ outcome: badN ? 'partial' : 'executed', count: okN }, meta)); await load('requests');
+      await say(badN ? 'Accepted ' + okN + ', but ' + badN + ' failed.' : 'Accepted ' + okN + ' friend request' + (okN === 1 ? '.' : 's.'), badN ? 'Nimekubali ' + okN + ', lakini ' + badN + ' vimeshindwa.' : 'Nimekubali maombi ' + okN + '.'); return true;
+    }
+    if (p.type === 'chip') { await load('discover'); var chip = root.document.getElementById(p.chip); if (!chip) return false; chip.click(); await say(p.chip === 'suggest' ? 'Showing suggested people.' : 'Showing all people.', p.chip === 'suggest' ? 'Inaonyesha watu wanaopendekezwa.' : 'Inaonyesha watu wote.'); return true; }
+    if (p.type === 'join-group') {
+      if (!p.name) return false; await load('groups'); var gs = ((api().state().groups) || []).filter(function (g) { return g && clean(g.name).toLowerCase().indexOf(p.name.toLowerCase()) >= 0; });
+      if (!gs.length) { await say('I could not find a group called "' + p.name + '" to join.', 'Sikupata kikundi kinachoitwa "' + p.name + '" cha kujiunga.'); return true; }
+      if (gs.length > 1) { var gi = await UI.choose({ title: T('Which group?', 'Kikundi kipi?'), options: gs.slice(0, 4).map(function (g) { return { label: g.name, sub: (g.participantCount || 0) + ' members' }; }), voiceAnswer: ask(T('Say the number.', 'Sema namba.')) }); if (gi < 0) { await say('Cancelled.', 'Imeghairiwa.'); return true; } gs = [gs[gi]]; }
+      var g0 = gs[0]; if (!(await confirmYes(T('Join the group ' + g0.name + '?' + (g0.requiresApproval ? ' An admin must approve you.' : ''), 'Jiunge na kikundi ' + g0.name + '?' + (g0.requiresApproval ? ' Msimamizi lazima akukubali.' : '')), T('Yes, join', 'Ndiyo, jiunge')))) { await say('Cancelled. You did not join.', 'Imeghairiwa. Hukujiunga.'); return true; }
+      var jb = root.document.querySelector('[data-group-join="' + String(g0.id).replace(/"/g, '') + '"]'); if (!jb) { await say('I could not find the Join button.', 'Sikuona kitufe cha Jiunge.'); return true; }
+      jb.click(); await new Promise(function (r) { setTimeout(r, 900); }); V.audit('friends.join-group', Object.assign({ outcome: 'executed' }, meta));
+      await say('Join requested for ' + g0.name + '. Check the screen for the result.', 'Ombi la kujiunga na ' + g0.name + ' limetumwa. Angalia skrini kwa matokeo.'); return true;
     }
     if (p.type === 'accept' || p.type === 'decline') {
       if (!p.name) return false; await load('requests');
