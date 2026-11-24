@@ -644,7 +644,27 @@
       const text = String(interaction.text || '').trim();
       return isMine ? `You replied to a status${text ? ': ' + text : ''}` : `Replied to your status${text ? ': ' + text : ''}`;
     }
+    // FIX (CHAT LIST SHOWED "🔒 Encrypted message" FOR EVERY CHAT AFTER DAYS AWAY): a lock label is never a useful last-message
+    // preview (WhatsApp never shows one). Until the real text resolves - or if it cannot be read on this device - the row now shows a
+    // neutral, type-aware label instead, and swaps to the real text the moment decryption lands (conversation:updated re-renders the
+    // row). The decrypt retry itself lives in js/message-client.js. Chat BUBBLES keep their own failure wording - this is list-only.
+    function _neutralPreview(lastMessage) {
+      const t = String((lastMessage && lastMessage.type) || '').toLowerCase();
+      if (t === 'image' || t === 'photo') return '📷 Photo';
+      if (t === 'video') return '🎥 Video';
+      if (t === 'audio' || t === 'voice' || t === 'voice_note' || t === 'voice-note') return '🎤 Voice message';
+      if (t === 'file' || t === 'document') return '📎 Document';
+      if (t === 'sticker') return 'Sticker';
+      if (t === 'gif') return 'GIF';
+      if (t === 'location') return '📍 Location';
+      return 'New message';
+    }
     function safeConvPreview(lastMessage, chatId) {
+      const out = _safeConvPreviewRaw(lastMessage, chatId);
+      if (typeof out === 'string' && /^(?:\uD83D\uDD12\s*)?(?:Encrypted message|Unable to decrypt this message)$/.test(out.trim())) return _neutralPreview(lastMessage);
+      return out;
+    }
+    function _safeConvPreviewRaw(lastMessage, chatId) {
       if (!lastMessage) return '';
       const statusPreview = _statusReplyPreviewText(lastMessage);
       if (statusPreview !== null) return statusPreview;

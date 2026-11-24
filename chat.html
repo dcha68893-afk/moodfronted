@@ -1928,6 +1928,68 @@
         };
         window.__warmAllModules = warmAll;
 
+        // FIX (GAMES TAB OPENS ON AN EMPTY SCREEN): Games is two frames deep (gamesIframe -> game.html -> game-v3.html) and, unlike
+        // Messages, it is warmed LAST. Anything that goes wrong along that chain - the frame never loaded, a stale/placeholder page was
+        // served for it, the arcade has no active screen - used to leave a blank panel with nothing to recover it (game.html's own
+        // watchdog only runs if game.html itself loaded). This guard runs from the shell every time Games is opened: it loads the frame
+        // if it is missing, activates the arcade home if no screen is active, reloads the chain (cache-busted) when it still has not
+        // painted, and after ~20s shows a clear Retry card instead of a blank panel. It never touches a healthy arcade.
+        (function () {
+            var timer = null, reloads = 0, t0 = 0, card = null;
+            function frame() { return document.getElementById('gamesIframe'); }
+            function arcadeDoc() {
+                try { var i = frame().contentDocument.getElementById('games'); return (i && i.contentDocument) || null; } catch (_) { return null; }
+            }
+            function onGames() { return window.__currentPage === 'games' || window.__currentPage === 'game'; }
+            function showCard(on) {
+                var box = document.getElementById('gamesContent'); if (!box) return;
+                if (!on) { if (card && card.parentNode) card.parentNode.removeChild(card); card = null; return; }
+                if (card) return;
+                card = document.createElement('div');
+                card.setAttribute('data-games-guard', '1');
+                card.style.cssText = 'position:absolute;inset:0;z-index:6;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;background:var(--kyn-bg-root,#0b1220);color:var(--kyn-text-primary,#e5e7eb);font-family:system-ui,sans-serif';
+                card.innerHTML = '<div><div style="font-size:42px">&#127918;</div><h2 style="margin:8px 0">Games are not ready yet</h2>' +
+                    '<p style="opacity:.8;max-width:20rem;margin:0 auto 16px;line-height:1.5">Check your connection, then try again.</p>' +
+                    '<button type="button" style="padding:12px 28px;border:0;border-radius:999px;background:#2563eb;color:#fff;font-size:16px">Try again</button></div>';
+                card.querySelector('button').addEventListener('click', function () { window.__gamesGuard(true); });
+                box.appendChild(card);
+            }
+            function healthy() {
+                var d = arcadeDoc();
+                return !!(d && d.body && d.querySelectorAll('#home .card').length && d.querySelector('.screen.active'));
+            }
+            function hardReload() {
+                var f = frame(); if (!f) return;
+                reloads++;
+                f.setAttribute('src', 'game.html?r=' + Date.now());
+            }
+            function tick() {
+                clearTimeout(timer);
+                if (!onGames()) return;                                   // user left Games: stop quietly
+                var f = frame(); if (!f) return;
+                if (!f.getAttribute('src')) { try { window.__loadModuleIframe('games'); } catch (_) {} }
+                else {
+                    var d = arcadeDoc();
+                    if (d && d.querySelectorAll('#home .card').length && !d.querySelector('.screen.active')) {
+                        try { d.getElementById('home').classList.add('active'); } catch (_) {}   // cards exist but no screen is shown: blank panel
+                    }
+                    if (healthy()) { showCard(false); return; }
+                    var age = Date.now() - t0;
+                    if (reloads === 0 && age > 7000) hardReload();
+                    else if (reloads === 1 && age > 14000) hardReload();
+                    else if (age > 20000) { showCard(true); return; }
+                }
+                timer = setTimeout(tick, 1000);
+            }
+            window.__gamesGuard = function (force) {
+                if (force) { reloads = 0; showCard(false); }
+                t0 = Date.now();
+                clearTimeout(timer);
+                if (force) { var f = frame(); if (f) f.setAttribute('src', 'game.html?r=' + Date.now()); }
+                timer = setTimeout(tick, 1500);
+            };
+        })();
+
         function startWarmup() {
             if (window.__modulesWarmupStarted) return;
             window.__modulesWarmupStarted = true;
@@ -2119,7 +2181,7 @@
             if (m === 'games') {
                 // Arcade layout placeholder (the real screen replaces it as soon as its tiles exist - see ready()).
                 o.className = 'kyn-snap kyn-skel'; o.setAttribute('aria-hidden', 'true');
-                o.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;z-index:5;pointer-events:none;background:Canvas;color:CanvasText;padding:16px;box-sizing:border-box;overflow:hidden;';
+                o.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;z-index:5;pointer-events:none;background:var(--kyn-bg-root,Canvas);color:var(--kyn-text-primary,CanvasText);padding:16px;box-sizing:border-box;overflow:hidden;';
                 var tiles = '';
                 for (var g = 0; g < 6; g++) tiles += '<div style="height:132px;border-radius:18px;background:rgba(127,127,127,.16)"></div>';
                 o.innerHTML = '<div style="font-weight:800;letter-spacing:.6px;text-align:center;margin:4px 0 16px">NECPRA ARCADE</div><div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">' + tiles + '</div>';
@@ -3424,6 +3486,7 @@
             }
             document.querySelectorAll('.nav-icon, .mobile-nav-icon').forEach(b => b.classList.remove('active'));
             document.querySelectorAll(`.nav-icon[data-page="${page}"], .mobile-nav-icon[data-page="${page}"]`).forEach(b => b.classList.add('active'));
+            if ((page === 'games' || page === 'game') && typeof window.__gamesGuard === 'function') { try { window.__gamesGuard(); } catch (_) {} }
             
             // FIX: the mirrored 1:1 chat header (#headerChatCtx) must only ever
             // show while the messages page is actually the visible one — the

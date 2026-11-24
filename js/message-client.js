@@ -82,6 +82,13 @@
     // the race window above), re-run decryption for anything in the visible
     // conversations that isn't already resolved plaintext.
     document.addEventListener('kyn:canonicalMessageE2EReady', () => {
+        // Sidebar previews that never got a decrypt result (E2E was not ready when the list loaded).
+        for (const [chatId, conv] of state.conversations.entries()) {
+            const lm = conv && conv.lastMessage;
+            if (lm && lm.id != null && (lm.displayContent === undefined || lm.displayContent === 'Decrypting…')) {
+                decryptForDisplay(chatId, { id: lm.id, chatId, content: lm.content, type: lm.type, senderId: lm.senderId, createdAt: lm.createdAt });
+            }
+        }
         for (const [chatId, bucket] of state.messagesByConversation.entries()) {
             for (const message of bucket.values()) {
                 if (message && message.displayContent === undefined) {
@@ -452,6 +459,24 @@
     // Fix: always get-or-create the bucket, and always seed it with this
     // message if it isn't already present, so the gate can never suppress a
     // genuine result again.
+    // One background wait per message; resumes decryption of a list preview once the E2E core is ready.
+    const _previewDeferred = new Set();
+    function _deferPreviewDecrypt(chatId, message, key) {
+        if (_previewDeferred.has(key)) return;
+        _previewDeferred.add(key);
+        waitForMessageE2E(120000).then((ok) => {
+            setTimeout(() => {
+                _previewDeferred.delete(key);
+                if (!ok) return;
+                const conv = state.conversations.get(chatId);
+                const cur = conv && conv.lastMessage;
+                // Already resolved meanwhile (cache, socket, opened chat)? Nothing to do.
+                if (cur && String(cur.id) === String(message.id) && cur.displayContent !== undefined && !_PLACEHOLDER_DISPLAY.has(cur.displayContent)) return;
+                decryptForDisplay(chatId, { id: message.id, chatId, content: message.content, type: message.type, senderId: message.senderId, createdAt: message.createdAt });
+            }, 0);
+        });
+    }
+
     async function decryptForDisplay(chatId, message) {
         if (!message || message.id == null || message.displayContent !== undefined) return;
         const key = String(chatId) + ':' + String(message.id);
@@ -490,25 +515,6 @@
                 return;
             }
         }
-        // FIX (PREVIEW TURNS INTO "Encrypted message" AFTER A WHILE): after a reload / app resume the in-memory bucket of a chat that was
-        // not opened yet is EMPTY, so the check above misses and this already-consumed message went through the Double Ratchet a second
-        // time (it can only be decrypted once) -> "Encrypted message". The plaintext was saved to disk when it first arrived or was sent:
-        // read that exact message back before ever attempting a new decrypt.
-        try {
-            const _db = window.KynectaMessageCache;
-            const _row = _db && typeof _db.getMessage === 'function' ? await _db.getMessage(chatId, message.id) : null;
-            if (_row && typeof _row.displayContent === 'string' && !_isPh(_row.displayContent)) {
-                const _mine = _row.senderId != null && window._kynCurrentUserId != null && String(_row.senderId) === String(window._kynCurrentUserId);
-                const _same = _row.content === undefined || _row.content === ciphertext || (_mine && _row.content === _row.displayContent);
-                if (_same) {
-                    const bucket = getOrCreateConversationBucket(chatId);
-                    bucket.set(message.id, Object.assign({}, bucket.get(message.id) || message, { displayContent: _row.displayContent, decryptVersion: _row.decryptVersion || null }));
-                    syncLastMessageDisplay(chatId, message.id, _row.displayContent, true);
-                    notify('message:decrypted', { chatId, messageId: message.id });
-                    return;
-                }
-            }
-        } catch (_) {}
         const cached = decryptResults.get(key);
         if (cached && cached.ciphertext === ciphertext) {
             const bucket = getOrCreateConversationBucket(chatId);
@@ -522,7 +528,11 @@
         if (decryptFlights.has(key)) { await decryptFlights.get(key); return; }
         const flight=(async()=>{
             const ready=await waitForMessageE2E();
-            if(!ready||typeof window.KynectaE2E?.decryptMessageForDisplay!=='function')return;
+            // FIX (CHAT LIST STUCK ON "Encrypted message" AFTER DAYS AWAY): after a long absence the session/token refresh and key
+            // unlock take longer than the 8s wait above. This used to `return` for good - the preview kept the raw ciphertext, the
+            // list showed the lock label, and nothing ever tried again once the keys DID become ready. Keep waiting in the
+            // background (no ratchet attempt has been made yet, so waiting is safe) and decrypt the moment E2E is usable.
+            if(!ready||typeof window.KynectaE2E?.decryptMessageForDisplay!=='function'){_deferPreviewDecrypt(chatId,message,key);return;}
             const conv=state.conversations.get(chatId),fallback='🔒 Encrypted message';
             try{
                 const plaintext=await window.KynectaE2E.decryptMessageForDisplay(message,chatId,window._kynCurrentUserId,{
