@@ -4,7 +4,7 @@
   'use strict';
   var V = root.NecpraVoice, UI = root.NecpraVoiceUI, B = root.NecpraVoiceBridge; if (!V) return;
   var embedded = false; try { embedded = root.parent !== root; } catch (_) {}
-  var client = null, mode = embedded ? 'unknown' : 'local', pendingMode = null, intentFns = [];
+  var client = null, mode = embedded ? 'unknown' : 'local', pendingMode = null, intentFns = [], fallbackFns = [];   // fallbackFns: generic handlers, always tried AFTER the screen's own
   // A screen can now have SEVERAL intent handlers (e.g. Messenger + chat search + voice notes). They are offered the words in order; the first that returns true wins.
   // A forwarded command can arrive a moment before the module's own init() has called onIntent() (the session exists from the first script, the
   // handler only after the page's big script ran). Wait briefly for a handler instead of answering "not handled".
@@ -12,7 +12,7 @@
     if (intentFns.length) return runIntents(p);
     return new Promise(function (res) { var end = Date.now() + 10000; (function poll() { if (intentFns.length) return res(runIntents(p)); if (Date.now() > end) return res(false); setTimeout(poll, 150); })(); });
   }
-  function runIntents(p) { var i = 0; return (function next() { if (i >= intentFns.length) return Promise.resolve(false); var f = intentFns[i++]; return Promise.resolve().then(function () { return f(p); }).then(function (ok) { return ok ? true : next(); }, function () { return next(); }); })(); }
+  function runIntents(p) { var i = 0, all = intentFns.concat(fallbackFns); return (function next() { if (i >= all.length) return Promise.resolve(false); var f = all[i++]; return Promise.resolve().then(function () { return f(p); }).then(function (ok) { return ok ? true : next(); }, function () { return next(); }); })(); }
 
   // A lost hello must never be permanent. The parent shell may not be listening yet when this frame boots (Messenger is hard-wired into chat.html and
   // loads while the shell is still parsing), so a one-shot hello that timed out used to latch 'local' for the life of the page and the shell could never
@@ -48,6 +48,8 @@
       else V.registerHandler(id, function (r) { return fn({ transcript: r.transcript, lang: r.lang }); });
     });
   }
+  // Generic last-resort handler (see necpra-voice-uiaction.js). Only used inside the app shell's frames, where order is guaranteed: it runs after every onIntent() handler.
+  function onIntentFallback(fn) { fallbackFns.push(fn); return ensure().then(function (m) { if (m === 'bridge' && client) client.onIntent(intentFn); }); }
   function speak(text, opts) {
     return ensure().then(function (m) {
       var safe = String(text == null ? '' : text).slice(0, 300);
@@ -56,6 +58,6 @@
       return V.speak(safe, opts || { force: true });
     });
   }
-  root.NecpraVoiceRemote = { capture: capture, speak: speak, onIntent: onIntent, mode: function () { return mode; }, ready: ensure };
+  root.NecpraVoiceRemote = { capture: capture, speak: speak, onIntent: onIntent, onIntentFallback: onIntentFallback, mode: function () { return mode; }, ready: ensure };
   if (embedded) ensure();
 })(typeof window !== 'undefined' ? window : globalThis);

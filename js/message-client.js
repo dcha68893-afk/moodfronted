@@ -490,6 +490,25 @@
                 return;
             }
         }
+        // FIX (PREVIEW TURNS INTO "Encrypted message" AFTER A WHILE): after a reload / app resume the in-memory bucket of a chat that was
+        // not opened yet is EMPTY, so the check above misses and this already-consumed message went through the Double Ratchet a second
+        // time (it can only be decrypted once) -> "Encrypted message". The plaintext was saved to disk when it first arrived or was sent:
+        // read that exact message back before ever attempting a new decrypt.
+        try {
+            const _db = window.KynectaMessageCache;
+            const _row = _db && typeof _db.getMessage === 'function' ? await _db.getMessage(chatId, message.id) : null;
+            if (_row && typeof _row.displayContent === 'string' && !_isPh(_row.displayContent)) {
+                const _mine = _row.senderId != null && window._kynCurrentUserId != null && String(_row.senderId) === String(window._kynCurrentUserId);
+                const _same = _row.content === undefined || _row.content === ciphertext || (_mine && _row.content === _row.displayContent);
+                if (_same) {
+                    const bucket = getOrCreateConversationBucket(chatId);
+                    bucket.set(message.id, Object.assign({}, bucket.get(message.id) || message, { displayContent: _row.displayContent, decryptVersion: _row.decryptVersion || null }));
+                    syncLastMessageDisplay(chatId, message.id, _row.displayContent, true);
+                    notify('message:decrypted', { chatId, messageId: message.id });
+                    return;
+                }
+            }
+        } catch (_) {}
         const cached = decryptResults.get(key);
         if (cached && cached.ciphertext === ciphertext) {
             const bucket = getOrCreateConversationBucket(chatId);

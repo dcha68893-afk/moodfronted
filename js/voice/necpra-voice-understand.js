@@ -13,7 +13,7 @@
   var V = root.NecpraVoice; if (!V) return;
   /* The engine is free (rules + statistics on our own server), so it is on by default. Set ENGINE_FALLBACK = false to disable it from the client. */
   var ENGINE_FALLBACK = true;
-  var CLIENT_TIMEOUT_MS = 6500, flags = { checkedAt: 0, on: false }, fails = 0, pausedUntil = 0, inflight = null;
+  var CLIENT_TIMEOUT_MS = 15000, CONFIG_TIMEOUT_MS = 12000, OFF_RECHECK_MS = 20000, FAIL_PAUSE_MS = 20000, flags = { checkedAt: 0, on: false }, fails = 0, pausedUntil = 0, inflight = null;
 
   function settingOn() { try { return V.getSettings().smart !== false; } catch (_) { return true; } }
   function cfg() { return (V._cfg && V._cfg()) || {}; }
@@ -26,10 +26,10 @@
 
   // Is the backend able to do it? Cached for 10 minutes (5 on failure) so normal commands never wait for this check.
   function backendOn() {
-    var now = Date.now(); if (now - flags.checkedAt < (flags.on ? 600000 : 300000)) return Promise.resolve(flags.on);
+    var now = Date.now(); if (now - flags.checkedAt < (flags.on ? 600000 : OFF_RECHECK_MS)) return Promise.resolve(flags.on);
     var tk = token(); if (!tk || !root.fetch) return Promise.resolve(false);
-    return withTimeout(base() + '/api/intelligence/config', { headers: { Authorization: 'Bearer ' + tk } }, 4000).then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (j) { flags = { checkedAt: Date.now(), on: !!(j && j.enabled) }; return flags.on; }, function () { flags = { checkedAt: Date.now(), on: false }; return false; });
+    return withTimeout(base() + '/api/intelligence/config', { headers: { Authorization: 'Bearer ' + tk } }, CONFIG_TIMEOUT_MS).then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { flags = { checkedAt: Date.now(), on: !!(j && j.enabled) }; return flags.on; }, function () { flags = { checkedAt: 0, on: false }; return true; });   /* slow / waking server: try /ask anyway instead of going deaf for minutes */
   }
 
   /* result = the engine's capture result ({transcript, alternatives, lang, ...}). Resolves to { phrase, module } (module = which screen owns the action: friends|money|tools|shell), or null. */
@@ -59,7 +59,7 @@
             if (j.type === 'prepare' && say) { V.speak(say, { force: true }); return { spoken: true }; }   // e.g. a reminder: prepared only, nothing saved
             return null;
           });
-      }).catch(function () { if (++fails >= 2) { pausedUntil = Date.now() + 120000; fails = 0; } return null; });
+      }).catch(function () { if (++fails >= 3) { pausedUntil = Date.now() + FAIL_PAUSE_MS; fails = 0; } return null; });
     } catch (_) { return Promise.resolve(null); }
   }
 

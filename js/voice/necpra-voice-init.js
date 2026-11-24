@@ -20,6 +20,13 @@
       if (root.NecpraVoiceBridge && o.host !== false && root.parent === root) root.NecpraVoiceInit.host = root.NecpraVoiceBridge.host({ allowedOrigins: o.allowedOrigins || [] });
       if (o.fab && root.NecpraVoiceUI) root.NecpraVoiceUI.mountFab(typeof o.fab === 'object' ? o.fab : {});
       if (root.NecpraHandsFree) root.NecpraHandsFree.autoResume();
+      // Every embedded module screen also gets the generic "tap what you named" fallback, so features nobody wrote a phrase for still respond.
+      try {
+        var embedded = root.parent !== root, path = (root.location && root.location.pathname) || '';
+        if (embedded && o.uiAction !== false && !/admin|game/i.test(path) && root.NecpraVoiceRemote && !root.NecpraVoiceUIAction) {
+          var sc = root.document.createElement('script'); sc.src = '/js/voice/necpra-voice-uiaction.js'; sc.async = false; (root.document.head || root.document.documentElement).appendChild(sc);
+        }
+      } catch (_) {}
     }
   };
 })(typeof window !== 'undefined' ? window : globalThis);
