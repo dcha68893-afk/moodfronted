@@ -171,9 +171,10 @@
         V.speak(T('Did you mean: ' + local.options[0].label + ', or ' + local.options[1].label + '?', 'Unamaanisha: ' + local.options[0].label + ', au ' + local.options[1].label + '?'), { force: true }); return true;
       } else if (local && local.kind === 'need') { V.speak(local.say, { force: true }); return true; }   // the action is clear but the name/amount is missing
     }
-    // (2) Optional AI fallback (only if the backend has it switched on and the user allows it). Silent no-op when off, offline, slow or unsure.
+    // (2) NECPRA Intelligence Engine on our own backend (free, no third-party AI; only if the backend has it on and the user allows it). Silent no-op when off, offline, slow or unsure.
     if (!result.__understood && !result.usedAlternative && root.NecpraVoiceUnderstand) {
       var u = await root.NecpraVoiceUnderstand.rewrite(result, page);
+      if (u && u.spoken) return true;   // the engine answered or asked a question out loud
       if (u && u.phrase && (await runUnderstood(u, result, page))) return true;
     }
     if (!result.__understood && !result.usedAlternative && NLU && V.getSettings().logUnheard) NLU.logUnheard(result.transcript);   // opt-in, stays on the phone
