@@ -42,7 +42,7 @@ function rendered(){try{var d=f.contentDocument;if(!d)return true;return !!(d.ge
 function show(on){if(on){fb.hidden=false;fb.style.display='flex';}else{fb.hidden=true;fb.style.display='none';}}
 function reload(){show(false);try{f.contentWindow.location.reload();}catch(e){f.src='game-v3.html';}}
 function check(){clearTimeout(timer);if(rendered()){show(false);return;}if(tries<2){tries++;reload();timer=setTimeout(check,4000);}else{show(true);}}
-f.addEventListener('load',function(){clearTimeout(timer);timer=setTimeout(check,1500);});
+f.addEventListener('load',function(){clearTimeout(timer);timer=setTimeout(check,1500);setTimeout(function(){if(rendered()){try{parent.postMessage({type:'NECPRA_MODULE_PAINTED'},'*')}catch(e){}}},900);});
 timer=setTimeout(check,8000);
 window.addEventListener('online',function(){if(!rendered()){tries=0;reload();clearTimeout(timer);timer=setTimeout(check,4000);}});
 btn.addEventListener('click',function(){tries=0;reload();clearTimeout(timer);timer=setTimeout(check,4000);});

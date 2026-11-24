@@ -24,7 +24,7 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.61.0';
+const SW_VERSION = '19.63.0';
 // FIX: bumped so activate() drops every existing cache immediately on this
 // deploy — anyone with a stale pre-rebuild group.html (or the old, now-
 // deleted group-core-*/group-os-* files, or the misspelled necpra-* icons
@@ -110,7 +110,12 @@ const SW_VERSION = '19.61.0';
 // v132: new landing page (index.html), Pay Later tab removed from money.html, Tools.html is now a redirect to /duka.html.
 // v133: mode separation — browser always shows landing page; installed app skips it when signed in; no browser->app / app->browser redirects (index.html, manifest.json, AndroidManifest.xml).
 // v135: instant-open (DUKA cache-first, Wallet saved balance, faster module warm-up), browser tab no longer auto-forwarded into the app, group settings redesign, DUKA visual polish; chat.html, money.html, group.html, duka.css/js changed.
-const CACHE_NAME = 'necpra-static-v136';
+const CACHE_NAME = 'necpra-static-v138';
+// v138: DUKA/Wallet reopen on the tab and scroll position they were left on (kept in localStorage, not sessionStorage), Wallet finds its saved balance in the installed app,
+// and DUKA/Wallet/Games tell the shell when a real screen is drawn so the 'last screen' picture is saved at once. money.html, game.html, chat.html, duka.js changed.
+// v137: DUKA no longer waits on the server before painting (layout shell + parallel loads, user-id fallback for the APK), Games has a
+// placeholder/saved screen and is warmed last instead of never (chat.html), and /features/duka/* is served saved-copy-first-then-refresh so
+// duka.html, duka.js and duka.css can never run out of step with each other. duka.html, features/duka/duka.js + duka.css, chat.html changed.
 // v134: landing page (/ and /index.html) is network-first; browser never auto-skips the landing page; android-app:// referrer only counts for com.necpa.
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
@@ -202,6 +207,7 @@ const NETWORK_FIRST_PATTERNS = [
   // navigation request (goes through navigation()'s already-network-first path
   // regardless), but the actual gameplay scripts are plain .js requests and were
   // falling through to the 7-day cache-first default without these.
+  /\/features\/duka\//i,/\/duka\.html/i,
   /\/game\.html/i,/\/game-v3\.html/i,/\/games-crossword-v4\.js/i,
   /\/games-v4-enhancements\.js/i,/\/games-commercial-v5\.js/i,/\/games-chess-v1\.js/i,/\/games-chess-3d\.js/i
 ];

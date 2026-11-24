@@ -1895,7 +1895,12 @@
                 if (off || !P || !P.nativeGamesAvailable) { fin(); return; }
                 P.nativeGamesAvailable().then(function (a) {
                     if (a && a.available && a.games && a.games.indexOf('arcade') >= 0) {
+                        // FIX (Games empty screen in the installed app): the web arcade used to be DROPPED from the warm-up queue
+                        // when the native hub exists, so the moment the native hub could not open (or the user came back to the web
+                        // Games tab) the frame had never loaded and showed a blank screen while ~350 KB downloaded. It is now booted
+                        // LAST, after every other module, so it is ready without competing with the screens people open first.
                         QUEUE = QUEUE.filter(function (q) { return q !== 'gamesIframe'; });
+                        QUEUE.push('gamesIframe');
                     }
                     fin();
                 }, fin);
@@ -2067,6 +2072,12 @@
                 if (m === 'messages' && document.body.classList.contains('chat-panel-active')) return; // keep the LIST, not an open chat
                 var now = Date.now(); if (last[m] && now - last[m] < 4000) return;
                 var doc = f.contentDocument; if (!doc || !doc.body || doc.readyState === 'loading') return;
+                if (doc.querySelector('.dk-skel')) return;                                              // never save a loading shell
+                if (m === 'games') {                                                                    // wrapper page: save the arcade home itself
+                    var gi = doc.getElementById('games'), gd = gi && gi.contentDocument;
+                    if (!gd || !gd.body || gd.readyState === 'loading' || !gd.querySelector('#home.active') || !gd.querySelectorAll('#home .card').length) return;
+                    doc = gd;
+                }
                 if ((doc.body.innerText || '').trim().length < 80) return;                              // never save an empty/loading screen
                 last[m] = now;
                 var html = serialize(doc);
@@ -2082,6 +2093,14 @@
                 if (!f || f.__kynLoaded !== true) return false;
                 var d = f.contentDocument;
                 if (!d || !d.body || d.readyState === 'loading') return false;
+                // DUKA draws a shimmering layout first; that is not real content yet, keep the saved screen over it.
+                if (d.querySelector('.dk-skel')) return false;
+                // Games: game.html is only a wrapper around the arcade frame (#games). The arcade is ready when its home tiles exist.
+                var inner = d.getElementById('games');
+                if (inner && inner.tagName === 'IFRAME') {
+                    var idoc = inner.contentDocument;
+                    return !!(idoc && idoc.readyState !== 'loading' && idoc.querySelectorAll('#home .card').length);
+                }
                 return (d.body.innerText || '').trim().length >= 80 || d.body.getElementsByTagName('*').length > 60;
             } catch (_) { return true; }   // cross-origin frame: cannot inspect, do not block
         }
@@ -2096,8 +2115,20 @@
         }
         // No saved screen yet (first launch / cleared cache): show neutral placeholder rows instead of a blank frame.
         function skeleton(m, box, f) {
-            if (m === 'games') return;   // canvas games paint no text; a placeholder would just linger
             var o = document.createElement('div');
+            if (m === 'games') {
+                // Arcade layout placeholder (the real screen replaces it as soon as its tiles exist - see ready()).
+                o.className = 'kyn-snap kyn-skel'; o.setAttribute('aria-hidden', 'true');
+                o.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;z-index:5;pointer-events:none;background:Canvas;color:CanvasText;padding:16px;box-sizing:border-box;overflow:hidden;';
+                var tiles = '';
+                for (var g = 0; g < 6; g++) tiles += '<div style="height:132px;border-radius:18px;background:rgba(127,127,127,.16)"></div>';
+                o.innerHTML = '<div style="font-weight:800;letter-spacing:.6px;text-align:center;margin:4px 0 16px">NECPRA ARCADE</div><div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">' + tiles + '</div>';
+                box.appendChild(o);
+                overlays[m] = o;
+                waitReady(m);
+                setTimeout(function () { removeOverlay(m); }, 15000);
+                return;
+            }
             o.className = 'kyn-snap kyn-skel'; o.setAttribute('aria-hidden', 'true');
             o.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;z-index:5;pointer-events:none;background:Canvas;padding:16px;box-sizing:border-box;overflow:hidden;';
             var rows = '';
@@ -2180,6 +2211,22 @@
             showForPage: function (page) { show(modOfPage(page)); },
             leave: function (page) { capture(modOfPage(page)); }
         };
+
+        // A module (DUKA, Wallet, Games) tells the shell the moment a REAL screen is drawn, so its 'last screen' picture is saved right away
+        // instead of 3-20 seconds later (which is why a quick leave/kill used to bring back an old or missing picture).
+        window.addEventListener('message', function (ev) {
+            try {
+                if (!ev.data || ev.data.type !== 'NECPRA_MODULE_PAINTED') return;
+                Object.keys(MODS).forEach(function (m) {
+                    var fr = document.getElementById(MODS[m][0]);
+                    if (fr && fr.contentWindow === ev.source) {
+                        fr.__kynLoaded = true;
+                        last[m] = 0;
+                        setTimeout(function () { capture(m); }, 700);
+                    }
+                });
+            } catch (_) {}
+        });
 
         // Keep the saved screens fresh: periodically for the visible module, and whenever the app is backgrounded.
         setInterval(function () { capture(modOfPage(window.__currentPage || 'messages')); }, 20000);

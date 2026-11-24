@@ -54,7 +54,7 @@ var UNITS = ['piece', 'kg', 'g', 'litre', 'ml', 'packet', 'bottle', 'carton', 'd
 var TYPES = ['Duka / Grocery', 'Wholesale', 'Hardware', 'Chemist', 'Butchery', 'Cereals & Produce', 'Salon / Barber', 'Electronics', 'Clothing', 'Mama Mboga', 'Other'];
 var S = { loading: true, err: '', shops: [], maxShops: 5, shopId: null, tab: 'dash', dash: null, products: [], total: 0, categories: [], q: '', cat: '', low: false, busy: false, draftId: null, opId: null,
   cart: [], saleId: null, disc: { type: 'amount', value: '' }, posQ: '', customers: [], coId: null, sales: [], salesSummary: null, range: 'today' };
-try { S.shopId = localStorage.getItem(dukaStorageKey('necpra_duka_shop')); S.tab = sessionStorage.getItem('necpra_duka_tab') || 'dash'; } catch (_) {}
+try { S.shopId = localStorage.getItem(dukaStorageKey('necpra_duka_shop')); S.tab = pget('necpra_duka_tab') || 'dash'; } catch (_) {}
 var shop = function () { return S.shops.filter(function (s) { return s.id === S.shopId; })[0] || null; };
 
 function toast(m, bad) { var t = document.createElement('div'); t.className = 'toast' + (bad ? ' err' : ''); t.textContent = m; $('toasts').appendChild(t); setTimeout(function () { t.remove(); }, 4200); }
@@ -120,20 +120,51 @@ async function ensureDefaultShop() {
 function userIsEditing() {
   try { var a = document.activeElement; if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return true; var m = $('modal'); return !!(m && m.classList.contains('open')); } catch (_) { return false; }
 }
+function waitForToken(ms) {
+  /* the shell hands the login to this frame a moment after it loads (native secure storage on the APK) */
+  return new Promise(function (res) {
+    var t0 = Date.now();
+    (function poll() { if (token() || Date.now() - t0 > ms) return res(); setTimeout(poll, 100); })();
+  });
+}
+/* Always-visible shell: the title, tabs and stat cards are on screen from the first frame, with or without saved data;
+   only the numbers fill in afterwards. */
+function viewShell() {
+  var tabs = [['dash', 'Dashboard'], ['pos', 'Sell'], ['sales', 'Sales'], ['products', 'Products'], ['group', 'Buy together'], ['waste', 'Waste'], ['money', 'Money'], ['settings', 'My shop']];
+  var bar = function (n) { var h = ''; for (var i = 0; i < n; i++) h += '<div class="card stat"><small>&nbsp;</small><b class="dk-skel">&nbsp;</b></div>'; return h; };
+  return '<div class="hero"><h1>NECPRA DUKA SMART</h1><p>Your shop. Your stock. Your money. Your assistant.</p></div>' +
+    '<div class="tabs" style="pointer-events:none">' + tabs.map(function (t) { return '<button class="tab' + (t[0] === (S.tab || 'dash') ? ' on' : '') + '" type="button" tabindex="-1">' + t[1] + '</button>'; }).join('') + '</div>' +
+    '<div class="grid">' + bar(4) + '</div><div class="grid">' + bar(4) + '</div>';
+}
+function paintShell() { try { var app = $('app'); if (app && !app.getAttribute('data-live')) app.innerHTML = viewShell(); } catch (_) {} }
 async function boot() {
-  /* Phase 1 (instant): paint from the saved copy of this shop, no network wait, no "Loading your duka…" screen.
-     Phase 2 (background): fetch fresh data, then quietly redraw (unless the user is typing / a form is open). */
+  /* Phase 1 (instant): paint from the saved copy of this shop, no network wait. The layout is drawn first so the screen is never empty.
+     Phase 2 (background): fetch fresh data IN PARALLEL, then quietly redraw (unless the user is typing / a form is open).
+     FIX (DUKA slow to show features): phase 1 used to await checkAdmin(), which is a NETWORK call (it bypasses the saved copy), so every open
+     waited on the server - up to 20s on a sleeping host - before anything painted; phase 2 then ran shops -> admin -> data one after another. */
   var painted = false;
+  paintShell();
   try {
     CACHE_ONLY = true;
     await loadShops();
-    if (S.shops.length) { try { await checkAdmin(); } catch (_) {} await loadTab(); painted = true; }
+    if (S.shops.length) { try { S.isAdmin = localStorage.getItem(dukaStorageKey('necpra_duka_isadmin')) === '1'; } catch (_) {} await loadTab(); painted = true; }
   } catch (_) {} finally { CACHE_ONLY = false; }
-  if (painted) { S.loading = false; S.err = ''; render(); }
-  try { await loadShops(); if (!S.shops.length) await ensureDefaultShop(); await checkAdmin(); await loadTab(); S.err = ''; }
-  catch (e) { if (!painted) S.err = e.message; }
+  if (painted) { S.loading = false; S.err = ''; $('app').setAttribute('data-live', '1'); render(); restoreScroll(); announcePainted(); }
+  try {
+    await waitForToken(3000);
+    var shopAtStart = S.shopId;
+    var adminP = checkAdmin();                                                         // never throws
+    var tabP = shopAtStart ? loadTab().then(function () { return null; }, function (e) { return e; }) : Promise.resolve(null);   // start the data while the shop list loads
+    await loadShops();
+    if (!S.shops.length) await ensureDefaultShop();
+    await adminP;
+    var tabErr = await tabP;
+    if (S.shopId !== shopAtStart || tabErr) await loadTab();                           // shop changed (or the early fetch failed): load the right one
+    S.err = '';
+  } catch (e) { if (!painted) S.err = e.message; }
   S.loading = false;
-  if (!painted || !userIsEditing()) render();
+  if (!painted || !userIsEditing()) { $('app').setAttribute('data-live', '1'); render(); }
+  restoreScroll(); announcePainted();
   setTimeout(syncNow, 500);
 }
 
@@ -856,7 +887,7 @@ async function doArchive(btn) {
 var FIN = [['expenses', 'Expenses'], ['debts', 'Debts'], ['suppliers', 'Suppliers'], ['reports', 'Reports']];
 var EXP_CATS = ['rent', 'transport', 'electricity', 'wages', 'packaging', 'airtime', 'licence', 'repairs', 'other'];
 S.fin = 'expenses'; S.rp = 'daily'; S.fd = {};
-try { S.fin = sessionStorage.getItem('necpra_duka_fin') || 'expenses'; } catch (_) {}
+try { S.fin = pget('necpra_duka_fin') || 'expenses'; } catch (_) {}
 async function loadMoney() {
   var b = '/shops/' + S.shopId;
   if (S.fin === 'expenses') {
@@ -1008,8 +1039,34 @@ var OBK = 'necpra_duka_outbox_v1:' + (curUid() || 'unknown'), CK = 'necpra_duka_
 var syncing = false, MAX_TRIES = 5;
 function lsGet(k, d) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (_) { return d; } }
 function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (_) { return false; } }
-function curUid() { try { var o = JSON.parse(atob(token().split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); return String(o.id || o.userId || o.sub || ''); } catch (_) { return ''; } }
+function curUid() {
+  try { var o = JSON.parse(atob(token().split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); var j = String(o.id || o.userId || o.sub || ''); if (j) return j; } catch (_) {}
+  /* FIX (installed app: DUKA empty/slow on every open): the APK keeps the login token in native storage, so at start-up token()
+     is still empty and this returned '' -> the saved shop/dashboard (stored under the real user id) was never found and the screen
+     waited on the network. Fall back to the same non-secret account-id hints the shell uses. */
+  try { var a = JSON.parse(localStorage.getItem('kynecta_auth') || 'null'), u = a && a.user, id = u && (u.id != null ? u.id : (u.userId != null ? u.userId : u._id)); if (id != null && id !== '') return String(id); } catch (_) {}
+  try { var h = JSON.parse(localStorage.getItem('necpa_user') || 'null'), hid = h && (h.id != null ? h.id : h.userId); if (hid != null && hid !== '') return String(hid); } catch (_) {}
+  try { var f = localStorage.getItem('userId') || localStorage.getItem('currentUserId'); if (f) return String(f); } catch (_) {}
+  return '';
+}
 function dukaStorageKey(base) { return base + ':' + (curUid() || 'unknown'); }
+/* FIX (Android closes the page in the background, so the app restarted on the Dashboard every time): the last tab (and Money sub-tab) lived in
+   sessionStorage, which is wiped when the page process dies. They are now also kept in localStorage per user, so the app reopens exactly where it was left. */
+function pget(k) { try { var v = localStorage.getItem(dukaStorageKey('ss:' + k)); if (v) return v; } catch (_) {} try { return sessionStorage.getItem(k); } catch (_) { return null; } }
+function pset(k, v) { try { sessionStorage.setItem(k, v); } catch (_) {} try { localStorage.setItem(dukaStorageKey('ss:' + k), v); } catch (_) {} }
+/* scroll position is kept too, and put back once the first real screen is drawn */
+var SCROLLK = 'necpra_duka_scroll', scrollRestored = false, scrollT = 0;
+function saveScroll() { try { localStorage.setItem(dukaStorageKey(SCROLLK), JSON.stringify({ tab: S.tab, y: Math.round(window.pageYOffset || document.documentElement.scrollTop || 0) })); } catch (_) {} }
+function restoreScroll() {
+  if (scrollRestored) return; scrollRestored = true;
+  try { var o = JSON.parse(localStorage.getItem(dukaStorageKey(SCROLLK)) || 'null'); if (o && o.tab === S.tab && o.y > 0) requestAnimationFrame(function () { window.scrollTo(0, o.y); }); } catch (_) {}
+}
+window.addEventListener('scroll', function () { clearTimeout(scrollT); scrollT = setTimeout(saveScroll, 400); }, { passive: true });
+window.addEventListener('pagehide', saveScroll);
+document.addEventListener('visibilitychange', function () { if (document.hidden) saveScroll(); });
+/* tell the shell a real (not placeholder) screen is on show, so it saves the 'last screen' picture right away instead of seconds later */
+function announcePainted() { try { if (window.parent && window.parent !== window) window.parent.postMessage({ type: 'NECPRA_MODULE_PAINTED' }, '*'); } catch (_) {} }
+
 /* cache of the last successful GET answers (per user) so screens and reports still open offline */
 function cKey(path) { return CK + curUid() + ':' + path; }
 function cacheSet(path, data) {
@@ -1330,7 +1387,7 @@ async function vHandle(raw) {
 }
 function vGoTab(tab, fin) {
   S.tab = tab; if (fin) S.fin = fin;
-  try { sessionStorage.setItem('necpra_duka_tab', S.tab); if (fin) sessionStorage.setItem('necpra_duka_fin', fin); } catch (_) {}
+  try { pset('necpra_duka_tab', S.tab); if (fin) pset('necpra_duka_fin', fin); } catch (_) {}
   render(); refresh();
 }
 async function vOpenTab(cmd) {
@@ -2140,7 +2197,12 @@ var ADM_SECS = [['fin', 'Financing', 'financingApplications'], ['sup', 'Supplier
 var ADM_ST = { fin: [['applied', 'New'], ['approved', 'Approved'], ['active', 'Active'], ['completed', 'Completed'], ['rejected', 'Rejected']], sup: [['pending', 'Pending'], ['verified', 'Verified'], ['suspended', 'Suspended']], disp: [['open', 'Open'], ['resolved', 'Resolved']], ref: [['pending', 'To pay out'], ['paid_out', 'Paid out']], rep: [['open', 'Open'], ['in_repair', 'In repair'], ['resolved', 'Resolved'], ['rejected', 'Rejected']] };
 var ADM_DEF = { fin: 'applied', sup: 'pending', disp: 'open', ref: 'pending', rep: 'open' };
 S.adm = { sec: 'fin', st: 'applied', rows: [], ov: null, id: null };
-async function checkAdmin() { try { S.isAdmin = (await api('GET', '/admin/me', null, GB_NOCACHE)).isAdmin === true; } catch (_) { S.isAdmin = false; } if (!S.isAdmin && S.tab === 'admin') S.tab = 'dash'; }
+async function checkAdmin() {
+  var key = dukaStorageKey('necpra_duka_isadmin');
+  try { S.isAdmin = (await api('GET', '/admin/me', null, GB_NOCACHE)).isAdmin === true; try { localStorage.setItem(key, S.isAdmin ? '1' : '0'); } catch (_) {} }
+  catch (e) { if (e && e.offline) { try { S.isAdmin = localStorage.getItem(key) === '1'; } catch (_) { S.isAdmin = false; } } else S.isAdmin = false; }
+  if (!S.isAdmin && S.tab === 'admin') S.tab = 'dash';
+}
 async function loadAdmin() {
   var A = S.adm, path = { fin: '/financing/admin/applications?status=', sup: '/admin/suppliers?status=', disp: '/admin/disputes?status=', ref: '/admin/refunds?status=', rep: '/admin/repairs?status=' }[A.sec], key = { fin: 'applications', sup: 'suppliers', disp: 'disputes', ref: 'refunds', rep: 'repairs' }[A.sec];
   var r = await Promise.all([api('GET', '/admin/overview', null, GB_NOCACHE), api('GET', path + A.st, null, GB_NOCACHE)]);
@@ -2371,7 +2433,7 @@ document.addEventListener('click', function (ev) {
   else if (a === 'exRun') exRun(t, t.dataset.k, t.dataset.f);
   else if (/^(gb|ws|fn|adm)[A-Z]/.test(a)) extraAct(a, t, id);
   else if (a === 'retry') { S.loading = true; boot(); }
-  else if (a === 'tab') { S.tab = t.dataset.tab; try { sessionStorage.setItem('necpra_duka_tab', S.tab); } catch (_) {} render(); refresh(); }
+  else if (a === 'tab') { S.tab = t.dataset.tab; try { pset('necpra_duka_tab', S.tab); } catch (_) {} render(); refresh(); }
   else if (a === 'toggleLow') { S.low = !S.low; refresh(); }
   else if (a === 'addProduct') openAddProduct();
   else if (a === 'saveNewProduct') saveNewProduct(t);
@@ -2397,7 +2459,7 @@ document.addEventListener('click', function (ev) {
   else if (a === 'retryOp') { obUpdate(id, { status: 'pending', attempts: 0, err: '' }); closeModal(); render(); syncNow(); }
   else if (a === 'discardOp') openDiscard(id);
   else if (a === 'doDiscard') { obRemove(id); note('Discarded a change that could not be saved.', true); closeModal(); render(); }
-  else if (a === 'fin') { S.fin = t.dataset.f; try { sessionStorage.setItem('necpra_duka_fin', S.fin); } catch (_) {} render(); refresh(); }
+  else if (a === 'fin') { S.fin = t.dataset.f; try { pset('necpra_duka_fin', S.fin); } catch (_) {} render(); refresh(); }
   else if (a === 'rp') { S.rp = t.dataset.p; S.fd.rep = null; render(); refresh(); }
   else if (a === 'addExpense') openAddExpense();
   else if (a === 'saveExpense') saveExpense(t);
@@ -2455,7 +2517,7 @@ async function vExtra(text) {
   function say(en, sw) { vSay(T(en, sw)); return true; }
   async function openTabReady(tab, fin) {
     S.tab = tab; if (fin) S.fin = fin;
-    try { sessionStorage.setItem('necpra_duka_tab', tab); if (fin) sessionStorage.setItem('necpra_duka_fin', fin); } catch (_) {}
+    try { pset('necpra_duka_tab', tab); if (fin) pset('necpra_duka_fin', fin); } catch (_) {}
     await refresh();
   }
   if (/^(?:please |tafadhali )?(?:sync now|sync pending changes|synchronize now|tuma mabadiliko|sawazisha sasa)$/.test(n)) {
@@ -2537,7 +2599,7 @@ window.__necpraDukaVoice = {
       });
       if (!S.saleId) S.saleId = uuid();
       if (disc && disc.value > 0 && !(S.disc.value !== '' && Number(S.disc.value) > 0)) S.disc = { type: disc.type, value: String(disc.value) };
-      S.tab = 'pos'; try { sessionStorage.setItem('necpra_duka_tab', 'pos'); } catch (_) {}
+      S.tab = 'pos'; try { pset('necpra_duka_tab', 'pos'); } catch (_) {}
       saveCart(); return { merged: merged };
     },
     closeAssistant: function () { closeModal(); },

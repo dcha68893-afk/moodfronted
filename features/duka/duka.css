@@ -118,3 +118,8 @@ label{font-size:12px;letter-spacing:.2px;margin:12px 2px 5px}
 .spin{padding:44px 16px}
 .mv{padding:9px 0}.tot.big{color:var(--dk)}
 .vafab{box-shadow:0 8px 22px rgba(0,0,0,.28)}
+
+/* Loading shell: layout is visible immediately, numbers fill in afterwards (no blank / spinner screen). */
+.dk-skel{display:block;border-radius:8px;min-height:22px;color:transparent!important;background:linear-gradient(90deg,rgba(127,127,127,.14) 25%,rgba(127,127,127,.26) 50%,rgba(127,127,127,.14) 75%);background-size:200% 100%;animation:dkShimmer 1.3s linear infinite}
+@keyframes dkShimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+@media(prefers-reduced-motion:reduce){.dk-skel{animation:none}}
