@@ -1861,7 +1861,7 @@
         //    TIME, each freeing the slot on load (4s cap) so a slow module cannot stall the rest;
         //  - tapping a tab loads that module IMMEDIATELY and pauses the queue until it has
         //    loaded (6s cap), so the module the user is waiting for gets the full bandwidth.
-        var QUEUE = ['gamesIframe','toolsIframe','moneyIframe','statusIframe','groupIframe','friendsIframe','settingsIframe'];   // DUKA, Wallet and Games first: they are the screens people open straight away
+        var QUEUE = ['toolsIframe','moneyIframe','gamesIframe','statusIframe','groupIframe','friendsIframe','settingsIframe'];   // DUKA, Wallet and Games first: they are the screens people open straight away
         var SLOTS = 4, running = 0, queueOn = false, urgent = 0;   // 4 modules boot together so every screen is ready (and answers voice commands) within seconds of opening
 
         function pump() {
@@ -1899,9 +1899,8 @@
                         // when the native hub exists, so the moment the native hub could not open (or the user came back to the web
                         // Games tab) the frame had never loaded and showed a blank screen while ~350 KB downloaded. It is now booted
                         // LAST, after every other module, so it is ready without competing with the screens people open first.
-                        // FIX (GAMES EMPTY IN INSTALLED APP, round 2): Games is no longer pushed to the END of the warm-up queue.
-                        // It stays at the FRONT so the web arcade (the screen shown underneath/behind the native hub, and the one
-                        // the Games tab falls back to) is already painted the first time the tab is opened.
+                        QUEUE = QUEUE.filter(function (q) { return q !== 'gamesIframe'; });
+                        QUEUE.push('gamesIframe');
                     }
                     fin();
                 }, fin);
@@ -7492,19 +7491,6 @@
                 window.wsService.on('friend_removed',          _fwdFriendRemoved);
                 window.wsService.on('friend:unfriended',       _fwdFriendRemoved);
 
-                // FIX (BACKGROUND SYNC - NEW USERS NEVER APPEARED): the server now announces every new registration
-                // ('user:registered'). Relay it to Friends (Discover/Browse list) and Messages (chat list) so both
-                // refresh in the background right away instead of waiting for a manual reopen.
-                function _fwdUserRegistered(payload) {
-                    try { _fwdToFriendIframe('user:registered', payload); } catch (_) {}
-                    try { _fwdToFriendIframe('FRIENDS_LIST_UPDATE', { reason: 'user:registered' }); } catch (_) {}
-                    try {
-                        var mf = document.getElementById('messagesIframe');
-                        if (mf && mf.contentWindow) mf.contentWindow.postMessage({ type: 'NECPRA_SYNC_NOW', reason: 'user:registered', id: 'sync_' + Date.now() }, '*');
-                    } catch (_) {}
-                }
-                window.wsService.on('user:registered', _fwdUserRegistered);
-
                 // ── STATUS REAL-TIME BRIDGE ──────────────────────────────────
                 // CRITICAL FIX: status:new, status:deleted etc were NEVER registered
                 // on wsService — they were dispatched as kyn: CustomEvents but nobody
@@ -8417,7 +8403,7 @@ window.__groupHdrHide = hideGroupHeader;
   if(!bind()){var n=0,t=setInterval(function(){if(bind()||++n>20)clearInterval(t);},500);}
 })();
 </script>
-<script src="/js/voice/necpra-voice-engine.js"></script><script src="/js/voice/necpra-voice-ui.js"></script><script src="/js/voice/necpra-voice-intents.js"></script><script src="/js/voice/necpra-voice-bridge.js"></script><script src="/js/voice/necpra-voice-handsfree.js"></script><script src="/js/voice/necpra-voice-init.js"></script><script src="/js/voice/necpra-voice-sales-nlu.js"></script><script src="/js/voice/necpra-voice-money-nlu.js"></script><script src="/js/voice/necpra-voice-knowledge.js"></script><script src="/js/voice/necpra-voice-nlu.js"></script><script src="/js/voice/necpra-voice-understand.js"></script><script src="/js/voice/necpra-voice-shell.js"></script><script>try{NecpraVoiceInit.start({fab:{side:'left',bottom:'84px'}});NecpraVoiceShell.init({navigate:function(p){window.__necpraNavigate&&window.__necpraNavigate(p)},getPage:function(){return window.__currentPage},host:function(){return NecpraVoiceInit.host},back:function(){window.__necpraBack?window.__necpraBack():history.back()}})}catch(e){console.error('[voice]',e)}</script>
+<script src="/js/voice/necpra-voice-engine.js"></script><script src="/js/voice/necpra-voice-ui.js"></script><script src="/js/voice/necpra-voice-intents.js"></script><script src="/js/voice/necpra-voice-bridge.js"></script><script src="/js/voice/necpra-voice-handsfree.js"></script><script src="/js/voice/necpra-voice-init.js"></script><script src="/js/voice/necpra-voice-sales-nlu.js"></script><script src="/js/voice/necpra-voice-money-nlu.js"></script><script src="/js/voice/necpra-voice-knowledge.js"></script><script src="/js/voice/necpra-voice-nlu.js"></script><script src="/js/voice/necpra-voice-understand.js"></script><script src="/js/necpra-reminders.js"></script><script src="/js/voice/necpra-voice-shell.js"></script><script>try{NecpraVoiceInit.start({fab:{side:'left',bottom:'84px'}});NecpraVoiceShell.init({navigate:function(p){window.__necpraNavigate&&window.__necpraNavigate(p)},getPage:function(){return window.__currentPage},host:function(){return NecpraVoiceInit.host},back:function(){window.__necpraBack?window.__necpraBack():history.back()}})}catch(e){console.error('[voice]',e)}</script><script>try{var __vc=NecpraVoice._cfg();NecpraReminders.create({getToken:__vc.getToken,apiBase:__vc.apiBase,speak:function(t){try{NecpraVoice.speak(t)}catch(_){}}}).start()}catch(e){console.error('[reminders]',e)}</script>
 <script src="/native-init.js"></script>
 
 <script>
