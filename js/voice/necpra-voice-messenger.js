@@ -416,11 +416,60 @@
     if (p.type === 'back') { return pressById('backBtn') ? ok('Back to your chats.', 'Nimerudi kwenye mazungumzo yako.') : no('You are already on the chat list.', 'Tayari upo kwenye orodha ya mazungumzo.'); }
   }
 
+  /* ───── Messenger intelligence (ON-DEVICE: js/necpra-messenger-ai.js). Works on messages the phone has already decrypted; nothing is sent anywhere,
+   *  nothing is stored, locked chats are never touched, and a suggested reply is only put in the message box (the person edits and sends it). ───── */
+  function AI() { return root.NecpraMessengerAI; }
+  function parseAssist(input) {
+    var s = clean(input).replace(/[.!?,]+$/, '').replace(/^(?:(?:hey|hi|ok|okay|so|now)\s+)?(?:please\s+|tafadhali\s+)?(?:can you\s+|could you\s+)?/i, ''), m;
+    if ((m = /^(?:summari[sz]e|recap|give me (?:a )?(?:summary|recap) of|fupisha|nipe muhtasari wa|muhtasari wa)\s+(?:(?:this|the|my)\s+)?(?:chat|conversation|messages|mazungumzo)(?:\s+(?:with|from|na|kutoka kwa)\s+(.+))?$/i.exec(s))) return { verb: 'summary', from: m[1] ? clean(m[1]) : '' };
+    if ((m = /^(?:suggest|give me|show me)\s+(?:a\s+|some\s+)?repl(?:y|ies)(?:\s+(?:to|for)\s+(?:this|the last)\s+message|\s+(?:to|for)\s+(.+))?$/i.exec(s)) || (m = /^(?:pendekeza|nipe)\s+(?:jibu|majibu)(?:\s+(?:kwa|la)\s+(.+))?$/i.exec(s)) || (m = /^what (?:should|can) i (?:reply|say|answer)(?:\s+to\s+(.+))?$/i.exec(s))) return { verb: 'reply', from: m[1] && !/^(?:this|the last)\b/i.test(m[1]) ? clean(m[1]) : '' };
+    if (/^(?:is|check (?:if|whether))\s+(?:this|that|the last)\s+(?:message\s+)?(?:safe|suspicious|a scam|scam|spam|fake)$/i.test(s) || /^(?:is this|is that)\s+(?:a\s+)?(?:scam|suspicious|fake)$/i.test(s) || /^(?:kagua|angalia)\s+ujumbe\s+(?:huu|wa mwisho)$/i.test(s)) return { verb: 'check', from: '' };
+    return null;
+  }
+  async function assist(p) {
+    var ai = AI(); if (!ai) { await say('That is not available on this screen yet.', 'Hilo bado halipatikani kwenye skrini hii.'); return; }
+    if (typeof cfg.MM.getMessages !== 'function') { await say('That is not available on this screen yet.', 'Hilo bado halipatikani kwenye skrini hii.'); return; }
+    var chat = await msgChat({ from: p.from }); if (!chat) return;
+    if (cfg.isLocked(chat.id)) { await say('That chat is locked, so I cannot read its messages.', 'Mazungumzo hayo yamefungwa kwa kufuli, siwezi kusoma ujumbe wake.'); return; }
+    var me = root._kynCurrentUserId, all = chronological((cfg.MM.getMessages(chat.id) || [])).filter(usable);
+    var msgs = all.slice(-60).map(function (m) { return { from: String(m.senderId) === String(me) ? 'me' : 'them', text: msgText(m), at: m.createdAt }; });
+    var aud = 'messenger.ai_' + p.verb;
+    if (!msgs.length) { await say('There are no messages in this chat yet.', 'Hakuna ujumbe kwenye mazungumzo haya bado.'); return; }
+    if (p.verb === 'summary') {
+      var en = ai.summarise(msgs, { lang: 'en' }), sw = ai.summarise(msgs, { lang: 'sw' });
+      V.audit(aud, { module: 'messenger', outcome: 'executed', chars: 0 });
+      await say(en.say + ' (' + en.notice + ')', sw.say); return;
+    }
+    var last = null; for (var i = msgs.length - 1; i >= 0; i--) if (msgs[i].from === 'them') { last = msgs[i]; break; }
+    if (!last) { await say('There is no message from ' + chat.name + ' to look at yet.', 'Hakuna ujumbe kutoka kwa ' + chat.name + ' wa kuangalia bado.'); return; }
+    if (p.verb === 'check') {
+      var a = ai.assess(last.text); V.audit(aud, { module: 'messenger', outcome: 'executed', chars: 0 });
+      if (!a.reasons.length) { await say('I found no common scam patterns in the last message from ' + chat.name + '. That does not prove it is safe, so stay careful with money, codes and links.', 'Sijaona dalili za kawaida za utapeli kwenye ujumbe wa mwisho wa ' + chat.name + '. Hiyo haithibitishi ni salama, kuwa makini na pesa, misimbo na viungo.'); return; }
+      await say('Careful: ' + a.reasons.map(function (r) { return r.en; }).join(' ') + ' ' + a.note, 'Tahadhari: ' + a.reasons.map(function (r) { return r.sw; }).join(' ') + ' Hii ni dalili tu kutoka kwa maneno, si uthibitisho. Hakuna kilichozuiwa. Kama huna uhakika, mpigie mhusika kwanza.'); return;
+    }
+    // reply drafts
+    var drafts = ai.suggestReplies(last.text, { lang: UI.T('en', 'sw') });
+    if (!drafts.length) { await say('I have no suggestion for that message.', 'Sina pendekezo kwa ujumbe huo.'); return; }
+    var idx = await UI.choose({ title: T('Reply to ' + chat.name + '?', 'Jibu ' + chat.name + '?'), options: drafts.map(function (d) { return { label: d, sub: T('Draft only. Nothing is sent.', 'Rasimu tu. Hakuna kinachotumwa.') }; }), voiceAnswer: ask(T('Say the number, or cancel.', 'Sema namba, au ghairi.')) });
+    if (idx < 0) { V.audit(aud, { module: 'messenger', outcome: 'cancelled' }); await say('Cancelled. Nothing was changed.', 'Imeghairiwa. Hakuna kilichobadilishwa.'); return; }
+    var cm = C(); if (cm) await cm.focusSoon();
+    if (!cm || !cm.isReady() || !cm.setText(drafts[idx])) { V.audit(aud, { module: 'messenger', outcome: 'error' }); await say('I could not put the draft in the message box. Nothing was sent.', 'Sikuweza kuweka rasimu kwenye kisanduku. Hakuna kilichotumwa.'); return; }
+    V.audit(aud, { module: 'messenger', outcome: 'executed', chars: drafts[idx].length });
+    await say('The draft is in the message box. Edit it if you like, then tap send or say send.', 'Rasimu ipo kwenye kisanduku. Ihariri ukipenda, kisha bonyeza tuma au sema tuma.');
+  }
+
   // Right after the app opens, the chat list may still be loading. Matching a spoken name against an empty list made "open chat with Denis" miss, so wait a few seconds for it.
   function waitConvs(ms) { return new Promise(function (res) { var end = Date.now() + ms; (function poll() { var n = 0; try { n = cfg.MM.getConversations().length; } catch (_) {} if (n || Date.now() > end) return res(); setTimeout(poll, 150); })(); }); }
   async function handle(payload) {
     var probe = payload && payload.mode === 'probe', text = payload.transcript;
     var list = contacts();
+    var as = parseAssist(text);   // on-device summary / reply drafts / scam hint
+    if (as) {
+      if (probe) return !!AI();
+      if (busy) { await say('I am still working on your last request.', 'Bado nashughulikia ombi lako la awali.'); return true; }
+      busy = true; try { await assist(as); } catch (e) { await say('That did not work: ' + ((e && e.message) || 'unknown error') + '. Nothing was changed.', 'Haikufanikiwa: ' + ((e && e.message) || 'hitilafu') + '. Hakuna kilichobadilishwa.'); } finally { busy = false; }
+      return true;
+    }
     var ma = !probe ? parseMsgAction(text) : null;   // one message: star / reply / forward / edit / delete (checked before whole-chat actions)
     if (ma) {
       if (busy) { await say('I am still working on your last request.', 'Bado nashughulikia ombi lako la awali.'); return true; }
@@ -486,5 +535,5 @@
     });
     return true;
   }
-  root.NecpraVoiceMessenger = { init: init, _handle: handle, _chatAction: chatAction, parseMsgAction: parseMsgAction, parseUi: parseUi };
+  root.NecpraVoiceMessenger = { init: init, _handle: handle, _chatAction: chatAction, parseMsgAction: parseMsgAction, parseAssist: parseAssist, _assist: assist, parseUi: parseUi };
 })(typeof window !== 'undefined' ? window : globalThis);

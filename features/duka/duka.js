@@ -1300,7 +1300,7 @@ function vParse(raw, fallbackLang) {
   var expTrig = /\b(expense|expenses|spent|spend|gharama|matumizi|nimetumia|nimelipa|nilitumia|nililipa)\b/.test(s);
   if (expTrig && (num || !/\b(report|ripoti|summary|muhtasari|today|leo|week|wiki|month|mwezi)\b/.test(s))) {
     var amt = (/(^| )(\d+(?:\.\d+)?)( |$)/.exec(s) || [])[2], cat = 'other';
-    for (var c in VCATS) if (VCATS[c].some(function (w) { return new RegExp('\b' + w + '\b').test(s); })) { cat = c; break; }
+    for (var c in VCATS) if (VCATS[c].some(function (w) { return new RegExp('\\b' + w + '\\b').test(s); })) { cat = c; break; }
     var desc = ''; if ((m = /\b(?:on|for|kwa|ya)\s+(?:the\s+)?([a-z ]+?)\s*$/.exec(s.replace(/\d+(\.\d+)?/g, ' ').replace(/\s+/g, ' ').trim()))) desc = m[1].trim();
     return Object.assign(out, { intent: 'expense', amount: amt ? Number(amt) : null, category: cat, description: desc && !/^(expense|gharama)$/.test(desc) ? desc : '' });
   }
@@ -2506,7 +2506,7 @@ $('modal').addEventListener('click', function (ev) { if (ev.target === $('modal'
 window.addEventListener('message', function (ev) { if (ev && ev.data && ev.data.type === 'MODULE_VISIBLE' && S.shopId && !S.loading) refresh(); });
 window.__DUKA_BOOT__ = boot;
 /* handle for the automated end-to-end tests (read/act only; no secrets) */
-window.__duka = { parse: vParse, norm: vNorm, S: S, syncNow: syncNow, obMine: obMine, cacheGet: cacheGet, updateCheckout: updateCheckout, saveCart: saveCart, scanAccept: scanAccept, scanHandle: scanHandle, wbUpdate: wbUpdate };
+window.__duka = { parse: vParse, norm: vNorm, S: S, syncNow: syncNow, obMine: obMine, cacheGet: cacheGet, updateCheckout: updateCheckout, saveCart: saveCart, scanAccept: scanAccept, scanHandle: scanHandle, wbUpdate: wbUpdate, vHandle: vHandle };
 /* NECPRA voice: adapter between the shared voice-sales flow and DUKA's own cart/checkout. Voice never saves a sale itself:
    it fills S.cart (same model as camera/barcode/manual) and opens the normal checkout, where stock, offline, credit-customer
    and M-PESA verification rules apply and the trader taps Confirm sale. */
