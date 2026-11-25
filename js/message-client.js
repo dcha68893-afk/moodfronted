@@ -208,7 +208,32 @@
         return false;
     }
 
+    // FIX (DELETED CHAT CAME BACK / STAYED IN THE LIST): a deleted chat is remembered per account as a "tombstone" (id -> time of
+    // deletion). Anything that would re-create it afterwards - a late presence/typing/read event, a stale server answer, a cache
+    // hydrate - is ignored unless a message NEWER than the deletion arrived (then the chat legitimately returns, as on WhatsApp).
+    const _DEL_KEY = 'kyn_deleted_chats_v1:';
+    function _delStore() {
+        try { return JSON.parse(localStorage.getItem(_DEL_KEY + String(window._kynCurrentUserId || '')) || '{}') || {}; } catch (_) { return {}; }
+    }
+    function _delSave(m) {
+        try {
+            const keys = Object.keys(m);
+            if (keys.length > 300) keys.sort((a, b) => m[a] - m[b]).slice(0, keys.length - 300).forEach(k => delete m[k]);
+            localStorage.setItem(_DEL_KEY + String(window._kynCurrentUserId || ''), JSON.stringify(m));
+        } catch (_) {}
+    }
+    function _tombstone(chatId) { const m = _delStore(); m[String(chatId)] = Date.now(); _delSave(m); }
+    // true = keep it deleted. `activityAt` = time of the newest message we know of for that chat (ISO string / ms / undefined).
+    function _isDeleted(chatId, activityAt) {
+        const m = _delStore(), t = m[String(chatId)];
+        if (!t) return false;
+        const a = activityAt ? new Date(activityAt).getTime() : 0;
+        if (a && a > t + 1500) { delete m[String(chatId)]; _delSave(m); return false; }   // newer message -> chat is back
+        return true;
+    }
+
     function upsertConversationMeta(chatId, patch) {
+        if (!state.conversations.has(chatId) && _isDeleted(chatId, patch && patch.lastMessage && patch.lastMessage.createdAt)) return;
         const existing = state.conversations.get(chatId) || { chatId, unreadCount: 0 };
         state.conversations.set(chatId, Object.assign(existing, patch));
         notify('conversation:updated', state.conversations.get(chatId));
@@ -2076,6 +2101,7 @@
         try {
             const res = await api().delete(`/chats/${chatId}`);
             if (res && (res.status === 'success' || res.success)) {
+                _tombstone(chatId);
                 _forgetConversation(chatId, { keepMessages: false });
                 notify('conversation:deleted', { chatId });
             }
@@ -2216,14 +2242,24 @@
             const knownBefore = new Set(Array.from(state.conversations.keys()).map(String));
             const res = await api().get('/chats?summary=1&limit=50');
             if (!res || res.success === false) throw new Error((res && res.message) || 'Failed to load conversation list');
-            const chats = (res.data && Array.isArray(res.data.chats)) ? res.data.chats : [];
+            const chatsAll = (res.data && Array.isArray(res.data.chats)) ? res.data.chats : [];
+            // Chats the person deleted stay deleted even if the server still lists one (e.g. an older backend): hide it and
+            // quietly repeat the hide on the server. A message newer than the deletion brings the chat back (see _isDeleted).
+            const chats = chatsAll.filter((c) => {
+                const raw = Array.isArray(c.chatMessages) && c.chatMessages[0] ? c.chatMessages[0] : null;
+                if (!_isDeleted(c.id, c.lastMessageAt || (raw && raw.createdAt))) return true;
+                if (c.type === 'direct') { try { api().delete(`/chats/${c.id}`).catch(() => {}); } catch (_) {} }
+                return false;
+            });
             state.convLoadFailed = false;
             _markListSettled();
             // FIX (DELETED / ARCHIVED CHATS STAYED IN THE LIST): this only ever ADDED conversations, so anything hidden or
             // archived (here or on another device) lingered from the cache forever. When the server returned the complete
             // list (the request is capped at 50), drop cached conversations it no longer lists. The open chat is left alone.
             // (An EMPTY answer is ambiguous — a real empty list or a server hiccup — so it never prunes.)
-            if (chats.length > 0 && chats.length < 50) {
+            // An EMPTY list is now trusted when the server says total=0 - before, deleting your LAST chat could never be pruned.
+            const _pgTotal = res.data && res.data.pagination ? Number(res.data.pagination.total) : NaN;
+            if (chatsAll.length < 50 && (chatsAll.length > 0 || _pgTotal === 0)) {
                 const serverIds = new Set(chats.map(c => String(c.id)));
                 const activeId = String(state.activeChatId == null ? '' : state.activeChatId);
                 knownBefore.forEach((id) => {
@@ -2348,6 +2384,25 @@
     // A failed refresh (offline, cold server) used to be final for the page session. Try again when the connection returns or
     // the person comes back to the tab — but only if the last attempt actually failed.
     window.addEventListener('online', () => { if (state.convLoadFailed) loadConversations(); });
+    // FIX (CHAT LIST NEVER SYNCED IN THE BACKGROUND): the list was fetched once at startup (and retried only after a failure), so a
+    // chat that was started/hidden on another device, a new contact's first message that arrived while this screen was hidden, or a
+    // deletion made elsewhere never showed until the app was restarted. Refresh quietly: every 30s while visible, when the app/tab
+    // returns, on focus/online, and when the shell relays a sync request ('NECPRA_SYNC_NOW' / new user / accepted friend).
+    let _lastConvSync = Date.now();
+    function _syncConversationsNow() {
+        if (document.visibilityState === 'hidden' || !navigator.onLine) return;
+        if (Date.now() - _lastConvSync < 4000) return;
+        _lastConvSync = Date.now();
+        try { loadConversations().catch(() => {}); } catch (_) {}
+    }
+    setInterval(_syncConversationsNow, 30000);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') _syncConversationsNow(); });
+    window.addEventListener('focus', _syncConversationsNow);
+    window.addEventListener('online', _syncConversationsNow);
+    window.addEventListener('message', (ev) => {
+        const t = ev.data && ev.data.type;
+        if (t === 'NECPRA_SYNC_NOW' || t === 'user:registered' || t === 'FRIEND_REQUEST_ACCEPTED' || t === 'friend:accepted') _syncConversationsNow();
+    });
     // FIX (resume thundering-herd): staggered via AppResumeController when
     // present (see the 'app:resume:messages' listener above for details);
     // same immediate fallback otherwise.

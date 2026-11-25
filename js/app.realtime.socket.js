@@ -1770,6 +1770,7 @@
                 'friend:blocked',    // current user was blocked
                 'friend:online',     // a friend came online
                 'friend:offline',    // a friend went offline
+                'user:registered',   // a brand-new account was created (refreshes Discover / chat list in the background)
             ];
 
             const marketplaceEvents = [

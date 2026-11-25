@@ -717,10 +717,13 @@
       var self = this, args = arguments;
       var deliberate = /^(games?)$/.test(String(page || '')) && !(options && options.fromHistory) && nativeArcadeFlag();
       if (deliberate) {
-        openNativeArcadeScreen().then(function (r) {
-          if (!r.opened) return origNavigate.apply(self, args);
-        });
-        return;
+        // FIX (GAMES SCREEN EMPTY IN THE INSTALLED APP): the web layer used to navigate ONLY when the native hub failed to open, so
+        // while the (async) native probe/launch ran - and again when the user came back from the hub - the shell was left on a
+        // blank/previous panel. The Games tab is now ALWAYS shown first (instant, from the warm frame), and the native hub is laid
+        // over it. Returning from the hub therefore lands on the arcade home, never on an empty screen.
+        var navResult = origNavigate.apply(self, args);
+        openNativeArcadeScreen().catch(function () {});
+        return navResult;
       }
       return origNavigate.apply(this, args);
     };

@@ -74,6 +74,34 @@ window.addEventListener('message',e=>{if(e.data?.type==='FRIENDS_LIST_UPDATE'||e
 try{const cf=readFriendsCache(),cr=_rj('knecta_friend_requests_cache',null);if(cf.length||cr){state.friends=cf;state.total=cf.length;if(cr){state.incoming=cr.incoming||[];state.outgoing=cr.outgoing||[]}render();notifyParent()}}catch(_){}
 await loadRequests();await loadFriends();render();notifyParent();const target=new URLSearchParams(location.search).get('target');if(target){$('search').value=target;state.query=target;state.tab='discover';notifyParent();await refresh()}}catch(e){if(_isNet(e)){state._offline=true;try{render();notifyParent()}catch(_){$('content').innerHTML=''}}else $('content').innerHTML='<div class="error">'+esc(e.message)+'</div>'}})();
 window.addEventListener('online',()=>{state._offline=false;refresh()});
+/* FIX (BACKGROUND SYNC): this screen is booted once (hidden) and used to load Friends/Discover ONLY on the first open or a manual tap,
+   so a user who registered later never showed up until the app was restarted. It now re-syncs quietly (no flicker, re-renders only
+   when something actually changed): every 25s while visible, when the app/tab comes back, on focus/online, and the moment the shell
+   relays a 'user:registered' / sync request. Discover is refreshed even while another tab is open so it is fresh when opened. */
+let _syncing=false,_lastSync=0;
+function _snap(){try{return JSON.stringify([state.friends,state.incoming,state.outgoing,state.discover,state.groups])}catch(_){return''}}
+async function silentSync(){
+  if(_syncing||state.loading||!navigator.onLine)return;
+  if(Date.now()-_lastSync<3000)return;
+  _syncing=true;_lastSync=Date.now();
+  const before=_snap();
+  try{
+    try{await loadRequests()}catch(_){}
+    try{await loadFriends()}catch(_){}
+    if(!state.query){try{await loadDiscover()}catch(_){}}
+    if(state.tab==='groups'){try{await loadGroups()}catch(_){}}
+    state._offline=!navigator.onLine;
+    if(_snap()!==before){try{render()}catch(_){}}
+  }finally{_syncing=false}
+}
+window.__kynFriendsSync=silentSync;
+setInterval(()=>{if(document.visibilityState!=='hidden')silentSync()},25000);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')silentSync()});
+window.addEventListener('focus',silentSync);
+window.addEventListener('pageshow',silentSync);
+window.addEventListener('online',silentSync);
+window.addEventListener('message',e=>{const t=e.data&&e.data.type;if(t==='user:registered'||t==='REALTIME_EVENT:user:registered'||t==='NECPRA_SYNC_NOW'||t==='NECPRA_MODULE_SHOWN'||t==='FRIEND_REQUEST_ACCEPTED'||t==='friend:accepted')silentSync()});
+setTimeout(silentSync,1500);
 async function voiceGo(t,q){while(state.loading)await new Promise(r=>setTimeout(r,100));if(typeof q==='string')state.query=q;state.tab=t;document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.dataset.tab===t));notifyParent();hydrateFromCache();render();await refresh();while(state.loading)await new Promise(r=>setTimeout(r,100))}
 window.__kynFriendsVoice={state:()=>state,go:voiceGo};
 window.__moduleBackDepth=()=>state.tab!=='friends'?1:0;

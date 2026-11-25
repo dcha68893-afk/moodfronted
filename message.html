@@ -1061,7 +1061,19 @@
         renderConversationList();
       } else if (action === 'delete') {
         if (!confirm('Delete this conversation for you? This cannot be undone.')) return;
-        await window.MessageModule.deleteChat(chatId);
+        const _delRes = await window.MessageModule.deleteChat(chatId);
+        if (!(_delRes && (_delRes.status === 'success' || _delRes.success))) {
+          alert('Could not delete this chat. Please check your connection and try again.');
+          return;
+        }
+        // FIX: if the deleted chat was the one open on screen, leave it - otherwise the old panel (and a late event) kept it alive.
+        if (String(window.MessageModule.getActiveChatId()) === sid) {
+          window.MessageModule.setActiveChatId(null);
+          const _lp = document.getElementById('convListPanel'), _cp = document.getElementById('chatPanel');
+          if (_lp) _lp.classList.remove('hide-on-mobile');
+          if (_cp) _cp.classList.add('hide-on-mobile');
+          try { renderChatPanel(null); } catch (_) {}
+        }
         renderConversationList();
       }
     }
@@ -1916,6 +1928,62 @@
       }
     }
 
+    // FIX (DELETE OPTIONS WERE ONE CRAMPED LINE): "Delete for everyone? Click Cancel to delete just for you." was a native confirm() that
+    // squeezed both choices into a single sentence. This is a proper sheet: each choice is its own full-width button with a short
+    // explanation, plus a separate Cancel. Resolves 'everyone' | 'me' | null (cancelled).
+    function kynChooseDelete(opts) {
+      opts = opts || {};
+      const count = Math.max(1, Number(opts.count) || 1);
+      const canEveryone = !!opts.canEveryone;
+      return new Promise((resolve) => {
+        if (!document.getElementById('kynDelSheetStyle')) {
+          const st = document.createElement('style');
+          st.id = 'kynDelSheetStyle';
+          st.textContent =
+            '#kynDelSheet{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.5);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);animation:kynDelFade .15s ease-out}' +
+            '#kynDelSheet .kds-card{width:100%;max-width:420px;box-sizing:border-box;background:var(--kyn-bg-modal,var(--kyn-bg-panel,#fff));color:var(--kyn-text-primary,#111827);border-radius:20px 20px 0 0;padding:20px 16px calc(16px + env(safe-area-inset-bottom,0px));box-shadow:0 -10px 40px rgba(0,0,0,.28);animation:kynDelUp .2s cubic-bezier(.2,.8,.2,1)}' +
+            '@media(min-width:600px){#kynDelSheet{align-items:center}#kynDelSheet .kds-card{border-radius:20px;padding-bottom:16px}}' +
+            '#kynDelSheet .kds-title{font-size:17px;font-weight:700;margin:0 0 4px;text-align:center}' +
+            '#kynDelSheet .kds-sub{font-size:13px;line-height:1.45;margin:0 0 16px;text-align:center;color:var(--kyn-text-secondary,#6b7280)}' +
+            '#kynDelSheet .kds-btn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;width:100%;box-sizing:border-box;min-height:54px;margin:0 0 10px;padding:10px 14px;border-radius:14px;border:1px solid var(--kyn-border,rgba(127,127,127,.3));background:transparent;color:inherit;font:inherit;font-size:15px;font-weight:600;cursor:pointer;-webkit-tap-highlight-color:transparent}' +
+            '#kynDelSheet .kds-btn small{font-size:11.5px;font-weight:400;opacity:.8}' +
+            '#kynDelSheet .kds-btn:active{transform:scale(.985)}' +
+            '#kynDelSheet .kds-danger{background:#dc2626;border-color:#dc2626;color:#fff}' +
+            '#kynDelSheet .kds-danger small{opacity:.92}' +
+            '#kynDelSheet .kds-cancel{border:0;margin:2px 0 0;min-height:44px;font-weight:600;color:var(--kyn-text-secondary,#6b7280)}' +
+            '@keyframes kynDelFade{from{opacity:0}to{opacity:1}}@keyframes kynDelUp{from{transform:translateY(24px);opacity:0}to{transform:none;opacity:1}}';
+          document.head.appendChild(st);
+        }
+        const old = document.getElementById('kynDelSheet'); if (old) old.remove();
+        const wrap = document.createElement('div');
+        wrap.id = 'kynDelSheet';
+        wrap.setAttribute('role', 'dialog');
+        wrap.setAttribute('aria-modal', 'true');
+        const title = count > 1 ? `Delete ${count} messages?` : 'Delete message?';
+        wrap.innerHTML =
+          '<div class="kds-card">' +
+            `<h3 class="kds-title">${title}</h3>` +
+            `<p class="kds-sub">${canEveryone ? 'Choose how you want to remove ' + (count > 1 ? 'them' : 'it') + '.' : 'This removes ' + (count > 1 ? 'them' : 'it') + ' from your chat only. The other person keeps ' + (count > 1 ? 'them' : 'it') + '.'}</p>` +
+            (canEveryone ? '<button type="button" class="kds-btn kds-danger" data-c="everyone">Delete for everyone<small>Removed for you and the other person</small></button>' : '') +
+            '<button type="button" class="kds-btn" data-c="me">Delete for me<small>Only removed from your chat</small></button>' +
+            '<button type="button" class="kds-btn kds-cancel" data-c="cancel">Cancel</button>' +
+          '</div>';
+        let done = false;
+        const finish = (v) => { if (done) return; done = true; document.removeEventListener('keydown', onKey, true); wrap.remove(); resolve(v); };
+        const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(null); } };
+        wrap.addEventListener('click', (e) => {
+          if (e.target === wrap) return finish(null);
+          const b = e.target.closest && e.target.closest('[data-c]');
+          if (!b) return;
+          const c = b.getAttribute('data-c');
+          finish(c === 'cancel' ? null : c);
+        });
+        document.addEventListener('keydown', onKey, true);
+        document.body.appendChild(wrap);
+        try { (wrap.querySelector('[data-c="me"]')).focus({ preventScroll: true }); } catch (_) {}
+      });
+    }
+
     async function performBulkDelete() {
       const chatId = window.MessageModule.getActiveChatId();
       if (!chatId || selectedIds.size === 0) return;
@@ -1924,12 +1992,9 @@
         const m = window.MessageModule.getMessages(chatId).find(x => x.id === id);
         return m && m.senderId === window._kynCurrentUserId;
       });
-      let forEveryone = false;
-      if (allMine) {
-        forEveryone = confirm(`Delete ${ids.length} message(s) for everyone? Click Cancel to delete just for you.`);
-      } else if (!confirm(`Delete ${ids.length} message(s) for you?`)) {
-        return;
-      }
+      const choice = await kynChooseDelete({ count: ids.length, canEveryone: allMine });
+      if (!choice) return;
+      const forEveryone = choice === 'everyone';
       await window.MessageModule.bulkDeleteMessages(chatId, ids, { forEveryone });
       exitSelectMode();
     }
@@ -2050,13 +2115,9 @@
           break;
         case 'delete': {
           const isMine = current.senderId === window._kynCurrentUserId;
-          let forEveryone = false;
-          if (isMine) {
-            forEveryone = confirm('Delete for everyone? Click Cancel to delete just for you.');
-          } else if (!confirm('Delete this message for you?')) {
-            return;
-          }
-          await window.MessageModule.deleteMessage(chatId, messageId, { forEveryone });
+          const choice = await kynChooseDelete({ count: 1, canEveryone: isMine });
+          if (!choice) return;
+          await window.MessageModule.deleteMessage(chatId, messageId, { forEveryone: choice === 'everyone' });
           break;
         }
         case 'report': {

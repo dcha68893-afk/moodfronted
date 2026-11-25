@@ -111,7 +111,7 @@ const SW_VERSION = '19.63.0';
 // v133: mode separation — browser always shows landing page; installed app skips it when signed in; no browser->app / app->browser redirects (index.html, manifest.json, AndroidManifest.xml).
 // v135: instant-open (DUKA cache-first, Wallet saved balance, faster module warm-up), browser tab no longer auto-forwarded into the app, group settings redesign, DUKA visual polish; chat.html, money.html, group.html, duka.css/js changed.
 // v139: Messenger intelligence on the phone (js/necpra-messenger-ai.js: summarise a chat, suggest reply drafts, scam hints; voice commands in necpra-voice-messenger.js; message.html loads it).
-const CACHE_NAME = 'necpra-static-v139';
+const CACHE_NAME = 'necpra-static-v140';
 // v138: DUKA/Wallet reopen on the tab and scroll position they were left on (kept in localStorage, not sessionStorage), Wallet finds its saved balance in the installed app,
 // and DUKA/Wallet/Games tell the shell when a real screen is drawn so the 'last screen' picture is saved at once. money.html, game.html, chat.html, duka.js changed.
 // v137: DUKA no longer waits on the server before painting (layout shell + parallel loads, user-id fallback for the APK), Games has a
