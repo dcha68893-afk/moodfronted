@@ -1961,8 +1961,12 @@
             function hardReload() {
                 var f = frame(); if (!f) return;
                 reloads++;
-                f.setAttribute('src', 'game.html?r=' + Date.now());
+                // FIX: this used to load 'game.html?r=<timestamp>'. A unique URL can never be found in the service-worker cache, so every
+                // recovery attempt had to download the whole arcade again from the network (the long blank screen on slow connections).
+                // Reload the SAME url so the cached copy is used.
+                try { f.contentWindow.location.reload(); } catch (_) { f.setAttribute('src', 'game.html'); }
             }
+            function frameLoaded() { try { var dd = frame().contentDocument; return !!(dd && dd.readyState === 'complete'); } catch (_) { return false; } }
             function tick() {
                 clearTimeout(timer);
                 if (!onGames()) return;                                   // user left Games: stop quietly
@@ -1975,9 +1979,11 @@
                     }
                     if (healthy()) { showCard(false); return; }
                     var age = Date.now() - t0;
-                    if (reloads === 0 && age > 7000) hardReload();
-                    else if (reloads === 1 && age > 14000) hardReload();
-                    else if (age > 20000) { showCard(true); return; }
+                    // Only reload when the frame has FINISHED loading and still shows nothing. A reload while it is still downloading
+                    // just restarts the download and makes the blank screen last longer.
+                    if (frameLoaded() && reloads === 0 && age > 5000) hardReload();
+                    else if (frameLoaded() && reloads === 1 && age > 12000) hardReload();
+                    else if (age > 40000) { showCard(true); return; }
                 }
                 timer = setTimeout(tick, 1000);
             }
@@ -1986,11 +1992,24 @@
             document.addEventListener('visibilitychange', function () { if (!document.hidden) recheck(); });
             window.addEventListener('pageshow', recheck);
             window.addEventListener('focus', recheck);
+            // FIX (GAMES BLANK AFTER LEAVING AND COMING BACK): the arcade lives two iframes deep inside a container that is hidden with
+            // visibility:hidden while other tabs are open. When it becomes visible again the browser can keep showing the old empty
+            // paint until something forces a repaint. Nudge it on every visit: ask the arcade to make sure a screen is active and force
+            // the compositor to redraw the frame.
+            function kickRepaint() {
+                var f = frame(); if (!f || !f.getAttribute('src')) return;
+                try { if (f.contentWindow) f.contentWindow.postMessage({ type: 'NECPRA_GAMES_SHOWN' }, '*'); } catch (_) {}
+                try {
+                    f.style.transform = 'translateZ(0)';
+                    requestAnimationFrame(function () { requestAnimationFrame(function () { f.style.transform = ''; }); });
+                } catch (_) {}
+            }
             window.__gamesGuard = function (force) {
                 if (force) { reloads = 0; showCard(false); }
                 t0 = Date.now();
                 clearTimeout(timer);
-                if (force) { var f = frame(); if (f) f.setAttribute('src', 'game.html?r=' + Date.now()); }
+                if (force) { var f = frame(); if (f) { try { f.contentWindow.location.reload(); } catch (_) { f.setAttribute('src', 'game.html'); } } }
+                else { setTimeout(kickRepaint, 60); setTimeout(kickRepaint, 600); }
                 timer = setTimeout(tick, 1500);
             };
         })();

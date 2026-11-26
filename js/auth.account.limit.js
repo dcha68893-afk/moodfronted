@@ -145,6 +145,7 @@
             button.addEventListener('click', () => {
                 button.disabled = true;
                 const result = switchSavedAccount(button.dataset.userId);
+                if (result?.success) return;   // page is navigating into the app
                 if (!result?.success) button.disabled = false;
                 if (!result?.success) alert(result?.error || 'Could not switch account.');
             });
@@ -162,8 +163,20 @@
         MAX_ACCOUNTS
     };
 
+    // FIX ("Already using this account" after logout): logout redirects to /index.html?logout=1, but a late write from one of the
+    // still-running module iframes can leave a session record behind. The account list then sees the same user as "active" and refuses
+    // to open it. When we arrive here from a logout, make sure no active session is left (saved accounts are kept on purpose).
+    function dropStaleSessionAfterLogout() {
+        try {
+            if (!/[?&]logout=1/.test(location.search)) return;
+            if (window.AuthStorage && typeof window.AuthStorage.clearAuth === 'function') window.AuthStorage.clearAuth();
+            else localStorage.removeItem('kynecta_auth');
+        } catch (_) {}
+    }
+
     function bootLoginSwitcher() {
         if (window.top !== window.self) return;
+        dropStaleSessionAfterLogout();
         renderLoginAccountSwitcher();
         window.addEventListener('storage', event => {
             if (event.key === AUTH_STORAGE_KEY || event.key === STORAGE_KEY) renderLoginAccountSwitcher();

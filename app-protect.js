@@ -26,6 +26,10 @@
   // 2. privacy shield when hidden
   var shield;
   function show() {
+    // FIX: every module iframe (Games is two frames deep) used to create its OWN full-screen black shield when the page was hidden.
+    // A nested shield that missed its 'visible' event stayed on top of that module = blank Games screen. The top window's shield
+    // already covers all frames, so frames never need one.
+    if (window.top !== window.self) return;
     if (shield || !document.body) return;
     shield = document.createElement('div');
     shield.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#111;';
@@ -37,6 +41,8 @@
   // gets the privacy shield, and it is removed as soon as the document returns.
   document.addEventListener('visibilitychange', function () { document.hidden ? show() : hide(); });
   window.addEventListener('focus', hide);
+  window.addEventListener('pageshow', hide);
+  ['pointerdown', 'touchstart', 'keydown'].forEach(function (ev) { window.addEventListener(ev, function () { if (!document.hidden) hide(); }, true); });
 
   // 3. deterrents
   document.addEventListener('keydown', function (e) {

@@ -24,7 +24,7 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.63.0';
+const SW_VERSION = '19.64.0';
 // FIX: bumped so activate() drops every existing cache immediately on this
 // deploy — anyone with a stale pre-rebuild group.html (or the old, now-
 // deleted group-core-*/group-os-* files, or the misspelled necpra-* icons
@@ -113,7 +113,7 @@ const SW_VERSION = '19.63.0';
 // v139: Messenger intelligence on the phone (js/necpra-messenger-ai.js: summarise a chat, suggest reply drafts, scam hints; voice commands in necpra-voice-messenger.js; message.html loads it).
 // v140: in-app reminder alerts (js/necpra-reminders.js: polls the caller's due reminders while the app is open; chat.html loads it).
 // v141: in-chat scam hint (message.html bubbleHtml uses js/necpra-messenger-ai.js; on-device, a hint is not proof, nothing is blocked).
-const CACHE_NAME = 'necpra-static-v141';
+const CACHE_NAME = 'necpra-static-v142';
 // v138: DUKA/Wallet reopen on the tab and scroll position they were left on (kept in localStorage, not sessionStorage), Wallet finds its saved balance in the installed app,
 // and DUKA/Wallet/Games tell the shell when a real screen is drawn so the 'last screen' picture is saved at once. money.html, game.html, chat.html, duka.js changed.
 // v137: DUKA no longer waits on the server before painting (layout shell + parallel loads, user-id fallback for the APK), Games has a
@@ -416,7 +416,10 @@ async function maybeRepair(force){
 // first launch after the deploy and refreshed again on every later one.
 async function networkFirst(request,event){
   const cache=await caches.open(CACHE_NAME);
-  const old=await cache.match(request);
+  // FIX (Games blank for a long time): the lookup used the exact URL, so '/games-crossword-v4.js?v=8.2' or 'game.html?x=..' missed the copy
+  // that was cached under another query string and the request then waited on the network with NO time limit. Match ignoring the query too.
+  let old=await cache.match(request);
+  if(!old)old=await cache.match(request,{ignoreSearch:true});
   const refresh=fetch(request,{cache:'no-cache'}).then(async r=>{
     if(r&&r.ok&&!badAssetResponse(request,r)){await cache.put(request,r.clone()).catch(()=>{});}
     return r;
@@ -425,7 +428,16 @@ async function networkFirst(request,event){
     if(event&&event.waitUntil)event.waitUntil(refresh.catch(()=>null));else refresh.catch(()=>null);
     return old;
   }
-  try{const r=await refresh;if(r.ok&&!badAssetResponse(request,r))return r;return r;}
+  // Nothing cached at all: wait for the network, but never forever.
+  const slow=new Promise(res=>setTimeout(()=>res('timeout'),12000));
+  try{
+    const first=await Promise.race([refresh,slow]);
+    if(first==='timeout'){
+      if(event&&event.waitUntil)event.waitUntil(refresh.catch(()=>null));else refresh.catch(()=>null);
+      return await refresh;   // still the only copy there is: keep waiting, but the background refresh above is guaranteed to finish and cache it
+    }
+    return first;
+  }
   catch(_){const alt=await cache.match(request,{ignoreSearch:true});if(alt)return alt;return new Response('Resource unavailable offline',{status:503});}
 }
 async function staticAsset(request){

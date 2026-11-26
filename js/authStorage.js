@@ -160,9 +160,19 @@
             restoreAccountState(targetId);
         }catch(_){}
     }
+    // True when this window belongs to the signed-in app shell (chat.html and the module iframes it hosts).
+    function isAppShellPage(){
+        try{
+            const top=(window.top&&window.top!==window)?window.top:window;
+            return /\/chat\.html$/i.test(String(top.location.pathname||''));
+        }catch(_){return false;}
+    }
     function reloadAppShell(){
         try{
             const top=(window.top&&window.top!==window)?window.top:window;
+            // FIX: from the landing/login page a reload just showed the landing page again (it never auto-continues in a browser tab,
+            // and ?logout=1 keeps it on the account list). Go straight into the app instead.
+            if(!isAppShellPage()){top.location.replace('/chat.html');return;}
             top.location.reload();
         }catch(_){
             // Cross-origin/sandboxed access can throw; fall back to reloading
@@ -229,7 +239,7 @@
     function getToken(){return getAuth()?.token||null;}function getUser(){return getAuth()?.user||null;}function isValidSession(s){return!!(s&&typeof s==='object'&&typeof s.token==='string'&&s.token.length>=10&&s.user&&typeof s.user==='object');}
 
     function switchAccount(userId){
-        const targetId=String(userId),accounts=getSavedAccounts();if(accounts.length>MAX_ACCOUNTS)return{success:false,error:`Maximum ${MAX_ACCOUNTS} accounts per device`};const target=accounts.find(a=>String(a?.userId??a?.id??'')===targetId);if(!target||!target.token||!target.userId)return{success:false,error:'Account is not registered on this device'};const currentId=getStoredUserId();if(currentId!=null&&String(currentId)===targetId)return{success:false,error:'Already using this account'};
+        const targetId=String(userId),accounts=getSavedAccounts();if(accounts.length>MAX_ACCOUNTS)return{success:false,error:`Maximum ${MAX_ACCOUNTS} accounts per device`};const target=accounts.find(a=>String(a?.userId??a?.id??'')===targetId);if(!target||!target.token||!target.userId)return{success:false,error:'Account is not registered on this device'};const currentId=getStoredUserId();if(currentId!=null&&String(currentId)===targetId){if(isAppShellPage())return{success:false,error:'Already using this account'};try{const u0={id:target.userId,email:target.email,username:target.username,displayName:target.displayName||target.username,avatar:target.avatar};const p0={token:target.token,refreshToken:target.refreshToken||null,user:u0,expiresAt:Object.prototype.hasOwnProperty.call(target,'expiresAt')?target.expiresAt:null,issuedAt:Date.now(),savedAt:new Date().toISOString(),_version:'1.5.2'};withAuthMutation(()=>{localStorage.setItem(AUTH_STORAGE_KEY,JSON.stringify(p0));LEGACY_TOKEN_KEYS.forEach(k=>{try{localStorage.setItem(k,target.token);}catch(_){}});LEGACY_USER_KEYS.forEach(k=>{try{localStorage.setItem(k,JSON.stringify(u0));}catch(_){}});localStorage.setItem(LOGIN_STATE_KEY,'true');});setLastActiveAccountId(target.userId);propagateOffSessionPolicy(target.token);window.currentUser=u0;window.__userToken=target.token;window.__accessToken=target.token;try{window.dispatchEvent(new CustomEvent('auth:account:switched',{detail:{userId:target.userId,user:u0,timestamp:Date.now()}}));}catch(_){}reloadAppShell();return{success:true,alreadyActive:true,user:u0,token:target.token};}catch(e0){return{success:false,error:e0.message||'Could not open account'};}}const prevAfterLogout=getLastActiveAccountId();if(currentId==null&&prevAfterLogout!=null&&String(prevAfterLogout)!==targetId){try{captureAccountState(prevAfterLogout);wipePreviousAccountData();}catch(_){}}
         try{
             if(currentId!=null)wipePreviousAccountData();const user={id:target.userId,email:target.email,username:target.username,displayName:target.displayName||target.username,avatar:target.avatar};const payload={token:target.token,refreshToken:target.refreshToken||null,user,expiresAt:Object.prototype.hasOwnProperty.call(target,'expiresAt')?target.expiresAt:null,issuedAt:Date.now(),savedAt:new Date().toISOString(),_version:'1.5.2'};
             withAuthMutation(()=>{localStorage.setItem(AUTH_STORAGE_KEY,JSON.stringify(payload));LEGACY_TOKEN_KEYS.forEach(k=>{try{localStorage.setItem(k,target.token);}catch(_){}});LEGACY_USER_KEYS.forEach(k=>{try{localStorage.setItem(k,JSON.stringify(user));}catch(_){}});localStorage.setItem(LOGIN_STATE_KEY,'true');});restoreAccountState(target.userId);withAuthMutation(()=>{localStorage.setItem(AUTH_STORAGE_KEY,JSON.stringify(payload));LEGACY_TOKEN_KEYS.forEach(k=>{try{localStorage.setItem(k,target.token);}catch(_){}});LEGACY_USER_KEYS.forEach(k=>{try{localStorage.setItem(k,JSON.stringify(user));}catch(_){}});localStorage.setItem(LOGIN_STATE_KEY,'true');});setLastActiveAccountId(target.userId);propagateOffSessionPolicy(target.token);window.currentUser=user;window.__userToken=target.token;window.__accessToken=target.token;target.lastUsed=Date.now();withAuthMutation(()=>localStorage.setItem(ACCOUNT_LIST_KEY,JSON.stringify(accounts.slice(0,MAX_ACCOUNTS))));try{window.dispatchEvent(new CustomEvent('auth:account:switched',{detail:{userId:target.userId,user,timestamp:Date.now()}}));}catch(_){}try{window.__ACCOUNT_SWITCH_RELOAD__=true;const _tid=target.userId;waitForAccountWipe().then(()=>sweepStaleAccountKeys(_tid)).then(reloadAppShell).catch(reloadAppShell);}catch(_){}return{success:true,user,token:target.token};

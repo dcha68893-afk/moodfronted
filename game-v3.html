@@ -257,7 +257,12 @@ setTimeout(syncServerCoins,1500);document.addEventListener('visibilitychange',()
 })();
 </script>
 <script id="mood-crossword-v4" src="/games-crossword-v4.js?v=8.2"></script><script src="/games-chess-v1.js?v=2.6"></script><script>
-'use strict';const $=id=>document.getElementById(id),S=['home','block','trivia','crossword','chess'];let data=JSON.parse(localStorage.getItem('moodArcadeV3')||'{}');data.coins??=1200;data.games??=0;data.best??=0;data.streak??=0;window.data=data;function save(){localStorage.setItem('moodArcadeV3',JSON.stringify(data));updateHome()}function updateHome(){$('coins').textContent=data.coins.toLocaleString();$('tc').textContent=data.coins.toLocaleString();$('games').textContent=data.games;$('best').textContent=data.best;$('streak').textContent=data.streak}function show(x){S.forEach(s=>$(s).classList.toggle('active',s===x))}
+'use strict';const $=id=>document.getElementById(id),S=['home','block','trivia','crossword','chess'];let data=JSON.parse(localStorage.getItem('moodArcadeV3')||'{}');data.coins??=1200;data.games??=0;data.best??=0;data.streak??=0;window.data=data;function save(){localStorage.setItem('moodArcadeV3',JSON.stringify(data));updateHome()}function updateHome(){$('coins').textContent=data.coins.toLocaleString();$('tc').textContent=data.coins.toLocaleString();$('games').textContent=data.games;$('best').textContent=data.best;$('streak').textContent=data.streak}function show(x){S.forEach(s=>{const e=$(s);if(e)e.classList.toggle('active',s===x)});if(!document.querySelector('.screen.active')){const h=$('home');if(h)h.classList.add('active')}}
+// FIX (GAMES BLANK AFTER LEAVING AND COMING BACK): if no screen is marked active the whole arcade is blank. show() above used to throw on a missing
+// section (e.g. chess not drawn yet) and leave nothing active. Re-activate Home whenever the arcade is shown again.
+function __ensureScreen(){try{if(!document.querySelector('.screen.active')){const h=document.getElementById('home');if(h)h.classList.add('active')}}catch(e){}}
+addEventListener('pageshow',__ensureScreen);document.addEventListener('visibilitychange',function(){if(!document.hidden)__ensureScreen()});
+addEventListener('message',function(ev){if(ev.data&&ev.data.type==='NECPRA_GAMES_SHOWN')__ensureScreen()});
 // FIX (NAV BAR STILL VISIBLE INSIDE A GAME): home() and openGame() only ever
 // toggled which internal .screen was visible — nothing here ever told the
 // PARENT chat shell (chat.html, two iframes up) that a specific game had

@@ -13,7 +13,7 @@ window.addEventListener('message',function(ev){
   // Downward leg of the same relay: chat.html's hardware-back handler sends
   // GO_BACK_TO_LIST to #gamesIframe (this window); forward it into the actual
   // arcade iframe, which knows how to return to its home screen.
-  if(d&&d.type==='GO_BACK_TO_LIST'){
+  if(d&&(d.type==='GO_BACK_TO_LIST'||d.type==='NECPRA_GAMES_SHOWN')){
     var f=document.getElementById('games');
     try{f&&f.contentWindow&&f.contentWindow.postMessage(d,'*')}catch(e){}
   }
