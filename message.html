@@ -303,6 +303,11 @@
   .bubble-reactions { margin-top: 2px; font-size: 14px; }
   .decrypt-retry { cursor: pointer; text-decoration: underline dotted; opacity: 0.8; }
   .decrypt-pending { opacity: 0.6; font-style: italic; }
+  .scam-hint { margin-top: 4px; font-size: 12px; border-left: 3px solid #f59e0b; padding: 2px 6px; background: rgba(245,158,11,.12); border-radius: 4px; }
+  .scam-hint.high { border-left-color: #dc2626; background: rgba(220,38,38,.12); }
+  .scam-hint summary { cursor: pointer; }
+  .scam-hint ul { margin: 4px 0 4px 16px; padding: 0; }
+  .scam-hint-note { opacity: .8; }
   .decrypt-version-badge { font-size: 9px; opacity: 0.55; cursor: default; margin-left: 3px; }
   .decrypt-version-badge.legacy { opacity: 0.75; }
   /* FIX (PARENT-HEADER-CONSOLIDATION regression): this rule used to declare
@@ -1279,6 +1284,21 @@
             ? `<span class="decrypt-version-badge" title="Decrypted with the current Double Ratchet (v3) encryption">🔐</span>`
             : `<span class="decrypt-version-badge legacy" title="Decrypted with the legacy (v2) key fallback — did not use the current forward-secret encryption">🔓</span>`)
         : '';
+      // FEATURE (SCAM HINT, on-device): received text that matches scam patterns gets an expandable note (js/necpra-messenger-ai.js).
+      // A hint is NOT proof; nothing is hidden or blocked. Runs only on this phone, skips locked chats, never sends or stores anything.
+      let scamHintHtml = '';
+      try {
+        const AI = window.NecpraMessengerAI;
+        if (AI && !isMine && !isDeletedForEveryone && !decryptFailed && !decryptPending && typeof content === 'string' && content.length > 8 && !statusCard
+            && !(typeof _kynCLGetSet === 'function' && _kynCLGetSet('locked_chats').has(String(chatId)))) {
+          const a = AI.assess(content);
+          if (a && (a.level === 'medium' || a.level === 'high')) {
+            const sw = /^sw/i.test(navigator.language || '');
+            const why = a.reasons.slice(0, 3).map(r => `<li>${escapeHtml(sw ? r.sw : r.en)}</li>`).join('');
+            scamHintHtml = `<details class="scam-hint ${a.level}"><summary>${sw ? '\u26A0\uFE0F Huenda ni ulaghai \u2014 si uthibitisho' : '\u26A0\uFE0F Possible scam \u2014 not proof'}</summary><ul>${why}</ul><div class="scam-hint-note">${escapeHtml(a.note)}</div></details>`;
+          }
+        }
+      } catch (_) { scamHintHtml = ''; }
       return `
         <div class="bubble-row ${isMine ? 'mine' : ''}${m.status === 'failed' ? ' failed' : ''}${selectMode ? ' selecting' : ''}${isSelected ? ' selected' : ''}" data-message-id="${m.id}">
           ${menuBtn}
@@ -1287,6 +1307,7 @@
             ${!isDeletedForEveryone ? attachmentHtml(m) : ''}
             ${statusCard}
             ${statusCard ? '' : '<span'+contentAttrs+'>'+ (content ? escapeHtml(content) : '') +'</span>'}${!isDeletedForEveryone ? editedTag : ''}
+            ${scamHintHtml}
             ${reactionsHtml}
             <div class="bubble-meta"><span class="bubble-time">${time}</span> ${statusTick}${m.starred ? ' ⭐' : ''}${decryptVersionBadge}</div>
 
