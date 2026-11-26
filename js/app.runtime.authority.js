@@ -268,6 +268,11 @@
 
         clearMirroredAuth();
         try { localStorage.removeItem(EVER_AUTHENTICATED_KEY); } catch (_error) {}
+        // Installed Android app: also drop the native Keystore copy so it is not re-published on the next start.
+        try {
+            const _nat = window.NecpraNative || (window.top && window.top.NecpraNative);
+            if (_nat && typeof _nat.authClearSession === 'function') Promise.resolve(_nat.authClearSession()).catch(function () {});
+        } catch (_error) {}
 
         if (window.KynectaStore) {
             window.KynectaStore.set('session', {

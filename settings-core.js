@@ -6400,10 +6400,8 @@ async function saveSettings() {
 // HANDLE LOGOUT - USES authorizedRequest
 // =============================================
 async function handleLogout() {
-    if (!isAuthenticated) {
-        return false;
-    }
-    
+    // FIX (logout did nothing): this used to return false when the settings frame did not (yet) consider itself
+    // authenticated, so the user only saw "Could not log out". Logging out must always work: clean up locally anyway.
     try {
         // Server-side revoke is best-effort: being offline (or a failed call) must never
         // leave the user unable to log out of this device.
@@ -6422,6 +6420,20 @@ async function handleLogout() {
         
         await MessageTransport.send('SESSION_INVALIDATED', {});
         try { await MessageTransport.send('LOGOUT', {}); } catch (_) {}
+
+        // FIX (logged straight back in after logout): the installed Android app keeps its own copy of the session in the
+        // native Keystore and re-publishes it to the web layer on the next start. Wipe it here too.
+        try {
+            var _nat = (window.top && window.top.NecpraNative) || window.NecpraNative;
+            if (_nat && typeof _nat.authClearSession === 'function') {
+                await Promise.race([Promise.resolve(_nat.authClearSession()).catch(function () {}), new Promise(function (r) { setTimeout(r, 1500); })]);
+            }
+        } catch (_) {}
+        try { localStorage.removeItem('kynecta_ever_authenticated'); localStorage.removeItem('kynecta_auth'); } catch (_) {}
+        // Safety net: if the app shell did not take us to the landing page, go there ourselves.
+        setTimeout(function () {
+            try { (window.top || window).location.replace('/index.html?logout=1'); } catch (_) { window.location.replace('/index.html?logout=1'); }
+        }, 1200);
         
         isAuthenticated = false;
         clearSession();

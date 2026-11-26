@@ -1981,6 +1981,11 @@
                 }
                 timer = setTimeout(tick, 1000);
             }
+            // Re-check whenever the app returns to the foreground or the user comes back from the native arcade hub.
+            function recheck() { if (onGames() && typeof window.__gamesGuard === 'function') window.__gamesGuard(); }
+            document.addEventListener('visibilitychange', function () { if (!document.hidden) recheck(); });
+            window.addEventListener('pageshow', recheck);
+            window.addEventListener('focus', recheck);
             window.__gamesGuard = function (force) {
                 if (force) { reloads = 0; showCard(false); }
                 t0 = Date.now();
@@ -3956,7 +3961,19 @@
                     window.AuthStorage.clearAuth();
                 }
             } catch (_) {}
-            window.location.replace('index.html');
+            try { localStorage.removeItem('kynecta_auth'); localStorage.removeItem('kynecta_ever_authenticated'); } catch (_) {}
+            // FIX (logout / delete account did not return to the landing page): wipe the native Android session too (otherwise it is
+            // restored on the next start) and go to index.html?logout=1 - without that flag index.html sends a signed-in installed app
+            // straight back into chat.html.
+            var _go = function () { window.location.replace('index.html?logout=1'); };
+            try {
+                var _n = window.NecpraNative;
+                if (_n && typeof _n.authClearSession === 'function') {
+                    Promise.race([Promise.resolve(_n.authClearSession()).catch(function () {}), new Promise(function (r) { setTimeout(r, 1500); })]).then(_go, _go);
+                    return;
+                }
+            } catch (_) {}
+            _go();
         }
         window.addEventListener('SESSION_EXPIRED', (e) => {
             const reason = e && e.detail && e.detail.reason;
@@ -3969,6 +3986,8 @@
         window.addEventListener('message', (event) => {
             if (!isTrustedOrigin(event.origin)) return;
             const _d = event.data || {};
+            // FIX (delete account never left the app): Settings posts ACCOUNT_DELETED after the server confirms; nothing listened for it.
+            if (_d.type === 'ACCOUNT_DELETED') { _performFullLogoutRedirect('account_deleted', event.origin); return; }
             if (_isFatalAuthMessage(_d)) {
                 if (_withinAuthBootGrace() && !EXPLICIT_FATAL_MESSAGE_TYPES.has(_d.type)) {
                     console.warn('[chat.html] Ignoring auto-detected auth-failure message received during the post-login/switch boot grace window (treating as a module-boot race, not a real auth failure):', _d.type);

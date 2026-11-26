@@ -4629,7 +4629,7 @@ export function loadDangerSection(container) {
                                 // this app (it only "worked" by accident via the server's
                                 // SPA catch-all serving index.html for any unmatched HTML
                                 // route). Point at the real entry page explicitly.
-                                window.location.href = '/index.html';
+                                window.location.href = '/index.html?logout=1';
                             }
                         }, 800);
                     } else {

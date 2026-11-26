@@ -3250,7 +3250,7 @@
       const err  = el('__p1delerr');
       err.style.display = 'none';
       if (conf !== 'delete my account') { err.textContent = 'Type "delete my account" exactly.'; err.style.display='block'; return; }
-      if (!pass)                         { err.textContent = 'Password is required.';              err.style.display='block'; return; }
+      // Google-only accounts have no password; the server decides whether one is required and says so.
       this.disabled = true; this.textContent = 'Deleting…';
       const r = await api('DELETE', '/api/settings/account', { confirmation: conf, password: pass });
       if (r.status === 'success') {
@@ -3259,7 +3259,15 @@
         // no real content (no head/body, just a script tag) — it was never
         // wired up to anything real. The actual login/register entry point
         // the whole app serves at "/" is index.html, so redirect there.
-        setTimeout(() => { localStorage.clear(); sessionStorage.clear(); window.location.href = '/index.html'; }, 2000);
+        // FIX (delete account did not return to landing page): this ran inside the app shell's iframe, so only the iframe went
+        // to index.html, and the Android Keystore session survived. Tell the shell (it wipes everything and goes to the landing
+        // page); fall back to a top-level redirect if there is no shell.
+        setTimeout(async () => {
+          try { const n = (window.top && window.top.NecpraNative) || window.NecpraNative; if (n && n.authClearSession) await Promise.race([Promise.resolve(n.authClearSession()).catch(()=>{}), new Promise(r => setTimeout(r, 1500))]); } catch (_) {}
+          try { localStorage.clear(); sessionStorage.clear(); } catch (_) {}
+          try { if (window.parent && window.parent !== window) window.parent.postMessage({ type: 'ACCOUNT_DELETED', source: 'settings' }, '*'); } catch (_) {}
+          setTimeout(() => { try { (window.top || window).location.replace('/index.html?logout=1'); } catch (_) { window.location.href = '/index.html?logout=1'; } }, 800);
+        }, 1500);
       } else {
         err.textContent = r.message || 'Failed — check your password.'; err.style.display = 'block';
         this.disabled = false; this.textContent = 'Delete My Account';
