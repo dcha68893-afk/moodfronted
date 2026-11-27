@@ -45,7 +45,7 @@
     "security:audit:fix": "npm audit fix",
     "security:outdated": "npm outdated",
     "security:check": "npm audit && npm outdated",
-    "build": "echo ? Build completed successfully!",
+    "build": "node scripts/build-config.js",
     "prestart": "npm run build",
     "docker:build:prod": "docker build -f Dockerfile.prod -t necpra-backend:prod .",
     "docker:push": "docker tag necpra-backend:prod your-registry/necpra-backend:latest && docker push your-registry/necpra-backend:latest",

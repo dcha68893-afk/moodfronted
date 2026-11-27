@@ -24,7 +24,7 @@
 // this gap for future edits to these two files (it only forces one clean
 // break right now); adding them to NETWORK_FIRST_PATTERNS is what stops it
 // from recurring on every future deploy.
-const SW_VERSION = '19.64.0';
+const SW_VERSION = '19.65.0';
 // FIX: bumped so activate() drops every existing cache immediately on this
 // deploy — anyone with a stale pre-rebuild group.html (or the old, now-
 // deleted group-core-*/group-os-* files, or the misspelled necpra-* icons
@@ -121,7 +121,15 @@ const SW_VERSION = '19.64.0';
 // v147: forces installed apps and browsers to drop the old cached copies. Chama management (Manage button + workspace), the full-screen Money pages
 // (Wallet/Savings goals/Circles/Requests/Airtime & Data/Activity each open their own screen) and the saved-account login fix were all committed
 // without a cache bump, so devices kept serving the old money.html / auth scripts. chama-management.js/css are now precached and network-first.
-const CACHE_NAME = 'necpra-static-v147';
+// v148: ROOT-CAUSE FIX for "I upgraded features but the UI still looks the same". Three strategies were serving OLD files first:
+//   1) navigation() answered every page (money.html, settings.html, chat.html ...) from the cached copy and only refreshed it for NEXT time,
+//      so a deploy always showed the previous version on the first open (and inline page code never changed until a second reload).
+//   2) networkFirst() was misnamed: it returned the cached copy immediately and fetched the new one in the background.
+//   3) isLiveCodeAsset() was defined but never called, so any .js/.css/.json not hand-listed in NETWORK_FIRST_PATTERNS fell into the 7-day
+//      cache-first staticAsset() path.
+// Now pages and ALL same-origin html/css/js/json are FRESH-FIRST: the network answer wins when it arrives within a short timeout and the
+// cached copy is used only when offline/slow. Images, fonts and icons stay cache-first. No more manual CACHE_NAME bump needed to see a deploy.
+const CACHE_NAME = 'necpra-static-v148';
 // v138: DUKA/Wallet reopen on the tab and scroll position they were left on (kept in localStorage, not sessionStorage), Wallet finds its saved balance in the installed app,
 // and DUKA/Wallet/Games tell the shell when a real screen is drawn so the 'last screen' picture is saved at once. money.html, game.html, chat.html, duka.js changed.
 // v137: DUKA no longer waits on the server before painting (layout shell + parallel loads, user-id fallback for the APK), Games has a
@@ -262,6 +270,8 @@ function badAssetResponse(request,res){
 // /chat.html hit the same shell, and start_url "/" has its own entry.
 function navKey(url){try{const u=new URL(url,self.location.origin);return u.origin+u.pathname;}catch(_){return url;}}
 const NAV_TIMEOUT_MS=6000;
+const NAV_FRESH_TIMEOUT_MS=3500;   // how long a page waits for the NEW copy before falling back to the saved one
+const ASSET_FRESH_TIMEOUT_MS=4000; // same, for scripts/styles/json
 // Chrome refuses to answer a navigation with a response flagged redirected=true, so any
 // stored/served document is rebuilt as a plain 200 response without that flag. Also keeps
 // the Tools.html marketplace script injection in ONE place (used by precache + refresh).
@@ -322,12 +332,17 @@ async function navigation(request,event){
       if(got==='timeout'&&event&&event.waitUntil)event.waitUntil(netFirst);
     }
   }
-  // INSTANT OPEN: answer from the cached page when there is one, then refresh it in the background.
+  // FRESH-FIRST (v148): ask the network first so a deploy shows on the very next open. The saved copy is only used when the device is
+  // offline (fails instantly) or the server is slower than NAV_FRESH_TIMEOUT_MS (cold start) - in that case the network request keeps
+  // running in the background and refreshes the saved copy for next time.
   let cachedNav=await cache.match(key);
   if(cachedNav){
+    const netFresh=refreshNav(request,cache).catch(()=>null);
+    const slowNav=new Promise(res=>setTimeout(()=>res('timeout'),NAV_FRESH_TIMEOUT_MS));
+    const fresh=await Promise.race([netFresh,slowNav]);
+    if(fresh&&fresh!=='timeout')return fresh;
+    if(event&&event.waitUntil)event.waitUntil(netFresh);
     if(cachedNav.redirected)cachedNav=await cleanNav(request.url,cachedNav);
-    const bg=refreshNav(request,cache).catch(()=>null);
-    if(event&&event.waitUntil)event.waitUntil(bg);
     return cachedNav;
   }
   // Nothing cached for this exact page: race the network against a timeout.
@@ -417,12 +432,10 @@ async function maybeRepair(force){
     if(await crawlCore(cache))await cache.put(REPAIR_KEY,new Response(String(Date.now()),{headers:{'Content-Type':'text/plain'}}));
   }catch(_){}finally{repairRunning=false;}
 }
-// UI CODE IS CACHE-FIRST WITH BACKGROUND REFRESH (was: network-first with NO timeout, which made
-// every module wait on the network - a slow/cold server meant a blank UI even with files cached).
-//  - cached copy exists  -> return it immediately, refresh the cache in the background
-//  - nothing cached yet  -> go to the network (first launch after a deploy), cache the result
-// A deploy bumps CACHE_NAME and re-precaches the core files, so new code is picked up on the
-// first launch after the deploy and refreshed again on every later one.
+// UI CODE IS FRESH-FIRST WITH A SHORT TIMEOUT (v148). History: it was network-first with NO timeout (blank UI on a cold server), then
+// became cache-first-with-background-refresh (deploys invisible until a second load). Now:
+//  - cached copy exists  -> wait up to ASSET_FRESH_TIMEOUT_MS for the network; fresh file wins, else saved copy (offline-safe)
+//  - nothing cached yet  -> go to the network, cache the result
 async function networkFirst(request,event){
   const cache=await caches.open(CACHE_NAME);
   // FIX (Games blank for a long time): the lookup used the exact URL, so '/games-crossword-v4.js?v=8.2' or 'game.html?x=..' missed the copy
@@ -434,6 +447,13 @@ async function networkFirst(request,event){
     return r;
   });
   if(old){
+    // FRESH-FIRST (v148): the new file wins if it arrives in time; otherwise (offline / slow server) the saved copy is used and the
+    // download keeps going in the background so the next load is current.
+    const slowAsset=new Promise(res=>setTimeout(()=>res('timeout'),ASSET_FRESH_TIMEOUT_MS));
+    try{
+      const first=await Promise.race([refresh,slowAsset]);
+      if(first&&first!=='timeout'&&first.ok&&!badAssetResponse(request,first))return first;
+    }catch(_){}
     if(event&&event.waitUntil)event.waitUntil(refresh.catch(()=>null));else refresh.catch(()=>null);
     return old;
   }
@@ -471,12 +491,9 @@ self.addEventListener('fetch',event=>{
   const r=event.request,url=r.url;if(r.method!=='GET')return;
   if(r.mode==='navigate'||r.destination==='document'){if(!isFrameRequest(r))event.waitUntil(sleep(8000).then(()=>maybeRepair(false)).catch(()=>{}));event.respondWith(navigation(r,event));return;}
   if(isApi(url)){event.respondWith(api(r));return;}
-  if(local(url)&&isNetworkFirst(url)){event.respondWith(networkFirst(r,event));return;}
-  // Non-critical HTML/CSS/JS/JSON uses the cache-first path below. Critical
-  // authentication/E2E/realtime assets remain explicitly network-first above.
-  // The SW version is bumped whenever this runtime changes, so deployed code
-  // still gets a clean cache generation without forcing a network request on
-  // every module load.
+  if(local(url)&&(isNetworkFirst(url)||isLiveCodeAsset(url))){event.respondWith(networkFirst(r,event));return;}
+  // v148: every same-origin html/css/js/json is fresh-first above (isLiveCodeAsset). Only images, fonts and icons reach the cache-first
+  // path below.
   if(local(url)&&isStatic(url)){event.respondWith(staticAsset(r));return;}
   // FIX: cross-origin requests (Google/Cloudinary/ui-avatars profile photos) go straight to the network.
   // Re-fetching them from inside the worker made them subject to the worker's CSP connect-src and to its
