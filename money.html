@@ -77,6 +77,43 @@ h4{margin:16px 0 4px;font-size:13px}
 details.rules{margin-top:10px;font-size:12px;color:var(--muted);line-height:1.5}details.rules summary{cursor:pointer;font-weight:700;color:var(--text)}
 /* keep the last cards clear of the bottom nav, centre button and voice mic */
 body{padding-bottom:calc(130px + env(safe-area-inset-bottom,0px))!important}
+/* ---------- full-screen feature pages (each feature opens its own screen) ---------- */
+.panel.pg{z-index:140}
+.pgh{display:flex;align-items:center;gap:14px;padding:16px;border-radius:20px;color:#fff;margin-bottom:14px;position:relative;overflow:hidden;box-shadow:0 10px 24px rgba(0,0,0,.18)}
+.pgh:after{content:"";position:absolute;right:-30px;top:-30px;width:120px;height:120px;border-radius:50%;background:rgba(255,255,255,.12)}
+.pgh .pi{width:48px;height:48px;border-radius:14px;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-size:20px;flex:0 0 auto;z-index:1}
+.pgh>div{z-index:1;min-width:0}.pgh b{display:block;font-size:17px}.pgh span{font-size:12.5px;opacity:.92;line-height:1.4}
+.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
+.tile{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px 6px;text-align:center;min-width:0}.tile b{display:block;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tile span{font-size:11px;color:var(--muted)}
+.cc{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px;margin-bottom:12px;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.05);transition:transform .12s}.cc:active{transform:scale(.985)}
+.cc .head{display:flex;align-items:center;gap:12px}.cc .ci{width:46px;height:46px;border-radius:14px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px;flex:0 0 auto}
+.cc .tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}.cc .tags .chip{text-transform:none}
+/* ---------- chama screen ---------- */
+.chero{border-radius:20px;padding:16px;color:#fff;margin-bottom:12px;position:relative;overflow:hidden;box-shadow:0 10px 26px rgba(0,0,0,.22)}
+.chero:after{content:"";position:absolute;right:-40px;top:-40px;width:140px;height:140px;border-radius:50%;background:rgba(255,255,255,.1)}
+.chero .ct{display:flex;gap:12px;align-items:center;position:relative;z-index:1}.chero .ci{width:46px;height:46px;border-radius:14px;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-size:19px;flex:0 0 auto}
+.chero .ct b{display:block;font-size:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.chero .ct span{font-size:12px;opacity:.9}
+.chero .big{font-size:30px;font-weight:800;margin:14px 0 2px;letter-spacing:-.5px;position:relative;z-index:1}.chero .cap{font-size:12px;opacity:.92;position:relative;z-index:1}
+.chero .pbar{height:8px;background:rgba(255,255,255,.28);border-radius:6px;overflow:hidden;margin:10px 0 2px;position:relative;z-index:1}.chero .pbar i{display:block;height:100%;background:#fff;border-radius:6px;transition:width .5s}
+.chero .row3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px;position:relative;z-index:1}.chero .row3>div{background:rgba(255,255,255,.16);border-radius:12px;padding:8px 6px;text-align:center;min-width:0}.chero .row3 b{display:block;font-size:13.5px;white-space:nowrap}.chero .row3 span{font-size:10.5px;opacity:.9}
+.acts2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.qa{display:flex;align-items:center;justify-content:center;gap:8px;padding:12px 8px;border-radius:14px;border:1px solid var(--line);background:var(--card);color:var(--text);font:inherit;font-size:12.5px;font-weight:700;cursor:pointer}.qa i{color:var(--accent);font-size:15px}.qa:active{transform:scale(.97)}
+.subt{display:flex;gap:4px;background:var(--surface);padding:4px;border-radius:14px;margin:0 0 12px;position:sticky;top:-12px;z-index:4}
+.subt button{flex:1;border:0;background:transparent;color:var(--muted);padding:9px 2px;border-radius:11px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap}.subt button.on{background:var(--card);color:var(--text);box-shadow:0 2px 8px rgba(0,0,0,.1)}
+.rcard{border-radius:18px;padding:16px;color:#fff;margin-bottom:10px;background:linear-gradient(135deg,#0f766e,#16a34a);box-shadow:0 8px 20px rgba(22,163,74,.25)}
+.rcard.next{background:linear-gradient(135deg,#1d4ed8,#6366f1);box-shadow:0 8px 20px rgba(79,70,229,.22)}
+.rcard .rl{font-size:10.5px;font-weight:800;letter-spacing:1.2px;opacity:.9}
+.rcard .rw{display:flex;gap:12px;align-items:center;margin-top:8px}.rcard .rw b{display:block;font-size:17px}.rcard .rw span{font-size:12px;opacity:.92}
+.av{width:46px;height:46px;border-radius:50%;background:rgba(255,255,255,.25);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;flex:0 0 auto}
+.rcard .rpot{display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.16);font-size:12px}.rcard .rpot b{font-size:15px}
+.rbtn{width:100%;margin-top:10px;border:0;border-radius:12px;background:#fff;color:#0f766e;font:inherit;font-weight:800;font-size:13px;padding:11px;cursor:pointer}
+.qn{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;background:var(--surface);color:var(--muted);flex:0 0 auto}
+.qn.received{background:#16a34a;color:#fff}.qn.current{background:#f59e0b;color:#fff;box-shadow:0 0 0 4px rgba(245,158,11,.25)}
+.chip.received{background:rgba(34,197,94,.15);color:#16a34a}.chip.current{background:rgba(245,158,11,.18);color:#b45309}.chip.upcoming{background:var(--surface);color:var(--muted)}
+.sec{display:flex;justify-content:space-between;align-items:center;margin:16px 0 6px}.sec h4{margin:0}.sec .row-sub{margin:0}
+.fine{font-size:11px;color:var(--muted);line-height:1.5;margin:6px 2px 0}
+.ordrow{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}.ordrow:last-child{border-bottom:0}
+.ordrow .mv{width:32px;height:32px;border-radius:10px;border:0;background:var(--surface);color:var(--text);cursor:pointer;font-size:13px}.ordrow .mv[disabled]{opacity:.35;cursor:default}
 </style>
 </head>
 <body>
@@ -96,8 +133,8 @@ body{padding-bottom:calc(130px + env(safe-area-inset-bottom,0px))!important}
 </section>
 <div class="notice warn"><b>Safety first:</b> A money request is not proof that someone is owed money. Verify the requester independently. NECPRA will never ask for your M-Pesa PIN, password or one-time code.</div>
 <div class="grid">
-  <button class="action" data-act="newCircle" type="button"><i class="fas fa-users" style="background:#16a34a"></i><b>Money Circles</b><span>Chamas, family funds, trips and events.</span></button>
-  <button class="action" data-act="newRequest" type="button"><i class="fas fa-hand-holding-heart" style="background:#2563eb"></i><b>Pay for Someone</b><span>Request money for family, friends or bills.</span></button>
+  <button class="action" data-act="goto:circles" type="button"><i class="fas fa-users" style="background:#16a34a"></i><b>Money Circles</b><span>Chamas, family funds, trips and events.</span></button>
+  <button class="action" data-act="goto:requests" type="button"><i class="fas fa-hand-holding-heart" style="background:#2563eb"></i><b>Pay for Someone</b><span>Request money for family, friends or bills.</span></button>
   <button class="action" data-act="goto:airtime" type="button"><i class="fas fa-mobile-screen" style="background:#16a34a"></i><b>Airtime &amp; Data</b><span>Buy airtime or data bundles with M-PESA.</span></button>
   <button class="action" data-act="goto:activity" type="button"><i class="fas fa-receipt" style="background:#7c3aed"></i><b>Activity</b><span>Contributions, requests and records.</span></button>
 </div>
@@ -112,6 +149,7 @@ body{padding-bottom:calc(130px + env(safe-area-inset-bottom,0px))!important}
 <section id="pane"></section>
 </main>
 <div class="panel" id="panel"><div class="phead"><button class="pbtn" id="pBack" type="button" aria-label="Back"><i class="fas fa-arrow-left"></i></button><div class="ptitle" id="pTitle">Circle</div><button class="pbtn" id="pGear" type="button" aria-label="Settings" style="display:none"><i class="fas fa-gear"></i></button></div><div class="pbody" id="pBody"></div><div class="pfoot" id="pFoot"></div></div>
+<div class="panel pg" id="page"><div class="phead"><button class="pbtn" id="pgBack" type="button" aria-label="Back"><i class="fas fa-arrow-left"></i></button><div class="ptitle" id="pgTitle">Money</div><button class="pbtn on" id="pgAct" type="button" aria-label="Add" style="display:none"><i class="fas fa-plus"></i></button></div><div class="pbody" id="pgBody"></div></div>
 <div class="modal" id="modal"><div class="sheet"><div class="grab"></div><h3 id="modalTitle">Money</h3><div id="modalBody"></div></div></div>
 <script src="/marketplace-digital-services.js"></script>
 <script>
@@ -139,11 +177,10 @@ function chip(s){return '<span class="chip '+esc(s)+'">'+esc(s)+'</span>'}
 var lastPhone=function(){try{return localStorage.getItem('necpra_money_phone')||''}catch(_){return''}};
 var savePhone=function(p){try{localStorage.setItem('necpra_money_phone',p)}catch(_){}};
 
-var S={tab:'wallet',wallet:null,walletErr:'',goals:null,goalsErr:'',reqSeg:'in',overview:null,circles:[],incoming:[],outgoing:[],orders:null,loading:true,err:''};
+var S={tab:'wallet',page:null,wallet:null,walletErr:'',goals:null,goalsErr:'',reqSeg:'in',overview:null,circles:[],incoming:[],outgoing:[],orders:null,loading:true,err:''};
 function tabGet(){try{var id=uidHint(),v=id&&localStorage.getItem('necpra.money.tab.'+id);if(v)return v}catch(_){}try{return sessionStorage.getItem('necpra_money_tab')}catch(_){return null}}
 function tabSet(t){try{sessionStorage.setItem('necpra_money_tab',t)}catch(_){}try{var id=uidHint();if(id)localStorage.setItem('necpra.money.tab.'+id,t)}catch(_){}}
-try{S.tab=tabGet()||'wallet'}catch(_){}
-if(S.tab==='paylater')S.tab='wallet'; /* Pay Later was retired */
+S.tab='wallet'; /* the Wallet screen is always home; every other feature opens its own page (see openPage) */
 
 /* ---------- in-app prompt (window.prompt is blocked/unreliable in installed apps & WebViews) ---------- */
 function ask(title,label,type,hint){return new Promise(function(res){
@@ -210,12 +247,38 @@ function header(){var o=(S.overview&&S.overview.overview)||{};
 /* ---------- rendering ---------- */
 function skeleton(){return '<div class="card"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>'}
 function errBox(){return '<div class="card"><div class="empty"><i class="fas fa-triangle-exclamation"></i>'+esc(S.err)+'<div style="margin-top:12px"><button class="primary small" data-act="retry" type="button">Try again</button></div></div></div>'}
+/* ---------- each feature opens its OWN full-screen page (nothing swaps inside the Wallet screen any more) ---------- */
+var PG={
+  goals:['Savings goals','piggy-bank','linear-gradient(135deg,#f59e0b,#ea580c)','Set money aside for school fees, rent and plans.'],
+  circles:['Money Circles','people-roof','linear-gradient(135deg,#0f766e,#16a34a)','Chamas, family funds, trips and events.'],
+  requests:['Pay for Someone','hand-holding-heart','linear-gradient(135deg,#1d4ed8,#2563eb)','Request money, or pay a request sent to you.'],
+  airtime:['Airtime & Data','mobile-screen','linear-gradient(135deg,#7c3aed,#2563eb)','Buy airtime or data bundles with M-PESA.'],
+  activity:['Activity','receipt','linear-gradient(135deg,#475569,#7c3aed)','Contributions, requests and records.']};
+var PG_ACT={goals:'newGoal',circles:'newCircle',requests:'newRequest'};
+function pageHero(t){var h=PG[t];return '<div class="pgh" style="background:'+h[2]+'"><div class="pi"><i class="fas fa-'+h[1]+'"></i></div><div><b>'+esc(h[0])+'</b><span>'+esc(h[3])+'</span></div></div>'}
+function openPage(t){if(!PG[t]){closePage();return}
+  var changed=S.page!==t;S.page=t;$('pgTitle').textContent=PG[t][0];
+  var act=PG_ACT[t],ab=$('pgAct');ab.style.display=act?'flex':'none';ab.dataset.act=act||'';
+  $('page').classList.add('open');document.body.style.overflow='hidden';
+  if(changed){$('pgBody').innerHTML='';$('pgBody').scrollTop=0}
+  if(t==='goals')loadGoals();render()}
+function closePage(){S.page=null;$('page').classList.remove('open');if(!$('panel').classList.contains('open'))document.body.style.overflow='';$('pgBody').innerHTML='';render()}
+function renderPage(){var t=S.page,b=$('pgBody');if(!t||!PG[t])return;
+  if(t==='airtime'){
+    if(!b.querySelector('.dsvc')){b.innerHTML=pageHero(t);var box=document.createElement('div');b.appendChild(box);
+      if(typeof window.__renderDigitalServices==='function')window.__renderDigitalServices(box,{tab:'airtime'});
+      else box.innerHTML='<div class="card"><div class="empty"><i class="fas fa-triangle-exclamation"></i>Airtime &amp; Data could not load. Refresh and try again.</div></div>'}
+    return}
+  var body;
+  if(t==='goals')body=viewGoals();
+  else if(S.loading&&!S.overview)body=skeleton();
+  else if(t==='circles')body=viewCircles();else if(t==='requests')body=viewRequests();else body=viewActivity();
+  var err=(S.err&&!S.overview&&t!=='goals')?'<div class="notice warn">'+esc(S.err)+' <button class="secondary small" data-act="retry" type="button">Try again</button></div>':'';
+  var st=b.scrollTop;b.innerHTML=pageHero(t)+err+body;b.scrollTop=st}
 function render(){
-  document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('on',t.dataset.tab===S.tab)});
-  var p=$('pane');if(S.tab==='airtime'){if(!p.querySelector('.dsvc')){if(typeof window.__renderDigitalServices==='function'){p.innerHTML='';window.__renderDigitalServices(p,{tab:'airtime'})}else p.innerHTML='<div class="card"><div class="empty"><i class="fas fa-triangle-exclamation"></i>Airtime &amp; Data could not load. Refresh and try again.</div></div>'}return}if(S.tab==='wallet'){p.innerHTML=viewWallet();return}if(S.tab==='goals'){p.innerHTML=viewGoals();return}
-  if(S.tab==='circles')p.innerHTML=viewCircles();else if(S.tab==='requests')p.innerHTML=viewRequests();
-  else p.innerHTML=viewActivity();
-  if(S.err&&!S.overview)p.insertAdjacentHTML('afterbegin','<div class="notice warn">'+esc(S.err)+' <button class="secondary small" data-act="retry" type="button">Try again</button></div>')}
+  document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('on',t.dataset.tab===(S.page||'wallet'))});
+  $('pane').innerHTML=viewWallet();
+  if(S.page)renderPage()}
 /* ================= WALLET: dashboard, add money, send, withdraw, receipts, savings goals ================= */
 var KT={topup:'Money added',transfer_in:'Money received',transfer_out:'Money sent',withdrawal:'Withdrawal to M-PESA',withdrawal_reversal:'Withdrawal refunded',order_payment:'Order payment',refund:'Refund',goal_deposit:'Saved to goal',goal_withdraw:'Moved from goal',admin_credit:'Credit from support',cashback:'Cashback',referral:'Referral bonus',reward:'Reward'};
 var KI={topup:'circle-plus',transfer_in:'circle-arrow-down',transfer_out:'paper-plane',withdrawal:'download',withdrawal_reversal:'rotate-left',order_payment:'bag-shopping',refund:'rotate-left',goal_deposit:'piggy-bank',goal_withdraw:'piggy-bank'};
@@ -223,10 +286,10 @@ function dt(d){try{return new Date(d).toLocaleString('en-KE',{day:'numeric',mont
 function ud(r){return(r&&r.data!==undefined)?r.data:r}
 async function loadWallet(manual){
   try{S.wallet=ud(await api('/wallet/dashboard'));S.walletErr='';wSave('wallet',S.wallet)}catch(e){S.walletErr=e.message||'unavailable'}
-  header();if(S.tab==='wallet')render()}
+  header();render()}
 async function loadGoals(){
   try{S.goals=(ud(await api('/wallet/goals'))||{}).items||[];S.goalsErr='';wSave('goals',S.goals)}catch(e){S.goals=S.goals||[];S.goalsErr=e.message||'Could not load goals'}
-  if(S.tab==='goals')render()}
+  if(S.page==='goals')render()}
 function viewWallet(){
   var w=S.wallet;
   var wNote='';if(!w){wNote=S.walletErr?'<div class="notice warn">'+esc(S.walletErr)+' <button class="secondary small" data-act="retryWallet" type="button">Try again</button></div>':'<div class="notice">Updating your wallet…</div>';w={pendingTotal:0,savedInGoals:0,receivedThisMonth:0,spentThisMonth:0,pendingDeposits:0,pendingWithdrawals:0,recent:[]}}
@@ -251,7 +314,7 @@ function viewGoals(){
 function newGoal(){
   modal('New savings goal','<label>Goal name</label><input class="input" id="ngName" maxlength="80" placeholder="e.g. Term 1 school fees"><label>Category</label><select class="input" id="ngCat">'+Object.keys(GCAT).map(function(k){return '<option value="'+k+'">'+GCAT[k][0]+'</option>'}).join('')+'</select><label>Target amount (KSh)</label><input class="input" id="ngTarget" type="number" inputmode="decimal" min="1" placeholder="20000"><label>Target date (optional)</label><input class="input" id="ngDate" type="date"><div class="actions"><button class="secondary" data-act="close" type="button">Cancel</button><button class="primary" id="ngGo" type="button">Create goal</button></div>');
   $('ngGo').onclick=async function(){var b=this;try{var name=$('ngName').value.trim(),t=Number($('ngTarget').value||0);if(!name)throw Error('Give your goal a name');if(!(t>0))throw Error('Enter a target amount');
-    busy(b,true,'Creating…');await api('/wallet/goals',{method:'POST',body:JSON.stringify({name:name,category:$('ngCat').value,target:t,dueDate:$('ngDate').value||undefined})});closeModal();toast('Goal created');S.tab='goals';S.goals=null;loadGoals();render()}catch(e){busy(b,false);toast(e.message,true)}}}
+    busy(b,true,'Creating…');await api('/wallet/goals',{method:'POST',body:JSON.stringify({name:name,category:$('ngCat').value,target:t,dueDate:$('ngDate').value||undefined})});closeModal();toast('Goal created');S.goals=null;openPage('goals');loadGoals()}catch(e){busy(b,false);toast(e.message,true)}}}
 async function goalMove(id,dir){
   var g=(S.goals||[]).find(function(x){return String(x.id)===String(id)});if(!g)return;
   var v=await ask(dir==='deposit'?'Add to '+g.name:'Move back to wallet','Amount (KSh)','number',dir==='deposit'?'Available in wallet: '+wm(S.wallet&&S.wallet.balance):'Saved in this goal: '+wm(g.saved));if(!v)return;
@@ -352,12 +415,17 @@ function receiveMoney(){
   var c=$('rcCopy');if(c)c.onclick=function(){if(navigator.clipboard)navigator.clipboard.writeText('@'+u).then(function(){toast('Username copied')},function(){toast('Could not copy',true)})}}
 
 
+var CT={chama:['Chama','people-roof','#16a34a'],family:['Family fund','house-user','#2563eb'],trip:['Trip','plane','#0ea5e9'],event:['Event','champagne-glasses','#db2777'],emergency:['Emergency fund','life-ring','#dc2626'],project:['Project','diagram-project','#7c3aed'],purchase:['Purchase','bag-shopping','#f59e0b'],other:['Circle','users','#64748b']};
 function viewCircles(){
   if(!S.circles.length)return '<div class="card"><div class="empty"><i class="fas fa-users"></i>No circles yet.<br>Start a chama, family fund or trip pot and invite people to contribute.<div style="margin-top:12px"><button class="primary" data-act="newCircle" type="button">Create your first circle</button></div></div></div>';
-  return '<div class="card">'+S.circles.map(function(c){var t=Number(c.targetAmount||0),got=Number(c.collectedAmount||0),pct=t>0?Math.min(100,Math.round(got/t*100)):0;
-    return '<div class="circle" data-act="circle" data-id="'+esc(c.id)+'" style="cursor:pointer"><div class="head"><div class="ico" style="background:#16a34a"><i class="fas fa-users"></i></div><div class="mid" style="min-width:0;flex:1"><div class="row-title">'+esc(c.name)+' '+(c.isOwner?'<span class="chip owner">Owner</span>':'')+'</div><div class="row-sub">'+esc(c.purpose||'Money Circle')+'</div></div></div>'
-    +(t>0?'<div class="bar"><i style="width:'+pct+'%"></i></div><div class="meta"><span>'+money(got)+' collected</span><span>'+pct+'% of '+money(t)+'</span></div>':'<div class="meta" style="margin-top:8px"><span>'+money(got)+' collected</span><span>No target set</span></div>')
-    +'<div class="btns"><button class="primary small" data-act="contribute" data-id="'+esc(c.id)+'" type="button">Contribute</button><button class="secondary small" data-act="circle" data-id="'+esc(c.id)+'" type="button">Details</button></div></div>'}).join('')+'</div>'}
+  var tot=0,mine=0;S.circles.forEach(function(c){tot+=Number(c.collectedAmount||0);mine+=Number(c.myContributed||0)});
+  var tiles='<div class="tiles"><div class="tile"><b>'+S.circles.length+'</b><span>Circles</span></div><div class="tile"><b>'+money(tot)+'</b><span>Collected</span></div><div class="tile"><b>'+money(mine)+'</b><span>You gave</span></div></div>';
+  return tiles+S.circles.map(function(c){var t=Number(c.targetAmount||0),got=Number(c.collectedAmount||0),pct=t>0?Math.min(100,Math.round(got/t*100)):0,ct=CT[c.type]||CT.other,st=c.settings||{},hasRot=st.rotation&&st.rotation.order&&st.rotation.order.length,hasGrp=!!st.groupChatId;
+    return '<div class="cc" data-act="circle" data-id="'+esc(c.id)+'"><div class="head"><div class="ci" style="background:'+ct[2]+'"><i class="fas fa-'+ct[1]+'"></i></div><div class="mid" style="min-width:0;flex:1"><div class="row-title">'+esc(c.name)+'</div><div class="row-sub">'+esc(ct[0])+' · '+(c.memberCount||1)+(Number(c.memberCount||1)===1?' member':' members')+'</div></div>'+(c.isOwner?'<span class="chip owner">Owner</span>':'')+'</div>'
+    +(c.purpose?'<div class="row-sub" style="margin-top:8px">'+esc(c.purpose)+'</div>':'')
+    +(t>0?'<div class="bar"><i style="width:'+pct+'%"></i></div><div class="meta"><span>'+money(got)+' collected</span><span>'+pct+'% of '+money(t)+'</span></div>':'<div class="meta" style="margin-top:10px"><span>'+money(got)+' collected</span><span>No target set</span></div>')
+    +((hasRot||hasGrp)?'<div class="tags">'+(hasRot?'<span class="chip ok"><i class="fas fa-rotate"></i> Rotation on</span>':'')+(hasGrp?'<span class="chip owner"><i class="fas fa-comments"></i> Group chat</span>':'')+'</div>':'')
+    +'<div class="btns"><button class="primary small" data-act="contribute" data-id="'+esc(c.id)+'" type="button">Contribute</button><button class="secondary small" data-act="circle" data-id="'+esc(c.id)+'" type="button">Open chama</button></div></div>'}).join('')+'<div style="text-align:center"><button class="secondary" data-act="newCircle" type="button">+ New circle</button></div>'}
 function viewRequests(){
   var seg='<div class="seg"><button data-act="seg:in" class="'+(S.reqSeg==='in'?'on':'')+'" type="button">Received ('+S.incoming.length+')</button><button data-act="seg:out" class="'+(S.reqSeg==='out'?'on':'')+'" type="button">Sent ('+S.outgoing.length+')</button></div>';
   var list=S.reqSeg==='in'?S.incoming:S.outgoing;
@@ -382,7 +450,7 @@ function newCircle(){modal('Create Money Circle','<div class="notice">Use this f
     if(rm==='phone'){recv.phone=$('mcRecvPhone').value.trim();recv.accountName=$('mcRecvName').value.trim();if(!recv.phone)throw Error('Enter the number that should receive the money')}
     busy(b,true,'Creating…');var d=await api('/money/circles',{method:'POST',body:JSON.stringify({name:name,purpose:purpose,targetAmount:target,type:$('mcType').value,receiving:recv,groupChatId:Number($('mcGroup').value)||undefined})});
     if(!d.circle)throw Error('Money Circle could not be created');closeModal();
-    toast(d.receivingWarning?('Circle created. '+d.receivingWarning+' - set it in the circle settings.'):(d.receiving&&d.receiving.status==='pending'?'Circle created. Your number is waiting for approval.':'Circle created'));S.tab='circles';await load()}catch(e){busy(b,false);toast(e.message,true)}}}
+    toast(d.receivingWarning?('Circle created. '+d.receivingWarning+' - set it in the circle settings.'):(d.receiving&&d.receiving.status==='pending'?'Circle created. Your number is waiting for approval.':'Circle created'));await load();openPage('circles')}catch(e){busy(b,false);toast(e.message,true)}}}
 function newRequest(){modal('Pay for Someone','<div class="notice warn">Only create requests for people you know. Never share your PIN, OTP or password with anyone.</div><label>Recipient phone</label><input class="input" id="prPhone" inputmode="tel" placeholder="07XX XXX XXX"><label>Amount (KSh, max 50,000)</label><input class="input" id="prAmount" type="number" inputmode="decimal" min="1" max="50000" placeholder="300"><label>Purpose</label><input class="input" id="prPurpose" placeholder="e.g. Mum electricity" maxlength="255"><div class="actions"><button class="secondary" data-act="close" type="button">Cancel</button><button class="primary" id="prGo" type="button">Create request</button></div>');
   $('prGo').onclick=async function(){var b=this;try{var phone=$('prPhone').value.trim(),amount=Number($('prAmount').value||0),purpose=$('prPurpose').value.trim();
     if(!phone)throw Error('Enter the recipient phone');if(!(amount>0))throw Error('Enter a valid amount');if(!purpose)throw Error('Enter a purpose');
@@ -391,7 +459,7 @@ function newRequest(){modal('Pay for Someone','<div class="notice warn">Only cre
     var send=function(st){return api('/money/requests',{method:'POST',headers:{'Idempotency-Key':idem,'X-Money-Step-Up':st},body:JSON.stringify({recipientPhone:phone,amount:amount,purpose:purpose})})};
     try{await send(step)}
     catch(e1){if(e1&&e1.errorCode==='MONEY_STEP_UP_REQUIRED'){sessionStorage.removeItem('necpra_money_step_up');busy(b,false);var step2=await stepUp(true);if(!step2)return;busy(b,true,'Creating…');await send(step2)}else throw e1}
-    closeModal();toast('Request created');S.tab='requests';S.reqSeg='out';await load()}catch(e){sessionStorage.removeItem('necpra_money_step_up');busy(b,false);toast(e.message,true)}}}
+    closeModal();toast('Request created');S.reqSeg='out';await load();openPage('requests')}catch(e){sessionStorage.removeItem('necpra_money_step_up');busy(b,false);toast(e.message,true)}}}
 function mpesaForm(title,note,amountField,goLabel,onGo,fixedAmt){
   modal(title,'<div class="notice">'+note+'</div>'+(amountField?'<label>Amount (KSh)</label><input class="input" id="mfAmount" type="number" inputmode="decimal" min="1" '+(fixedAmt?'value="'+esc(fixedAmt)+'" readonly style="opacity:.8"':'placeholder="1000"')+'>':'')+'<label>Your M-Pesa phone</label><input class="input" id="mfPhone" inputmode="tel" placeholder="07XX XXX XXX" value="'+esc(lastPhone())+'"><div class="actions"><button class="secondary" data-act="close" type="button">Cancel</button><button class="primary" id="mfGo" type="button">'+esc(goLabel)+'</button></div>');
   $('mfGo').onclick=async function(){var b=this;try{var phone=$('mfPhone').value.trim(),amount=amountField?Number($('mfAmount').value||0):0;
@@ -405,13 +473,15 @@ function payReq(id){var r=S.incoming.find(function(x){return String(x.id)===Stri
     return await api('/money/requests/'+encodeURIComponent(id)+'/pay',{method:'POST',body:JSON.stringify({phone:phone})})})}
 async function cancelReq(id){if(!confirm('Cancel this payment request?'))return;try{await api('/money/requests/'+encodeURIComponent(id)+'/cancel',{method:'POST'});toast('Request cancelled');load()}catch(e){toast(e.message,true)}}
 /* ---------- Circle full-screen panel (details) + Settings ---------- */
-var P={id:null,d:null,view:'main'};
+var P={id:null,d:null,view:'main',sub:'overview'};
 function initial(n){return esc(String(n||'?').trim().charAt(0).toUpperCase()||'?')}
 function fixedOf(d){var s=d&&d.schedule;return s&&Number(s.amountPerMember)>0?Number(s.amountPerMember):0}
+function sd(d){try{return new Date(d).toLocaleDateString('en-KE',{day:'numeric',month:'short',year:'numeric'})}catch(_){return''}}
+function firstName(n){return String(n||'').trim().split(/\s+/)[0]||'member'}
 function openPanel(){$('panel').classList.add('open');document.body.style.overflow='hidden'}
-function closePanel(){$('panel').classList.remove('open');document.body.style.overflow='';P.id=null;P.d=null;P.view='main';load()}
-function circleDetail(id){P.id=id;P.d=null;P.view='main';openPanel();
-  $('pTitle').textContent='Circle';$('pGear').style.display='none';$('pFoot').innerHTML='';
+function closePanel(){$('panel').classList.remove('open');document.body.style.overflow=S.page?'hidden':'';P.id=null;P.d=null;P.view='main';P.sub='overview';load()}
+function circleDetail(id){P.id=id;P.d=null;P.view='main';P.sub='overview';openPanel();
+  $('pTitle').textContent='Chama';$('pGear').style.display='none';$('pFoot').innerHTML='';
   $('pBody').innerHTML='<div class="skel"></div><div class="skel"></div><div class="skel"></div>';refreshPanel()}
 async function refreshPanel(silent){var id=P.id;if(!id)return;
   try{var d=await api('/money/circles/'+encodeURIComponent(id));if(P.id!==id)return;P.d=d;drawPanel()}
@@ -420,7 +490,9 @@ function drawPanel(){var d=P.d;if(!d)return;
   $('pTitle').textContent=d.circle.name;
   $('pGear').style.display=d.isOwner?'flex':'none';
   $('pGear').classList.toggle('on',P.view==='settings');
-  if(P.view==='settings'&&d.isOwner)drawSettings(d);else{P.view='main';drawMain(d)}}
+  var sc=$('pBody').scrollTop;
+  if(P.view==='settings'&&d.isOwner)drawSettings(d);else{P.view='main';drawMain(d)}
+  $('pBody').scrollTop=sc}
 function memberRow(m,fixed){
   var paid=Number(m.contributed||0)>0||(m.items&&m.items.length),pend=Number(m.pendingAmount||0)>0;
   var right=paid
@@ -428,22 +500,93 @@ function memberRow(m,fixed){
     :'<span class="chip '+(pend?'pending':'')+'" style="text-transform:none">'+(pend?'Payment pending…':'Not yet contributed')+'</span>';
   if(fixed&&m.owes!=null)right+='<div style="margin-top:4px">'+(m.owes?'<span class="chip pending">Owes</span>':'<span class="chip paid">Paid</span>')+'</div>';
   return '<div class="row" style="padding:10px 0"><div class="ico" style="width:40px;height:40px;background:'+(paid?'#16a34a':'#64748b')+';border-radius:50%;font-size:14px">'+initial(m.name)+'</div><div class="mid"><div class="row-title">'+esc(m.name)+(m.isYou?' <span class="row-sub">(You)</span>':'')+(m.role==='owner'?' <span class="chip owner">Owner</span>':'')+'</div><div class="row-sub">'+(m.username?'@'+esc(m.username):'Member')+'</div></div><div style="text-align:right">'+right+'</div></div>'}
+/* ---------- chama screen: Overview / Rotation / Members / History ---------- */
+function chatActions(d){var g=d.groupChatId;
+  if(g)return '<div class="acts2"><button class="qa" data-act="groupMsg" type="button"><i class="fas fa-comment-dots"></i>Send message to chama</button><button class="qa" data-act="groupView" type="button"><i class="fas fa-comments"></i>View conversation</button></div>';
+  if(d.isOwner)return '<div class="notice">Link this chama to a group chat so members can talk about contributions and payouts.<div style="margin-top:8px"><button class="secondary small" data-act="linkGroup" type="button"><i class="fas fa-link"></i>&nbsp; Link a group</button></div></div>';
+  return '<div class="notice">This chama is not linked to a group chat yet. The owner can link one.</div>'}
+function cycleBanner(d){var sc=d.schedule,fixed=fixedOf(d),me=(d.members||[]).find(function(m){return m.isYou}),dl=sc?sc.daysLeft:null;
+  return fixed
+    ?'<div class="notice'+(dl<0?' warn':'')+'"><b>'+money(fixed)+' per member</b> · due '+esc(sc.dueDate)+' · '+(dl>0?dl+(dl===1?' day left':' days left'):dl===0?'due today':Math.abs(dl)+(dl===-1?' day overdue':' days overdue'))+(me&&me.owes?'<br>You have not paid yet. The M-Pesa prompt will be exactly '+money(fixed)+'.':(me?'<br>Your payment is confirmed. Thank you.':''))+'</div>'
+    :'<div class="notice">Open contributions: each member gives whatever amount they want. There is no minimum or maximum.</div>'}
+function posOf(rot,uid){var q=(rot.queue||[]).find(function(x){return x.userId===uid});return q?q.position:0}
+function rotTeaser(d){var rot=d.rotation||{};
+  if(!rot.enabled)return d.isOwner?'<div class="notice"><b>Set up the rotation</b><br>Decide who receives the pot each round, so every member knows when it is their turn.<div style="margin-top:8px"><button class="primary small" data-act="setOrder" type="button">Set rotation order</button></div></div>':'';
+  return '<div class="sec"><h4>Receiving now</h4><button class="secondary small" data-act="sub:rotation" type="button">Full rotation</button></div>'
+   +'<div class="card" style="padding:4px 14px"><div class="row"><div class="ico" style="background:#16a34a;border-radius:50%;font-size:15px;font-weight:800">'+initial(rot.current&&rot.current.name)+'</div><div class="mid"><div class="row-title">'+esc(rot.current?rot.current.name:'—')+'</div><div class="row-sub">Round '+rot.round+' · '+rot.receivedThisRound+' of '+rot.positions+' received</div></div><span class="chip current">Now</span></div>'
+   +(rot.next?'<div class="row"><div class="ico" style="background:#6366f1;border-radius:50%;font-size:15px;font-weight:800">'+initial(rot.next.name)+'</div><div class="mid"><div class="row-title">'+esc(rot.next.name)+'</div><div class="row-sub">Next in line</div></div><span class="chip upcoming">Next</span></div>':'')+'</div>'}
+function myStatus(d){var me=(d.members||[]).find(function(m){return m.isYou}),rot=d.rotation||{};if(!me)return '';
+  var pos=rot.enabled?posOf(rot,me.userId):0,q=pos?(rot.queue||[]).find(function(x){return x.userId===me.userId}):null;
+  return '<div class="sec"><h4>Your standing</h4></div><div class="card" style="padding:2px 14px"><div class="kv"><span>You have contributed</span><b>'+money(me.contributed||0)+'</b></div>'
+   +(pos?'<div class="kv"><span>Your turn to receive</span><b>#'+pos+' of '+rot.positions+(q&&q.status==='received'?' · received':(q&&q.status==='current'?' · now':''))+'</b></div>':(rot.enabled?'<div class="kv"><span>Your turn to receive</span><b>Not in rotation yet</b></div>':''))+'</div>'}
+function contribList(d,n){var cs=d.contributions||[];
+  return '<div class="card" style="padding:2px 14px">'+(cs.length?cs.slice(0,n).map(function(x){return '<div class="row" style="padding:10px 0"><div class="mid"><div class="row-title">'+esc(x.contributorName)+'</div><div class="row-sub">'+(x.offline?'Cash / goods':'M-Pesa')+(x.item?' · '+esc(x.item):'')+' · '+esc(n>10?dt(x.createdAt):ago(x.createdAt))+'</div></div><div class="amt pos">+'+money(x.amount)+'</div></div>'}).join(''):'<div class="empty" style="padding:14px">No confirmed contributions yet.</div>')+'</div>'}
+function subOverview(d){return cycleBanner(d)+rotTeaser(d)+myStatus(d)+'<div class="sec"><h4>Recent contributions</h4>'+((d.contributions||[]).length>5?'<button class="secondary small" data-act="sub:history" type="button">See all</button>':'')+'</div>'+contribList(d,5)}
+function subRotation(d){var rot=d.rotation||{},meId=((d.members||[]).find(function(m){return m.isYou})||{}).userId;
+  if(!rot.enabled)return d.isOwner
+    ?'<div class="card"><div class="empty"><i class="fas fa-rotate"></i>No rotation yet.<br>Choose the order in which members receive the pot.<div style="margin-top:12px"><button class="primary" data-act="setOrder" type="button">Set rotation order</button></div></div></div>'
+    :'<div class="card"><div class="empty"><i class="fas fa-rotate"></i>The owner has not set the receiving order yet.</div></div>';
+  var cur=rot.current,nx=rot.next,pot=rot.pot||{};
+  var html='<div class="row-sub" style="margin:0 2px 8px">Round '+rot.round+' · '+rot.receivedThisRound+' of '+rot.positions+' members have received</div>';
+  if(cur)html+='<div class="rcard"><div class="rl">NOW RECEIVING</div><div class="rw"><div class="av">'+initial(cur.name)+'</div><div style="min-width:0"><b>'+esc(cur.name)+(cur.userId===meId?' (You)':'')+'</b><span>Position '+posOf(rot,cur.userId)+' of '+rot.positions+'</span></div></div><div class="rpot"><span>Available in the pot</span><b>'+money(pot.available)+'</b></div>'+(d.isOwner?'<button class="rbtn" data-act="recPayout" type="button"><i class="fas fa-hand-holding-dollar"></i>&nbsp; Record payout to '+esc(firstName(cur.name))+'</button>':'')+'</div>';
+  if(nx)html+='<div class="rcard next"><div class="rl">NEXT IN LINE</div><div class="rw"><div class="av">'+initial(nx.name)+'</div><div style="min-width:0"><b>'+esc(nx.name)+(nx.userId===meId?' (You)':'')+'</b><span>'+(cur&&nx.userId&&posOf(rot,nx.userId)<posOf(rot,cur.userId)?'Starts the next round':'Receives after '+esc(cur?cur.name:'the current member'))+'</span></div></div></div>';
+  if(d.isOwner&&rot.unordered&&rot.unordered.length)html+='<div class="notice warn"><b>'+rot.unordered.length+' member'+(rot.unordered.length===1?' is':'s are')+' not in the rotation:</b> '+esc(rot.unordered.map(function(u){return u.name}).join(', '))+'. Open "Change order" to add them.</div>';
+  html+='<div class="sec"><h4>Payout order</h4>'+(d.isOwner?'<button class="secondary small" data-act="setOrder" type="button">Change order</button>':'')+'</div><div class="card" style="padding:2px 14px">'
+   +(rot.queue||[]).map(function(q){var sub=q.status==='received'?('Received'+(q.receivedAmount!=null?' '+money(q.receivedAmount):'')+(q.receivedAt?' · '+sd(q.receivedAt):'')):(q.status==='current'?'Receiving now':'Waiting for their turn');
+     return '<div class="row" style="padding:10px 0"><div class="qn '+q.status+'">'+(q.status==='received'?'<i class="fas fa-check"></i>':q.position)+'</div><div class="mid"><div class="row-title">'+esc(q.name)+(q.userId===meId?' <span class="row-sub">(You)</span>':'')+'</div><div class="row-sub">'+esc(sub)+'</div></div><span class="chip '+q.status+'">'+(q.status==='received'?'Received':(q.status==='current'?'Now':'Upcoming'))+'</span></div>'}).join('')+'</div>';
+  html+='<div class="sec"><h4>Previously received</h4></div>';
+  var h=rot.history||[];
+  html+='<div class="card" style="padding:2px 14px">'+(h.length?h.map(function(x){return '<div class="row" style="padding:10px 0"><div class="ico" style="width:40px;height:40px;background:#16a34a;border-radius:50%;font-size:14px">'+initial(x.name)+'</div><div class="mid"><div class="row-title">'+esc(x.name)+'</div><div class="row-sub">'+esc(dt(x.paidAt))+' · Round '+x.round+(x.note?' · '+esc(x.note):'')+'</div></div><div class="amt">'+money(x.amount)+'</div></div>'}).join(''):'<div class="empty" style="padding:14px">No payouts recorded yet.</div>')+'</div>'
+   +'<div class="fine">Payouts are recorded by the chama owner after paying the member. NECPRA does not verify them.</div>';
+  return html}
+function subMembers(d){var members=d.members||[],guests=d.guests||[],fixed=fixedOf(d),tot=d.totals||{};
+  return '<div class="row-sub" style="margin:0 2px 8px">'+(tot.membersPaid||0)+' contributed · '+(tot.membersUnpaid!=null?tot.membersUnpaid:members.length)+' not yet contributed. Amounts update automatically once M-Pesa confirms.</div>'
+   +'<div class="card" style="padding:2px 14px">'+(members.length?members.map(function(m){return memberRow(m,!!fixed)}).join(''):'<div class="empty">No members yet.</div>')+'</div>'
+   +(d.isOwner?'<div style="margin:4px 0 10px;text-align:center"><button class="secondary small" data-act="panelSettings" type="button"><i class="fas fa-user-plus"></i>&nbsp; Add members &amp; reminders</button></div>':'')
+   +(guests.length?'<div class="sec"><h4>Cash / goods from non-members</h4></div><div class="card" style="padding:2px 14px">'+guests.map(function(g){return '<div class="row" style="padding:10px 0"><div class="ico" style="width:40px;height:40px;background:#f59e0b;border-radius:50%;font-size:14px">'+initial(g.name)+'</div><div class="mid"><div class="row-title">'+esc(g.name)+'</div><div class="row-sub">Cash / goods'+(g.items&&g.items.length?' · '+esc(g.items.join(', ')):'')+'</div></div><div class="amt" style="color:#16a34a">'+money(g.contributed)+'</div></div>'}).join('')+'</div>':'')}
+function subHistory(d){return '<div class="sec" style="margin-top:0"><h4>Contributions</h4></div>'+contribList(d,30)}
 function drawMain(d){
   var c=d.circle,t=Number(c.targetAmount||0),tot=d.totals||{},got=Number(tot.collected!=null?tot.collected:(c.collectedAmount||0)),pct=t>0?Math.min(100,Math.round(got/t*100)):0;
-  var members=d.members||[],guests=d.guests||[],contribs=d.contributions||[],sc=d.schedule,fixed=fixedOf(d),me=members.find(function(m){return m.isYou}),dl=sc?sc.daysLeft:null;
-  var banner=fixed
-    ?'<div class="notice'+(dl<0?' warn':'')+'"><b>'+money(fixed)+' per member</b> · due '+esc(sc.dueDate)+' · '+(dl>0?dl+(dl===1?' day left':' days left'):dl===0?'due today':Math.abs(dl)+(dl===-1?' day overdue':' days overdue'))+(me&&me.owes?'<br>You have not paid yet. The M-Pesa prompt will be exactly '+money(fixed)+'.':(me?'<br>Your payment is confirmed. Thank you.':''))+'</div>'
-    :'<div class="notice">Open contributions: each member gives whatever amount they want. There is no minimum or maximum.</div>';
-  var mem=members.length?members.map(function(m){return memberRow(m,!!fixed)}).join(''):'<div class="empty">No members yet.</div>';
-  $('pBody').innerHTML=(c.purpose?'<div class="row-sub" style="margin-bottom:8px">'+esc(c.purpose)+'</div>':'')+banner
-   +(t>0?'<div class="bar"><i style="width:'+pct+'%"></i></div>':'')
-   +recvLine(d)
-   +'<div class="sum"><div><b>'+money(got)+'</b><span>Collected</span></div><div><b>'+(t>0?money(t):'—')+'</b><span>Target</span></div><div><b>'+members.length+'</b><span>Members</span></div></div>'
-   +'<div class="row-sub" style="margin:8px 0">'+(tot.membersPaid||0)+' contributed · '+(tot.membersUnpaid!=null?tot.membersUnpaid:members.length)+' not yet contributed. Amounts update automatically once M-Pesa confirms.</div>'
-   +'<h4>Members &amp; contributions</h4><div class="card" style="padding:2px 14px">'+mem+'</div>'
-   +(guests.length?'<h4>Cash / goods from non-members</h4><div class="card" style="padding:2px 14px">'+guests.map(function(g){return '<div class="row" style="padding:10px 0"><div class="ico" style="width:40px;height:40px;background:#f59e0b;border-radius:50%;font-size:14px">'+initial(g.name)+'</div><div class="mid"><div class="row-title">'+esc(g.name)+'</div><div class="row-sub">Cash / goods'+(g.items&&g.items.length?' · '+esc(g.items.join(', ')):'')+'</div></div><div class="amt" style="color:#16a34a">'+money(g.contributed)+'</div></div>'}).join('')+'</div>':'')
-   +'<h4>Recent contributions</h4><div class="card" style="padding:2px 14px">'+(contribs.length?contribs.slice(0,30).map(function(x){return '<div class="row" style="padding:10px 0"><div class="mid"><div class="row-title">'+esc(x.contributorName)+'</div><div class="row-sub">'+(x.offline?'Cash / goods':'M-Pesa')+(x.item?' · '+esc(x.item):'')+' · '+esc(ago(x.createdAt))+'</div></div><div class="amt">'+money(x.amount)+'</div></div>'}).join(''):'<div class="empty" style="padding:14px">No confirmed contributions yet.</div>')+'</div>';
+  var members=d.members||[],fixed=fixedOf(d),ct=CT[c.type]||CT.other,rot=d.rotation||{};
+  if(['overview','rotation','members','history'].indexOf(P.sub)<0)P.sub='overview';
+  var hero='<div class="chero" style="background:linear-gradient(135deg,'+ct[2]+' 0%,#0f172a 170%)"><div class="ct"><div class="ci"><i class="fas fa-'+ct[1]+'"></i></div><div style="min-width:0"><b>'+esc(c.name)+'</b><span>'+esc(ct[0])+(c.purpose?' · '+esc(c.purpose):'')+'</span></div></div>'
+   +'<div class="big">'+money(got)+'</div><div class="cap">'+(t>0?'collected of '+money(t)+' · '+pct+'%':'collected · no target set')+'</div>'+(t>0?'<div class="pbar"><i style="width:'+pct+'%"></i></div>':'')
+   +'<div class="row3"><div><b>'+members.length+'</b><span>Members</span></div><div><b>'+(tot.membersPaid||0)+' / '+members.length+'</b><span>Contributed</span></div><div><b>'+(rot.enabled?'Round '+rot.round:'Off')+'</b><span>Rotation</span></div></div></div>';
+  var tabs=[['overview','Overview'],['rotation','Rotation'],['members','Members'],['history','History']];
+  var subt='<div class="subt">'+tabs.map(function(x){return '<button data-act="sub:'+x[0]+'" class="'+(P.sub===x[0]?'on':'')+'" type="button">'+x[1]+'</button>'}).join('')+'</div>';
+  var body=P.sub==='rotation'?subRotation(d):(P.sub==='members'?subMembers(d):(P.sub==='history'?subHistory(d):subOverview(d)));
+  $('pBody').innerHTML=hero+recvLine(d)+chatActions(d)+subt+body;
   $('pFoot').innerHTML='<button class="secondary" data-act="closePanel" type="button">Close</button><button class="primary" data-act="contribute" data-id="'+esc(c.id)+'" type="button">'+(fixed?'Contribute '+money(fixed):'Contribute')+'</button>'}
+/* ---------- chama <-> group module ---------- */
+function openGroupChat(compose){var g=P.d&&P.d.groupChatId;
+  if(!g){toast('This chama is not linked to a group chat yet',true);return}
+  /* The Groups screen is end-to-end encrypted, so messages are written there, never from Money. The shell already
+     understands OPEN_GROUP_BY_ID: it switches to the Groups module and opens this exact group. */
+  try{window.parent.postMessage({type:'OPEN_GROUP_BY_ID',payload:{groupId:g,focusComposer:!!compose},source:'money'},'*')}catch(e){toast('Could not open the group chat',true)}}
+async function linkGroup(){
+  modal('Link a group','<div class="notice">Everyone in the group you choose becomes a member of this chama and gets its updates. Only groups you administer are listed.</div><div id="lgList"><div class="skel"></div></div><div class="actions"><button class="secondary" data-act="close" type="button">Cancel</button></div>');
+  try{var r=await api('/money/my-groups'),gs=(r&&r.groups)||[];var l=$('lgList');if(!l)return;
+    l.innerHTML=gs.length?gs.map(function(g){return '<div class="row"><div class="ico" style="background:#2563eb;border-radius:50%;font-size:14px">'+initial(g.name)+'</div><div class="mid"><div class="row-title">'+esc(g.name)+'</div></div><button class="primary small" data-linkg="'+esc(g.id)+'" type="button">Link</button></div>'}).join(''):'<div class="empty">You are not an admin of any group yet.</div>'}
+  catch(e){var l2=$('lgList');if(l2)l2.innerHTML='<div class="empty">'+esc(e.message)+'</div>'}}
+async function syncGroup(){var b=document.querySelector('[data-act="syncGroup"]');busy(b,true,'Adding…');
+  try{var r=await api('/money/circles/'+encodeURIComponent(P.id)+'/sync-group',{method:'POST',body:'{}'});busy(b,false);toast(r.membersAdded?(r.membersAdded+' new member'+(r.membersAdded===1?'':'s')+' added'):'Everyone in the group is already a member');await refreshPanel();load()}catch(e){busy(b,false);toast(e.message,true)}}
+/* ---------- rotation: owner sets the order and records payouts ---------- */
+function setOrder(){var d=P.d;if(!d||!d.isOwner)return;var rot=d.rotation||{},ms=d.members||[],byId={};ms.forEach(function(m){byId[m.userId]=m});
+  var inQ=(rot.queue||[]).map(function(q){return q.userId}).filter(function(id){return byId[id]}),ord=inQ.slice(),on={};
+  ms.forEach(function(m){if(ord.indexOf(m.userId)<0)ord.push(m.userId)});ord.forEach(function(id){on[id]=inQ.length?inQ.indexOf(id)>=0:true});
+  modal('Rotation order','<div class="notice">Members are paid the pot in this order. Move people up or down, and untick anyone who should not receive. Members who already received this round stay marked as received.</div><div class="card" id="ordList" style="padding:2px 14px"></div><div class="actions"><button class="secondary" data-act="close" type="button">Cancel</button><button class="primary" id="ordSave" type="button">Save order</button></div>');
+  function draw(){$('ordList').innerHTML=ord.map(function(id,i){var m=byId[id];return '<div class="ordrow"><div class="qn">'+(on[id]?(ord.filter(function(x,j){return j<=i&&on[x]}).length):'–')+'</div><label style="display:flex;align-items:center;gap:8px;margin:0;flex:1;min-width:0;color:var(--text);font-size:13.5px"><input type="checkbox" data-on="'+id+'"'+(on[id]?' checked':'')+'><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(m.name)+(m.isYou?' (You)':'')+'</span></label><button class="mv" data-mv="up" data-id="'+id+'" type="button"'+(i===0?' disabled':'')+'><i class="fas fa-arrow-up"></i></button><button class="mv" data-mv="dn" data-id="'+id+'" type="button"'+(i===ord.length-1?' disabled':'')+'><i class="fas fa-arrow-down"></i></button></div>'}).join('')}
+  draw();
+  $('ordList').onclick=function(e){var b=e.target.closest('[data-mv]');if(!b)return;var id=Number(b.dataset.id),i=ord.indexOf(id),j=b.dataset.mv==='up'?i-1:i+1;if(j<0||j>=ord.length)return;var x=ord[i];ord[i]=ord[j];ord[j]=x;draw()};
+  $('ordList').onchange=function(e){var c=e.target.closest('[data-on]');if(c){on[Number(c.dataset.on)]=c.checked;draw()}};
+  $('ordSave').onclick=async function(){var b=this,order=ord.filter(function(id){return on[id]});if(!order.length){toast('Choose at least one member',true);return}
+    busy(b,true,'Saving…');try{await api('/money/circles/'+encodeURIComponent(P.id)+'/rotation',{method:'PUT',body:JSON.stringify({order:order})});closeModal();toast('Rotation saved');P.sub='rotation';await refreshPanel();load()}catch(e){busy(b,false);toast(e.message,true)}}}
+function recPayout(){var d=P.d,rot=d&&d.rotation;if(!d||!d.isOwner)return;if(!rot||!rot.current){toast('Set the rotation order first',true);return}
+  var cur=rot.current,avail=(rot.pot&&rot.pot.available)||0,idem=newIdem();
+  modal('Record payout','<div class="notice warn">This records a payout you have <b>already made</b> to the member (through Money, M-PESA or in person). It does not send any money.</div><div style="text-align:center;margin:6px 0 4px"><div class="row-sub">Paying</div><div style="font-weight:800;font-size:17px">'+esc(cur.name)+'</div><div class="row-sub">Round '+rot.round+' · position '+posOf(rot,cur.userId)+' of '+rot.positions+'</div></div><label>Amount paid (KSh)</label><input class="input" id="rpAmt" type="number" inputmode="decimal" min="1" value="'+esc(avail>0?avail:'')+'" placeholder="0"><div class="row-sub" style="margin-top:4px">Collected and not yet paid out: '+money(avail)+'</div><label>Note (optional)</label><input class="input" id="rpNote" maxlength="240" placeholder="e.g. Sent via M-PESA"><div class="actions"><button class="secondary" data-act="close" type="button">Cancel</button><button class="primary" id="rpGo" type="button">Record payout</button></div>');
+  $('rpGo').onclick=async function(){var b=this,amt=Number($('rpAmt').value||0),note=$('rpNote').value.trim();if(!(amt>0)){toast('Enter the amount paid',true);return}
+    busy(b,true,'Recording…');try{var r=await withStep(function(st){return api('/money/circles/'+encodeURIComponent(P.id)+'/rotation/payout',{method:'POST',headers:{'X-Money-Step-Up':st},body:JSON.stringify({id:idem,amount:amt,note:note||undefined})})});
+      if(!r){busy(b,false);return}closeModal();var nx=r.rotation&&r.rotation.current;toast('Payout recorded'+(nx?' · next: '+nx.name:''));P.sub='rotation';await refreshPanel();load()}catch(e){busy(b,false);toast(e.message,true)}}}
 
 /* ---------- chama: where it receives money + delete ---------- */
 function recvLine(d){var r=d&&d.receiving;if(!r)return '';
@@ -468,6 +611,7 @@ function wireRecvSettings(d){
     if(!confirm('Delete "'+nm+'"?\n\nMembers will no longer be able to contribute. This cannot be undone.'))return;
     busy(b,true,'Deleting…');try{var r=await withStep(function(st){return api('/money/circles/'+encodeURIComponent(P.id),{method:'DELETE',headers:{'X-Money-Step-Up':st}})});
       if(!r){busy(b,false);return}toast(r.message||'Chama deleted');S.circles=S.circles.filter(function(c){return String(c.id)!==String(P.id)});closePanel()}catch(e){busy(b,false);toast(e.message,true)}};}
+function groupSettingsHtml(d){var g=d.groupChatId;return '<h4>Group chat</h4><div class="card" style="padding:14px">'+(g?'<div class="row-sub">This chama is linked to a group chat. Everyone in that group is a member of this chama.</div><div class="actions"><button class="secondary" data-act="syncGroup" type="button">Add new group members</button></div>':'<div class="row-sub">Link a group so members can talk about contributions and payouts.</div><div class="actions"><button class="primary" data-act="linkGroup" type="button">Link a group</button></div>')+'</div>'}
 function drawSettings(d){
   var sc=d.schedule,fixed=fixedOf(d),members=d.members||[];
   var owing=fixed?members.filter(function(m){return m.owes&&!m.isYou}):[];
@@ -478,7 +622,7 @@ function drawSettings(d){
    +'<label>Keep reminding for</label><div style="display:flex;gap:8px"><input class="input" id="scDur" type="number" inputmode="numeric" min="1" max="2160" style="flex:1" value="'+esc((sc&&sc.reminderDuration&&sc.reminderDuration.value)||7)+'"><select class="input" id="scUnit" style="flex:1"><option value="hours"'+((sc&&sc.reminderDuration&&sc.reminderDuration.unit==='hours')?' selected':'')+'>hours</option><option value="days"'+((sc&&sc.reminderDuration&&sc.reminderDuration.unit==='hours')?'':' selected')+'>days</option></select></div><div class="row-sub" style="margin-top:4px">Counted from the morning of the due date. When it ends, reminders and the bottom notice stop for everyone (max 90 days).</div>'
    +'<div class="actions"><button class="primary" id="scSave" type="button">'+(fixed?'Update':'Save')+' fixed amount</button></div></div></div>'
    +(fixed?'<h4>Reminders</h4><div class="card" style="padding:6px 14px">'+(owing.length?owing.map(function(m){return '<div class="row" style="padding:10px 0"><div class="ico" style="width:36px;height:36px;background:#64748b;border-radius:50%;font-size:13px">'+initial(m.name)+'</div><div class="mid"><div class="row-title">'+esc(m.name)+'</div><div class="row-sub">Owes '+money(fixed)+'</div></div><button class="secondary small" data-remind="'+esc(m.userId)+'" type="button">Remind</button></div>'}).join('')+'<div class="actions" style="margin:8px 0"><button class="secondary" id="scAll" type="button">Remind all unpaid</button></div>':'<div class="empty" style="padding:14px">Everyone has paid.</div>')+'</div>':'')
-   +'<h4>Add a member</h4><div class="card" style="padding:12px 14px"><input class="input" id="amWho" placeholder="Search by name or @username (your friends show first)" autocomplete="off"><div id="amList" style="margin-top:6px"></div></div>'+recvSettingsHtml(d);
+   +groupSettingsHtml(d)+'<h4>Add a member</h4><div class="card" style="padding:12px 14px"><input class="input" id="amWho" placeholder="Search by name or @username (your friends show first)" autocomplete="off"><div id="amList" style="margin-top:6px"></div></div>'+recvSettingsHtml(d);
   wireRecvSettings(d);
   $('pFoot').innerHTML='<button class="secondary" data-act="panelMain" type="button" style="flex:1">Back to circle</button>';
   var fx=$('fxOn');
@@ -507,6 +651,9 @@ $('pBody').addEventListener('click',async function(ev){
   if(rb){busy(rb,true,'Sending…');try{var r=await api('/money/circles/'+encodeURIComponent(P.id)+'/prompt',{method:'POST',body:JSON.stringify({userId:Number(rb.dataset.remind)})});busy(rb,false);toast(r.sent?'Reminder sent':(r.throttled?'Already reminded a moment ago':'This member has already paid'))}catch(e){busy(rb,false);toast(e.message,true)}return}
   var ab=ev.target.closest('[data-adduser]');
   if(ab){busy(ab,true,'Adding…');try{var r2=await api('/money/circles/'+encodeURIComponent(P.id)+'/members',{method:'POST',body:JSON.stringify({userId:Number(ab.dataset.adduser)})});toast(r2.created===false?'Already a member':'Member added');await refreshPanel();load()}catch(e){busy(ab,false);toast(e.message,true)}}});
+$('modalBody').addEventListener('click',async function(ev){var lb=ev.target.closest('[data-linkg]');if(!lb)return;busy(lb,true,'Linking…');
+  try{var r=await api('/money/circles/'+encodeURIComponent(P.id)+'/link-group',{method:'POST',body:JSON.stringify({chatId:Number(lb.dataset.linkg)})});closeModal();toast('Group linked'+(r&&r.membersAdded?' · '+r.membersAdded+' member'+(r.membersAdded===1?'':'s')+' added':''));await refreshPanel();load()}catch(e){busy(lb,false);toast(e.message,true)}});
+$('pgBack').addEventListener('click',closePage);
 $('pBack').addEventListener('click',function(){if(P.view==='settings'){P.view='main';drawPanel()}else closePanel()});
 $('pGear').addEventListener('click',function(){P.view=P.view==='settings'?'main':'settings';drawPanel()});
 function fixedFor(id){var d=P.d;if(d&&d.circle&&String(d.circle.id)===String(id))return fixedOf(d);var c=S.circles.find(function(x){return String(x.id)===String(id)});var s=c&&c.settings&&c.settings.schedule;return s&&Number(s.amountPerMember)>0?Number(s.amountPerMember):0}
@@ -515,34 +662,35 @@ var pollTimer=null;function pollSoon(){var n=0;clearInterval(pollTimer);pollTime
 /* ---------- events (one delegated handler: nothing depends on inline onclick) ---------- */
 document.addEventListener('click',function(e){
   if(e.target.closest&&e.target.closest('.dsvc'))return;var t=e.target.closest('[data-tab],[data-act]');if(!t){if(e.target.id==='modal')closeModal();return}
-  if(t.dataset.tab){S.tab=t.dataset.tab;tabSet(S.tab);if(S.tab==='goals')loadGoals();render();return}
+  if(t.dataset.tab){var tt=t.dataset.tab;if(tt==='wallet')closePage();else openPage(tt);return}
   var a=t.dataset.act,id=t.dataset.id;
   if(a==='addMoney')addMoney();else if(a==='sendMoney')sendMoney();else if(a==='withdraw')withdrawMoney();else if(a==='receive')receiveMoney();else if(a==='receipt')showReceipt(id);else if(a==='newGoal')newGoal();else if(a==='goalDep')goalMove(id,'deposit');else if(a==='goalWd')goalMove(id,'withdraw');else if(a==='goalClose')goalClose(id);else if(a==='plRemind')plRemind(id);else if(a==='retryWallet'){loadWallet(true)}else if(a==='retryGoals'){loadGoals()}
   else if(a==='newCircle')newCircle();else if(a==='newRequest')newRequest();else if(a==='close')closeModal();
   else if(a==='retry')load(true);else if(a==='contribute')contribute(id);else if(a==='circle')circleDetail(id);else if(a==='closePanel')closePanel();else if(a==='panelMain'){P.view='main';drawPanel()}
   else if(a==='payReq')payReq(id);else if(a==='cancelReq')cancelReq(id);
+  else if(a==='groupMsg')openGroupChat(true);else if(a==='groupView')openGroupChat(false);else if(a==='linkGroup')linkGroup();else if(a==='syncGroup')syncGroup();else if(a==='setOrder')setOrder();else if(a==='recPayout')recPayout();else if(a==='panelSettings'){P.view='settings';drawPanel()}
+  else if(a&&a.indexOf('sub:')===0){P.sub=a.slice(4);drawPanel();$('pBody').scrollTop=0}
   else if(a&&a.indexOf('seg:')===0){S.reqSeg=a.slice(4);render()}
-  else if(a&&a.indexOf('goto:')===0){S.tab=a.slice(5);tabSet(S.tab);render();var tb=document.querySelector('.tabs');if(tb)tb.scrollIntoView({behavior:'smooth',block:'start'})}
+  else if(a&&a.indexOf('goto:')===0){var gt=a.slice(5);if(gt==='wallet')closePage();else openPage(gt)}
 });
 $('eyeBtn').addEventListener('click',function(){BAL_SHOWN=!BAL_SHOWN;try{sessionStorage.setItem(SHOW_KEY,BAL_SHOWN?'1':'0')}catch(_){}header();render()});
-$('refreshBtn').addEventListener('click',function(){load(true);loadWallet(true);if(S.tab==='goals')loadGoals();});
+$('refreshBtn').addEventListener('click',function(){load(true);loadWallet(true);if(S.page==='goals')loadGoals();});
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeModal()});
 // back button inside this module: close an open sheet first (hardware back is handled by the shell)
-window.__moneyCloseTopLayer=function(){if($('modal').classList.contains('open')){closeModal();return true}if($('panel').classList.contains('open')){if(P.view==='settings'){P.view='main';drawPanel()}else closePanel();return true}return false};
- if(S.tab==='goals')loadGoals(); adultCheck().then(function(ok){if(!ok)adultGate()}); var _h1=cacheHydrate(),_h2=walletHydrate();if(_h1||_h2){try{header()}catch(_){}render();try{window.parent.postMessage({type:'NECPRA_MODULE_PAINTED'},'*')}catch(_){}} /* NECPRA voice adapter. Read access + tab switching + PRE-FILLING the Send-money screen only. Nothing here sends money. */
+window.__moneyCloseTopLayer=function(){if($('modal').classList.contains('open')){closeModal();return true}if($('panel').classList.contains('open')){if(P.view==='settings'){P.view='main';drawPanel()}else closePanel();return true}if(S.page){closePage();return true}return false};
+ adultCheck().then(function(ok){if(!ok)adultGate()}); var _h1=cacheHydrate(),_h2=walletHydrate();if(_h1||_h2){try{header()}catch(_){}render();try{window.parent.postMessage({type:'NECPRA_MODULE_PAINTED'},'*')}catch(_){}} /* NECPRA voice adapter. Read access + tab switching + PRE-FILLING the Send-money screen only. Nothing here sends money. */
 window.__necpraMoneyVoice={
   state:function(){return{wallet:S.wallet,circles:S.circles,overview:S.overview,incoming:S.incoming,outgoing:S.outgoing,stale:!!S.walletErr}},
   refresh:async function(){await loadWallet();try{await load()}catch(_){}},
-  setTab:function(t){var b=document.querySelector('.tab[data-tab="'+t+'"]');if(b)b.click()},
+  setTab:function(t){if(!t||t==='wallet')closePage();else openPage(t)},
   reveal:function(){if(!BAL_SHOWN&&$('eyeBtn'))$('eyeBtn').click()},
   toast:function(m){toast(m)},
   openAction:function(action){
-    var map={addMoney:'addMoney',sendMoney:'sendMoney',withdraw:'withdraw',receive:'receive',newGoal:'newGoal',newCircle:'newCircle',newRequest:'newRequest'};
-    var act=map[action];if(!act)return false;
-    // Receive and new-goal controls live inside the Wallet pane, so reveal it first.
-    if(action==='receive'||action==='newGoal')this.setTab('wallet');
-    var btn=document.querySelector('[data-act="'+act+'"]');if(!btn)return false;
-    btn.click();return true;
+    var map={addMoney:addMoney,sendMoney:sendMoney,withdraw:withdrawMoney,receive:receiveMoney,newGoal:newGoal,newCircle:newCircle,newRequest:newRequest};
+    var fn=map[action];if(!fn)return false;
+    // Receive and new-goal live on the Wallet screen; the rest are sheets that open over whatever is showing.
+    if(action==='receive'||action==='newGoal')closePage();
+    fn();return true;
   },
   prepareTransfer:function(o){sendMoney();var t=$('smTo'),a=$('smAmt');if(t&&o.to){t.value=o.to;t.dispatchEvent(new Event('input'))}if(a&&o.amount>0)a.value=String(o.amount);var go=$('smGo');if(go)go.focus()}
 };

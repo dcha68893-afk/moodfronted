@@ -936,7 +936,7 @@ window.addEventListener('message',e=>{
   if(d.type==='MODULE_BLURRED'){try{window.KynGroupUnread&&window.KynGroupUnread.setOpen(null)}catch(_){}return}
   if(d.type==='MODULE_FOCUSED'){try{if(S.current&&window.KynGroupUnread){window.KynGroupUnread.setOpen(S.current.id);markRead(S.current.id)}}catch(_){}}
   if(d.type==='PARENT_REFRESH_GROUPS'){loadGroups();return}
-  if(d.type==='OPEN_GROUP_BY_ID'){const gid=d.payload&&d.payload.groupId;if(!gid)return;if(S.groups.length)openGroup(gid);else loadGroups().then(()=>openGroup(gid));return}
+  if(d.type==='OPEN_GROUP_BY_ID'){const gid=d.payload&&d.payload.groupId;if(!gid)return;const foc=!!(d.payload&&d.payload.focusComposer);const go=()=>{openGroup(gid);if(foc)setTimeout(()=>{try{const i=document.getElementById('input');if(i)i.focus()}catch(_){}},450)};if(S.groups.length)go();else loadGroups().then(go);return}
   if(d.type==='PARENT_GROUP_ACTION'){const action=d.payload&&d.payload.action;if(action==='members'||action==='info')showInfo();else if(action==='settings')showSettings();else if(action==='purpose')showPurpose();return}
 });
 window.__GROUP_LOAD_GROUPS=loadGroups;window.__GROUP_REFRESH_MESSAGES=loadMessages;loadUnread();loadGroups();
