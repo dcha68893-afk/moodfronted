@@ -118,7 +118,10 @@ const SW_VERSION = '19.64.0';
 // v144: voice commands answer faster (js/voice engine/understand/shell) and Games is no longer reloaded when you come back (chat.html).
 // v145: deleted chats stay deleted (js/message-client.js), Games scripts load with game-v3.html instead of after it.
 // v146: Games home no longer waits for the crossword/chess scripts (game-v3.html); deleting a chat removes its history for good (backend).
-const CACHE_NAME = 'necpra-static-v146';
+// v147: forces installed apps and browsers to drop the old cached copies. Chama management (Manage button + workspace), the full-screen Money pages
+// (Wallet/Savings goals/Circles/Requests/Airtime & Data/Activity each open their own screen) and the saved-account login fix were all committed
+// without a cache bump, so devices kept serving the old money.html / auth scripts. chama-management.js/css are now precached and network-first.
+const CACHE_NAME = 'necpra-static-v147';
 // v138: DUKA/Wallet reopen on the tab and scroll position they were left on (kept in localStorage, not sessionStorage), Wallet finds its saved balance in the installed app,
 // and DUKA/Wallet/Games tell the shell when a real screen is drawn so the 'last screen' picture is saved at once. money.html, game.html, chat.html, duka.js changed.
 // v137: DUKA no longer waits on the server before painting (layout shell + parallel loads, user-id fallback for the APK), Games has a
@@ -137,13 +140,14 @@ const CORE_STATIC_ASSETS = [
   '/app-protect.js','/session-restore.js','/report-problem.js','/js/runtime-config.js','/js/config.js','/js/offline-gate.js','/js/header-labels.js','/js/necpra-messenger-ai.js','/js/necpra-reminders.js','/js/voice/necpra-voice-engine.js','/js/voice/necpra-voice-knowledge.js','/js/voice/necpra-voice-ui.js','/js/voice/necpra-voice-bridge.js','/js/voice/necpra-voice-handsfree.js','/js/voice/necpra-voice-init.js','/js/voice/necpra-voice-intents.js','/js/voice/necpra-voice-remote.js','/js/voice/necpra-voice-shell.js','/js/voice/necpra-voice-nlu.js','/js/voice/necpra-voice-understand.js','/js/voice/necpra-voice-messenger.js','/js/voice/necpra-voice-composer.js','/js/voice/necpra-voice-sales-nlu.js','/js/voice/necpra-voice-sales.js','/js/voice/necpra-voice-money-nlu.js','/js/voice/necpra-voice-money.js','/js/voice/necpra-voice-friends.js','/js/voice/necpra-voice-status.js','/js/voice/necpra-voice-settings.js','/js/voice/necpra-voice-games.js','/js/voice/necpra-voice-admin.js','/js/voice/necpra-voice-groups.js','/js/offline-first.js','/js/theme.engine.js','/js/theme-contrast-guard.js','/js/settings-broadcast-listener.js','/js/necpa-session-resilience.js','/js/services.friend.js'
   // v100: games + wallet precached so the first open after a deploy paints from cache instead of waiting on the
   // network for ~330KB of game scripts. URLs include the ?v= query because the cache key does.
-  ,'/game-v3.html','/money.html','/games-crossword-v4.js?v=8.2','/games-chess-v1.js?v=2.6','/games-chess-3d.js?v=1','/games-commercial-v5.js?v=5.4','/games-v4-enhancements.js?v=4.4','/js/settings-broadcast-listener.js'
+  ,'/game-v3.html','/money.html','/games-crossword-v4.js?v=8.2','/games-chess-v1.js?v=2.6','/games-chess-3d.js?v=1','/games-commercial-v5.js?v=5.4','/games-v4-enhancements.js?v=4.4','/js/settings-broadcast-listener.js','/js/chama-management.js','/css/chama-management.css'
   ,'/css/vendor/font-awesome.min.css','/fonts/fa-solid-900.woff2','/fonts/fa-regular-400.woff2','/fonts/fa-brands-400.woff2'
 ];
 
 const NETWORK_FIRST_PATTERNS = [
   // FIX: config.js (global brand/config layer every page runs) and the group send path were served stale-while-
   // revalidate, so a fix could sit on the server for a full session before an installed app ran it.
+  /\/js\/chama-management\.js/i,/\/css\/chama-management\.css/i,
   /\/native-init\.js/i,/\/js\/config\.js/i,/\/js\/avatar-fix\.js/i,/\/js\/groupMessaging\.client\.js/i,/\/group\.html/i,
   /\/js\/theme\.engine\.js/i,/\/theme\.colors\.css/i,/\/js\/e2e-encryption\.js/i,
   /\/js\/e2e-session-init\.js/i,/\/js\/api\.request\.js/i,/\/js\/message-e2e-core\.js/i,

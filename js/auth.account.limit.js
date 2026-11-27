@@ -146,8 +146,14 @@
                 button.disabled = true;
                 const result = switchSavedAccount(button.dataset.userId);
                 if (result?.success) return;   // page is navigating into the app
-                if (!result?.success) button.disabled = false;
-                if (!result?.success) alert(result?.error || 'Could not switch account.');
+                // FIX ("Already using this account" on the login page): tapping the account that is already the stored session is not an
+                // error here - the person is on the login screen precisely because they want to get back in. Refresh nothing, just open the app.
+                if (/already using/i.test(String(result?.error || ''))) {
+                    try { window.location.replace('/chat.html'); } catch (_) { window.location.href = '/chat.html'; }
+                    return;
+                }
+                button.disabled = false;
+                alert(result?.error || 'Could not switch account.');
             });
         });
     }
