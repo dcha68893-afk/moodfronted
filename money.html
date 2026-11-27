@@ -426,7 +426,7 @@ function viewCircles(){
     +(c.purpose?'<div class="row-sub" style="margin-top:8px">'+esc(c.purpose)+'</div>':'')
     +(t>0?'<div class="bar"><i style="width:'+pct+'%"></i></div><div class="meta"><span>'+money(got)+' collected</span><span>'+pct+'% of '+money(t)+'</span></div>':'<div class="meta" style="margin-top:10px"><span>'+money(got)+' collected</span><span>No target set</span></div>')
     +((hasRot||hasGrp)?'<div class="tags">'+(hasRot?'<span class="chip ok"><i class="fas fa-rotate"></i> Rotation on</span>':'')+(hasGrp?'<span class="chip owner"><i class="fas fa-comments"></i> Group chat</span>':'')+'</div>':'')
-    +'<div class="btns"><button class="primary small" data-act="contribute" data-id="'+esc(c.id)+'" type="button">Contribute</button><button class="secondary small" data-act="circle" data-id="'+esc(c.id)+'" type="button">Open chama</button></div></div>'}).join('')+'<div style="text-align:center"><button class="secondary" data-act="newCircle" type="button">+ New circle</button></div>'}
+    +'<div class="btns"><button class="primary small" data-act="contribute" data-id="'+esc(c.id)+'" type="button"><i class="fas fa-coins"></i> Contribute</button><button class="secondary small" data-act="circle" data-id="'+esc(c.id)+'" type="button"><i class="fas fa-folder-open"></i> Open chama</button><button class="secondary small" data-act="manageChama" data-cm="open-circle" data-circle-id="'+esc(c.id)+'" type="button"><i class="fas fa-sliders-h"></i> Manage</button></div></div>'}).join('')+'<div style="text-align:center"><button class="secondary" data-act="newCircle" type="button">+ New circle</button></div>'}
 function viewRequests(){
   var seg='<div class="seg"><button data-act="seg:in" class="'+(S.reqSeg==='in'?'on':'')+'" type="button">Received ('+S.incoming.length+')</button><button data-act="seg:out" class="'+(S.reqSeg==='out'?'on':'')+'" type="button">Sent ('+S.outgoing.length+')</button></div>';
   var list=S.reqSeg==='in'?S.incoming:S.outgoing;
@@ -667,7 +667,7 @@ document.addEventListener('click',function(e){
   var a=t.dataset.act,id=t.dataset.id;
   if(a==='addMoney')addMoney();else if(a==='sendMoney')sendMoney();else if(a==='withdraw')withdrawMoney();else if(a==='receive')receiveMoney();else if(a==='receipt')showReceipt(id);else if(a==='newGoal')newGoal();else if(a==='goalDep')goalMove(id,'deposit');else if(a==='goalWd')goalMove(id,'withdraw');else if(a==='goalClose')goalClose(id);else if(a==='plRemind')plRemind(id);else if(a==='retryWallet'){loadWallet(true)}else if(a==='retryGoals'){loadGoals()}
   else if(a==='newCircle')newCircle();else if(a==='newRequest')newRequest();else if(a==='close')closeModal();
-  else if(a==='retry')load(true);else if(a==='contribute')contribute(id);else if(a==='circle')circleDetail(id);else if(a==='closePanel')closePanel();else if(a==='panelMain'){P.view='main';drawPanel()}
+  else if(a==='retry')load(true);else if(a==='contribute')contribute(id);else if(a==='circle')circleDetail(id);else if(a==='manageChama'){return}else if(a==='closePanel')closePanel();else if(a==='panelMain'){P.view='main';drawPanel()}
   else if(a==='payReq')payReq(id);else if(a==='cancelReq')cancelReq(id);
   else if(a==='groupMsg')openGroupChat(true);else if(a==='groupView')openGroupChat(false);else if(a==='linkGroup')linkGroup();else if(a==='syncGroup')syncGroup();else if(a==='setOrder')setOrder();else if(a==='recPayout')recPayout();else if(a==='panelSettings'){P.view='settings';drawPanel()}
   else if(a&&a.indexOf('sub:')===0){P.sub=a.slice(4);drawPanel();$('pBody').scrollTop=0}
