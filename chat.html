@@ -1954,9 +1954,12 @@
                 card.querySelector('button').addEventListener('click', function () { window.__gamesGuard(true); });
                 box.appendChild(card);
             }
+            var everHealthy = false;   // once the arcade has painted, it is KEPT: later visits only repaint, they never reload it
             function healthy() {
                 var d = arcadeDoc();
-                return !!(d && d.body && d.querySelectorAll('#home .card').length && d.querySelector('.screen.active'));
+                var ok = !!(d && d.body && d.querySelectorAll('#home .card').length && d.querySelector('.screen.active'));
+                if (ok) everHealthy = true;
+                return ok;
             }
             function hardReload() {
                 var f = frame(); if (!f) return;
@@ -1978,6 +1981,10 @@
                         try { d.getElementById('home').classList.add('active'); } catch (_) {}   // cards exist but no screen is shown: blank panel
                     }
                     if (healthy()) { showCard(false); return; }
+                    // ROOT-CAUSE FIX (GAMES SLOW/EMPTY EVERY TIME YOU COME BACK): t0 restarts on every visit, so any momentary "not painted yet"
+                    // reading (the frame was hidden and throttled) was treated like a failed first load and the whole arcade - game.html,
+                    // game-v3.html and its four game scripts - was reloaded. An arcade that has painted once is never reloaded by this guard.
+                    if (everHealthy) { try { var _h = d && d.getElementById('home'); if (_h && !d.querySelector('.screen.active')) _h.classList.add('active'); } catch (_) {} kickRepaint(); return; }
                     var age = Date.now() - t0;
                     // Only reload when the frame has FINISHED loading and still shows nothing. A reload while it is still downloading
                     // just restarts the download and makes the blank screen last longer.

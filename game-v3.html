@@ -256,7 +256,11 @@ window.__buyGameCoins=function(){if(__inApp()){try{toast('Earn coins by playing:
 setTimeout(syncServerCoins,1500);document.addEventListener('visibilitychange',()=>{if(!document.hidden)syncServerCoins()});
 })();
 </script>
-<script id="mood-crossword-v4" src="/games-crossword-v4.js?v=8.2"></script><script src="/games-chess-v1.js?v=2.6"></script><script>
+<!-- FIX (GAMES HOME SLOW TO APPEAR): the 305 KB crossword and 43 KB chess scripts were plain blocking scripts, so the page could not go on
+     (and the home screen could not draw) until both were downloaded and run. `defer` downloads them in parallel and runs them, IN THIS ORDER,
+     after the page is parsed - the home screen and its script no longer wait for them. Both already start themselves only once the document is
+     ready (readyState check), so behaviour is the same; the two scripts at the end of the page are deferred too so the old order is kept. -->
+<script id="mood-crossword-v4" src="/games-crossword-v4.js?v=8.2" defer></script><script src="/games-chess-v1.js?v=2.6" defer></script><script>
 'use strict';const $=id=>document.getElementById(id),S=['home','block','trivia','crossword','chess'];let data=JSON.parse(localStorage.getItem('moodArcadeV3')||'{}');data.coins??=1200;data.games??=0;data.best??=0;data.streak??=0;window.data=data;function save(){localStorage.setItem('moodArcadeV3',JSON.stringify(data));updateHome()}function updateHome(){$('coins').textContent=data.coins.toLocaleString();$('tc').textContent=data.coins.toLocaleString();$('games').textContent=data.games;$('best').textContent=data.best;$('streak').textContent=data.streak}function show(x){S.forEach(s=>{const e=$(s);if(e)e.classList.toggle('active',s===x)});if(!document.querySelector('.screen.active')){const h=$('home');if(h)h.classList.add('active')}}
 // FIX (GAMES BLANK AFTER LEAVING AND COMING BACK): if no screen is marked active the whole arcade is blank. show() above used to throw on a missing
 // section (e.g. chess not drawn yet) and leave nothing active. Re-activate Home whenever the arcade is shown again.
@@ -654,4 +658,9 @@ const _fq=window.finishQ;window.finishQ=function(){rm('trivia');return _fq.apply
 const _home=window.home;window.home=function(){try{snapAll()}catch(_){}return _home.apply(this,arguments)};
 })();
 </script>
+<!-- FIX (GAMES SLOW TO SHOW): these two scripts used to be added by game.html only AFTER this whole page had finished loading (a second,
+     sequential download step). They are part of this page now and load with it. Same files and versions; both already wait for the
+     document themselves (readyState check), and game.html skips them because the ids below already exist. -->
+<script id="mood-v4-loader" src="/games-v4-enhancements.js?v=4.4" defer></script>
+<script id="mood-arcade-v5" src="/games-commercial-v5.js?v=5.4" defer></script>
 </body></html>

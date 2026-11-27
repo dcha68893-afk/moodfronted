@@ -666,7 +666,7 @@
     }
     function safeConvPreview(lastMessage, chatId) {
       const out = _safeConvPreviewRaw(lastMessage, chatId);
-      if (typeof out === 'string' && /^(?:\uD83D\uDD12\s*)?(?:Encrypted message|Unable to decrypt this message)$/.test(out.trim())) return _neutralPreview(lastMessage);
+      if (typeof out === 'string' && /^(?:\uD83D\uDD12\s*)?(?:Encrypted message|Unable to decrypt this message)$|^Decrypting(?:…|\.\.\.)?$/.test(out.trim())) return _neutralPreview(lastMessage);
       return out;
     }
     function _safeConvPreviewRaw(lastMessage, chatId) {

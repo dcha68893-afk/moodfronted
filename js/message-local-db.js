@@ -22,9 +22,21 @@
       }
       if (global.currentUser) mem = idFrom(global.currentUser);
       if (mem == null && global.AuthStorage && typeof global.AuthStorage.getUser === 'function') mem = idFrom(global.AuthStorage.getUser());
+      // The shell tells every module iframe who is signed in (SESSION_DATA -> window._kynCurrentUserId).
+      if (mem == null && global._kynCurrentUserId != null) mem = String(global._kynCurrentUserId);
     } catch (_) {}
     if (stored != null && mem != null && stored !== mem) return null;
-    return stored != null ? stored : mem;
+    const resolved = stored != null ? stored : mem;
+    // ROOT-CAUSE FIX (EVERYTHING "ENCRYPTED" AFTER DAYS AWAY): after a long absence the sign-in record can be briefly missing or
+    // reshaped while the session refreshes (or after an app update). With no id this module returned null, so the whole saved
+    // history was unreadable at start-up - the chat list and the open chat were then rebuilt from the network and re-decrypted
+    // (which can never work for a message that was already read). Remember the last id that was resolved from a real sign-in and
+    // use it ONLY while no sign-in information at all is available. It is cleared with the rest of the account's storage on
+    // an account switch, and replaced the moment a sign-in id is readable again.
+    try {
+      if (resolved != null) { if (localStorage.getItem('kyn_msgcache_last_uid') !== resolved) localStorage.setItem('kyn_msgcache_last_uid', resolved); return resolved; }
+      return localStorage.getItem('kyn_msgcache_last_uid') || null;
+    } catch (_) { return resolved; }
   }
   // A failure placeholder is UI state, never message content. Persisting one makes
   // decryptForDisplay() treat the message as already resolved after a reload

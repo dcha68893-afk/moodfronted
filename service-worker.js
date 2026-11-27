@@ -113,7 +113,12 @@ const SW_VERSION = '19.64.0';
 // v139: Messenger intelligence on the phone (js/necpra-messenger-ai.js: summarise a chat, suggest reply drafts, scam hints; voice commands in necpra-voice-messenger.js; message.html loads it).
 // v140: in-app reminder alerts (js/necpra-reminders.js: polls the caller's due reminders while the app is open; chat.html loads it).
 // v141: in-chat scam hint (message.html bubbleHtml uses js/necpra-messenger-ai.js; on-device, a hint is not proof, nothing is blocked).
-const CACHE_NAME = 'necpra-static-v142';
+// v143: chat list/panel keep already-read messages readable after days away or an update (js/message-client.js, js/message-local-db.js,
+// message.html: saved-copy-first decrypt, unread badge fix). Bump makes every installed copy fetch them fresh once.
+// v144: voice commands answer faster (js/voice engine/understand/shell) and Games is no longer reloaded when you come back (chat.html).
+// v145: deleted chats stay deleted (js/message-client.js), Games scripts load with game-v3.html instead of after it.
+// v146: Games home no longer waits for the crossword/chess scripts (game-v3.html); deleting a chat removes its history for good (backend).
+const CACHE_NAME = 'necpra-static-v146';
 // v138: DUKA/Wallet reopen on the tab and scroll position they were left on (kept in localStorage, not sessionStorage), Wallet finds its saved balance in the installed app,
 // and DUKA/Wallet/Games tell the shell when a real screen is drawn so the 'last screen' picture is saved at once. money.html, game.html, chat.html, duka.js changed.
 // v137: DUKA no longer waits on the server before painting (layout shell + parallel loads, user-id fallback for the APK), Games has a

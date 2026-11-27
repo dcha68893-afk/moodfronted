@@ -173,7 +173,9 @@
     }
     // (2) NECPRA Intelligence Engine on our own backend (free, no third-party AI; only if the backend has it on and the user allows it). Silent no-op when off, offline, slow or unsure.
     if (!result.__understood && !result.usedAlternative && root.NecpraVoiceUnderstand) {
-      var u = await root.NecpraVoiceUnderstand.rewrite(result, page);
+      // FIX (NO SIGN OF LIFE WHILE THE HELPER THINKS): say so after 1.5s instead of staying silent.
+      var _wait = setTimeout(function () { try { V.speak(T('One moment…', 'Subiri kidogo…'), { force: true }); } catch (_) {} }, 1500);
+      var u; try { u = await root.NecpraVoiceUnderstand.rewrite(result, page); } finally { clearTimeout(_wait); }
       if (u && u.spoken) return true;   // the engine answered or asked a question out loud
       if (u && u.phrase && (await runUnderstood(u, result, page))) return true;
     }

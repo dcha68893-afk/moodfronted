@@ -288,12 +288,71 @@
         try { window.KynectaMessageCache && window.KynectaMessageCache.putConversation(chatId, conv); } catch (_) {}
     }
 
+    // ── READ WATERMARK + UNREAD HELPERS ────────────────────────────────────────────────────────────────────
+    // ROOT-CAUSE FIX (UNREAD BADGE COMES BACK / GROWS AFTER THE CHAT WAS ALREADY READ): applyIncomingMessage() added +1 to the
+    // chat's unread count for EVERY call that was not "fromSelf" - including history pages, cache replays, delta syncs, socket
+    // re-deliveries of a message already held, and the person's OWN old messages inside a history page. So a chat that was read
+    // still collected +1 per replayed row each time the app resumed, and the next /chats refresh then restored the server's stale
+    // number when the mark-read request had not reached it. Now: (1) only a message that is NEW on this device, from someone else,
+    // and newer than what the person already read counts; (2) the newest message id the person has seen in each chat is kept on
+    // this device (a "read watermark", per account) so a stale server badge for already-read messages is not shown and the
+    // mark-read request is simply sent again.
+    const _RW_PREFIX = 'kyn_read_wm_v1:';
+    function _rwStorageKey() {
+        let id = window._kynCurrentUserId;
+        if (id == null) {
+            try { const a = JSON.parse(localStorage.getItem('kynecta_auth') || 'null'); const u = a && (a.user || a); id = u && (u.id != null ? u.id : (u.userId != null ? u.userId : (u.uid != null ? u.uid : u._id))); } catch (_) {}
+        }
+        return id == null ? null : _RW_PREFIX + String(id);
+    }
+    function _getReadWm(chatId) {
+        const k = _rwStorageKey(); if (!k) return null;
+        try { const v = (JSON.parse(localStorage.getItem(k) || '{}') || {})[String(chatId)]; return typeof v === 'number' ? v : null; } catch (_) { return null; }
+    }
+    function _bumpReadWm(chatId, id) {
+        if (typeof id !== 'number' || !isFinite(id) || chatId == null || /^pending:/.test(String(chatId))) return;
+        const k = _rwStorageKey(); if (!k) return;
+        try {
+            const map = JSON.parse(localStorage.getItem(k) || '{}') || {};
+            const cur = map[String(chatId)];
+            if (typeof cur === 'number' && cur >= id) return;
+            map[String(chatId)] = id;
+            localStorage.setItem(k, JSON.stringify(map));
+        } catch (_) {}
+    }
+    function _isOwnMessage(message) {
+        const me = window._kynCurrentUserId;
+        return !!(message && message.senderId != null && me != null && String(message.senderId) === String(me));
+    }
+    function _isOlderMessage(a, b) {
+        if (!a || !b) return false;
+        if (typeof a.id === 'number' && typeof b.id === 'number') return a.id < b.id;
+        const at = a.createdAt ? new Date(a.createdAt).getTime() : NaN, bt = b.createdAt ? new Date(b.createdAt).getTime() : NaN;
+        return isFinite(at) && isFinite(bt) && at < bt;
+    }
+    function _noteChatReadLocally(chatId) {
+        let max = null;
+        const conv = state.conversations.get(chatId), lm = conv && conv.lastMessage;
+        if (lm && typeof lm.id === 'number') max = lm.id;
+        const b = state.messagesByConversation.get(chatId);
+        if (b) b.forEach((m, k) => { if (typeof k === 'number' && (max === null || k > max)) max = k; });
+        if (max !== null) _bumpReadWm(chatId, max);
+    }
+    const _readRetryAt = new Map();
+    function _retryServerMarkRead(chatId) {
+        const key = String(chatId), now = Date.now();
+        if (now - (_readRetryAt.get(key) || 0) < 30000) return;
+        _readRetryAt.set(key, now);
+        try { Promise.resolve(api().post('/messages/read', { chatId: Number(chatId), silent: _receiptsOff() })).catch(() => {}); } catch (_) {}
+    }
+
     // The ONE place a message (from any source) enters client state.
     // Handles: dedup by id, dedup by clientMessageId (optimistic reconciliation),
     // ordering by id (server-authoritative — spec §36), and decryption.
-    function applyIncomingMessage(message, { fromSelf = false } = {}) {
+    function applyIncomingMessage(message, { fromSelf = false, replay = false } = {}) {
         const chatId = message.chatId;
         const bucket = getOrCreateConversationBucket(chatId);
+        const _wasKnown = bucket.has(message.id);   // already held on this device (cache replay / re-delivery)
 
         if (message.clientMessageId) {
             // FIX: the stub can live in a different bucket (the synthetic "pending:<receiverId>"
@@ -354,10 +413,26 @@
             bucket.set(message.id, message);
         }
 
+        // ROOT-CAUSE FIX (LIST PREVIEW RE-LOCKED ON EVERY HISTORY/SYNC LOAD): lastMessage used to be the RAW incoming copy
+        // (ciphertext, no displayContent) even when the bucket already held the resolved plaintext for that id, and an OLDER
+        // page of history could replace a newer last message. Use the merged bucket entry and never step backwards.
+        const _mergedForList = bucket.get(message.id) || message;
+        const _convBefore = state.conversations.get(chatId);
+        const _lastBefore = _convBefore && _convBefore.lastMessage;
+        const _prevUnread = (_convBefore && _convBefore.unreadCount) || 0;
+        const _ownMsg = fromSelf || _isOwnMessage(message);
+        const _viewingNow = String(chatId) === String(state.activeChatId == null ? '' : state.activeChatId) && !_tabHidden();
+        const _wm = _getReadWm(chatId);
+        const _alreadySeen = _wasKnown || replay || (typeof message.id === 'number' && _wm !== null && message.id <= _wm);
+        let _nextUnread;
+        if (_ownMsg) _nextUnread = _prevUnread;
+        else if (_viewingNow) _nextUnread = 0;
+        else if (_alreadySeen) _nextUnread = _prevUnread;
+        else _nextUnread = _prevUnread + 1;
+        if (typeof message.id === 'number' && (_ownMsg || _viewingNow)) _bumpReadWm(chatId, message.id);
         upsertConversationMeta(chatId, {
-            lastMessage: message,
-            unreadCount: fromSelf ? (state.conversations.get(chatId)?.unreadCount || 0)
-                                  : ((chatId === state.activeChatId && !_tabHidden()) ? 0 : (state.conversations.get(chatId)?.unreadCount || 0) + 1),
+            lastMessage: (_lastBefore && _isOlderMessage(_mergedForList, _lastBefore)) ? _lastBefore : _mergedForList,
+            unreadCount: _nextUnread,
             // FIX (RECEIVER-SEES-"User"-INSTEAD-OF-REAL-NAME): for a chat that
             // already existed, otherUser.username was already populated by
             // loadConversations() from GET /chats, which computes
@@ -540,6 +615,30 @@
                 return;
             }
         }
+        // ROOT-CAUSE FIX (ALREADY-READ MESSAGES SHOWN AS "Encrypted message" AFTER DAYS AWAY / AN UPDATE / A RELOAD): once a message
+        // has been read, its plaintext is saved on this phone (js/message-local-db.js) and a Double Ratchet message key can only be
+        // used ONCE - decrypting the same ciphertext again can never succeed. The saved copy was only consulted when the chat was
+        // opened (hydrateFromCacheThenSync) and only through the in-memory bucket; the chat list and every other entry point
+        // (loadConversations, history/sync/redelivery of a message not in memory) went straight to the ratchet again. Ask the
+        // phone's own store FIRST, for every path, and only run decryption for a message that has never been decrypted here.
+        try {
+            const _db = window.KynectaMessageCache;
+            if (_db && typeof _db.getMessage === 'function') {
+                const _row = await _db.getMessage(chatId, message.id);
+                if (_row && typeof _row.displayContent === 'string' && !_isPh(_row.displayContent) && (_row.content === undefined || _row.content === ciphertext)) {
+                    const _b = getOrCreateConversationBucket(chatId);
+                    const _cur = _b.get(message.id) || message;
+                    if (_cur.displayContent === undefined || _isPh(_cur.displayContent)) {
+                        const _ver = _row.decryptVersion || _cur.decryptVersion || null;
+                        _b.set(message.id, Object.assign({}, _cur, { displayContent: _row.displayContent, decryptVersion: _ver }));
+                        decryptResults.set(key, { ciphertext, value: { displayContent: _row.displayContent, decryptVersion: _ver } });
+                        syncLastMessageDisplay(chatId, message.id, _row.displayContent, false);
+                        notify('message:decrypted', { chatId, messageId: message.id });
+                    }
+                    return;
+                }
+            }
+        } catch (_) { /* disk lookup is best-effort - fall through to the normal path */ }
         const cached = decryptResults.get(key);
         if (cached && cached.ciphertext === ciphertext) {
             const bucket = getOrCreateConversationBucket(chatId);
@@ -859,7 +958,7 @@
         qs.set('limit', String(limit));
         const res = await api().get(`/messages/${chatId}?${qs.toString()}`);
         if (res && res.success && Array.isArray(res.data)) {
-            _chronological(res.data).forEach(m => applyIncomingMessage(m, { fromSelf: false }));
+            _chronological(res.data).forEach(m => applyIncomingMessage(m, { fromSelf: false, replay: true }));
             return { messages: res.data, hasMore: !!res.hasMore, ok: true };
         }
         return { messages: [], hasMore: false, ok: false };
@@ -942,7 +1041,7 @@
                         delete row.displayContent;
                         delete row.decryptFailureReason;
                     }
-                    applyIncomingMessage(row, { fromSelf: false });
+                    applyIncomingMessage(row, { fromSelf: false, replay: true });
                 });
                 cachedCount = cached.length;
             } catch (_) { /* cache is best-effort — falls through to a full network load below */ }
@@ -1231,16 +1330,19 @@
     async function markChatRead(chatId) {
         if (chatId == null || /^pending:/.test(String(chatId))) return;
         _recentlyRead.set(String(chatId), Date.now());
+        _noteChatReadLocally(chatId);
         upsertConversationMeta(chatId, { unreadCount: 0 });
         try {
             await api().post('/messages/read', { chatId: Number(chatId), silent: _receiptsOff() });
-        } catch (_) { /* local badge already cleared; next open/visibility retries */ }
+        } catch (_) { /* local badge already cleared; the watermark makes the next list refresh send it again */ }
+        _noteChatReadLocally(chatId);
         _recentlyRead.set(String(chatId), Date.now());   // restart the window after the server has it
     }
 
     async function markRead(chatId, messageIds) {
         if (!messageIds || messageIds.length === 0) return;
         _recentlyRead.set(String(chatId), Date.now());
+        try { messageIds.forEach(id => { if (typeof id === 'number') _bumpReadWm(chatId, id); }); } catch (_) {}
         upsertConversationMeta(chatId, { unreadCount: 0 });
         try { await api().post('/messages/read', { messageIds, silent: _receiptsOff() }); } catch (_) {}
     }
@@ -1530,6 +1632,16 @@
 
             if (data.type === 'SESSION_DATA' && data.payload && data.payload.userId != null) {
                 window._kynCurrentUserId = data.payload.userId;
+                // The saved chat list is read once at start-up; if the account id was not known yet it came back empty. Read it again now.
+                try {
+                    if (state.conversations.size === 0 && window.KynectaMessageCache) {
+                        Promise.resolve(window.KynectaMessageCache.getConversations()).then((cached) => {
+                            let added = 0;
+                            (cached || []).forEach((conv) => { if (conv && conv.chatId != null && !state.conversations.has(conv.chatId) && !_isDeleted(conv.chatId, conv.lastMessage && conv.lastMessage.createdAt)) { state.conversations.set(conv.chatId, Object.assign({ unreadCount: 0 }, conv)); added++; } });
+                            if (added > 0) { window.__kynConvListSettled = true; notify('conversations:hydrated', { count: added }); }
+                        }).catch(() => {});
+                    }
+                } catch (_) {}
                 return;
             }
 
@@ -2066,7 +2178,7 @@
             cache.deleteConversation(Number(chatId));
             if (!keepMessages) cache.deleteChatMessages(chatId);
         } catch (_) {}
-        try { state.messagesByConversation && !keepMessages && state.messagesByConversation.delete(chatId); } catch (_) {}
+        try { if (state.messagesByConversation && !keepMessages) Array.from(state.messagesByConversation.keys()).forEach(k => { if (String(k) === String(chatId)) state.messagesByConversation.delete(k); }); } catch (_) {}
     }
 
     async function archiveChat(chatId) {
@@ -2275,6 +2387,14 @@
                 // already resolved (from cache/decrypt) when the list is (re)loaded.
                 const prevConv = state.conversations.get(c.id);
                 const prevLast = prevConv && prevConv.lastMessage;
+                // The server still counts unread messages although this device already showed the newest one to the person
+                // (the mark-read request never reached it): show 0 and send the mark-read request again.
+                const _locallyRead = (chat, raw) => {
+                    const wm = _getReadWm(chat.id);
+                    const stale = (chat.unreadCount || 0) > 0 && raw && typeof raw.id === 'number' && wm !== null && raw.id <= wm;
+                    if (stale) _retryServerMarkRead(chat.id);
+                    return stale;
+                };
                 const keepDisplay = (prevLast && lastRaw && String(prevLast.id) === String(lastRaw.id) && !_PLACEHOLDER_DISPLAY.has(prevLast.displayContent)) ? prevLast.displayContent : undefined;
                 upsertConversationMeta(c.id, {
                     otherUser: Object.assign({}, prevConv && prevConv.otherUser, {
@@ -2282,7 +2402,7 @@
                         username: c.otherParticipant.displayName || c.otherParticipant.username,
                         avatar: c.otherParticipant.avatar,
                     }),
-                    unreadCount: ((String(c.id) === String(state.activeChatId == null ? '' : state.activeChatId) && !_tabHidden()) || _isRecentlyRead(c.id)) ? 0 : (c.unreadCount || 0),
+                    unreadCount: ((String(c.id) === String(state.activeChatId == null ? '' : state.activeChatId) && !_tabHidden()) || _isRecentlyRead(c.id) || _locallyRead(c, lastRaw)) ? 0 : (c.unreadCount || 0),
                     lastMessage: lastRaw ? Object.assign(
                         { id: lastRaw.id, content: lastRaw.content, type: lastRaw.type, createdAt: lastRaw.createdAt, senderId: lastRaw.senderId, chatId: c.id },
                         keepDisplay !== undefined ? { displayContent: keepDisplay } : {}
@@ -2372,6 +2492,8 @@
             let added = 0;
             (cached || []).forEach((conv) => {
                 if (!conv || conv.chatId == null || state.conversations.has(conv.chatId)) return;
+                // A chat the person deleted must not come back from the saved list (the saved row can outlive the delete).
+                if (_isDeleted(conv.chatId, conv.lastMessage && conv.lastMessage.createdAt)) { try { window.KynectaMessageCache.deleteConversation(conv.chatId); } catch (_) {} return; }
                 state.conversations.set(conv.chatId, Object.assign({ unreadCount: 0 }, conv));
                 added++;
             });

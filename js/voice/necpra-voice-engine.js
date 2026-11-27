@@ -180,8 +180,10 @@
     opts = opts || {};
     if (S) return Promise.resolve(fail('busy', null, true));
     var sess = S = {
+      // FIX (COMMAND FELT SLOW): a command used to wait the full dictation pause (3.5s of silence) before it was even processed. A command is short;
+      // wait at most 2s (dictation keeps the user's own setting).
       id: uid(), mode: opts.mode === 'command' ? 'command' : 'dictation', lang: (flipNext && opts.mode === 'command' && !opts.lang && settings.lang === 'auto') ? (flipNext = false, otherLang()) : resolveLang(opts.lang),
-      pauseMs: opts.pauseMs || settings.pauseMs, autoFinish: opts.autoFinish != null ? !!opts.autoFinish : (opts.mode === 'command'),
+      pauseMs: opts.pauseMs || (opts.mode === 'command' ? Math.min(settings.pauseMs, 2000) : settings.pauseMs), autoFinish: opts.autoFinish != null ? !!opts.autoFinish : (opts.mode === 'command'),
       segments: [], interim: '', startedAt: now(), lastActivity: now(), heard: false, restarts: 0, quickEnds: 0,
       run: null, finishing: false, closed: false, timers: {}, netRetries: 0, provider: null, reason: null
     };

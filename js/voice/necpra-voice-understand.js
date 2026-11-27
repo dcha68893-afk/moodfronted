@@ -13,7 +13,9 @@
   var V = root.NecpraVoice; if (!V) return;
   /* The engine is free (rules + statistics on our own server), so it is on by default. Set ENGINE_FALLBACK = false to disable it from the client. */
   var ENGINE_FALLBACK = true;
-  var CLIENT_TIMEOUT_MS = 15000, CONFIG_TIMEOUT_MS = 12000, OFF_RECHECK_MS = 20000, FAIL_PAUSE_MS = 20000, flags = { checkedAt: 0, on: false }, fails = 0, pausedUntil = 0, inflight = null;
+  // FIX (SILENT WAIT BEFORE "I did not get that"): these were 12s + 15s, so a sleeping/slow server left the person in silence for up to 27s
+  // after every command the phone could not understand by itself. 3s + 7s keeps the helper but never makes the person wait that long.
+  var CLIENT_TIMEOUT_MS = 7000, CONFIG_TIMEOUT_MS = 3000, OFF_RECHECK_MS = 20000, FAIL_PAUSE_MS = 20000, flags = { checkedAt: 0, on: false }, fails = 0, pausedUntil = 0, inflight = null;
 
   function settingOn() { try { return V.getSettings().smart !== false; } catch (_) { return true; } }
   function cfg() { return (V._cfg && V._cfg()) || {}; }
